@@ -1,0 +1,367 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from loopx.quota import build_quota_should_run
+from loopx.status import collect_status, parse_active_state_todos
+from loopx.todos import add_goal_todo, complete_goal_todo, supersede_goal_todo
+
+GOAL_ID = "decision-scope-lifecycle"
+AGENT_ID = "codex-delivery"
+OTHER_AGENT_ID = "codex-review"
+PUBLISH_SCOPE = "direction:action:publish_release"
+ANNOUNCE_SCOPE = "direction:action:announce_release"
+PRIVATE_READ_SCOPE = "private_read:project:restricted_material"
+BENCHMARK_MERGE_SCOPE = "write_scope:goal:benchmark_pr_self_merge"
+
+
+def _write_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = repo / "ACTIVE_GOAL_STATE.md"
+    state.write_text(
+        "\n".join(
+            [
+                "---",
+                f"goal_id: {GOAL_ID}",
+                "updated_at: 2026-07-16T00:00:00+00:00",
+                "---",
+                "",
+                "## Agent Todo",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "registry.global.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "domain": "harness_self_improvement",
+                        "status": "active",
+                        "repo": str(repo),
+                        "state_file": "ACTIVE_GOAL_STATE.md",
+                        "adapter": {"kind": "harness_self_improvement"},
+                        "coordination": {
+                            "agent_model": "peer_v1",
+                            "registered_agents": [AGENT_ID, OTHER_AGENT_ID],
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return repo, state, registry
+
+
+def _todo(state: Path, todo_id: str) -> dict:
+    todos = parse_active_state_todos(state.read_text(encoding="utf-8"))
+    return next(
+        item
+        for role in ("agent_todos", "user_todos")
+        for item in todos[role]["items"]
+        if item["todo_id"] == todo_id
+    )
+
+
+def _add_target_and_gate(
+    registry: Path,
+    *,
+    required_scopes: list[str],
+    target_status: str = "open",
+    decision_scope: str = PUBLISH_SCOPE,
+) -> tuple[dict, dict]:
+    target = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Publish the approved release artifact.",
+        status=target_status,
+        task_class="advancement_task",
+        claimed_by=AGENT_ID,
+        required_decision_scopes=required_scopes,
+    )
+    gate = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="user",
+        text="Approve publishing the release artifact.",
+        task_class="user_gate",
+        blocks_agent=AGENT_ID,
+        decision_scope=decision_scope,
+        unblocks_todo_id=target["todo_id"],
+    )
+    return target, gate
+
+
+def test_completed_gate_consumes_scope_for_already_open_publication(
+    tmp_path: Path,
+) -> None:
+    repo, state, registry = _write_fixture(tmp_path)
+    target, gate = _add_target_and_gate(
+        registry,
+        required_scopes=[PUBLISH_SCOPE],
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+        role="user",
+        decision_outcome="approve",
+        evidence="owner approved the exact release publication",
+    )
+
+    assert result["decision_scope_resolution"] == {
+        "schema_version": "todo_decision_scope_resolution_v0",
+        "state": "resolved",
+        "source_todo_id": gate["todo_id"],
+        "target_todo_id": target["todo_id"],
+        "decision_scope": {
+            "schema_version": "decision_scope_v0",
+            "kind": "direction",
+            "granularity": "action",
+            "scope_key": "publish_release",
+        },
+        "resolved_required_decision_scopes": [
+            {
+                "schema_version": "decision_scope_v0",
+                "kind": "direction",
+                "granularity": "action",
+                "scope_key": "publish_release",
+            }
+        ],
+        "remaining_required_decision_scopes": [],
+        "changed": True,
+        "target_status": "open",
+    }
+    assert result["unblock_resume"]["state"] == "target_not_blocked"
+    updated_target = _todo(state, target["todo_id"])
+    assert updated_target["status"] == "open"
+    assert updated_target.get("required_decision_scopes", []) == []
+
+    status = collect_status(
+        registry_path=registry,
+        runtime_root_override=str(tmp_path / "runtime"),
+        scan_roots=[repo],
+        limit=1,
+        goal_id=GOAL_ID,
+    )
+    quota = build_quota_should_run(status, goal_id=GOAL_ID, agent_id=AGENT_ID)
+    assert quota["effective_action"] != "todo_decision_scope_projection_repair"
+    consistency = quota.get("todo_decision_scope_consistency")
+    assert consistency is None or consistency["ok"] is True
+
+
+def test_completed_broad_gate_projects_standing_authority_into_quota(
+    tmp_path: Path,
+) -> None:
+    repo, state, registry = _write_fixture(tmp_path)
+    target = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Validate and self-merge a benchmark PR.",
+        task_class="advancement_task",
+        claimed_by=AGENT_ID,
+        required_decision_scopes=[BENCHMARK_MERGE_SCOPE],
+    )
+    gate = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="user",
+        text="Approve validated benchmark PR self-merge for this goal.",
+        task_class="user_gate",
+        blocks_agent=AGENT_ID,
+        decision_scope=BENCHMARK_MERGE_SCOPE,
+    )
+
+    complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+        role="user",
+        agent_id=AGENT_ID,
+        decision_outcome="approve",
+        evidence="owner approved the standing benchmark PR merge policy",
+    )
+
+    parsed = parse_active_state_todos(state.read_text(encoding="utf-8"))
+    authority = parsed["standing_decision_authority"]
+    assert authority["active_count"] == 1
+    assert authority["entries"][0]["source_todo_id"] == gate["todo_id"]
+
+    status = collect_status(
+        registry_path=registry,
+        runtime_root_override=str(tmp_path / "runtime"),
+        scan_roots=[repo],
+        limit=1,
+        goal_id=GOAL_ID,
+    )
+    quota = build_quota_should_run(status, goal_id=GOAL_ID, agent_id=AGENT_ID)
+
+    assert quota["standing_decision_authority"]["active_count"] == 1
+    assert quota["standing_decision_authority"]["entries"][0]["source_todo_id"] == (
+        gate["todo_id"]
+    )
+    assert quota["selected_todo"]["todo_id"] == target["todo_id"]
+    assert quota["effective_action"] != "todo_decision_scope_projection_repair"
+    consistency = quota.get("todo_decision_scope_consistency")
+    assert consistency is None or consistency["ok"] is True
+
+
+def test_completed_gate_consumes_only_covered_scope(tmp_path: Path) -> None:
+    _repo, state, registry = _write_fixture(tmp_path)
+    target, gate = _add_target_and_gate(
+        registry,
+        required_scopes=[PUBLISH_SCOPE, ANNOUNCE_SCOPE],
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+        role="user",
+        decision_outcome="approve",
+        evidence="owner approved publication only",
+    )
+
+    resolution = result["decision_scope_resolution"]
+    assert [
+        item["scope_key"]
+        for item in resolution["resolved_required_decision_scopes"]
+    ] == ["publish_release"]
+    assert [
+        item["scope_key"]
+        for item in resolution["remaining_required_decision_scopes"]
+    ] == ["announce_release"]
+    updated_target = _todo(state, target["todo_id"])
+    assert [
+        item["scope_key"] for item in updated_target["required_decision_scopes"]
+    ] == ["announce_release"]
+
+
+def test_superseded_gate_does_not_consume_required_scope(tmp_path: Path) -> None:
+    _repo, state, registry = _write_fixture(tmp_path)
+    target, gate = _add_target_and_gate(
+        registry,
+        required_scopes=[PUBLISH_SCOPE],
+        target_status="blocked",
+    )
+
+    result = supersede_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+        role="user",
+        agent_id=AGENT_ID,
+        reason="approval request replaced without granting authority",
+    )
+
+    assert "decision_scope_resolution" not in result
+    updated_target = _todo(state, target["todo_id"])
+    assert updated_target["status"] == "blocked"
+    assert [
+        item["scope_key"] for item in updated_target["required_decision_scopes"]
+    ] == ["publish_release"]
+
+
+@pytest.mark.parametrize(
+    ("decision_outcome", "unblock_state"),
+    [
+        ("reject", "decision_rejected"),
+        ("cancel", "decision_cancelled"),
+    ],
+)
+def test_non_approval_gate_outcome_remains_a_durable_block(
+    tmp_path: Path,
+    decision_outcome: str,
+    unblock_state: str,
+) -> None:
+    repo, state, registry = _write_fixture(tmp_path)
+    target, gate = _add_target_and_gate(
+        registry,
+        required_scopes=[PRIVATE_READ_SCOPE],
+        target_status="blocked",
+        decision_scope=PRIVATE_READ_SCOPE,
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+        role="user",
+        decision_outcome=decision_outcome,
+        evidence=f"owner recorded {decision_outcome} for the exact private read",
+    )
+
+    assert result["decision_outcome"] == decision_outcome
+    assert "decision_scope_resolution" not in result
+    assert result["unblock_resume"]["state"] == unblock_state
+    updated_target = _todo(state, target["todo_id"])
+    assert updated_target["status"] == "blocked"
+    assert updated_target["required_decision_scopes"][0]["scope_key"] == (
+        "restricted_material"
+    )
+    assert updated_target["decision_scope_outcomes"] == [
+        {
+            "schema_version": "todo_decision_scope_outcome_v0",
+            "outcome": decision_outcome,
+            "decision_scope": {
+                "schema_version": "decision_scope_v0",
+                "kind": "private_read",
+                "granularity": "project",
+                "scope_key": "restricted_material",
+            },
+            "source_todo_id": gate["todo_id"],
+        }
+    ]
+    assert "authorization satisfied" not in str(updated_target.get("reason") or "")
+
+    status = collect_status(
+        registry_path=registry,
+        runtime_root_override=str(tmp_path / "runtime"),
+        scan_roots=[repo],
+        limit=1,
+        goal_id=GOAL_ID,
+    )
+    quota = build_quota_should_run(status, goal_id=GOAL_ID, agent_id=AGENT_ID)
+    assert quota["effective_action"] != "todo_decision_scope_projection_repair"
+    consistency = quota.get("todo_decision_scope_consistency")
+    assert consistency is None or consistency["ok"] is True
+
+
+def test_user_gate_completion_requires_explicit_decision_outcome(
+    tmp_path: Path,
+) -> None:
+    _repo, state, registry = _write_fixture(tmp_path)
+    target, gate = _add_target_and_gate(
+        registry,
+        required_scopes=[PRIVATE_READ_SCOPE],
+        target_status="blocked",
+        decision_scope=PRIVATE_READ_SCOPE,
+    )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="user_gate completion requires decision_outcome",
+    ):
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=gate["todo_id"],
+            role="user",
+            evidence="ambiguous completion must not grant authority",
+        )
+
+    assert state.read_text(encoding="utf-8") == before
+    assert _todo(state, target["todo_id"])["status"] == "blocked"

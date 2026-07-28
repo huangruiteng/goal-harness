@@ -4,7 +4,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .acceptance_loop import build_issue_fix_caller_repo_branch_packet
+from .candidate_preflight import build_issue_fix_candidate_preflight_packet
 from .intake_surface import build_content_ops_issue_fix_metadata_preview_packet
+from .repository_context import build_issue_fix_repository_context_packet
 
 
 ISSUE_FIX_WORKFLOW_PLAN_PACKET_SCHEMA_VERSION = "issue_fix_workflow_plan_packet_v0"
@@ -35,6 +37,123 @@ def _todo_preview(
         "blocks": list(blocks or []),
         "would_write": False,
         "requires_execute_flag": True,
+    }
+
+
+def _resolution_route_candidates(
+    *,
+    repo_label: str,
+    issue_label: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "schema_version": "issue_fix_resolution_route_candidate_v0",
+            "route": "fix_pr",
+            "priority": "P0",
+            "when": [
+                "public metadata suggests a bounded bug",
+                "caller-approved repo context is available",
+                "a focused repro or validation label can be named",
+            ],
+            "next_action_kind": "issue_fix_branch_validation",
+            "external_issue_comment_performed": False,
+            "external_pr_created": False,
+            "requires_user_gate_before_external_write": True,
+            "summary": (
+                f"Prepare a small fix branch for {repo_label} {issue_label}, "
+                "validate it, and emit a PR review packet."
+            ),
+        },
+        {
+            "schema_version": "issue_fix_resolution_route_candidate_v0",
+            "route": "comment_only",
+            "priority": "P1",
+            "when": [
+                "the issue needs missing repro detail",
+                "the safe answer is maintainer-facing clarification",
+                "patching would require private material or oversized design work",
+            ],
+            "next_action_kind": "issue_fix_external_comment_packet",
+            "external_issue_comment_performed": False,
+            "external_pr_created": False,
+            "requires_user_gate_before_external_write": True,
+            "summary": (
+                "Draft a public-safe maintainer comment packet, but require an "
+                "explicit gate before posting it."
+            ),
+        },
+        {
+            "schema_version": "issue_fix_resolution_route_candidate_v0",
+            "route": "triage_only",
+            "priority": "P2",
+            "when": [
+                "public metadata is too weak for repro or a useful comment",
+                "the issue is likely policy, product, or environment specific",
+            ],
+            "next_action_kind": "issue_fix_no_followup_or_owner_gate",
+            "external_issue_comment_performed": False,
+            "external_pr_created": False,
+            "requires_user_gate_before_external_write": True,
+            "summary": (
+                "Record a blocker or no-follow-up decision rather than opening "
+                "an ungrounded patch loop."
+            ),
+        },
+    ]
+
+
+def _post_pr_lifecycle_monitor_plan() -> dict[str, Any]:
+    return {
+        "schema_version": "issue_fix_post_pr_lifecycle_monitor_plan_v1",
+        "command_preview": (
+            "loopx issue-fix pr-lifecycle --url <github-pr-url> "
+            "--metadata-json <public-pr-state.json> --format json"
+        ),
+        "creates_per_pr_continuous_monitor_todo": False,
+        "monitor_scope": "lifecycle_state_bucket",
+        "monitor_action_kind_template": "issue_fix_pr_state_<state_bucket>_monitor",
+        "bucket_projection_source": "pr-lifecycle.grouped_monitor_projection",
+        "materializes_nonempty_buckets_only": True,
+        "terminal_members_removed": True,
+        "per_pr_material_actions_are_one_shot": True,
+        "external_notification_granularity": "one_pr_per_message",
+        "decisions": [
+            "runnable_successor",
+            "monitor_continuation",
+            "user_gate",
+            "no_followup",
+        ],
+        "terminal_state_precedence": (
+            "PR terminal states such as MERGED or CLOSED win over stale review "
+            "metadata and must close the monitor with no-follow-up."
+        ),
+        "external_writes_performed": False,
+        "raw_check_logs_captured": False,
+    }
+
+
+def _feasibility_checkpoint_plan() -> dict[str, Any]:
+    return {
+        "schema_version": "issue_fix_feasibility_checkpoint_plan_v0",
+        "command_preview": (
+            "loopx issue-fix feasibility --url <github-issue-url> "
+            "--reproduction-status <confirmed|planned|missing|blocked> "
+            "--scope-class <bounded|uncertain|oversized> "
+            "--repository-context-json <compact-context.json> "
+            "--goal-id <goal-id> --format json"
+        ),
+        "input_contract": "compact_public_safe_agent_observation",
+        "selects_exactly_one_route": True,
+        "routes": ["fix_pr", "comment_only", "triage_only"],
+        "fix_pr_requires": [
+            "bounded_scope",
+            "named_reproduction_or_plan",
+            "named_validation_surface",
+        ],
+        "writes_domain_state_by_default_with_goal_id": True,
+        "persists_repository_context_with_feasibility": True,
+        "writes_loopx_todo": False,
+        "raw_issue_or_log_material_captured": False,
     }
 
 
@@ -103,6 +222,9 @@ def build_issue_fix_workflow_plan_packet(
     base_branch: str = "main",
     issue_branch: str | None = None,
     validation_label: str = "caller-declared validation",
+    repository_context_input: Mapping[str, Any] | None = None,
+    repository_memory_input: Mapping[str, Any] | None = None,
+    candidate_preflight_input: Mapping[str, Any] | None = None,
     generated_at: str | None = "2026-06-23T00:00:00Z",
 ) -> dict[str, Any]:
     """Build a public-safe issue-fix workflow plan without writing state."""
@@ -133,6 +255,28 @@ def build_issue_fix_workflow_plan_packet(
 
     repo_label = str(metadata["repo"])
     issue_label = str(metadata["issue_ref"])
+    candidate_preflight = build_issue_fix_candidate_preflight_packet(
+        repo=repo_label,
+        issue_ref=issue_label,
+        input_payload=candidate_preflight_input,
+        generated_at=generated_at,
+    )
+    repository_context = build_issue_fix_repository_context_packet(
+        repo=repo_label,
+        issue_ref=issue_label,
+        context_input=repository_context_input,
+        memory_retrieval_input=repository_memory_input,
+        generated_at=generated_at,
+    )
+    unresolved_context = list(
+        repository_context.get("unresolved_required_aspects") or []
+    )
+    resolution_routes = _resolution_route_candidates(
+        repo_label=repo_label,
+        issue_label=issue_label,
+    )
+    feasibility_checkpoint = _feasibility_checkpoint_plan()
+    post_pr_monitor = _post_pr_lifecycle_monitor_plan()
     agent_todos = [
         _todo_preview(
             planner_order=1,
@@ -142,11 +286,14 @@ def build_issue_fix_workflow_plan_packet(
             action_kind="issue_fix_public_metadata_classification",
             text=(
                 f"[P0] Classify {repo_label} {issue_label} from body-free public "
-                "metadata and pick the first safe repro/code-context route."
+                "metadata and compact repository context; ground any missing "
+                "change-scope, reproduction, or validation evidence, or preserve it "
+                "as unresolved before routing."
             ),
             depends_on=[
                 "content_ops_issue_fix_metadata_preview_packet_v0",
                 "issue_fix_intake_v0",
+                "issue_fix_repository_context_v0",
             ],
         ),
         _todo_preview(
@@ -154,65 +301,60 @@ def build_issue_fix_workflow_plan_packet(
             role="agent",
             priority="P0",
             task_class="advancement_task",
-            action_kind="issue_fix_repro_and_route",
+            action_kind="issue_fix_feasibility_decision",
             text=(
-                "[P0] Create or identify a focused repro smoke, inspect the "
-                "selected repo-relative code route, and stop before private "
-                "repro material or external comments."
+                "[P0] Record a compact feasibility observation and select exactly "
+                "one fix_pr, comment_only, or triage_only route; write only the "
+                "selected successor."
             ),
             depends_on=["issue_fix_public_metadata_classification"],
         ),
-        _todo_preview(
-            planner_order=3,
-            role="agent",
-            priority="P0",
-            task_class="advancement_task",
-            action_kind="issue_fix_branch_validation",
-            text=(
-                "[P0] Prepare or claim the approved issue branch and run the "
-                "caller-declared validation label before declaring review readiness."
-            ),
-            depends_on=["issue_fix_repro_and_route"],
-            blocks=["pr_review_packet_ready"],
-        ),
-        _todo_preview(
-            planner_order=4,
-            role="agent",
-            priority="P1",
-            task_class="advancement_task",
-            action_kind="issue_fix_pr_review_packet",
-            text=(
-                "[P1] Emit a PR review packet with repo-relative changed files, "
-                "validation labels, remaining gates, and no external publication."
-            ),
-            depends_on=["issue_fix_branch_validation"],
-        ),
     ]
-    user_gates = [
-        _todo_preview(
-            planner_order=5,
-            role="user",
-            priority="P1",
-            task_class="user_gate",
-            action_kind="approve_external_issue_publish_or_merge",
-            text=(
-                "[P1] Approve any external issue comment, PR creation, merge, "
-                "publish, or repository-policy exception before LoopX performs it."
-            ),
-            depends_on=["issue_fix_pr_review_packet"],
-            blocks=[
-                "external_issue_comment",
-                "external_pr_creation",
-                "merge",
-                "publish",
-            ],
+    preflight_route = str(
+        (candidate_preflight.get("decision") or {}).get("route") or "proceed"
+    )
+    if preflight_route != "proceed":
+        existing_refs = list(
+            (candidate_preflight.get("decision") or {}).get("existing_pr_refs")
+            or []
         )
-    ]
-    if gated_fields:
-        user_gates.insert(
-            0,
+        route_action = {
+            "reuse_existing_pr": "issue_fix_reuse_existing_pr",
+            "comment_only": "issue_fix_existing_work_disposition",
+            "skip": "issue_fix_candidate_no_followup",
+        }[preflight_route]
+        route_text = {
+            "reuse_existing_pr": (
+                f"[P0] Evaluate and reuse existing implementation work "
+                f"{', '.join(existing_refs)} for {repo_label} {issue_label}; "
+                "do not create a competing patch or reopen agentic recall."
+            ),
+            "comment_only": (
+                f"[P0] Preserve the existing disposition for {repo_label} "
+                f"{issue_label}; assess whether a compact maintainer comment is "
+                "useful before any new patch planning."
+            ),
+            "skip": (
+                f"[P0] Record the prior-work no-follow-up disposition for "
+                f"{repo_label} {issue_label}; do not make the issue runnable again."
+            ),
+        }[preflight_route]
+        agent_todos = [
             _todo_preview(
-                planner_order=5,
+                planner_order=1,
+                role="agent",
+                priority="P0",
+                task_class="advancement_task",
+                action_kind=route_action,
+                text=route_text,
+                depends_on=["issue_fix_candidate_preflight_v0"],
+            )
+        ]
+    user_gates: list[dict[str, Any]] = []
+    if gated_fields and preflight_route == "proceed":
+        user_gates.append(
+            _todo_preview(
+                planner_order=3,
                 role="user",
                 priority="P0",
                 task_class="user_gate",
@@ -226,8 +368,10 @@ def build_issue_fix_workflow_plan_packet(
             )
             | {"gated_fields": gated_fields},
         )
-        for offset, gate in enumerate(user_gates, start=5):
-            gate["planner_order"] = offset
+    ordered_previews = sorted(
+        agent_todos + user_gates,
+        key=lambda preview: int(preview.get("planner_order", 0)),
+    )
 
     validation_plan = [
         {
@@ -255,20 +399,122 @@ def build_issue_fix_workflow_plan_packet(
         "readiness_blockers": readiness_blockers,
         "files_changed": [],
         "validation_commands": [validation_label],
+        "pr_description_contract": {
+            "schema_version": "issue_fix_pr_description_contract_v0",
+            "source_contract": "pr_review_five_block_template_v0",
+            "extension_contract": "issue_fix_reviewer_context_v0",
+            "builder_contract": {
+                "schema_version": "issue_fix_pr_description_build_v0",
+                "surface": "issue_fix.pr_description",
+                "default_enabled": False,
+                "explicit_dependency_injection": True,
+                "provider_call_budget": 1,
+                "fail_open_preserves_base_description": True,
+                "applied_preferences_require_compact_receipt": True,
+            },
+            "sections": [
+                {
+                    "label": "动机",
+                    "purpose": "Explain the reproduced user or maintainer problem and why the fix is necessary.",
+                },
+                {
+                    "label": "改动思路",
+                    "purpose": "Explain the chosen fix route and the main design tradeoff.",
+                },
+                {
+                    "label": "关键代码或伪代码",
+                    "purpose": (
+                        "Show the smallest code or pseudocode slice that lets a "
+                        "reviewer verify the behavioral change quickly."
+                    ),
+                    "applicability": "code_changes",
+                },
+                {
+                    "label": "具体改动",
+                    "purpose": "Name the reviewer-relevant modules, behavior, and focused regression coverage.",
+                },
+                {
+                    "label": "修复后复现",
+                    "purpose": (
+                        "Provide a post-fix reproduction path using the repository "
+                        "CLI or focused code/test surface."
+                    ),
+                    "applicability": "reproducible_changes",
+                    "accepted_surfaces": [
+                        "repository_cli",
+                        "focused_code_or_test",
+                    ],
+                },
+                {
+                    "label": "验证",
+                    "purpose": "List repository-native commands and honest pass, fail, or skipped results.",
+                },
+                {
+                    "label": "对主干的风险与未覆盖",
+                    "purpose": "State compatibility risk, residual gaps, and checks not run.",
+                },
+                {
+                    "label": "关联 Issue",
+                    "purpose": (
+                        "Use a GitHub closing keyword for each fully resolved issue; "
+                        "use a non-closing related reference for partial work."
+                    ),
+                    "applicability": "issue_backed_changes",
+                },
+            ],
+            "issue_reference_policy": {
+                "schema_version": "issue_fix_pr_issue_reference_policy_v0",
+                "default_closing_keyword": "Fixes",
+                "partial_fix_prefix": "Related to",
+                "closing_requires_default_branch": True,
+                "full_syntax_required_per_issue": True,
+                "applied_after_semantic_preferences": True,
+                "verification_surface": "closingIssuesReferences",
+            },
+            "infographic_policy": {
+                "required": False,
+                "allowed_when": "complex_change",
+                "must_not_replace_textual_evidence": True,
+            },
+            "review_only_section_excluded": "我的整体评价",
+            "requires_current_diff_evidence": True,
+        },
         "external_issue_comment_performed": False,
         "external_pr_created": False,
         "merge_performed": False,
     }
+    preflight_next_action = {
+        "reuse_existing_pr": (
+            "reuse or assess the matched implementation PR; keep the candidate out "
+            "of new patch planning and preserve the existing recall receipt"
+        ),
+        "comment_only": (
+            "preserve the existing route and produce only a compact disposition or "
+            "maintainer-comment plan"
+        ),
+        "skip": (
+            "record no-follow-up from prior terminal or triage evidence; do not "
+            "reopen patch planning"
+        ),
+    }.get(preflight_route)
     first_screen = {
         "waiting_on": "agent",
         "user_action_required": False,
         "agent_can_continue": True,
         "top_agent_todo": agent_todos[0],
-        "top_gate": user_gates[0] if gated_fields else None,
-        "next_safe_action": (
-            "write the ordered LoopX todo plan only after the metadata preview "
-            "stays body-free; then run branch/validation work inside the "
-            "caller-approved repo context"
+        "top_gate": user_gates[0] if user_gates else None,
+        "next_safe_action": preflight_next_action or (
+            (
+                "inspect current repository evidence for "
+                f"{', '.join(unresolved_context)}; ground what is available and "
+                "preserve the rest as unresolved in feasibility instead of guessing"
+            )
+            if unresolved_context
+            else (
+                "use the grounded repository context in the metadata classification "
+                "and feasibility checkpoint; then let feasibility project one "
+                "route-specific successor or no-follow-up"
+            )
         ),
     }
     packet: dict[str, Any] = {
@@ -287,9 +533,15 @@ def build_issue_fix_workflow_plan_packet(
             "body_captured": False,
             "comment_bodies_captured": False,
         },
+        "repository_context": repository_context,
+        "candidate_preflight": candidate_preflight,
+        "candidate_fix_workflow_allowed": preflight_route == "proceed",
         "first_screen": first_screen,
         "branch_plan": branch_plan,
-        "ordered_loopx_todo_writeback_preview": agent_todos + user_gates,
+        "resolution_route_candidates": resolution_routes,
+        "feasibility_checkpoint_plan": feasibility_checkpoint,
+        "post_pr_lifecycle_monitor_plan": post_pr_monitor,
+        "ordered_loopx_todo_writeback_preview": ordered_previews,
         "validation_plan": validation_plan,
         "review_packet_preview": review_packet_preview,
         "external_reads_performed": bool(metadata_packet["external_reads_performed"]),
@@ -311,7 +563,9 @@ def build_issue_fix_workflow_plan_packet(
     return packet
 
 
-def validate_issue_fix_workflow_plan_packet(packet: Mapping[str, Any]) -> dict[str, Any]:
+def validate_issue_fix_workflow_plan_packet(
+    packet: Mapping[str, Any],
+) -> dict[str, Any]:
     errors: list[str] = []
     if packet.get("schema_version") != ISSUE_FIX_WORKFLOW_PLAN_PACKET_SCHEMA_VERSION:
         errors.append("packet schema_version must be issue_fix_workflow_plan_packet_v0")
@@ -351,6 +605,101 @@ def validate_issue_fix_workflow_plan_packet(packet: Mapping[str, Any]) -> dict[s
     if branch_plan.get("private_repo_state_read") is not False:
         errors.append("branch_plan private_repo_state_read must be false")
 
+    repository_context = packet.get("repository_context")
+    if repository_context is not None:
+        if not isinstance(repository_context, Mapping):
+            errors.append("repository_context must be an object when present")
+            repository_context = {}
+        if repository_context.get("ok") is not True:
+            errors.append("repository_context must be valid")
+        if repository_context.get("external_writes_performed") is not False:
+            errors.append("repository_context must not perform external writes")
+        truth_contract = repository_context.get("truth_contract")
+        if (
+            not isinstance(truth_contract, Mapping)
+            or truth_contract.get("context_cannot_authorize_external_writes")
+            is not True
+        ):
+            errors.append("repository_context must deny external-write authority")
+
+    candidate_preflight = packet.get("candidate_preflight")
+    if not isinstance(candidate_preflight, Mapping):
+        errors.append("candidate_preflight is required")
+        candidate_preflight = {}
+    if candidate_preflight.get("schema_version") != "issue_fix_candidate_preflight_v0":
+        errors.append("candidate_preflight has wrong schema")
+    if candidate_preflight.get("external_reads_performed") is not False:
+        errors.append("candidate_preflight must not perform external reads")
+    if candidate_preflight.get("external_writes_performed") is not False:
+        errors.append("candidate_preflight must not perform external writes")
+    preflight_decision = candidate_preflight.get("decision")
+    preflight_decision = (
+        preflight_decision if isinstance(preflight_decision, Mapping) else {}
+    )
+    candidate_runnable = preflight_decision.get("candidate_runnable") is True
+    if packet.get("candidate_fix_workflow_allowed") is not candidate_runnable:
+        errors.append("candidate workflow permission must match preflight decision")
+
+    routes = packet.get("resolution_route_candidates")
+    if not isinstance(routes, Sequence) or isinstance(routes, (str, bytes)):
+        errors.append("resolution_route_candidates must be a list")
+        routes = []
+    route_names = {route.get("route") for route in routes if isinstance(route, Mapping)}
+    for route_name in ("fix_pr", "comment_only", "triage_only"):
+        if route_name not in route_names:
+            errors.append(f"resolution route {route_name} is required")
+    for route in routes:
+        if not isinstance(route, Mapping):
+            errors.append("resolution route entries must be objects")
+            continue
+        if route.get("external_issue_comment_performed") is not False:
+            errors.append("resolution routes must not perform external comments")
+        if route.get("external_pr_created") is not False:
+            errors.append("resolution routes must not create PRs")
+        if route.get("requires_user_gate_before_external_write") is not True:
+            errors.append("resolution routes must gate external writes")
+
+    feasibility = packet.get("feasibility_checkpoint_plan")
+    if not isinstance(feasibility, Mapping):
+        errors.append("feasibility_checkpoint_plan is required")
+        feasibility = {}
+    if feasibility.get("selects_exactly_one_route") is not True:
+        errors.append("feasibility checkpoint must select exactly one route")
+    if feasibility.get("writes_domain_state_by_default_with_goal_id") is not True:
+        errors.append("feasibility checkpoint must default-write domain state")
+    if (
+        packet.get("repository_context") is not None
+        and feasibility.get("persists_repository_context_with_feasibility") is not True
+    ):
+        errors.append("feasibility checkpoint must persist repository context")
+    if feasibility.get("writes_loopx_todo") is not False:
+        errors.append("feasibility checkpoint must not directly write LoopX todos")
+    if feasibility.get("raw_issue_or_log_material_captured") is not False:
+        errors.append("feasibility checkpoint must not capture raw material")
+
+    post_pr = packet.get("post_pr_lifecycle_monitor_plan")
+    if not isinstance(post_pr, Mapping):
+        errors.append("post_pr_lifecycle_monitor_plan is required")
+        post_pr = {}
+    if post_pr.get("schema_version") != "issue_fix_post_pr_lifecycle_monitor_plan_v1":
+        errors.append("post PR lifecycle plan must use grouped monitor plan v1")
+    if post_pr.get("creates_per_pr_continuous_monitor_todo") is not False:
+        errors.append("post PR lifecycle plan must not create per-PR monitor todos")
+    if post_pr.get("monitor_scope") != "lifecycle_state_bucket":
+        errors.append("post PR lifecycle plan must group by lifecycle state")
+    if post_pr.get("materializes_nonempty_buckets_only") is not True:
+        errors.append("post PR lifecycle plan must materialize only nonempty buckets")
+    if post_pr.get("terminal_members_removed") is not True:
+        errors.append("post PR lifecycle plan must remove terminal members")
+    if post_pr.get("per_pr_material_actions_are_one_shot") is not True:
+        errors.append("post PR lifecycle plan must use one-shot per-PR actions")
+    if post_pr.get("external_notification_granularity") != "one_pr_per_message":
+        errors.append("post PR lifecycle plan must preserve one-PR messages")
+    if post_pr.get("external_writes_performed") is not False:
+        errors.append("post PR lifecycle plan must not perform external writes")
+    if post_pr.get("raw_check_logs_captured") is not False:
+        errors.append("post PR lifecycle plan must not capture raw check logs")
+
     previews = packet.get("ordered_loopx_todo_writeback_preview")
     if not isinstance(previews, Sequence) or isinstance(previews, (str, bytes)):
         errors.append("ordered_loopx_todo_writeback_preview must be a list")
@@ -375,6 +724,18 @@ def validate_issue_fix_workflow_plan_packet(packet: Mapping[str, Any]) -> dict[s
             errors.append("todo preview planner_order must be an integer")
         roles.add(preview.get("role"))
         priorities.add(preview.get("priority"))
+    if not candidate_runnable:
+        forbidden = {
+            "issue_fix_public_metadata_classification",
+            "issue_fix_feasibility_decision",
+            "issue_fix_branch_validation",
+        }
+        if any(
+            isinstance(preview, Mapping)
+            and preview.get("action_kind") in forbidden
+            for preview in previews
+        ):
+            errors.append("deduped candidate must not project new patch-planning todos")
     if orders != sorted(orders):
         errors.append("todo previews must be ordered by planner_order")
     if "agent" not in roles:
@@ -390,6 +751,81 @@ def validate_issue_fix_workflow_plan_packet(packet: Mapping[str, Any]) -> dict[s
         errors.append("review packet preview has wrong schema")
     if review.get("ready") is not False:
         errors.append("workflow plan preview must not mark PR review ready")
+    description = review.get("pr_description_contract")
+    if not isinstance(description, Mapping):
+        errors.append("review preview must include PR description contract")
+    else:
+        if description.get("schema_version") != (
+            "issue_fix_pr_description_contract_v0"
+        ):
+            errors.append("PR description contract has wrong schema")
+        if description.get("builder_contract") != {
+            "schema_version": "issue_fix_pr_description_build_v0",
+            "surface": "issue_fix.pr_description",
+            "default_enabled": False,
+            "explicit_dependency_injection": True,
+            "provider_call_budget": 1,
+            "fail_open_preserves_base_description": True,
+            "applied_preferences_require_compact_receipt": True,
+        }:
+            errors.append("PR description builder contract is incomplete")
+        sections = description.get("sections")
+        labels = (
+            [
+                section.get("label")
+                for section in sections
+                if isinstance(section, Mapping)
+            ]
+            if isinstance(sections, list)
+            else []
+        )
+        if labels != [
+            "动机",
+            "改动思路",
+            "关键代码或伪代码",
+            "具体改动",
+            "修复后复现",
+            "验证",
+            "对主干的风险与未覆盖",
+            "关联 Issue",
+        ]:
+            errors.append("PR description contract sections are incomplete")
+        section_by_label = {
+            str(section.get("label") or ""): section
+            for section in sections or []
+            if isinstance(section, Mapping)
+        }
+        if section_by_label.get("关键代码或伪代码", {}).get("applicability") != (
+            "code_changes"
+        ):
+            errors.append("key code section must apply to code changes")
+        if section_by_label.get("修复后复现", {}).get("accepted_surfaces") != [
+            "repository_cli",
+            "focused_code_or_test",
+        ]:
+            errors.append("post-fix reproduction surfaces are incomplete")
+        if section_by_label.get("关联 Issue", {}).get("applicability") != (
+            "issue_backed_changes"
+        ):
+            errors.append("issue reference section applicability is incomplete")
+        if description.get("issue_reference_policy") != {
+            "schema_version": "issue_fix_pr_issue_reference_policy_v0",
+            "default_closing_keyword": "Fixes",
+            "partial_fix_prefix": "Related to",
+            "closing_requires_default_branch": True,
+            "full_syntax_required_per_issue": True,
+            "applied_after_semantic_preferences": True,
+            "verification_surface": "closingIssuesReferences",
+        }:
+            errors.append("PR description issue reference policy is incomplete")
+        if description.get("infographic_policy") != {
+            "required": False,
+            "allowed_when": "complex_change",
+            "must_not_replace_textual_evidence": True,
+        }:
+            errors.append("PR description infographic policy is incomplete")
+        if description.get("review_only_section_excluded") != "我的整体评价":
+            errors.append("PR description contract must exclude reviewer verdict")
     if review.get("external_issue_comment_performed") is not False:
         errors.append("review preview must not perform external issue comments")
     if review.get("external_pr_created") is not False:
@@ -450,6 +886,41 @@ def render_issue_fix_workflow_plan_markdown(payload: dict[str, Any]) -> str:
                 f"- labels: `{issue_signal.get('labels')}`",
             ]
         )
+    repository_context = payload.get("repository_context")
+    if isinstance(repository_context, Mapping):
+        lines.extend(
+            [
+                "",
+                "## Repository Context",
+                "",
+                f"- status: `{repository_context.get('context_status')}`",
+                f"- repository_revision: `{repository_context.get('repository_revision')}`",
+                f"- context_fingerprint: `{repository_context.get('context_fingerprint')}`",
+                f"- unresolved_required_aspects: "
+                f"`{repository_context.get('unresolved_required_aspects')}`",
+                f"- expert_next_action: "
+                f"`{(repository_context.get('expert_consultation') or {}).get('next_action')}`",
+            ]
+        )
+    candidate_preflight = payload.get("candidate_preflight")
+    if isinstance(candidate_preflight, Mapping):
+        decision = candidate_preflight.get("decision") or {}
+        evidence = candidate_preflight.get("evidence") or {}
+        recall = candidate_preflight.get("agentic_recall") or {}
+        lines.extend(
+            [
+                "",
+                "## Candidate Preflight",
+                "",
+                f"- configured: `{candidate_preflight.get('configured')}`",
+                f"- route: `{decision.get('route')}`",
+                f"- candidate_runnable: `{decision.get('candidate_runnable')}`",
+                f"- existing_pr_refs: `{decision.get('existing_pr_refs')}`",
+                f"- domain_state_matched: `{evidence.get('domain_state_matched')}`",
+                f"- agentic_recall_action: `{recall.get('action')}`",
+                f"- provider_calls_performed: `{recall.get('provider_calls_performed')}`",
+            ]
+        )
     branch = payload.get("branch_plan")
     if isinstance(branch, Mapping):
         lines.extend(
@@ -475,6 +946,47 @@ def render_issue_fix_workflow_plan_markdown(payload: dict[str, Any]) -> str:
                     f"`{todo.get('priority')}` `{todo.get('action_kind')}`: "
                     f"would_write=`{todo.get('would_write')}`"
                 )
+    feasibility = payload.get("feasibility_checkpoint_plan")
+    if isinstance(feasibility, Mapping):
+        lines.extend(
+            [
+                "",
+                "## Feasibility Checkpoint",
+                "",
+                f"- selects_exactly_one_route: "
+                f"`{feasibility.get('selects_exactly_one_route')}`",
+                f"- routes: `{feasibility.get('routes')}`",
+                f"- writes_domain_state_by_default_with_goal_id: "
+                f"`{feasibility.get('writes_domain_state_by_default_with_goal_id')}`",
+                f"- command_preview: `{feasibility.get('command_preview')}`",
+            ]
+        )
+    routes = payload.get("resolution_route_candidates")
+    if isinstance(routes, Sequence) and not isinstance(routes, (str, bytes)):
+        lines.extend(["", "## Resolution Routes", ""])
+        for route in routes:
+            if isinstance(route, Mapping):
+                lines.append(
+                    f"- `{route.get('route')}` `{route.get('priority')}`: "
+                    f"{route.get('summary')}"
+                )
+    post_pr = payload.get("post_pr_lifecycle_monitor_plan")
+    if isinstance(post_pr, Mapping):
+        lines.extend(
+            [
+                "",
+                "## Post-PR Lifecycle Monitor",
+                "",
+                f"- creates_per_pr_continuous_monitor_todo: "
+                f"`{post_pr.get('creates_per_pr_continuous_monitor_todo')}`",
+                f"- monitor_scope: `{post_pr.get('monitor_scope')}`",
+                f"- monitor_action_kind_template: "
+                f"`{post_pr.get('monitor_action_kind_template')}`",
+                f"- external_notification_granularity: "
+                f"`{post_pr.get('external_notification_granularity')}`",
+                f"- decisions: `{post_pr.get('decisions')}`",
+            ]
+        )
     review = payload.get("review_packet_preview")
     if isinstance(review, Mapping):
         lines.extend(
@@ -488,9 +1000,26 @@ def render_issue_fix_workflow_plan_markdown(payload: dict[str, Any]) -> str:
                 f"- merge_performed: `{review.get('merge_performed')}`",
             ]
         )
+        description = review.get("pr_description_contract")
+        if isinstance(description, Mapping):
+            lines.extend(["", "### PR Description Contract", ""])
+            for section in description.get("sections") or []:
+                if isinstance(section, Mapping):
+                    lines.append(
+                        f"- **{section.get('label')}**: {section.get('purpose')}"
+                    )
+            infographic = description.get("infographic_policy")
+            if isinstance(infographic, Mapping):
+                lines.append(
+                    "- infographic: optional for complex changes; textual evidence remains required"
+                )
     validation = payload.get("validation")
     if isinstance(validation, Mapping):
-        errors = validation.get("errors") if isinstance(validation.get("errors"), list) else []
+        errors = (
+            validation.get("errors")
+            if isinstance(validation.get("errors"), list)
+            else []
+        )
         lines.extend(
             [
                 "",

@@ -8,6 +8,8 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -34,13 +36,86 @@ for line in sys.stdin:
     elif method == "thread/goal/get":
         result = {"goal": {"threadId": "thread-smoke", "status": "active"}}
     elif method == "turn/start":
-        if msg.get("params", {}).get("effort") != "high":
+        if msg.get("params", {}).get("effort") not in {"high", "xhigh"}:
             print(json.dumps({
                 "id": mid,
-                "error": {"code": -32602, "message": "missing high effort"},
+                "error": {"code": -32602, "message": "missing supported effort"},
             }), flush=True)
             continue
         prompt_text = msg.get("params", {}).get("input", [{}])[0].get("text", "")
+        if "response-turn-id drift" in prompt_text:
+            result = {"turn": {"id": "turn-response-placeholder", "status": "running"}}
+            print(json.dumps({"id": mid, "result": result}), flush=True)
+            print(json.dumps({
+                "method": "turn/started",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turn": {"id": "turn-event-canonical", "status": "inProgress"},
+                },
+            }), flush=True)
+            print(json.dumps({
+                "method": "item/started",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turnId": "turn-event-canonical",
+                    "item": {
+                        "id": "user-item-drift-smoke",
+                        "type": "userMessage",
+                        "content": [{"type": "text", "text": prompt_text}],
+                    },
+                },
+            }), flush=True)
+            print(json.dumps({
+                "method": "item/completed",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turnId": "turn-event-canonical",
+                    "item": {
+                        "id": "user-item-drift-smoke",
+                        "type": "userMessage",
+                        "content": [{"type": "text", "text": prompt_text}],
+                    },
+                },
+            }), flush=True)
+            print(json.dumps({
+                "method": "item/started",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turnId": "turn-event-canonical",
+                    "item": {
+                        "id": "command-item-drift-smoke",
+                        "type": "commandExecution",
+                    },
+                },
+            }), flush=True)
+            print(json.dumps({
+                "method": "item/completed",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turnId": "turn-event-canonical",
+                    "item": {
+                        "id": "command-item-drift-smoke",
+                        "type": "commandExecution",
+                    },
+                },
+            }), flush=True)
+            print(json.dumps({
+                "method": "item/agentMessage/delta",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turnId": "turn-event-canonical",
+                    "itemId": "item-drift-smoke",
+                    "delta": "Drift final answer.",
+                },
+            }), flush=True)
+            print(json.dumps({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turn": {"id": "turn-event-canonical", "status": "completed"},
+                },
+            }), flush=True)
+            continue
         if "event-style completion" in prompt_text:
             result = {"turn": {"id": "turn-event-msg-smoke", "status": "running"}}
             print(json.dumps({"id": mid, "result": result}), flush=True)
@@ -74,10 +149,48 @@ for line in sys.stdin:
                 "payload": {"type": "task_complete"},
             }), flush=True)
             continue
+        if "stale completion status" in prompt_text:
+            result = {
+                "turn": {"id": "turn-stale-completion-status", "status": "inProgress"}
+            }
+            print(json.dumps({"id": mid, "result": result}), flush=True)
+            print(json.dumps({
+                "method": "item/agentMessage/delta",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turnId": "turn-stale-completion-status",
+                    "itemId": "item-stale-completion-status",
+                    "delta": "Stale status final answer.",
+                },
+            }), flush=True)
+            print(json.dumps({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-smoke",
+                    "turn": {
+                        "id": "turn-stale-completion-status",
+                        "status": "inProgress",
+                    },
+                },
+            }), flush=True)
+            continue
         if "session-file completion" in prompt_text:
             result = {"turn": {"id": "turn-session-file-smoke", "status": "running"}}
             print(json.dumps({"id": mid, "result": result}), flush=True)
             with open("rollout-fake-session-smoke.jsonl", "a", encoding="utf-8") as session:
+                session.write(json.dumps({
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "developer",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "<permissions instructions>startup context</permissions instructions><skills_instructions>skill context</skills_instructions>",
+                            }
+                        ],
+                    },
+                }) + "\\n")
                 session.write(json.dumps({
                     "type": "response_item",
                     "payload": {
@@ -160,8 +273,19 @@ def _load_module():
     return module
 
 
+def assert_inaccessible_proc_fds_are_ignored(module) -> None:
+    turn = SimpleNamespace(
+        work_dir=None,
+        process=SimpleNamespace(pid=12345),
+    )
+    with patch.object(module, "_process_descendant_pids", return_value={12345}):
+        with patch.object(Path, "iterdir", side_effect=PermissionError("denied")):
+            assert module._codex_session_jsonl_paths(turn) == []
+
+
 def main() -> int:
     module = _load_module()
+    assert_inaccessible_proc_fds_are_ignored(module)
     with tempfile.TemporaryDirectory(prefix="gh-codex-app-server-smoke-") as tmp:
         root = Path(tmp)
         fake = root / "codex"
@@ -232,6 +356,50 @@ def main() -> int:
         finally:
             completed_turn.terminate()
 
+        xhigh_turn = module.start_codex_app_server_goal_turn(
+            codex_bin=str(fake),
+            work_dir=root / "work-xhigh",
+            objective="Synthetic objective.",
+            prompt="Synthetic prompt.",
+            model_name="gpt-5.5",
+            reasoning_effort="xhigh",
+            response_timeout_sec=5,
+            wait_for_completion=True,
+            turn_timeout_sec=5,
+        )
+        try:
+            assert xhigh_turn.assistant_message == "Synthetic final answer."
+            compact = module.compact_turn_metadata(xhigh_turn)
+            assert compact["turn_completed_observed"] is True, compact
+            assert compact["assistant_message_present"] is True, compact
+        finally:
+            xhigh_turn.terminate()
+
+        drift_turn = module.start_codex_app_server_goal_turn(
+            codex_bin=str(fake),
+            work_dir=root / "work-turn-id-drift",
+            objective="Synthetic objective.",
+            prompt="Synthetic response-turn-id drift prompt.",
+            model_name="gpt-5.5",
+            reasoning_effort="xhigh",
+            response_timeout_sec=5,
+            wait_for_completion=True,
+            turn_timeout_sec=5,
+        )
+        try:
+            assert drift_turn.turn_id == "turn-event-canonical", drift_turn
+            assert drift_turn.assistant_message == "Drift final answer."
+            compact = module.compact_turn_metadata(drift_turn)
+            assert compact["turn_id_source"] == "event_stream", compact
+            assert compact["turn_start_response_turn_id_present"] is True, compact
+            assert compact["turn_event_stream_turn_id_present"] is True, compact
+            assert compact["turn_completed_observed"] is True, compact
+            assert compact["assistant_message_present"] is True, compact
+            assert compact["non_user_item_completed_count"] >= 1, compact
+            assert "Drift final answer." not in json.dumps(compact), compact
+        finally:
+            drift_turn.terminate()
+
         event_completed_turn = module.start_codex_app_server_goal_turn(
             codex_bin=str(fake),
             work_dir=root / "work-event-completed",
@@ -259,6 +427,26 @@ def main() -> int:
         finally:
             event_completed_turn.terminate()
 
+        stale_completion_status_turn = module.start_codex_app_server_goal_turn(
+            codex_bin=str(fake),
+            work_dir=root / "work-stale-completion-status",
+            objective="Synthetic objective.",
+            prompt="Synthetic stale completion status prompt.",
+            model_name="gpt-5.5",
+            reasoning_effort="high",
+            response_timeout_sec=5,
+            wait_for_completion=True,
+            turn_timeout_sec=5,
+        )
+        try:
+            compact = module.compact_turn_metadata(stale_completion_status_turn)
+            assert compact["turn_completed_observed"] is True, compact
+            assert compact["turn_status"] == "completed", compact
+            assert compact["assistant_message_present"] is True, compact
+            assert "Stale status final answer." not in json.dumps(compact), compact
+        finally:
+            stale_completion_status_turn.terminate()
+
         session_completed_turn = module.start_codex_app_server_goal_turn(
             codex_bin=str(fake),
             work_dir=root / "work-session-completed",
@@ -276,14 +464,18 @@ def main() -> int:
             assert compact["turn_completed_observed"] is True, compact
             assert compact["turn_status"] == "completed", compact
             assert compact["session_log_observed"] is True, compact
-            assert compact["session_event_count"] >= 2, compact
+            assert compact["session_event_count"] >= 3, compact
             assert compact["session_task_complete_observed"] is True, compact
             assert compact["assistant_message_present"] is True, compact
+            assert session_completed_turn.assistant_message == "Session file final answer."
             assert compact["assistant_message_chars"] == len(
                 "Session file final answer."
             )
+            assert compact["agent_message_item_count"] == 1, compact
+            assert compact["non_user_item_completed_count"] == 1, compact
             assert "event_msg:task_complete" in compact["notifications"], compact
             assert "Session file final answer." not in json.dumps(compact), compact
+            assert "startup context" not in json.dumps(compact), compact
         finally:
             session_completed_turn.terminate()
 

@@ -6,3 +6,10 @@ stable enough to test, lint, or link from implementation.
 Current groups:
 
 - [Protocol contracts](protocols/README.md)
+- [Project skill delivery](project-skill-delivery.md): release-owned,
+  project-local skill discovery and managed-copy lifecycle.
+
+High-traffic read paths:
+
+- [agent_scoped_evidence_ledger_v0](protocols/agent-scoped-evidence-ledger-v0.md):
+  thin, per-agent evidence chronology used before replan or handoff.

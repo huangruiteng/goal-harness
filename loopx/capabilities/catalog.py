@@ -1,16 +1,129 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any
 
+from .registry import CapabilityRegistry
+
+from ..extensions.runtime import extension_catalog_entries
 
 CAPABILITY_CATALOG_SCHEMA_VERSION = "loopx_capability_catalog_v0"
 CAPABILITY_DETAIL_SCHEMA_VERSION = "loopx_capability_detail_v0"
 
 
-CAPABILITIES: tuple[dict[str, Any], ...] = (
+BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "change-quality-qualification",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Exact-scope change quality qualification",
+        "status": "active-preview",
+        "default_enabled": False,
+        "real_world_anchor": (
+            "provider-neutral final-diff review with bounded repair and merge evidence"
+        ),
+        "user_value": (
+            "Give every managed project the same compact engineering-quality "
+            "contract without assuming its language, framework, or agent host."
+        ),
+        "entry_command": (
+            "loopx change-quality prepare --goal-id <goal-id> "
+            "--repo-path <repo> --format json"
+        ),
+        "workflow_skill": {
+            "name": "loopx-change-quality",
+            "delivery": "project_managed_copy",
+            "activation": "explicit_project_install_plus_goal_policy",
+            "project_copy_required": True,
+            "install_command": (
+                "loopx project-skill install --project . --skill "
+                "loopx-change-quality --surface codex --execute"
+            ),
+        },
+        "commands": [
+            {
+                "command": (
+                    "loopx change-quality prepare --goal-id <goal-id> "
+                    "--repo-path <repo> --format json"
+                ),
+                "purpose": "Build a self-contained review contract for the exact final diff.",
+                "write_boundary": "read-only git and registry projection; no code or receipt write",
+            },
+            {
+                "command": (
+                    "loopx change-quality record --goal-id <goal-id> "
+                    "--repo-path <repo> --result-json <result.json> --execute --format json"
+                ),
+                "purpose": "Validate a provider result against the exact diff and store its receipt.",
+                "write_boundary": "atomic goal-runtime receipt only; no repository or external write",
+            },
+            {
+                "command": (
+                    "loopx change-quality verify --goal-id <goal-id> "
+                    "--repo-path <repo> --format json"
+                ),
+                "purpose": "Verify goal policy and the current exact-diff receipt.",
+                "write_boundary": "read-only registry, git, and runtime receipt verification",
+            },
+            {
+                "command": (
+                    "loopx canary premerge --from-git-diff --goal-id <goal-id>"
+                ),
+                "purpose": "Apply strict receipt policy inside the authoritative premerge gate.",
+                "write_boundary": "validation only; no merge, push, or external action",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "change_quality_scope_v0",
+                "module": "loopx.capabilities.change_quality.scope",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_prepare_packet_v1",
+                "module": "loopx.capabilities.change_quality.receipt",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_agent_result_v1",
+                "module": "loopx.capabilities.change_quality.result",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_receipt_v1",
+                "module": "loopx.capabilities.change_quality.receipt",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_receipt_verification_v1",
+                "module": "loopx.capabilities.change_quality.receipt",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+        ],
+        "smokes": ["python3 examples/change-quality-qualification-smoke.py"],
+        "docs": ["docs/capabilities/change-quality/README.md"],
+        "boundaries": [
+            "The capability is default-off and activates only through explicit per-goal policy; managed skill discovery is a separate project-level choice.",
+            "safe_fix permits at most one bounded repair pass; it grants no destructive git, permission expansion, or unrelated refactor authority.",
+            "strict_receipt is an exact-diff premerge evidence gate and does not itself permit code mutation.",
+            "Subjective style advice stays nonblocking; only concrete correctness, security, privacy, contract, or required-validation failures may block.",
+            "Turn may transport a packet or receipt reference, but premerge remains the enforcement authority.",
+            "The canonical workflow skill is release-owned and project-delivered; the global installer does not publish it into every agent configuration.",
+            "Receipts stay in local runtime state; raw model transcripts, private context, and credentials are not persisted.",
+            "The first version is single-level: it qualifies one final diff and does not recursively review reviews.",
+        ],
+        "next_real_step": (
+            "Enable it on an explicit goal, qualify one final diff, and verify "
+            "that safe-fix and strict-receipt policies remain independently enforced."
+        ),
+    },
     {
         "id": "issue-fix",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
         "title": "Repo issue-fix loop",
         "status": "active-preview",
         "real_world_anchor": "open-source issue/PR solver",
@@ -26,14 +139,54 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "write_boundary": "read-only external metadata; no issue comment, PR, or todo write",
             },
             {
+                "command": "loopx value-connectors github-public-probe --url <github-issue-or-pr-url> --fetch-metadata --format json",
+                "purpose": "Use the compatibility CLI to fetch the issue-fix-owned public GitHub probe packet.",
+                "write_boundary": "public metadata read only; no issue bodies, comments, PRs, account changes, or writes",
+            },
+            {
+                "command": "loopx value-connectors github-reply-monitor --issue-url <github-issue-or-pr-url> --after-comment-url <github-issue-comment-url> --fetch-metadata --format json",
+                "purpose": "Use the compatibility CLI to detect public maintainer replies through the issue-fix provider.",
+                "write_boundary": "public comment metadata read only; no comment bodies, thread bump, or external write",
+            },
+            {
                 "command": "loopx content-ops issue-fix-intake --format json",
                 "purpose": "Project public issue metadata into an issue-fix intake packet.",
                 "write_boundary": "fixture-only; no external read or write",
             },
             {
-                "command": "loopx issue-fix workflow-plan --url <github-issue-url> --repo-path <repo> --format json",
-                "purpose": "Compose metadata, intake, ordered LoopX todo previews, validation labels, and PR review readiness blockers.",
+                "command": "loopx issue-fix workflow-plan --url <github-issue-url> --repo-path <repo> --repository-context-json <context.json> --format json",
+                "purpose": "Compose metadata, repository context, intake, feasibility, validation labels, and PR review readiness blockers.",
                 "write_boundary": "preview-only; no todo write, repo execution, external comment, PR creation, merge, or publish",
+            },
+            {
+                "command": "loopx issue-fix feasibility --url <github-issue-url> --reproduction-status <state> --scope-class <scope> --repository-context-json <context.json> --goal-id <goal-id> --format json",
+                "purpose": "Select one route and persist its compact repository evidence basis with feasibility domain state.",
+                "write_boundary": "writes compact project-local domain state with goal or ledger context; no raw issue/comment/log capture or external write",
+            },
+            {
+                "command": "loopx issue-fix reviewer-plan --repo-path <repo> --repo <owner/repo> --base-ref <base-ref> --execute --format json",
+                "purpose": "Rank explainable reviewer candidates from CODEOWNERS and changed-path/module history.",
+                "write_boundary": "approved local repo read only; no external review request",
+            },
+            {
+                "command": "loopx issue-fix reviewer-request --url <github-pr-url> --repo-path <repo> --base-ref <base-ref> [--notification-sinks-json <local-private.json>] --execute --format json",
+                "purpose": "Under reviewer-notification authority, exclude the live PR author, establish canonical GitHub coverage, and optionally deliver the same reviewer through verified project-dedicated sinks.",
+                "write_boundary": "one formal GitHub review request, or one reviewer-tagging comment only after confirmed permission denial; optional configured secondary sends consume local-private identity/destination data without copying it; no arbitrary comment, push, merge, or publish",
+            },
+            {
+                "command": "loopx issue-fix reviewer-notification-drain --goal-id <goal-id> --project <project> --execute --format json",
+                "purpose": "Drain one bounded review-required state bucket after live PR verification while preserving one PR per group message.",
+                "write_boundary": "verified configured secondary sends plus compact receipt or stale-queue state writeback; no per-PR continuous monitor, arbitrary comment, push, merge, or publish",
+            },
+            {
+                "command": "loopx issue-fix pr-lifecycle --url <github-pr-url> --goal-id <goal-id> --format json",
+                "purpose": "Project public PR lifecycle state into a successor, monitor continuation, user gate, or no-follow-up transition.",
+                "write_boundary": "writes compact project-local domain state when goal or ledger context is provided; no external comment, PR creation, merge, raw logs, or body/comment capture",
+            },
+            {
+                "command": "loopx issue-fix outcome --goal-id <goal-id> --repo <owner/repo> --issue-ref <issue-ref> --pr-ref <pr-ref> --format json",
+                "purpose": "Compose one operator-facing issue status/output card from existing feasibility, repository context, optional delivery evidence, and PR lifecycle state.",
+                "write_boundary": "read-only derived projection; writes no source ledger and performs no external action",
             },
             {
                 "command": "loopx issue-fix acceptance-fixture --format json",
@@ -52,6 +205,16 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             },
         ],
         "implemented_protocols": [
+            {
+                "schema_version": "github_public_channel_probe_packet_v0",
+                "module": "loopx.capabilities.issue_fix.github_public",
+                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
+            },
+            {
+                "schema_version": "github_public_reply_monitor_packet_v0",
+                "module": "loopx.capabilities.issue_fix.github_public",
+                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
+            },
             {
                 "schema_version": "github_issue_metadata_preview_v0",
                 "module": "loopx.capabilities.issue_fix.metadata_preview",
@@ -78,6 +241,61 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "doc": "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md",
             },
             {
+                "schema_version": "issue_fix_repository_context_v0",
+                "module": "loopx.capabilities.issue_fix.repository_context",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_feasibility_v0",
+                "module": "loopx.capabilities.issue_fix.feasibility",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_discovered_issue_promotion_v0",
+                "module": "loopx.capabilities.issue_fix.discovered_issue_promotion",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-discovered-issue-promotion-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_pr_lifecycle_monitor_v0",
+                "module": "loopx.capabilities.issue_fix.pr_lifecycle",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_maintainer_correction_input_v0",
+                "module": "loopx.capabilities.issue_fix.pr_lifecycle",
+                "doc": "docs/capabilities/issue-fix/README.md",
+            },
+            {
+                "schema_version": "issue_fix_reviewer_recommendation_v0",
+                "module": "loopx.capabilities.issue_fix.reviewer_recommendation",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-recommendation-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_reviewer_request_v0",
+                "module": "loopx.capabilities.issue_fix.reviewer_request",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-request-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_reviewer_notification_sinks_result_v0",
+                "module": "loopx.capabilities.issue_fix.reviewer_notification",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-notification-sinks-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_reviewer_notification_drain_v0",
+                "module": "loopx.capabilities.issue_fix.reviewer_notification_drain",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-notification-sinks-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_outcome_projection_v0",
+                "module": "loopx.capabilities.issue_fix.outcome_projection",
+                "doc": "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_validated_outcome_memory_writeback_v0",
+                "module": "loopx.capabilities.issue_fix.repository_memory_provider",
+                "doc": "docs/capabilities/issue-fix/README.md",
+            },
+            {
                 "schema_version": "issue_fix_acceptance_loop_v0",
                 "module": "loopx.capabilities.issue_fix.acceptance_loop",
                 "doc": "docs/capabilities/issue-fix/protocols/issue-fix-acceptance-loop-v0.md",
@@ -92,16 +310,50 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "module": "loopx.capabilities.issue_fix.acceptance_loop",
                 "doc": "docs/capabilities/issue-fix/protocols/issue-fix-acceptance-loop-v0.md",
             },
+            {
+                "schema_version": "issue_fix_pr_review_binding_v0",
+                "module": "loopx.capabilities.issue_fix.pr_review_ack",
+                "doc": "docs/project-agent-todo-contract.md",
+            },
+            {
+                "schema_version": "issue_fix_pr_review_ack_receipt_v0",
+                "module": "loopx.capabilities.issue_fix.pr_review_ack",
+                "doc": "docs/project-agent-todo-contract.md",
+            },
+            {
+                "schema_version": "issue_fix_pr_review_acked_reconciliation_v0",
+                "module": "loopx.capabilities.issue_fix.pr_gate_reconcile",
+                "doc": "docs/project-agent-todo-contract.md",
+            },
         ],
         "smokes": [
+            "python3 examples/value-connectors-github-public-probe-smoke.py",
             "python3 examples/issue-fix-workflow-plan-smoke.py",
+            "python3 examples/issue-fix-repository-context-smoke.py",
+            "python3 examples/issue-fix-feasibility-smoke.py",
+            "python3 examples/issue-fix-discovered-issue-promotion-smoke.py",
+            "python3 examples/issue-fix-pr-lifecycle-smoke.py",
+            "python3 examples/issue-fix-pr-review-reconcile-smoke.py",
+            "python3 examples/issue-fix-maintainer-correction-smoke.py",
+            "python3 examples/issue-fix-outcome-projection-smoke.py",
+            "python3 examples/issue-fix-validated-memory-writeback-smoke.py",
+            "python3 examples/issue-fix-reviewer-recommendation-smoke.py",
+            "python3 examples/issue-fix-reviewer-request-smoke.py",
+            "python3 examples/issue-fix-json-input-boundary-smoke.py",
+            "python3 examples/issue-fix-reviewer-notification-sink-smoke.py",
             "python3 examples/content-ops-issue-fix-metadata-preview-smoke.py",
             "python3 examples/content-ops-issue-fix-intake-smoke.py",
             "python3 examples/issue-fix-acceptance-loop-smoke.py",
         ],
         "docs": [
             "docs/capabilities/issue-fix/README.md",
+            "docs/reference/protocols/value-connector-plan-v0.md",
+            "docs/capabilities/issue-fix/openviking-pilot-handoff.md",
             "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md",
+            "docs/capabilities/issue-fix/protocols/issue-fix-discovered-issue-promotion-v0.md",
+            "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-recommendation-v0.md",
+            "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-request-v0.md",
+            "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-notification-sinks-v0.md",
             "docs/capabilities/issue-fix/protocols/issue-fix-acceptance-loop-v0.md",
             "docs/reference/protocols/content-ops-surface-v0.md",
             "docs/reference/protocols/issue-fix-acceptance-loop-v0.md",
@@ -109,15 +361,736 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         "boundaries": [
             "GitHub issue body, comments, timeline, and raw provider payloads are gated and not copied.",
             "Caller repo mode reads and writes only the explicitly approved local git repo.",
-            "External comments, PR creation, merge, publish, and destructive git remain out of scope.",
+            "Arbitrary external comments, PR creation, merge, publish, and destructive git remain separately gated; reviewer-request may use one reviewer-tagging comment only as a verified permission-denial fallback under the same narrow authority.",
+            "Secondary reviewer sinks require an explicit project-dedicated identity and local-private destination/member mapping; no credential, raw roster, provider response, or private identifier enters public state.",
         ],
         "next_real_step": (
-            "Put an agent patching step between branch preparation and PR-ready "
-            "packet generation, while keeping external PR/comment actions explicit."
+            "Exercise route selection and continuation on a public issue-fix pilot, "
+            "while keeping external PR/comment actions explicit."
+        ),
+    },
+    {
+        "id": "decision-context",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Goal-scoped decision evidence and outcome contract",
+        "status": "experimental",
+        "default_enabled": False,
+        "real_world_anchor": (
+            "incremental authority rebase before long-running agent decisions"
+        ),
+        "user_value": (
+            "Separate current evidence, advisory proposals, and verified outcomes "
+            "while keeping source providers replaceable and Core authority unchanged."
+        ),
+        "entry_command": (
+            "loopx decision-context inspect-profile "
+            "--goal-id <goal-id> --agent-id <agent-id> --format json"
+        ),
+        "commands": [
+            {
+                "command": "loopx decision-context architecture --format json",
+                "purpose": "Render the default-off Stage-0 packet, source, provider, and lifecycle boundaries.",
+                "write_boundary": "stateless contract output only; no provider, source, goal state, or external write",
+            },
+            {
+                "command": (
+                    "loopx decision-context inspect-profile "
+                    "--goal-id <goal-id> --agent-id <agent-id> "
+                    "[--profile <private-local-profile>] --format json"
+                ),
+                "purpose": (
+                    "Resolve the default-off goal and agent route while projecting "
+                    "only public-safe provider availability."
+                ),
+                "write_boundary": (
+                    "reads an optional private local profile; never emits source "
+                    "locators, provider config, raw content, cursors, or credentials"
+                ),
+            },
+            {
+                "command": (
+                    "loopx decision-context source-manifest "
+                    "--goal-id <goal-id> --agent-id <agent-id> "
+                    "--profile <private-local-profile> --format json"
+                ),
+                "purpose": (
+                    "Project an enabled source profile into a public-safe manifest "
+                    "before any provider access."
+                ),
+                "write_boundary": (
+                    "read-only local projection; no provider access, cursor write, "
+                    "goal mutation, or external action"
+                ),
+            },
+            {
+                "command": (
+                    "loopx decision-context prepare-evidence "
+                    "--goal-id <goal-id> --agent-id <agent-id> "
+                    "--profile <private-local-profile> "
+                    "--decision-id <decision-id> "
+                    "[--cursor-state <private-cursor-json>] "
+                    "[--source-id <on-demand-source>] --format json"
+                ),
+                "purpose": (
+                    "Resolve enabled profile providers, run bounded scans and "
+                    "exact reads, and emit a public-safe evidence preparation "
+                    "packet for domain rebase."
+                ),
+                "write_boundary": (
+                    "read-only provider access; changed-source cursors remain "
+                    "preserved until semantic rebase and validated lifecycle "
+                    "writeback"
+                ),
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "decision_context_architecture_v0",
+                "module": "loopx.capabilities.decision_context.architecture",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+            {
+                "schema_version": "decision_evidence_packet_v0",
+                "module": "loopx.capabilities.decision_context.packets",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+            {
+                "schema_version": "decision_proposal_v0",
+                "module": "loopx.capabilities.decision_context.packets",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+            {
+                "schema_version": "decision_outcome_receipt_v0",
+                "module": "loopx.capabilities.decision_context.packets",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+            {
+                "schema_version": "decision_source_manifest_v0",
+                "module": "loopx.capabilities.decision_context.sources",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+            {
+                "schema_version": "decision_source_scan_receipt_v0",
+                "module": "loopx.capabilities.decision_context.sources",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+            {
+                "schema_version": "decision_context_profile_v0",
+                "module": "loopx.capabilities.decision_context.profile",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+            {
+                "schema_version": "decision_context_activation_status_v0",
+                "module": "loopx.capabilities.decision_context.profile",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+            {
+                "schema_version": "decision_cursor_commit_receipt_v0",
+                "module": "loopx.capabilities.decision_context.cursor_commit",
+                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
+            },
+        ],
+        "smokes": ["python3 examples/decision-context-contract-smoke.py"],
+        "docs": [
+            "docs/reference/protocols/decision-context-architecture-v0.md",
+            "docs/reference/protocols/decision-context-architecture-v0.zh-CN.md",
+        ],
+        "boundaries": [
+            "The capability is default-off and cannot create action authority or mutate Core state.",
+            "Private source locators, cursors, raw content, provider payloads, tool output, and credentials stay outside public packets.",
+            "DecisionSourceProvider rebases current authority; ContextProvider supplies advisory recall only.",
+            "The built-in local-file adapter and prepare-evidence route are read-only; cursor commit requires packet-chain validation, exact lifecycle-event readback, private-state CAS, and atomic verified write.",
+        ],
+        "next_real_step": (
+            "Exercise the first private incremental source profile and produce "
+            "an outcome receipt that changes or stops a real decision."
+        ),
+    },
+    {
+        "id": "project-skill-delivery",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Managed project skill delivery",
+        "status": "active-preview",
+        "real_world_anchor": (
+            "one release-owned skill delivered into selected projects for "
+            "Codex, Claude Code, or OpenCode"
+        ),
+        "user_value": (
+            "Keep capability skills out of global agent configuration while "
+            "installing, upgrading, and removing verified project-local copies "
+            "through one host-neutral lifecycle."
+        ),
+        "entry_command": (
+            "loopx project-skill status --project . --skill <skill-id> "
+            "--surface codex --format json"
+        ),
+        "commands": [
+            {
+                "command": (
+                    "loopx project-skill status --project . --skill "
+                    "<skill-id> --surface <surface> --format json"
+                ),
+                "purpose": "Inspect source and managed-copy digests without writing the project.",
+                "write_boundary": "read-only project and release inspection",
+            },
+            {
+                "command": (
+                    "loopx project-skill install --project . --skill "
+                    "<skill-id> --surface <surface> --execute --format json"
+                ),
+                "purpose": "Transactionally install or upgrade one release-owned project skill for one or more agent hosts.",
+                "write_boundary": "managed host-native project skill directories only; unmanaged or locally modified targets fail closed",
+            },
+            {
+                "command": (
+                    "loopx project-skill uninstall --project . --skill "
+                    "<skill-id> --surface <surface> --execute --format json"
+                ),
+                "purpose": "Transactionally remove verified managed copies while preserving user-owned targets.",
+                "write_boundary": "verified managed host-native project skill directories only",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "loopx_project_skill_status_v0",
+                "module": "loopx.project_skill_delivery",
+                "doc": "docs/reference/project-skill-delivery.md",
+            },
+            {
+                "schema_version": "loopx_managed_project_skill_v0",
+                "module": "loopx.project_skill_delivery",
+                "doc": "docs/reference/project-skill-delivery.md",
+            },
+        ],
+        "docs": ["docs/reference/project-skill-delivery.md"],
+        "boundaries": [
+            "Only skills marked project-scoped in the LoopX release can be delivered.",
+            "Project connection, preview-first mutation, digest readback, symlink containment, and rollback are mandatory.",
+            "Skill discovery never creates a goal, todo, write scope, domain authority, credential, or external permission.",
+            "Public delivery metadata contains no private project content, locators, provider payloads, or credentials.",
+        ],
+        "next_real_step": (
+            "Dogfood a second project-scoped skill or host combination before "
+            "considering higher-level automatic installation."
+        ),
+    },
+    {
+        "id": "material-lifecycle",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Backup-safe material inventory, ranked-entry rebuild, and rerank",
+        "status": "experimental",
+        "default_enabled": False,
+        "real_world_anchor": (
+            "large local candidate and archive stores that must remain "
+            "recoverable while decisions change their short-list"
+        ),
+        "user_value": (
+            "Preserve raw source authority and stable material references while "
+            "making migration, archive transitions, structural entry rebuilds, "
+            "and small reranks auditable."
+        ),
+        "entry_command": "loopx material-lifecycle architecture --format json",
+        "workflow_skill": {
+            "name": "loopx-material",
+            "delivery": "project_managed_copy",
+            "activation": "explicit_project_install_plus_goal_authority",
+            "project_copy_required": True,
+            "install_command": (
+                "loopx project-skill install --project . --skill "
+                "loopx-material --surface codex --execute"
+            ),
+        },
+        "commands": [
+            {
+                "command": "loopx material-lifecycle architecture --format json",
+                "purpose": "Render the default-off Stage-0 inventory, migration, lifecycle, and bounded-rerank boundaries.",
+                "write_boundary": "stateless contract output only; no source store, backup, goal state, provider, or external write",
+            }
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "material_lifecycle_architecture_v0",
+                "module": "loopx.capabilities.material_lifecycle.architecture",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_store_inventory_v0",
+                "module": "loopx.capabilities.material_lifecycle.inventory",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_migration_plan_v0",
+                "module": "loopx.capabilities.material_lifecycle.inventory",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_lifecycle_receipt_v0",
+                "module": "loopx.capabilities.material_lifecycle.lifecycle",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_rerank_proposal_v0",
+                "module": "loopx.capabilities.material_lifecycle.ranking",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_rerank_apply_receipt_v0",
+                "module": "loopx.capabilities.material_lifecycle.ranking",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_ranked_entry_rebuild_plan_v0",
+                "module": "loopx.capabilities.material_lifecycle.rebuild",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_ranked_entry_rebuild_apply_receipt_v0",
+                "module": "loopx.capabilities.material_lifecycle.rebuild",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+        ],
+        "smokes": ["python3 examples/material-lifecycle-contract-smoke.py"],
+        "docs": [
+            "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            "docs/reference/protocols/material-lifecycle-architecture-v0.zh-CN.md",
+        ],
+        "boundaries": [
+            "The capability is default-off and cannot create action authority or mutate Core state.",
+            "Raw material, private locations, provider payloads, credentials, and source-store formats stay outside public packets.",
+            "Snapshot and verified backup precede dual-read reconciliation; cutover and rollback remain owner-gated.",
+            "Decision Context may supply revisioned evidence, but Material Lifecycle owns candidate, archive, and rerank receipts.",
+            "Oversized ranked entries are rebuilt into independently sortable entries; overflow cannot be hidden outside the ranked set.",
+            "LoopX ships the canonical loopx-material source, but discovery uses an explicit managed project copy rather than a global skill install.",
+            "A project-local skill makes the workflow discoverable; it does not replace explicit goal-scoped Material Lifecycle authority.",
+            "Concrete legacy adapters, exploration providers, source profiles, and material-store writes remain deferred to private dogfood.",
+        ],
+        "next_real_step": (
+            "Dogfood one exact-read semantic rebuild through owner-gated apply "
+            "while preserving complete source bytes and canonical records."
+        ),
+    },
+    {
+        "id": "semantic-preference",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Optional semantic preference hook",
+        "status": "active-preview",
+        "real_world_anchor": "provider-neutral preference recall before domain work",
+        "user_value": (
+            "Let any LoopX module recall provider-owned semantic preferences and "
+            "record a compact application receipt without creating a second memory ledger."
+        ),
+        "entry_command": "loopx semantic-preference recall --config <ignored-config.json> --surface <module.surface> --format json",
+        "commands": [
+            {
+                "command": "loopx semantic-preference doctor --config <ignored-config.json> --execute --format json",
+                "purpose": "Check a configured provider entry point and optional read-only probe, then return explicit install/config guidance when unavailable.",
+                "write_boundary": "read-only discovery; never installs packages, starts services, changes config, or writes credentials",
+            },
+            {
+                "command": "loopx semantic-preference recall --config <ignored-config.json> --surface <module.surface> --execute --format json",
+                "purpose": "Send one bounded recall request to a configured command_json_v0 provider.",
+                "write_boundary": "provider read only; LoopX does not persist recalled semantic content",
+            },
+            {
+                "command": "loopx semantic-preference receipt --surface <module.surface> --application-id <id> --outcome applied --format json",
+                "purpose": "Build a compact receipt with hashed preference references for existing evidence/state writeback.",
+                "write_boundary": "stateless output only; no provider, file, or external write",
+            },
+            {
+                "command": "loopx semantic-preference maintenance-receipt --trigger explicit_feedback --outcome verified --corpus-id <id> --format json",
+                "purpose": "Build a compact receipt after a provider-owned corpus maintenance decision and readback closure.",
+                "write_boundary": "stateless output only; scope references are hashed and semantic content is excluded",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "semantic_preference_hook_config_v0",
+                "module": "loopx.capabilities.semantic_preference.contract",
+                "doc": "docs/capabilities/semantic-preference/README.md",
+            },
+            {
+                "schema_version": "semantic_preference_provider_request_v0",
+                "module": "loopx.capabilities.semantic_preference.contract",
+                "doc": "docs/capabilities/semantic-preference/README.md",
+            },
+            {
+                "schema_version": "semantic_preference_provider_doctor_v0",
+                "module": "loopx.capabilities.semantic_preference.contract",
+                "doc": "docs/capabilities/semantic-preference/README.md",
+            },
+            {
+                "schema_version": "semantic_preference_application_receipt_v0",
+                "module": "loopx.capabilities.semantic_preference.contract",
+                "doc": "docs/capabilities/semantic-preference/README.md",
+            },
+            {
+                "schema_version": "semantic_preference_maintenance_guidance_v0",
+                "module": "loopx.capabilities.semantic_preference.contract",
+                "doc": "docs/capabilities/semantic-preference/README.md",
+            },
+            {
+                "schema_version": "semantic_preference_maintenance_receipt_v0",
+                "module": "loopx.capabilities.semantic_preference.contract",
+                "doc": "docs/capabilities/semantic-preference/README.md",
+            },
+        ],
+        "smokes": [
+            "python3 examples/semantic-preference-hook-smoke.py",
+            "python3 examples/openviking-extension-runtime-smoke.py",
+        ],
+        "docs": ["docs/capabilities/semantic-preference/README.md"],
+        "boundaries": [
+            "The hook is disabled until an enabled local-private config is supplied.",
+            "Surface ids and queries are domain-owned configuration; the runtime has no issue-fix branch.",
+            "LoopX does not persist recalled semantic content, receipts, provider commands, config paths, or raw errors.",
+            "Provider failures follow explicit fail-open/fail-closed policy and do not become user gates automatically.",
+            "Provider setup remains guidance-only: package, service, config, and credential writes require an explicit operator action.",
+        ],
+        "next_real_step": (
+            "Keep the hook opt-in until a second domain module proves useful recall and existing-state receipt writeback."
+        ),
+    },
+    {
+        "id": "reward-memory",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Reward-memory candidate, recall, and application foundation",
+        "status": "active-preview",
+        "real_world_anchor": (
+            "typed feedback memory, provider-owned corpus health, and pilot/meta delegation"
+        ),
+        "user_value": (
+            "Keep run judgments, policies, preferences, reusable experience, and "
+            "working context distinct; derive policy content from verified contributor "
+            "signals without inventing or widening authority."
+        ),
+        "entry_command": "loopx reward-memory architecture --format json",
+        "commands": [
+            {
+                "command": "loopx reward-memory architecture --format json",
+                "purpose": "Render the five-class Stage-0 architecture, lifecycle, precedence, and staged ownership contract.",
+                "write_boundary": "stateless contract output only; no memory, provider, state, or external write",
+            },
+            {
+                "command": "loopx reward-memory route-check --case pr-3237 --format json",
+                "purpose": "Exercise deterministic safety guards for the public PR #3237 regression; this fixture is not the live reasoning router.",
+                "write_boundary": "stateless public guard fixture only; no issue body, memory content, repository, provider, or external write",
+            },
+            {
+                "command": "loopx reward-memory corpus-registry --format json",
+                "purpose": "Render the Stage-1 corpus ownership, authority, scope, freshness, lifecycle, and maintenance registry.",
+                "write_boundary": "stateless read model only; provider content stays at its source of truth",
+            },
+            {
+                "command": "loopx reward-memory health-check --case wrong-project --format json",
+                "purpose": "Exercise deterministic project, surface, freshness, index, retrieval, readback, and application health states.",
+                "write_boundary": "public fixture classification only; no memory, index, receipt, state, or external write",
+            },
+            {
+                "command": "loopx reward-memory candidate-review --case issue-fix-verified-contributor --decision accept --format json",
+                "purpose": "Exercise the Stage-2 shared candidate/review seam through the mapping-only Issue Fix adapter.",
+                "write_boundary": "stateless decision output only; persistence stays with the declared corpus owner and this command performs no provider or external write",
+            },
+            {
+                "command": "loopx reward-memory evaluate --format json",
+                "purpose": "Run the Stage-4 provider-neutral core-contract suite and compact release gate over the real recall/application seam.",
+                "write_boundary": "bounded local fixture reads only; no provider, memory, repository, state, model API, or external write",
+            },
+            {
+                "command": "loopx reward-memory dogfood-evaluate --input <compact-observations.json> --format json",
+                "purpose": "Bind verified Issue Fix and LoopX module outcomes to compact hit, miss, refute, cost, intervention, and bot-feedback receipts after the Stage-4 gate.",
+                "write_boundary": "reads compact receipts only; no raw provider content, memory write, operator write, automatic recall, or external write",
+            },
+            {
+                "command": "loopx reward-memory operator-control --input <reviewed-record.json> --action edit --control-ref <ref> --reasoning-summary <summary> --edited-content-summary <summary> --format json",
+                "purpose": "Prepare an authority-matched edit or retirement decision for a reviewed active record.",
+                "write_boundary": "returns a control decision and next-step receipt only; the declared corpus owner must perform and exactly read back any provider write",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "reward_memory_architecture_v0",
+                "module": "loopx.capabilities.reward_memory.architecture",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_pilot_meta_route_v0",
+                "module": "loopx.capabilities.reward_memory.architecture",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_corpus_registry_v0",
+                "module": "loopx.capabilities.reward_memory.registry",
+                "doc": "docs/reference/protocols/reward-memory-corpus-registry-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_corpus_health_v0",
+                "module": "loopx.capabilities.reward_memory.health",
+                "doc": "docs/reference/protocols/reward-memory-corpus-registry-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_candidate_v0",
+                "module": "loopx.capabilities.reward_memory.candidate_review",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_candidate_review_v0",
+                "module": "loopx.capabilities.reward_memory.candidate_review",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_reward_memory_candidate_adapter_v0",
+                "module": "loopx.capabilities.reward_memory.candidate_review",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "scoped_feedback_reward_memory_event_v0",
+                "module": "loopx.capabilities.reward_memory.scoped_feedback",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": (
+                    "scoped_feedback_reward_memory_candidate_adapter_v0"
+                ),
+                "module": "loopx.capabilities.reward_memory.scoped_feedback",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_active_record_v0",
+                "module": "loopx.capabilities.reward_memory.application",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_recall_request_v0",
+                "module": "loopx.capabilities.reward_memory.application",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_recall_v0",
+                "module": "loopx.capabilities.reward_memory.application",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_application_receipt_v0",
+                "module": "loopx.capabilities.reward_memory.application",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "issue_fix_reward_memory_application_v0",
+                "module": "loopx.capabilities.issue_fix.reward_memory",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": ("semantic_preference_reward_memory_application_v0"),
+                "module": "loopx.capabilities.semantic_preference.reward_memory",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_evaluation_v0",
+                "module": "loopx.capabilities.reward_memory.evaluation",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_release_gate_v0",
+                "module": "loopx.capabilities.reward_memory.evaluation",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_dogfood_receipt_v0",
+                "module": "loopx.capabilities.reward_memory.dogfood",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_dogfood_batch_v0",
+                "module": "loopx.capabilities.reward_memory.dogfood",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+            {
+                "schema_version": "reward_memory_operator_control_v0",
+                "module": "loopx.capabilities.reward_memory.dogfood",
+                "doc": "docs/reference/protocols/reward-memory-architecture-v0.md",
+            },
+        ],
+        "smokes": [
+            "python3 examples/reward-memory-architecture-smoke.py",
+            "python3 examples/reward-memory-corpus-registry-smoke.py",
+            "python3 examples/reward-memory-candidate-review-smoke.py",
+            "python3 examples/reward-memory-recall-application-smoke.py",
+            "python3 examples/reward-memory-evaluation-smoke.py",
+            "python3 examples/reward-memory-dogfood-smoke.py",
+        ],
+        "docs": [
+            "docs/reference/protocols/reward-memory-architecture-v0.md",
+            "docs/reference/protocols/reward-memory-corpus-registry-v0.md",
+        ],
+        "boundaries": [
+            "Run-bound reward is outcome evidence; future influence requires compact candidate derivation and an activation policy.",
+            "Verified owner or core-contributor feedback may derive hard-policy content only inside independently verified repository and action authority scope.",
+            "Deterministic code enforces authority, scope, privacy, freshness, verification, and conflict guards; model reasoning owns interpretation and trade-offs inside those guards.",
+            "Retrieval without current-artifact verification has zero patch authority.",
+            "OpenViking cases are evaluation fixtures, provider soul text is not action authority, and session working memory remains continuation context.",
+            "LoopX fresh execution context already exists and Stage 2 must reuse it rather than add another context system.",
+            "Corpus presence, index presence, retrieval success, readback, and applied receipts are distinct health states.",
+            "Project or surface mismatch fails closed before provider availability can influence application.",
+            "Stages 0-1 write no corpus, candidate, provider memory, evaluation result, or external artifact.",
+            "Stage 2 returns inspectable candidate/review decisions only; accept or retire still requires the caller to use the corpus owner's declared write authority and verify readback.",
+            "Issue Fix and generic scoped-feedback adapters map compact domain evidence into the shared core and own no parallel lifecycle, store, scheduler, or recall path.",
+            "Stage 3 recalls only after an explicit exact-corpus, module-surface request and a matching read-authority checkpoint; it never scans every corpus automatically.",
+            "Function-boundary recall permits one caller-owned query; bounded agentic search permits at most three caller/model-owned queries and contains no semantic router.",
+            "Provider and application failures preserve the base output, emit compact receipts or setup hints, and never become user gates automatically.",
+            "Private corpus summaries stay transient in-process; public packets retain opaque references and compact lineage only.",
+            "Stage 4 proves bounded core-contract invariants only; its fixture pass does not claim semantic uplift or authorize production rollout.",
+            "Stage 5 receipts are derived from Stage-3 application receipts and verified module outcomes; hit or refute requires exact provider readback plus current-artifact verification.",
+            "Stage 5 trial readiness requires Issue Fix, two distinct LoopX domains, hit/miss/refute coverage, and authority-matched edit/retire controls; it still does not authorize production rollout.",
+        ],
+        "next_real_step": (
+            "Feed one corpus-owner-approved, exactly read-back record through the "
+            "bounded OpenViking Issue Fix pilot and write back compact bot feedback "
+            "without widening the Stage-5 trial-only claim."
+        ),
+    },
+    {
+        "id": "periodic-report",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Provider-neutral periodic and progress report runs",
+        "status": "active-preview",
+        "default_enabled": False,
+        "real_world_anchor": "scheduled and milestone project reports with verified archive and delivery",
+        "user_value": (
+            "Generate a concise weekly project report from the active session "
+            "with one built-in portable profile, while retaining deterministic "
+            "trigger, receipt, partial-state, and retry contracts for custom runs."
+        ),
+        "entry_command": "loopx periodic-report inspect-profile --preset weekly --format json",
+        "commands": [
+            {
+                "command": "loopx periodic-report inspect-profile --preset weekly --format json",
+                "purpose": "Resolve the built-in domain-neutral weekly profile for an explicitly requested in-session report.",
+                "write_boundary": "local preset inspection only; creates no schedule, persists no activation, declares no sink, and performs no provider lookup or write",
+            },
+            {
+                "command": "loopx periodic-report inspect-profile --profile-json <profile.json> --format json",
+                "purpose": "Validate custom project trigger, source, renderer, schedule, and extension sink bindings.",
+                "write_boundary": "local profile inspection only; performs no provider lookup, schedule mutation, or write",
+            },
+            {
+                "command": "loopx periodic-report evaluate-trigger --request-json <request.json> --format json",
+                "purpose": "Select, coalesce, cool down, and deduplicate cadence or material progress triggers without provider effects.",
+                "write_boundary": "local trigger decision only; no source read, schedule mutation, rendering, archive write, message delivery, or provider write",
+            },
+            {
+                "command": "loopx periodic-report compose-run --request-json <request.json> --format json",
+                "purpose": "Normalize one typed report attempt and derive stable run/sink idempotency, state, and retry evidence.",
+                "write_boundary": "local contract output only; no source read, rendering, archive write, message delivery, or provider write",
+            },
+            {
+                "command": "loopx periodic-report archive-openviking --request-json <request.json> --available-capability openviking_context_write --execute --format json",
+                "purpose": "Invoke the optional OpenViking archive extension after profile, runtime-capability, manifest permission, revision, and doctor checks.",
+                "write_boundary": "writes report.md and then manifest.json only when --execute is explicit; exact Resource readback is required for sent",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "periodic_report_profile_v0",
+                "module": "loopx.capabilities.periodic_report.profile",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_activation_v0",
+                "module": "loopx.capabilities.periodic_report.profile",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_project_progress_projection_v0",
+                "module": "loopx.capabilities.periodic_report.project_progress",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_trigger_decision_v0",
+                "module": "loopx.capabilities.periodic_report.triggers",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_v0",
+                "module": "loopx.capabilities.periodic_report.core",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_editorial_orchestration_v0",
+                "module": "loopx.capabilities.periodic_report.adapters",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_generation_bundle_v0",
+                "module": "loopx.capabilities.periodic_report.bindings",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_generation_receipt_v0",
+                "module": "loopx.capabilities.periodic_report.bindings",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_sink_binding_v0",
+                "module": "loopx.capabilities.periodic_report.bindings",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_extension_readiness_v0",
+                "module": "loopx.capabilities.periodic_report.bindings",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+            {
+                "schema_version": "periodic_report_delivery_receipt_v0",
+                "module": "loopx.capabilities.periodic_report.bindings",
+                "doc": "docs/reference/protocols/periodic-report-v0.md",
+            },
+        ],
+        "smokes": [
+            "python3 examples/periodic-report-smoke.py",
+            "python3 examples/periodic-report-adapters-smoke.py",
+            "python3 examples/periodic-report-html-smoke.py",
+            "python3 examples/periodic-report-bindings-smoke.py",
+            "python3 examples/openviking-periodic-report-extension-smoke.py",
+            "python3 examples/periodic-report-profile-smoke.py",
+        ],
+        "docs": [
+            "docs/capabilities/periodic-report/README.md",
+            "docs/reference/protocols/periodic-report-v0.md",
+        ],
+        "boundaries": [
+            "An explicit request in an active project session may select the built-in weekly-progress profile for one provider-free local generation; it persists no project activation and creates no schedule or sink.",
+            "Custom, unattended, or externally delivered reports remain disabled until a project profile and host/runtime authority explicitly enable those separate paths.",
+            "The core owns material trigger classification, coalescing, cooldown/deduplication, period/profile binding, deterministic identity, receipts, run state, and retry projection.",
+            "Profiles own schedule calculation, enabled trigger kinds, minimum interval, timezone, sections, audience, and project policy.",
+            "Adapters own domain source collection; renderers and sinks own all provider effects and verified readback.",
+            "The document builder compiles hero summaries only from typed primary outcomes, risks, and next actions; renderers reject authored or stale summaries.",
+            "Markdown and HTML render from one normalized document; runtime and delivery-receipt items must be supporting, HTML collapses them, and Markdown preserves them in a labeled appendix.",
+            "Raw content, messages, logs, transcripts, credentials, secrets, and private paths are rejected.",
+            "The optional openviking-periodic-report extension implements only the archive sink; it rejects activation unless the periodic-report profile is enabled, its sink binding matches, and openviking_context_write is observed.",
+        ],
+        "next_real_step": (
+            "Exercise the built-in weekly profile in a normal project session, then "
+            "prove one separately configured scheduled delivery without widening its "
+            "authority into the portable path."
         ),
     },
     {
         "id": "content-ops",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
         "title": "Creator/content operations loop",
         "status": "active-preview",
         "real_world_anchor": "self-media operations and public/private source intake",
@@ -179,6 +1152,11 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "module": "loopx.capabilities.content_ops.surface",
                 "doc": "docs/reference/protocols/content-ops-surface-v0.md",
             },
+            {
+                "schema_version": "content_ops_social_browser_x_provider_v0",
+                "module": "loopx.capabilities.content_ops.social_browser_x",
+                "doc": "docs/capabilities/content-ops/README.md",
+            },
         ],
         "smokes": [
             "python3 examples/content-ops-exploration-plan-smoke.py",
@@ -203,15 +1181,17 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "value-connectors",
-        "title": "External value connector starters",
-        "status": "active-preview",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Value connector compatibility facade",
+        "status": "compatibility-facade",
         "real_world_anchor": "external channel intake for revenue, cost, demand, and connector reuse",
         "user_value": (
-            "Install and run public-safe connector starters that turn external "
-            "channel metadata into LoopX value signals while gating account "
-            "setup, sends, posts, and private reads."
+            "Keep existing connector commands and packet schemas stable while "
+            "each profile moves to the outcome capability that serves callers."
         ),
-        "entry_command": "loopx value-connectors install-check --format json",
+        "entry_command": "loopx value-connectors source-map --format json",
         "commands": [
             {
                 "command": "loopx value-connectors install-check --format json",
@@ -219,19 +1199,27 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "write_boundary": "local check only; no external read or write",
             },
             {
+                "command": "loopx value-connectors source-map --format json",
+                "purpose": "Give agents a read-first source-map packet for all currently surfaced connector profiles.",
+                "write_boundary": "packet only; no external read, write, account setup, or raw payload capture",
+            },
+            {
                 "command": "loopx value-connectors github-public-probe --url <github-issue-or-pr-url> --format json",
                 "purpose": "Validate a public GitHub channel URL and build a connector call packet.",
                 "write_boundary": "no network read unless --fetch-metadata is provided",
+                "compatibility_for": "issue-fix",
             },
             {
                 "command": "loopx value-connectors github-public-probe --url <github-issue-or-pr-url> --fetch-metadata --format json",
                 "purpose": "Fetch allowlisted public GitHub metadata without body/comment/timeline content.",
                 "write_boundary": "public metadata read only; no comments, PRs, account changes, or writes",
+                "compatibility_for": "issue-fix",
             },
             {
                 "command": "loopx value-connectors github-reply-monitor --issue-url <github-issue-or-pr-url> --after-comment-url <github-issue-comment-url> --fetch-metadata --format json",
                 "purpose": "Detect public maintainer replies after a LoopX comment without capturing comment bodies.",
                 "write_boundary": "public comment metadata read only; no comment bodies, thread bump, or external write",
+                "compatibility_for": "issue-fix",
             },
             {
                 "command": "loopx value-connectors plan --connector-id <id> ... --format json",
@@ -256,19 +1244,14 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "doc": "docs/reference/protocols/value-connector-plan-v0.md",
             },
             {
-                "schema_version": "github_public_channel_probe_packet_v0",
-                "module": "loopx.capabilities.value_connectors.github_public",
-                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
-            },
-            {
-                "schema_version": "github_public_reply_monitor_packet_v0",
-                "module": "loopx.capabilities.value_connectors.github_public",
-                "doc": "docs/reference/protocols/value-connector-plan-v0.md",
-            },
-            {
                 "schema_version": "value_connector_install_check_packet_v0",
-                "module": "loopx.capabilities.value_connectors.github_public",
+                "module": "loopx.capabilities.value_connectors.install_check",
                 "doc": "docs/reference/protocols/value-connector-plan-v0.md",
+            },
+            {
+                "schema_version": "value_connector_source_map_packet_v0",
+                "module": "loopx.capabilities.value_connectors.source_map",
+                "doc": "docs/capabilities/value-connectors/agent-reach-ops-source-map.md",
             },
         ],
         "smokes": [
@@ -285,11 +1268,121 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             "Every connector call must include a money, cost, demand, or capability metric plus a kill condition.",
         ],
         "next_real_step": (
-            "Use reply-monitor signals to graduate only explicit maintainer interest "
-            "into public triage notes or paid-path discovery; otherwise stop without bumps."
+            "Move one mapped profile at a time to its declared outcome capability, "
+            "keeping this CLI and its packet schemas stable until callers migrate."
+        ),
+    },
+    {
+        "id": "explore",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Explore evidence topology",
+        "status": "active-preview",
+        "real_world_anchor": (
+            "goal-scoped questions, hypotheses, experiments, findings, and result projections"
+        ),
+        "user_value": (
+            "Keep exploration outcomes queryable and attributable instead of leaving them "
+            "only in chat or a presentation sink."
+        ),
+        "entry_command": "loopx explore summary --goal-id <goal-id> --format json",
+        "commands": [
+            {
+                "command": "loopx explore finding --goal-id <goal-id> --title <finding> --evidence-ref <ref> --format json",
+                "purpose": "Append one public-safe, attributable finding to the canonical result log.",
+                "write_boundary": "goal-scoped local result log only; no sink or external write",
+            },
+            {
+                "command": "loopx explore summary --goal-id <goal-id> --format json",
+                "purpose": "Fold canonical result events into the bounded operator projection.",
+                "write_boundary": "read-only projection over the goal result log",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "loopx_explore_result_event_v0",
+                "module": "loopx.capabilities.explore.result_log",
+                "doc": "docs/capabilities/explore/README.md",
+            },
+            {
+                "schema_version": "loopx_explore_result_projection_v0",
+                "module": "loopx.capabilities.explore.result_log",
+                "doc": "docs/capabilities/explore/README.md",
+            },
+        ],
+        "smokes": [
+            "python3 examples/explore-result-layer-smoke.py",
+            "python3 examples/explore-todo-result-node-linkage-smoke.py",
+        ],
+        "docs": ["docs/capabilities/explore/README.md"],
+        "boundaries": [
+            "Canonical result events are the source of truth; Lark and other sinks render projections only.",
+            "Evidence refs must be public-safe relative refs or opaque ids, never credentials, raw private payloads, or local absolute paths.",
+        ],
+        "next_real_step": (
+            "Register findings and terminal outcomes through the result log before refreshing any display sink."
+        ),
+    },
+    {
+        "id": "auto-research",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Decentralized auto-research preset",
+        "status": "experimental",
+        "real_world_anchor": (
+            "one-question research contracts with role-scoped workers, evidence packets, and a visible frontier"
+        ),
+        "user_value": (
+            "Launch a thin multi-agent research recipe while reusing LoopX todo, quota, "
+            "history, evidence, and continuation contracts."
+        ),
+        "entry_command": "loopx auto-research <open-question>",
+        "commands": [
+            {
+                "command": "loopx auto-research <open-question>",
+                "purpose": "Render the fixed one-question contract, bounded plan, and exact start command.",
+                "write_boundary": "stateless contract output only",
+            },
+            {
+                "command": "loopx auto-research start <open-question> --execute",
+                "purpose": "Create an isolated goal and launch visible role-scoped workers through the shared multi-agent runtime.",
+                "write_boundary": "local goal, workspace, and visible launcher state; no publication, benchmark submission, or protected external action",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "auto_research_user_contract_v0",
+                "module": "loopx.capabilities.auto_research.user_contract",
+                "doc": "docs/guides/auto-research-command-path.md",
+            },
+            {
+                "schema_version": "decentralized_auto_research_projection_v0",
+                "module": "loopx.capabilities.auto_research.research_state",
+                "doc": "docs/reference/protocols/decentralized-auto-research-state-v0.md",
+            },
+        ],
+        "smokes": [
+            "python3 examples/auto-research-user-contract-entry-smoke.py",
+            "python3 examples/auto-research-worker-turn-smoke.py",
+        ],
+        "docs": [
+            "docs/guides/auto-research-command-path.md",
+            "docs/product/decentralized-auto-research-showcase.md",
+        ],
+        "boundaries": [
+            "The preset reuses shared control-plane and multi-agent contracts; it is not a second scheduler or runner.",
+            "Completion and uplift require role-authored evidence and projected outcomes; the launcher does not manufacture research results.",
+        ],
+        "next_real_step": (
+            "Use the one-question entrypoint for bounded research and preserve every promoted or rejected outcome in canonical evidence."
         ),
     },
 )
+
+# Preserve the original import surface while routing all reads through the registry.
+CAPABILITIES = BUILTIN_CAPABILITIES
 
 
 def _summary(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -297,36 +1390,107 @@ def _summary(record: Mapping[str, Any]) -> dict[str, Any]:
         "id": record["id"],
         "title": record["title"],
         "status": record["status"],
+        "origin": record["origin"],
+        "visibility": record["visibility"],
+        "provider_id": record["provider_id"],
+        "provider_state": record["provider_state"],
         "real_world_anchor": record["real_world_anchor"],
         "entry_command": record["entry_command"],
         "implemented_protocol_count": len(record.get("implemented_protocols") or []),
+        "implementation_provider_count": len(
+            record.get("implementation_providers") or []
+        ),
         "smoke_count": len(record.get("smokes") or []),
         "next_real_step": record["next_real_step"],
     }
 
 
-def capability_ids() -> list[str]:
-    return [str(record["id"]) for record in CAPABILITIES]
+def build_capability_registry(
+    extension_manifest_paths: Iterable[str | Path] = (),
+    *,
+    extension_state_file: str | Path | None = None,
+) -> CapabilityRegistry:
+    registry = CapabilityRegistry()
+    registry.register_provider(
+        {
+            "id": "loopx-core",
+            "origin": "builtin",
+            "declared": True,
+            "installed": True,
+            "enabled": True,
+            "ready": True,
+        }
+    )
+    for record in BUILTIN_CAPABILITIES:
+        registry.register_capability(record)
+    for manifest in extension_catalog_entries(
+        extension_manifest_paths,
+        state_file=extension_state_file,
+    ):
+        registry.register_provider(manifest["provider"])
+        for record in manifest["capabilities"]:
+            registry.register_capability(record)
+        for implementation in manifest["implementations"]:
+            registry.register_implementation(implementation)
+    return registry
 
 
-def get_capability(capability_id: str) -> dict[str, Any]:
-    wanted = str(capability_id or "").strip()
-    for record in CAPABILITIES:
-        if record["id"] == wanted:
-            return dict(record)
-    raise ValueError(f"unknown capability `{wanted}`; expected one of {capability_ids()}")
+def capability_ids(
+    extension_manifest_paths: Iterable[str | Path] = (),
+    *,
+    include_internal: bool = False,
+    extension_state_file: str | Path | None = None,
+) -> list[str]:
+    return build_capability_registry(
+        extension_manifest_paths,
+        extension_state_file=extension_state_file,
+    ).capability_ids(include_internal=include_internal)
 
 
-def build_capability_catalog_packet() -> dict[str, Any]:
+def get_capability(
+    capability_id: str,
+    extension_manifest_paths: Iterable[str | Path] = (),
+    *,
+    include_internal: bool = False,
+    extension_state_file: str | Path | None = None,
+) -> dict[str, Any]:
+    return build_capability_registry(
+        extension_manifest_paths,
+        extension_state_file=extension_state_file,
+    ).get(
+        capability_id,
+        include_internal=include_internal,
+    )
+
+
+def build_capability_catalog_packet(
+    extension_manifest_paths: Iterable[str | Path] = (),
+    *,
+    extension_state_file: str | Path | None = None,
+) -> dict[str, Any]:
+    registry = build_capability_registry(
+        extension_manifest_paths,
+        extension_state_file=extension_state_file,
+    )
     return {
         "ok": True,
         "schema_version": CAPABILITY_CATALOG_SCHEMA_VERSION,
-        "capabilities": [_summary(record) for record in CAPABILITIES],
+        "capabilities": [_summary(record) for record in registry.records()],
+        "providers": registry.providers(),
     }
 
 
-def build_capability_detail_packet(capability_id: str) -> dict[str, Any]:
-    record = get_capability(capability_id)
+def build_capability_detail_packet(
+    capability_id: str,
+    extension_manifest_paths: Iterable[str | Path] = (),
+    *,
+    extension_state_file: str | Path | None = None,
+) -> dict[str, Any]:
+    record = get_capability(
+        capability_id,
+        extension_manifest_paths,
+        extension_state_file=extension_state_file,
+    )
     return {
         "ok": True,
         "schema_version": CAPABILITY_DETAIL_SCHEMA_VERSION,
@@ -344,9 +1508,13 @@ def render_capability_catalog_markdown(payload: dict[str, Any]) -> str:
                 f"## {item.get('id')}: {item.get('title')}",
                 "",
                 f"- status: `{item.get('status')}`",
+                f"- provider: `{item.get('provider_id')}` ({item.get('origin')})",
+                f"- provider_state: `{item.get('provider_state')}`",
+                f"- visibility: `{item.get('visibility')}`",
                 f"- anchor: {item.get('real_world_anchor')}",
                 f"- entry: `{item.get('entry_command')}`",
                 f"- implemented_protocol_count: `{item.get('implemented_protocol_count')}`",
+                f"- implementation_provider_count: `{item.get('implementation_provider_count')}`",
                 f"- smoke_count: `{item.get('smoke_count')}`",
                 f"- next: {item.get('next_real_step')}",
                 "",
@@ -364,6 +1532,9 @@ def render_capability_detail_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- id: `{record.get('id')}`",
         f"- status: `{record.get('status')}`",
+        f"- provider: `{record.get('provider_id')}` ({record.get('origin')})",
+        f"- provider_state: `{record.get('provider_state')}`",
+        f"- visibility: `{record.get('visibility')}`",
         f"- anchor: {record.get('real_world_anchor')}",
         f"- value: {record.get('user_value')}",
         f"- entry: `{record.get('entry_command')}`",

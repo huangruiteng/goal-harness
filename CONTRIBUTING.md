@@ -46,6 +46,11 @@ loopx check \
 
 ## Local Development
 
+Use the [developer guide](docs/development/README.md) as the stable entry point.
+Before changing scheduler, quota, todo/gate, onboarding, agent-facing output,
+or release behavior, read the bilingual
+[testing and quality guide](docs/development/testing-and-quality.md).
+
 Install and verify the checkout:
 
 ```bash
@@ -59,21 +64,88 @@ loopx demo
 Common focused checks:
 
 ```bash
-python3 -m py_compile loopx/*.py
-python3 examples/demo-cli-smoke.py
-python3 examples/fresh-clone-quickstart-smoke.py
-python3 examples/todo-cli-smoke.py
-python3 examples/todo-lifecycle-cli-smoke.py
-python3 examples/quota-contract-smoke.py
-python3 examples/review-packet-cli-smoke.py
-loopx check --scan-root .
+python -m pip install -e ".[test]"
+python -m ruff check tests loopx/canary loopx/control_plane loopx/domain_packs loopx/presentation
+python -m mypy
+python examples/control_plane/cli-output-budget-regression-smoke.py
+python -m pytest -q
+loopx canary premerge --from-git-diff
+loopx check --scan-path loopx/ --scan-path tests/ --scan-path examples/ --scan-path docs/
 git diff --check
 ```
+
+Choose focused smokes and broader canaries by change risk; do not run every
+public smoke or a live model call for every patch. The quality guide explains
+the CI, local/manual, and release-only boundaries.
+
+## Host Loops And LoopX Turn
+
+Treat LoopX Turn and a long-running host loop as separate layers:
+
+- `loopx turn run-once` is one atomic governed transaction. It may decide,
+  invoke one bounded host segment, validate independently, write back, spend
+  once, and project the latest scheduler phase.
+- A Turn Loop Controller is an outer runtime owner. It decides when to wake,
+  invokes `run-once`, consumes the typed result, applies the shared
+  `scheduler_hint`, and either waits, routes a user action, repairs, replans,
+  continues, or stops.
+- A host adapter translates one typed request and result. It owns the opaque
+  host session and tools, but it does not own LoopX state, quota, completion,
+  validation, scheduler policy, or replan policy.
+
+Do not add a sleep loop, cron implementation, recurring daemon, operator
+notification path, or multi-Turn replan loop inside `run-once`. Do not copy
+Codex App heartbeat prompt rules into a second scheduler. Reuse the existing
+interaction, scheduler, autonomous-replan, todo, and TurnEnvelope contracts;
+only the runtime-specific act of applying a wakeup belongs in a scheduler
+adapter.
+
+A `replan_required` result is not permission to invoke the same todo again. A
+controller must first record a bounded todo or vision delta, obtain a fresh
+TurnEnvelope, and preserve the causal `(goal_id, agent_id, todo_id)` frontier.
+An opaque resumable host session is recovery metadata, not authority to bypass
+that decision.
+
+Stage host-loop contributions in reviewable slices:
+
+1. characterize current Codex App and Turn behavior with independently derived
+   fixtures;
+2. add a pure next-disposition decision table with no host or state effects;
+3. add one scheduler-owner adapter with a fake clock and fake host;
+4. add runtime-specific wakeup, notification, or presentation only after the
+   shared transition contract is stable.
+
+For every controller or host-loop change, prove:
+
+- scheduler owner, host surface, and execution mode are explicit and valid;
+- `wait`, user action, monitor-only, and cadence-only paths make no model call
+  and spend no quota;
+- material progress requires independent postcondition validation before
+  durable writeback and spend;
+- replay and interrupted-phase recovery are idempotent;
+- repair and replan remain distinct, and replan produces a fresh frontier
+  before another Turn; and
+- fixtures contain no raw prompts, transcripts, credentials, private state, or
+  host-local paths.
+
+See the [LoopX Turn protocol](docs/reference/protocols/loopx-turn-v0.md) and the
+[Contributor Task Board](CONTRIBUTOR_TASKS.md) for the staged controller plan.
+
+## Governance And Attribution
+
+Repository roles and decision authority are defined in
+[GOVERNANCE.md](GOVERNANCE.md). Creator and contributor attribution is recorded
+in [AUTHORS.md](AUTHORS.md) and the public Git history. Contribution does not
+automatically grant merge or release authority, and an agent or automation
+identity is not a human maintainer.
+
+When naming or packaging a fork, integration, or hosted service, follow the
+project's [name and marks guidance](TRADEMARKS.md).
 
 For dashboard changes:
 
 ```bash
-cd apps/dashboard
+cd apps/presentation/dashboard
 npm install
 npm run build
 npm run smoke:demo-readiness

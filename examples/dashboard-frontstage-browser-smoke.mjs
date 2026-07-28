@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const dashboardDir = resolve(repoRoot, "apps/dashboard");
+const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
 const fixtureName = "status.frontstage.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
 const privateTrapFixtureName = "status.frontstage.private-trap.json";
@@ -402,7 +402,7 @@ async function captureDeveloperFrontstage(page, url, label) {
     "Developer mode ignores statusUrl",
     "Developer Onboarding",
     "Open the project and send one LoopX bootstrap message in Codex CLI.",
-    "workspace_guard blocks side-agent edits",
+    "workspace_guard isolates peer writes",
     "quota/status agree on user todos",
     "TUI steering stays visible",
     "Public Boundary",
@@ -474,7 +474,7 @@ async function main() {
         "safe work moves",
         "Self-Iteration Timeline",
         "Three-lane control-plane story",
-        "Primary control",
+        "Release validation",
         "Product capability",
         "Implementation lane",
         "human gate: decision_frontstage_to_implementation_lane",
@@ -825,10 +825,10 @@ async function main() {
           "Smoke Checklist",
           "Component Examples",
           "Extension Boundary",
-          "apps/dashboard/src/data/status.ts",
-          "apps/dashboard/src/data/goal-channel-frontstage.ts",
+          "apps/presentation/dashboard/src/data/status.ts",
+          "apps/presentation/dashboard/src/data/goal-channel-frontstage.ts",
           "examples/status.example.json",
-          "loopx check --scan-path apps/dashboard",
+          "loopx check --scan-path apps/presentation/dashboard",
           "read-only contributor workbench",
           "live status feeds, registry files, and browser write APIs stay outside",
         ],

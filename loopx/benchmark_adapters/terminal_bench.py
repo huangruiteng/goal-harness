@@ -14,6 +14,8 @@ from typing import Any, Iterable, Mapping, Sequence
 from ..benchmark_core import (
     BenchmarkFailureClass,
     build_benchmark_attempt_accounting,
+    build_benchmark_launch_observable_handle,
+    build_benchmark_live_worker_phase,
     build_run_permission_policy,
     canonical_lifecycle,
     compact_run_permission_policy_for_quota,
@@ -4230,75 +4232,18 @@ def _terminal_bench_prompt_driven_loopx_observation(
     first_blocker = "none"
     treatment_claim_blocker = "none"
     strict_claim_allowed = False
-    controller_trace_observed = False
-    controller_trace_public_safe = False
-    controller_max_round_observed = -1
-    controller_max_rounds_budget = 0
-    controller_initial_prompt_count = 0
-    controller_followup_prompt_count = 0
-    controller_action_decisions = 0
-    controller_no_active_todo_confirmed_count = 0
-    controller_round_timeout_sec: float | None = None
-    controller_last_decision = "none"
+    historical_prompt_polling_trace_observed = False
     controller_turn_completed_observed = False
 
     def observe_controller_trace(payload: Any) -> None:
-        nonlocal controller_trace_observed
-        nonlocal controller_trace_public_safe
-        nonlocal controller_max_round_observed
-        nonlocal controller_max_rounds_budget
-        nonlocal controller_initial_prompt_count
-        nonlocal controller_followup_prompt_count
-        nonlocal controller_action_decisions
-        nonlocal controller_no_active_todo_confirmed_count
-        nonlocal controller_round_timeout_sec
-        nonlocal controller_last_decision
+        nonlocal historical_prompt_polling_trace_observed
         if not isinstance(payload, dict):
             return
-        controller_trace_observed = True
-        publicness = str(payload.get("trace_publicness") or "")
-        controller_trace_public_safe = controller_trace_public_safe or (
-            "public" in publicness
-            and payload.get("raw_task_text_recorded") is not True
-            and payload.get("raw_verifier_output_recorded") is not True
-            and payload.get("raw_agent_trajectory_recorded") is not True
+        historical_prompt_polling_trace_observed = (
+            historical_prompt_polling_trace_observed
+            or payload.get("schema_version")
+            == "harbor_host_prompt_polling_controller_trace_v0"
         )
-        for field, current in (
-            ("max_round_observed", controller_max_round_observed),
-            ("max_rounds_budget", controller_max_rounds_budget),
-            ("initial_prompt_count", controller_initial_prompt_count),
-            ("followup_prompt_count", controller_followup_prompt_count),
-            ("controller_action_decisions", controller_action_decisions),
-            (
-                "no_active_todo_confirmed_count",
-                controller_no_active_todo_confirmed_count,
-            ),
-        ):
-            raw = payload.get(field)
-            if not isinstance(raw, int) or isinstance(raw, bool):
-                continue
-            value = max(current, raw)
-            if field == "max_round_observed":
-                controller_max_round_observed = value
-            elif field == "max_rounds_budget":
-                controller_max_rounds_budget = value
-            elif field == "initial_prompt_count":
-                controller_initial_prompt_count = value
-            elif field == "followup_prompt_count":
-                controller_followup_prompt_count = value
-            elif field == "controller_action_decisions":
-                controller_action_decisions = value
-            elif field == "no_active_todo_confirmed_count":
-                controller_no_active_todo_confirmed_count = value
-        timeout_raw = payload.get("round_timeout_sec")
-        if isinstance(timeout_raw, (int, float)) and not isinstance(timeout_raw, bool):
-            controller_round_timeout_sec = max(
-                float(controller_round_timeout_sec or 0.0),
-                float(timeout_raw),
-            )
-        decision = _public_safe_benchmark_label(payload.get("last_decision"))
-        if decision and decision != "none":
-            controller_last_decision = decision
 
     for path in trace_paths:
         payload = _load_json_object(path)
@@ -4344,9 +4289,6 @@ def _terminal_bench_prompt_driven_loopx_observation(
             "strict_loopx_treatment_claim_allowed"
         ) is True
         observe_controller_trace(payload.get("loopx_controller_trace"))
-        controller_trace_observed = controller_trace_observed or payload.get(
-            "loopx_controller_trace_present"
-        ) is True
         controller_turn_completed_observed = (
             controller_turn_completed_observed
             or payload.get("turn_completed_observed") is True
@@ -4369,6 +4311,11 @@ def _terminal_bench_prompt_driven_loopx_observation(
         "quota_spend",
         "spend_slot",
     }
+    if historical_prompt_polling_trace_observed:
+        strict_claim_allowed = False
+        treatment_claim_blocker = (
+            "historical_nonproduct_invalid_for_comparison"
+        )
     return {
         "trace_file_count": len(trace_paths),
         "compact_file_count": len(compact_paths),
@@ -4385,18 +4332,7 @@ def _terminal_bench_prompt_driven_loopx_observation(
         "first_blocker": first_blocker,
         "strict_loopx_treatment_claim_allowed": strict_claim_allowed,
         "loopx_treatment_claim_blocker": treatment_claim_blocker,
-        "controller_trace_observed": controller_trace_observed,
-        "controller_trace_public_safe": controller_trace_public_safe,
-        "controller_max_round_observed": controller_max_round_observed,
-        "controller_max_rounds_budget": controller_max_rounds_budget,
-        "controller_initial_prompt_count": controller_initial_prompt_count,
-        "controller_followup_prompt_count": controller_followup_prompt_count,
-        "controller_action_decisions": controller_action_decisions,
-        "controller_no_active_todo_confirmed_count": (
-            controller_no_active_todo_confirmed_count
-        ),
-        "controller_round_timeout_sec": controller_round_timeout_sec,
-        "controller_last_decision": controller_last_decision,
+        "historical_route_read_only": historical_prompt_polling_trace_observed,
         "controller_turn_completed_observed": controller_turn_completed_observed,
     }
 
@@ -5554,31 +5490,45 @@ def build_terminal_bench_harbor_result_benchmark_run(
         if official_score is not None
         else {"kind": "harbor_verifier_reward_missing"}
     )
+    historical_prompt_polling_route = bool(
+        prompt_driven_loopx.get("historical_route_read_only")
+    )
+    raw_prompt_driven_claim_blocker = prompt_driven_loopx.get(
+        "loopx_treatment_claim_blocker"
+    )
+    observed_prompt_driven_claim_blocker = (
+        raw_prompt_driven_claim_blocker
+        if isinstance(raw_prompt_driven_claim_blocker, str)
+        else ""
+    )
     prompt_driven_claim_blocker = "none"
-    if not prompt_driven_lifecycle_observed and worker_bridge_required:
-        raw_claim_blocker = prompt_driven_loopx.get(
-            "loopx_treatment_claim_blocker"
-        )
+    if historical_prompt_polling_route:
         prompt_driven_claim_blocker = (
-            raw_claim_blocker if isinstance(raw_claim_blocker, str) else ""
-        ) or "prompt_driven_loopx_lifecycle_absent"
-        if prompt_driven_claim_blocker in {"", "none"}:
-            prompt_driven_claim_blocker = (
-                "prompt_driven_loopx_lifecycle_absent"
-            )
+            "historical_nonproduct_invalid_for_comparison"
+        )
+    elif observed_prompt_driven_claim_blocker not in {"", "none"}:
+        prompt_driven_claim_blocker = observed_prompt_driven_claim_blocker
+    elif not prompt_driven_lifecycle_observed and worker_bridge_required:
+        prompt_driven_claim_blocker = "prompt_driven_loopx_lifecycle_absent"
     prompt_driven_evidence_tier = "not_applicable"
-    if worker_bridge_required:
+    if historical_prompt_polling_route:
+        prompt_driven_evidence_tier = (
+            "historical_nonproduct_invalid_for_comparison"
+        )
+    elif worker_bridge_required:
         prompt_driven_evidence_tier = (
             "prompt_driven_case_local_loopx_cli_lifecycle"
             if prompt_driven_lifecycle_observed
             else "prompt_driven_case_local_loopx_cli_not_observed"
         )
     strict_loopx_treatment_claim_allowed = bool(
-        prompt_driven_lifecycle_observed
-        or prompt_driven_loopx.get(
+        not historical_prompt_polling_route
+        and prompt_driven_lifecycle_observed
+        and prompt_driven_loopx.get(
             "strict_loopx_treatment_claim_allowed"
         )
         is True
+        and prompt_driven_claim_blocker == "none"
     )
     raw_prompt_driven_first_blocker = prompt_driven_loopx.get(
         "first_blocker"
@@ -5807,6 +5757,7 @@ def build_terminal_bench_harbor_result_benchmark_run(
         "strict_loopx_treatment_claim_allowed": (
             strict_loopx_treatment_claim_allowed
         ),
+        "historical_route_read_only": historical_prompt_polling_route,
         "loopx_treatment_claim_blocker": prompt_driven_claim_blocker,
         "loopx_treatment_evidence_tier": prompt_driven_evidence_tier,
         "worker_loopx_cli_call_total": worker_cli_total,
@@ -6590,6 +6541,37 @@ def build_terminal_bench_private_runner_launch(**command_kwargs: Any) -> dict[st
             if codex_app_server_goal_mode
             else ""
         ),
+        "observable_handle_registration": build_benchmark_launch_observable_handle(
+            benchmark_id=TERMINAL_BENCH_DEFAULT_DATASET,
+            launch_mode=f"terminal_bench_private_runner_{mode or 'codex-loopx'}",
+            run_label=str(
+                resolved_command_kwargs.get("job_name")
+                or "terminal_bench_private_runner_launch"
+            ),
+            job_basename=str(
+                resolved_command_kwargs.get("job_name")
+                or "terminal_bench_private_runner_launch"
+            ),
+            process_state="not_started",
+            compact_artifact_refs=(
+                "benchmark-run.compact.json",
+                "job-result.compact.json",
+                "trial-result.compact.json",
+            ),
+            allowed_poll_command="terminal_bench_run_status_snapshot",
+            scheduler_kind="terminal_bench_private_runner",
+            will_execute=bool(argv)
+            and first_blocker == "ready_for_private_managed_no_upload_pilot_review",
+            read_boundary={
+                "compact_only": True,
+                "task_text_read": False,
+                "raw_logs_read": False,
+                "raw_artifacts_read": False,
+                "trajectory_read": False,
+                "local_paths_recorded": False,
+                "private_handle_values_recorded": False,
+            },
+        ),
         "first_blocker": first_blocker,
         "ready": first_blocker == "ready_for_private_managed_no_upload_pilot_review",
     }
@@ -6735,6 +6717,49 @@ def _terminal_bench_compact_failure_marker(
     )
     return marker
 
+
+def _terminal_bench_live_worker_phase(
+    summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    worker_running = bool(
+        summary.get("job_active_without_trial_result") is True
+        or _compact_positive_int(summary.get("job_running_trial_count")) > 0
+    )
+    if summary.get("ready_for_compact_failure_marker") is True:
+        terminal_disposition = "failed"
+    elif (
+        summary.get("ready_for_compact_result_ingest") is True
+        and summary.get("job_result_finished") is True
+    ):
+        terminal_disposition = "completed"
+    elif summary.get("external_handle_terminal") is True:
+        terminal_disposition = "ended_unresolved"
+    else:
+        terminal_disposition = "open"
+    return build_benchmark_live_worker_phase(
+        runtime_preparing=bool(
+            summary.get("checked") is True
+            and (
+                summary.get("external_handle_observed") is True
+                or summary.get("jobs_dir_present") is True
+            )
+        ),
+        worker_prepared=summary.get("ready_for_launch_state") is True,
+        worker_running=worker_running,
+        agent_active=False,
+        terminal_disposition=terminal_disposition,
+    )
+
+
+def _with_terminal_bench_live_worker_phase(
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    summary["benchmark_live_worker_phase"] = _terminal_bench_live_worker_phase(
+        summary
+    )
+    return summary
+
+
 def summarize_terminal_bench_post_launch_materialization(
     jobs_dir: str | Path,
     *,
@@ -6785,7 +6810,7 @@ def summarize_terminal_bench_post_launch_materialization(
         "stale_active_reconcile_requested": bool(reconcile_stale_active),
     }
     if placeholder:
-        return summary
+        return _with_terminal_bench_live_worker_phase(summary)
 
     root = Path(jobs_dir).expanduser()
     jobs_dir_present = root.is_dir()
@@ -6810,7 +6835,7 @@ def summarize_terminal_bench_post_launch_materialization(
                     ),
                 }
             )
-        return summary
+        return _with_terminal_bench_live_worker_phase(summary)
 
     if public_job_name:
         candidates = [root / public_job_name]
@@ -6838,7 +6863,7 @@ def summarize_terminal_bench_post_launch_materialization(
                     ),
                 }
             )
-        return summary
+        return _with_terminal_bench_live_worker_phase(summary)
 
     job_root = existing_candidates[0]
     lock_present = (job_root / "lock.json").is_file()
@@ -7036,7 +7061,7 @@ def summarize_terminal_bench_post_launch_materialization(
             summary["first_blocker"] = "ready_for_compact_polling"
     else:
         summary["first_blocker"] = "ready_for_compact_result_ingest"
-    return summary
+    return _with_terminal_bench_live_worker_phase(summary)
 
 def _terminal_bench_launch_timeout_multiplier_policy(
     argv: list[Any],
@@ -7344,6 +7369,11 @@ def summarize_terminal_bench_private_runner_launch(
         codex_goal_mode_baseline_claim_blocker = "missing_codex_app_server_goal_proof"
     else:
         codex_goal_mode_baseline_claim_blocker = ""
+    observable_handle_registration = (
+        launch.get("observable_handle_registration")
+        if isinstance(launch.get("observable_handle_registration"), dict)
+        else {}
+    )
     summary = {
         "schema_version": "terminal_bench_private_runner_launch_summary_v0",
         "launch_schema_version": str(launch.get("schema_version") or ""),
@@ -7449,6 +7479,7 @@ def summarize_terminal_bench_private_runner_launch(
             setup_timeout_repair_profile=setup_timeout_repair_profile,
         ),
         "closeout_command_templates": _terminal_bench_run_ledger_closeout_templates(),
+        "observable_handle_registration": observable_handle_registration,
         "auth_values_recorded": False,
         "raw_env_recorded": False,
         "raw_paths_recorded": False,
@@ -8202,9 +8233,11 @@ def build_terminal_bench_loopx_access_packet(
                 "loopx_cli_bridge_command_status: "
                 + f"{base} status --limit 5",
                 "loopx_cli_bridge_command_quota_should_run: "
-                + f"{base} quota should-run --goal-id {goal_id_quoted}",
+                + f"{base} quota should-run --goal-id {goal_id_quoted} "
+                "--runtime-profile outer_controller",
                 "loopx_cli_bridge_command_todo_list: "
-                + f"{base} quota should-run --goal-id {goal_id_quoted}",
+                + f"{base} quota should-run --goal-id {goal_id_quoted} "
+                "--runtime-profile outer_controller",
                 "loopx_cli_bridge_command_history: "
                 + f"{base} history --goal-id {goal_id_quoted} --limit 5",
             ]

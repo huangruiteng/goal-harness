@@ -4,7 +4,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from .todo_contract import normalize_required_write_scopes
+from .control_plane.runtime.time import parse_timestamp as _parse_timestamp
+from .control_plane.todos.contract import normalize_required_write_scopes
 
 
 CHECKPOINTED_BOUNDARY_AUTHORITY_SCHEMA_VERSION = "checkpointed_boundary_authority_v0"
@@ -26,19 +27,6 @@ PRIVATE_TEXT_PATTERNS = (
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).astimezone()
-
-
-def _parse_timestamp(value: Any) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
 
 
 def _validate_public_safe_text(label: str, value: str | None) -> None:
@@ -161,11 +149,38 @@ def normalize_checkpointed_boundary_authority_entries(
     return entries
 
 
+def _compact_checkpointed_boundary_authority_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    def _count(raw: Any) -> int:
+        try:
+            return max(0, int(raw or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    active_scopes = normalize_required_write_scopes(value.get("active_write_scope"))
+    if not active_scopes and "active_count" not in value and "inactive_count" not in value:
+        return None
+    return {
+        "schema_version": CHECKPOINTED_BOUNDARY_AUTHORITY_SCHEMA_VERSION,
+        "active_count": _count(value.get("active_count")),
+        "inactive_count": _count(value.get("inactive_count")),
+        "active_write_scope": active_scopes,
+    }
+
+
 def checkpointed_boundary_authority_summary(coordination: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(coordination, dict):
         return None
+    checkpointed_authority = coordination.get("checkpointed_boundary_authority")
+    if isinstance(checkpointed_authority, dict):
+        compact_summary = _compact_checkpointed_boundary_authority_summary(checkpointed_authority)
+        if compact_summary is not None and "entries" not in checkpointed_authority:
+            return compact_summary
+        checkpointed_authority = checkpointed_authority.get("entries")
     entries = normalize_checkpointed_boundary_authority_entries(
-        coordination.get("checkpointed_boundary_authority")
+        checkpointed_authority
     )
     if not entries:
         return None

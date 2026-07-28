@@ -8,7 +8,7 @@ For Codex CLI users, the first successful path is:
 1. Open Codex CLI TUI in a project repo.
 2. Paste one LoopX start message.
 3. If `loopx` is missing, let the agent run the no-clone installer.
-4. Return to the same TUI with current goal, gate, todo, and next safe action.
+4. Return to the same TUI with current objective, gate, todo, and next safe action.
 
 The user should not have to clone this repository before learning whether
 LoopX helps their project.
@@ -26,7 +26,21 @@ loopx doctor
 The installer downloads a GitHub archive, creates a stable local release
 snapshot under `~/.local/share/loopx/releases/`, installs the
 `loopx` wrapper under `~/.local/bin`, and installs the reusable Codex
-skills under `~/.codex/skills`.
+skills under `~/.codex/skills`. It also refreshes the lightweight slash-command
+facades:
+
+- `~/.codex/skills/loopx*/SKILL.md` for explicit Codex command-facade
+  invocation through `$loopx` or `/skills`;
+- `~/.codex/skills/loopx-project/SKILL.md` for the distinct project workflow
+  skill shown as `LoopX Project` in `/skills`;
+- `~/.claude/skills/loopx*/SKILL.md` for Claude Code slash-command discovery.
+
+Current verified Codex CLI builds still reject user-installed `/loopx` and
+`/prompts:loopx` commands, so the packaged install reports Codex CLI as an
+unsupported native slash surface. For an explicit Codex skill invocation, use
+`$loopx` or choose `loopx` from `/skills`. For the visible long-running TUI
+loop, use `loopx codex-cli-bootstrap-message --project .`, paste the generated
+setup into the TUI, then set the generated `/goal <thin task_body>`.
 
 By default, the archive source is the public `stable` ref. Maintainers can
 override it with `LOOPX_REF=main` when intentionally testing or repairing from
@@ -43,7 +57,7 @@ The agent-first start message can now be stricter about install repair:
 ```text
 Start LoopX for this repo. If `loopx` is missing, install it with
 the official no-clone GitHub installer, then connect this project. Show me the
-current goal, concrete user gate if any, top todos, and next safe action before
+current objective, concrete user gate if any, top todos, and next safe action before
 running longer work. Keep me in this Codex CLI TUI unless I explicitly accept a
 headless fallback.
 ```
@@ -78,6 +92,12 @@ The update command plans the source archive, reports the installed release
 snapshot, preserves runtime state under `~/.codex/loopx`, and refreshes the
 executable and skills together when `--execute` is accepted.
 
+For the normal GitHub repo/ref source, `--check` compares the installed package
+version with that exact ref using a short, read-only network probe. Offline
+checks still report local install health and make the missing remote comparison
+explicit. Custom archive URLs skip this comparison rather than guessing which
+version they contain.
+
 `loopx update` uses the same `stable` ref by default. Use `loopx update --ref
 main` only when you intentionally want a dev/head refresh instead of the stable
 channel.
@@ -87,7 +107,7 @@ wrapper or release snapshot is broken enough that `loopx update` cannot run.
 
 ## Contributor Path
 
-For contributors and side agents working on LoopX itself, keep using a
+For contributors and registered peers working on LoopX itself, keep using a
 real checkout:
 
 ```bash

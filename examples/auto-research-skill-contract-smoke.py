@@ -63,22 +63,27 @@ def main() -> int:
         "worker-local role playbook",
         "not a global LoopX skill",
         "Identity comes from LoopX control-plane metadata",
+        "Pane Tick Contract",
+        "generic multi-agent kernel owns the default LoopX project/doc-registry skills",
+        "fixed A2A wake prompt",
         "auto_research_role_profile_v0",
         'loopx --format json auto-research frontier --goal-id "$LOOPX_GOAL_ID" --agent-id "$LOOPX_AGENT_ID"',
         "No role owns the full graph",
         "Do not infer role from pane title",
         "Research Curator",
-        "Hypothesis Mapper",
-        "Evidence Runner",
-        "Evidence Verifier",
+        "Hypothesis Proposer",
+        "Research Executor",
+        "Evaluator/Promoter",
         "Projection Narrator",
         "Control-Plane Guard",
         "Shared Stop Conditions",
         "research_contract_v0",
         "research_hypothesis_v0",
         "auto_research_evidence_packet_v0",
-        "research_showcase_projection_v0",
+        "research_evidence_graph_v0",
         "quota should-run",
+        "role_profile.continuation_policy",
+        "No-follow-up is only valid",
         "demo-supervisor",
         "--execute",
     ]
@@ -91,14 +96,20 @@ def main() -> int:
         "leader agent required",
         "coordinator owns the graph",
         "promote without evidence",
+        "First Commands",
+        "$loopx-project",
+        "$loopx-doc-registry",
     ]
     lowered = compact_skill.lower()
     for term in forbidden_skill_terms:
         assert term.lower() not in lowered, f"skill drifted into forbidden term {term!r}"
 
     assert "required_skill\": \"loopx-auto-research\"" in role_profile, role_profile
+    assert "continuation_policy" in role_profile, role_profile
+    assert "no-follow-up depend on evidence" in role_profile, role_profile
     assert "worker-local" in role_profile, role_profile
     assert "auto_research_role_profile_v0" in role_state_machine, role_state_machine
+    assert "single promoted branch does not close" in role_state_machine, role_state_machine
     assert "product_narrator" in lane_contract, lane_contract
     assert (
         "`loopx-auto-research` | Running role-scoped auto-research lanes"

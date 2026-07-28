@@ -6,8 +6,8 @@ from typing import Any
 
 from .file_lock import exclusive_file_lock
 from .state_refresh import now_local
-from .status import normalize_todo_text
-from .todo_contract import TODO_TASK_CLASS_ADVANCEMENT
+from .control_plane.todos.contract import TODO_TASK_CLASS_ADVANCEMENT
+from .control_plane.todos.todo_summary import normalize_todo_text
 from .todos import (
     TODO_SECTION_HEADINGS,
     add_todo_to_lines,
@@ -135,6 +135,7 @@ def capture_followup_todos(
                 target_capabilities=target_capabilities,
                 required_decision_scopes=required_decision_scopes,
                 evidence=evidence_text,
+                updated_at=updated_at,
             )
             changed = changed or bool(add_result.get("added")) or bool(add_result.get("metadata_updated"))
             recorded_count += 1

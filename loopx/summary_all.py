@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .control_plane.runtime.time import now_utc, now_utc_iso
 from .history import collect_history, load_registry
 from .paths import resolve_runtime_root
+from .presentation.markdown import as_dict as _as_dict
+from .presentation.markdown import as_list as _as_list
+from .presentation.public_safety import public_safe_boundary, redact_public_text
 from .quota import build_quota_should_run
 from .status import collect_status
 
@@ -18,14 +21,7 @@ LEGACY_COMMAND_ALIASES = {
 }
 SCHEMA_VERSION = "global_manager_command_response_v0"
 
-BOUNDARY = {
-    "raw_logs_recorded": False,
-    "raw_transcripts_recorded": False,
-    "raw_connector_payloads_recorded": False,
-    "credential_values_recorded": False,
-    "absolute_paths_recorded": False,
-    "private_source_bodies_recorded": False,
-}
+BOUNDARY = public_safe_boundary()
 
 SOURCE_SURFACES = [
     "global registry compact status",
@@ -47,19 +43,13 @@ LANE_PRIORITY = {
     "quota_unavailable": 5,
 }
 
-LOCAL_PATH_PATTERNS = (
-    re.compile(r"/(?:Users|home|private|tmp|var)/[^\s`|,)]+"),
-    re.compile(r"[A-Za-z]:\\\\Users\\\\[^\s`|,)]+"),
-)
-
-
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return now_utc_iso()
 
 
 def _parse_time_range(value: str) -> tuple[str, datetime | None]:
     normalized = (value or "24h").strip().lower()
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     if normalized.endswith("h") and normalized[:-1].isdigit():
         return normalized, now - timedelta(hours=int(normalized[:-1]))
     if normalized.endswith("d") and normalized[:-1].isdigit():
@@ -78,23 +68,12 @@ def _parse_datetime(value: object) -> datetime | None:
 
 
 def _redact_text(value: object, *, limit: int = 260) -> str:
-    text = str(value or "").strip()
-    for alias, canonical in LEGACY_COMMAND_ALIASES.items():
-        text = text.replace(alias, canonical)
-    for pattern in LOCAL_PATH_PATTERNS:
-        text = pattern.sub("<local-path-redacted>", text)
-    text = re.sub(r"\s+", " ", text)
-    if len(text) > limit:
-        return text[: max(0, limit - 1)].rstrip() + "…"
-    return text
-
-
-def _as_dict(value: object) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _as_list(value: object) -> list[Any]:
-    return value if isinstance(value, list) else []
+    return redact_public_text(
+        value,
+        limit=limit,
+        replacements=LEGACY_COMMAND_ALIASES,
+        truncation_marker="…",
+    )
 
 
 def _first_open_todo(quota_payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -366,14 +345,14 @@ def build_summary_all(
                 "action_id": "act_read_goal_detail",
                 "kind": "read_more",
                 "requires_user_approval": False,
-                "requires_primary_agent": False,
+                "requires_maintainer_authority": False,
                 "preview": "Run `loopx review-packet --goal-id <goal>` or `loopx quota should-run --goal-id <goal>` for one lane.",
             },
             {
                 "action_id": "act_ask_user_gate",
                 "kind": "ask_user",
                 "requires_user_approval": False,
-                "requires_primary_agent": False,
+                "requires_maintainer_authority": False,
                 "preview": "Surface the projected gate question when open_gate_count is non-zero.",
             },
         ],

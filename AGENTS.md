@@ -74,6 +74,37 @@ submission behavior, permission boundaries, or launch new benchmark jobs.
 After self-merging, sync local `main`, leave unrelated untracked local artifacts
 alone, and continue with the next safe project batch.
 
+Before self-merging non-trivial LoopX changes, run
+`loopx canary premerge --from-git-diff` or an equivalent risk-based validation
+set. The PR comment must name the changed surfaces, checks run, failures/skips,
+manual holds, and why the coverage is enough. One hand-picked smoke is not
+enough for runtime, quota/status, scheduler, todo, install, dashboard,
+benchmark-boundary, or public/private evidence changes.
+
+### Release Contributor Attribution
+
+Keep the shipped product changes as the primary release narrative. When the tag
+range contains merged work from community contributors other than project
+founder `@huangruiteng`, add a prominent `## Community Contributors` section
+after the English product groups and a matching `### 社区贡献者` section after
+the Chinese product groups. Place both before compatibility, validation, or
+update material so the credit remains visible without replacing the release
+summary.
+
+Link each eligible contributor's GitHub handle and relevant pull requests, and
+describe the concrete contribution instead of publishing an unannotated name
+list. Explicitly highlight external and first-time contributors when
+applicable. Do not list or thank `@huangruiteng` in contributor sections;
+founder stewardship is implicit in LoopX releases. Omit both contributor
+sections when the tag range has no eligible community contribution.
+
+Derive attribution from the previous-tag-to-current-tag Git range plus merged
+PR metadata. Do not guess from commit display names, omit contributors because
+their work is summarized elsewhere, let contributor credit displace product
+content, or invent community attribution for a founder-only release. The
+release PR and final GitHub release body must preserve the same bilingual
+attribution.
+
 ## First-Screen Review Gate
 
 Treat the first visible screen of public product surfaces as owner-reviewed
@@ -120,6 +151,113 @@ private/security-sensitive material that must not be posted publicly.
 
 Do not leave actionable PR blockers only in chat memory. The final user report
 should include the PR comment URL and a compact summary of the posted findings.
+
+## Engineering Quality And Right-Sized Scope
+
+Treat code volume as a cost, especially during refactors. A good LoopX change
+should make the next change easier to localize, test, and revert; it should not
+turn a design possibility into unused production structure.
+
+## Capability And Extension Placement
+
+Before adding an ability, decide its capability owner and provider boundary;
+do not choose a directory from the feature name alone:
+
+- name public capabilities after caller outcomes, not delivery mechanisms. A
+  proposed `connector`, `provider`, `adapter`, or `sink` capability needs an
+  independently useful caller contract; otherwise make it an extension
+  provider or an internal part of the outcome capability it serves;
+- extend `loopx/capabilities/<capability>/` when the change belongs to an
+  existing product contract and shares that built-in capability's lifecycle;
+- create a new built-in capability only when LoopX core must ship it by
+  default and it has a stable caller contract, real entrypoint, and focused
+  validation;
+- put generic manifest, registration, compatibility, and lifecycle mechanics
+  in `loopx/extensions/`;
+- put an independently versioned or optional provider distribution in
+  `packages/<package-id>/` when it is co-located, or in its own package or
+  repository when it is distributed separately. Reserve `loopx/extensions/`
+  for extension lifecycle code and providers bundled in the LoopX wheel;
+- do not create a capability merely to make an extension installable. An
+  extension-owned command or workflow may declare only its runtime and
+  lifecycle when LoopX callers do not need a provider-neutral capability
+  contract;
+- when a provider introduces a new product contract, register the capability
+  contract and implement it through the extension only when that contract is
+  intentionally provider-neutral and belongs in LoopX's capability catalog;
+- keep private helpers in the nearest owning module. A helper is not a new
+  capability or extension merely because several files are involved.
+
+Record the placement rationale before editing: capability id, provider id,
+whether the provider is built-in or extension-delivered, and why the nearest
+existing owner is or is not sufficient. See `docs/reference/extensions.md` for the full
+decision guide.
+
+Before adding a new module, builder, protocol field, CLI option, fixture, smoke
+section, or abstraction, pass a scope-fit review:
+
+- Identify the shipped behavior, active call site, or explicit compatibility
+  contract that needs it. If the value is only an uncommitted future runner, a
+  design note, or a hypothetical extension with no validation contract, keep the
+  design in docs or todo state until the real call site appears.
+- Prefer a cohesive behavior-preserving seam. For example, let the ledger first
+  recognize one compact public-safe row shape before adding a dedicated
+  benchmark-specific builder, arm constants, or wide field-level smoke. Do not
+  split so narrowly that reviewers must reconstruct one logical behavior from
+  several dependent PRs.
+- Design tests from semantics, not observed output. Independently review the
+  intended invariant and legal or illegal transitions before testing the
+  implementation. Never derive expected results from the implementation under
+  test or its current output; characterization fixtures are non-authoritative,
+  and contradictions require rule repair plus negative or mutation coverage.
+- Characterize before moving code. For status, quota, review-packet, scheduler,
+  monitor, and handoff behavior, add or extend parity fixtures first, then
+  extract the proven rule or cohesive rule group.
+- Reuse existing repository patterns and bounded contexts. Add code where its
+  change reason belongs, such as `control_plane/runtime`, `control_plane/quota`,
+  or `control_plane/todos`; do not create generic sink directories or helper
+  layers just because several files share a similar shape.
+- Treat large or hot files as warning signals. When a change would grow an
+  already oversized module, first look for a narrow read model, domain helper,
+  or bounded-context home. For internal module moves, update active call sites
+  and delete the old entry point; leave a compatibility wrapper only when a
+  real external import, persisted state, CLI/API contract, or migration window
+  requires it.
+- Distinguish duplicate knowledge from duplicate-looking code. Collapse shared
+  state rules, protocol semantics, serialization contracts, and lifecycle
+  invariants; avoid a parameter-heavy abstraction when two callers merely look
+  similar but will evolve for different reasons.
+- Keep smokes thin and durable. They should prove shipped behavior, boundary
+  enforcement, and regression contracts, not every incidental field produced by
+  a temporary builder. Large smokes are a prompt to move reusable logic into
+  product modules or to narrow the assertion surface.
+- Make illegal states hard to express. For status, quota, scheduler, monitor,
+  todo, and handoff flows, prefer explicit enums, schemas, and transition
+  helpers over scattered booleans and prose-only assumptions.
+- Fail fast with actionable context at input, config, permission, and state
+  boundaries, but do not replace clear control flow with broad exception
+  plumbing or silent fallback.
+- Ship right-sized, reversible batches. A PR should be theme-unified, locally
+  validated, and reviewable as a complete stage package. A few hundred to
+  roughly one or two thousand lines can be appropriate when the diff is cohesive
+  and avoids hidden future scaffolding; a 30-line PR can still be too small if it
+  leaves behavior split across follow-up PRs. Separate characterization/parity
+  fixtures, mechanical moves, behavior changes, and cleanup when that makes
+  review and rollback clearer.
+- Keep public PRs concise and current-purpose focused. Future extension points
+  are allowed when they reduce near-term churn, preserve compatibility, or
+  define a real contract that is documented and tested. Do not bundle
+  private/local experiment scaffolding, diagnostic run dumps, unused speculative
+  plumbing, or long background narratives with the code path needed by the
+  current behavior.
+- Compress rather than append. For docs, fixtures, dashboards, and examples,
+  replace or retire stale material when adding new current truth; do not let
+  canonical surfaces accumulate multiple versions of the same conclusion.
+
+Use this checklist to delete, defer, or right-size code as actively as you add
+it. A PR that removes an unused abstraction, narrows a smoke to the real
+contract, or moves a rule into the right bounded context is often more valuable
+than one that adds a larger framework around the same behavior.
 
 ## Automation And Monitor Todos
 

@@ -5,7 +5,7 @@
 | Command | Intent | Mutation policy |
 | --- | --- | --- |
 | `/loopx` | Inspect or preview project connection. | Read-first; ask before bootstrap/connect writes. |
-| `/loopx <goal text>` | Start a concrete goal, plan ranked todos, and enter the LoopX automation flow. | Explicit invocation may write project-local LoopX state and todos. |
+| `/loopx <goal text>` | Start a concrete goal, plan ranked todos, activate the host loop, and enter the LoopX automation flow. | Explicit invocation may write project-local LoopX state and todos, then must activate or gate the host loop. |
 
 This command is intentionally separate from `/loopx-global-*`: global commands
 summarize and manage visible control-plane state across projects, while
@@ -19,8 +19,46 @@ When the user provides text after `/loopx`, the host should:
 2. Connect project-local LoopX state if no matching registry goal exists.
 3. Plan before writing todos.
 4. Write planned todos in exact plan order.
-5. Run `refresh-state`, then `quota should-run`, then start the first bounded
-   segment only when the quota contract allows it.
+5. Run `refresh-state`.
+6. Activate the host loop if it is missing, unknown, or stale:
+   - `codex-app`: create or update the Codex App heartbeat automation from the
+     generated `heartbeat-prompt` task body.
+   - `codex-app-ssh`: when Codex App is attached to a remote workspace over SSH
+     and host automation tools are unavailable, set the current visible task to
+     `/goal <task_body>` using the generated `codex_app_ssh_goal` profile.
+   - `codex-cli`: set the visible Codex CLI TUI to `/goal <task_body>`.
+   - `claude-code`: arm LoopX with `/loopx <task>`, then run native `/loop`.
+   - `opencode`: call `loopx_goal_activate` from the installed LoopX OpenCode
+     bridge; the bridge gates idle continuation and timer wakes through
+     `quota should-run` and completes only on validated terminal no-follow-up.
+   - `manual` / `other-agent`: wire the external loop driver described by
+     `loopx agent-onboard`.
+7. If the host cannot mutate that surface, report the exact pasteable gate
+   instead of claiming autonomous setup complete.
+8. Run `quota should-run`, then start the first bounded segment only when the
+   quota contract allows it.
+
+New hosts should discover exact agent types with:
+
+```bash
+loopx agent-onboard --list-agent-types
+```
+
+Ambiguous values such as `codex` must fail closed because Codex App automation,
+Codex App over SSH, the IDE plugin, and Codex CLI use different host-loop
+activation paths.
+
+The `codex-app-ssh` task body is an interactive Goal contract, not a scheduled
+heartbeat. It must fit the Codex `/goal` text limit, call `quota should-run`
+without a heartbeat turn receipt, and must not instruct the host to invoke
+`automation_update`, apply an RRULE, or synthesize `LOOPX_TURN`.
+
+Agent identity follows the same fail-closed rule. A goal with one registered
+agent may select that identity automatically. A goal with multiple registered
+agents and no `--agent-id` must project a concrete identity-selection gate with
+executable scoped choices; it must not advertise unscoped heartbeat or quota
+commands. Once selected, the identity must be preserved across `agent-onboard`,
+`bootstrap-command-pack`, `start-goal`, heartbeat prompt, and quota commands.
 
 The command pack preview is still read-only. It describes the commands and
 contracts; the slash invocation is what authorizes project-local state writes.
@@ -74,17 +112,34 @@ before writing todos:
 loopx issue-fix workflow-plan \
   --url <github-issue-or-pr-url> \
   --repo-path <approved-repo> \
+  --repository-context-json <compact-context.json> \
   --validation-label "<validation command>" \
   --format json
 ```
 
-The preview maps public metadata, intake classification, branch planning,
-validation labels, todo writeback previews, and PR review readiness blockers
-into the `/loopx <goal text>` planning checkpoint. Accepted candidates are then
-written with `loopx todo add` in priority and planner order. User todos or
-operator gates must cover private repro material, issue body/comment reads,
-external issue comments, PR creation, merge, publish, destructive git,
-production actions, and repository-policy approvals.
+The preview maps public metadata, repository context, intake classification,
+branch planning, validation labels, the feasibility checkpoint, and PR review
+readiness blockers into `/loopx <goal text>`. Repository context pins compact
+policy, architecture, change-scope, reproduction, and validation refs to a
+revision; memory and external experts stay advisory until repository-verified.
+Initially write only metadata classification and the feasibility checkpoint in
+priority and planner order. Then record a compact observation and let LoopX
+select exactly one route:
+
+```bash
+loopx issue-fix feasibility \
+  --url <github-issue-url> \
+  --reproduction-status <confirmed|planned|missing|blocked> \
+  --scope-class <bounded|uncertain|oversized> \
+  --repository-context-json <compact-context.json> \
+  --goal-id <goal-id> \
+  --format json
+```
+
+Write only the projected route successor or no-follow-up. User todos or operator
+gates must cover private repro material, issue body/comment reads, external
+issue comments, PR creation, merge, publish, destructive git, production
+actions, and repository-policy approvals.
 
 ## Stop Conditions
 
@@ -93,4 +148,6 @@ Stop and ask the user instead of writing or executing when:
 - private source material must be read before a public-safe todo can be formed;
 - credentials or secrets are required;
 - destructive git or production actions are needed;
-- the host cannot execute shell/CLI/tool calls or persist LoopX state.
+- the host cannot execute shell/CLI/tool calls or persist LoopX state;
+- the host cannot activate or expose the required host loop and no concrete
+  pasteable gate can be shown.

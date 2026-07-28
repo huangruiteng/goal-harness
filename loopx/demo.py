@@ -62,14 +62,13 @@ def run_demo(
         parent_goal_id=None,
         state_file=None,
         goal_doc=Path("GOAL.md"),
-        adapter_kind="generic_project_goal_v0",
+        adapter_kind="demo_local_queue_v0",
         adapter_status="connected",
         next_probe=None,
         spawn_allowed=False,
         max_children=3,
         allowed_domains=[],
         write_scope=[],
-        claim_ttl_minutes=30,
         onboarding_scan_enabled=False,
         force=False,
         dry_run=False,
@@ -80,6 +79,9 @@ def run_demo(
         goal_id=goal_id,
         role="user",
         text=user_todo,
+        task_class="user_gate",
+        action_kind="demo_goal_decision",
+        global_gate=True,
     )
     agent_todo_payload = add_goal_todo(
         registry_path=registry_path,
@@ -103,6 +105,7 @@ def run_demo(
         runtime_root_override=str(runtime_root),
         scan_roots=[project],
         limit=5,
+        goal_id=goal_id,
     )
     quota = build_quota_should_run(status_payload, goal_id=goal_id)
     queue_item = _first_queue_item(status_payload, goal_id)
@@ -146,7 +149,7 @@ def run_demo(
             f"cd {project}",
             'registry="$PWD/.loopx/registry.json"',
             'loopx --registry "$registry" status --scan-root "$PWD"',
-            f'loopx --registry "$registry" --format json quota should-run --goal-id {goal_id}',
+            f'loopx --registry "$registry" --format json quota should-run --goal-id {goal_id} --runtime-profile generic_cli',
         ],
         "dashboard_status_commands": [
             f"cd {project}",
@@ -159,7 +162,7 @@ def run_demo(
         ],
         "canonical_dashboard_status_url": "http://127.0.0.1:8766/status.json",
         "dashboard_app_commands": [
-            "cd ~/loopx/apps/dashboard",
+            "cd ~/loopx/apps/presentation/dashboard",
             "npm install",
             "npm run dev",
         ],

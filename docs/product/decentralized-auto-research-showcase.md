@@ -49,7 +49,7 @@ The executable product contract is split into three peer artifacts:
 
 - `decentralized_auto_research_state_v0` defines the records and projections:
   contracts, todo-linked hypotheses, evidence events, frontier, evidence graph,
-  and showcase projection.
+  and compact decision candidates.
 - `auto_research_lane_contract_v1` defines decentralized lanes: curator,
   hypothesis proposer, executor, evaluator/promoter, and product narrator. Each
   lane contributes typed records through claims and gates; none owns the whole
@@ -128,84 +128,75 @@ next agent does not rediscover them from scratch.
 
 ## Minimal Reproduction Plan
 
-New users should not have to learn the full command matrix first. The
-quickstart path starts from one read-only command that returns the research
-contract, the files that would be created, and the first runnable hypothesis for
-the current agent:
+New users should not have to learn the full command matrix first. The default
+path previews a fresh demo-local goal surface and the visible Codex TUI lanes
+that will work it:
 
 ```bash
-loopx --format json auto-research quickstart \
-  --agent-id codex-side-bypass
+loopx --format json auto-research demo-e2e \
+  --agent-id auto-research-operator
 ```
 
-When the preview is acceptable, explicitly create the protected starter pack:
+When the preview is acceptable, launch the visible lanes:
 
 ```bash
-loopx --format json auto-research quickstart \
-  --agent-id codex-side-bypass \
-  --output-dir auto_research_knn_pack \
+loopx --format json auto-research demo-e2e \
+  --agent-id auto-research-operator \
   --execute
 ```
 
-This writes a k-NN research pack with one editable candidate file, a protected
-baseline/evaluator, and a `research_contract_v0`. The command also returns the
-next dev/holdout/evidence commands, so an agent can continue from a concrete
-hypothesis instead of choosing among `frontier`, `evidence`, and
-`append-evidence` manually.
+This starts the product path: visible Codex TUI roles read their own
+quota/frontier through LoopX state, then author public-safe research evidence or
+successor todos from inside the pane. The pane-local tick is a guard/frontier
+read; it does not manufacture research contracts, hypotheses, dev scores, or
+holdout scores.
 
-The runnable pack now lives at `examples/auto_research_knn_pack/`. It provides
-an editable candidate solver, a protected evaluator, deterministic dev/held-out
-splits, and a no-upload boundary.
+The public line-count claim is intentionally narrower than the kernel. The
+copyable recipe is one user command plus the four default auto-research role
+specs; the reusable kernel still owns the runner, visible Codex TUI panes,
+fixed wake prompt, pane-local A2A tick, todo/evidence/status protocol, and
+public artifact routing.
 
-Run the candidate on the dev split:
-
-```bash
-python3 examples/auto_research_knn_pack/protected_eval.py \
-  --solution examples/auto_research_knn_pack/solution_candidate.py \
-  --split dev
+```text
+loopx auto-research start "<open question>" --execute
+research-curator:research-curator:research_curator
+hypothesis-proposer:hypothesis-proposer:hypothesis_proposer
+research-executor:research-executor:research_executor
+evaluator-promoter:evaluator-promoter:evaluator_promoter
 ```
 
-Run the candidate on the held-out split:
-
-```bash
-python3 examples/auto_research_knn_pack/protected_eval.py \
-  --solution examples/auto_research_knn_pack/solution_candidate.py \
-  --split holdout
-```
-
-The current public pack reports exact neighbor identity with deterministic
-protected speedup `4.0x` on dev and `4.5x` on holdout for the partial-selection
-candidate. The metric is a protected ranking-work proxy rather than wall-clock
-time, so it is stable enough for smoke tests while still preserving the product
-shape: dev evidence, held-out promotion evidence, and a clean boundary.
+That is the marketing-safe claim: a five-line declarative recipe can start
+decentralized A2A communication because the generic LoopX kernel already knows
+how to wake each pane and let each pane read its own quota/frontier.
 
 The fixture-backed projection remains the read-only showcase state slice:
 
 ```bash
 loopx --format json auto-research frontier \
   --fixture examples/fixtures/decentralized-auto-research-knn.public.json \
-  --agent-id codex-side-bypass
+  --agent-id hypothesis-proposer
 ```
 
 This renders `decentralized_research_frontier_v0`,
-`research_evidence_graph_v0`, and `research_showcase_projection_v0` from a
-public fixture. It does not launch experiments; it proves that the state shape
-can present a per-agent frontier without one leader agent.
+`research_evidence_graph_v0`, and compact decision candidates from a public
+fixture. It does not launch experiments or claim uplift; it proves that the
+state shape can present a per-agent frontier without one leader agent.
 
-The protected evaluator outputs can also be converted into public-safe evidence
-records:
+Public-safe evaluator outputs can also be converted into evidence records. A
+minimal contract/eval pair is enough; the kernel does not require a shipped
+domain pack:
 
 ```bash
 loopx --format json auto-research evidence \
-  --contract examples/auto_research_knn_pack/research_contract.json \
+  --contract research-contract.public.json \
   --eval-result dev-result.public.json \
   --eval-result holdout-result.public.json \
-  --hypothesis-id hyp_pack_partial_selection \
-  --todo-id todo_auto_research_pack_001 \
-  --agent-id codex-side-bypass \
-  --claimed-by codex-side-bypass \
-  --mechanism-family partial_selection \
-  --hypothesis "Use exact partial selection to avoid full distance sorting." \
+  --hypothesis-id hyp_state_a2a_round \
+  --todo-id todo_auto_research_demo_001 \
+  --agent-id research-executor \
+  --claimed-by research-executor \
+  --mechanism-family state_a2a_iteration \
+  --hypothesis "Use a small state-mediated handoff loop to improve the shared candidate." \
   --branch-ref codex/auto-research-evidence-writer
 ```
 
@@ -227,28 +218,19 @@ The append step writes one `research_hypothesis` rollout event and one
 `research_evidence` event per split. It skips existing event ids on retry, which
 keeps heartbeat-driven lanes replayable.
 
-After rollout evidence exists, the frontier packet also returns
-`auto_research_artifact_packet_v0`: a read-only artifact chain for the
-user-facing research answer. It carries the question, source map, claim ledger,
-contradiction review, citation packet, and decision packet derived from
-`research_evidence_graph_v0`. For real demos this should be rollout-backed, not
-fixture-only, so every claim can point back to LoopX rollout/evidence events
-without exposing raw logs or private source bodies.
-
-The experimental Frontstage board is also available as a read-only packet. It
-wraps the same frontier/evidence/artifact projection with product-facing value
-metrics, user gates, and the first-screen policy, so the dashboard is not a
-second source of truth:
+After rollout evidence exists, the frontier read path exposes the compact
+`research_evidence_graph_v0` plus promotion, retirement, and retry candidates.
+That graph is the only durable research read model in the kernel; product
+surfaces may consume it later, but they are not part of the auto-research
+control loop.
 
 ```bash
-loopx --format json auto-research board \
-  --goal-id loopx-auto-research-knn \
-  --agent-id codex-side-bypass
+loopx --format json auto-research frontier \
+  --goal-id loopx-auto-research-demo \
+  --agent-id hypothesis-proposer
 ```
 
-For fixture rehearsals, use `--fixture` instead of `--goal-id`. In both modes
-the board must remain experimental and must not take over README, hosted
-frontstage home, showcase index, hero, or primary CTA without owner review.
+For fixture rehearsals, use `--fixture` instead of `--goal-id`.
 
 ## Local Demo Supervisor
 
@@ -259,7 +241,7 @@ launch Codex, read session files, write LoopX state, or spend quota.
 
 ```bash
 loopx --format json auto-research demo-supervisor \
-  --goal-id loopx-auto-research-knn
+  --goal-id loopx-auto-research-demo
 ```
 
 The packet has two important product properties:
@@ -284,30 +266,29 @@ Operators can pass explicit lanes when rehearsing a real local demo:
 
 ```bash
 loopx --format json auto-research demo-supervisor \
-  --goal-id loopx-auto-research-knn \
-  --agent codex-product-capability:research-curator:research_curator \
-  --agent codex-side-bypass:hypothesis-mapper:hypothesis_mapper \
-  --agent codex-main-control:evidence-runner:evidence_runner \
-  --agent codex-value-explorer:evidence-verifier:evidence_verifier
+  --goal-id loopx-auto-research-demo \
+  --agent research-curator:research-curator:research_curator \
+  --agent hypothesis-proposer:hypothesis-proposer:hypothesis_proposer \
+  --agent research-executor:research-executor:research_executor \
+  --agent evaluator-promoter:evaluator-promoter:evaluator_promoter
 ```
 
 The third segment is optional for compatibility; when omitted, LoopX infers the
 role from the lane name or from the default role order. The v0 default uses
-three registered lanes: research curator, hypothesis mapper, and evidence
-runner. Evidence review is folded into the curator lane until a separately
-registered verifier lane is needed. The explicit `--agent` form remains the
-escape hatch for rehearsing a four-role layout.
+four registered research-role agents: research curator, hypothesis proposer,
+research executor, and evaluator/promoter. The explicit `--agent` form remains
+the escape hatch for rehearsing a custom four-role layout.
 
 When the dry-run packet is acceptable, the same command can launch visible
 local Codex CLI TUIs. This is intentionally opt-in:
 
 ```bash
 loopx auto-research demo-supervisor \
-  --goal-id loopx-auto-research-knn \
-  --agent codex-product-capability:research-curator:research_curator \
-  --agent codex-side-bypass:hypothesis-mapper:hypothesis_mapper \
-  --agent codex-main-control:evidence-runner:evidence_runner \
-  --agent codex-value-explorer:evidence-verifier:evidence_verifier \
+  --goal-id loopx-auto-research-demo \
+  --agent research-curator:research-curator:research_curator \
+  --agent hypothesis-proposer:hypothesis-proposer:hypothesis_proposer \
+  --agent research-executor:research-executor:research_executor \
+  --agent evaluator-promoter:evaluator-promoter:evaluator_promoter \
   --execute
 ```
 
@@ -324,7 +305,7 @@ itself does not write LoopX state or spend LoopX quota; any writeback must
 happen through the visible Codex lane's normal LoopX todo/evidence commands.
 All lanes share the same LoopX goal surface: registry, runtime root, frontier,
 todo projection, and evidence graph. Workspace isolation is not applied to
-every pane by default; only mutating evidence-runner attempts need a claimed
+every pane by default; only mutating research-executor attempts need a claimed
 git worktree or equivalent execution boundary.
 
 The live worker path stays separate from the supervisor. The supervisor makes
@@ -333,11 +314,12 @@ quota/frontier/todos and writes evidence through LoopX:
 
 ```bash
 loopx --format json auto-research worker-loop \
-  --goal-id loopx-auto-research-knn \
-  --agent-id codex-product-capability \
-  --agent-id codex-side-bypass \
-  --agent-id codex-main-control \
-  --max-rounds 3
+  --goal-id loopx-auto-research-demo \
+  --agent-id research-curator \
+  --agent-id hypothesis-proposer \
+  --agent-id research-executor \
+  --agent-id evaluator-promoter \
+  --max-rounds 4
 ```
 
 When the dry-run selects safe runnable work, add `--execute` and
@@ -351,7 +333,7 @@ launcher:
 
 ```bash
 loopx --format json auto-research demo-supervisor \
-  --goal-id loopx-auto-research-knn
+  --goal-id loopx-auto-research-demo
 ```
 
 The user should see four concrete things in the packet:
@@ -363,7 +345,7 @@ The user should see four concrete things in the packet:
   frontier`, and `codex-cli-bootstrap-message` commands;
 - a shared goal-surface contract showing that all panes use the same LoopX
   registry/runtime/frontier/evidence graph, while mutation isolation is reserved
-  for evidence-runner attempts;
+  for research-executor attempts;
 - a `start_script` array that can be copied into the user's shell only after
   the user sets `LOOPX_PROJECT`, `LOOPX_REGISTRY`, and
   `LOOPX_RUNTIME_ROOT`;
@@ -425,7 +407,7 @@ P0 candidates:
 - **Retry semantics.** Add `needs_retry` as a reusable outcome for
   incomplete/unscored research attempts, preserving branch/evidence refs.
 - **Split-aware evidence.** Make dev/held-out split labels first-class in
-  evidence events and showcase projections.
+  evidence events and evidence graph projections.
 
 P1 candidates:
 

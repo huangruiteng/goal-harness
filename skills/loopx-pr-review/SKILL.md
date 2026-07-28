@@ -1,6 +1,6 @@
 ---
 name: loopx-pr-review
-description: Use when the visible request starts with `/loopx-pr-review` or asks LoopX to review a repository PR queue by time window, open/unmerged status, merged/closed status, or current-day PR activity. Run `loopx pr-review` first, preserve the full packet contract, then read PR evidence and produce per-PR reviews with the five required blocks. Do not use for approving, commenting on, merging, self-merging, or admin-bypassing a specific PR; use `loopx-pr-merge` for those actions.
+description: Use when the visible request starts with `/loopx-pr-review` or asks LoopX to review a repository PR queue by time window, open/unmerged status, merged/closed status, or current-day PR activity. Run `loopx pr-review` first, preserve the full packet contract, then read PR evidence and produce per-PR reviews with the five required blocks, including code-volume necessity and concrete simplification analysis. Do not use for approving, commenting on, merging, self-merging, or admin-bypassing a specific PR; use `loopx-pr-merge` for those actions.
 ---
 
 # LoopX PR Review
@@ -34,8 +34,10 @@ Translate user filters only into these CLI options:
 - `--repo owner/repo` for an explicit repository;
 - `--since ISO` for an explicit time window;
 - `--state open`, `--state merged`, or `--state all` for state filters.
+- `--limit N` when the user explicitly requests a bounded batch.
 
-Default to the current `gh` repository and `--state all`. Treat words like
+Default to the current `gh` repository, `--state all`, and the CLI's normal
+100-PR group limit. Treat words like
 `today`, `open`, `closed`, or `merged` as review-queue filters. They do not
 mean "stats only" unless the user explicitly says `只统计`, `只列出`,
 `stats only`, `list only`, `不要 review`, or `不用分析`.
@@ -45,6 +47,7 @@ mean "stats only" unless the user explicitly says `只统计`, `只列出`,
 Keep these fields in model context from the first CLI packet:
 
 - `agent_response_contract`;
+- `result_completeness`;
 - `review_groups`;
 - `pull_requests[].review_template`;
 - `pull_requests[].evidence_commands`.
@@ -62,6 +65,7 @@ import sys
 p = json.load(open(sys.argv[1]))
 print(json.dumps({
   "agent_response_contract": p.get("agent_response_contract"),
+  "result_completeness": p.get("result_completeness"),
   "review_groups": p.get("review_groups"),
   "pull_requests": [
     {
@@ -77,6 +81,16 @@ PY
 rm -f "$packet"
 ```
 
+## Require Complete Exhaustive Queues
+
+When the user asks for `all`, `every`, `全部`, `每个`, or an exhaustive time
+window, do not start reviewing until `result_completeness.complete=true`.
+When it is false, rerun the same first command with
+`--limit <result_completeness.recommended_limit>`. Repeat until complete,
+preserving the latest full packet as the queue source of truth. Never infer
+completeness from `summary.total_pr_count`, a count equal to the limit, or the
+absence of a pagination error.
+
 ## Review Flow
 
 Review `review_groups.unmerged` first, then `review_groups.merged`. A queue
@@ -87,15 +101,58 @@ For each selected PR, read the PR evidence before writing the review. Prefer the
 packet's `evidence_commands`; equivalent targeted `gh pr view`, `gh pr diff
 --name-only`, and `gh pr diff --patch` commands are acceptable when needed.
 
+Treat `agent_response_contract.explanation_depth_contract` and each
+`review_template.sections[].agent_instruction` as the canonical detail policy.
+The skill owns routing and evidence discipline; it must not maintain a second,
+competing explanation checklist. For older packets without the depth contract,
+still explain context, architecture, implementation, validation, necessity, and
+risk for a reader who may not know the subsystem.
+
+Record the remote `headRefOid` before deep review and query it again before the
+verdict. If it changed, review the new head instead of carrying forward stale
+findings. Use a clean read-only worktree at the exact head when local execution
+or line-level evidence is useful, and name the reviewed short SHA in the answer.
+
 Do not fill the five-block review from title, labels, changed-file counts, or
 metadata risk hints alone. `metadata_risk_hint` is only for queue ordering.
 
 If the queue is too large for one response, review the highest-priority PRs
 first and say which PRs remain. Do not silently replace review with a summary.
 
+## Code Volume And Simplification Review
+
+For every selected PR, analyze whether its code volume is necessary for the
+shipped behavior and name concrete simplification opportunities. Do not treat a
+large diff as a defect by itself or reward a small diff that hides complexity.
+
+- Establish the changed-line shape from the exact reviewed base and head with
+  `git diff --stat`, `git diff --numstat`, or equivalent evidence. Separate
+  production code from tests/fixtures, docs, generated files, and mechanical
+  moves before judging implementation size.
+- Inspect the largest changed production files and the affected symbols, active
+  call sites, and compatibility contracts. Use line count to locate review
+  hotspots, not as the verdict.
+- Classify the volume as `necessary`, `partly avoidable`, or `not yet proven`.
+  Necessary volume may include a cohesive shipped behavior, a real migration or
+  compatibility contract, and focused semantic or regression coverage.
+- Look for avoidable volume in duplicated domain rules, speculative providers or
+  extension points without a caller, compatibility wrappers without a real
+  consumer, parameter-heavy helpers that join unrelated behavior, repeated
+  fixture assertions, and old entry points that should have been removed.
+- Propose a reduction only when it preserves the intended behavior and evidence.
+  Cite the file or symbol, explain what can be deleted or collapsed, and name the
+  validation that would keep the smaller version honest. If no safe reduction is
+  supported by the diff, explicitly say the volume is justified.
+
+Keep the five-heading output contract: put the measured shape and structural
+hotspots under `具体改动`, and put the necessity verdict plus the highest-value
+simplification direction under `我的整体评价`. A code-volume conclusion without
+diff and call-site evidence is incomplete.
+
 ## Output Contract
 
-For each reviewed PR, use exactly these five headings:
+Lead with a one-line evidence-based verdict and highest-severity reason. Then use
+exactly these five headings for each reviewed PR:
 
 1. `动机`
 2. `改动思路`
@@ -103,11 +160,12 @@ For each reviewed PR, use exactly these five headings:
 4. `对主干的风险`
 5. `我的整体评价`
 
-Use the packet's blank `review_template` only as structure and word-count hint.
-Do not copy fake/example content into the sections. Fill the content after
-reading PR body, files, checks, and diff. Small PRs usually fit in 100-200
-Chinese characters total; use more only when risk or diff complexity requires
-it.
+Use the packet's blank `review_template` as the required structure and minimum
+detail signal, not as fake/example content. Fill each section only after reading
+PR body, files, checks, and diff. Follow the packet's per-section ranges and
+instructions as depth signals rather than padding. Avoid title-only summaries
+such as "improves docs" or "low risk", and distinguish intended behavior from
+what the implementation and validation actually prove.
 
 ## Failure And Fallback
 

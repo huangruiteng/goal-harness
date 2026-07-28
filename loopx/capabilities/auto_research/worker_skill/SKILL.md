@@ -27,36 +27,39 @@ Identity comes from LoopX control-plane metadata:
 No role owns the full graph. Do not infer role from pane title, branch name,
 tmux window name, or the section of this skill that happens to be visible.
 
-## First Commands
+## Pane Tick Contract
 
-Before doing research work, resolve identity and frontier from LoopX:
+The generic multi-agent kernel owns the default LoopX project/doc-registry
+skills and the fixed A2A wake prompt. This skill should stay role-specific:
+use it after the pane-local tick has resolved identity, quota, and frontier
+from LoopX.
 
-```bash
-loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" \
-  --runtime-root "$HOME/.codex/loopx" \
-  quota should-run --goal-id "$LOOPX_GOAL_ID" --agent-id "$LOOPX_AGENT_ID"
+Compact frontier command: `loopx --format json auto-research frontier --goal-id "$LOOPX_GOAL_ID" --agent-id "$LOOPX_AGENT_ID"`. Also honor `quota should-run`.
 
-loopx --format json auto-research frontier \
-  --goal-id "$LOOPX_GOAL_ID" \
-  --agent-id "$LOOPX_AGENT_ID"
-```
+If the launcher exported `LOOPX_ROLE_ID`, `LOOPX_ROLE_PROFILE_REF`, or a profile
+JSON path, compare those values with the quota and frontier packets. Stop when
+they disagree. Do not guess the intended role.
 
-Equivalent compact frontier command: `loopx --format json auto-research frontier --goal-id "$LOOPX_GOAL_ID" --agent-id "$LOOPX_AGENT_ID"`.
+If the role profile includes `successor_todos`, treat those declarations as the
+only role-local way to create the next agent todo. A successor declaration must
+name the target agent and include a `todo_command_template` such as
+`loopx todo add ... --claimed-by {target_agent_id_shell}`. In visible
+auto-research, the pane-local tick is a guard/frontier read, not a research
+writer. Render and run a successor todo only after the visible role has authored
+real public-safe evidence or notes that satisfy the declared condition. Do not
+invent an extra continuation plan in prose, and do not ask a leader pane to pick
+the next role.
 
-If the launcher exported `LOOPX_ROLE_ID`, `LOOPX_ROLE_PROFILE_REF`,
-`LOOPX_ROLE_PHASE`, or a profile JSON path, compare those values with the quota
-and frontier packets. Stop when they disagree. Do not guess the intended role.
+Before completing with no follow-up, compare the evidence summary with
+`role_profile.continuation_policy`. When the target is still unmet and a
+declared successor condition is satisfied, create or link that successor first.
+No-follow-up is only valid after the target is reached, a projected blocker or
+user gate stops the lane, or evidence-backed retirement closes the frontier.
 
-For a visible demo rehearsal, inspect the dry-run supervisor before execution:
-
-```bash
-loopx --format json auto-research demo-supervisor \
-  --goal-id "$LOOPX_GOAL_ID"
-```
-
-Only run with `--execute` when the user explicitly opted into starting visible
-local panes. The default rehearsal must not start Codex, write LoopX state, or
-spend quota by itself.
+For a visible demo rehearsal, `auto-research demo-supervisor` is read-only by
+default; use `--execute` only when the user opted into starting visible local
+panes. The default rehearsal must not start Codex, write LoopX state, or spend
+quota by itself.
 
 ## Role Resolution
 
@@ -65,9 +68,9 @@ Map the role profile to one of these sections:
 | Role id or lane | Skill section | Authority source |
 | --- | --- | --- |
 | `research_curator` | Research curator | role profile, quota packet, contract todo |
-| `hypothesis_mapper`, `hypothesis-runner` when proposing | Hypothesis mapper | role profile, frontier packet, hypothesis todo |
-| `evidence_runner`, `hypothesis-runner` when executing | Evidence runner | role profile, selected frontier item, write scope |
-| `evidence_verifier`, `evidence-promoter` | Evidence verifier | role profile, evidence packet, promotion policy |
+| `hypothesis_proposer` | Hypothesis proposer | role profile, frontier packet, hypothesis todo |
+| `research_executor` | Research executor | role profile, selected frontier item, write scope |
+| `evaluator_promoter` | Evaluator/promoter | role profile, evidence packet, promotion policy |
 | `research-narrator`, `product_narrator` | Projection narrator | read-only projection packet and first-screen gate |
 | `control-plane-guard` | Control-plane guard | quota/status/check packet and repository rules |
 
@@ -89,6 +92,21 @@ Stop and report the exact blocker when any of these are true:
 - the work would require a leader/coordinator agent to select, promote, or
   rewrite the whole graph.
 
+## Benchmark Workspace Hints
+
+When the role profile or workspace exposes a benchmark contract, use that
+contract before writing research claims. For KNN-style demos this means:
+
+- read `research_contract.public.json`, `README.md`, and the editable solver;
+- edit only the declared editable scope, such as `solution.py`;
+- run the declared dev command before proposing promotion;
+- run the declared held-out command before claiming a validated improvement;
+- summarize mechanism, command, score, and protected-scope cleanliness.
+- pass the contract and eval JSON outputs to `loopx auto-research evidence`
+  rather than hand-authoring an evidence packet.
+
+The pane-local tick can point at a todo; it cannot count as benchmark evidence.
+
 ## Research Curator
 
 Use when the role owns objective, metric, editable scope, protected scope,
@@ -104,7 +122,7 @@ Allowed actions:
 Useful command:
 
 ```bash
-loopx --format json auto-research quickstart \
+loopx --format json auto-research frontier \
   --goal-id "$LOOPX_GOAL_ID" \
   --agent-id "$LOOPX_AGENT_ID"
 ```
@@ -122,7 +140,7 @@ Must not:
 - run experiments;
 - present unsupported metrics as product value.
 
-## Hypothesis Mapper
+## Hypothesis Proposer
 
 Use when the role turns ideas into todo-backed hypotheses, refinements,
 successors, or retirements.
@@ -147,7 +165,7 @@ Must not:
 - select a winner;
 - hide contradictory evidence by replacing a hypothesis with a cleaner story.
 
-## Evidence Runner
+## Research Executor
 
 Use when the role runs exactly one selected hypothesis in an isolated
 workspace/worktree and records attempt evidence.
@@ -157,49 +175,27 @@ Allowed actions:
 - claim the current frontier item selected for this agent;
 - edit only allowed solution or experiment scope;
 - run dev or holdout evaluation only when the contract permits it;
-- build an `auto_research_evidence_packet_v0` or equivalent public-safe event.
+- build an `auto_research_evidence_packet_v0` or equivalent public-safe event;
+- create only the role-declared successor todo, such as a holdout validation
+  todo or post-holdout verifier summary todo, when the profile's
+  `successor_todos.condition` is satisfied.
 
-Useful command after a protected eval result exists:
+Successor routing belongs here, not in a central projector: the role profile
+must name the target agent and provide the `todo_command_template`, typically a
+normal `loopx todo add ... --claimed-by {target_agent_id_shell}` command. The
+kernel only validates the target agent and executes the normal LoopX todo
+writer.
 
-```bash
-loopx --format json auto-research evidence \
-  --contract "$RESEARCH_CONTRACT_JSON" \
-  --eval-result "$EVAL_RESULT_JSON" \
-  --hypothesis-id "$HYPOTHESIS_ID" \
-  --todo-id "$TODO_ID" \
-  --agent-id "$LOOPX_AGENT_ID" \
-  --claimed-by "$LOOPX_AGENT_ID" \
-  --mechanism-family "$MECHANISM_FAMILY" \
-  --hypothesis "$HYPOTHESIS_TEXT"
-```
+Evidence writeback should use an explicit lane-authored evidence packet or
+normal LoopX todo/evidence commands exposed by the current state. Append only
+after reviewing packet boundary, then capture compact live evidence from the
+lane-authored packet when visible lanes are accepted. Do not use worker-turn to
+manufacture dev or holdout metrics.
 
-Append only after review of the packet and boundary:
-
-```bash
-loopx --format json auto-research append-evidence \
-  --packet "$AUTO_RESEARCH_EVIDENCE_PACKET_JSON" \
-  --dry-run
-
-append_result="${APPEND_RESULT_JSON:-.local/evidence-runner/append-result.public.json}"
-loopx --format json auto-research append-evidence \
-  --packet "$AUTO_RESEARCH_EVIDENCE_PACKET_JSON" \
-  --output "$append_result"
-```
-
-After a real append succeeds in a visible lane, capture compact live evidence
-from the lane-authored packet and append result:
-
-```bash
-live_evidence="${LIVE_CODEX_E2E_EVIDENCE_JSON:-.local/evidence-runner/live-codex-e2e-evidence.public.json}"
-loopx --format json auto-research capture-live-evidence \
-  --packet "$AUTO_RESEARCH_EVIDENCE_PACKET_JSON" \
-  --append-result "$append_result" \
-  --agent-id "$LOOPX_AGENT_ID" \
-  --lane-count "${LOOPX_VISIBLE_LANE_COUNT:-1}" \
-  --visible-lanes-accepted \
-  --output "$live_evidence" \
-  --execute
-```
+After a real append/capture succeeds for the selected frontier todo, close out
+that selected todo with compact public-safe evidence. Dependent evaluator or
+successor lanes usually resume from `todo_done:<selected_todo_id>`; leaving the
+executor todo open after supported evidence strands the next round.
 
 Must not:
 
@@ -207,7 +203,7 @@ Must not:
 - promote results;
 - omit failed, inconclusive, or guardrail-failed attempts.
 
-## Evidence Verifier
+## Evaluator/Promoter
 
 Use when the role reads evidence and classifies it as supported,
 contradicted, retry-needed, promotion-ready, or retirement-ready.
@@ -220,7 +216,11 @@ Allowed actions:
   evidence;
 - request retry with a bounded reason and resumable ref;
 - create promotion, retirement, or gate candidates;
-- write compact validation notes for the next worker.
+- write compact validation notes for the next worker;
+- add only the role-declared successor todo when evidence needs another bounded
+  split, using the profile's `todo_command_template`.
+- do not close with no-follow-up while `continuation_policy` still reports an
+  unmet target and a role-declared successor condition is satisfied.
 
 Verification checklist:
 
@@ -242,7 +242,7 @@ is a transition duty in v0 and may become a separate role later.
 
 Allowed actions:
 
-- render `research_showcase_projection_v0` from promoted, retired, and retry
+- render `research_evidence_graph_v0` from promoted, retired, and retry
   evidence;
 - update public-safe docs or Frontstage surfaces only from projection refs;
 - preserve failed and retired directions as useful learning.
@@ -250,7 +250,7 @@ Allowed actions:
 Useful command:
 
 ```bash
-loopx --format json auto-research board \
+loopx --format json auto-research frontier \
   --goal-id "$LOOPX_GOAL_ID" \
   --agent-id "$LOOPX_AGENT_ID"
 ```
@@ -297,7 +297,7 @@ by the role:
 - `research_hypothesis_v0`;
 - `auto_research_evidence_packet_v0`;
 - promotion/retirement/gate candidate;
-- `research_showcase_projection_v0`;
+- `research_evidence_graph_v0`;
 - LoopX todo completion plus next todo/rationale;
 - `loopx refresh-state` and one quota spend only after validation when the
   quota contract permits it.

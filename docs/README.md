@@ -8,15 +8,24 @@ incident report, or launch draft.
 
 - [Project README](../README.md): product positioning, showcases, and the
   shortest quick start.
+- [User manual (Feishu/Lark)](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg):
+  public onboarding guide with Quick Start, product/technical concepts, FAQ,
+  and selected cases.
 - [Getting started](guides/getting-started.md): agent-first start, manual
   installation, project connection, diagnosis, daily workflow, heartbeats,
   dashboard, development, and command reference.
 - [Newcomer command path](guides/newcomer-command-path.md): the minimal product
   path for `/loopx`, `/loopx <goal>`, and one CLI quickstart before the full
   command catalog.
+- [Custom Agent runner integration](guides/custom-agent-runner-integration.md):
+  the concise CLI, lightweight skill, self-driven tick, and decentralized
+  handoff model for an existing remote runner or workflow supervisor.
 - [Auto-research command path](guides/auto-research-command-path.md): the
   shortest visible route from a clean workspace to an inspectable multi-agent
   auto-research rehearsal with stop and takeover controls.
+- [Multi-agent product recipe](guides/multi-agent-product-recipe.md): the
+  product-author path for keeping both user config and product presets thin
+  while the generic kernel owns runner, TUI, tick, status, and host controls.
 - [Product vision](product/vision.md): long-term product direction, Loop Agent
   definition, maintainer-first management surface, and open-source anchor
   strategy.
@@ -33,6 +42,11 @@ incident report, or launch draft.
   shortest public route from no-clone install to one-message TUI bootstrap and
   proof-capture fixtures.
 - [Architecture](architecture.md): core concepts and control-plane shape.
+- [Extensions and capabilities](reference/extensions.md): declarative manifests,
+  doctor-verified subprocess activation, and reversible provider lifecycle.
+- [Project skill delivery](reference/project-skill-delivery.md): managed,
+  project-local discovery for release-owned agent skills without domain
+  authority expansion.
 - [Integration guide](integration.md): how to connect a project to LoopX,
   including public-safe Lark or Feishu reply card payloads.
 - [Showcases](showcases/README.md): public-safe cases, reproducible demos, and
@@ -44,6 +58,15 @@ incident report, or launch draft.
   surfaces.
 - [Benchmark developer workflow](benchmark-developer-workflow.md): how to run,
   observe, and ingest benchmark slices as a developer-facing product workflow.
+- [Developer guide](development/README.md): the contributor entry point for
+  architecture, validation, public boundaries, and release contracts.
+- [Control-plane developer course](development/control-plane-course/README.md):
+  eight Chinese lectures that follow the real CLI, state transitions, core
+  functions, smokes, and extension seams from first loop to multi-agent use.
+- [Testing and quality](development/testing-and-quality.md): the bilingual
+  quality stack from unit contracts and public smokes through canary, CLI
+  output budgets, decision replay, low-frequency model behavior, and release
+  outcome baselines.
 - [State interaction model](state-interaction-model.md): user, agent, and state
   channel flow.
 - [Heartbeat automation prompt](heartbeat-automation-prompt.md): current
@@ -61,6 +84,10 @@ incident report, or launch draft.
   published, or retained.
 - [Contributor tasks](../CONTRIBUTOR_TASKS.md): visible public work, sorted by
   complexity and ownership.
+- [Project governance](../GOVERNANCE.md), [authors and contributors](../AUTHORS.md),
+  [project history](project/history.md), and [name and marks](../TRADEMARKS.md):
+  maintainer authority, public attribution, evidence-backed milestones, and
+  community identity guidance.
 
 ## Stable Reference
 
@@ -70,6 +97,8 @@ incident report, or launch draft.
 - [Core control-plane graphs](product/core-control-plane/README.md)
 - [State interaction model](state-interaction-model.md)
 - [Interaction pattern catalog](interaction-pattern-catalog.md)
+- [Extensions and capabilities](reference/extensions.md)
+- [Project skill delivery](reference/project-skill-delivery.md)
 - [Field-derived patterns](field-derived-patterns.md)
 - [Public/private boundary](public-private-boundary.md)
 
@@ -77,7 +106,9 @@ incident report, or launch draft.
 
 - [Getting started](guides/getting-started.md)
 - [Newcomer command path](guides/newcomer-command-path.md)
+- [Custom Agent runner integration](guides/custom-agent-runner-integration.md)
 - [Auto-research command path](guides/auto-research-command-path.md)
+- [Multi-agent product recipe](guides/multi-agent-product-recipe.md)
 - [Integration guide](integration.md)
 - [Benchmark developer workflow](benchmark-developer-workflow.md)
 - [Attention queue](attention-queue.md)
@@ -86,6 +117,16 @@ incident report, or launch draft.
 - [Authority source registration](authority-source-registration.md)
 - [New-project Codex prompt](new-project-codex-prompt.md)
 
+### Developer Workflows
+
+- [Developer guide](development/README.md)
+- [Control-plane developer course](development/control-plane-course/README.md)
+- [Testing and quality](development/testing-and-quality.md)
+- [Benchmark developer workflow](benchmark-developer-workflow.md)
+- [Release readiness](product/release-readiness.md)
+- [Interface budget contract](interface-budget-contract.md)
+- [Public/private boundary](public-private-boundary.md)
+
 ### Contracts
 
 - [Status data contract](status-data-contract.md)
@@ -93,10 +134,12 @@ incident report, or launch draft.
 - [OpenViking session memory adapter v0](reference/protocols/openviking-session-memory-adapter-v0.md)
 - [Interface budget contract](interface-budget-contract.md)
 - [Host integration surface v0](reference/protocols/host-integration-surface-v0.md)
+- [Computer-use runtime connector v0](reference/protocols/computer-use-runtime-connector-v0.md)
 - [Host integration plugin plan v0](reference/protocols/host-integration-plugin-plan-v0.md)
 - [Codex App host command registry v0](reference/protocols/codex-app-host-command-registry-v0.md)
-- [Local agent launch plan v0](reference/protocols/local-agent-launch-plan-v0.md)
+- [Local agent launch plan v1](reference/protocols/local-agent-launch-plan-v1.md)
 - [Multi-agent visible launcher v0](reference/protocols/multi-agent-visible-launcher-v0.md)
+- [Goal vision replan contract v0](reference/protocols/goal-vision-replan-contract-v0.md)
 - [Runtime connector catalog](runtime-connector-catalog.md)
 - [Reward gate direct-write contract](reward-gate-direct-write-contract.md)
 - [Worker bridge install contract](worker-bridge-install-contract.md)
@@ -110,6 +153,7 @@ incident report, or launch draft.
 
 - [Product vision](product/vision.md)
 - [Release readiness](product/release-readiness.md)
+- [LoopX Turn Codex CLI quickstart](product/loopx-turn-codex-cli-quickstart.md)
 - [Public adoption loop](product/public-adoption-loop.md)
 - [Codex CLI TUI-first loop](product/codex-cli-tui-loop.md)
 - [Reward-style replanning hints](product/reward-style-replanning.md)
@@ -118,9 +162,17 @@ incident report, or launch draft.
 - [Long-task cadence hint](long-task-cadence-policy.md)
 - [Dreaming exploration lane](dreaming-exploration-lane.md)
 - [Session runtime control-plane adapter](session-runtime-control-plane-adapter.md)
-- [Codex subagent orchestration](codex-subagent-orchestration.md)
+- [Codex peer task orchestration](codex-subagent-orchestration.md)
 - [Dashboard frontend selection](dashboard-frontend-selection.md)
 - [Experiment controller milestone](experiment-controller-milestone.md)
+
+### Project Governance
+
+- [Project governance](../GOVERNANCE.md)
+- [Authors and contributors](../AUTHORS.md)
+- [Project history](project/history.md)
+- [Name and marks](../TRADEMARKS.md)
+- [Contributing](../CONTRIBUTING.md)
 
 ### Research And Evidence
 
@@ -149,6 +201,8 @@ incident report, or launch draft.
 - Put public launch, narrative, demo, and PR copy drafts under `docs/outreach/`.
 - Put stable product-direction notes that cross individual contracts under
   `docs/product/`.
+- Put stable contributor workflows and quality-system guidance under
+  `docs/development/`.
 - Put machine-facing protocol contracts under `docs/reference/`.
 - Every new doc should be linked from this index or from a subdirectory
   `README.md`. If it is not worth indexing, it probably belongs in local notes

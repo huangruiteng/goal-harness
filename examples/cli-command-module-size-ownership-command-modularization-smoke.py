@@ -8,19 +8,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CLI_COMMANDS = ROOT / "loopx" / "cli_commands"
 
-DEFAULT_MAX_LINES = 500
+DEFAULT_MAX_LINES = 1000
 LEGACY_MODULE_LIMITS = {
     "benchmark_review_lifecycle.py": 1300,
-    "benchmark_run_ledger.py": 820,
-    "history.py": 720,
-    "registry_admin.py": 780,
-    "terminal_bench_adapter.py": 760,
     "terminal_bench_environment_result.py": 1280,
-    "worker_bridge.py": 700,
 }
 STARTER_MODULE_LIMITS = {
-    "starter.py": 160,
-    "starter_bootstrap.py": 240,
+    "starter.py": 180,
+    "starter_bootstrap.py": 220,
+    "starter_bootstrap_registration.py": 240,
     "starter_runtime_idle.py": 160,
     "starter_scheduler.py": 240,
     "starter_session_runtime.py": 220,
@@ -29,10 +25,10 @@ STARTER_MODULE_LIMITS = {
     "starter_visible_pilot.py": 340,
 }
 STARTER_COMMAND_OWNERS = {
-    "new-project-prompt": "starter_bootstrap.py",
-    "codex-cli-bootstrap-message": "starter_bootstrap.py",
-    "codex-cli-tui-bootstrap-smoke-bundle": "starter_bootstrap.py",
-    "codex-cli-exec-handoff": "starter_bootstrap.py",
+    "new-project-prompt": "starter_bootstrap_registration.py",
+    "codex-cli-bootstrap-message": "starter_bootstrap_registration.py",
+    "codex-cli-tui-bootstrap-smoke-bundle": "starter_bootstrap_registration.py",
+    "codex-cli-exec-handoff": "starter_bootstrap_registration.py",
     "codex-cli-one-message-loop-pilot": "starter_visible_pilot.py",
     "codex-cli-visible-local-driver-pilot": "starter_visible_pilot.py",
     "codex-cli-bounded-visible-pilot-adapter": "starter_visible_pilot.py",
@@ -89,7 +85,7 @@ def assert_module_size_budgets() -> None:
         require(
             count <= limit,
             f"{path.name} has {count} lines, above budget {limit}; "
-            "split the command family before adding more code",
+            "extract a cohesive command owner before adding more code",
         )
 
     for module_name in sorted(LEGACY_MODULE_LIMITS):

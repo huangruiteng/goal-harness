@@ -76,6 +76,9 @@ runtime contract, benchmark route, or launch draft.
   driver planner that keeps TUI bootstrap primary, composes quota/idle/fallback
   checks, validates visible-session proof fixtures, and treats `codex exec` as
   an explicit fallback.
+- [LoopX Turn Codex CLI quickstart](loopx-turn-codex-cli-quickstart.md): the
+  partner-facing isolated-headless path reduced to the built-in Agent CLI
+  adapter, one independent validator, one command, and five typed outcomes.
 - [Codex CLI visible proof capture protocol](codex-cli-visible-proof-capture-protocol.md):
   the opt-in public-safe procedure for turning `resume` / `remote-control`
   signals into evidence, with stop conditions that keep one-message TUI
@@ -102,9 +105,9 @@ runtime contract, benchmark route, or launch draft.
   visibly through the first guard and steering decision, while scheduled
   same-TUI attach stays blocked until proof and idle evidence pass.
 - [Agent profile contract](agent-profile-contract.md): the registry-owned
-  identity/scope contract for primary and side agents, including worktree and
-  review handoff policy, while keeping todo ownership in `claimed_by` and future
-  leases.
+  advisory capability/scope contract for peers, while task and repository
+  policy own workspace/review requirements and todos retain soft ownership
+  through `claimed_by`, with optional hard leases for explicit contention cases.
 - [Non-technical operator status model](nontechnical-operator-status-model.md):
   first-screen Agent Work Feed and card model for people who need to review
   agent outputs, progress, blockers, next moves, signal inbox, anchor
@@ -114,6 +117,13 @@ runtime contract, benchmark route, or launch draft.
   maintainer-first product design for signal inbox, selected anchors, agent
   lanes, review feed, and performance review so long-running Loop Agents can be
   evaluated by value, quality, cost, and user attention.
+- [Presentation surface layout](presentation-surface-layout.md):
+  repository boundary for frontend apps, display projections, renderers, sinks,
+  capability facades, and value-connector separation.
+- [Agent management observability MVP](agent-management-observability-mvp.md):
+  read-only ops dashboard slice for registered agents, claimed todos, state
+  badges, evidence/handoff links, quota/cadence hints, and workspace hints
+  without introducing a dispatcher or second task runtime.
 - [Complex request planning intake](complex-request-planning-intake.md):
   bounded intake pattern for turning a large mixed strategy request into a
   small typed todo batch with claim decisions, safe summaries, and a visible
@@ -122,11 +132,18 @@ runtime contract, benchmark route, or launch draft.
   value model for Loop Agents that separates quantity, quality, token cost, and
   user attention cost without turning one benchmark score into a universal
   product claim.
+- [Agent-facing interaction and trajectory quality](agent-facing-trajectory-quality.md):
+  Chinese project note on bounded turn context, trajectory-hygiene monitoring,
+  semantic parity, landed PR evidence, and a conservative optimization roadmap.
 - [Loop Engineering principles and pitfalls](loop-engineering-principles-and-pitfalls.md):
   short public-safe digest of the operating rules behind source of truth, human
   gates, safe fallback, feedback, compact evidence, quota, and performance
   review. A Chinese version is available at
   [Loop Engineering 原则与常见坑](loop-engineering-principles-and-pitfalls.zh.md).
+- [Beginner loop presets](beginner-loop-presets.md): recommendation matrix for
+  turning lightweight loop-engineering starter patterns into LoopX-native
+  beginner presets, opt-in L2 sweepers, readiness score, and README structure
+  without adding a second state runtime.
 - [Frontstage two-surface strategy](frontstage-two-surface-strategy.md): route,
   data-source, visual-freedom, validation, and roadmap boundaries between the
   public showcase/homepage surface and the real local ops control-plane

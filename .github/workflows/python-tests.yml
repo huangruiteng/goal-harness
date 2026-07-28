@@ -1,0 +1,65 @@
+name: Python Tests
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/python-tests.yml"
+      - "loopx/**"
+      - "tests/**"
+      - "pyproject.toml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/python-tests.yml"
+      - "loopx/**"
+      - "tests/**"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -e ".[test]"
+
+      - name: Lint test suite
+        run: >-
+          python -m ruff check
+          tests
+          loopx/canary
+          loopx/control_plane
+          loopx/domain_packs
+          loopx/presentation
+
+      - name: Type-check kernel contracts
+        run: python -m mypy
+
+      - name: Qualify agent-facing CLI output
+        run: python examples/control_plane/cli-output-budget-regression-smoke.py
+
+      - name: Run fast tests
+        run: >-
+          python -m pytest -q -n 2
+          --cov=loopx
+          --cov-report=term
+          --cov-fail-under=19.6

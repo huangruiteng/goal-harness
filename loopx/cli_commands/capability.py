@@ -6,10 +6,10 @@ from collections.abc import Callable
 from ..capabilities.catalog import (
     build_capability_catalog_packet,
     build_capability_detail_packet,
-    capability_ids,
     render_capability_catalog_markdown,
     render_capability_detail_markdown,
 )
+from ..extensions.runtime import default_extension_state_file
 
 
 PrintPayload = Callable[
@@ -18,6 +18,19 @@ PrintPayload = Callable[
 ]
 FormatSelector = Callable[..., str]
 AddFormat = Callable[[argparse.ArgumentParser], None]
+
+
+def _add_extension_manifest_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--extension-manifest",
+        action="append",
+        default=[],
+        help=(
+            "Declare one extension manifest for this catalog read without "
+            "installing or enabling it. Repeat for multiple manifests."
+        ),
+    )
+    parser.set_defaults(capability_operation_parser=parser)
 
 
 def register_capability_commands(
@@ -37,6 +50,7 @@ def register_capability_commands(
         help="List implemented product capability paths.",
     )
     add_subcommand_format(list_parser)
+    _add_extension_manifest_argument(list_parser)
     show_parser = capability_sub.add_parser(
         "show",
         help="Show CLI, protocol, smoke, and boundary details for a capability.",
@@ -44,26 +58,39 @@ def register_capability_commands(
     add_subcommand_format(show_parser)
     show_parser.add_argument(
         "capability_id",
-        choices=capability_ids(),
         help="Capability id to inspect.",
     )
+    _add_extension_manifest_argument(show_parser)
 
 
 def handle_capability_command(
     args: argparse.Namespace,
     *,
+    runtime_root_arg: str | None,
     output_format: FormatSelector,
     print_payload: PrintPayload,
 ) -> int | None:
     if args.command != "capability":
         return None
-    if args.capability_command == "list":
-        payload = build_capability_catalog_packet()
-        renderer = render_capability_catalog_markdown
-    elif args.capability_command == "show":
-        payload = build_capability_detail_packet(args.capability_id)
-        renderer = render_capability_detail_markdown
-    else:
-        raise ValueError("capability requires `list` or `show`")
+    manifest_paths = tuple(args.extension_manifest)
+    state_file = default_extension_state_file(runtime_root_arg)
+    try:
+        if args.capability_command == "list":
+            payload = build_capability_catalog_packet(
+                manifest_paths,
+                extension_state_file=state_file,
+            )
+            renderer = render_capability_catalog_markdown
+        elif args.capability_command == "show":
+            payload = build_capability_detail_packet(
+                args.capability_id,
+                manifest_paths,
+                extension_state_file=state_file,
+            )
+            renderer = render_capability_detail_markdown
+        else:
+            raise ValueError("capability requires `list` or `show`")
+    except ValueError as exc:
+        args.capability_operation_parser.error(str(exc))
     print_payload(payload, output_format(args), renderer)
     return 0

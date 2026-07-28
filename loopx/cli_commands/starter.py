@@ -4,7 +4,7 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
-from ..capabilities.cross_runtime import (
+from ..control_plane.handoff.cross_runtime_impl_review import (
     DEFAULT_GOAL_ID as DEFAULT_IMPL_REVIEW_GOAL_ID,
     DEFAULT_IMPLEMENTER_AGENT_ID,
     DEFAULT_REQUIREMENT,
@@ -22,10 +22,8 @@ from ..demo import (
     render_demo_markdown,
     run_demo,
 )
-from .starter_bootstrap import (
-    handle_starter_bootstrap_command,
-    register_starter_bootstrap_commands,
-)
+from .starter_bootstrap import handle_starter_bootstrap_command
+from .starter_bootstrap_registration import register_starter_bootstrap_commands
 from .starter_scheduler import (
     handle_starter_scheduler_command,
     register_starter_scheduler_commands,

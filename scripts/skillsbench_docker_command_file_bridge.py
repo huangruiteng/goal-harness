@@ -12,11 +12,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
+import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -26,6 +31,10 @@ from loopx.benchmark_adapters.skillsbench_remote_bridge import (  # noqa: E402
     SKILLSBENCH_REMOTE_COMMAND_FILE_BRIDGE_PROBE_REQUEST_SCHEMA_VERSION,
     build_skillsbench_remote_command_file_bridge_probe_response,
 )
+from loopx.benchmark_core.container_exec import (  # noqa: E402
+    parse_container_exit_status,
+    wrap_container_command_with_exit_status,
+)
 
 
 MARKER_CONTENT = "loopx-skillsbench-docker-bridge-probe"
@@ -34,6 +43,7 @@ OPERATION_RESPONSE_SCHEMA_VERSION = (
 )
 MAX_CAPTURE_BYTES = 200_000
 ALLOWED_SANDBOX_PATH_ROOTS = ("/app", "/tmp", "/root")
+BRIDGE_TEMP_ROOT = "/tmp/loopx-skillsbench-command-file-bridge"
 
 
 def _json_response(payload: dict[str, Any]) -> int:
@@ -131,6 +141,132 @@ class DockerCommandFileBridge:
             check=False,
         )
 
+    @staticmethod
+    def _docker_socket_path() -> str | None:
+        docker_host = os.environ.get("DOCKER_HOST", "").strip()
+        if docker_host.startswith("unix://"):
+            return docker_host.removeprefix("unix://")
+        if docker_host:
+            return None
+        return "/var/run/docker.sock"
+
+    def _resolve_container_id(self, *, timeout_seconds: int) -> str | None:
+        socket_path = self._docker_socket_path()
+        if not socket_path:
+            return None
+        filters = {
+            "label": [
+                f"com.docker.compose.project={self.project_name}",
+                f"com.docker.compose.service={self.service}",
+            ],
+            "status": ["running"],
+        }
+        url = (
+            "http://localhost/containers/json?all=1&filters="
+            + quote(json.dumps(filters, separators=(",", ":")), safe="")
+        )
+        try:
+            proc = subprocess.run(
+                [
+                    "curl",
+                    "--silent",
+                    "--show-error",
+                    "--fail",
+                    "--unix-socket",
+                    socket_path,
+                    url,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout_seconds + 10,
+                check=False,
+            )
+        except OSError:
+            return None
+        if proc.returncode != 0:
+            return None
+        try:
+            containers = json.loads(proc.stdout)
+            matches = [
+                str(container.get("Id") or "").strip()
+                for container in containers
+                if isinstance(container, dict) and container.get("Id")
+            ]
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            return None
+        return matches[0] if len(matches) == 1 else None
+
+    def _remove_container_path(
+        self, path: str, *, recursive: bool, timeout_seconds: int
+    ) -> None:
+        try:
+            self._compose_exec(
+                ("rm -rf -- " if recursive else "rm -f -- ") + shlex.quote(path),
+                timeout_seconds=timeout_seconds,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    def _read_container_file_via_copy(
+        self,
+        path: str,
+        *,
+        max_bytes: int,
+        timeout_seconds: int,
+    ) -> tuple[int, bytes, bytes]:
+        staged_path = f"{BRIDGE_TEMP_ROOT}/{uuid.uuid4().hex}.bounded"
+        try:
+            stage_proc = self._compose_exec(
+                "mkdir -p "
+                + shlex.quote(BRIDGE_TEMP_ROOT)
+                + " && dd if="
+                + shlex.quote(path)
+                + " of="
+                + shlex.quote(staged_path)
+                + " bs="
+                + shlex.quote(str(max_bytes + 1))
+                + " count=1 status=none",
+                timeout_seconds=timeout_seconds,
+            )
+            if stage_proc.returncode != 0:
+                return stage_proc.returncode, b"", stage_proc.stderr
+            container_id = self._resolve_container_id(
+                timeout_seconds=timeout_seconds
+            )
+            if not container_id:
+                return 1, b"", b"docker container resolution failed"
+            with tempfile.TemporaryDirectory(
+                prefix="loopx-skillsbench-docker-copy-"
+            ) as tmp:
+                destination = Path(tmp) / "payload"
+                try:
+                    copy_proc = subprocess.run(
+                        [
+                            "docker",
+                            "cp",
+                            f"{container_id}:{staged_path}",
+                            str(destination),
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=timeout_seconds + 10,
+                        check=False,
+                    )
+                except OSError:
+                    return 1, b"", b"docker copy unavailable"
+                if copy_proc.returncode != 0:
+                    return copy_proc.returncode, b"", copy_proc.stderr
+                try:
+                    return 0, destination.read_bytes(), b""
+                except OSError as exc:
+                    return 1, b"", str(exc).encode("utf-8", errors="replace")
+        finally:
+            self._remove_container_path(
+                staged_path,
+                recursive=False,
+                timeout_seconds=timeout_seconds,
+            )
+
     def run_operation(self, request: dict[str, Any]) -> int:
         operation = str(request.get("operation") or "").strip()
         if operation not in {"exec", "read_file", "write_file", "cleanup"}:
@@ -172,27 +308,134 @@ class DockerCommandFileBridge:
         command = str(request.get("command") or "").strip()
         if not command:
             raise ValueError("command_missing")
-        proc = self._compose_exec(
+        return _json_response(
+            self._exec_response(
+                cwd=cwd,
+                command=command,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+
+    def _exec_response(
+        self,
+        *,
+        cwd: str,
+        command: str,
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        capture_dir = f"{BRIDGE_TEMP_ROOT}/{uuid.uuid4().hex}.exec"
+        stdout_path = capture_dir + "/stdout"
+        stderr_path = capture_dir + "/stderr"
+        exit_code_path = capture_dir + "/exit_code"
+        captured_command = (
             "timeout "
             + shlex.quote(str(timeout_seconds))
             + " sh -lc "
-            + shlex.quote(command),
+            + shlex.quote(command)
+            + " > "
+            + shlex.quote(stdout_path)
+            + " 2> "
+            + shlex.quote(stderr_path)
+        )
+        started_at = time.monotonic()
+        proc = self._compose_exec(
+            wrap_container_command_with_exit_status(
+                captured_command,
+                exit_code_path,
+            ),
             cwd=cwd,
             timeout_seconds=timeout_seconds,
         )
-        stdout, stdout_truncated = _bounded_text(proc.stdout, limit=MAX_CAPTURE_BYTES)
-        stderr, stderr_truncated = _bounded_text(proc.stderr, limit=MAX_CAPTURE_BYTES)
-        return _json_response(
-            _operation_response(
-                ok=proc.returncode == 0,
-                operation="exec",
-                first_blocker=None if proc.returncode == 0 else "exec_failed",
-                exit_code=proc.returncode,
-                stdout=stdout,
-                stderr=stderr,
-                stdout_truncated=stdout_truncated,
-                stderr_truncated=stderr_truncated,
+        deadline = started_at + timeout_seconds + 2
+        exit_code_rc = 1
+        exit_code_bytes = b""
+        exit_code_copy_stderr = b"container exit status capture unavailable"
+        captured_exit_code = None
+        while captured_exit_code is None:
+            remaining = deadline - time.monotonic()
+            exit_code_rc, exit_code_bytes, exit_code_copy_stderr = (
+                self._read_container_file_via_copy(
+                    exit_code_path,
+                    max_bytes=16,
+                    timeout_seconds=max(1, min(5, int(max(remaining, 1)))),
+                )
             )
+            if exit_code_rc == 0:
+                captured_exit_code = parse_container_exit_status(exit_code_bytes)
+            if captured_exit_code is None:
+                if remaining <= 0:
+                    break
+                time.sleep(min(0.5, max(0.0, remaining)))
+        stdout_rc, stdout_bytes, stdout_copy_stderr = (
+            self._read_container_file_via_copy(
+                stdout_path,
+                max_bytes=MAX_CAPTURE_BYTES,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stderr_rc, stderr_bytes, stderr_copy_stderr = (
+            self._read_container_file_via_copy(
+                stderr_path,
+                max_bytes=MAX_CAPTURE_BYTES,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        self._remove_container_path(
+            capture_dir,
+            recursive=True,
+            timeout_seconds=timeout_seconds,
+        )
+        stdout, stdout_truncated = _bounded_text(
+            stdout_bytes, limit=MAX_CAPTURE_BYTES
+        )
+        stderr_source = stderr_bytes
+        if (
+            proc.returncode != 0
+            or stdout_rc != 0
+            or stderr_rc != 0
+            or exit_code_rc != 0
+        ):
+            stderr_source += (
+                proc.stderr
+                + stdout_copy_stderr
+                + stderr_copy_stderr
+                + exit_code_copy_stderr
+            )
+        if captured_exit_code is None:
+            stderr_source += b"container exit status capture invalid\n"
+        stderr, stderr_truncated = _bounded_text(
+            stderr_source, limit=MAX_CAPTURE_BYTES
+        )
+        output_capture_ok = stdout_rc == 0 and stderr_rc == 0
+        status_capture_ok = exit_code_rc == 0 and captured_exit_code is not None
+        effective_exit_code = (
+            proc.returncode
+            if proc.returncode != 0
+            else captured_exit_code if captured_exit_code is not None else 1
+        )
+        blocker = None
+        if proc.returncode != 0:
+            blocker = "exec_failed"
+        elif not status_capture_ok:
+            blocker = "exec_status_capture_failed"
+        elif not output_capture_ok:
+            blocker = "exec_output_capture_failed"
+        elif effective_exit_code != 0:
+            blocker = "exec_failed"
+        return _operation_response(
+            ok=(
+                proc.returncode == 0
+                and output_capture_ok
+                and status_capture_ok
+                and effective_exit_code == 0
+            ),
+            operation="exec",
+            first_blocker=blocker,
+            exit_code=effective_exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            stdout_truncated=stdout_truncated,
+            stderr_truncated=stderr_truncated,
         )
 
     def _run_read_file(self, request: dict[str, Any], timeout_seconds: int) -> int:
@@ -201,18 +444,21 @@ class DockerCommandFileBridge:
             1,
             min(int(request.get("max_bytes") or MAX_CAPTURE_BYTES), MAX_CAPTURE_BYTES),
         )
-        proc = self._compose_exec(
-            "dd if=" + shlex.quote(path) + " bs=1 count=" + shlex.quote(str(max_bytes)),
+        returncode, content_bytes, copy_stderr = self._read_container_file_via_copy(
+            path,
+            max_bytes=max_bytes,
             timeout_seconds=timeout_seconds,
         )
-        content, truncated = _bounded_text(proc.stdout, limit=max_bytes)
-        stderr, stderr_truncated = _bounded_text(proc.stderr, limit=MAX_CAPTURE_BYTES)
+        content, truncated = _bounded_text(content_bytes, limit=max_bytes)
+        stderr, stderr_truncated = _bounded_text(
+            copy_stderr, limit=MAX_CAPTURE_BYTES
+        )
         return _json_response(
             _operation_response(
-                ok=proc.returncode == 0,
+                ok=returncode == 0,
                 operation="read_file",
-                first_blocker=None if proc.returncode == 0 else "read_file_failed",
-                exit_code=proc.returncode,
+                first_blocker=None if returncode == 0 else "read_file_failed",
+                exit_code=returncode,
                 content=content,
                 content_truncated=truncated,
                 stderr=stderr,
@@ -263,13 +509,11 @@ class DockerCommandFileBridge:
         )
 
     def probe(self, timeout_seconds: int) -> tuple[list[dict[str, Any]], str | None]:
-        probe_dir = "/tmp/loopx-skillsbench-command-file-bridge"
+        probe_dir = BRIDGE_TEMP_ROOT
         marker = probe_dir + "/marker.txt"
-        exec_proc = self._compose_exec(
-            "mkdir -p "
-            + shlex.quote(probe_dir)
-            + " && test -d "
-            + shlex.quote(probe_dir),
+        exec_response = self._exec_response(
+            cwd="/tmp",
+            command="exit 7",
             timeout_seconds=timeout_seconds,
         )
         write_proc = self._compose_exec(
@@ -277,21 +521,27 @@ class DockerCommandFileBridge:
             stdin=MARKER_CONTENT.encode("utf-8"),
             timeout_seconds=timeout_seconds,
         )
-        read_proc = self._compose_exec(
-            "cat " + shlex.quote(marker),
+        read_returncode, read_bytes, _ = self._read_container_file_via_copy(
+            marker,
+            max_bytes=MAX_CAPTURE_BYTES,
             timeout_seconds=timeout_seconds,
         )
         cleanup_proc = self._compose_exec(
             "rm -f " + shlex.quote(marker),
             timeout_seconds=timeout_seconds,
         )
-        read_text, _ = _bounded_text(read_proc.stdout, limit=MAX_CAPTURE_BYTES)
+        read_text, _ = _bounded_text(read_bytes, limit=MAX_CAPTURE_BYTES)
+        exit_status_roundtrip_ok = (
+            exec_response.get("ok") is False
+            and exec_response.get("first_blocker") == "exec_failed"
+            and exec_response.get("exit_code") == 7
+        )
         operations = [
             {
                 "kind": "exec",
-                "label": "bounded_noop_command",
-                "status": "ok" if exec_proc.returncode == 0 else "failed",
-                "exit_code_zero": exec_proc.returncode == 0,
+                "label": "nonzero_exit_status_roundtrip",
+                "status": "ok" if exit_status_roundtrip_ok else "failed",
+                "nonzero_exit_status_detected": exit_status_roundtrip_ok,
             },
             {
                 "kind": "write_file",
@@ -303,11 +553,10 @@ class DockerCommandFileBridge:
                 "label": "probe_marker_read",
                 "status": (
                     "ok"
-                    if read_proc.returncode == 0 and read_text == MARKER_CONTENT
+                    if read_returncode == 0 and read_text == MARKER_CONTENT
                     else "failed"
                 ),
-                "content_match": read_proc.returncode == 0
-                and read_text == MARKER_CONTENT,
+                "content_match": read_returncode == 0 and read_text == MARKER_CONTENT,
             },
             {
                 "kind": "cleanup",

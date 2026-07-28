@@ -65,11 +65,12 @@ loopx doctor
 
 Chat gateways that turn LoopX work into Lark or Feishu replies should keep
 message rendering separate from message sending.
-`loopx.capabilities.lark.message_card` provides a public-safe card payload
-builder for Markdown replies:
+The implementation is owned by the explicitly enabled Lark extension under
+`loopx.extensions.lark.presentation.message_card`; core does not retain a
+compatibility import for provider-owned presentation code:
 
 ```python
-from loopx.capabilities.lark.message_card import build_lark_markdown_reply_card
+from loopx.extensions.lark.presentation.message_card import build_lark_markdown_reply_card
 
 card = build_lark_markdown_reply_card(
     "**Done**\n- Validated the bounded change",
@@ -97,7 +98,19 @@ loopx bootstrap \
 
 `loopx connect` is an alias for the same operation. The command is
 safe to rerun: by default it keeps an existing state file and existing registry
-entry; pass `--force` only when you intentionally want to replace them.
+entry. If the goal only needs an additional write boundary after connection,
+prefer the incremental migration path:
+
+```bash
+loopx configure-goal \
+  --goal-id project-goal \
+  --write-scope "src/**" \
+  --execute
+```
+
+Pass `--force` only when you intentionally want to replace the registry entry or
+active state. If you need a force reconnect but want to keep the current todo
+projection, add `--preserve-todos`.
 
 The default files are:
 
@@ -314,10 +327,16 @@ A project adapter should be thin and project-specific. It may read:
 It should output:
 
 - `classification`,
-- exactly one `recommended_action`,
+- exactly one `recommended_action` for the local control loop,
 - relevant warnings,
 - hard guards,
 - optional run log paths.
+
+`recommended_action` is local project state, not a public artifact by default:
+it may include private project refs such as todo ids, branch names, local
+aliases, or operator-private routing labels. It must not include AK/SK values,
+tokens, auth headers, passwords, or inline credentials. Public/export sinks
+must redact or omit private routing refs before rendering shareable surfaces.
 
 By default it should be read-only. Launching jobs, stopping jobs, syncing docs,
 or editing production state requires explicit user approval.
@@ -327,27 +346,26 @@ registry and state contract so the first adapter can be added deliberately.
 
 For a large project, prefer a read-only adapter map before any writes. The map
 should identify authority sources, work clusters, validation surfaces, proposed
-sub-agent scopes, boundary findings, and a short controller handoff packet. See
+peer task scopes, boundary findings, and a short claim/decision packet. See
 [complex-project-readonly-adapter.md](complex-project-readonly-adapter.md).
 
 ## Controller / Sub-Agent Coordination
 
-Some Codex goal runs should use multiple sub-agents. LoopX should keep
-that parallelism explicit:
+Some Codex goal runs should use multiple child workers. LoopX should keep that
+task-scoped parallelism explicit:
 
 - child runs declare `work_scope` before acting;
-- overlapping write scopes require parent arbitration;
+- overlapping write scopes require task-coordinator arbitration;
 - children default to read-only unless the registry grants a write scope;
-- only the controller can mark the main goal complete;
 - child final reports include changed files, validation, residual risk, and
   next handoff;
-- the controller performs final merge, public/private scan, and state writeback.
+- the temporary task coordinator aggregates accepted bundle evidence, while
+  merge and state writeback still follow explicit task/repository policy.
 
 Minimal registry fields for this pattern are:
 
 ```json
 {
-  "role": "controller",
   "parent_goal_id": null,
   "spawn_policy": {
     "mode": "multi_subagent",
@@ -356,10 +374,9 @@ Minimal registry fields for this pattern are:
     "allowed_domains": ["docs-map", "validation-map"]
   },
   "coordination": {
+    "agent_model": "peer_v1",
     "registered_agents": ["codex-main-control", "codex-side-bypass"],
-    "primary_agent": "codex-main-control",
     "write_scope": ["docs/**", "examples/**"],
-    "claim_ttl_minutes": 30,
     "requires_parent_approval": ["write", "publish", "production-action"]
   }
 }
@@ -373,16 +390,18 @@ dispatchers instead of relying on prompt text.
 These fields are a public contract, not a runtime lock manager. The current
 lightweight runtime surface uses todo `claimed_by` as a soft owner written under
 the active-state CLI lock. Claim ids must be listed in
-`coordination.registered_agents`; exactly one `coordination.primary_agent`
-owns final review, verification, merge, and publication. Side agents keep their
-scope in the automation prompt or handoff and work in separate git worktrees.
-They may self-merge small AGENTS-eligible validated changes with explicit
-evidence; broader or higher-risk side-agent work should complete by adding a
-successor review todo claimed by the primary agent. A future version can add
-claim files, stale-claim detection, overlap warnings, TTLs, and
-compare-and-swap conflict responses. That future pending contract should be per
-todo: a pending lease is keyed by `(goal_id, todo_id)`, so unrelated todos under
-the same goal can still run in parallel when scopes permit.
+`coordination.registered_agents`; those identities are peers. Task claims,
+boundaries, capabilities, typed continuation, and repository policy determine
+authority. Repository-writing peers use isolated worktrees when the selected
+task requires it. Small AGENTS-eligible validated changes may self-merge with
+explicit evidence; broader or higher-risk work uses an explicit
+`independent_handoff` with `action_kind=review`, optionally excluding the author
+when executor separation is required. Soft claims do not expire. The legacy
+bootstrap option `--claim-ttl-minutes` is accepted but ignored; use the optional
+`loopx task-lease` CLI when a concrete contention case needs TTL, overlap
+checks, transfer, and compare-and-swap behavior. Hard leases remain keyed by
+`(goal_id, todo_id)`, so unrelated todos under the same goal can still run in
+parallel when scopes permit.
 
 ## Shared Runtime
 
@@ -431,6 +450,10 @@ When `--recommended-action` is omitted, the command derives the compact action
 from the first public-safe item in the active state's `## Next Action`, joining
 wrapped continuation lines and falling back to a generic refresh action if that
 item contains private-looking content.
+If a `refresh-state` text field is rejected as private-looking, the CLI names
+the field and suggests using a compact public-safe alias/summary there while
+keeping raw local paths, private URLs, task bodies, and logs in evidence or
+private payloads.
 When the state refresh is also the compact record for a validated progress
 artifact, add explicit delivery hints so handoff readiness does not have to
 infer scale from a classification name:
@@ -444,8 +467,10 @@ loopx refresh-state \
 ```
 
 Use `--delivery-batch-scale` for `test_only`, `single_surface`,
-`multi_surface`, or `implementation`. `--delivery-outcome` is a structured enum,
-not a classification string:
+`multi_surface`, or `implementation`. For agent-facing `refresh-state` calls,
+`single_segment` and `bounded_segment` are accepted as input aliases for
+`single_surface`; the recorded run still stores the canonical `single_surface`
+value. `--delivery-outcome` is a structured enum, not a classification string:
 
 | Value | Meaning |
 | --- | --- |
@@ -659,7 +684,7 @@ Put generic code here:
 - contract checker,
 - generic schema and docs,
 - sanitized adapter examples,
-- controller/sub-agent lifecycle examples.
+- peer task and ephemeral worker lifecycle examples.
 
 Keep in the project repo:
 

@@ -30,13 +30,27 @@ sync catch up.
 ## Write Contract
 
 When read-only analysis, a review packet, a gate checklist, or P0/P1 steering
-finds a concrete user or owner action, write it immediately with the todo CLI:
+finds a concrete user or owner action, write it immediately with the todo CLI.
+Use `user_gate` only when the item blocks an agent or the whole goal:
 
 ```bash
 loopx todo add \
   --goal-id <goal-id> \
   --role user \
-  --text "<public-safe user or owner action>"
+  --task-class user_gate \
+  --blocks-agent <agent-id> \
+  --text "<public-safe blocking user or owner decision>"
+```
+
+Use `user_action` for owner-visible follow-up that should not stop unrelated
+agents:
+
+```bash
+loopx todo add \
+  --goal-id <goal-id> \
+  --role user \
+  --task-class user_action \
+  --text "<public-safe non-blocking user or owner todo>"
 ```
 
 Use `--role agent` for project-agent follow-up work:
@@ -78,9 +92,10 @@ loopx todo add \
 CLI project the lane consistently, but explicit `--task-class` is the authority
 when both are present. If an exact todo already exists, `todo add` updates or
 inserts the metadata comment instead of creating a duplicate checkbox.
-`--task-class user_gate` and `--task-class blocker` are non-executable control
-lanes for owner input and concrete blockers; quota/executor code must not treat
-them as advancement work.
+`--task-class user_gate`, `--task-class user_action`, and `--task-class blocker`
+are non-executable control lanes; quota/executor code must not treat them as
+advancement work. Open user todos must declare either `user_gate` or
+`user_action`; a bare `--role user` todo is an authoring error.
 
 For scheduled monitors, keep the contract minimal: `--next-due-at` is the first
 eligible time, `--cadence` is the retry interval, `--monitor-target-key` is the
@@ -131,61 +146,103 @@ Quota treats a gate as covering an agent todo when `decision_scope` matches or
 dominates one of that todo's `required_decision_scopes`; otherwise the todo is
 independent and can be selected as a safe fallback when the boundary permits it.
 
-Each goal should have one `coordination.primary_agent`: the primary agent owns
-final review, verification, merge, publication, and reassignment decisions. All
-other registered agents are side agents. Side agents should do repository edits
-only in an independent git worktree/branch, never in the primary checkout. Small
-AGENTS-eligible validated changes may be self-merged when the side agent records
-public-safe evidence; higher-risk or unclear work should create a successor
-handoff todo claimed by the primary agent by default. A project may route all
-side-agent handoffs through `coordination.side_agent_handoff_agent`, or route a
-specific side-agent through
-`coordination.agent_profiles.<agent_id>.review_policy.handoff_agent`. First
-register the agent ids and primary agent in the goal registry:
+Each shared goal declares `coordination.agent_model=peer_v1` and a
+`coordination.registered_agents` set. Registration grants identity, not rank.
+Work authority comes from `claimed_by`, task leases, the goal/write boundary,
+and typed continuation policy. Functional profile roles and scope summaries are
+advisory; they do not make one identity the default reviewer or leader.
 
-`quota should-run --agent-id <side-agent-id>` enforces this as a preflight: when
-the side agent is running from the registered primary checkout, a non-git
-directory, or an unrelated git worktree, it returns `workspace_guard` and blocks
-normal delivery until the agent moves to an independent worktree and reruns the
-guard.
+Ordinary lifecycle mutations follow todo ownership. A goal may separately
+delegate narrow cross-owner actions to an orchestration agent:
+
+```yaml
+coordination:
+  todo_lifecycle_authority:
+    - agent_id: codex-main-control
+      actions: [complete, reassign, supersede]
+      requires_reason: true
+```
+
+Configure the equivalent registry value without hand-editing state:
+
+```bash
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --todo-lifecycle-authority-json \
+  '{"agent_id":"codex-main-control","actions":["complete","reassign","supersede"],"requires_reason":true}' \
+  --execute
+```
+
+The delegated agent must already be registered. Each override is action-scoped
+and emits a typed receipt containing the actor, original owner, authority
+source, and public-safe `--authority-reason`. Delegation never bypasses an
+explicit `excluded_agents` boundary. `coordination.supervisor` remains a
+proposal-only observation role and does not imply lifecycle authority.
+
+```bash
+loopx todo complete \
+  --goal-id <goal-id> \
+  --todo-id <todo-id> \
+  --agent-id codex-main-control \
+  --authority-reason "Verified the result and closed the stalled lane." \
+  --evidence "<public-safe evidence>"
+```
+
+An agent todo can name a different task repository without copying agent scope
+into todo metadata:
+
+```bash
+loopx todo update \
+  --goal-id <goal-id> \
+  --role agent \
+  --todo-id <todo-id> \
+  --task-repository git:github.com/owner/repo
+```
+
+`task_repository` is a first-class, credential-free Git identity. It routes
+workspace isolation, not write authority; claim/lease, capabilities, the goal
+boundary, and repository policy continue to apply.
+
+`quota should-run --agent-id <agent-id>` is the preflight for every peer. When
+the selected task writes repository state and the peer is in a non-git,
+unrelated, or non-isolated workspace, it returns `workspace_guard` and blocks
+normal delivery until that peer moves to an independent worktree and reruns the
+guard. Read-only and monitor-only work does not require isolation merely because
+of agent identity. When `task_repository` is absent, the registered goal repo is
+still the expected repository, so an unrelated worktree cannot bypass the goal
+repository rule.
 
 Contributor-facing example:
 
 ```bash
 loopx --format json quota should-run \
   --goal-id <goal-id> \
-  --agent-id codex-side-bypass
+  --agent-id codex-peer-b
 ```
 
 If the response includes
-`effective_action=side_agent_workspace_repair` and
-`workspace_guard.current_workspace=primary_checkout`, the side agent should not
-edit files yet. Create or switch to a separate worktree and rerun the same
-guard:
+`effective_action=agent_workspace_repair`, the peer should not edit files yet.
+Create or switch to a separate worktree and rerun the same guard:
 
 ```bash
-git worktree add /tmp/<goal-id>-side-agent -b codex/<side-agent-branch>
-cd /tmp/<goal-id>-side-agent
+git worktree add /tmp/<goal-id>-peer-b -b codex/<peer-branch>
+cd /tmp/<goal-id>-peer-b
 loopx --format json quota should-run \
   --goal-id <goal-id> \
-  --agent-id codex-side-bypass
+  --agent-id codex-peer-b
 ```
 
-Only after that rerun returns normal delivery should the side agent claim an
-in-scope todo and edit repository files. A primary-owned todo remains
-primary-owned even when the side-agent workspace guard passes; the side agent
-must pick a todo inside its scope or create a successor handoff todo.
-For agent-specific `quota should-run --agent-id <side-agent-id>` payloads, the
-todo summary is claim-aware: current-agent claimed todos are preferred, unclaimed
-todos remain selectable, and primary/other-agent claimed todos are projected as
-blocked-claim context rather than as the side agent's next action. This reduces
-accidental collisions without writing scope into todo metadata or turning
-`claimed_by` into a lease. When a runnable current-agent or unclaimed
+Only after that rerun returns normal delivery should the peer claim an in-scope
+todo and edit repository files. A todo claimed by another peer remains owned by
+that peer until explicit transfer. For agent-specific quota payloads, current
+agent claims are preferred, unclaimed todos remain selectable, and other-peer
+claims are diagnostic context rather than executable work. This reduces
+collisions without writing broad prompt scope into todo metadata or pretending
+that a soft claim is already a hard lease. When a runnable current-agent or unclaimed
 advancement todo exists, quota may also expose
 `agent_lane_next_action.schema_version=agent_lane_next_action_v0`. That field is
-the side agent's current slice for this turn; it does not overwrite the
-goal-level `Next Action` owned by the primary/global route. `loopx status
---agent-id <side-agent-id>` may attach the same derived field to matching status
+the peer's current slice for this turn; it does not overwrite the durable
+goal-level `Next Action`. `loopx status --agent-id <agent-id>` may attach the same derived field to matching status
 queue items for observation, while leaving the project-level route unchanged.
 When a candidate has `target_capabilities` and missing target bridge
 capabilities, quota may mark it `capability_repair_mode=true`; scoped
@@ -200,7 +257,12 @@ Deferred todos may carry a machine-readable resume condition with
   replan candidate after the referenced todo reaches `status=done`.
 - `resume_when=pr_merged:#532` or
   `resume_when=pr_merged:owner/repo#532`: the deferred todo becomes a successor
-  candidate after a structured rollout event records that PR merge.
+  candidate after a structured rollout event records that PR merge. An
+  unqualified `#532` is bound only to the todo's GitHub `task_repository`; use
+  the qualified form for cross-repository dependencies. If LoopX cannot derive
+  that binding, it keeps the todo deferred and exposes a machine-readable
+  repository ambiguity instead of matching the same PR number in another
+  repository.
 
 Open todos may also carry `resume_when` when they are visible but not yet
 executable. Until the parsed `resume_condition.satisfied` value is true, status
@@ -219,18 +281,19 @@ loopx register-agent \
   --goal-id <goal-id> \
   --agent-id codex-main-control \
   --agent-id codex-side-bypass \
-  --primary-agent codex-main-control \
   --execute
 ```
 
-Then claim through the dedicated command. `--claimed-by` is required for
-`todo claim` and must match one of the registered agent ids:
+Then claim through the dedicated command. `--claimed-by` records the durable
+owner, while `--agent-id` attributes the peer performing this mutation. For a
+self-claim they are both required and must name the same registered agent:
 
 ```bash
 loopx todo claim \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
-  --claimed-by codex-main-control
+  --claimed-by codex-main-control \
+  --agent-id codex-main-control
 ```
 
 Old projects that do not yet have `coordination.registered_agents` are
@@ -241,12 +304,16 @@ registration writes the source registry named by the global projection; if the
 shared global registry is not writable, it fails before changing that source so
 the control plane does not drift into a half-registered state.
 
-Use `--clear-claim` when the controller reassigns a todo or an agent releases
-work. `claimed_by` is visibility, not a runtime lease: it does not bypass quota,
-user gates, write-scope checks, or validation. `todo add/update/complete` also
-accept `--claimed-by`, but the value is checked against the same registered
-agent list. Claimed completion also requires `coordination.primary_agent`, so
-old projects fail closed before side-agent handoff semantics become ambiguous.
+Use `--clear-claim` when an owning peer reassigns a todo or releases work.
+`claimed_by` is visibility, not a runtime lease: it does not bypass quota, user
+gates, write-scope checks, validation, or actor authorization. On registered
+multi-agent goals, `todo claim/update/complete/supersede` require `--agent-id`;
+the actor must not be excluded and must match the current `claimed_by` owner
+when one exists. An exact linked `user_gate` decision scope is the narrow
+exception: its typed approve/reject/cancel completion is attributed to the
+owner/controller decision instead of an agent actor. Old projects without
+`coordination.registered_agents` still fail closed before ownership metadata
+can be written.
 `todo claim` is non-destructive: if another registered agent already owns the
 todo, it fails closed instead of silently replacing `claimed_by`. Transfer
 ownership with an explicit `todo update --clear-claim` or
@@ -300,11 +367,86 @@ Complete the current todo and atomically register the next executable todo:
 loopx todo complete \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
+  --agent-id <registered-agent> \
   --evidence "<public-safe artifact or result>" \
   --next-agent-todo "<public-safe next executable action>" \
   --next-task-class advancement_task \
   --next-action-kind run_eval
 ```
+
+Human review is not automatically an execution gate. When a validated feature
+PR can wait for review while independent work continues, atomically derive a
+bound reminder and a runnable successor:
+
+```bash
+loopx todo complete \
+  --goal-id <goal-id> \
+  --todo-id <todo_id> \
+  --claimed-by <registered-agent> \
+  --agent-id <registered-agent> \
+  --evidence "<validated PR URL and checks>" \
+  --next-user-todo "Review the validated feature PR." \
+  --next-user-task-class user_action \
+  --next-agent-todo "Continue the next independent feature slice." \
+  --next-claimed-by <registered-agent>
+```
+
+`--next-user-todo` requires an explicit
+`--next-user-task-class user_gate|user_action`. Use `user_action` for a reminder
+that stays visible without setting `blocks_agent`; reserve `user_gate` for an
+exact owner/controller authority boundary such as merging an aggregate branch
+into `main`, release, benchmark launch, credentials, or protected production
+action. Omitting the task class fails before writeback so LoopX never guesses
+an authorization boundary. Add a separate `continuous_monitor` todo when the
+PR lifecycle needs periodic readback.
+
+For an experimental feature stack, a stable integration branch may collect
+small feature PRs while review reminders remain open. Each feature still uses a
+dedicated worktree and branch; its PR targets the integration branch. The
+aggregate integration-branch PR to `main` is the review/merge boundary. This
+keeps review latency from suspending unrelated work without weakening the final
+delivery gate.
+
+Terminal PR state does not silently complete a review reminder: merged PRs may
+still need post-merge review. When the owner explicitly acknowledges that an
+exact review action is complete, persist a typed acknowledgement receipt with
+the exact bound `user_action` and GitHub PR:
+
+```bash
+loopx issue-fix pr-review-ack \
+  --url https://github.com/owner/repo/pull/123 \
+  --goal-id <goal-id> \
+  --todo-id <review-todo-id> \
+  --agent-id <bound-agent> \
+  --owner-acknowledged
+```
+
+The receipt is fail-closed, idempotent per todo revision, and read back after
+append. It binds the goal, todo revision, agent, provider, repository, PR
+number, and canonical permalink without parsing reminder prose. Reopening or
+materially editing the todo invalidates the prior acknowledgement.
+
+Use `pr-review-reconcile` as the single reconciliation path. It may be invoked
+explicitly or by a due `continuous_monitor` through any scheduler or host
+adapter. Supplying `--owner-acknowledged` first records the same typed receipt.
+Reconciliation validates the current todo revision before provider access and
+again before completion, then closes the reminder only for the exact terminal
+PR. A missing receipt, stale revision, unavailable provider, or unsupported
+forge leaves the reminder open. Quota projection has no provider side effects.
+
+Heartbeat hosts with `external_evidence_poll` may run the bounded batch form
+before quota:
+
+```bash
+loopx heartbeat-prequota -g <goal-id> -a <bound-agent>
+```
+
+The batch reads only persisted exact acknowledgement bindings, skips stale or
+already reconciled todos before provider access, and performs no quota spend.
+Provider failures are reported as degraded results and do not block the
+subsequent quota guard. Binding, acknowledgement, and reconciliation are kernel
+contracts; `loopx-project` may document the workflow but is not a runtime
+dependency.
 
 If an agent takes ownership at completion time, include the claim in the same
 locked lifecycle write:
@@ -313,60 +455,64 @@ locked lifecycle write:
 loopx todo complete \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
-  --claimed-by codex-side-bypass \
+  --claimed-by codex-peer-a \
+  --agent-id codex-peer-a \
   --evidence "<public-safe artifact or result>" \
-  --next-agent-todo "Review, verify, and merge this side-agent work."
+  --next-agent-todo "Continue the next bounded task." \
+  --next-claimed-by codex-peer-b \
+  --next-continuation-policy independent_handoff
 ```
 
-If `--claimed-by` names a side agent, broad side-agent completion defaults to
-requiring a successor handoff todo. By default that successor is claimed by the
-goal's `primary_agent`. A goal may set
-`coordination.side_agent_handoff_agent` to another registered agent for the
-shared default route, and may override that default for a specific side agent
-with `coordination.agent_profiles.<agent_id>.review_policy.handoff_agent`.
-`--next-claimed-by` is allowed only when it matches the resolved handoff owner.
-Existing registry fields named for review are not aliases for this route. This
-keeps broad side-agent handoff visible to the shared control plane without
-hard-coding a single follow-up surface for every side-agent lane.
+LoopX does not infer continuation authority from agent identity. `action_kind`
+remains an open domain token describing the work. The closed
+`continuation_policy` enum describes only the relationship between the completed
+task and its successor:
 
-LoopX does not model "review" as a separate kernel object. Review, verification,
-or continuation are product-level names for a successor todo. The machine
-contract is generic: the generated successor records
-`blocks_agent=<side-agent-id>` and
-`unblocks_todo_id=<completed-todo-id>`, while `claimed_by` names the agent that
-should handle the dependency. Quota and dashboards can prioritize this handoff
-without parsing prose or adding a review-specific action kind. Same-agent broad
-handoff is rejected; if the completing side agent is allowed to deliver without
-another agent, it must use the explicit `--side-agent-self-merged --evidence`
-path.
+- `independent_handoff` is the default. The successor stays unclaimed unless
+  `--next-claimed-by` selects a registered peer;
+- `same_agent_non_delivery` keeps an evidence-backed non-delivery continuation
+  with the completing peer.
 
-For primary-agent completions and self-merged same-lane continuations, a
-successor created with `--next-agent-todo` inherits the completed todo's
-effective `claimed_by` unless `--next-claimed-by` explicitly names another
-registered agent. This prevents follow-up work from accidentally falling into
-the unclaimed pool.
+Review, verification, merge, and publication remain ordinary `action_kind`
+values. They do not alter scheduler ordering. Use `independent_handoff` for a
+successor that another peer may claim, and add one or more `excluded_agents`
+only when executor separation is required. `claimed_by` may not name an
+excluded peer.
 
-For small changes that satisfy the repository's self-merge rules, the side
-agent may self-merge and complete without a successor review todo by making the
+`same_agent_non_delivery` is intentionally structural rather than
+review-specific. It covers readiness checks, audits, triage, and other
+non-delivery continuations when explicitly selected. LoopX does not infer it
+from `action_kind`, and it does not authorize repository delivery or bypass
+successor quota/capability checks.
+
+A handoff becomes a blocking dependency only when it carries both
+`unblocks_todo_id` and executor exclusions. Ordinary independent successors do
+not inherit an owner implicitly. Use `--next-claimed-by` when the next owner is
+already known; leave the successor unclaimed when a later claim should select
+it.
+
+For small changes that satisfy the repository's self-merge rules, a peer may
+self-merge and complete without a successor review todo by making the
 exception explicit:
 
 ```bash
 loopx todo complete \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
-  --claimed-by codex-side-bypass \
-  --side-agent-self-merged \
+  --claimed-by codex-peer-a \
+  --agent-id codex-peer-a \
+  --self-merged \
   --evidence "<public-safe commit, validation, and self-merge summary>"
 ```
 
-`--side-agent-self-merged` requires `--evidence`. Do not use it for runtime,
+`--self-merged` requires `--evidence`. Do not use it for runtime,
 benchmark, permission, production, destructive git, publication, public
 evidence-policy, or broad coordination changes that need an independent
 handoff.
 After a validated self-merge, write back the real delivery outcome at the
 project level when the slice advanced the public product or case path. An
-agent-lane refresh with `--agent-id` is useful for side-lane notes, but it does
-not replace the goal-level latest run used by quota and dashboard routing. Do
+agent-lane refresh with `--agent-id` records peer-local notes; a goal-scope
+refresh records the durable goal route. Both require a registered peer. Do
 not append a follow-up goal-level `surface_only` sync after a validated
 `outcome_progress` slice; either skip the duplicate sync or mirror the product
 progress with:
@@ -377,40 +523,55 @@ loopx refresh-state \
   --classification <public-safe-progress-classification> \
   --delivery-batch-scale multi_surface \
   --delivery-outcome outcome_progress \
-  --agent-id <primary-agent> \
+  --agent-id <registered-agent> \
   --progress-scope goal
 ```
 
-This keeps validated side-agent product work from being misread as another
+This keeps validated peer product work from being misread as another
 surface-only heartbeat turn.
-When a self-merged side-agent slice has an obvious same-scope continuation, it
-may also atomically add that successor todo and claim it back to the same side
-agent:
+When a self-merged slice has an obvious same-scope continuation, it may also
+atomically add that successor todo and claim it back to the same peer:
 
 ```bash
 loopx todo complete \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
-  --claimed-by codex-side-bypass \
-  --side-agent-self-merged \
+  --claimed-by codex-peer-a \
+  --agent-id codex-peer-a \
+  --self-merged \
   --evidence "<public-safe commit, validation, and self-merge summary>" \
   --next-agent-todo "Continue the next small docs/productization slice." \
-  --next-claimed-by codex-side-bypass
+  --next-claimed-by codex-peer-a
 ```
 
-Without `--side-agent-self-merged`, a side-agent successor remains a primary
-review handoff and must stay claimed by the primary agent.
+Without `--self-merged`, no implicit review route is created. For independent
+review, use `--next-action-kind review --next-continuation-policy
+independent_handoff`; add `--next-excluded-agent <author>` only when the review
+must remain open to multiple peers while excluding the author. When that
+successor belongs to a specific repository or needs execution capabilities,
+set `--next-task-repository <git:host/path>` and repeat
+`--next-required-capability <capability>` in the same completion command. The
+successor is then fully routable before its executor exclusions take effect.
 
-Use `todo update` for lower-level status changes:
+Use `todo update` for lower-level, non-terminal status changes:
 
 ```bash
 loopx todo update \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
+  --agent-id <registered-agent> \
   --status blocked \
   --reason "<public-safe blocker>" \
   --task-class blocker
 ```
+
+Agent Todo completion always goes through `todo complete`; `todo update
+--status done` is rejected so review, successor, and no-follow-up policy cannot
+be bypassed. An evidence-backed peer
+`continuous_monitor` with no required write scope may close with
+`todo complete --no-follow-up` when its bounded watch ends without a material
+transition. This closeout records `self_merged=false` and does not
+create a successor review todo for observation-only work.
 
 Use `--resume-when` when deferring a successor that should wake up after a
 machine-readable condition instead of living only in prose:
@@ -419,6 +580,7 @@ machine-readable condition instead of living only in prose:
 loopx todo update \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
+  --agent-id <registered-agent> \
   --status deferred \
   --resume-when todo_done:<blocking_todo_id> \
   --reason "<public-safe deferred rationale>"
@@ -430,6 +592,7 @@ Use `todo supersede` when the current open todo should be retired and replaced:
 loopx todo supersede \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
+  --agent-id <registered-agent> \
   --reason "<public-safe reason>" \
   --next-agent-todo "<replacement executable action>"
 ```
@@ -454,14 +617,41 @@ carry `schema_version=todo_summary_v0`; individual items carry
 `schema_version=todo_item_v0`, `todo_id`, `role`, `status`, `priority`,
 `title`, `archive_state`, `source_section`, `index`, `text`, `task_class`, and
 optional `action_kind`, `claimed_by`, `required_capabilities`, and
-`target_capabilities`. Primary review handoffs may also carry
-`blocks_agent`, `unblocks_todo_id`, and `no_followup=true` to show which
-agent/todo they release and whether a completed handoff intentionally has no
-successor.
+`target_capabilities`. `action_kind` is extensible; optional
+`continuation_policy` is limited to `independent_handoff`,
+or `same_agent_non_delivery`. Agent todos may also carry `excluded_agents`,
+`unblocks_todo_id`, and `no_followup=true` to express executor separation,
+dependency lineage, and intentional closeout. `blocks_agent` is reserved for
+scoping user gates.
+
+After a hard-cut upgrade, `loopx check` reports agent todos that still carry
+removed gate-routing fields. New readers also preserve a read-only
+`removed_continuation_policy` diagnostic for legacy `review_handoff` and
+`primary_review` records and exclude those records from claim/quota execution.
+This fail-closed compatibility marker is not a supported continuation type and
+is never written back. Repair legacy review records explicitly:
+
+```bash
+loopx todo update \
+  --goal-id <goal-id> \
+  --todo-id <todo-id> \
+  --agent-id <registered-agent> \
+  --role agent \
+  --continuation-policy independent_handoff \
+  --excluded-agent <author>
+```
+
+For removed `blocks_agent` routing, use `loopx todo update --todo-id <todo_id>
+--role agent --clear-blocks-agent`. LoopX does not infer the excluded author or
+rewrite either form automatically.
+
 Deferred successors may carry `resume_when`, `resume_condition`, and
 `resume_ready`; `resume_ready=true` means the deferred item should be considered
 for a successor replan before any agent-scoped no-candidate wait, not that
-normal delivery may skip the todo lifecycle.
+normal delivery may skip the todo lifecycle. A ready deferred successor also
+preempts a strictly lower-priority open advancement todo for this lifecycle
+replan. It does not preempt an equal-priority open todo, and it never enters the
+normal executable backlog until a lifecycle command reopens it.
 The `todo_id` is first-class when written by the CLI.
 `claimed_by` values are normalized public-safe agent ids and should correspond to
 `coordination.registered_agents`. Legacy Markdown without metadata still gets a
@@ -550,10 +740,10 @@ execution blocker.
 Two dependency-free public fixtures cover this contract:
 
 ```bash
-python3 examples/todo-cli-smoke.py
-python3 examples/todo-lifecycle-cli-smoke.py
-python3 examples/project-agent-adoption-smoke.py
-python3 examples/todo-concurrent-write-lock-smoke.py
+python3 examples/control_plane/todo-cli-smoke.py
+python3 examples/control_plane/todo-lifecycle-cli-smoke.py
+python3 examples/project/project-agent-adoption-smoke.py
+python3 examples/control_plane/todo-concurrent-write-lock-smoke.py
 python3 examples/capability-gate-smoke.py
 ```
 

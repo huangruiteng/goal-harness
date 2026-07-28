@@ -49,6 +49,7 @@ surfaces into smaller modules:
 | Module | Owns | Must Not Own |
 | --- | --- | --- |
 | `loopx.benchmark_core` | adapter-neutral lifecycle, round summaries, artifact/source boundary policy, JSON/number IO reducers | benchmark-specific launchers or scoring quirks |
+| `loopx.benchmarks.read_models` | public-safe benchmark result, comparison, ledger, lifecycle, and diagnostic projections | generic control-plane runtime rules or benchmark-family launch behavior |
 | `loopx.benchmark_adapters.skillsbench` | SkillsBench routes, arm semantics, job names, public-safe setup failure attribution | Terminal-Bench/ALE/AgentIssue behavior |
 | `loopx.benchmark_adapters.terminal_bench` | Terminal-Bench public constants, runner modes, CLI-bridge/access-packet labels, private-runner launch/materialization/readiness helpers, Harbor result reducers, timeout and compact validation policy constants | ALE/SkillsBench/AgentIssue behavior |
 | `loopx.benchmark_adapters.agents_last_exam` | ALE public constants, case-state path, local runner/source readiness, launch-packet, validation-gate, CUA/Codex-route, task-material and result-report helpers | Terminal-Bench/SkillsBench/AgentIssue behavior or raw ALE task material |
@@ -87,6 +88,9 @@ Completed slices:
 10. `benchmark_core.attempts` for `benchmark_attempt_accounting_v0` and the
     shared failure taxonomy that keeps runner startup/materialization blockers
     out of case-attempt accounting.
+11. `benchmark_core.remote_closeout` for compact/public-only remote artifact
+    sync and local ledger/aggregate ownership. Remote benchmark runners produce
+    compacts; they do not also maintain a second ledger.
 
 ## Adapter Rollout Matrix
 
@@ -97,10 +101,10 @@ details must stay in the adapter column, not in `benchmark_core`.
 
 | Benchmark family | Adapter module | Current generic lifecycle coverage | Next migration slice |
 | --- | --- | --- | --- |
-| Terminal-Bench | `loopx.benchmark_adapters.terminal_bench` | First migration target. Public configuration, private-runner launch/materialization helpers, access packets, bridge traces, Harbor reducers, timeout policy, and compact validation policy are adapter-owned. | Adopt `benchmark_attempt_accounting_v0` and `run_permission_policy_v0` in the public launch/result packets before adding new Terminal-Bench runner behavior. |
-| SkillsBench | `loopx.benchmark_adapters.skillsbench` plus ACP relay helpers | Route contracts, arm semantics, job names, public-safe setup failure attribution, case-local product lifecycle, and compact reducer surfaces are adapter-owned. | Map goal-start `/loopx` raw/new runs into the same launch/observe/ingest/classify/ledger fields after solver output and new-arm compact artifacts are available. |
+| Terminal-Bench | `loopx.benchmark_adapters.terminal_bench` | First migration target. Public configuration, private-runner launch/materialization helpers, access packets, bridge traces, Harbor reducers, timeout policy, compact validation policy, `run_permission_policy_v0`, and `benchmark_attempt_accounting_v0` adoption are adapter-owned. | Adopt the same permission-policy and attempt-accounting fields in any new public launch/result packets before adding new Terminal-Bench runner behavior. |
+| SkillsBench | `loopx.benchmark_adapters.skillsbench` plus ACP relay helpers | Route contracts, arm semantics, job names, public-safe setup failure attribution, case-local product lifecycle, compact reducer surfaces, no-upload permission policy, and split attempt-accounting surfaces are adapter-owned. | Goal-start `/loopx` raw/new mapping remains blocked on transport monitor `todo_45357c108d81`: the latest compact monitor saw no solver output and no new-arm compact artifact, so it must not be promoted into launch/observe/ingest/classify/ledger fields yet. |
 | ALE | `loopx.benchmark_adapters.agents_last_exam` | Public configuration, local runner/source readiness, launch packets, validation gates, CUA/Codex-route helpers, and task-material/result-report helpers are adapter-owned. | Add attempt accounting and permission-policy fields to local launch/readiness packets before any new ALE run path is promoted. |
-| SWE-Marathon | no dedicated adapter yet | Current evidence remains in public-safe research packets and run ledger rows, not in a reusable adapter module. | Create the adapter only after a second SWE-Marathon route needs shared launch/observe/ingest behavior; until then, do not add SWE-specific conventions to `benchmark_core`. |
+| SWE-Marathon | no dedicated adapter yet | Current evidence remains in public-safe research packets and run ledger rows, not in a reusable adapter module. | Deferred: create the adapter only after a second SWE-Marathon route needs shared launch/observe/ingest behavior; until then, do not add SWE-specific conventions to `benchmark_core`. |
 
 Next slices:
 
@@ -109,8 +113,10 @@ Next slices:
 2. Split shared compact/result helper functions that are still only imported
    through the Terminal-Bench adapter into narrower `benchmark_core` modules
    when a second benchmark needs them.
-3. Adopt `run_permission_policy_v0` in each benchmark adapter's public launch
-   packet before relying on adapter-specific prose for authorization.
-4. Adopt `benchmark_attempt_accounting_v0` in Terminal-Bench, SkillsBench, and
-   ALE reducers so compact ledgers can compare startup, solver, verifier, and
-   official-score failures without benchmark-specific label drift.
+3. Adopt `run_permission_policy_v0` in any remaining benchmark adapter public
+   launch packet before relying on adapter-specific prose for authorization.
+4. Adopt `benchmark_attempt_accounting_v0` in remaining adapter reducers so
+   compact ledgers can compare startup, solver, verifier, and official-score
+   failures without benchmark-specific label drift.
+5. Keep SkillsBench goal-start matrix rows blocked until compact transport
+   monitor evidence includes solver output and a new-arm compact artifact.

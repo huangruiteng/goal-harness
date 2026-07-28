@@ -21,6 +21,9 @@ from loopx.capabilities.issue_fix.acceptance_loop import (  # noqa: E402
 from loopx.capabilities.issue_fix.intake_surface import (  # noqa: E402
     build_content_ops_issue_fix_metadata_preview_packet,
 )
+from loopx.capabilities.issue_fix.feasibility import (  # noqa: E402
+    build_issue_fix_feasibility_packet,
+)
 from loopx.capabilities.issue_fix.workflow_plan import (  # noqa: E402
     build_issue_fix_workflow_plan_packet,
 )
@@ -124,22 +127,46 @@ def test_metadata_to_ordered_todos_and_gates() -> None:
         1,
         2,
         3,
-        4,
-        5,
-        6,
     ], plan
     assert todo_by_action(plan, "issue_fix_public_metadata_classification")["role"] == "agent"
-    assert todo_by_action(plan, "issue_fix_repro_and_route")["priority"] == "P0"
-    assert todo_by_action(plan, "issue_fix_branch_validation")["blocks"] == [
-        "pr_review_packet_ready"
-    ]
+    assert todo_by_action(plan, "issue_fix_feasibility_decision")["priority"] == "P0"
     gated_read = todo_by_action(plan, "approve_github_issue_body_or_comment_read")
     assert gated_read["role"] == "user", gated_read
     assert gated_read["priority"] == "P0", gated_read
     assert gated_read["would_write"] is False, gated_read
-    publish_gate = todo_by_action(plan, "approve_external_issue_publish_or_merge")
-    assert publish_gate["role"] == "user", publish_gate
-    assert "external_pr_creation" in publish_gate["blocks"], publish_gate
+    action_kinds = {
+        todo["action_kind"] for todo in plan["ordered_loopx_todo_writeback_preview"]
+    }
+    assert "issue_fix_branch_validation" not in action_kinds, action_kinds
+    assert "issue_fix_pr_lifecycle_monitor" not in action_kinds, action_kinds
+    routes = {route["route"]: route for route in plan["resolution_route_candidates"]}
+    assert set(routes) == {"fix_pr", "comment_only", "triage_only"}, routes
+    assert routes["fix_pr"]["next_action_kind"] == "issue_fix_branch_validation"
+    assert routes["comment_only"]["external_issue_comment_performed"] is False
+    assert routes["comment_only"]["requires_user_gate_before_external_write"] is True
+    checkpoint = plan["feasibility_checkpoint_plan"]
+    assert checkpoint["selects_exactly_one_route"] is True, checkpoint
+    assert checkpoint["writes_domain_state_by_default_with_goal_id"] is True
+    post_pr = plan["post_pr_lifecycle_monitor_plan"]
+    assert post_pr["schema_version"] == "issue_fix_post_pr_lifecycle_monitor_plan_v1"
+    assert post_pr["creates_per_pr_continuous_monitor_todo"] is False, post_pr
+    assert post_pr["monitor_scope"] == "lifecycle_state_bucket", post_pr
+    assert post_pr["per_pr_material_actions_are_one_shot"] is True, post_pr
+    assert post_pr["external_notification_granularity"] == "one_pr_per_message"
+    assert "no_followup" in post_pr["decisions"], post_pr
+
+    decision = build_issue_fix_feasibility_packet(
+        url="https://github.com/huangruiteng/loopx/issues/123",
+        reproduction_status="planned",
+        reproduction_label="focused repro plan",
+        scope_class="bounded",
+        validation_label="python3 examples/focused-smoke.py",
+    )
+    assert decision["decision"]["route"] == "fix_pr", decision
+    assert decision["transition"]["projected_todo"]["action_kind"] == (
+        "issue_fix_confirm_reproduction"
+    ), decision
+    assert decision["external_writes_performed"] is False, decision
 
     review_preview = plan["review_packet_preview"]
     assert review_preview["ready"] is False, review_preview
@@ -148,6 +175,7 @@ def test_metadata_to_ordered_todos_and_gates() -> None:
     assert review_preview["merge_performed"] is False, review_preview
     assert_public_safe(metadata)
     assert_public_safe(plan)
+    assert_public_safe(decision)
 
 
 def test_validation_and_review_packet_readiness() -> None:

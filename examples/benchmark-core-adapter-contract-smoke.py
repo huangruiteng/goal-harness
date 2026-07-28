@@ -34,8 +34,11 @@ from loopx.benchmark_core import (  # noqa: E402
     Observation,
     PreflightResult,
     RunHandle,
+    build_benchmark_live_worker_phase,
     build_round_artifact_restore_plan,
     compact_round_artifact_snapshots,
+    compact_benchmark_canonical_lifecycle,
+    compact_benchmark_live_worker_phase,
     canonical_lifecycle,
     load_json_object,
     optional_float,
@@ -108,6 +111,29 @@ def test_process_started_is_not_case_entry() -> None:
     assert lifecycle["entered_benchmark_case"] is False, lifecycle
     assert lifecycle["case_attempt_countable"] is False, lifecycle
     assert lifecycle["next_required_phase"] == "runner_accepted_args", lifecycle
+    compact = compact_benchmark_canonical_lifecycle(lifecycle)
+    assert compact["current_phase"] == "process_started", compact
+    assert compact["phase_ready"]["process_started"] is True, compact
+    assert compact["phase_ready"]["runner_accepted_args"] is False, compact
+    noisy = dict(lifecycle)
+    noisy["phase_ready"] = {**lifecycle["phase_ready"], "fixture_private_phase": True}
+    assert "fixture_private_phase" not in compact_benchmark_canonical_lifecycle(
+        noisy
+    )["phase_ready"]
+
+
+def test_live_worker_phase_keeps_terminal_state_separate_from_progress() -> None:
+    phase = build_benchmark_live_worker_phase(
+        agent_active=True,
+        terminal_disposition="completed",
+    )
+    assert phase["current_phase"] == "agent_active", phase
+    assert phase["worker_live"] is False, phase
+    assert phase["terminal"] is True, phase
+    assert phase["terminal_disposition"] == "completed", phase
+    assert phase["public_evidence_only"] is True, phase
+    noisy = {**phase, "private_detail": "not projected"}
+    assert compact_benchmark_live_worker_phase(noisy) == phase
 
 
 def test_existing_lifecycle_builder_projects_canonical_state() -> None:
@@ -264,14 +290,19 @@ def test_adapter_rollout_matrix_records_current_migration_order() -> None:
     ).read_text(encoding="utf-8")
     assert "## Adapter Rollout Matrix" in doc
     assert "| Terminal-Bench | `loopx.benchmark_adapters.terminal_bench` | First migration target." in doc
-    assert "Map goal-start `/loopx` raw/new runs into the same launch/observe/ingest/classify/ledger fields" in doc
+    assert "`run_permission_policy_v0`, and `benchmark_attempt_accounting_v0` adoption" in doc
+    assert "Goal-start `/loopx` raw/new mapping remains blocked on transport monitor `todo_45357c108d81`" in doc
+    assert "no solver output and no new-arm compact artifact" in doc
     assert "| SWE-Marathon | no dedicated adapter yet |" in doc
+    assert "Deferred: create the adapter only after a second SWE-Marathon route" in doc
     assert "do not add SWE-specific conventions to `benchmark_core`" in doc
+    assert "Keep SkillsBench goal-start matrix rows blocked until compact transport" in doc
 
 
 def main() -> int:
     assert_adapter(FixtureAdapter())
     test_process_started_is_not_case_entry()
+    test_live_worker_phase_keeps_terminal_state_separate_from_progress()
     test_existing_lifecycle_builder_projects_canonical_state()
     test_round_reward_summary_prefers_best_score()
     test_best_round_restore_plan_uses_public_snapshot_handle()

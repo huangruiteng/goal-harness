@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const dashboardDir = resolve(repoRoot, "apps/dashboard");
+const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
 const fixtureName = "status.home.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
 const visualOutputDir = resolve(repoRoot, "output/playwright/dashboard-home-visual-acceptance");
@@ -641,7 +641,7 @@ async function main() {
       "Creator Operator",
       "热点",
       "合成案例",
-      "Side Agent 自迭代",
+      "Peer Agent 自迭代",
       "需要 Codex recovery",
       "排序器 / 跨域证据",
       "具体 blocker",
@@ -790,8 +790,7 @@ async function main() {
       "--self-repair-enabled",
       "--self-repair-health",
       "--self-repair-waiting-projection",
-      "--orchestration-mode multi_subagent",
-      "--spawn-allowed",
+      "--multi-subagent-feature enabled",
       "--max-children 2",
       "--allowed-domain docs",
       "--allowed-domain validation",

@@ -5,22 +5,13 @@ This is a thin launcher around the official SkillsBench/BenchFlow runner.  It
 keeps task execution and verification inside BenchFlow, then reduces only the
 official result/timing files into ``benchmark_run_v0``.
 
-The ``codex-app-server-goal-baseline`` route is the native Codex Goal baseline
-surface. The comparable LoopX test route is
-``loopx-prompt-polling-test``: it uses BenchFlow's ``BaseUser``
-progressive-disclosure hook as the outer LoopX polling controller
-without forwarding official reward, pass/fail, verifier errors, or verifier
-output back to the agent:
-
-- round 0 sends the task instruction with a LoopX controller header;
-- later rounds are scheduled continuations that explicitly say they are not
-  evidence of verifier success or failure;
-- public closeout reads only official ``result.json`` and ``timing.json``.
-
-The historical ``loopx-blind-loop-treatment`` route is kept as an alias
-for existing SkillsBench rows that used the same no-feedback polling semantics.
-The ``codex-acp-blind-loop-baseline`` route uses the same no-reward loop budget
-with an ordinary Codex prompt and no LoopX controller semantics.
+The ``codex-cli-goal-baseline`` route is the canonical Codex Goal baseline:
+it drives the Codex CLI TUI slash-command surface with a real ``/goal`` command.
+The comparable LoopX route is ``loopx-goal-start-product-mode``. It runs the
+actual guided ``/loopx <task objective>`` contract, requires the agent-authored
+plan and selected-P0 lifecycle, and records a compact control score. Historical
+prompt-polling routes are intentionally not launchable because they measured an
+outer prompt/controller treatment rather than the LoopX product lifecycle.
 
 Routes that forward official verifier reward, pass/fail status, verifier
 errors, or verifier output back to the agent are intentionally unsupported for
@@ -28,18 +19,10 @@ SkillsBench product-mode research. Official verifier artifacts may be reduced
 into private metrics and public-safe compact counters only after the agent turn;
 they must not become continuation prompts or case-local LoopX todos.
 
-For the ``codex-goal-mode-baseline`` route it uses BenchFlow's user hook only
-to request a slash-goal-style initial prompt, with no reward follow-up, no Goal
-Harness controller state, and no verifier feedback. This is not sufficient by
-itself to prove native Codex CLI goal mode; that requires separate CLI
-slash-command/goal-state evidence. Full execution of this route is blocked by
-default until that evidence exists; use it only for explicit slash-prefix
-experiments.
-
-The native Goal baseline requires a host-side Codex app-server worker using
-``thread/start``, ``thread/goal/set``, ``thread/goal/get``, and ``turn/start``.
-Until the BenchFlow worker integration is wired, full execution fails closed;
-``--plan-only`` still emits the public-safe launch contract.
+The historical ``codex-app-server-goal-baseline`` route remains in the codebase
+for compatibility and reducer forensics, but it is deprecated for SkillsBench
+treatment/baseline collection. Normal executions fail closed unless an explicit
+legacy override flag is passed; prefer ``codex-cli-goal-baseline``.
 
 Run from the SkillsBench checkout so BenchFlow's dependency environment is
 available, for example:
@@ -59,6 +42,7 @@ import argparse
 import ast
 import asyncio
 import contextlib
+import difflib
 import importlib
 import inspect
 import json
@@ -88,8 +72,6 @@ from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION,
     BENCHMARK_CASE_LOOPX_AGENT_ID,
     BENCHMARK_CASE_LOOPX_CLI_PATH,
-    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS,
-    BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS,
     BENCHMARK_CASE_LOOPX_REGISTRY_PATH,
     BENCHMARK_CASE_LOOPX_RUNTIME_ROOT,
     BENCHMARK_CASE_LOOPX_SOURCE_MOUNT_TARGET,
@@ -98,14 +80,36 @@ from loopx.benchmark_case_state import (  # noqa: E402
     BENCHMARK_CASE_LOOPX_TODO_ID,
     benchmark_case_loopx_command_prefix,
     benchmark_case_loopx_install_payload,
+    benchmark_case_outer_controller_quota_guard_command,
     benchmark_case_active_state_path,
     benchmark_case_active_state_seed_text,
     benchmark_case_active_state_write_command,
 )
 from loopx.benchmark_adapters.skillsbench import (  # noqa: E402
+    apply_skillsbench_pre_agent_setup_diagnostic_attribution,
     build_skillsbench_app_server_goal_worker_contract,
     build_skillsbench_run_permission_policy,
     build_skillsbench_worker_handshake_preflight,
+)
+from loopx.benchmark_adapters.skillsbench_batch import (  # noqa: E402
+    BatchCaseStartPacer,
+    batch_case_args_to_cli as _batch_case_args_to_cli,
+    batch_task_ids as _batch_task_ids,
+    clone_args_for_batch_case as _clone_args_for_batch_case,
+    parallel_batch_requires_subprocess_isolation as _parallel_isolation_required,
+    split_task_ids_arg as _split_task_ids_arg,
+)
+from loopx.benchmark_adapters.skillsbench_task_source import (  # noqa: E402
+    classify_missing_task_source,
+)
+from loopx.benchmark_adapters import (  # noqa: E402
+    skillsbench_codex_runtime as codex_runtime,
+    skillsbench_dockerfile_runtime as dockerfile_runtime,
+    skillsbench_proxy_runtime as proxy_runtime,
+    skillsbench_runner_source as runner_source,
+    skillsbench_uv_cache as uv_cache,
+    skillsbench_verifier_bootstrap as verifier_bootstrap,
+    skillsbench_verifier_cache as verifier_cache,
 )
 from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
     SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER,
@@ -115,18 +119,54 @@ from loopx.benchmark_adapters.skillsbench_acp_relay import (  # noqa: E402
     run_skillsbench_host_local_acp_transport_probe,
     run_skillsbench_local_acp_relay_probe,
 )
+from loopx.benchmark_adapters.skillsbench_acp_failure_policy import (  # noqa: E402
+    RECOVERABLE_CODEX_TURN_FAILURE_CATEGORIES,
+)
+from loopx.benchmark_adapters.skillsbench_codex_goal_trace import (  # noqa: E402
+    codex_cli_goal_recovery_public_fields,
+    merge_codex_cli_goal_recovery_trace,
+    new_codex_cli_goal_recovery_summary,
+)
 from loopx.benchmark_adapters.skillsbench_remote_bridge import (  # noqa: E402
     run_skillsbench_remote_command_file_bridge_probe,
     skillsbench_remote_command_file_bridge_command_is_fixture_probe,
+)
+from loopx.benchmark_adapters.skillsbench_setup_preflight import (  # noqa: E402
+    run_setup_only_public_preflight,
+)
+from loopx.benchmark_adapters.skillsbench_typed_repair import (  # noqa: E402
+    begin_skillsbench_typed_repair,
+    build_skillsbench_typed_repair_prompt,
+    record_skillsbench_typed_repair_terminal,
+    resolve_skillsbench_typed_repair_response,
+    skillsbench_projected_open_todo_count,
+)
+from loopx.benchmark_adapters.skillsbench_turn_route import (  # noqa: E402
+    SkillsBenchTurnTraceSummary,
+    add_skillsbench_loopx_turn_arguments,
+    skillsbench_loopx_turn_launch_error,
+    skillsbench_loopx_turn_runner_prerequisites,
+    sync_skillsbench_loopx_turn_trace_into_compact,
+)
+from loopx.benchmark_core import (  # noqa: E402
+    build_benchmark_launch_observable_handle,
+    build_benchmark_live_worker_phase,
+    canonical_lifecycle,
+    compact_benchmark_canonical_lifecycle,
+    compact_benchmark_live_worker_phase,
+    read_container_file_via_compose_copy,
+    run_container_command_with_exit_status,
+    run_container_command_with_output_capture,
+    write_benchmark_run_observable_status,
 )
 from loopx.benchmark_core.loop_protocol import (  # noqa: E402
     BLIND_LOOP_DEFAULT_MAX_ROUNDS,
     CODEX_ACP_BLIND_LOOP_BASELINE_ROUTE,
     CODEX_APP_SERVER_GOAL_BASELINE_ROUTE,
-    LOOPX_BLIND_LOOP_TREATMENT_ROUTE,
+    CODEX_CLI_GOAL_BASELINE_ROUTE,
     LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
     LOOPX_PRODUCT_MODE_ROUTE,
-    LOOPX_PROMPT_POLLING_TEST_ROUTE,
+    LOOPX_TURN_AGENT_CLI_ROUTE,
     RAW_CODEX_AUTONOMOUS_MAX5_ROUTE,
     build_benchmark_loop_controller_trace,
     build_blind_loop_continuation_prompt,
@@ -136,6 +176,16 @@ from loopx.benchmark_trajectory import (
     loopx_cli_state_usage,
     normalized_loopx_cli_call,
     summarize_public_acp_trajectory,
+)
+from loopx.benchmarks.read_models.goal_start_control_score import (
+    build_goal_start_product_mode_control_score,
+    goal_start_public_command_records as _goal_start_public_command_records,
+    goal_start_public_text_list as _goal_start_public_text_list,
+    goal_start_public_todo_id_list as _goal_start_public_todo_id_list,
+)
+from loopx.control_plane.turn_driver import (
+    loopx_turn_execution_committed,
+    loopx_turn_execution_has_durable_effects,
 )
 
 
@@ -147,174 +197,24 @@ class SkillsBenchProductModeNoLifecycleRequests(RuntimeError):
     """Product-mode agent made no required case-local LoopX lifecycle request."""
 
 
-DEFAULT_SKILLSBENCH_ROOT = REPO_ROOT / ".local/benchmark/externals/skillsbench"
-DEFAULT_LEDGER = (
-    REPO_ROOT
-    / "docs/research/long-horizon-agent-benchmarks/benchmark-run-ledger.json"
-)
-TERMINAL_OFFICIAL_NONPASSING_ATTRIBUTIONS = {
-    "official_score_zero_case_failure",
-    "official_verifier_solution_failure",
-}
-DEFAULT_GOAL_ID = "loopx-meta"
-DEFAULT_MODEL = "gpt-5.5"
-DEFAULT_TIMEOUT_SEC = 7200
-DEFAULT_HOST_LOCAL_CODEX_BRIDGE_IDLE_TIMEOUT_SEC = 3600
-DEFAULT_HOST_LOCAL_CODEX_TASK_OUTPUT_QUIET_TIMEOUT_SEC = 600
-DEFAULT_APP_SERVER_GOAL_FIRST_ACTION_TIMEOUT_SEC = 3600
-DEFAULT_VERIFIER_PREP_TIMEOUT_SEC = 120
-DEFAULT_SOFT_VERIFIER_TIMEOUT_SEC = 600
-DEFAULT_PRODUCT_MODE_SOFT_VERIFY_POLICY = "every-round"
-DEFAULT_MAX_ROUNDS = 16
-PRODUCT_MODE_MIN_FORMAL_MAX_ROUNDS = 10
-RUNNER_PREREQUISITES_PUBLIC_FILENAME = "runner_prerequisites.public.json"
-RUNNER_CONFIG_PUBLIC_FILENAME = "runner_config.public.json"
-HOST_LOCAL_ACP_TARGET_ENV_KEYS = (
-    "AI_ADDR",
-    "AI_PORT",
-    "GOAL_HARNESS_REMOTE_BENCH_ROOT",
-    "LOOPX_SKILLSBENCH_EGRESS_PROXY",
-    "LOOPX_BENCHMARK_EGRESS_PROXY",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "ALL_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "all_proxy",
-    "NO_PROXY",
-    "no_proxy",
-    "LOOPX_CODEX_API_REVERSE_TUNNEL_PROXY",
-)
+class SkillsBenchLoopXTurnTerminalFailureStall(RuntimeError):
+    """A terminal failed Turn did not let BenchFlow close the case."""
 
 
-def _expanded_path(value: str | os.PathLike[str]) -> Path:
-    return Path(value).expanduser()
+from scripts import skillsbench_runner_constants as _runner_constants
 
-
-def _same_ledger_path(left: Path, right: Path) -> bool:
-    return left.resolve(strict=False) == right.resolve(strict=False)
-
-
-def _ledger_scope_label(primary_path: Path, global_path: Path) -> str:
-    if _same_ledger_path(primary_path, global_path):
-        return "global"
-    return "run_group_with_global_sync"
-
-
-def _inherit_global_ledger_snapshot(
-    *,
-    primary_path: Path,
-    global_path: Path,
-    dry_run: bool,
-    enabled: bool,
-) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "schema_version": "skillsbench_global_ledger_inheritance_v0",
-        "enabled": enabled,
-        "dry_run": dry_run,
-        "inherited": False,
-        "markdown_inherited": False,
-        "primary_ledger_path": str(primary_path),
-        "global_ledger_path": str(global_path),
+globals().update(
+    {
+        name: getattr(_runner_constants, name)
+        for name in dir(_runner_constants)
+        if not name.startswith("__")
     }
-    if not enabled:
-        result["status"] = "disabled"
-        return result
-    if _same_ledger_path(primary_path, global_path):
-        result["status"] = "same_as_global"
-        return result
-    if primary_path.exists():
-        result["status"] = "primary_ledger_already_exists"
-        return result
-    if not global_path.exists():
-        result["status"] = "global_ledger_missing"
-        return result
-    if dry_run:
-        result["status"] = "would_inherit"
-        result["inherited"] = True
-        result["markdown_inherited"] = global_path.with_suffix(".md").exists()
-        return result
+)
 
-    primary_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(global_path, primary_path)
-    result["inherited"] = True
-    global_markdown = global_path.with_suffix(".md")
-    primary_markdown = primary_path.with_suffix(".md")
-    if global_markdown.exists():
-        shutil.copy2(global_markdown, primary_markdown)
-        result["markdown_inherited"] = True
-    result["status"] = "inherited"
-    return result
-CODEX_API_REVERSE_TUNNEL_PROXY_ENV_KEYS = (
-    "LOOPX_CODEX_API_REVERSE_TUNNEL_PROXY",
-    "CODEX_API_REVERSE_TUNNEL_PROXY",
-)
-CODEX_API_PROXY_FORWARD_ENV_KEYS = (
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "ALL_PROXY",
-    "https_proxy",
-    "http_proxy",
-    "all_proxy",
-    "LOOPX_CODEX_API_REVERSE_TUNNEL_PROXY",
-)
-CODEX_API_EGRESS_TEST_HOST = "chatgpt.com"
-CODEX_API_EGRESS_TEST_PORT = 443
-CODEX_API_EGRESS_MODE_CHOICES = ("auto", "reverse-tunnel", "direct")
-DEFAULT_CODEX_API_EGRESS_PREFLIGHT_TIMEOUT_SEC = 8.0
-BENCHMARK_EGRESS_PROXY_ENV_KEYS = (
-    "LOOPX_SKILLSBENCH_EGRESS_PROXY",
-    "LOOPX_BENCHMARK_EGRESS_PROXY",
-)
-BENCHMARK_EGRESS_PROXY_FORWARD_ENV_KEYS = (
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "ALL_PROXY",
-    "https_proxy",
-    "http_proxy",
-    "all_proxy",
-)
-BENCHMARK_EGRESS_PROXY_MODE_CHOICES = ("auto", "off", "require")
-BENCHMARK_EGRESS_TEST_HOST = "pypi.org"
-BENCHMARK_EGRESS_TEST_PORT = 443
-DEFAULT_BENCHMARK_EGRESS_PROXY_PREFLIGHT_TIMEOUT_SEC = 8.0
-_MISSING = object()
-SUPPORTED_ROUTES = (
-    CODEX_ACP_BLIND_LOOP_BASELINE_ROUTE,
-    LOOPX_BLIND_LOOP_TREATMENT_ROUTE,
-    LOOPX_PROMPT_POLLING_TEST_ROUTE,
-    RAW_CODEX_AUTONOMOUS_MAX5_ROUTE,
-    LOOPX_PRODUCT_MODE_ROUTE,
-    LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
+INDEPENDENT_GOAL_RETRY_ROUTES = {
     CODEX_APP_SERVER_GOAL_BASELINE_ROUTE,
-    "codex-goal-mode-baseline",
-)
-DEFAULT_ROUTE = LOOPX_BLIND_LOOP_TREATMENT_ROUTE
-CODEX_ACP_SET_MODEL_UNSUPPORTED_LABEL = "codex_acp_set_model_unsupported"
-ACP_TRAJECTORY_SUMMARY_SCHEMA_VERSION = "skillsbench_acp_trajectory_summary_v0"
-LOCAL_CODEX_PARTICIPANT_MATERIALIZATION_SCHEMA_VERSION = (
-    "skillsbench_local_codex_participant_materialization_v0"
-)
-LOCAL_CODEX_PARTICIPANT_READY_MARKER = (
-    "LOOPX_LOCAL_CODEX_PARTICIPANT_READY"
-)
-PRODUCT_MODE_CASE_GOAL_ID = "skillsbench-case"
-PRODUCT_MODE_CASE_STATE_PATH = benchmark_case_active_state_path(
-    PRODUCT_MODE_CASE_GOAL_ID
-)
-PRODUCT_MODE_CASE_STATE_SCHEMA_VERSION = BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION
-LOOPX_PRODUCT_MODE_FAMILY_ROUTES = frozenset(
-    {
-        LOOPX_PRODUCT_MODE_ROUTE,
-        LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
-    }
-)
-PRODUCT_MODE_CONTROLLER_ROUTES = frozenset(
-    {
-        RAW_CODEX_AUTONOMOUS_MAX5_ROUTE,
-        *LOOPX_PRODUCT_MODE_FAMILY_ROUTES,
-    }
-)
+    CODEX_CLI_GOAL_BASELINE_ROUTE,
+}
 
 
 def _is_loopx_product_mode_route(route: str) -> bool:
@@ -325,16 +225,35 @@ def _is_goal_start_product_mode_route(route: str) -> bool:
     return route == LOOPX_GOAL_START_PRODUCT_MODE_ROUTE
 
 
+def _is_loopx_turn_agent_cli_route(route: str) -> bool:
+    return route == LOOPX_TURN_AGENT_CLI_ROUTE
+
+
+def _is_case_loopx_route(route: str) -> bool:
+    return route in LOOPX_CASE_RUNTIME_ROUTES
+
+
 def _product_mode_arm_id_for_route(route: str) -> str:
     if _is_goal_start_product_mode_route(route):
         return "loopx_goal_start_product_mode"
     return "loopx_product_mode"
 
 
+def _loopx_case_arm_id_for_route(route: str) -> str:
+    if _is_loopx_turn_agent_cli_route(route):
+        return "loopx_turn_agent_cli"
+    return _product_mode_arm_id_for_route(route)
+
+
 def product_mode_soft_verify_policy_for_route(
     route: str,
     requested_policy: str,
 ) -> str:
+    if route == LOOPX_TURN_AGENT_CLI_ROUTE:
+        # Turn owns a separate public workspace validator and recovery receipt.
+        # Re-running the private official verifier every round duplicates that
+        # control signal and can exhaust the agent timeout before final scoring.
+        return "final-only"
     if route in PRODUCT_MODE_CONTROLLER_ROUTES:
         return requested_policy
     return "every-round"
@@ -460,14 +379,47 @@ DOCKER_CODEX_ACP_RUNTIME_TOOLS_BEGIN = (
 DOCKER_CODEX_ACP_RUNTIME_TOOLS_END = (
     "# END LOOPX_SKILLSBENCH_CODEX_ACP_RUNTIME_TOOLS"
 )
+DOCKER_LOOPX_CASE_PYTHON_RUNTIME_BEGIN = (
+    "# BEGIN LOOPX_SKILLSBENCH_LOOPX_CASE_PYTHON_RUNTIME"
+)
+DOCKER_LOOPX_CASE_PYTHON_RUNTIME_END = (
+    "# END LOOPX_SKILLSBENCH_LOOPX_CASE_PYTHON_RUNTIME"
+)
 DOCKER_PIP_BOOTSTRAP_BEGIN = "# BEGIN LOOPX_SKILLSBENCH_PIP_BOOTSTRAP"
 DOCKER_PIP_BOOTSTRAP_END = "# END LOOPX_SKILLSBENCH_PIP_BOOTSTRAP"
-VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN = (
-    "# BEGIN LOOPX_SKILLSBENCH_VERIFIER_UV_BOOTSTRAP_MIRROR"
+DOCKER_GCR_MIRROR_BEGIN = "# BEGIN LOOPX_SKILLSBENCH_GCR_MIRROR"
+DOCKER_GCR_MIRROR_END = "# END LOOPX_SKILLSBENCH_GCR_MIRROR"
+DOCKER_BENCHMARK_EGRESS_PROXY_BEGIN = (
+    "# BEGIN LOOPX_SKILLSBENCH_DOCKER_BENCHMARK_EGRESS_PROXY"
 )
-VERIFIER_UV_BOOTSTRAP_MIRROR_END = (
-    "# END LOOPX_SKILLSBENCH_VERIFIER_UV_BOOTSTRAP_MIRROR"
+DOCKER_BENCHMARK_EGRESS_PROXY_END = (
+    "# END LOOPX_SKILLSBENCH_DOCKER_BENCHMARK_EGRESS_PROXY"
 )
+DOCKER_ELAN_TOOLCHAIN_RETRY_BEGIN = (
+    "# BEGIN LOOPX_SKILLSBENCH_ELAN_TOOLCHAIN_RETRY"
+)
+DOCKER_ELAN_TOOLCHAIN_RETRY_END = (
+    "# END LOOPX_SKILLSBENCH_ELAN_TOOLCHAIN_RETRY"
+)
+DOCKER_NETWORK_DOWNLOAD_RETRY_BEGIN = (
+    "# BEGIN LOOPX_SKILLSBENCH_NETWORK_DOWNLOAD_RETRY"
+)
+DOCKER_NETWORK_DOWNLOAD_RETRY_END = (
+    "# END LOOPX_SKILLSBENCH_NETWORK_DOWNLOAD_RETRY"
+)
+DOCKER_UV_BOOTSTRAP_MIRROR_BEGIN = (
+    "# BEGIN LOOPX_SKILLSBENCH_DOCKER_UV_BOOTSTRAP_MIRROR"
+)
+DOCKER_UV_BOOTSTRAP_MIRROR_END = (
+    "# END LOOPX_SKILLSBENCH_DOCKER_UV_BOOTSTRAP_MIRROR"
+)
+DOCKER_MAVEN_MIRROR_BEGIN = "# BEGIN LOOPX_SKILLSBENCH_MAVEN_MIRROR"
+DOCKER_MAVEN_MIRROR_END = "# END LOOPX_SKILLSBENCH_MAVEN_MIRROR"
+DEFAULT_DOCKER_APACHE_ARCHIVE_MIRROR_BASE = "https://mirrors.huaweicloud.com/apache"
+DEFAULT_DOCKER_APACHE_ARCHIVE_MIRROR_HOST = "mirrors.huaweicloud.com"
+DEFAULT_DOCKER_MAVEN_MIRROR_URL = "https://repo.huaweicloud.com/repository/maven"
+DEFAULT_DOCKER_MAVEN_MIRROR_HOST = "repo.huaweicloud.com"
+DEFAULT_DOCKER_MAVEN_SETTINGS_PATH = "/opt/loopx-maven/settings.xml"
 VERIFIER_BENCHMARK_EGRESS_PROXY_BEGIN = (
     "# BEGIN LOOPX_SKILLSBENCH_VERIFIER_BENCHMARK_EGRESS_PROXY"
 )
@@ -475,12 +427,30 @@ VERIFIER_BENCHMARK_EGRESS_PROXY_END = (
     "# END LOOPX_SKILLSBENCH_VERIFIER_BENCHMARK_EGRESS_PROXY"
 )
 DEFAULT_VERIFIER_UV_RELEASE_MIRROR_BASE = (
-    "https://releases.astral.sh/github/uv/releases/download"
+    verifier_bootstrap.DEFAULT_VERIFIER_UV_RELEASE_MIRROR_BASE
 )
-DEFAULT_VERIFIER_UV_RELEASE_MIRROR_HOST = "releases.astral.sh"
-DEFAULT_DOCKER_PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple"
-DEFAULT_DOCKER_PIP_EXTRA_INDEX_URL = "https://pypi.org/simple"
+DEFAULT_VERIFIER_UV_RELEASE_MIRROR_HOST = (
+    verifier_bootstrap.DEFAULT_VERIFIER_UV_RELEASE_MIRROR_HOST
+)
+VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN = (
+    verifier_bootstrap.VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN
+)
+VERIFIER_UV_BOOTSTRAP_MIRROR_END = verifier_bootstrap.VERIFIER_UV_BOOTSTRAP_MIRROR_END
+DEFAULT_DOCKER_PIP_INDEX_URL = verifier_bootstrap.DEFAULT_DOCKER_PIP_INDEX_URL
 DEFAULT_DOCKER_PIP_INDEX_HOST = "pypi.tuna.tsinghua.edu.cn"
+PRIMARY_DOCKER_PIP_INDEX_URL = "https://pypi.org/simple"
+PRIMARY_DOCKER_PIP_INDEX_HOST = "pypi.org"
+DEFAULT_DOCKER_PIP_INDEX_MODE = "mirror"
+DOCKER_PIP_INDEX_MODES = {
+    "mirror": (DEFAULT_DOCKER_PIP_INDEX_URL, DEFAULT_DOCKER_PIP_INDEX_HOST),
+    "primary": (PRIMARY_DOCKER_PIP_INDEX_URL, PRIMARY_DOCKER_PIP_INDEX_HOST),
+}
+DEFAULT_DOCKER_APT_SOURCE_MODE = "mirror"
+DOCKER_APT_SOURCE_MODES = ("mirror", "primary")
+DEFAULT_DOCKER_APT_TRANSPORT_MODE = "default"
+DOCKER_APT_TRANSPORT_MODES = ("default", "proxy-compatible")
+DEFAULT_DOCKER_PIP_BUILD_MODE = "isolated"
+DOCKER_PIP_BUILD_MODES = ("isolated", "no-isolation")
 DOCKER_HOST_CPU_ENV = "LOOPX_SKILLSBENCH_DOCKER_CPUS"
 SANDBOX_PATH_RE = re.compile(r"/(?:app|root|workspace|tmp)/[A-Za-z0-9_./-]+")
 LOOPX_CLI_RE = re.compile(r"(?:^|\s|/)loopx(?:\s|$)")
@@ -511,6 +481,13 @@ CODEX_ACP_RUNTIME_CONTAINER_BOOTSTRAP_CMD = (
     "  exit 0; "
     "fi; "
     "if command -v apt-get >/dev/null 2>&1; then "
+    "  for apt_source in /etc/apt/sources.list "
+    "/etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do "
+    "    [ -f \"$apt_source\" ] || continue; "
+    "    sed -i 's|http://deb.debian.org|https://deb.debian.org|g; "
+    "s|http://security.debian.org|https://security.debian.org|g' "
+    "\"$apt_source\"; "
+    "  done; "
     "  apt_cache=/var/cache/apt/archives; "
     "  rm -f \"$apt_cache\"/*.deb; "
     "  mkdir -p \"$apt_cache/partial\"; "
@@ -567,6 +544,13 @@ CODEX_ACP_RUNTIME_DEPS_SETUP_CMD = (
     "2>/dev/null | grep -q .; then exit 0; fi; "
     "export DEBIAN_FRONTEND=noninteractive; "
     "if command -v apt-get >/dev/null 2>&1; then "
+    "  for apt_source in /etc/apt/sources.list "
+    "/etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do "
+    "    [ -f \"$apt_source\" ] || continue; "
+    "    sed -i 's|http://deb.debian.org|https://deb.debian.org|g; "
+    "s|http://security.debian.org|https://security.debian.org|g' "
+    "\"$apt_source\"; "
+    "  done; "
     "  apt_cache=/var/cache/apt/archives; "
     "  rm -f \"$apt_cache\"/*.deb; "
     "  mkdir -p \"$apt_cache/partial\"; "
@@ -693,15 +677,6 @@ def _now_stamp() -> str:
     return datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%Z")
 
 
-def _split_task_ids_arg(value: str | None) -> list[str]:
-    return [part for part in re.split(r"[,\s]+", value or "") if part]
-
-
-def _safe_batch_suffix(task_id: str, index: int) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id).strip("-")
-    return f"{index + 1:02d}-{slug or 'task'}"
-
-
 def _json_default(value: Any) -> str:
     if isinstance(value, Path):
         return str(value)
@@ -793,130 +768,6 @@ def _host_local_proxy_endpoint_probe(
         "status": "not_configured",
         "raw_proxy_url_recorded": False,
     }
-
-
-def materialize_local_codex_participant(
-    *,
-    codex_bin: str = "codex",
-    timeout_sec: int = 120,
-) -> dict[str, Any]:
-    """Run a fixed local Codex CLI ping and return a compact materialization proof.
-
-    This proves only the local CLI participant. It does not claim that the
-    SkillsBench A2A/worker handshake is wired, and it deliberately drops raw
-    JSONL events, stderr, prompts, paths, and credentials.
-    """
-
-    resolved = shutil.which(codex_bin) if os.sep not in codex_bin else codex_bin
-    if not resolved or (os.sep in str(resolved) and not Path(resolved).exists()):
-        return {
-            "schema_version": LOCAL_CODEX_PARTICIPANT_MATERIALIZATION_SCHEMA_VERSION,
-            "ready": False,
-            "first_blocker": "local_codex_cli_not_on_path",
-            "codex_cli_available": False,
-            "codex_cli_invoked": False,
-            "raw_output_recorded": False,
-            "raw_event_jsonl_recorded": False,
-            "credential_values_recorded": False,
-            "host_paths_recorded": False,
-            "a2a_worker_handshake_ready": False,
-        }
-
-    with tempfile.TemporaryDirectory(prefix="gh-skillsbench-codex-") as tmp:
-        tmpdir = Path(tmp)
-        output_path = tmpdir / "last-message.txt"
-        prompt = (
-            "Respond with exactly this single line and nothing else: "
-            f"{LOCAL_CODEX_PARTICIPANT_READY_MARKER}"
-        )
-        cmd = [
-            resolved,
-            "exec",
-            "--ephemeral",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-            "-C",
-            str(tmpdir),
-            "--output-last-message",
-            str(output_path),
-            "--json",
-            prompt,
-        ]
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=tmpdir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=timeout_sec,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            return {
-                "schema_version": LOCAL_CODEX_PARTICIPANT_MATERIALIZATION_SCHEMA_VERSION,
-                "ready": False,
-                "first_blocker": "local_codex_cli_participant_timeout",
-                "codex_cli_available": True,
-                "codex_cli_invoked": True,
-                "exit_code": None,
-                "timeout_sec": timeout_sec,
-                "stdout_len_bucket": _compact_size_bucket(
-                    len(exc.stdout or "")
-                    if isinstance(exc.stdout, str)
-                    else len(exc.stdout or b"")
-                ),
-                "stderr_len_bucket": _compact_size_bucket(
-                    len(exc.stderr or "")
-                    if isinstance(exc.stderr, str)
-                    else len(exc.stderr or b"")
-                ),
-                "raw_output_recorded": False,
-                "raw_event_jsonl_recorded": False,
-                "credential_values_recorded": False,
-                "host_paths_recorded": False,
-                "a2a_worker_handshake_ready": False,
-            }
-
-        marker = ""
-        if output_path.exists():
-            try:
-                marker = output_path.read_text(encoding="utf-8").strip()
-            except OSError:
-                marker = ""
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
-        event_count = len([line for line in stdout.splitlines() if line.strip()])
-        ready = proc.returncode == 0 and marker == LOCAL_CODEX_PARTICIPANT_READY_MARKER
-        if ready:
-            first_blocker = "local_codex_cli_participant_ready"
-        elif proc.returncode != 0:
-            first_blocker = "local_codex_cli_participant_exit_nonzero"
-        else:
-            first_blocker = "local_codex_cli_participant_marker_missing"
-        return {
-            "schema_version": LOCAL_CODEX_PARTICIPANT_MATERIALIZATION_SCHEMA_VERSION,
-            "ready": ready,
-            "first_blocker": first_blocker,
-            "codex_cli_available": True,
-            "codex_cli_invoked": True,
-            "exit_code": proc.returncode,
-            "marker_matched": marker == LOCAL_CODEX_PARTICIPANT_READY_MARKER,
-            "json_event_count": event_count,
-            "stdout_len_bucket": _compact_size_bucket(len(stdout)),
-            "stderr_len_bucket": _compact_size_bucket(len(stderr)),
-            "raw_output_recorded": False,
-            "raw_event_jsonl_recorded": False,
-            "credential_values_recorded": False,
-            "host_paths_recorded": False,
-            "a2a_worker_handshake_ready": False,
-            "next_blocker_after_ready": (
-                "skillsbench_local_acp_relay_missing"
-                if ready
-                else first_blocker
-            ),
-        }
 
 
 def _prepend_skillsbench_site_packages(skillsbench_root: Path) -> None:
@@ -1047,7 +898,7 @@ def _host_local_acp_launch_command(
         index = command.index("--dry-run-response")
         del command[index : index + 2]
     relay_trace_dir = str(plan.get("host_local_acp_relay_trace_dir") or "")
-    if args.route == "codex-app-server-goal-baseline":
+    if args.route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE:
         worker_trace_dir = str(plan.get("app_server_goal_worker_trace_dir") or "")
         command.extend(
             [
@@ -1055,15 +906,36 @@ def _host_local_acp_launch_command(
                 "--approval-policy",
                 "never",
                 "--reasoning-effort",
-                args.app_server_reasoning_effort,
+                _effective_app_server_reasoning_effort(args),
                 "--response-timeout-sec",
                 "30",
                 "--stream-heartbeat-interval-sec",
                 str(args.app_server_acp_heartbeat_interval_sec),
+                "--app-server-goal-followup-max",
+                str(
+                    max(
+                        0,
+                        int(getattr(args, "app_server_goal_followup_max", 0) or 0),
+                    )
+                ),
+                "--app-server-goal-prompt-style",
+                str(getattr(args, "app_server_goal_prompt_style", "bridge-only")),
             ]
         )
         if worker_trace_dir:
             command.extend(["--worker-public-trace-dir", worker_trace_dir])
+    elif args.route == CODEX_CLI_GOAL_BASELINE_ROUTE:
+        command.extend(["--codex-cli-goal-worker"])
+        if getattr(args, "codex_cli_goal_thread_prewarm", False): command.extend(["--codex-cli-goal-thread-prewarm"])
+        proxy_url, _proxy_source = _codex_api_reverse_tunnel_proxy(args)
+        if (
+            proxy_url
+            and args.host_local_acp_launch
+            and _codex_api_egress_resolved_mode(args) == "reverse-tunnel"
+        ):
+            command.extend(["--codex-api-proxy", proxy_url])
+        if relay_trace_dir:
+            command.extend(["--worker-public-trace-dir", relay_trace_dir])
     elif relay_trace_dir:
         command.extend(["--worker-public-trace-dir", relay_trace_dir])
     command.extend(
@@ -1088,13 +960,18 @@ def _host_local_acp_launch_command(
             str(_effective_local_codex_exec_timeout_sec(args)),
             "--first-action-timeout-sec",
             str(_effective_local_codex_first_action_timeout_sec(args)),
+            "--goal-active-timeout-sec",
+            str(_effective_local_codex_goal_active_timeout_sec(args)),
             "--bridge-idle-timeout-sec",
             str(_effective_local_codex_bridge_idle_timeout_sec(args)),
             "--task-output-quiet-timeout-sec",
             str(_effective_local_codex_task_output_quiet_timeout_sec(args)),
         ]
     )
-    if args.host_local_acp_launch and args.route != "codex-app-server-goal-baseline":
+    cli_reasoning_effort = _effective_codex_cli_reasoning_effort(args)
+    if cli_reasoning_effort and args.route != CODEX_APP_SERVER_GOAL_BASELINE_ROUTE:
+        command.extend(["--reasoning-effort", cli_reasoning_effort])
+    if args.host_local_acp_launch and args.route != CODEX_APP_SERVER_GOAL_BASELINE_ROUTE:
         heartbeat_interval = min(
             max(1.0, float(args.app_server_acp_heartbeat_interval_sec)),
             15.0,
@@ -1102,8 +979,9 @@ def _host_local_acp_launch_command(
         command.extend(["--stream-heartbeat-interval-sec", str(heartbeat_interval)])
     if args.model:
         command.extend(["--model", args.model])
-    bridge_enabled_route = args.route in PRODUCT_MODE_CONTROLLER_ROUTES or (
-        args.route == "codex-app-server-goal-baseline"
+    bridge_enabled_route = args.route in HOST_LOCAL_BRIDGE_ROUTES or (
+        args.route
+        in {CODEX_APP_SERVER_GOAL_BASELINE_ROUTE, CODEX_CLI_GOAL_BASELINE_ROUTE}
     )
     if (
         bridge_enabled_route
@@ -1129,7 +1007,10 @@ def _host_local_acp_launch_command(
                     args.remote_command_file_bridge_agent_command,
                 ]
         )
-        if _is_loopx_product_mode_route(args.route):
+        if (
+            _is_loopx_product_mode_route(args.route)
+            and not _is_goal_start_product_mode_route(args.route)
+        ):
             payload = benchmark_case_loopx_install_payload(
                 benchmark_id="skillsbench",
                 case_id=args.task_id,
@@ -1162,8 +1043,59 @@ def _host_local_acp_launch_command(
                     ),
                 ]
             )
+    if _is_loopx_turn_agent_cli_route(args.route):
+        payload = benchmark_case_loopx_install_payload(
+            benchmark_id="skillsbench",
+            case_id=args.task_id,
+            arm_id=_loopx_case_arm_id_for_route(args.route),
+            route=args.route,
+            max_rounds=args.max_rounds,
+            case_loopx_source_path=_loopx_case_source_path_for_container(args),
+            goal_start_product_mode=False,
+        )
+        command.extend(
+            [
+                "--loopx-turn-agent-cli",
+                "--loopx-case-goal-id",
+                str(payload.get("benchmark_case_goal_id") or ""),
+                "--loopx-case-agent-id",
+                str(payload.get("case_agent_id") or BENCHMARK_CASE_LOOPX_AGENT_ID),
+                "--loopx-case-todo-id",
+                str(payload.get("case_todo_id") or BENCHMARK_CASE_LOOPX_TODO_ID),
+                "--loopx-case-cli-path",
+                str(payload.get("case_cli_path") or BENCHMARK_CASE_LOOPX_CLI_PATH),
+                "--loopx-case-registry-path",
+                str(
+                    payload.get("case_registry_path")
+                    or BENCHMARK_CASE_LOOPX_REGISTRY_PATH
+                ),
+                "--loopx-case-runtime-root",
+                str(
+                    payload.get("case_runtime_root")
+                    or BENCHMARK_CASE_LOOPX_RUNTIME_ROOT
+                ),
+            ]
+        )
+        validation_command = str(
+            getattr(args, "loopx_turn_validation_command", "") or ""
+        ).strip()
+        if validation_command:
+            command.extend(
+                ["--loopx-turn-validation-command", validation_command]
+            )
+        command.extend(
+            [
+                "--loopx-turn-max-turns",
+                str(getattr(args, "loopx_turn_max_turns", 1)),
+                "--loopx-turn-progress-exit-code",
+                str(getattr(args, "loopx_turn_progress_exit_code", 10)),
+                "--loopx-turn-terminal-policy",
+                str(getattr(args, "loopx_turn_terminal_policy", "validator")),
+            ]
+        )
     if (
         _is_loopx_product_mode_route(args.route)
+        and not _is_goal_start_product_mode_route(args.route)
         and args.host_local_acp_launch
         and "--loopx-workflow-lifecycle-checkpoint" not in command
     ):
@@ -1202,6 +1134,22 @@ def _host_local_acp_launch_command(
     return command
 
 
+def _effective_reasoning_effort(args: argparse.Namespace) -> str:
+    return str(getattr(args, "reasoning_effort", None) or "").strip()
+
+
+def _effective_app_server_reasoning_effort(args: argparse.Namespace) -> str:
+    return str(
+        getattr(args, "reasoning_effort", None)
+        or getattr(args, "app_server_reasoning_effort", None)
+        or "high"
+    ).strip()
+
+
+def _effective_codex_cli_reasoning_effort(args: argparse.Namespace) -> str:
+    return _effective_reasoning_effort(args)
+
+
 def _effective_local_codex_exec_timeout_sec(args: argparse.Namespace) -> int:
     configured_raw = getattr(args, "local_codex_exec_timeout_sec", None)
     configured = max(1, int(configured_raw or DEFAULT_TIMEOUT_SEC))
@@ -1210,15 +1158,18 @@ def _effective_local_codex_exec_timeout_sec(args: argparse.Namespace) -> int:
         configured_raw is None
         and bool(getattr(args, "host_local_acp_launch", False))
     ):
+        outer_timeout = max(0, int(getattr(args, "outer_timeout_sec", 0) or 0))
         if getattr(args, "route", "") == "codex-app-server-goal-baseline":
-            outer_timeout = max(0, int(getattr(args, "outer_timeout_sec", 0) or 0))
             return max(configured, outer_timeout)
         bridge_idle_timeout = _effective_local_codex_bridge_idle_timeout_sec(args)
         if bridge_idle_timeout > 0:
             return max(
                 1,
+                outer_timeout,
                 bridge_idle_timeout + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC,
             )
+        if outer_timeout > 0:
+            return outer_timeout
     if configured_raw is None and idle_timeout > 0:
         return min(configured, idle_timeout)
     return configured
@@ -1257,9 +1208,32 @@ def _effective_local_codex_first_action_timeout_sec(args: argparse.Namespace) ->
         return max(0, int(configured or 0))
     if (
         bool(getattr(args, "host_local_acp_launch", False))
+        and getattr(args, "route", "") == CODEX_CLI_GOAL_BASELINE_ROUTE
+    ):
+        idle_timeout = max(0, int(getattr(args, "agent_idle_timeout", 0) or 0))
+        if idle_timeout > 0:
+            return min(idle_timeout, DEFAULT_CODEX_CLI_GOAL_FIRST_ACTION_TIMEOUT_SEC)
+        return DEFAULT_CODEX_CLI_GOAL_FIRST_ACTION_TIMEOUT_SEC
+    if (
+        bool(getattr(args, "host_local_acp_launch", False))
         and getattr(args, "route", "") == "codex-app-server-goal-baseline"
     ):
+        idle_timeout = max(0, int(getattr(args, "agent_idle_timeout", 0) or 0))
+        if idle_timeout > 0:
+            return min(idle_timeout, DEFAULT_APP_SERVER_GOAL_FIRST_ACTION_TIMEOUT_SEC)
         return DEFAULT_APP_SERVER_GOAL_FIRST_ACTION_TIMEOUT_SEC
+    return 0
+
+
+def _effective_local_codex_goal_active_timeout_sec(args: argparse.Namespace) -> int:
+    configured = getattr(args, "local_codex_goal_active_timeout_sec", None)
+    if configured is not None:
+        return max(0, int(configured or 0))
+    if (
+        bool(getattr(args, "host_local_acp_launch", False))
+        and getattr(args, "route", "") == CODEX_CLI_GOAL_BASELINE_ROUTE
+    ):
+        return 0 if _effective_local_codex_first_action_timeout_sec(args) <= 0 else min(max(0, int(getattr(args, "agent_idle_timeout", 0) or 0)) or DEFAULT_CODEX_CLI_GOAL_ACTIVE_TIMEOUT_SEC, DEFAULT_CODEX_CLI_GOAL_ACTIVE_TIMEOUT_SEC)
     return 0
 
 
@@ -1285,10 +1259,17 @@ def _effective_local_codex_task_output_quiet_timeout_sec(
 
 
 def _codex_api_egress_preflight_required(args: argparse.Namespace) -> bool:
-    return (
-        getattr(args, "route", "") == "codex-app-server-goal-baseline"
-        and bool(getattr(args, "host_local_acp_launch", False))
-    )
+    if bool(getattr(args, "setup_only_public_preflight", False)):
+        return False
+    if not bool(getattr(args, "host_local_acp_launch", False)):
+        return False
+    requested = _codex_api_egress_requested_mode(args)
+    if requested in {"reverse-tunnel", "direct"}:
+        return True
+    return getattr(args, "route", "") in {
+        "codex-app-server-goal-baseline",
+        CODEX_CLI_GOAL_BASELINE_ROUTE,
+    }
 
 
 def _codex_api_egress_requested_mode(args: argparse.Namespace | None) -> str:
@@ -1301,13 +1282,18 @@ def _codex_api_egress_requested_mode(args: argparse.Namespace | None) -> str:
 
 
 def _codex_api_egress_resolved_mode(args: argparse.Namespace | None) -> str:
-    if args is None or not _codex_api_egress_preflight_required(args):
+    if args is None or not bool(getattr(args, "host_local_acp_launch", False)):
         return "not_required"
     requested = _codex_api_egress_requested_mode(args)
     if requested == "auto":
-        # Formal remote app-server benchmark runs must use the reverse tunnel
-        # path by default; direct egress is only for explicit local debugging.
-        return "reverse-tunnel"
+        # Formal remote Goal benchmark runs must use the reverse tunnel path by
+        # default; direct egress is only for explicit local debugging.
+        if getattr(args, "route", "") in {
+            "codex-app-server-goal-baseline",
+            CODEX_CLI_GOAL_BASELINE_ROUTE,
+        }:
+            return "reverse-tunnel"
+        return "not_required"
     return requested
 
 
@@ -1367,6 +1353,52 @@ def _normalized_proxy_url(proxy_url: str) -> str:
     return f"http://{raw}"
 
 
+def _proxy_url_validation_error(proxy_url: str) -> str:
+    raw = str(proxy_url or "").strip()
+    if not raw:
+        return ""
+    if re.search(r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*", raw):
+        return "unexpanded_placeholder"
+    if "<" in raw or ">" in raw:
+        return "placeholder_marker"
+    try:
+        scheme, host, port = _parse_proxy_endpoint(raw)
+    except Exception as exc:
+        return type(exc).__name__
+    if not scheme or not host or not port:
+        return "missing_endpoint"
+    return ""
+
+
+def _merged_no_proxy(*values: str) -> str:
+    entries: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for raw_entry in str(value or "").split(","):
+            entry = raw_entry.strip()
+            if not entry:
+                continue
+            key = entry.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(entry)
+    return ",".join(entries)
+
+
+def _benchmark_egress_no_proxy(args: argparse.Namespace | None) -> str:
+    configured = ""
+    if args is not None:
+        configured = str(getattr(args, "benchmark_egress_no_proxy", "") or "")
+    if not configured:
+        for key in BENCHMARK_EGRESS_NO_PROXY_ENV_KEYS:
+            value = os.environ.get(key)
+            if value:
+                configured = value
+                break
+    return _merged_no_proxy(DEFAULT_BENCHMARK_EGRESS_NO_PROXY, configured)
+
+
 def _benchmark_egress_proxy_requested_mode(
     args: argparse.Namespace | None,
 ) -> str:
@@ -1374,8 +1406,27 @@ def _benchmark_egress_proxy_requested_mode(
     if args is not None:
         requested = str(getattr(args, "benchmark_egress_proxy_mode", "") or "")
     if requested in BENCHMARK_EGRESS_PROXY_MODE_CHOICES:
+        if requested == "auto" and _formal_goal_benchmark_egress_proxy_required(args):
+            return "require"
         return requested
     return "auto"
+
+
+def _formal_goal_benchmark_egress_proxy_required(
+    args: argparse.Namespace | None,
+) -> bool:
+    if args is None:
+        return False
+    if bool(getattr(args, "reduce_only", False)):
+        return False
+    if not bool(getattr(args, "host_local_acp_launch", False)):
+        return False
+    if getattr(args, "route", "") not in {
+        "codex-app-server-goal-baseline",
+        CODEX_CLI_GOAL_BASELINE_ROUTE,
+    }:
+        return False
+    return _codex_api_egress_resolved_mode(args) == "reverse-tunnel"
 
 
 def _proxy_host_kind(host: str) -> str:
@@ -1477,6 +1528,17 @@ def _probe_http_connect_proxy(
     return "proxy_connect_rejected"
 
 
+def _probe_direct_tcp_egress(
+    *,
+    host: str,
+    port: int,
+    timeout_sec: float,
+) -> str:
+    with socket.create_connection((host, port), timeout=timeout_sec):
+        pass
+    return "direct_tcp_ready"
+
+
 def _run_codex_api_egress_preflight(
     args: argparse.Namespace,
     plan: dict[str, Any],
@@ -1525,12 +1587,11 @@ def _run_codex_api_egress_preflight(
                     status = "unsupported_proxy_scheme"
                     ready = False
         elif mode == "direct":
-            with socket.create_connection(
-                (CODEX_API_EGRESS_TEST_HOST, CODEX_API_EGRESS_TEST_PORT),
-                timeout=timeout_sec,
-            ):
-                pass
-            status = "direct_tcp_ready"
+            status = _probe_direct_tcp_egress(
+                host=CODEX_API_EGRESS_TEST_HOST,
+                port=CODEX_API_EGRESS_TEST_PORT,
+                timeout_sec=timeout_sec,
+            )
             ready = True
         else:
             status = "unsupported_egress_mode"
@@ -1609,20 +1670,30 @@ def _public_benchmark_egress_proxy_contract(
     proxy_source = ""
     if proxy_mode != "off":
         proxy_url, proxy_source = _benchmark_egress_proxy(args)
+    validation_error = _proxy_url_validation_error(proxy_url)
     scheme = ""
     host = ""
     port = 0
     parse_error = ""
-    if proxy_url:
+    if proxy_url and not validation_error:
         try:
             scheme, host, port = _parse_proxy_endpoint(proxy_url)
         except Exception as exc:
             parse_error = type(exc).__name__
-    configured = bool(proxy_url)
+    no_proxy = _benchmark_egress_no_proxy(args) if proxy_mode != "off" else ""
+    no_proxy_entry_count = (
+        len([entry for entry in no_proxy.split(",") if entry.strip()])
+        if no_proxy
+        else 0
+    )
+    configured = bool(proxy_url and not validation_error)
     if status == "pending":
         if proxy_mode == "off":
             status = "disabled"
             ready = True
+        elif validation_error:
+            status = "invalid_proxy_value"
+            ready = proxy_mode == "auto"
         elif not configured and proxy_mode == "auto":
             status = "not_configured"
             ready = True
@@ -1632,10 +1703,22 @@ def _public_benchmark_egress_proxy_contract(
     return {
         "schema_version": "skillsbench_benchmark_egress_proxy_v0",
         "requested_mode": proxy_mode,
+        "effective_mode": (
+            "direct"
+            if status
+            in {
+                "direct_tcp_ready_after_proxy_failure",
+                "direct_tcp_ready_after_invalid_proxy",
+            }
+            or (status == "invalid_proxy_value" and proxy_mode == "auto")
+            else ("proxy" if ready and configured and proxy_mode != "off" else proxy_mode)
+        ),
         "ready": bool(ready),
         "status": status,
-        "error_kind": error_kind or parse_error,
+        "error_kind": error_kind or validation_error or parse_error,
         "proxy_configured": configured,
+        "proxy_value_valid": not bool(validation_error),
+        "proxy_invalid_reason": validation_error[:80],
         "proxy_required": proxy_mode == "require",
         "proxy_source": (
             proxy_source.split(":", 1)[0] if proxy_source else ""
@@ -1648,9 +1731,18 @@ def _public_benchmark_egress_proxy_contract(
         "proxy_scheme": scheme[:20],
         "proxy_endpoint_kind": _proxy_host_kind(host) if host else "",
         "proxy_endpoint_port": port,
+        "no_proxy_configured": bool(no_proxy),
+        "no_proxy_entry_count": no_proxy_entry_count,
+        "no_proxy_raw_value_recorded": False,
         "proxy_url_recorded": False,
         "raw_proxy_url_recorded": False,
         "raw_probe_output_recorded": False,
+        "direct_fallback_allowed": proxy_mode == "auto",
+        "direct_fallback_active": status
+        in {
+            "direct_tcp_ready_after_proxy_failure",
+            "direct_tcp_ready_after_invalid_proxy",
+        },
         "test_host": BENCHMARK_EGRESS_TEST_HOST,
         "test_host_public_only": True,
     }
@@ -1676,6 +1768,7 @@ def _run_benchmark_egress_proxy_preflight(
     status = "pending"
     ready = False
     error_kind = ""
+    direct_fallback_active = False
     try:
         if proxy_mode == "off":
             status = "disabled"
@@ -1688,25 +1781,73 @@ def _run_benchmark_egress_proxy_preflight(
             )
             ready = proxy_mode == "auto"
         else:
-            scheme, host, port = _parse_proxy_endpoint(proxy_url)
-            if not host or not port:
-                raise ValueError("proxy endpoint missing host or port")
-            if scheme != "http":
-                status = "unsupported_proxy_scheme"
-                ready = False
+            validation_error = _proxy_url_validation_error(proxy_url)
+            if validation_error:
+                error_kind = validation_error
+                if proxy_mode == "auto":
+                    fallback_status = _probe_direct_tcp_egress(
+                        host=BENCHMARK_EGRESS_TEST_HOST,
+                        port=BENCHMARK_EGRESS_TEST_PORT,
+                        timeout_sec=timeout_sec,
+                    )
+                    if fallback_status == "direct_tcp_ready":
+                        status = "direct_tcp_ready_after_invalid_proxy"
+                        ready = True
+                        direct_fallback_active = True
+                    else:
+                        status = "invalid_proxy_value"
+                        ready = False
+                else:
+                    status = "invalid_proxy_value"
+                    ready = False
             else:
-                status = _probe_http_connect_proxy(
-                    host=host,
-                    port=port,
-                    timeout_sec=timeout_sec,
-                    target_host=BENCHMARK_EGRESS_TEST_HOST,
-                    target_port=BENCHMARK_EGRESS_TEST_PORT,
-                )
-                ready = status == "http_connect_ready"
+                scheme, host, port = _parse_proxy_endpoint(proxy_url)
+                if not host or not port:
+                    raise ValueError("proxy endpoint missing host or port")
+                if scheme != "http":
+                    status = "unsupported_proxy_scheme"
+                    ready = False
+                else:
+                    status = _probe_http_connect_proxy(
+                        host=host,
+                        port=port,
+                        timeout_sec=timeout_sec,
+                        target_host=BENCHMARK_EGRESS_TEST_HOST,
+                        target_port=BENCHMARK_EGRESS_TEST_PORT,
+                    )
+                    ready = status == "http_connect_ready"
+                    if not ready and proxy_mode == "auto":
+                        fallback_status = _probe_direct_tcp_egress(
+                            host=BENCHMARK_EGRESS_TEST_HOST,
+                            port=BENCHMARK_EGRESS_TEST_PORT,
+                            timeout_sec=timeout_sec,
+                        )
+                        if fallback_status == "direct_tcp_ready":
+                            status = "direct_tcp_ready_after_proxy_failure"
+                            ready = True
+                            direct_fallback_active = True
     except Exception as exc:
         status = "failed"
         ready = False
         error_kind = type(exc).__name__
+        if proxy_mode == "auto":
+            try:
+                fallback_status = _probe_direct_tcp_egress(
+                    host=BENCHMARK_EGRESS_TEST_HOST,
+                    port=BENCHMARK_EGRESS_TEST_PORT,
+                    timeout_sec=timeout_sec,
+                )
+                if fallback_status == "direct_tcp_ready":
+                    status = "direct_tcp_ready_after_proxy_failure"
+                    ready = True
+                    direct_fallback_active = True
+            except Exception:
+                pass
+    setattr(
+        args,
+        "_benchmark_egress_proxy_direct_fallback_active",
+        direct_fallback_active,
+    )
     contract = _public_benchmark_egress_proxy_contract(
         args,
         status=status,
@@ -1734,6 +1875,12 @@ def _sync_benchmark_egress_proxy_contract(
     target["benchmark_egress_proxy_configured"] = bool(
         contract.get("proxy_configured")
     )
+    target["benchmark_egress_proxy_value_valid"] = bool(
+        contract.get("proxy_value_valid")
+    )
+    target["benchmark_egress_proxy_invalid_reason"] = str(
+        contract.get("proxy_invalid_reason") or ""
+    )
     target["benchmark_egress_proxy_required"] = bool(contract.get("proxy_required"))
     target["benchmark_egress_proxy_url_recorded"] = False
     target["benchmark_egress_proxy_status"] = str(contract.get("status") or "")
@@ -1742,6 +1889,15 @@ def _sync_benchmark_egress_proxy_contract(
     )
     target["benchmark_egress_proxy_mode_requested"] = str(
         contract.get("requested_mode") or ""
+    )
+    target["benchmark_egress_proxy_mode_effective"] = str(
+        contract.get("effective_mode") or ""
+    )
+    target["benchmark_egress_direct_fallback_allowed"] = bool(
+        contract.get("direct_fallback_allowed")
+    )
+    target["benchmark_egress_direct_fallback_active"] = bool(
+        contract.get("direct_fallback_active")
     )
     target["benchmark_egress_proxy_source"] = str(
         contract.get("proxy_source") or ""
@@ -1759,6 +1915,16 @@ def _sync_benchmark_egress_proxy_contract(
     target["benchmark_egress_proxy_endpoint_port"] = (
         int(port) if isinstance(port, int) and not isinstance(port, bool) else 0
     )
+    target["benchmark_egress_no_proxy_configured"] = bool(
+        contract.get("no_proxy_configured")
+    )
+    entry_count = contract.get("no_proxy_entry_count")
+    target["benchmark_egress_no_proxy_entry_count"] = (
+        int(entry_count)
+        if isinstance(entry_count, int) and not isinstance(entry_count, bool)
+        else 0
+    )
+    target["benchmark_egress_no_proxy_raw_value_recorded"] = False
     target.setdefault("benchmark_egress_proxy_docker_config_injected", False)
     target.setdefault("benchmark_egress_proxy_docker_config_path_recorded", False)
     target.setdefault("benchmark_egress_proxy_docker_config_raw_proxy_recorded", False)
@@ -1767,88 +1933,29 @@ def _sync_benchmark_egress_proxy_contract(
 def _benchmark_egress_proxy_env(args: argparse.Namespace | None) -> dict[str, str]:
     if args is None or _benchmark_egress_proxy_requested_mode(args) == "off":
         return {}
+    if getattr(args, "_benchmark_egress_proxy_direct_fallback_active", False):
+        return {}
     proxy_url, _source = _benchmark_egress_proxy(args)
     if not proxy_url:
         return {}
+    if _proxy_url_validation_error(proxy_url):
+        return {}
     env = {key: proxy_url for key in BENCHMARK_EGRESS_PROXY_FORWARD_ENV_KEYS}
     env["LOOPX_SKILLSBENCH_EGRESS_PROXY"] = proxy_url
-    env.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
-    env.setdefault("no_proxy", "localhost,127.0.0.1,::1")
+    no_proxy = _benchmark_egress_no_proxy(args)
+    env["NO_PROXY"] = no_proxy
+    env["no_proxy"] = no_proxy
     return env
-
-
-def _docker_config_payload_with_proxy(
-    *,
-    proxy_url: str,
-    no_proxy: str,
-) -> dict[str, Any]:
-    """Return a Docker client config that forwards proxies without mutating home."""
-
-    docker_config_dir = os.environ.get("DOCKER_CONFIG")
-    source_config = (
-        Path(docker_config_dir).expanduser() / "config.json"
-        if docker_config_dir
-        else Path.home() / ".docker" / "config.json"
-    )
-    payload: dict[str, Any] = {}
-    if source_config.exists():
-        try:
-            loaded = json.loads(source_config.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            loaded = {}
-        if isinstance(loaded, dict):
-            payload = loaded
-    proxies = payload.setdefault("proxies", {})
-    if not isinstance(proxies, dict):
-        proxies = {}
-        payload["proxies"] = proxies
-    proxies["default"] = {
-        "httpProxy": proxy_url,
-        "httpsProxy": proxy_url,
-        "noProxy": no_proxy,
-    }
-    return payload
 
 
 @contextlib.contextmanager
 def _benchmark_egress_proxy_env_applied(
-    args: argparse.Namespace,
+    args: argparse.Namespace, *, plan: dict[str, Any] | None = None,
 ) -> Any:
-    proxy_env = _benchmark_egress_proxy_env(args)
-    if not proxy_env:
+    with proxy_runtime.proxy_runtime_env_applied(
+        _benchmark_egress_proxy_env(args), plan=plan
+    ):
         yield
-        return
-    docker_config_tmp: tempfile.TemporaryDirectory[str] | None = None
-    docker_config_env: dict[str, str] = {}
-    proxy_url = proxy_env.get("LOOPX_SKILLSBENCH_EGRESS_PROXY", "")
-    if proxy_url:
-        docker_config_tmp = tempfile.TemporaryDirectory(
-            prefix="loopx-skillsbench-docker-proxy-"
-        )
-        docker_config_path = Path(docker_config_tmp.name) / "config.json"
-        docker_config_payload = _docker_config_payload_with_proxy(
-            proxy_url=proxy_url,
-            no_proxy=proxy_env.get("NO_PROXY", "localhost,127.0.0.1,::1"),
-        )
-        docker_config_path.write_text(
-            json.dumps(docker_config_payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        docker_config_env["DOCKER_CONFIG"] = docker_config_tmp.name
-    keys = set(proxy_env) | set(docker_config_env)
-    previous = {key: os.environ.get(key) for key in keys}
-    try:
-        os.environ.update(proxy_env)
-        os.environ.update(docker_config_env)
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        if docker_config_tmp is not None:
-            docker_config_tmp.cleanup()
 
 
 def _host_local_acp_target_env(
@@ -1865,7 +1972,11 @@ def _host_local_acp_target_env(
             continue
         target_env[key] = str(value)
     proxy_url, _proxy_source = _codex_api_reverse_tunnel_proxy(args)
-    if proxy_url and args is not None and _codex_api_egress_preflight_required(args):
+    if (
+        proxy_url
+        and args is not None
+        and _codex_api_egress_resolved_mode(args) == "reverse-tunnel"
+    ):
         for key in CODEX_API_PROXY_FORWARD_ENV_KEYS:
             target_env[key] = proxy_url
         target_env.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
@@ -1929,9 +2040,72 @@ def _host_local_acp_docker_bridge_command(
     return shlex.join(command)
 
 
+def install_benchflow_docker_exec_output_capture(
+    env: Any,
+    *,
+    plan: dict[str, Any],
+) -> Any:
+    """Make BenchFlow Docker exec results reliable for host-local runners."""
+
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    existing = getattr(env, "_loopx_output_capture_original_exec", None)
+    if existing is not None:
+        return existing
+    original_exec = getattr(env, "exec", None)
+    compose_fn = getattr(env, "_run_docker_compose_command", None)
+    if not callable(original_exec) or not callable(compose_fn):
+        prerequisites["host_local_acp_docker_exec_capture_status"] = "unsupported"
+        return None
+
+    async def file_reader(
+        path: str,
+        service: str,
+        remaining: float,
+    ) -> bytes | None:
+        return await read_container_file_via_compose_copy(
+            compose_fn,
+            path,
+            service=service,
+            timeout_sec=max(1.0, remaining),
+        )
+
+    async def exec_with_output_capture(*args: Any, **kwargs: Any) -> Any:
+        command = kwargs.get("command")
+        positional_command = command is None and bool(args)
+        if command is None and positional_command:
+            command = args[0]
+        if not isinstance(command, str):
+            return await original_exec(*args, **kwargs)
+        call_kwargs = dict(kwargs)
+        call_kwargs.pop("command", None)
+        call_args = args[1:] if positional_command else args
+        try:
+            timeout_sec = float(call_kwargs.get("timeout_sec") or 3600)
+        except (TypeError, ValueError):
+            timeout_sec = 3600
+        return await run_container_command_with_output_capture(
+            original_exec,
+            command,
+            timeout_sec=max(1.0, timeout_sec),
+            exec_args=call_args,
+            exec_kwargs=call_kwargs,
+            file_reader_fn=file_reader,
+        )
+
+    setattr(env, "_loopx_output_capture_original_exec", original_exec)
+    setattr(env, "exec", exec_with_output_capture)
+    prerequisites["host_local_acp_docker_exec_capture_status"] = "installed"
+    prerequisites["host_local_acp_docker_exec_capture_required"] = True
+    prerequisites["host_local_acp_docker_exec_capture_compose_copy"] = True
+    prerequisites["host_local_acp_docker_exec_capture_raw_output_recorded"] = False
+    return original_exec
+
+
 def _host_local_acp_codex_exec_preflight_command(
     args: argparse.Namespace,
     plan: dict[str, Any],
+    *,
+    sandbox_bridge_command: str | None = None,
 ) -> list[str]:
     local_acp_relay_command = getattr(args, "local_acp_relay_command", None)
     if local_acp_relay_command:
@@ -1959,6 +2133,9 @@ def _host_local_acp_codex_exec_preflight_command(
     )
     if args.model:
         command.extend(["--model", args.model])
+    cli_reasoning_effort = _effective_codex_cli_reasoning_effort(args)
+    if cli_reasoning_effort and args.route != "codex-app-server-goal-baseline":
+        command.extend(["--reasoning-effort", cli_reasoning_effort])
     relay_trace_dir = str(plan.get("host_local_acp_relay_trace_dir") or "")
     if relay_trace_dir:
         command.extend(
@@ -1967,7 +2144,10 @@ def _host_local_acp_codex_exec_preflight_command(
                 str(Path(relay_trace_dir) / "codex-exec-preflight"),
             ]
         )
-    if _host_local_acp_codex_exec_preflight_requires_bridge_action(args):
+    if _host_local_acp_codex_exec_preflight_requires_bridge_action(
+        args,
+        sandbox_bridge_command=sandbox_bridge_command,
+    ):
         command.extend(
             [
                 "--remote-command-file-bridge-command",
@@ -1995,6 +2175,17 @@ def _host_local_acp_codex_exec_preflight_command(
         )
         if agent_command:
             command.extend(["--remote-command-file-bridge-agent-command", agent_command])
+    if sandbox_bridge_command:
+        command = _set_option_value(
+            command,
+            "--remote-command-file-bridge-command",
+            sandbox_bridge_command,
+        )
+        command = _set_option_value(
+            command,
+            "--remote-command-file-bridge-agent-command",
+            sandbox_bridge_command,
+        )
     return command
 
 
@@ -2003,10 +2194,19 @@ def _host_local_acp_codex_exec_preflight_should_run(
 ) -> bool:
     """Return whether the host-local Codex exec path must be probed first."""
 
+    route = str(getattr(args, "route", "") or "")
+    local_codex_provider = str(
+        getattr(args, "local_codex_provider", "exact-host") or "exact-host"
+    )
     if (
         bool(getattr(args, "host_local_acp_launch", False))
-        and str(getattr(args, "route", "") or "")
-        == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+        and route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+    ):
+        return False
+    if (
+        bool(getattr(args, "host_local_acp_launch", False))
+        and route == CODEX_CLI_GOAL_BASELINE_ROUTE
+        and local_codex_provider != "reverse-channel"
     ):
         return False
     if bool(getattr(args, "host_local_acp_codex_exec_preflight", False)):
@@ -2020,12 +2220,30 @@ def _host_local_acp_codex_exec_preflight_should_run(
 
 def _host_local_acp_codex_exec_preflight_requires_bridge_action(
     args: argparse.Namespace,
+    *,
+    sandbox_bridge_command: str | None = None,
+    require_materialized_sandbox_bridge: bool = False,
 ) -> bool:
+    route = str(getattr(args, "route", "") or "")
+    local_codex_provider = str(
+        getattr(args, "local_codex_provider", "exact-host") or "exact-host"
+    )
     return bool(
         getattr(args, "host_local_acp_launch", False)
-        and str(getattr(args, "route", "") or "")
-        in PRODUCT_MODE_CONTROLLER_ROUTES
-        and str(getattr(args, "remote_command_file_bridge_solver_command", "") or "")
+        and (
+            route in HOST_LOCAL_BRIDGE_ROUTES
+            or (
+                route == CODEX_CLI_GOAL_BASELINE_ROUTE
+                and local_codex_provider == "reverse-channel"
+            )
+        )
+        and (
+            require_materialized_sandbox_bridge
+            or bool(sandbox_bridge_command)
+            or str(
+                getattr(args, "remote_command_file_bridge_solver_command", "") or ""
+            )
+        )
         and (
             bool(getattr(args, "remote_command_file_bridge_ready", False))
             or bool(getattr(args, "remote_command_file_bridge_probe", False))
@@ -2156,6 +2374,22 @@ def _host_local_acp_codex_exec_preflight_bridge_success_observed(
     return action_count > 0 and successful_action_count > 0
 
 
+def _host_local_acp_codex_exec_preflight_retry_allowed(
+    *,
+    category: str,
+    bridge_summary: dict[str, Any],
+) -> bool:
+    if category == "codex_reverse_channel_unavailable":
+        return True
+    return bool(
+        category == "codex_exec_first_action_timeout"
+        and int(bridge_summary.get("request_count") or 0) == 0
+        and int(bridge_summary.get("preflight_operation_count") or 0) == 0
+        and int(bridge_summary.get("task_facing_operation_count") or 0) == 0
+        and bridge_summary.get("raw_material_recorded") is False
+    )
+
+
 def _first_bridge_failure_category(bridge_summary: dict[str, Any]) -> str:
     counts = bridge_summary.get("failure_category_counts")
     if isinstance(counts, dict):
@@ -2168,12 +2402,15 @@ def _first_bridge_failure_category(bridge_summary: dict[str, Any]) -> str:
 def _run_host_local_acp_codex_exec_preflight(
     args: argparse.Namespace,
     plan: dict[str, Any],
+    *,
+    sandbox_bridge_command: str | None = None,
 ) -> None:
     prerequisites = plan.setdefault("runner_prerequisites", {})
     prerequisites["host_local_acp_codex_exec_preflight_requested"] = True
     prerequisites["host_local_acp_codex_exec_preflight_status"] = "running"
     bridge_action_required = _host_local_acp_codex_exec_preflight_requires_bridge_action(
-        args
+        args,
+        sandbox_bridge_command=sandbox_bridge_command,
     )
     prerequisites["host_local_acp_codex_exec_preflight_bridge_action_required"] = (
         bridge_action_required
@@ -2182,8 +2419,20 @@ def _run_host_local_acp_codex_exec_preflight(
         1,
         int(getattr(args, "host_local_acp_codex_exec_preflight_attempts", 1) or 1),
     )
-    command = _host_local_acp_codex_exec_preflight_command(args, plan)
-    proxy_probe = _host_local_proxy_endpoint_probe()
+    command = _host_local_acp_codex_exec_preflight_command(
+        args,
+        plan,
+        sandbox_bridge_command=sandbox_bridge_command,
+    )
+    target_env = _host_local_acp_target_env({}, args=args)
+    prerequisites["host_local_acp_target_env_forwarded"] = bool(target_env)
+    prerequisites["host_local_acp_target_env_key_count"] = len(target_env)
+    prerequisites["host_local_acp_target_env_keys"] = sorted(target_env)
+    if target_env:
+        prerequisites["benchmark_egress_proxy_agent_env_injected"] = bool(
+            any(key.startswith("LOOPX_SKILLSBENCH") for key in target_env)
+        )
+    proxy_probe = _host_local_proxy_endpoint_probe(env=target_env or None)
     prerequisites["host_local_acp_proxy_endpoint_status"] = proxy_probe["status"]
     prerequisites["host_local_acp_proxy_endpoint_checked"] = (
         proxy_probe.get("checked") is True
@@ -2227,6 +2476,7 @@ def _run_host_local_acp_codex_exec_preflight(
     )
     for attempt in range(1, attempts + 1):
         prerequisites["host_local_acp_codex_exec_preflight_attempt_count"] = attempt
+        prerequisites.pop("host_local_acp_codex_exec_failure_category", None)
         if preflight_trace_dir:
             preflight_trace_dir.mkdir(parents=True, exist_ok=True)
             for trace_file in preflight_trace_dir.glob("*.compact.json"):
@@ -2245,6 +2495,7 @@ def _run_host_local_acp_codex_exec_preflight(
                 else SKILLSBENCH_LOCAL_ACP_RELAY_READY_MARKER
             ),
             model_id=str(getattr(args, "model", "") or "") or None,
+            env=target_env or None,
         )
         ready = probe.get("ready") is True
         prerequisites["host_local_acp_codex_exec_preflight_ready"] = ready
@@ -2354,9 +2605,9 @@ def _run_host_local_acp_codex_exec_preflight(
         category = str(
             prerequisites.get("host_local_acp_codex_exec_failure_category") or ""
         )
-        if (
-            category == "codex_reverse_channel_unavailable"
-            and attempt < attempts
+        if attempt < attempts and _host_local_acp_codex_exec_preflight_retry_allowed(
+            category=category,
+            bridge_summary=bridge_summary,
         ):
             time.sleep(2.0)
             continue
@@ -2425,7 +2676,7 @@ def _loopx_source_mount_contract(args: argparse.Namespace) -> dict[str, Any]:
     source_dir = Path(str(source_arg)).expanduser() if source_arg else None
     disabled = bool(getattr(args, "no_loopx_source_mount", False))
     requested = (
-        _is_loopx_product_mode_route(args.route)
+        _is_case_loopx_route(args.route)
         and args.sandbox == "docker"
         and not disabled
         and source_dir is not None
@@ -2517,6 +2768,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "schema_version",
         "agent_execution_mode",
         "benchflow_run_stage",
+        "benchflow_case_worker_status",
         "host_local_acp_launch_status",
         "host_local_acp_install_stage",
         "host_local_acp_install_failed_stage",
@@ -2542,18 +2794,26 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_orphan_cleanup_status",
         "host_local_acp_attempt_cleanup_status",
         "benchflow_setup_stall_cleanup_status",
+        "benchflow_loopx_turn_terminal_failure_status",
+        "benchflow_loopx_turn_terminal_failure_category",
         "remote_command_file_bridge_consumption_status",
         "remote_command_file_bridge_agent_operation_trace_status",
         "remote_command_file_bridge_agent_transport_mode",
         "host_local_acp_sandbox_bridge_mode",
         "host_local_acp_session_adapter_status",
+        "host_local_acp_docker_exec_capture_status",
         "host_local_acp_pwd_probe_status",
         "host_local_acp_pwd_probe_exception_type",
         "host_local_acp_pwd_probe_stdout_type",
         "host_local_acp_codex_exec_preflight_status",
+        "host_local_acp_codex_exec_preflight_placement",
         "host_local_acp_codex_exec_preflight_stage",
         "host_local_acp_codex_exec_preflight_first_blocker",
         "host_local_acp_codex_exec_failure_category",
+        "codex_cli_goal_tui_stage",
+        "codex_cli_goal_tui_post_bridge_recovery_action",
+        "codex_cli_goal_tui_post_bridge_recovery_skip_reason",
+        "codex_cli_goal_tui_reasoning_effort",
         "codex_api_egress_preflight_status",
         "codex_api_egress_preflight_error_kind",
         "codex_api_egress_mode_requested",
@@ -2564,10 +2824,12 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchmark_egress_proxy_status",
         "benchmark_egress_proxy_error_kind",
         "benchmark_egress_proxy_mode_requested",
+        "benchmark_egress_proxy_mode_effective",
         "benchmark_egress_proxy_source",
         "benchmark_egress_proxy_env_key",
         "benchmark_egress_proxy_scheme",
         "benchmark_egress_proxy_endpoint_kind",
+        "verifier_dependency_cache_mode",
         "host_local_acp_proxy_endpoint_status",
         "host_local_acp_proxy_endpoint_env_key",
         "host_local_acp_proxy_endpoint_scheme",
@@ -2587,6 +2849,10 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "codex_acp_runtime_launch_preflight",
         "codex_acp_runtime_launch_preflight_raw_logs_read",
         "host_local_acp_launch",
+        "host_local_acp_docker_exec_capture_required",
+        "host_local_acp_docker_exec_capture_compose_copy",
+        "host_local_acp_docker_exec_capture_raw_output_recorded",
+        "host_local_acp_docker_exec_capture_preflight",
         "host_local_acp_sandbox_bridge_configured",
         "host_local_acp_sandbox_bridge_path_recorded",
         "host_local_acp_target_env_forwarded",
@@ -2603,10 +2869,16 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchmark_egress_proxy_configured",
         "benchmark_egress_proxy_required",
         "benchmark_egress_proxy_url_recorded",
+        "benchmark_egress_direct_fallback_allowed",
+        "benchmark_egress_direct_fallback_active",
+        "benchmark_egress_no_proxy_configured",
+        "benchmark_egress_no_proxy_raw_value_recorded",
         "benchmark_egress_proxy_agent_env_injected",
         "benchmark_egress_proxy_docker_config_injected",
         "benchmark_egress_proxy_docker_config_path_recorded",
         "benchmark_egress_proxy_docker_config_raw_proxy_recorded",
+        "benchmark_egress_proxy_docker_cli_plugins_preserved",
+        "benchmark_egress_proxy_docker_cli_plugin_paths_recorded",
         "host_local_acp_codex_exec_preflight_response_marker_observed",
         "host_local_acp_codex_exec_preflight_bridge_action_required",
         "host_local_acp_codex_exec_preflight_bridge_action_observed",
@@ -2637,6 +2909,8 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_codex_exec_failure_trace_present",
         "host_local_acp_codex_exec_failure_raw_material_recorded",
         "remote_command_file_bridge_driver_lifecycle_raw_material_recorded",
+        "codex_cli_goal_tui_trace_present",
+        "codex_cli_goal_tui_raw_material_recorded",
         "preinstalled_benchflow_agent_runtime_required",
         "benchflow_agent_runtime_layer_ready",
         "codex_acp_runtime_dependency_setup_skipped",
@@ -2653,6 +2927,12 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "loopx_source_upload_fallback_supported",
         "loopx_source_upload_fallback_attempted",
         "loopx_source_upload_raw_material_recorded",
+        "verifier_dependency_cache_requested",
+        "verifier_dependency_cache_ready",
+        "verifier_dependency_cache_mount_injected",
+        "verifier_dependency_cache_raw_path_recorded",
+        "verifier_dependency_cache_solver_write_access",
+        "verifier_dependency_cache_scoring_material_cached",
         "benchflow_agent_timeout_overridden",
         "codex_app_server_goal_worker_adapter_present",
         "codex_app_server_goal_worker_turn_start_required",
@@ -2681,6 +2961,9 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_attempt_cleanup_raw_command_recorded",
         "goal_start_product_mode",
         "goal_start_plan_required",
+        "goal_start_guided_command_required",
+        "goal_start_agent_authored_plan_required",
+        "goal_start_host_preseed_forbidden",
         "goal_start_selected_p0_lifecycle_required",
         "benchflow_verifier_prep_timeout_override_enabled",
         "benchflow_verifier_prep_timeout_raw_command_recorded",
@@ -2688,16 +2971,29 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_final_verifier_timeout_triggered",
         "benchflow_final_verifier_timeout_raw_command_recorded",
         "benchflow_final_verifier_timeout_raw_output_recorded",
+        "benchflow_final_verifier_started",
+        "benchflow_verifier_completion_poll_enabled",
+        "benchflow_verifier_completion_poll_timeout_triggered",
+        "benchflow_verifier_completion_poll_raw_command_recorded",
+        "benchflow_verifier_completion_poll_raw_output_recorded",
         "benchflow_setup_stall_timeout_enabled",
         "benchflow_setup_stall_timeout_triggered",
         "benchflow_setup_stall_raw_logs_read",
         "benchflow_setup_stall_before_agent_lifecycle",
         "benchflow_agent_install_started",
+        "benchflow_lifecycle_private_logs_read",
         "benchflow_setup_stall_task_cancel_requested",
         "benchflow_setup_stall_task_cancel_acknowledged",
         "benchflow_setup_stall_task_cancel_timeout",
         "benchflow_setup_stall_cleanup_requested",
         "benchflow_setup_stall_cleanup_raw_logs_read",
+        "benchflow_loopx_turn_terminal_failure_watchdog_enabled",
+        "benchflow_loopx_turn_terminal_failure_observed",
+        "benchflow_loopx_turn_terminal_failure_triggered",
+        "benchflow_loopx_turn_terminal_failure_raw_material_recorded",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_requested",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_timeout",
         "runner_interrupted_before_official_result",
         "runner_interruption_compact_closeout_expected",
         "runner_interruption_raw_material_recorded",
@@ -2705,8 +3001,19 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
+    lifecycle = compact_benchmark_canonical_lifecycle(
+        value.get("benchmark_canonical_lifecycle")
+    )
+    if lifecycle:
+        compact["benchmark_canonical_lifecycle"] = lifecycle
+    live_worker_phase = compact_benchmark_live_worker_phase(
+        value.get("benchmark_live_worker_phase")
+    )
+    if live_worker_phase:
+        compact["benchmark_live_worker_phase"] = live_worker_phase
     for field in (
         "codex_acp_runtime_launch_preflight_rc",
+        "benchflow_lifecycle_receipt_sequence",
         "benchflow_agent_timeout_requested_sec",
         "benchflow_agent_timeout_original_sec",
         "benchflow_agent_timeout_effective_sec",
@@ -2746,14 +3053,18 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_verifier_prep_timeout_sec",
         "benchflow_final_verifier_timeout_sec",
         "benchflow_final_verifier_timeout_override_count",
+        "benchflow_final_verifier_outer_timeout_override_count",
         "benchflow_verifier_prep_timeout_override_count",
         "benchflow_verify_prep_timeout_override_count",
         "benchflow_soft_verify_prep_timeout_override_count",
+        "benchflow_setup_stall_timeout_requested_sec",
         "benchflow_setup_stall_timeout_sec",
         "benchflow_setup_stall_cleanup_match_count",
         "benchflow_setup_stall_cleanup_term_sent_count",
         "benchflow_setup_stall_cleanup_kill_sent_count",
         "benchflow_setup_stall_cleanup_alive_after_count",
+        "benchflow_loopx_turn_terminal_failure_grace_sec",
+        "verifier_dependency_cache_env_key_count",
         "goal_start_planned_todo_count_expected",
         "remote_command_file_bridge_solver_trace_count",
         "remote_command_file_bridge_solver_probe_ready_count",
@@ -2780,6 +3091,15 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count",
         "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count",
         "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count",
+        "codex_cli_goal_tui_trace_count",
+        "codex_cli_goal_tui_ok_count",
+        "codex_cli_goal_tui_goal_active_observed_count",
+        "codex_cli_goal_tui_goal_terminal_observed_count",
+        "codex_cli_goal_tui_first_action_observed_count",
+        "codex_cli_goal_tui_bridge_request_count",
+        "codex_cli_goal_tui_task_facing_success_count",
+        "codex_cli_goal_tui_pre_bridge_recovery_attempt_count",
+        "codex_cli_goal_tui_post_bridge_recovery_attempt_count",
         "host_local_acp_sandbox_bridge_compose_file_count",
         "host_local_acp_target_env_key_count",
         "host_local_acp_pwd_probe_rc",
@@ -2796,12 +3116,18 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_codex_exec_preflight_bridge_task_facing_success_count",
         "host_local_acp_codex_exec_preflight_bridge_task_facing_failure_count",
         "host_local_acp_codex_exec_failure_trace_count",
+        "host_local_acp_codex_exec_recoverable_failure_trace_count",
+        "host_local_acp_codex_exec_fatal_failure_trace_count",
         "codex_api_reverse_tunnel_proxy_endpoint_port",
         "benchmark_egress_proxy_endpoint_port",
+        "benchmark_egress_no_proxy_entry_count",
         "host_local_acp_proxy_endpoint_loopback_port",
     ):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
+    compact.update(runner_source.compact_runner_source_public_fields(value))
+    compact.update(proxy_runtime.compact_base_image_prewarm_fields(value))
+    compact.update(codex_runtime.compact_public_fields(value))
     target_keys = value.get("host_local_acp_target_env_keys")
     if isinstance(target_keys, list):
         compact["host_local_acp_target_env_keys"] = [
@@ -2855,6 +3181,50 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         compact["remote_command_file_bridge_driver_lifecycle_execution_style"] = (
             style[:120]
         )
+    stages = value.get("codex_cli_goal_tui_stages")
+    if isinstance(stages, list):
+        compact["codex_cli_goal_tui_stages"] = [
+            stage[:80] for stage in stages if isinstance(stage, str) and stage
+        ][:16]
+    recovery_actions = value.get("codex_cli_goal_tui_post_bridge_recovery_actions")
+    if isinstance(recovery_actions, list):
+        compact["codex_cli_goal_tui_post_bridge_recovery_actions"] = [
+            action[:40]
+            for action in recovery_actions
+            if isinstance(action, str) and action
+        ][:8]
+    pre_recovery_actions = value.get("codex_cli_goal_tui_pre_bridge_recovery_actions")
+    if isinstance(pre_recovery_actions, list):
+        compact["codex_cli_goal_tui_pre_bridge_recovery_actions"] = [
+            action[:40]
+            for action in pre_recovery_actions
+            if isinstance(action, str) and action
+        ][:8]
+    recovery_skip_reasons = value.get(
+        "codex_cli_goal_tui_post_bridge_recovery_skip_reasons"
+    )
+    if isinstance(recovery_skip_reasons, list):
+        compact["codex_cli_goal_tui_post_bridge_recovery_skip_reasons"] = [
+            reason[:80]
+            for reason in recovery_skip_reasons
+            if isinstance(reason, str) and reason
+        ][:8]
+    pre_recovery_skip_reasons = value.get(
+        "codex_cli_goal_tui_pre_bridge_recovery_skip_reasons"
+    )
+    if isinstance(pre_recovery_skip_reasons, list):
+        compact["codex_cli_goal_tui_pre_bridge_recovery_skip_reasons"] = [
+            reason[:80]
+            for reason in pre_recovery_skip_reasons
+            if isinstance(reason, str) and reason
+        ][:8]
+    reasoning_efforts = value.get("codex_cli_goal_tui_reasoning_efforts")
+    if isinstance(reasoning_efforts, list):
+        compact["codex_cli_goal_tui_reasoning_efforts"] = [
+            effort[:40]
+            for effort in reasoning_efforts
+            if isinstance(effort, str) and effort
+        ][:8]
     return compact
 
 
@@ -2878,11 +3248,98 @@ def _write_public_runner_prerequisites(plan: dict[str, Any]) -> Path | None:
     if path is None:
         return None
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    _write_text_atomic(
+        path,
         json.dumps(compact, indent=2, sort_keys=True, default=_json_default) + "\n",
-        encoding="utf-8",
     )
     return path
+
+
+def _write_public_runner_lifecycle_receipt(
+    plan: dict[str, Any],
+    *,
+    run_stage: str | None = None,
+    worker_status: str | None = None,
+    host_local_acp_status: str | None = None,
+    host_local_acp_install_stage: str | None = None,
+    agent_install_started: bool | None = None,
+) -> Path | None:
+    """Persist one public-safe live phase without inspecting private output."""
+
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    previous_live_phase = compact_benchmark_live_worker_phase(
+        prerequisites.get("benchmark_live_worker_phase")
+    )
+    previous_ready = previous_live_phase.get("phase_ready")
+    if not isinstance(previous_ready, dict):
+        previous_ready = {}
+    if run_stage is not None:
+        prerequisites["benchflow_run_stage"] = run_stage
+    if worker_status is not None:
+        prerequisites["benchflow_case_worker_status"] = worker_status
+    if host_local_acp_status is not None:
+        prerequisites["host_local_acp_launch_status"] = host_local_acp_status
+    if host_local_acp_install_stage is not None:
+        prerequisites["host_local_acp_install_stage"] = host_local_acp_install_stage
+    if agent_install_started is not None:
+        prerequisites["benchflow_agent_install_started"] = agent_install_started
+    current_worker_status = str(
+        prerequisites.get("benchflow_case_worker_status") or ""
+    )
+    worker_running_statuses = {
+        "worker_running",
+        "sandbox_installing",
+        "sandbox_installed",
+        "sandbox_install_failed",
+        "agent_install_started",
+        "acp_connecting",
+        "acp_connected",
+        "acp_connect_failed",
+        "agent_active",
+        "worker_completed",
+        "setup_stalled",
+    }
+    runtime_preparing_statuses = {
+        "runtime_preparing",
+        "worker_prepared",
+        *worker_running_statuses,
+    }
+    terminal_disposition = {
+        "worker_completed": "completed",
+        "sandbox_install_failed": "failed",
+        "acp_connect_failed": "failed",
+        "setup_stalled": "failed",
+    }.get(
+        current_worker_status,
+        str(previous_live_phase.get("terminal_disposition") or "open"),
+    )
+    prerequisites["benchmark_live_worker_phase"] = (
+        build_benchmark_live_worker_phase(
+            runtime_preparing=bool(
+                previous_ready.get("runtime_preparing")
+                or current_worker_status in runtime_preparing_statuses
+            ),
+            worker_prepared=bool(
+                previous_ready.get("worker_prepared")
+                or current_worker_status == "worker_prepared"
+                or current_worker_status in worker_running_statuses
+            ),
+            worker_running=bool(
+                previous_ready.get("worker_running")
+                or current_worker_status in worker_running_statuses
+            ),
+            agent_active=bool(
+                previous_ready.get("agent_active")
+                or current_worker_status == "agent_active"
+            ),
+            terminal_disposition=terminal_disposition,
+        )
+    )
+    prerequisites["benchflow_lifecycle_private_logs_read"] = False
+    prerequisites["benchflow_lifecycle_receipt_sequence"] = (
+        int(prerequisites.get("benchflow_lifecycle_receipt_sequence") or 0) + 1
+    )
+    return _write_public_runner_prerequisites(plan)
 
 
 def _read_public_runner_prerequisites(plan: dict[str, Any]) -> dict[str, Any]:
@@ -3456,6 +3913,10 @@ def install_benchflow_verifier_prep_timeout_override(
     prerequisites["benchflow_verifier_prep_timeout_raw_command_recorded"] = False
     prerequisites["benchflow_final_verifier_timeout_enabled"] = final_timeout_enabled
     prerequisites["benchflow_final_verifier_timeout_raw_command_recorded"] = False
+    prerequisites["benchflow_verifier_completion_poll_enabled"] = False
+    prerequisites["benchflow_verifier_completion_poll_timeout_triggered"] = False
+    prerequisites["benchflow_verifier_completion_poll_raw_command_recorded"] = False
+    prerequisites["benchflow_verifier_completion_poll_raw_output_recorded"] = False
     prerequisites["benchflow_intermediate_soft_verify_timeout_enabled"] = (
         soft_timeout_enabled
     )
@@ -3477,6 +3938,10 @@ def install_benchflow_verifier_prep_timeout_override(
         trace["benchflow_verifier_prep_timeout_raw_command_recorded"] = False
         trace["benchflow_final_verifier_timeout_enabled"] = final_timeout_enabled
         trace["benchflow_final_verifier_timeout_raw_command_recorded"] = False
+        trace["benchflow_verifier_completion_poll_enabled"] = False
+        trace["benchflow_verifier_completion_poll_timeout_triggered"] = False
+        trace["benchflow_verifier_completion_poll_raw_command_recorded"] = False
+        trace["benchflow_verifier_completion_poll_raw_output_recorded"] = False
         trace["benchflow_intermediate_soft_verify_timeout_enabled"] = (
             soft_timeout_enabled
         )
@@ -3504,6 +3969,10 @@ def install_benchflow_verifier_prep_timeout_override(
         return "/verifier/test.sh" in command
 
     async def _run_with_override(self: Any, phase: str, original: Any) -> Any:
+        if phase == "verify":
+            prerequisites["benchflow_final_verifier_started"] = True
+            if isinstance(trace, dict):
+                trace["benchflow_final_verifier_started"] = True
         if not enabled and not final_timeout_enabled and not soft_timeout_enabled:
             return await original(self)
 
@@ -3514,6 +3983,7 @@ def install_benchflow_verifier_prep_timeout_override(
 
         override_count = 0
         final_timeout_override_count = 0
+        final_timeout_outer_override_count = 0
         soft_timeout_override_count = 0
 
         async def exec_with_verifier_prep_timeout(*args: Any, **kwargs: Any) -> Any:
@@ -3543,13 +4013,107 @@ def install_benchflow_verifier_prep_timeout_override(
                     kwargs = dict(kwargs)
                     kwargs["timeout_sec"] = soft_verifier_timeout_sec
                     soft_timeout_override_count += 1
-            return await original_exec(*args, **kwargs)
+            verifier_exec = _looks_like_final_verifier_exec(args, kwargs)
+            try:
+                completion_timeout = float(kwargs.get("timeout_sec") or 0)
+            except (TypeError, ValueError):
+                completion_timeout = 0
+            docker_completion_poll = (
+                verifier_exec
+                and hasattr(env, "_run_docker_compose_command")
+                and completion_timeout > 0
+            )
+            if not docker_completion_poll:
+                return await original_exec(*args, **kwargs)
+
+            command = kwargs.get("command")
+            positional_command = command is None and bool(args)
+            if command is None and positional_command:
+                command = args[0]
+            if not isinstance(command, str):
+                return await original_exec(*args, **kwargs)
+
+            call_kwargs = dict(kwargs)
+            call_kwargs.pop("command", None)
+            call_args = args[1:] if positional_command else args
+
+            prerequisites["benchflow_verifier_completion_poll_enabled"] = True
+            compose_fn = getattr(env, "_run_docker_compose_command", None)
+            status_reader_fn = None
+            if callable(compose_fn):
+                async def status_reader_fn(
+                    status_path: str,
+                    service: str,
+                    remaining: float,
+                ) -> bytes | None:
+                    return await read_container_file_via_compose_copy(
+                        compose_fn,
+                        status_path,
+                        service=service,
+                        timeout_sec=remaining,
+                    )
+
+                prerequisites["benchflow_verifier_completion_poll_reader"] = (
+                    "compose_copy"
+                )
+            else:
+                prerequisites["benchflow_verifier_completion_poll_reader"] = (
+                    "exec_stdout"
+                )
+            if isinstance(trace, dict):
+                trace["benchflow_verifier_completion_poll_enabled"] = True
+                trace["benchflow_verifier_completion_poll_reader"] = prerequisites[
+                    "benchflow_verifier_completion_poll_reader"
+                ]
+
+            try:
+                return await run_container_command_with_exit_status(
+                    original_exec,
+                    command,
+                    timeout_sec=completion_timeout,
+                    exec_args=call_args,
+                    exec_kwargs=call_kwargs,
+                    status_reader_fn=status_reader_fn,
+                )
+            except asyncio.TimeoutError:
+                prerequisites[
+                    "benchflow_verifier_completion_poll_timeout_triggered"
+                ] = True
+                if isinstance(trace, dict):
+                    trace[
+                        "benchflow_verifier_completion_poll_timeout_triggered"
+                    ] = True
+                raise
 
         phase_timeout_sec = 0
         if phase == "verify" and final_timeout_enabled:
             phase_timeout_sec = final_verifier_timeout_sec
         elif phase == "soft_verify" and soft_timeout_enabled:
             phase_timeout_sec = soft_verifier_timeout_sec
+
+        task_verifier_config = None
+        original_task_verifier_timeout_sec = None
+        task_verifier_timeout_overridden = False
+        if phase == "verify" and final_timeout_enabled:
+            task = getattr(self, "_task", None)
+            task_config = getattr(task, "config", None)
+            task_verifier_config = getattr(task_config, "verifier", None)
+            original_task_verifier_timeout_sec = getattr(
+                task_verifier_config,
+                "timeout_sec",
+                None,
+            )
+            if original_task_verifier_timeout_sec != final_verifier_timeout_sec:
+                try:
+                    setattr(
+                        task_verifier_config,
+                        "timeout_sec",
+                        final_verifier_timeout_sec,
+                    )
+                    task_verifier_timeout_overridden = True
+                    final_timeout_outer_override_count += 1
+                except Exception:
+                    task_verifier_config = None
 
         try:
             env.exec = exec_with_verifier_prep_timeout
@@ -3619,6 +4183,15 @@ def install_benchflow_verifier_prep_timeout_override(
             raise
         finally:
             env.exec = original_exec
+            if task_verifier_timeout_overridden and task_verifier_config is not None:
+                try:
+                    setattr(
+                        task_verifier_config,
+                        "timeout_sec",
+                        original_task_verifier_timeout_sec,
+                    )
+                except Exception:
+                    pass
             phase_key = f"benchflow_{phase}_prep_timeout_override_count"
             total_key = "benchflow_verifier_prep_timeout_override_count"
             prerequisites[phase_key] = (
@@ -3640,6 +4213,19 @@ def install_benchflow_verifier_prep_timeout_override(
                     trace[count_key] = (
                         int(trace.get(count_key) or 0)
                         + final_timeout_override_count
+                    )
+            if final_timeout_outer_override_count:
+                count_key = (
+                    "benchflow_final_verifier_outer_timeout_override_count"
+                )
+                prerequisites[count_key] = (
+                    int(prerequisites.get(count_key) or 0)
+                    + final_timeout_outer_override_count
+                )
+                if isinstance(trace, dict):
+                    trace[count_key] = (
+                        int(trace.get(count_key) or 0)
+                        + final_timeout_outer_override_count
                     )
             if soft_timeout_override_count:
                 count_key = (
@@ -4099,6 +4685,14 @@ def _runner_prerequisite_failure_attribution(
             "skillsbench_runner_error",
         ]
 
+    if value.get("benchflow_verifier_completion_poll_timeout_triggered") is True:
+        label = "skillsbench_verifier_completion_timeout"
+        return label, label, [
+            label,
+            "skillsbench_verifier_timeout",
+            "skillsbench_runner_error",
+        ]
+
     if value.get("benchflow_final_verifier_timeout_triggered") is True:
         label = "skillsbench_final_verifier_timeout"
         return label, label, [
@@ -4135,6 +4729,10 @@ def _runner_prerequisite_failure_attribution(
     ):
         label = "skillsbench_codex_acp_runtime_dependency_preflight_failed"
         return label, label, [label, "skillsbench_runner_setup_error"]
+
+    codex_preflight_failure = codex_runtime.failure_attribution(value)
+    if codex_preflight_failure:
+        return codex_preflight_failure
 
     if value.get("host_local_acp_launch_status") == "failed":
         label = "skillsbench_host_local_acp_launch_failed"
@@ -4335,7 +4933,8 @@ def _ensure_setup_stall_timeout_prerequisites(
 ) -> None:
     """Backfill public setup-stall evidence when BenchFlow times out pre-agent."""
 
-    build_stall_timeout_sec = int(args.build_stall_timeout_sec or 0)
+    requested_build_stall_timeout_sec = _requested_build_stall_timeout_sec(args)
+    build_stall_timeout_sec = _effective_build_stall_timeout_sec(args)
     if build_stall_timeout_sec <= 0:
         return
     if not _runner_exception_indicates_timeout(exc):
@@ -4348,6 +4947,10 @@ def _ensure_setup_stall_timeout_prerequisites(
         "benchflow_run_stage", "build_or_setup_stall_before_agent"
     )
     raw_prerequisites.setdefault("benchflow_setup_stall_timeout_enabled", True)
+    raw_prerequisites.setdefault(
+        "benchflow_setup_stall_timeout_requested_sec",
+        requested_build_stall_timeout_sec,
+    )
     raw_prerequisites.setdefault(
         "benchflow_setup_stall_timeout_sec", build_stall_timeout_sec
     )
@@ -4443,13 +5046,28 @@ def _apply_host_local_acp_prereq_failure_attribution(
     compact: dict[str, Any],
     runner_prerequisites: dict[str, Any],
 ) -> bool:
-    """Prefer structured host-local Codex exec failures over zero-score labels."""
+    """Prefer host Codex failures unless a completed verifier score is usable."""
 
     official_score = compact.get("official_score")
+    validation = compact.get("validation")
+    counters = compact.get("interaction_counters")
+    task_activity_count = 0
+    if isinstance(counters, dict):
+        for key in (
+            "remote_command_file_bridge_agent_task_facing_operation_count",
+            "remote_command_file_bridge_agent_task_facing_success_count",
+        ):
+            value = counters.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                task_activity_count = max(task_activity_count, value)
     if (
         isinstance(official_score, (int, float))
         and not isinstance(official_score, bool)
-        and official_score >= 1.0
+        and compact.get("official_score_status") == "completed"
+        and isinstance(validation, dict)
+        and validation.get("official_verifier_validation_present") is True
+        and validation.get("official_verifier_status") in {"completed", "passed"}
+        and task_activity_count > 0
     ):
         return False
 
@@ -4489,6 +5107,346 @@ def _apply_host_local_acp_prereq_failure_attribution(
     if isinstance(runner_failure, dict):
         runner_failure["exception_type"] = label
         runner_failure["failure_class"] = label
+    attempt_accounting = compact.get("attempt_accounting")
+    if isinstance(attempt_accounting, dict):
+        attempt_accounting["failure_class"] = "job_materialization_failed"
+        attempt_accounting["failure_label"] = label
+        attempt_accounting["lifecycle_phase"] = "runner_accepted_args"
+        for key in (
+            "case_attempt_countable",
+            "solver_attempt_countable",
+            "verifier_attempt_countable",
+            "official_score_attempt_countable",
+        ):
+            attempt_accounting[key] = False
+        attempts = attempt_accounting.get("attempts")
+        if isinstance(attempts, dict):
+            for key in ("case", "solver", "verifier", "official_score"):
+                attempt = attempts.get(key)
+                if isinstance(attempt, dict):
+                    attempt["countable"] = False
+    return True
+
+
+def _sync_specific_runner_failure_root_blockers(
+    compact: dict[str, Any],
+) -> bool:
+    if compact.get("official_score_status") != "missing":
+        return False
+    if not isinstance(compact.get("runner_failure"), dict):
+        return False
+    attribution = compact.get("score_failure_attribution")
+    if not isinstance(attribution, str) or attribution in {
+        "",
+        "none",
+        "score_missing",
+        "skillsbench_runner_error",
+    }:
+        return False
+
+    changed = False
+    replaceable = {
+        None,
+        "",
+        "none",
+        "score_missing",
+        "skillsbench_runner_error",
+    }
+    for field in ("first_blocker", "repeat_blocked_by"):
+        if compact.get(field) in replaceable:
+            compact[field] = attribution
+            changed = True
+    return changed
+
+
+def _apply_native_goal_worker_finish_guard_attribution(
+    compact: dict[str, Any],
+) -> bool:
+    official_score = compact.get("official_score")
+    if (
+        isinstance(official_score, (int, float))
+        and not isinstance(official_score, bool)
+        and official_score >= 1.0
+    ):
+        return False
+    counters = compact.get("interaction_counters")
+    if not isinstance(counters, dict):
+        return False
+    worker_contract = compact.get("native_goal_worker_contract")
+    if not isinstance(worker_contract, dict):
+        worker_contract = {}
+    if counters.get("native_goal_worker_route") is not True:
+        return False
+    incomplete_count = counters.get(
+        "native_goal_worker_incomplete_after_completion_event_count"
+    )
+    if not isinstance(incomplete_count, int) or isinstance(incomplete_count, bool):
+        incomplete_count = worker_contract.get(
+            "incomplete_after_completion_event_count"
+        )
+    if not (
+        isinstance(incomplete_count, int)
+        and not isinstance(incomplete_count, bool)
+        and incomplete_count > 0
+    ):
+        return False
+    task_ops = counters.get(
+        "remote_command_file_bridge_agent_task_facing_operation_count"
+    )
+    task_success = counters.get(
+        "remote_command_file_bridge_agent_task_facing_success_count"
+    )
+    if (
+        isinstance(task_ops, int)
+        and not isinstance(task_ops, bool)
+        and task_ops > 0
+    ) or (
+        isinstance(task_success, int)
+        and not isinstance(task_success, bool)
+        and task_success > 0
+    ):
+        return False
+
+    label = "skillsbench_native_goal_worker_incomplete_turn_without_task_activity"
+    compact["score_failure_attribution"] = label
+    compact["first_blocker"] = label
+    compact["official_score_comparable_to_native_codex"] = False
+    compact["official_score_comparable_to_loopx_treatment"] = False
+    existing_labels = [
+        item
+        for item in compact.get("failure_attribution_labels", [])
+        if isinstance(item, str)
+        and item
+        not in {
+            "official_score_zero_case_failure",
+            "official_verifier_solution_failure",
+            "verifier_infrastructure_failure",
+        }
+    ]
+    for item in (label, "skillsbench_runner_setup_error"):
+        if item not in existing_labels:
+            existing_labels.append(item)
+    compact["failure_attribution_labels"] = existing_labels
+    runner_failure = compact.setdefault("runner_failure", {})
+    if isinstance(runner_failure, dict):
+        runner_failure["exception_type"] = label
+        runner_failure["failure_class"] = label
+        runner_failure["native_goal_worker"] = {
+            "failure_category": label,
+            "incomplete_after_completion_event_count": incomplete_count,
+            "task_facing_operation_count": max(0, int(task_ops or 0)),
+            "raw_material_recorded": False,
+        }
+    if isinstance(worker_contract, dict):
+        worker_contract["countable_baseline"] = False
+        worker_contract["failure_category"] = label
+        worker_contract["first_blocker"] = label
+        worker_contract["countability_source"] = "native_goal_worker_finish_guard"
+    attempt_accounting = compact.get("attempt_accounting")
+    if isinstance(attempt_accounting, dict):
+        attempt_accounting["failure_class"] = "job_materialization_failed"
+        attempt_accounting["failure_label"] = label
+        attempt_accounting["lifecycle_phase"] = "runner_accepted_args"
+        for key in (
+            "case_attempt_countable",
+            "solver_attempt_countable",
+            "verifier_attempt_countable",
+            "official_score_attempt_countable",
+        ):
+            attempt_accounting[key] = False
+        attempts = attempt_accounting.get("attempts")
+        if isinstance(attempts, dict):
+            for key in ("case", "solver", "verifier", "official_score"):
+                attempt = attempts.get(key)
+                if isinstance(attempt, dict):
+                    attempt["countable"] = False
+    return True
+
+
+def _apply_codex_cli_goal_countability_guard_attribution(
+    compact: dict[str, Any],
+) -> bool:
+    runner_config = compact.get("runner_config")
+    if not isinstance(runner_config, dict):
+        runner_config = {}
+    route = str(compact.get("route") or runner_config.get("route") or "")
+    mode = str(compact.get("mode") or "")
+    if (
+        route != CODEX_CLI_GOAL_BASELINE_ROUTE
+        and mode != "skillsbench_codex_cli_goal_baseline"
+    ):
+        return False
+    if compact.get("official_score_status") != "completed":
+        return False
+
+    counters = compact.get("interaction_counters")
+    if not isinstance(counters, dict):
+        counters = {}
+    runner_prerequisites = compact.get("runner_prerequisites")
+    if not isinstance(runner_prerequisites, dict):
+        runner_prerequisites = {}
+
+    def max_counter(*fields: str) -> int:
+        values: list[int] = []
+        for source in (counters, runner_prerequisites):
+            for field in fields:
+                value = source.get(field)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    values.append(max(0, value))
+        return max(values, default=0)
+
+    task_facing_count = max_counter(
+        "remote_command_file_bridge_agent_task_facing_success_count",
+        "remote_command_file_bridge_agent_task_facing_operation_count",
+        "codex_cli_goal_tui_task_facing_success_count",
+    )
+    request_count = max_counter(
+        "remote_command_file_bridge_agent_request_count",
+        "codex_cli_goal_tui_bridge_request_count",
+    )
+    ok_count = max_counter("codex_cli_goal_tui_ok_count")
+    trace_present = bool(
+        counters.get("codex_cli_goal_tui_trace_present") is True
+        or runner_prerequisites.get("codex_cli_goal_tui_trace_present") is True
+    )
+    goal_stage = str(
+        counters.get("codex_cli_goal_tui_stage")
+        or runner_prerequisites.get("codex_cli_goal_tui_stage")
+        or ""
+    )[:120]
+    operation_trace_status = str(
+        counters.get("remote_command_file_bridge_agent_operation_trace_status")
+        or runner_prerequisites.get(
+            "remote_command_file_bridge_agent_operation_trace_status"
+        )
+        or ""
+    )[:120]
+
+    missing_task_activity = task_facing_count <= 0 or request_count <= 0
+    completed_task_attempt_countable = (
+        not missing_task_activity
+        and str(compact.get("official_score_status") or "") == "completed"
+    )
+    terminal_goal_failure_stages = {
+        "auth_refresh_token_revoked",
+        "post_bridge_tui_model_timeout",
+        "post_bridge_tui_error_prompt",
+        "post_bridge_tui_rate_limit",
+        "task_output_quiet_timeout",
+    }
+    goal_failed = (
+        trace_present
+        and ok_count <= 0
+        and (
+            not completed_task_attempt_countable
+            or goal_stage in terminal_goal_failure_stages
+        )
+    )
+    if not (missing_task_activity or goal_failed):
+        compact["codex_cli_goal_countability_contract"] = {
+            "schema_version": "skillsbench_codex_cli_goal_countability_contract_v0",
+            "required": True,
+            "countable_baseline": True,
+            "countability_source": (
+                "official_score_completed_with_task_facing_activity"
+            ),
+            "failure_category": "",
+            "first_blocker": "",
+            "trace_present": trace_present,
+            "ok_count": ok_count,
+            "goal_stage": goal_stage,
+            "request_count": request_count,
+            "task_facing_activity_count": task_facing_count,
+            "operation_trace_status": operation_trace_status,
+            "raw_material_recorded": False,
+        }
+        return False
+
+    label = "skillsbench_codex_cli_goal_uncountable_no_task_activity"
+    if goal_stage == "auth_refresh_token_revoked":
+        label = "skillsbench_codex_cli_goal_uncountable_auth_refresh_token_revoked"
+    elif goal_stage == "goal_active_timeout":
+        label = "skillsbench_codex_cli_goal_uncountable_goal_active_timeout"
+    elif goal_stage == "pre_bridge_tui_model_timeout":
+        label = "skillsbench_codex_cli_goal_uncountable_pre_bridge_model_timeout"
+    elif goal_stage == "pre_bridge_tui_error_prompt":
+        label = "skillsbench_codex_cli_goal_uncountable_pre_bridge_tui_error"
+    elif goal_stage == "pre_bridge_tui_rate_limit":
+        label = "skillsbench_codex_cli_goal_uncountable_pre_bridge_rate_limit"
+    elif goal_stage == "post_bridge_tui_model_timeout":
+        label = "skillsbench_codex_cli_goal_uncountable_post_bridge_model_timeout"
+    elif goal_stage == "post_bridge_tui_error_prompt":
+        label = "skillsbench_codex_cli_goal_uncountable_post_bridge_tui_error"
+    elif goal_stage == "post_bridge_tui_rate_limit":
+        label = "skillsbench_codex_cli_goal_uncountable_post_bridge_rate_limit"
+    elif goal_stage == "task_output_quiet_timeout":
+        label = "skillsbench_codex_cli_goal_uncountable_task_output_quiet_timeout"
+    if goal_failed and not missing_task_activity:
+        label = {
+            "post_bridge_tui_model_timeout": (
+                "skillsbench_codex_cli_goal_uncountable_post_bridge_model_timeout"
+            ),
+            "post_bridge_tui_error_prompt": (
+                "skillsbench_codex_cli_goal_uncountable_post_bridge_tui_error"
+            ),
+            "post_bridge_tui_rate_limit": (
+                "skillsbench_codex_cli_goal_uncountable_post_bridge_rate_limit"
+            ),
+            "task_output_quiet_timeout": (
+                "skillsbench_codex_cli_goal_uncountable_task_output_quiet_timeout"
+            ),
+        }.get(goal_stage, "skillsbench_codex_cli_goal_uncountable_goal_failed")
+    compact["score_failure_attribution"] = label
+    compact["first_blocker"] = label
+    compact["repeat_blocked_by"] = label
+    compact["official_score_comparable_to_native_codex"] = False
+    compact["official_score_comparable_to_loopx_treatment"] = False
+    existing_labels = [
+        item
+        for item in compact.get("failure_attribution_labels", [])
+        if isinstance(item, str)
+        and item
+        not in {
+            "official_score_zero_case_failure",
+            "official_verifier_solution_failure",
+            "verifier_infrastructure_failure",
+        }
+    ]
+    for item in (
+        label,
+        "skillsbench_codex_cli_goal_uncountable_baseline",
+    ):
+        if item not in existing_labels:
+            existing_labels.append(item)
+    compact["failure_attribution_labels"] = existing_labels
+    compact["codex_cli_goal_countability_contract"] = {
+        "schema_version": "skillsbench_codex_cli_goal_countability_contract_v0",
+        "required": True,
+        "countable_baseline": False,
+        "countability_source": "codex_cli_goal_countability_guard",
+        "failure_category": label,
+        "first_blocker": label,
+        "trace_present": trace_present,
+        "ok_count": ok_count,
+        "goal_stage": goal_stage,
+        "request_count": request_count,
+        "task_facing_activity_count": task_facing_count,
+        "operation_trace_status": operation_trace_status,
+        "raw_material_recorded": False,
+    }
+    runner_failure = compact.setdefault("runner_failure", {})
+    if isinstance(runner_failure, dict):
+        runner_failure["exception_type"] = label
+        runner_failure["failure_class"] = label
+        runner_failure["codex_cli_goal"] = {
+            "failure_category": label,
+            "trace_present": trace_present,
+            "ok_count": ok_count,
+            "goal_stage": goal_stage,
+            "request_count": request_count,
+            "task_facing_activity_count": task_facing_count,
+            "raw_material_recorded": False,
+        }
     attempt_accounting = compact.get("attempt_accounting")
     if isinstance(attempt_accounting, dict):
         attempt_accounting["failure_class"] = "job_materialization_failed"
@@ -4579,540 +5537,16 @@ def _append_case_timeline_event(
     events.append(entry)
 
 
-def _goal_start_public_count_map(value: Any) -> dict[str, int]:
-    if not isinstance(value, dict):
-        return {}
-    compact: dict[str, int] = {}
-    for key, count in value.items():
-        if (
-            isinstance(key, str)
-            and key
-            and isinstance(count, int)
-            and not isinstance(count, bool)
-            and count >= 0
-        ):
-            compact[key[:80]] = count
-    return compact
-
-
-def _goal_start_subcommand_count(
-    families: tuple[str, ...],
-    *maps: Any,
-) -> int:
-    return max(
-        (
-            _subcommand_family_count(_goal_start_public_count_map(item), *families)
-            for item in maps
-        ),
-        default=0,
-    )
-
-
-_GOAL_START_TODO_ID_RE = re.compile(r"^todo_[A-Za-z0-9_-]{6,80}$")
-_GOAL_START_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$")
-
-
-def _goal_start_safe_todo_id(value: Any) -> str:
-    text = _case_timeline_safe_string(value, limit=100)
-    return text if _GOAL_START_TODO_ID_RE.match(text) else ""
-
-
-def _goal_start_safe_goal_id(value: Any) -> str:
-    text = _case_timeline_safe_string(value, limit=140)
-    return text if _GOAL_START_GOAL_ID_RE.match(text) else ""
-
-
-def _goal_start_public_text_list(value: Any, *, limit: int = 8) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    result: list[str] = []
-    for item in value:
-        text = _case_timeline_safe_string(item, limit=180)
-        if text:
-            result.append(text)
-        if len(result) >= limit:
-            break
-    return result
-
-
-def _goal_start_public_todo_id_list(value: Any, *, limit: int = 16) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    result: list[str] = []
-    for item in value:
-        todo_id = _goal_start_safe_todo_id(item)
-        if todo_id and todo_id not in result:
-            result.append(todo_id)
-        if len(result) >= limit:
-            break
-    return result
-
-
-def _goal_start_public_command_records(*values: Any) -> list[dict[str, str]]:
-    records: list[dict[str, str]] = []
-    allowed_subcommands = {
-        "quota should-run",
-        "todo claim",
-        "todo update",
-        "todo complete",
-        "refresh-state",
-        "quota spend-slot",
-        "status",
-        "diagnose",
-    }
-    for value in values:
-        if not isinstance(value, list):
-            continue
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            subcommand = _case_timeline_safe_string(
-                item.get("subcommand"),
-                limit=80,
-            )
-            if subcommand not in allowed_subcommands:
-                continue
-            record: dict[str, str] = {"subcommand": subcommand}
-            todo_id = _goal_start_safe_todo_id(item.get("todo_id"))
-            if todo_id:
-                record["todo_id"] = todo_id
-            goal_id = _goal_start_safe_goal_id(item.get("goal_id"))
-            if goal_id:
-                record["goal_id"] = goal_id
-            records.append(record)
-            if len(records) >= 128:
-                return records
-    return records
-
-
-def _goal_start_planned_todo_packet(
-    counters: dict[str, Any],
-    runner_prerequisites: dict[str, Any],
-) -> tuple[list[str], list[str]]:
-    ids = (
-        _goal_start_public_todo_id_list(counters.get("planned_todo_ids"))
-        or _goal_start_public_todo_id_list(
-            runner_prerequisites.get("planned_todo_ids")
-        )
-    )
-    texts = (
-        _goal_start_public_text_list(counters.get("planned_todo_texts_public_safe"))
-        or _goal_start_public_text_list(
-            runner_prerequisites.get("planned_todo_texts_public_safe")
-        )
-    )
-    if not ids and (
-        counters.get("goal_start_product_mode") is True
-        or runner_prerequisites.get("goal_start_product_mode") is True
-        or runner_prerequisites.get("goal_start_plan_required") is True
-    ):
-        ids = list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_IDS)
-    if not texts and ids:
-        texts = list(BENCHMARK_CASE_LOOPX_GOAL_START_TODO_TEXTS)
-    return ids[:8], texts[:8]
-
-
-def _build_goal_start_todo_snapshot(
-    *,
-    counters: dict[str, Any],
-    runner_prerequisites: dict[str, Any],
-    selected_p0_todo_id: str,
-    agent_claim_count: int,
-    agent_update_count: int,
-    agent_complete_count: int,
-    selected_todo_claimed: bool,
-    selected_todo_updated_before_solver: bool,
-) -> dict[str, Any]:
-    planned_ids, planned_texts = _goal_start_planned_todo_packet(
-        counters,
-        runner_prerequisites,
-    )
-    if not selected_p0_todo_id and planned_ids:
-        selected_p0_todo_id = planned_ids[0]
-    records = _goal_start_public_command_records(
-        counters.get("remote_command_file_bridge_agent_successful_loopx_command_records"),
-        runner_prerequisites.get(
-            "remote_command_file_bridge_agent_successful_loopx_command_records"
-        ),
-    )
-    counts_by_todo: dict[str, dict[str, int]] = {}
-    complete_without_todo_id = 0
-    for record in records:
-        subcommand = record.get("subcommand", "")
-        if subcommand not in {"todo claim", "todo update", "todo complete"}:
-            continue
-        todo_id = _goal_start_safe_todo_id(record.get("todo_id"))
-        if not todo_id:
-            if subcommand == "todo complete":
-                complete_without_todo_id += 1
-            continue
-        counts = counts_by_todo.setdefault(
-            todo_id,
-            {"claim": 0, "update": 0, "complete": 0},
-        )
-        counts[subcommand.split()[1]] += 1
-
-    inferred_identity = False
-    if not records and selected_p0_todo_id:
-        selected_counts = counts_by_todo.setdefault(
-            selected_p0_todo_id,
-            {"claim": 0, "update": 0, "complete": 0},
-        )
-        if agent_claim_count > 0 or selected_todo_claimed:
-            selected_counts["claim"] = max(selected_counts["claim"], agent_claim_count)
-        if agent_update_count > 0 or selected_todo_updated_before_solver:
-            selected_counts["update"] = max(
-                selected_counts["update"],
-                agent_update_count,
-            )
-        if agent_complete_count > 0:
-            selected_counts["complete"] = max(
-                selected_counts["complete"],
-                agent_complete_count,
-            )
-            inferred_identity = True
-
-    completed_ids = sorted(
-        todo_id
-        for todo_id, counts in counts_by_todo.items()
-        if counts.get("complete", 0) > 0
-    )
-    selected_counts = counts_by_todo.get(
-        selected_p0_todo_id,
-        {"claim": 0, "update": 0, "complete": 0},
-    )
-    selected_complete_count = max(0, selected_counts.get("complete", 0))
-    selected_duplicate_complete_count = max(0, selected_complete_count - 1)
-    non_selected_complete_count = sum(
-        max(0, counts.get("complete", 0))
-        for todo_id, counts in counts_by_todo.items()
-        if todo_id != selected_p0_todo_id
-    )
-
-    planned_todos: list[dict[str, Any]] = []
-    for index, todo_id in enumerate(planned_ids):
-        counts = counts_by_todo.get(todo_id, {"claim": 0, "update": 0, "complete": 0})
-        complete_count = max(0, counts.get("complete", 0))
-        if complete_count > 0:
-            status = "done_observed"
-        elif todo_id == selected_p0_todo_id:
-            status = "open_or_in_progress_observed"
-        else:
-            status = "open_or_deferred_observed"
-        item: dict[str, Any] = {
-            "todo_id": todo_id,
-            "role": "selected_p0" if todo_id == selected_p0_todo_id else "supporting",
-            "status": status,
-            "claim_count": max(0, counts.get("claim", 0)),
-            "update_count": max(0, counts.get("update", 0)),
-            "complete_count": complete_count,
-        }
-        if index < len(planned_texts):
-            item["text_public_safe"] = planned_texts[index]
-        planned_todos.append(item)
-
-    return {
-        "schema_version": "skillsbench_goal_start_todo_snapshot_v0",
-        "raw_material_recorded": False,
-        "planned_todos": planned_todos,
-        "planned_todo_ids": planned_ids,
-        "planned_todo_texts_public_safe": planned_texts,
-        "selected_p0_todo_id": selected_p0_todo_id,
-        "completed_todo_ids": completed_ids[:8],
-        "completed_todo_id_count": len(completed_ids),
-        "selected_todo_complete_count": selected_complete_count,
-        "selected_todo_duplicate_complete_count": selected_duplicate_complete_count,
-        "non_selected_todo_complete_count": non_selected_complete_count,
-        "todo_complete_without_todo_id_count": complete_without_todo_id,
-        "todo_identity_attribution": (
-            "inferred_from_counts" if inferred_identity else "command_record_observed"
-        ),
-    }
-
-
 def _build_goal_start_product_mode_control_score(
     compact: dict[str, Any],
     plan: dict[str, Any],
 ) -> dict[str, Any]:
-    """Summarize goal-start control-plane closure from public compact counters."""
-
-    counters = (
-        compact.get("interaction_counters")
-        if isinstance(compact.get("interaction_counters"), dict)
-        else {}
-    )
-    runner_prerequisites = _public_runner_prerequisites(
-        plan.get("runner_prerequisites")
-    )
-    compact_runner_prerequisites = compact.get("runner_prerequisites")
-    if isinstance(compact_runner_prerequisites, dict):
-        runner_prerequisites.update(compact_runner_prerequisites)
-    lifecycle_contract = (
-        compact.get("product_mode_lifecycle_contract")
-        if isinstance(compact.get("product_mode_lifecycle_contract"), dict)
-        else {}
-    )
-
-    required = bool(
-        counters.get("goal_start_product_mode") is True
-        or runner_prerequisites.get("goal_start_product_mode") is True
-        or runner_prerequisites.get("goal_start_plan_required") is True
-    )
-    if not required:
-        return {}
-
-    agent_successful_subcommands = counters.get(
-        "remote_command_file_bridge_agent_successful_loopx_subcommand_counts"
-    )
-    agent_requested_subcommands = counters.get(
-        "remote_command_file_bridge_agent_loopx_subcommand_counts"
-    )
-    prereq_agent_successful_subcommands = runner_prerequisites.get(
-        "remote_command_file_bridge_agent_successful_loopx_subcommand_counts"
-    )
-    prereq_agent_requested_subcommands = runner_prerequisites.get(
-        "remote_command_file_bridge_agent_loopx_subcommand_counts"
-    )
-    driver_commands = counters.get(
-        "remote_command_file_bridge_driver_lifecycle_command_counts"
-    )
-    prereq_driver_commands = runner_prerequisites.get(
-        "remote_command_file_bridge_driver_lifecycle_command_counts"
-    )
-    driver_failure_count = _case_timeline_max_int(
-        counters.get("remote_command_file_bridge_driver_lifecycle_failure_count"),
-        runner_prerequisites.get(
-            "remote_command_file_bridge_driver_lifecycle_failure_count"
+    return build_goal_start_product_mode_control_score(
+        compact,
+        runner_prerequisites=_public_runner_prerequisites(
+            plan.get("runner_prerequisites")
         ),
     )
-    driver_commands_count_as_successful = driver_failure_count == 0
-
-    selected_p0_todo_id = _case_timeline_safe_string(
-        counters.get("selected_p0_todo_id")
-        or runner_prerequisites.get("selected_p0_todo_id"),
-        limit=100,
-    )
-    planned_todo_ids, planned_todo_texts = _goal_start_planned_todo_packet(
-        counters,
-        runner_prerequisites,
-    )
-    if not selected_p0_todo_id and planned_todo_ids:
-        selected_p0_todo_id = planned_todo_ids[0]
-    planned_todo_count = _case_timeline_max_int(counters.get("planned_todo_count"))
-    if planned_todo_ids:
-        planned_todo_count = max(planned_todo_count, len(planned_todo_ids))
-    expected_todo_count = _case_timeline_max_int(
-        runner_prerequisites.get("goal_start_planned_todo_count_expected")
-    )
-    planned_p0_count = _case_timeline_max_int(counters.get("planned_p0_count"))
-    if selected_p0_todo_id:
-        planned_p0_count = max(planned_p0_count, 1)
-    closeout_spend_count = _case_timeline_max_int(
-        counters.get("remote_command_file_bridge_agent_quota_spend_slot_count"),
-        runner_prerequisites.get(
-            "remote_command_file_bridge_agent_quota_spend_slot_count"
-        ),
-        lifecycle_contract.get("agent_bridge_quota_spend_slot_count"),
-    )
-
-    agent_claim_count = _goal_start_subcommand_count(
-        ("todo claim",),
-        agent_successful_subcommands,
-        prereq_agent_successful_subcommands,
-        agent_requested_subcommands,
-        prereq_agent_requested_subcommands,
-    )
-    agent_update_count = _goal_start_subcommand_count(
-        ("todo update",),
-        agent_successful_subcommands,
-        prereq_agent_successful_subcommands,
-        agent_requested_subcommands,
-        prereq_agent_requested_subcommands,
-    )
-    agent_complete_count = _goal_start_subcommand_count(
-        ("todo complete",),
-        agent_successful_subcommands,
-        prereq_agent_successful_subcommands,
-        agent_requested_subcommands,
-        prereq_agent_requested_subcommands,
-    )
-    agent_spend_count = _goal_start_subcommand_count(
-        ("quota spend-slot",),
-        agent_successful_subcommands,
-        prereq_agent_successful_subcommands,
-        agent_requested_subcommands,
-        prereq_agent_requested_subcommands,
-    )
-    driver_claim_count = (
-        _goal_start_subcommand_count(("todo claim",), driver_commands, prereq_driver_commands)
-        if driver_commands_count_as_successful
-        else 0
-    )
-    driver_update_count = (
-        _goal_start_subcommand_count(("todo update",), driver_commands, prereq_driver_commands)
-        if driver_commands_count_as_successful
-        else 0
-    )
-
-    selected_todo_claimed = bool(
-        counters.get("selected_todo_claimed") is True
-        or agent_claim_count > 0
-        or driver_claim_count > 0
-    )
-    selected_todo_updated_before_solver = bool(
-        counters.get("selected_todo_updated_before_solver") is True
-        or agent_update_count > 0
-        or driver_update_count > 0
-    )
-    selected_todo_spend_observed = bool(closeout_spend_count > 0 or agent_spend_count > 0)
-    selected_todo_completed_before_spend = bool(
-        counters.get("selected_todo_completed_before_spend") is True
-        or (agent_complete_count > 0 and selected_todo_spend_observed)
-    )
-    todo_snapshot = _build_goal_start_todo_snapshot(
-        counters=counters,
-        runner_prerequisites=runner_prerequisites,
-        selected_p0_todo_id=selected_p0_todo_id,
-        agent_claim_count=agent_claim_count,
-        agent_update_count=agent_update_count,
-        agent_complete_count=agent_complete_count,
-        selected_todo_claimed=selected_todo_claimed,
-        selected_todo_updated_before_solver=selected_todo_updated_before_solver,
-    )
-    selected_todo_complete_count = _case_timeline_max_int(
-        todo_snapshot.get("selected_todo_complete_count")
-    )
-    selected_todo_duplicate_complete_count = _case_timeline_max_int(
-        todo_snapshot.get("selected_todo_duplicate_complete_count")
-    )
-    non_selected_todo_complete_count = _case_timeline_max_int(
-        todo_snapshot.get("non_selected_todo_complete_count")
-    )
-    todo_complete_without_todo_id_count = _case_timeline_max_int(
-        todo_snapshot.get("todo_complete_without_todo_id_count")
-    )
-    completed_todo_id_count = _case_timeline_max_int(
-        todo_snapshot.get("completed_todo_id_count")
-    )
-    selected_todo_completed_observed = bool(
-        selected_todo_complete_count > 0 or agent_complete_count > 0
-    )
-    quota_spend_missing_after_repeated_complete = bool(
-        selected_todo_duplicate_complete_count > 0
-        and not selected_todo_spend_observed
-    )
-    last_decision = _case_timeline_safe_string(counters.get("last_decision"), limit=100)
-    premature_done_signal_count = _case_timeline_max_int(
-        counters.get("product_mode_declared_done_below_passing_reward_count")
-    )
-    premature_done_stop_reason = ""
-    if counters.get("product_mode_no_open_todo_below_passing_reward_stop") is True:
-        premature_done_stop_reason = (
-            last_decision or "no_open_todo_below_passing_reward_stop"
-        )
-    elif (
-        counters.get("product_mode_declared_done_below_passing_reward") is True
-        and last_decision.startswith("stop_after")
-        and "below_passing_reward" in last_decision
-    ):
-        premature_done_stop_reason = (
-            last_decision or "declared_done_below_passing_reward"
-        )
-
-    component_results = [
-        {
-            "name": "plan_observed",
-            "satisfied": counters.get("goal_start_plan_observed") is True,
-        },
-        {
-            "name": "planned_todo_count",
-            "satisfied": bool(
-                planned_todo_count > 0
-                and (expected_todo_count == 0 or planned_todo_count >= expected_todo_count)
-            ),
-        },
-        {"name": "planned_p0_count", "satisfied": planned_p0_count > 0},
-        {
-            "name": "planner_before_todo_write",
-            "satisfied": counters.get("planner_before_todo_write") is True,
-        },
-        {
-            "name": "same_priority_order_preserved",
-            "satisfied": counters.get("same_priority_order_preserved") is True,
-        },
-        {"name": "selected_p0_todo_id", "satisfied": bool(selected_p0_todo_id)},
-        {"name": "selected_todo_claimed", "satisfied": selected_todo_claimed},
-        {
-            "name": "selected_todo_updated_before_solver",
-            "satisfied": selected_todo_updated_before_solver,
-        },
-        {
-            "name": "selected_todo_completed_before_spend",
-            "satisfied": selected_todo_completed_before_spend,
-        },
-        {
-            "name": "selected_todo_spend_observed",
-            "satisfied": selected_todo_spend_observed,
-        },
-        {
-            "name": "non_selected_todos_preserved_open_or_deferred",
-            "satisfied": (
-                counters.get("non_selected_todos_preserved_open_or_deferred") is True
-            ),
-        },
-        {"name": "no_premature_done_stop", "satisfied": not premature_done_stop_reason},
-    ]
-    satisfied_count = sum(1 for item in component_results if item["satisfied"])
-    component_count = len(component_results)
-    score = round(satisfied_count / component_count, 3) if component_count else 0.0
-    return {
-        "schema_version": "skillsbench_goal_start_product_mode_control_score_v0",
-        "required": True,
-        "satisfied": satisfied_count == component_count,
-        "score": score,
-        "component_count": component_count,
-        "satisfied_component_count": satisfied_count,
-        "raw_material_recorded": False,
-        "goal_start_plan_observed": counters.get("goal_start_plan_observed") is True,
-        "planned_todo_count": planned_todo_count,
-        "planned_todo_count_expected": expected_todo_count,
-        "planned_p0_count": planned_p0_count,
-        "planner_before_todo_write": counters.get("planner_before_todo_write") is True,
-        "same_priority_order_preserved": (
-            counters.get("same_priority_order_preserved") is True
-        ),
-        "selected_p0_todo_id": selected_p0_todo_id,
-        "selected_todo_claimed": selected_todo_claimed,
-        "selected_todo_updated_before_solver": selected_todo_updated_before_solver,
-        "selected_todo_completed_before_spend": selected_todo_completed_before_spend,
-        "selected_todo_completed_observed": selected_todo_completed_observed,
-        "selected_todo_spend_observed": selected_todo_spend_observed,
-        "non_selected_todos_preserved_open_or_deferred": (
-            counters.get("non_selected_todos_preserved_open_or_deferred") is True
-        ),
-        "quota_spend_missing_after_repeated_complete": (
-            quota_spend_missing_after_repeated_complete
-        ),
-        "premature_done_signal_count": premature_done_signal_count,
-        "premature_done_stop_reason": premature_done_stop_reason,
-        "agent_todo_claim_count": agent_claim_count,
-        "agent_todo_update_count": agent_update_count,
-        "agent_todo_complete_count": agent_complete_count,
-        "agent_todo_complete_unique_todo_count": completed_todo_id_count,
-        "selected_todo_complete_count": selected_todo_complete_count,
-        "selected_todo_duplicate_complete_count": (
-            selected_todo_duplicate_complete_count
-        ),
-        "non_selected_todo_complete_count": non_selected_todo_complete_count,
-        "todo_complete_without_todo_id_count": todo_complete_without_todo_id_count,
-        "agent_quota_spend_slot_count": max(closeout_spend_count, agent_spend_count),
-        "driver_todo_claim_count": driver_claim_count,
-        "driver_todo_update_count": driver_update_count,
-        "planned_todo_ids": planned_todo_ids,
-        "planned_todo_texts_public_safe": planned_todo_texts,
-        "goal_start_todo_snapshot": todo_snapshot,
-        "component_results": component_results,
-    }
 
 
 def _build_case_event_timeline(
@@ -5396,6 +5830,8 @@ def _build_case_event_timeline(
     controller_status = "not_observed"
     if counters.get("controller_official_success_observed") is True:
         controller_status = "official_success_observed"
+    elif counters.get("product_mode_typed_repair_terminal") is True:
+        controller_status = "typed_repair_terminal"
     elif (
         counters.get("product_mode_host_local_idle_no_task_output_progress_stop")
         is True
@@ -5575,9 +6011,37 @@ def _public_task_staging(value: Any) -> dict[str, Any]:
         "include_task_skills",
         "apt_setup_risk_detected",
         "apt_retry_patch_required",
+        "dockerfile_ubuntu_apt_mirror_patch_required",
+        "dockerfile_ubuntu_apt_mirror_patch_applied",
+        "dockerfile_ubuntu_apt_mirror_raw_url_recorded",
+        "dockerfile_debian_apt_mirror_patch_required",
+        "dockerfile_debian_apt_mirror_patch_applied",
+        "dockerfile_debian_apt_mirror_raw_url_recorded",
         "dockerfile_pip_install_risk_detected",
         "dockerfile_pip_bootstrap_patch_required",
         "dockerfile_pip_bootstrap_patch_applied",
+        "dockerfile_venv_pip_invocation_patch_required",
+        "dockerfile_venv_pip_invocation_patch_applied",
+        "dockerfile_gcr_mirror_configured",
+        "dockerfile_gcr_mirror_patch_required",
+        "dockerfile_gcr_mirror_patch_applied",
+        "dockerfile_gcr_mirror_raw_prefix_recorded",
+        "dockerfile_elan_toolchain_retry_patch_required",
+        "dockerfile_elan_toolchain_retry_patch_applied",
+        "dockerfile_wget_gpg_key_retry_patch_required",
+        "dockerfile_wget_gpg_key_retry_patch_applied",
+        "dockerfile_network_download_retry_patch_required",
+        "dockerfile_network_download_retry_patch_applied",
+        "dockerfile_uv_bootstrap_risk_detected",
+        "dockerfile_uv_bootstrap_mirror_patch_required",
+        "dockerfile_uv_bootstrap_mirror_patch_applied",
+        "dockerfile_uv_bootstrap_pip_fallback_patch_applied",
+        "dockerfile_apache_archive_mirror_patch_required",
+        "dockerfile_apache_archive_mirror_patch_applied",
+        "dockerfile_apache_archive_raw_url_recorded",
+        "dockerfile_maven_mirror_patch_required",
+        "dockerfile_maven_mirror_patch_applied",
+        "dockerfile_maven_mirror_raw_url_recorded",
         "dockerfile_package_bootstrap_risk_preflight_blocked",
         "app_skills_mount_patch_applied",
         "apt_retry_patch_applied",
@@ -5586,25 +6050,46 @@ def _public_task_staging(value: Any) -> dict[str, Any]:
         "bootstrap_light_fail_fast_defaulted",
         "verifier_bootstrap_risk_detected",
         "verifier_uv_bootstrap_risk_detected",
+        "verifier_external_download_risk_detected",
+        "verifier_package_install_risk_detected",
         "verifier_uv_bootstrap_mirror_patch_required",
         "verifier_uv_bootstrap_mirror_patch_applied",
         "verifier_uv_bootstrap_pip_fallback_patch_applied",
+        "verifier_script_executable_required",
+        "verifier_script_executable_ready",
+        "verifier_dependency_cache_required",
+        "verifier_dependency_cache_env_patch_applied",
+        "verifier_dependency_cache_raw_path_recorded",
         "benchmark_egress_proxy_verifier_env_patch_required",
         "benchmark_egress_proxy_verifier_env_patch_applied",
         "benchmark_egress_proxy_verifier_env_raw_proxy_recorded",
+        "benchmark_egress_proxy_dockerfile_env_patch_required",
+        "benchmark_egress_proxy_dockerfile_env_patch_applied",
+        "benchmark_egress_proxy_dockerfile_java_opts_patch_applied",
+        "benchmark_egress_proxy_dockerfile_env_raw_proxy_recorded",
         "verifier_bootstrap_risk_preflight_blocked",
         "verifier_bootstrap_fail_fast_defaulted",
         "codex_acp_runtime_tools_patch_applied",
+        "loopx_case_python_runtime_patch_required",
+        "loopx_case_python_runtime_patch_applied",
         "task_skills_removed",
         "original_task_mutated",
     ):
         if isinstance(value.get(field), bool):
             compact[field] = value[field]
     for field in (
+        "dockerfile_apt_source_mode",
+        "dockerfile_apt_transport_mode",
         "dockerfile_pip_index_host",
         "bootstrap_light_blocker_kind",
+        "dockerfile_uv_bootstrap_version",
+        "dockerfile_uv_bootstrap_mirror_host",
         "verifier_uv_bootstrap_version",
         "verifier_uv_bootstrap_mirror_host",
+        "dockerfile_apache_archive_mirror_host",
+        "dockerfile_maven_mirror_host",
+        "dockerfile_ubuntu_apt_mirror_host",
+        "dockerfile_debian_apt_mirror_host",
     ):
         raw = value.get(field)
         if isinstance(raw, str) and raw:
@@ -5615,6 +6100,19 @@ def _public_task_staging(value: Any) -> dict[str, Any]:
     key_count = value.get("benchmark_egress_proxy_verifier_env_key_count")
     if isinstance(key_count, int) and not isinstance(key_count, bool) and key_count >= 0:
         compact["benchmark_egress_proxy_verifier_env_key_count"] = key_count
+    key_count = value.get("verifier_dependency_cache_env_key_count")
+    if isinstance(key_count, int) and not isinstance(key_count, bool) and key_count >= 0:
+        compact["verifier_dependency_cache_env_key_count"] = key_count
+    key_count = value.get("benchmark_egress_proxy_dockerfile_env_key_count")
+    if isinstance(key_count, int) and not isinstance(key_count, bool) and key_count >= 0:
+        compact["benchmark_egress_proxy_dockerfile_env_key_count"] = key_count
+    categories = value.get("verifier_bootstrap_risk_categories")
+    if isinstance(categories, list):
+        compact["verifier_bootstrap_risk_categories"] = [
+            item[:80]
+            for item in categories
+            if isinstance(item, str) and item
+        ][:8]
     resource_cap = value.get("resource_cap_patch")
     if isinstance(resource_cap, dict):
         safe_cap: dict[str, Any] = {}
@@ -5635,6 +6133,21 @@ def _public_task_staging(value: Any) -> dict[str, Any]:
 
 
 def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
+    docker_apt_source_mode = _docker_apt_source_mode(
+        str(
+            plan.get("docker_apt_source_mode")
+            or DEFAULT_DOCKER_APT_SOURCE_MODE
+        )
+    )
+    docker_apt_transport_mode = _docker_apt_transport_mode(
+        str(
+            plan.get("docker_apt_transport_mode")
+            or DEFAULT_DOCKER_APT_TRANSPORT_MODE
+        )
+    )
+    _, docker_pip_index_host = _docker_pip_index(
+        str(plan.get("docker_pip_index_mode") or DEFAULT_DOCKER_PIP_INDEX_MODE)
+    )
     jobs_dir = Path(str(plan.get("jobs_dir") or "")).expanduser()
     job_name = str(plan.get("job_name") or "")
     task_id = str(plan.get("task_id") or "")
@@ -5652,7 +6165,7 @@ def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
         )
     except OSError:
         dockerfile_text = ""
-    verifier = prepared_task / "verifier" / "test.sh"
+    verifier = proxy_runtime.skillsbench_verifier_script(prepared_task)
     try:
         verifier_text = (
             verifier.read_text(encoding="utf-8", errors="replace")
@@ -5661,7 +6174,7 @@ def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
         )
     except OSError:
         verifier_text = ""
-    uv_versions = _verifier_uv_bootstrap_versions(verifier_text)
+    uv_versions = verifier_bootstrap.verifier_uv_bootstrap_versions(verifier_text)
     include_task_skills = bool(plan.get("include_task_skills"))
     discovered = {
         "schema_version": "skillsbench_task_staging_v0",
@@ -5671,19 +6184,126 @@ def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
             DOCKER_APP_SKILLS_MOUNT_BEGIN in dockerfile_text
         ),
         "apt_retry_patch_applied": DOCKER_APT_RETRY_BEGIN in dockerfile_text,
+        "dockerfile_apt_source_mode": (
+            docker_apt_source_mode if DOCKER_APT_RETRY_BEGIN in dockerfile_text else ""
+        ),
+        "dockerfile_apt_transport_mode": (
+            docker_apt_transport_mode
+            if DOCKER_APT_RETRY_BEGIN in dockerfile_text
+            else ""
+        ),
+        "dockerfile_ubuntu_apt_mirror_patch_applied": (
+            dockerfile_runtime.UBUNTU_APT_MIRROR_BEGIN in dockerfile_text
+        ),
+        "dockerfile_ubuntu_apt_mirror_host": (
+            dockerfile_runtime.DEFAULT_UBUNTU_APT_MIRROR_HOST
+            if dockerfile_runtime.UBUNTU_APT_MIRROR_BEGIN in dockerfile_text
+            else ""
+        ),
+        "dockerfile_ubuntu_apt_mirror_raw_url_recorded": False,
+        "dockerfile_debian_apt_mirror_patch_applied": (
+            dockerfile_runtime.DEBIAN_APT_MIRROR_BEGIN in dockerfile_text
+        ),
+        "dockerfile_debian_apt_mirror_host": (
+            dockerfile_runtime.DEFAULT_DEBIAN_APT_MIRROR_HOST
+            if dockerfile_runtime.DEBIAN_APT_MIRROR_BEGIN in dockerfile_text
+            else ""
+        ),
+        "dockerfile_debian_apt_mirror_raw_url_recorded": False,
         "dockerfile_pip_bootstrap_patch_applied": (
             DOCKER_PIP_BOOTSTRAP_BEGIN in dockerfile_text
         ),
+        "dockerfile_venv_pip_invocation_patch_applied": (
+            dockerfile_runtime.VENV_PIP_INVOCATION_MARKER in dockerfile_text
+        ),
+        "dockerfile_venv_pip_invocation_patch_required": (
+            dockerfile_runtime.VENV_PIP_INVOCATION_MARKER in dockerfile_text
+        ),
+        "dockerfile_gcr_mirror_patch_applied": (
+            DOCKER_GCR_MIRROR_BEGIN in dockerfile_text
+        ),
+        "dockerfile_gcr_mirror_raw_prefix_recorded": False,
+        "dockerfile_elan_toolchain_retry_patch_applied": (
+            DOCKER_ELAN_TOOLCHAIN_RETRY_BEGIN in dockerfile_text
+        ),
+        "dockerfile_wget_gpg_key_retry_patch_applied": (
+            "curl -fsSL --retry 5 --retry-delay 2 --connect-timeout 30"
+            in dockerfile_text
+            and "| gpg --dearmor" in dockerfile_text
+        ),
+        "dockerfile_network_download_retry_patch_applied": (
+            DOCKER_NETWORK_DOWNLOAD_RETRY_BEGIN in dockerfile_text
+        ),
+        "dockerfile_uv_bootstrap_mirror_patch_applied": (
+            DOCKER_UV_BOOTSTRAP_MIRROR_BEGIN in dockerfile_text
+        ),
+        "dockerfile_uv_bootstrap_pip_fallback_patch_applied": (
+            DOCKER_UV_BOOTSTRAP_MIRROR_BEGIN in dockerfile_text
+            and "python3 -m pip install" in dockerfile_text
+            and "uv==${LOOPX_SKILLSBENCH_UV_VERSION}" in dockerfile_text
+        ),
+        **uv_cache.discover_uv_binary_cache_metadata(prepared_task, dockerfile_text),
+        "dockerfile_uv_bootstrap_mirror_host": (
+            DEFAULT_VERIFIER_UV_RELEASE_MIRROR_HOST
+            if DOCKER_UV_BOOTSTRAP_MIRROR_BEGIN in dockerfile_text
+            else ""
+        ),
+        "dockerfile_apache_archive_mirror_patch_applied": (
+            DEFAULT_DOCKER_APACHE_ARCHIVE_MIRROR_HOST in dockerfile_text
+        ),
+        "dockerfile_apache_archive_mirror_host": (
+            DEFAULT_DOCKER_APACHE_ARCHIVE_MIRROR_HOST
+            if DEFAULT_DOCKER_APACHE_ARCHIVE_MIRROR_HOST in dockerfile_text
+            else ""
+        ),
+        "dockerfile_apache_archive_raw_url_recorded": False,
+        "dockerfile_maven_mirror_patch_applied": (
+            DOCKER_MAVEN_MIRROR_BEGIN in dockerfile_text
+        ),
+        "dockerfile_maven_mirror_host": (
+            DEFAULT_DOCKER_MAVEN_MIRROR_HOST
+            if DOCKER_MAVEN_MIRROR_BEGIN in dockerfile_text
+            else ""
+        ),
+        "dockerfile_maven_mirror_raw_url_recorded": False,
         "codex_acp_runtime_tools_patch_applied": (
             DOCKER_CODEX_ACP_RUNTIME_TOOLS_BEGIN in dockerfile_text
+        ),
+        "loopx_case_python_runtime_patch_required": (
+            DOCKER_LOOPX_CASE_PYTHON_RUNTIME_BEGIN in dockerfile_text
+        ),
+        "loopx_case_python_runtime_patch_applied": (
+            DOCKER_LOOPX_CASE_PYTHON_RUNTIME_BEGIN in dockerfile_text
+        ),
+        "benchmark_egress_proxy_dockerfile_env_patch_applied": (
+            DOCKER_BENCHMARK_EGRESS_PROXY_BEGIN in dockerfile_text
+        ),
+        "benchmark_egress_proxy_dockerfile_java_opts_patch_applied": (
+            "COURSIER_OPTS=${LOOPX_SKILLSBENCH_JAVA_PROXY_OPTS}"
+            in dockerfile_text
         ),
         "task_skills_removed": (
             not include_task_skills
             and not (prepared_task / "environment" / "skills").exists()
         ),
         "original_task_mutated": False,
+        "verifier_script_executable_required": verifier.is_file(),
+        "verifier_script_executable_ready": (
+            verifier.is_file() and os.access(verifier, os.X_OK)
+        ),
     }
-    if VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN in verifier_text:
+    dockerfile_uv_versions = _dockerfile_uv_bootstrap_versions(dockerfile_text)
+    if DOCKER_UV_BOOTSTRAP_MIRROR_BEGIN in dockerfile_text:
+        discovered.update(
+            {
+                "dockerfile_uv_bootstrap_risk_detected": True,
+                "dockerfile_uv_bootstrap_mirror_patch_required": True,
+                "dockerfile_uv_bootstrap_mirror_patch_applied": True,
+            }
+        )
+        if dockerfile_uv_versions:
+            discovered["dockerfile_uv_bootstrap_version"] = dockerfile_uv_versions[0]
+    if verifier_bootstrap.VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN in verifier_text:
         discovered.update(
             {
                 "verifier_uv_bootstrap_risk_detected": True,
@@ -5692,6 +6312,10 @@ def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
                 "verifier_uv_bootstrap_pip_fallback_patch_applied": (
                     "python3 -m pip install" in verifier_text
                     and "uv==${loopx_uv_version}" in verifier_text
+                ),
+                "verifier_uv_env_source_guard_patch_applied": (
+                    'if [ -f "$HOME/.local/bin/env" ]; then' in verifier_text
+                    and '. "$HOME/.local/bin/env"' in verifier_text
                 ),
                 "verifier_uv_bootstrap_mirror_host": (
                     DEFAULT_VERIFIER_UV_RELEASE_MIRROR_HOST
@@ -5714,7 +6338,7 @@ def _discover_prepared_task_staging(plan: dict[str, Any]) -> dict[str, Any]:
                 "dockerfile_pip_install_risk_detected": True,
                 "dockerfile_pip_bootstrap_patch_required": True,
                 "dockerfile_pip_bootstrap_patch_applied": True,
-                "dockerfile_pip_index_host": DEFAULT_DOCKER_PIP_INDEX_HOST,
+                "dockerfile_pip_index_host": docker_pip_index_host,
             }
         )
     return discovered
@@ -5746,6 +6370,10 @@ def _public_task_setup_preflight(value: Any) -> dict[str, Any]:
         "task_id",
         "first_blocker",
         "alternate_source_kind",
+        "canonical_equivalent_status",
+        "registry_source_kind",
+        "registry_source_status",
+        "registry_task_path",
         "selection_recommendation",
     ):
         raw = value.get(field)
@@ -5767,6 +6395,9 @@ def _public_task_setup_preflight(value: Any) -> dict[str, Any]:
         "dockerfile_present",
         "canonical_task_present",
         "alternate_source_supported_by_runner",
+        "registry_task_present",
+        "registry_task_path_recorded",
+        "registry_excluded",
         "task_source_path_recorded",
         "task_source_content_recorded",
         "bootstrap_light_candidate_eligible",
@@ -5796,6 +6427,25 @@ def _public_int(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
+def _requested_build_stall_timeout_sec(args: argparse.Namespace) -> int:
+    return max(0, int(getattr(args, "build_stall_timeout_sec", 0) or 0))
+
+
+def _effective_build_stall_timeout_sec(args: argparse.Namespace) -> int:
+    return _requested_build_stall_timeout_sec(args)
+
+
+def _effective_setup_only_stage_timeout_sec(args: argparse.Namespace) -> int:
+    sandbox_timeout_sec = max(
+        1,
+        int(getattr(args, "sandbox_setup_timeout", 0) or 0),
+    )
+    build_stall_timeout_sec = _effective_build_stall_timeout_sec(args)
+    if build_stall_timeout_sec <= 0:
+        return sandbox_timeout_sec
+    return min(sandbox_timeout_sec, build_stall_timeout_sec)
+
+
 def build_compose_setup_diagnostic(
     compact: dict[str, Any],
     plan: dict[str, Any],
@@ -5821,6 +6471,34 @@ def build_compose_setup_diagnostic(
         if isinstance(compact.get("runner_failure_fingerprint"), dict)
         else {}
     )
+    fingerprint_matched_patterns = [
+        str(item)[:120]
+        for item in fingerprint.get("matched_patterns", [])
+        if isinstance(item, str)
+    ][:10]
+    matched_patterns = set(fingerprint_matched_patterns)
+    terminal_dependency_classes = [
+        str(item)[:120]
+        for item in fingerprint.get("terminal_failure_dependency_classes", [])
+        if isinstance(item, str)
+    ][:10]
+    terminal_failure_reason_codes = [
+        str(item)[:120]
+        for item in fingerprint.get("terminal_failure_reason_codes", [])
+        if isinstance(item, str)
+    ][:10]
+    apt_failure_subtype = str(
+        fingerprint.get("apt_failure_subtype") or ""
+    )[:120]
+    pip_failure_subtype = str(
+        fingerprint.get("pip_failure_subtype") or ""
+    )[:120]
+    terminal_failure_dependency_endpoints = [
+        str(item)[:120]
+        for item in fingerprint.get("terminal_failure_dependency_endpoints", [])
+        if isinstance(item, str)
+    ][:10]
+    retryability = str(fingerprint.get("retryability") or "unknown")[:80]
     discovery = (
         compact.get("result_discovery")
         if isinstance(compact.get("result_discovery"), dict)
@@ -5876,24 +6554,47 @@ def build_compose_setup_diagnostic(
     docker_daemon_unavailable = (
         score_failure == "skillsbench_docker_daemon_unavailable"
         or "skillsbench_docker_daemon_unavailable" in labels
-        or "docker_daemon_unavailable" in {
-            str(item)
-            for item in fingerprint.get("matched_patterns", [])
-            if isinstance(item, str)
-        }
+        or "docker_daemon_unavailable" in matched_patterns
+    )
+    apt_repository_failure = (
+        score_failure == "skillsbench_docker_compose_apt_repository_failure"
+        or "skillsbench_docker_compose_apt_repository_failure" in labels
+        or "system_package" in terminal_dependency_classes
+        or any(code.startswith("apt_") for code in terminal_failure_reason_codes)
+    )
+    pip_bootstrap_failure = (
+        score_failure == "skillsbench_docker_compose_pip_bootstrap_failure"
+        or "skillsbench_docker_compose_pip_bootstrap_failure" in labels
+        or "pip_bootstrap_failure" in matched_patterns
     )
     volume_mount_failure = (
         score_failure == "skillsbench_docker_compose_volume_mount_failure"
         or "skillsbench_docker_compose_volume_mount_failure" in labels
-        or "volume_mount_failure" in {
-            str(item)
-            for item in fingerprint.get("matched_patterns", [])
-            if isinstance(item, str)
-        }
+        or "volume_mount_failure" in matched_patterns
     )
+    if pip_bootstrap_failure:
+        primary_setup_failure_category = "python_package_bootstrap"
+    elif apt_repository_failure:
+        primary_setup_failure_category = "system_package_repository"
+    elif volume_mount_failure:
+        primary_setup_failure_category = "volume_mount"
+    elif docker_daemon_unavailable:
+        primary_setup_failure_category = "docker_runtime"
+    elif unclassified:
+        primary_setup_failure_category = "unclassified"
+    else:
+        primary_setup_failure_category = "runner_setup"
     if compose_setup_failure and not agent_rounds_started:
         status = "compose_setup_blocked_before_agent_rounds"
-        if volume_mount_failure:
+        if pip_bootstrap_failure:
+            next_action = (
+                "repair_python_package_bootstrap_before_product_treatment"
+            )
+        elif apt_repository_failure:
+            next_action = (
+                "repair_system_package_repository_setup_before_product_treatment"
+            )
+        elif volume_mount_failure:
             next_action = "repair_task_volume_mount_setup_before_product_treatment"
         elif unclassified:
             next_action = "classify_sanitized_compose_setup_category_before_product_treatment"
@@ -5918,7 +6619,18 @@ def build_compose_setup_diagnostic(
         "compose_setup_failure": compose_setup_failure,
         "unclassified_compose_failure": unclassified,
         "docker_daemon_unavailable": docker_daemon_unavailable,
+        "apt_repository_failure": apt_repository_failure,
+        "pip_bootstrap_failure": pip_bootstrap_failure,
         "volume_mount_failure": volume_mount_failure,
+        "primary_setup_failure_category": primary_setup_failure_category,
+        "apt_failure_subtype": apt_failure_subtype,
+        "pip_failure_subtype": pip_failure_subtype,
+        "terminal_failure_dependency_classes": terminal_dependency_classes,
+        "terminal_failure_reason_codes": terminal_failure_reason_codes,
+        "terminal_failure_dependency_endpoints": (
+            terminal_failure_dependency_endpoints
+        ),
+        "retryability": retryability,
         "environment_setup_failure": environment_setup_failure,
         "agent_rounds_started": agent_rounds_started,
         "heartbeat_count": heartbeat_count,
@@ -5931,6 +6643,12 @@ def build_compose_setup_diagnostic(
         "official_result_json_materialized": official_result_materialized,
         "case_attempt_budget_should_count": not (
             environment_setup_failure and not agent_rounds_started
+        ),
+        "setup_stall_timeout_requested_sec": _public_int(
+            runner_prerequisites.get("benchflow_setup_stall_timeout_requested_sec")
+        ),
+        "setup_stall_timeout_sec": _public_int(
+            runner_prerequisites.get("benchflow_setup_stall_timeout_sec")
         ),
         "runner_prerequisite_status": str(
             runner_prerequisites.get(
@@ -5979,11 +6697,7 @@ def build_compose_setup_diagnostic(
         "resource_cap_applied": (
             isinstance(resource_cap, dict) and resource_cap.get("applied") is True
         ),
-        "fingerprint_matched_patterns": [
-            str(item)[:120]
-            for item in fingerprint.get("matched_patterns", [])
-            if isinstance(item, str)
-        ][:10],
+        "fingerprint_matched_patterns": fingerprint_matched_patterns,
         "fingerprint_confidence": str(
             fingerprint.get("fingerprint_confidence") or ""
         )[:120],
@@ -6206,6 +6920,506 @@ def dockerfile_needs_pip_bootstrap_patch(dockerfile: Path) -> bool:
     )
 
 
+def _normalized_docker_gcr_mirror_prefix(mirror_prefix: str | None) -> str:
+    prefix = str(mirror_prefix or "").strip().rstrip("/")
+    if not prefix or "://" in prefix or re.search(r"\s", prefix):
+        return ""
+    return prefix
+
+
+def dockerfile_references_gcr_oss_fuzz_base(dockerfile: Path) -> bool:
+    if not dockerfile.exists():
+        return False
+    text = dockerfile.read_text(encoding="utf-8", errors="replace")
+    pattern = re.compile(
+        r"^\s*FROM(?:\s+--platform=[^\s]+)?\s+gcr\.io/oss-fuzz-base/",
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    return bool(pattern.search(text))
+
+
+def dockerfile_needs_gcr_mirror_rewrite(
+    dockerfile: Path,
+    *,
+    mirror_prefix: str | None,
+) -> bool:
+    if not _normalized_docker_gcr_mirror_prefix(mirror_prefix):
+        return False
+    return dockerfile_references_gcr_oss_fuzz_base(dockerfile)
+
+
+def patch_dockerfile_gcr_mirror(
+    dockerfile: Path,
+    *,
+    mirror_prefix: str | None,
+) -> bool:
+    """Rewrite staged GCR oss-fuzz base image refs to a configured mirror."""
+
+    prefix = _normalized_docker_gcr_mirror_prefix(mirror_prefix)
+    if not prefix or not dockerfile.exists():
+        return False
+    original = dockerfile.read_text(encoding="utf-8", errors="replace")
+    text = _strip_marker_block(
+        original,
+        DOCKER_GCR_MIRROR_BEGIN,
+        DOCKER_GCR_MIRROR_END,
+    )
+    pattern = re.compile(
+        r"^(?P<lead>\s*FROM(?:\s+--platform=[^\s]+)?\s+)"
+        r"(?P<image>gcr\.io/oss-fuzz-base/[^\s]+)"
+        r"(?P<tail>.*)$",
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        return (
+            f"{match.group('lead')}{prefix}/{match.group('image')}"
+            f"{match.group('tail')}"
+        )
+
+    rewritten, count = pattern.subn(replace, text)
+    if count == 0:
+        return False
+    block = (
+        f"{DOCKER_GCR_MIRROR_BEGIN}\n"
+        "# Staged-only public base-image mirror rewrite; raw mirror prefix is\n"
+        "# provided by private benchmark runtime configuration.\n"
+        f"{DOCKER_GCR_MIRROR_END}"
+    )
+    patched = f"{block}\n{rewritten}".rstrip() + "\n"
+    if patched == original:
+        return False
+    _write_text_atomic(dockerfile, patched)
+    return True
+
+
+def _dockerfile_uv_bootstrap_versions(text: str) -> list[str]:
+    versions: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(
+        r"https?://astral\.sh/uv/(?P<version>[0-9A-Za-z][0-9A-Za-z._+-]*)/install\.sh",
+        text,
+    ):
+        version = match.group("version")
+        if version and version not in seen:
+            versions.append(version)
+            seen.add(version)
+    for match in re.finditer(
+        r"\bLOOPX_SKILLSBENCH_UV_VERSION=(?P<version>[0-9A-Za-z][0-9A-Za-z._+-]*)",
+        text,
+    ):
+        version = match.group("version")
+        if version and version not in seen:
+            versions.append(version)
+            seen.add(version)
+    return versions
+
+
+def dockerfile_needs_uv_bootstrap_mirror_patch(dockerfile: Path) -> bool:
+    if not dockerfile.exists():
+        return False
+    text = dockerfile.read_text(encoding="utf-8", errors="replace")
+    text = _strip_marker_block(
+        text,
+        DOCKER_UV_BOOTSTRAP_MIRROR_BEGIN,
+        DOCKER_UV_BOOTSTRAP_MIRROR_END,
+    )
+    return bool(_dockerfile_uv_bootstrap_versions(text))
+
+
+def _dockerfile_instruction_block_end(lines: list[str], start: int) -> int:
+    """Return the exclusive end offset for a possibly continued instruction."""
+
+    end = start + 1
+    while end < len(lines) and lines[end - 1].rstrip().endswith("\\"):
+        end += 1
+    return end
+
+
+def _dockerfile_curl_retry_all_errors_arg() -> str:
+    return "$(curl --help all 2>/dev/null | grep -q -- '--retry-all-errors' && printf '%s' '--retry-all-errors' || true)"
+
+
+def patch_dockerfile_uv_bootstrap_mirror(dockerfile: Path) -> dict[str, Any]:
+    """Make staged Dockerfile uv bootstraps tolerate installer egress failures."""
+
+    metadata: dict[str, Any] = {
+        "dockerfile_uv_bootstrap_risk_detected": False,
+        "dockerfile_uv_bootstrap_mirror_patch_required": False,
+        "dockerfile_uv_bootstrap_mirror_patch_applied": False,
+        "dockerfile_uv_bootstrap_pip_fallback_patch_applied": False,
+        "dockerfile_uv_bootstrap_version": "",
+        "dockerfile_uv_bootstrap_mirror_host": "",
+    }
+    if not dockerfile.exists():
+        return metadata
+    original = dockerfile.read_text(encoding="utf-8", errors="replace")
+    text = _strip_marker_block(
+        original,
+        DOCKER_UV_BOOTSTRAP_MIRROR_BEGIN,
+        DOCKER_UV_BOOTSTRAP_MIRROR_END,
+    )
+    versions = _dockerfile_uv_bootstrap_versions(text)
+    if not versions:
+        return metadata
+    version = versions[0]
+    block = (
+        f"{DOCKER_UV_BOOTSTRAP_MIRROR_BEGIN}\n"
+        "# Prefer the PyPI uv wheel for Docker build bootstrap; keep the\n"
+        "# official uv installer as a bounded mirror-backed fallback.\n"
+        f"ARG LOOPX_SKILLSBENCH_UV_RELEASE_MIRROR={DEFAULT_VERIFIER_UV_RELEASE_MIRROR_BASE}\n"
+        f"ARG LOOPX_SKILLSBENCH_UV_VERSION={version}\n"
+        f"{uv_cache.dockerfile_uv_binary_cache_prelude()}"
+        "    if command -v python3 >/dev/null 2>&1; then \\\n"
+        "      loopx_pip_break_system_packages=''; \\\n"
+        "      if python3 -m pip install --help 2>/dev/null | grep -q -- '--break-system-packages'; then \\\n"
+        "        loopx_pip_break_system_packages='--break-system-packages'; \\\n"
+        "      fi; \\\n"
+        "      python3 -m pip install ${loopx_pip_break_system_packages} \\\n"
+        "        --no-cache-dir --timeout 120 --retries 5 \\\n"
+        f"        --index-url {DEFAULT_DOCKER_PIP_INDEX_URL} \\\n"
+        "        \"uv==${LOOPX_SKILLSBENCH_UV_VERSION}\" || true; \\\n"
+        "    fi; \\\n"
+        "    if ! command -v uvx >/dev/null 2>&1; then \\\n"
+        "      export INSTALLER_DOWNLOAD_URL=\"${LOOPX_SKILLSBENCH_UV_RELEASE_MIRROR}/${LOOPX_SKILLSBENCH_UV_VERSION}\"; \\\n"
+        f"      curl -LsSf --retry 5 {_dockerfile_curl_retry_all_errors_arg()} --retry-delay 2 --connect-timeout 30 \\\n"
+        "        \"https://astral.sh/uv/${LOOPX_SKILLSBENCH_UV_VERSION}/install.sh\" | sh; \\\n"
+        "    fi; \\\n"
+        "    if [ -x \"${HOME}/.local/bin/uv\" ]; then install -m 0755 \"${HOME}/.local/bin/uv\" /usr/local/bin/uv; fi; \\\n"
+        "    if [ -x \"${HOME}/.local/bin/uvx\" ]; then install -m 0755 \"${HOME}/.local/bin/uvx\" /usr/local/bin/uvx; fi; \\\n"
+        "    command -v uv >/dev/null 2>&1; \\\n"
+        "    command -v uvx >/dev/null 2>&1\n"
+        f"{DOCKER_UV_BOOTSTRAP_MIRROR_END}"
+    )
+    lines = text.splitlines()
+    patched_lines: list[str] = []
+    index = 0
+    replaced = False
+    while index < len(lines):
+        line = lines[index]
+        if (
+            not replaced
+            and re.match(r"^\s*RUN\b", line, flags=re.IGNORECASE)
+            and "astral.sh/uv/" in line
+            and "install.sh" in line
+        ):
+            block_end = _dockerfile_instruction_block_end(lines, index)
+            patched_lines.extend(block.splitlines())
+            index = block_end
+            replaced = True
+            continue
+        patched_lines.append(line)
+        index += 1
+    if not replaced:
+        patched_lines = [*block.splitlines(), "", *lines]
+    patched = "\n".join(patched_lines).rstrip() + "\n"
+    if patched != original:
+        _write_text_atomic(dockerfile, patched)
+    metadata.update(
+        {
+            "dockerfile_uv_bootstrap_risk_detected": True,
+            "dockerfile_uv_bootstrap_mirror_patch_required": True,
+            "dockerfile_uv_bootstrap_mirror_patch_applied": True,
+            "dockerfile_uv_bootstrap_pip_fallback_patch_applied": True,
+            "dockerfile_uv_binary_cache_dockerfile_patch_applied": True,
+            "dockerfile_uv_bootstrap_version": version,
+            "dockerfile_uv_bootstrap_mirror_host": (
+                DEFAULT_VERIFIER_UV_RELEASE_MIRROR_HOST
+            ),
+        }
+    )
+    return metadata
+
+
+def dockerfile_needs_elan_toolchain_retry_patch(dockerfile: Path) -> bool:
+    if not dockerfile.exists():
+        return False
+    text = dockerfile.read_text(encoding="utf-8", errors="replace")
+    return bool(
+        re.search(
+            r"\belan\s+toolchain\s+install\s+\$\(cat\s+[^)]+lean-toolchain\)",
+            text,
+        )
+    )
+
+
+def patch_dockerfile_elan_toolchain_retry(dockerfile: Path) -> bool:
+    """Add bounded retry around staged Lean toolchain downloads."""
+
+    if not dockerfile_needs_elan_toolchain_retry_patch(dockerfile):
+        return False
+    original = dockerfile.read_text(encoding="utf-8", errors="replace")
+    text = _strip_marker_block(
+        original,
+        DOCKER_ELAN_TOOLCHAIN_RETRY_BEGIN,
+        DOCKER_ELAN_TOOLCHAIN_RETRY_END,
+    )
+    pattern = re.compile(
+        r"RUN\s+elan\s+toolchain\s+install\s+\$\(cat\s+"
+        r"(?P<toolchain>[^)]+lean-toolchain)\)\s*&&\s*\\?\s*"
+        r"(?:\n\s*)?elan\s+default\s+\$\(cat\s+(?P=toolchain)\)",
+        flags=re.MULTILINE,
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        toolchain = match.group("toolchain").strip()
+        return (
+            f"{DOCKER_ELAN_TOOLCHAIN_RETRY_BEGIN}\n"
+            "RUN set -eux; \\\n"
+            f"    loopx_lean_toolchain=\"$(cat {toolchain})\"; \\\n"
+            "    for loopx_attempt in 1 2 3 4 5; do \\\n"
+            "      elan toolchain install \"${loopx_lean_toolchain}\" && break; \\\n"
+            "      if [ \"${loopx_attempt}\" = \"5\" ]; then exit 1; fi; \\\n"
+            "      sleep 10; \\\n"
+            "    done; \\\n"
+            "    elan default \"${loopx_lean_toolchain}\"\n"
+            f"{DOCKER_ELAN_TOOLCHAIN_RETRY_END}"
+        )
+
+    patched, count = pattern.subn(replace, text, count=1)
+    if count == 0:
+        return False
+    patched = patched.rstrip() + "\n"
+    if patched == original:
+        return False
+    _write_text_atomic(dockerfile, patched)
+    return True
+
+
+def dockerfile_needs_wget_gpg_key_retry_patch(dockerfile: Path) -> bool:
+    if not dockerfile.exists():
+        return False
+    text = dockerfile.read_text(encoding="utf-8", errors="replace")
+    return bool(
+        re.search(
+            r"\bwget\s+(?:-qO\s+-|-q\s+-O\s+-|-O\s+-\s+-q)\s+"
+            r"https?://[^\s|]+\s*\|\s*gpg\s+--dearmor",
+            text,
+        )
+        or re.search(
+            r"\bcurl\s+[^|\n]*https?://[^\s|]+\s*\|\s*gpg\s+--dearmor",
+            text,
+        )
+    )
+
+
+def patch_dockerfile_wget_gpg_key_retry(dockerfile: Path) -> bool:
+    """Use curl retry semantics for staged public key download pipelines."""
+
+    if not dockerfile_needs_wget_gpg_key_retry_patch(dockerfile):
+        return False
+    original = dockerfile.read_text(encoding="utf-8", errors="replace")
+    pattern = re.compile(
+        r"\bwget\s+(?:-qO\s+-|-q\s+-O\s+-|-O\s+-\s+-q)\s+"
+        r"(?P<url>https?://[^\s|]+)\s*\|\s*gpg\s+--dearmor",
+    )
+    curl_pattern = re.compile(
+        r"\bcurl\s+(?P<args>[^|\n]*?)"
+        r"(?P<url>https?://[^\s|]+)\s*\|\s*gpg\s+--dearmor"
+    )
+
+    def gpg_key_curl_command(url: str) -> str:
+        return (
+            "curl -fsSL --retry 8 "
+            f"{_dockerfile_curl_retry_all_errors_arg()} --retry-delay 3 "
+            f"--connect-timeout 60 --max-time 300 {url} | gpg --dearmor"
+        )
+
+    def replace(match: re.Match[str]) -> str:
+        return gpg_key_curl_command(match.group("url"))
+
+    patched, count = pattern.subn(replace, original)
+    patched, curl_count = curl_pattern.subn(
+        lambda match: gpg_key_curl_command(match.group("url")),
+        patched,
+    )
+    if (count + curl_count) == 0 or patched == original:
+        return False
+    _write_text_atomic(dockerfile, patched)
+    return True
+
+
+def dockerfile_needs_apache_archive_mirror_rewrite(dockerfile: Path) -> bool:
+    if not dockerfile.exists():
+        return False
+    text = dockerfile.read_text(encoding="utf-8", errors="replace")
+    return (
+        "https://archive.apache.org/dist/druid/" in text
+        or "http://archive.apache.org/dist/druid/" in text
+    )
+
+
+def patch_dockerfile_apache_archive_mirror(dockerfile: Path) -> bool:
+    """Rewrite known slow Apache archive Druid downloads to a public mirror."""
+
+    if not dockerfile_needs_apache_archive_mirror_rewrite(dockerfile):
+        return False
+    original = dockerfile.read_text(encoding="utf-8", errors="replace")
+    mirror_base = DEFAULT_DOCKER_APACHE_ARCHIVE_MIRROR_BASE.rstrip("/")
+    patched = original.replace(
+        "https://archive.apache.org/dist/druid/",
+        f"{mirror_base}/druid/",
+    ).replace(
+        "http://archive.apache.org/dist/druid/",
+        f"{mirror_base}/druid/",
+    )
+    if patched == original:
+        return False
+    _write_text_atomic(dockerfile, patched)
+    return True
+
+
+def _insert_dockerfile_block_after_first_from(text: str, block: str) -> str:
+    patched_lines: list[str] = []
+    inserted = False
+    for line in text.splitlines():
+        patched_lines.append(line)
+        if not inserted and _is_dockerfile_from_instruction(line.strip()):
+            patched_lines.extend(["", *block.splitlines(), ""])
+            inserted = True
+    if not inserted:
+        return "\n".join([*block.splitlines(), "", *text.splitlines()])
+    return "\n".join(patched_lines)
+
+
+def dockerfile_needs_maven_mirror_patch(dockerfile: Path) -> bool:
+    if not dockerfile.exists():
+        return False
+    text = dockerfile.read_text(encoding="utf-8", errors="replace")
+    return bool(re.search(r"\bmvn\s+", text))
+
+
+def patch_dockerfile_maven_mirror(dockerfile: Path) -> bool:
+    """Route staged Docker build Maven downloads through a public mirror."""
+
+    if not dockerfile_needs_maven_mirror_patch(dockerfile):
+        return False
+    original = dockerfile.read_text(encoding="utf-8", errors="replace")
+    text = _strip_marker_block(
+        original,
+        DOCKER_MAVEN_MIRROR_BEGIN,
+        DOCKER_MAVEN_MIRROR_END,
+    )
+    settings_block = (
+        f"{DOCKER_MAVEN_MIRROR_BEGIN}\n"
+        "RUN mkdir -p /opt/loopx-maven && cat > "
+        f"{DEFAULT_DOCKER_MAVEN_SETTINGS_PATH} "
+        "<<'LOOPX_MAVEN_SETTINGS_EOF'\n"
+        "<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\" "
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
+        "xsi:schemaLocation=\"http://maven.apache.org/SETTINGS/1.0.0 "
+        "https://maven.apache.org/xsd/settings-1.0.0.xsd\">\n"
+        "  <mirrors>\n"
+        "    <mirror>\n"
+        "      <id>loopx-public-maven-mirror</id>\n"
+        "      <mirrorOf>*</mirrorOf>\n"
+        "      <url>"
+        f"{DEFAULT_DOCKER_MAVEN_MIRROR_URL}"
+        "</url>\n"
+        "    </mirror>\n"
+        "  </mirrors>\n"
+        "</settings>\n"
+        "LOOPX_MAVEN_SETTINGS_EOF\n"
+        f"{DOCKER_MAVEN_MIRROR_END}"
+    )
+    if DOCKER_NETWORK_DOWNLOAD_RETRY_END in text:
+        text = text.replace(
+            DOCKER_NETWORK_DOWNLOAD_RETRY_END,
+            f"{DOCKER_NETWORK_DOWNLOAD_RETRY_END}\n\n{settings_block}",
+            1,
+        )
+    else:
+        text = _insert_dockerfile_block_after_first_from(text, settings_block)
+    text = re.sub(
+        r"\bmvn(?!\s+(?:--settings|-s)\b)",
+        f"mvn --settings {DEFAULT_DOCKER_MAVEN_SETTINGS_PATH}",
+        text,
+    )
+    if text == original:
+        return False
+    _write_text_atomic(dockerfile, text.rstrip() + "\n")
+    return True
+
+
+def dockerfile_needs_network_download_retry_patch(dockerfile: Path) -> bool:
+    if not dockerfile.exists():
+        return False
+    text = dockerfile.read_text(encoding="utf-8", errors="replace")
+    return bool(
+        re.search(r"\bwget\s+[^;\n]*https?://", text)
+        or re.search(r"\bcurl\s+[^;\n|]*https?://", text)
+        or re.search(r"\bgit\s+clone\s+https?://", text)
+        or re.search(r"\bmvn\s+", text)
+    )
+
+
+def patch_dockerfile_network_download_retry(dockerfile: Path) -> bool:
+    """Add staged retry/timeout defaults for common build-time downloads."""
+
+    if not dockerfile_needs_network_download_retry_patch(dockerfile):
+        return False
+    original = dockerfile.read_text(encoding="utf-8", errors="replace")
+    text = _strip_marker_block(
+        original,
+        DOCKER_NETWORK_DOWNLOAD_RETRY_BEGIN,
+        DOCKER_NETWORK_DOWNLOAD_RETRY_END,
+    )
+    wget_pattern = re.compile(
+        r"\bwget(?P<args>(?:\s+(?!https?://)[^\s\\;&|]+)*)\s+"
+        r"(?P<url>https?://[^\s\\;&|]+)"
+    )
+    curl_pattern = re.compile(
+        r"\bcurl(?P<args>(?:\s+(?!https?://)[^\s\\;&|]+)*)\s+"
+        r"(?P<url>https?://[^\s\\;&|]+)"
+    )
+
+    def replace_wget(match: re.Match[str]) -> str:
+        args = match.group("args") or ""
+        if "--tries" in args or "--timeout" in args:
+            return match.group(0)
+        return (
+            f"wget{args} --tries=5 --timeout=120 --read-timeout=120 "
+            f"--retry-connrefused {match.group('url')}"
+        )
+
+    def replace_curl(match: re.Match[str]) -> str:
+        args = match.group("args") or ""
+        if "--retry" in args or "--connect-timeout" in args:
+            return match.group(0)
+        return (
+            "curl"
+            f"{args} --retry 5 {_dockerfile_curl_retry_all_errors_arg()} --retry-delay 2 "
+            f"--connect-timeout 60 --max-time 600 {match.group('url')}"
+        )
+
+    text = wget_pattern.sub(replace_wget, text)
+    text = curl_pattern.sub(replace_curl, text)
+    block = (
+        f"{DOCKER_NETWORK_DOWNLOAD_RETRY_BEGIN}\n"
+        "ENV GIT_HTTP_LOW_SPEED_LIMIT=1000 \\\n"
+        "    GIT_HTTP_LOW_SPEED_TIME=120 \\\n"
+        "    MAVEN_OPTS=\"-Dmaven.wagon.http.retryHandler.count=5 "
+        "-Dmaven.wagon.httpconnectionManager.ttlSeconds=60 "
+        "-Dhttp.keepAlive=false\"\n"
+        f"{DOCKER_NETWORK_DOWNLOAD_RETRY_END}"
+    )
+    patched_lines: list[str] = []
+    inserted = False
+    for line in text.splitlines():
+        patched_lines.append(line)
+        stripped = line.strip()
+        if stripped.upper().startswith("FROM ") and " scratch" not in stripped.lower():
+            patched_lines.extend(["", *block.splitlines(), ""])
+            inserted = True
+    if not inserted:
+        patched_lines = [*block.splitlines(), "", *text.splitlines()]
+    patched = "\n".join(patched_lines).rstrip() + "\n"
+    if patched == original:
+        return False
+    _write_text_atomic(dockerfile, patched)
+    return True
+
+
 def _skillsbench_public_task_label(value: Any, *, limit: int = 120) -> str:
     text = str(value or "").strip()
     cleaned = []
@@ -6217,6 +7431,63 @@ def _skillsbench_public_task_label(value: Any, *, limit: int = 120) -> str:
     while "--" in label:
         label = label.replace("--", "-")
     return label[:limit]
+
+
+def _skillsbench_task_id_tokens(value: str) -> set[str]:
+    return {token for token in re.findall(r"[a-z0-9]+", value.lower()) if len(token) >= 2}
+
+
+def _skillsbench_task_id_similarity(
+    requested_task_id: str,
+    canonical_task_id: str,
+) -> tuple[float, bool]:
+    requested = _skillsbench_public_task_label(requested_task_id).lower()
+    canonical = _skillsbench_public_task_label(canonical_task_id).lower()
+    if not requested or not canonical:
+        return 0.0, False
+    sequence_score = difflib.SequenceMatcher(None, requested, canonical).ratio()
+    requested_tokens = _skillsbench_task_id_tokens(requested)
+    canonical_tokens = _skillsbench_task_id_tokens(canonical)
+    token_overlap = 0.0
+    has_token_overlap = False
+    if requested_tokens and canonical_tokens:
+        intersection = requested_tokens & canonical_tokens
+        union = requested_tokens | canonical_tokens
+        token_overlap = len(intersection) / len(union)
+        has_token_overlap = bool(intersection)
+    return (sequence_score * 0.4) + (token_overlap * 0.6), has_token_overlap
+
+
+def skillsbench_nearest_canonical_task_ids(
+    *,
+    requested_task_id: str,
+    canonical_root: Path,
+    limit: int = 5,
+) -> tuple[list[str], str]:
+    canonical_ids: list[str] = []
+    if canonical_root.is_dir():
+        for child in sorted(canonical_root.iterdir(), key=lambda item: item.name):
+            if not child.is_dir():
+                continue
+            label = _skillsbench_public_task_label(child.name)
+            if label:
+                canonical_ids.append(label)
+    if not canonical_ids:
+        return [], "canonical_task_index_empty"
+
+    ranked: list[tuple[float, bool, str]] = []
+    for canonical_id in canonical_ids:
+        score, has_token_overlap = _skillsbench_task_id_similarity(
+            requested_task_id,
+            canonical_id,
+        )
+        ranked.append((score, has_token_overlap, canonical_id))
+    ranked.sort(key=lambda item: (-item[0], item[2]))
+    best_score, best_has_token_overlap, _best_id = ranked[0]
+    close_match = best_has_token_overlap or best_score >= 0.34
+    if close_match:
+        return [item[2] for item in ranked[:limit]], "close_canonical_match_found"
+    return canonical_ids[:limit], "no_close_canonical_match"
 
 
 SKILLSBENCH_BOOTSTRAP_LIGHT_BLOCKING_PREFLIGHT_FIELDS = (
@@ -6387,29 +7658,22 @@ def skillsbench_task_setup_preflight(
             / "sanity-tasks"
             / expanded_task_path.name
         )
-        alternate_source_kind = (
-            "experiments_sanity_tasks" if sanity_task.is_dir() else "none"
+        nearest, canonical_equivalent_status = (
+            skillsbench_nearest_canonical_task_ids(
+                requested_task_id=public_task_id,
+                canonical_root=skillsbench_root / "tasks",
+            )
         )
-        nearest: list[str] = []
-        canonical_root = skillsbench_root / "tasks"
-        if canonical_root.is_dir():
-            for child in sorted(canonical_root.iterdir(), key=lambda item: item.name):
-                if not child.is_dir():
-                    continue
-                label = _skillsbench_public_task_label(child.name)
-                if label:
-                    nearest.append(label)
-                if len(nearest) >= 5:
-                    break
         preflight.update(
             {
-                "status": "task_missing_from_canonical_tasks",
-                "first_blocker": "skillsbench_task_source_preflight_blocked",
-                "alternate_source_kind": alternate_source_kind,
-                "nearest_canonical_task_ids": nearest,
-                "selection_recommendation": (
-                    "choose_normal_tasks_candidate_or_use_explicit_sanity_source_runner"
+                **classify_missing_task_source(
+                    skillsbench_root=skillsbench_root,
+                    task_id=expanded_task_path.name,
+                    sanity_task_exists=sanity_task.is_dir(),
+                    canonical_equivalent_status=canonical_equivalent_status,
                 ),
+                "canonical_equivalent_status": canonical_equivalent_status,
+                "nearest_canonical_task_ids": nearest,
             }
         )
         preflight["bootstrap_light_blocking_fields"] = (
@@ -6431,7 +7695,9 @@ def skillsbench_task_setup_preflight(
 
     apt_risk = dockerfile_needs_apt_retry_patch(dockerfile)
     pip_risk = dockerfile_needs_pip_bootstrap_patch(dockerfile)
-    verifier_risk = skillsbench_verifier_bootstrap_risk(expanded_task_path)
+    verifier_risk = verifier_bootstrap.skillsbench_verifier_bootstrap_risk(
+        expanded_task_path
+    )
     preflight.update(verifier_risk)
     verifier_bootstrap_risk = bool(
         verifier_risk.get("verifier_bootstrap_risk_detected")
@@ -6472,173 +7738,6 @@ def skillsbench_task_setup_preflight(
     return preflight
 
 
-def skillsbench_verifier_bootstrap_risk(task_path: Path) -> dict[str, Any]:
-    """Return public-safe verifier dependency bootstrap risk flags.
-
-    The check reads only the verifier wrapper shape and records booleans, not
-    raw task text, logs, trajectories, or verifier output. It catches cases
-    where the official verifier would spend the final closeout on network
-    bootstrap such as uv installation, curl/wget downloads, or package install
-    commands.
-    """
-
-    verifier = task_path / "verifier" / "test.sh"
-    result: dict[str, Any] = {
-        "verifier_present": verifier.exists(),
-        "verifier_bootstrap_risk_detected": False,
-        "verifier_uv_bootstrap_risk_detected": False,
-        "verifier_external_download_risk_detected": False,
-        "verifier_package_install_risk_detected": False,
-        "verifier_bootstrap_risk_categories": [],
-    }
-    if not verifier.exists():
-        return result
-    try:
-        text = verifier.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return result
-
-    uv_versions = _verifier_uv_bootstrap_versions(text)
-    if uv_versions:
-        result["verifier_uv_bootstrap_version"] = uv_versions[0]
-    categories: list[str] = []
-    uv_bootstrap_pattern = (
-        r"astral\.sh/uv|"
-        r"(?:^|[;&|(\s])uv(?:x|\s+add|\s+sync|\s+pip|\s+tool)"
-    )
-    if re.search(uv_bootstrap_pattern, text):
-        result["verifier_uv_bootstrap_risk_detected"] = True
-        categories.append("uv_bootstrap")
-    if re.search(r"(?:curl|wget)\s+[^;\n]*(?:https?://|astral\.sh)", text):
-        result["verifier_external_download_risk_detected"] = True
-        categories.append("external_download")
-    if re.search(
-        r"(?:python\s+-m\s+pip|pip3?|uv\s+pip|uv\s+add|"
-        r"poetry\s+install|npm\s+install|pnpm\s+install|"
-        r"yarn\s+install|apt-get\s+(?:update|install))",
-        text,
-    ):
-        result["verifier_package_install_risk_detected"] = True
-        categories.append("package_install")
-    result["verifier_bootstrap_risk_categories"] = sorted(set(categories))
-    result["verifier_bootstrap_risk_detected"] = bool(categories)
-    return result
-
-
-def _verifier_uv_bootstrap_versions(text: str) -> list[str]:
-    versions: list[str] = []
-    seen: set[str] = set()
-    for match in re.finditer(
-        r"https?://astral\.sh/uv/(?P<version>[0-9A-Za-z][0-9A-Za-z._+-]*)/install\.sh",
-        text,
-    ):
-        version = match.group("version")
-        if version and version not in seen:
-            versions.append(version)
-            seen.add(version)
-    return versions
-
-
-def patch_verifier_uv_bootstrap_mirror(verifier: Path) -> dict[str, Any]:
-    """Point staged uv installer bootstrap at a reachable public mirror.
-
-    The patch is applied only to the copied prepared task. It does not alter
-    scoring assertions, task instructions, or verifier command order; it only
-    supplies uv's installer with the tarball URL that the official installer
-    would otherwise derive from a GitHub release URL.
-    """
-
-    metadata: dict[str, Any] = {
-        "verifier_uv_bootstrap_risk_detected": False,
-        "verifier_uv_bootstrap_mirror_patch_required": False,
-        "verifier_uv_bootstrap_mirror_patch_applied": False,
-        "verifier_uv_bootstrap_pip_fallback_patch_applied": False,
-    }
-    if not verifier.exists():
-        return metadata
-    try:
-        original = verifier.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return metadata
-    text = _strip_marker_block(
-        original,
-        VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN,
-        VERIFIER_UV_BOOTSTRAP_MIRROR_END,
-    )
-    versions = _verifier_uv_bootstrap_versions(text)
-    if not versions:
-        return metadata
-
-    version = versions[0]
-    block = (
-        f"{VERIFIER_UV_BOOTSTRAP_MIRROR_BEGIN}\n"
-        "# Prefer the PyPI uv wheel for verifier bootstrap; the official uv\n"
-        "# installer release tarball remains as a bounded fallback.\n"
-        f"loopx_uv_release_mirror={shlex.quote(DEFAULT_VERIFIER_UV_RELEASE_MIRROR_BASE)}\n"
-        f"loopx_uv_version={shlex.quote(version)}\n"
-        "if ! command -v uvx >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then\n"
-        "  loopx_pip_break_system_packages=''\n"
-        "  if python3 -m pip install --help 2>/dev/null | grep -q -- '--break-system-packages'; then\n"
-        "    loopx_pip_break_system_packages='--break-system-packages'\n"
-        "  fi\n"
-        "  python3 -m pip install ${loopx_pip_break_system_packages} \\\n"
-        "    --no-cache-dir --timeout 120 --retries 5 \\\n"
-        f"    --index-url {shlex.quote(DEFAULT_DOCKER_PIP_INDEX_URL)} \\\n"
-        f"    --extra-index-url {shlex.quote(DEFAULT_DOCKER_PIP_EXTRA_INDEX_URL)} \\\n"
-        "    \"uv==${loopx_uv_version}\" || true\n"
-        "  unset loopx_pip_break_system_packages\n"
-        "fi\n"
-        "if [ -z \"${INSTALLER_DOWNLOAD_URL:-}\" ]; then\n"
-        "  export INSTALLER_DOWNLOAD_URL=\"${loopx_uv_release_mirror}/${loopx_uv_version}\"\n"
-        "fi\n"
-        "loopx_uv_installer_timeout_sec=${LOOPX_SKILLSBENCH_UV_INSTALL_TIMEOUT_SEC:-180}\n"
-        f"{VERIFIER_UV_BOOTSTRAP_MIRROR_END}"
-    )
-    patched_lines: list[str] = []
-    inserted = False
-    for line in text.splitlines():
-        if (
-            not inserted
-            and "astral.sh/uv/" in line
-            and "install.sh" in line
-        ):
-            patched_lines.extend(block.splitlines())
-            inserted = True
-            if "curl" in line and "|" in line:
-                fallback_line = shlex.quote(line)
-                patched_lines.extend(
-                    [
-                        "if ! command -v uvx >/dev/null 2>&1; then",
-                        "  if command -v timeout >/dev/null 2>&1; then",
-                        f"    timeout \"${{loopx_uv_installer_timeout_sec}}\" sh -c {fallback_line}",
-                        "  else",
-                        f"    sh -c {fallback_line}",
-                        "  fi",
-                        "fi",
-                    ]
-                )
-                continue
-        patched_lines.append(line)
-    if not inserted:
-        patched_lines.extend(block.splitlines())
-    patched = "\n".join(patched_lines).rstrip() + "\n"
-    if patched != original:
-        _write_text_atomic(verifier, patched)
-    metadata.update(
-        {
-            "verifier_uv_bootstrap_risk_detected": True,
-            "verifier_uv_bootstrap_mirror_patch_required": True,
-            "verifier_uv_bootstrap_mirror_patch_applied": True,
-            "verifier_uv_bootstrap_pip_fallback_patch_applied": True,
-            "verifier_uv_bootstrap_version": version,
-            "verifier_uv_bootstrap_mirror_host": (
-                DEFAULT_VERIFIER_UV_RELEASE_MIRROR_HOST
-            ),
-        }
-    )
-    return metadata
-
-
 def _verifier_benchmark_egress_proxy_exports(
     proxy_env: Mapping[str, str] | None,
 ) -> dict[str, str]:
@@ -6671,13 +7770,16 @@ def patch_verifier_benchmark_egress_proxy_env(
     """Forward the private benchmark egress proxy into staged verifier scripts."""
 
     exports = _verifier_benchmark_egress_proxy_exports(proxy_env)
+    patch_required = bool(exports and verifier.exists())
     metadata: dict[str, Any] = {
-        "benchmark_egress_proxy_verifier_env_patch_required": bool(exports),
+        "benchmark_egress_proxy_verifier_env_patch_required": patch_required,
         "benchmark_egress_proxy_verifier_env_patch_applied": False,
-        "benchmark_egress_proxy_verifier_env_key_count": len(exports),
+        "benchmark_egress_proxy_verifier_env_key_count": (
+            len(exports) if patch_required else 0
+        ),
         "benchmark_egress_proxy_verifier_env_raw_proxy_recorded": False,
     }
-    if not verifier.exists() or not exports:
+    if not patch_required:
         return metadata
     try:
         original = verifier.read_text(encoding="utf-8", errors="replace")
@@ -6717,39 +7819,195 @@ def patch_verifier_benchmark_egress_proxy_env(
     return metadata
 
 
-def patch_dockerfile_apt_retry(dockerfile: Path) -> bool:
-    """Add public-safe apt retry/no-cache defaults to staged Dockerfiles."""
+def patch_dockerfile_benchmark_egress_proxy_env(
+    dockerfile: Path,
+    *,
+    proxy_env: Mapping[str, str] | None,
+) -> dict[str, Any]:
+    """Forward the private benchmark egress proxy into staged Docker builds."""
+
+    exports = _verifier_benchmark_egress_proxy_exports(proxy_env)
+    proxy_url = str(exports.get("HTTPS_PROXY") or exports.get("HTTP_PROXY") or "")
+    no_proxy = str(exports.get("NO_PROXY") or exports.get("no_proxy") or "")
+    metadata: dict[str, Any] = {
+        "benchmark_egress_proxy_dockerfile_env_patch_required": bool(proxy_url),
+        "benchmark_egress_proxy_dockerfile_env_patch_applied": False,
+        "benchmark_egress_proxy_dockerfile_java_opts_patch_applied": False,
+        "benchmark_egress_proxy_dockerfile_env_key_count": len(exports),
+        "benchmark_egress_proxy_dockerfile_env_raw_proxy_recorded": False,
+    }
+    if not dockerfile.exists() or not proxy_url:
+        return metadata
+    try:
+        original = dockerfile.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return metadata
+    text = _strip_marker_block(
+        original,
+        DOCKER_BENCHMARK_EGRESS_PROXY_BEGIN,
+        DOCKER_BENCHMARK_EGRESS_PROXY_END,
+    )
+    proxy_host = ""
+    proxy_port = 0
+    try:
+        _, proxy_host, proxy_port = _parse_proxy_endpoint(proxy_url)
+    except Exception:
+        proxy_host = ""
+        proxy_port = 0
+    block_lines = [
+        DOCKER_BENCHMARK_EGRESS_PROXY_BEGIN,
+        "# Forward the runtime benchmark egress proxy into Docker build steps.",
+        "# The concrete proxy is staged only in the private prepared task copy.",
+        f"ARG LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY={proxy_url}",
+        f"ARG LOOPX_SKILLSBENCH_BENCHMARK_NO_PROXY={no_proxy}",
+        "ENV HTTPS_PROXY=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY} \\",
+        "    HTTP_PROXY=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY} \\",
+        "    ALL_PROXY=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY} \\",
+        "    https_proxy=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY} \\",
+        "    http_proxy=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY} \\",
+        "    all_proxy=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY} \\",
+        "    NO_PROXY=${LOOPX_SKILLSBENCH_BENCHMARK_NO_PROXY} \\",
+        "    no_proxy=${LOOPX_SKILLSBENCH_BENCHMARK_NO_PROXY}",
+    ]
+    if proxy_host and proxy_port:
+        java_proxy_opts = (
+            "-Dhttp.proxyHost=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY_HOST} "
+            "-Dhttp.proxyPort=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY_PORT} "
+            "-Dhttps.proxyHost=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY_HOST} "
+            "-Dhttps.proxyPort=${LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY_PORT}"
+        )
+        block_lines.extend(
+            [
+                f"ARG LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY_HOST={proxy_host}",
+                f"ARG LOOPX_SKILLSBENCH_BENCHMARK_EGRESS_PROXY_PORT={proxy_port}",
+                "ENV LOOPX_SKILLSBENCH_JAVA_PROXY_OPTS=\""
+                f"{java_proxy_opts}\" \\",
+                "    JAVA_TOOL_OPTIONS=${LOOPX_SKILLSBENCH_JAVA_PROXY_OPTS} \\",
+                "    COURSIER_OPTS=${LOOPX_SKILLSBENCH_JAVA_PROXY_OPTS} \\",
+                "    SBT_OPTS=${LOOPX_SKILLSBENCH_JAVA_PROXY_OPTS}",
+            ]
+        )
+        metadata["benchmark_egress_proxy_dockerfile_java_opts_patch_applied"] = True
+    block_lines.append(DOCKER_BENCHMARK_EGRESS_PROXY_END)
+    block = "\n".join(block_lines)
+    patched_lines: list[str] = []
+    inserted = False
+    heredoc_delimiter: str | None = None
+    for line in text.splitlines():
+        patched_lines.append(line)
+        if heredoc_delimiter is not None:
+            if line.strip() == heredoc_delimiter:
+                heredoc_delimiter = None
+            continue
+        heredoc_delimiter = dockerfile_runtime.dockerfile_heredoc_delimiter(line)
+        stripped = line.strip()
+        if (
+            _is_dockerfile_from_instruction(stripped)
+            and " scratch" not in stripped.lower()
+        ):
+            patched_lines.extend(["", block, ""])
+            inserted = True
+    if not inserted:
+        return metadata
+    patched = "\n".join(patched_lines).rstrip() + "\n"
+    if patched != original:
+        _write_text_atomic(dockerfile, patched)
+    metadata["benchmark_egress_proxy_dockerfile_env_patch_applied"] = True
+    return metadata
+
+
+def patch_dockerfile_apt_retry(
+    dockerfile: Path,
+    *,
+    transport_mode: str = DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+) -> bool:
+    """Add public-safe apt retry/no-cache defaults to apt-using stages."""
 
     if not dockerfile_needs_apt_retry_patch(dockerfile):
         return False
+    transport_mode = _docker_apt_transport_mode(transport_mode)
     text = _strip_marker_block(
         dockerfile.read_text(encoding="utf-8"),
         DOCKER_APT_RETRY_BEGIN,
         DOCKER_APT_RETRY_END,
     )
+    proxy_compatible_config = (
+        "        'Acquire::http::Pipeline-Depth \"0\";' \\\n"
+        "        'Acquire::https::Pipeline-Depth \"0\";' \\\n"
+        "        'Acquire::ForceIPv4 \"true\";' \\\n"
+        if transport_mode == "proxy-compatible"
+        else ""
+    )
+    proxy_compatible_source_upgrade = (
+        "      find /etc/apt -type f \\\n"
+        "        \\( -name '*.list' -o -name '*.sources' \\) \\\n"
+        "        -exec sed -i \\\n"
+        '          -e "s#http://archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g" \\\n'
+        '          -e "s#http://security.ubuntu.com/ubuntu#https://security.ubuntu.com/ubuntu#g" \\\n'
+        '          -e "s#http://ports.ubuntu.com/ubuntu-ports#https://ports.ubuntu.com/ubuntu-ports#g" \\\n'
+        '          -e "s#http://deb.debian.org/debian-security#https://deb.debian.org/debian-security#g" \\\n'
+        '          -e "s#http://security.debian.org/debian-security#https://security.debian.org/debian-security#g" \\\n'
+        '          -e "s#http://deb.debian.org/debian#https://deb.debian.org/debian#g" \\\n'
+        "          {} +; \\\n"
+        if transport_mode == "proxy-compatible"
+        else ""
+    )
     block = (
         f"{DOCKER_APT_RETRY_BEGIN}\n"
         "RUN set -eux; \\\n"
-        "    mkdir -p /etc/apt/apt.conf.d; \\\n"
-        "    printf '%s\\n' \\\n"
-        "      'Acquire::Retries \"5\";' \\\n"
-        "      'Acquire::http::No-Cache \"true\";' \\\n"
-        "      'Acquire::https::No-Cache \"true\";' \\\n"
-        "      'Acquire::Check-Valid-Until \"false\";' \\\n"
-        "      > /etc/apt/apt.conf.d/80-loopx-retry; \\\n"
-        "    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb\n"
+        "    if mkdir -p /etc/apt/apt.conf.d 2>/dev/null && "
+        "[ -w /etc/apt/apt.conf.d ]; then \\\n"
+        f"{proxy_compatible_source_upgrade}"
+        "      printf '%s\\n' \\\n"
+        "        'Acquire::Retries \"5\";' \\\n"
+        "        'Acquire::http::No-Cache \"true\";' \\\n"
+        "        'Acquire::https::No-Cache \"true\";' \\\n"
+        f"{proxy_compatible_config}"
+        "        'Acquire::Check-Valid-Until \"false\";' \\\n"
+        "        > /etc/apt/apt.conf.d/80-loopx-retry; \\\n"
+        "      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
+        "    else \\\n"
+        "      echo 'loopx apt retry config skipped: apt config directory is not writable'; \\\n"
+        "    fi\n"
         f"{DOCKER_APT_RETRY_END}"
     )
-    patched_lines: list[str] = []
-    inserted = False
-    for line in text.splitlines():
-        patched_lines.append(line)
-        stripped = line.strip()
-        if stripped.startswith("FROM ") and not inserted:
-            patched_lines.extend(["", *block.splitlines(), ""])
-            inserted = True
-    if not inserted:
-        patched_lines = [*block.splitlines(), "", *text.splitlines()]
+    lines = text.splitlines()
+    stage_starts: list[int] = []
+    heredoc_delimiter: str | None = None
+    for index, line in enumerate(lines):
+        if heredoc_delimiter is not None:
+            if line.strip() == heredoc_delimiter:
+                heredoc_delimiter = None
+            continue
+        heredoc_delimiter = dockerfile_runtime.dockerfile_heredoc_delimiter(line)
+        if _is_dockerfile_from_instruction(line.strip()):
+            stage_starts.append(index)
+
+    if not stage_starts:
+        patched_lines = [*block.splitlines(), "", *lines]
+    else:
+        patched_lines = lines[: stage_starts[0]]
+        for position, start in enumerate(stage_starts):
+            end = (
+                stage_starts[position + 1]
+                if position + 1 < len(stage_starts)
+                else len(lines)
+            )
+            stage_lines = lines[start:end]
+            from_line = stage_lines[0].strip().lower()
+            stage_uses_apt = bool(
+                re.search(
+                    r"\bapt(?:-get)?\s+update\b",
+                    "\n".join(stage_lines),
+                    flags=re.IGNORECASE,
+                )
+            )
+            if stage_uses_apt and " scratch" not in from_line:
+                patched_lines.extend(
+                    [stage_lines[0], "", *block.splitlines(), "", *stage_lines[1:]]
+                )
+            else:
+                patched_lines.extend(stage_lines)
     patched = "\n".join(patched_lines).rstrip() + "\n"
     if patched == dockerfile.read_text(encoding="utf-8"):
         return False
@@ -6757,23 +8015,59 @@ def patch_dockerfile_apt_retry(dockerfile: Path) -> bool:
     return True
 
 
-def patch_dockerfile_pip_bootstrap(dockerfile: Path) -> bool:
+def _docker_pip_index(mode: str) -> tuple[str, str]:
+    try:
+        return DOCKER_PIP_INDEX_MODES[mode]
+    except KeyError as exc:
+        raise ValueError(f"unsupported Docker pip index mode: {mode}") from exc
+
+
+def _docker_pip_build_mode(mode: str) -> str:
+    if mode not in DOCKER_PIP_BUILD_MODES:
+        raise ValueError(f"unsupported Docker pip build mode: {mode}")
+    return mode
+
+
+def _docker_apt_source_mode(mode: str) -> str:
+    if mode not in DOCKER_APT_SOURCE_MODES:
+        raise ValueError(f"unsupported Docker apt source mode: {mode}")
+    return mode
+
+
+def _docker_apt_transport_mode(mode: str) -> str:
+    if mode not in DOCKER_APT_TRANSPORT_MODES:
+        raise ValueError(f"unsupported Docker apt transport mode: {mode}")
+    return mode
+
+
+def patch_dockerfile_pip_bootstrap(
+    dockerfile: Path,
+    *,
+    index_url: str = DEFAULT_DOCKER_PIP_INDEX_URL,
+    build_mode: str = DEFAULT_DOCKER_PIP_BUILD_MODE,
+) -> bool:
     """Add public-safe pip retry/index defaults to staged Dockerfiles."""
 
     if not dockerfile_needs_pip_bootstrap_patch(dockerfile):
         return False
+    build_mode = _docker_pip_build_mode(build_mode)
     original = dockerfile.read_text(encoding="utf-8")
     text = _strip_marker_block(
         original,
         DOCKER_PIP_BOOTSTRAP_BEGIN,
         DOCKER_PIP_BOOTSTRAP_END,
     )
+    if build_mode == "no-isolation":
+        text, _ = dockerfile_runtime.add_pip_no_build_isolation_flags(text)
+        text, _ = (
+            dockerfile_runtime.add_pip_no_isolation_build_prerequisite_steps(
+                text
+            )
+        )
     block = (
         f"{DOCKER_PIP_BOOTSTRAP_BEGIN}\n"
-        f"ARG LOOPX_SKILLSBENCH_PIP_INDEX_URL={DEFAULT_DOCKER_PIP_INDEX_URL}\n"
-        f"ARG LOOPX_SKILLSBENCH_PIP_EXTRA_INDEX_URL={DEFAULT_DOCKER_PIP_EXTRA_INDEX_URL}\n"
+        f"ARG LOOPX_SKILLSBENCH_PIP_INDEX_URL={index_url}\n"
         "ENV PIP_INDEX_URL=${LOOPX_SKILLSBENCH_PIP_INDEX_URL} \\\n"
-        "    PIP_EXTRA_INDEX_URL=${LOOPX_SKILLSBENCH_PIP_EXTRA_INDEX_URL} \\\n"
         "    PIP_DEFAULT_TIMEOUT=120 \\\n"
         "    PIP_RETRIES=10 \\\n"
         "    PIP_DISABLE_PIP_VERSION_CHECK=1\n"
@@ -6781,10 +8075,19 @@ def patch_dockerfile_pip_bootstrap(dockerfile: Path) -> bool:
     )
     patched_lines: list[str] = []
     inserted = False
+    heredoc_delimiter: str | None = None
     for line in text.splitlines():
         patched_lines.append(line)
+        if heredoc_delimiter is not None:
+            if line.strip() == heredoc_delimiter:
+                heredoc_delimiter = None
+            continue
+        heredoc_delimiter = dockerfile_runtime.dockerfile_heredoc_delimiter(line)
         stripped = line.strip()
-        if stripped.upper().startswith("FROM ") and " scratch" not in stripped.lower():
+        if (
+            _is_dockerfile_from_instruction(stripped)
+            and " scratch" not in stripped.lower()
+        ):
             patched_lines.extend(["", *block.splitlines(), ""])
             inserted = True
     if not inserted:
@@ -6794,6 +8097,18 @@ def patch_dockerfile_pip_bootstrap(dockerfile: Path) -> bool:
         return False
     _write_text_atomic(dockerfile, patched)
     return True
+
+
+def _is_dockerfile_from_instruction(stripped_line: str) -> bool:
+    """Match Dockerfile ``FROM`` instructions without matching heredoc Python."""
+
+    return bool(
+        re.match(
+            r"^FROM(?:\s+--platform=\S+)?\s+\S+(?:\s+AS\s+\S+)?\s*$",
+            stripped_line,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
@@ -6818,6 +8133,10 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
         "      exit 0; \\\n"
         "    fi; \\\n"
         "    if command -v apt-get >/dev/null 2>&1; then \\\n"
+        "      for apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \\\n"
+        "        [ -f \"$apt_source\" ] || continue; \\\n"
+        "        sed -i 's|http://deb.debian.org|https://deb.debian.org|g; s|http://security.debian.org|https://security.debian.org|g' \"$apt_source\"; \\\n"
+        "      done; \\\n"
         "      mkdir -p /etc/apt/apt.conf.d; \\\n"
         "      printf '%s\\n' \\\n"
         "        'Acquire::Retries \"5\";' \\\n"
@@ -6865,6 +8184,111 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
     return True
 
 
+def patch_dockerfile_loopx_case_python_runtime(dockerfile: Path) -> bool:
+    """Ensure the final task image can execute the case-local LoopX CLI."""
+
+    if not dockerfile.exists():
+        return False
+    original = dockerfile.read_text(encoding="utf-8")
+    text = _strip_marker_block(
+        original,
+        DOCKER_LOOPX_CASE_PYTHON_RUNTIME_BEGIN,
+        DOCKER_LOOPX_CASE_PYTHON_RUNTIME_END,
+    )
+    lines = text.splitlines()
+    from_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if _is_dockerfile_from_instruction(line.strip())
+    ]
+    if not from_indexes:
+        return False
+    final_from_index = from_indexes[-1]
+    if " scratch" in f" {lines[final_from_index].strip().lower()} ":
+        return False
+    block = (
+        f"{DOCKER_LOOPX_CASE_PYTHON_RUNTIME_BEGIN}\n"
+        "RUN set -eux; \\\n"
+        "    if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then \\\n"
+        "      exit 0; \\\n"
+        "    fi; \\\n"
+        "    if command -v apt-get >/dev/null 2>&1; then \\\n"
+        "      DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 update -qq; \\\n"
+        "      DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends python3; \\\n"
+        "      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
+        "    elif command -v apk >/dev/null 2>&1; then \\\n"
+        "      apk add --no-cache python3; \\\n"
+        "    elif command -v microdnf >/dev/null 2>&1; then \\\n"
+        "      microdnf install -y python3; \\\n"
+        "    elif command -v dnf >/dev/null 2>&1; then \\\n"
+        "      dnf -y install python3; \\\n"
+        "    elif command -v yum >/dev/null 2>&1; then \\\n"
+        "      yum install -y python3; \\\n"
+        "    else \\\n"
+        "      echo 'LoopX case lifecycle requires Python in the final benchmark image' >&2; \\\n"
+        "      exit 127; \\\n"
+        "    fi; \\\n"
+        "    command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1\n"
+        f"{DOCKER_LOOPX_CASE_PYTHON_RUNTIME_END}"
+    )
+    trailing_lines = lines[final_from_index + 1 :]
+    while trailing_lines and not trailing_lines[0].strip():
+        trailing_lines.pop(0)
+    patched_lines = [
+        *lines[: final_from_index + 1],
+        "",
+        *block.splitlines(),
+        "",
+        *trailing_lines,
+    ]
+    patched = "\n".join(patched_lines).rstrip() + "\n"
+    if patched == original:
+        return False
+    _write_text_atomic(dockerfile, patched)
+    return True
+
+
+def dockerfile_references_skills_build_context(dockerfile: Path) -> bool:
+    """Return whether the Dockerfile copies the local ``skills`` build context."""
+
+    if not dockerfile.exists():
+        return False
+    try:
+        text = dockerfile.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    pattern = re.compile(r"^\s*(?:COPY|ADD)\b[^\n]*\bskills(?:\s|$)", re.MULTILINE)
+    return bool(pattern.search(text))
+
+
+def ensure_empty_skills_build_context(dockerfile: Path) -> bool:
+    """Create an empty ``skills`` context when staging removed task skills."""
+
+    if not dockerfile_references_skills_build_context(dockerfile):
+        return False
+    skills_dir = dockerfile.parent / "skills"
+    if skills_dir.exists():
+        return False
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    (skills_dir / ".loopx_keep").write_text(
+        "empty SkillsBench build context created by LoopX staging\n",
+        encoding="utf-8",
+    )
+    return True
+
+
+def ensure_verifier_script_executable(verifier: Path) -> bool:
+    """Ensure a staged verifier remains executable after atomic text patches."""
+
+    if not verifier.is_file():
+        return False
+    try:
+        verifier.chmod(verifier.stat().st_mode | 0o111)
+        return bool(verifier.stat().st_mode & 0o111)
+    except OSError:
+        return False
+
+
 def stage_task_for_sandbox(
     *,
     task_path: Path,
@@ -6873,10 +8297,25 @@ def stage_task_for_sandbox(
     sandbox: str,
     include_task_skills: bool = True,
     benchmark_egress_proxy_env: Mapping[str, str] | None = None,
+    docker_apt_source_mode: str = DEFAULT_DOCKER_APT_SOURCE_MODE,
+    docker_apt_transport_mode: str = DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+    docker_pip_index_mode: str = DEFAULT_DOCKER_PIP_INDEX_MODE,
+    docker_pip_build_mode: str = DEFAULT_DOCKER_PIP_BUILD_MODE,
+    docker_gcr_mirror_prefix: str = "",
+    verifier_dependency_cache_enabled: bool = False,
+    loopx_case_runtime_required: bool = False,
 ) -> tuple[Path, dict[str, Any]]:
     """Return the task path to run, staging Docker tasks when setup needs it."""
 
     task_path = task_path.expanduser().resolve()
+    docker_apt_source_mode = _docker_apt_source_mode(docker_apt_source_mode)
+    docker_apt_transport_mode = _docker_apt_transport_mode(
+        docker_apt_transport_mode
+    )
+    docker_pip_index_url, docker_pip_index_host = _docker_pip_index(
+        docker_pip_index_mode
+    )
+    docker_pip_build_mode = _docker_pip_build_mode(docker_pip_build_mode)
     metadata: dict[str, Any] = {
         "schema_version": "skillsbench_task_staging_v0",
         "original_task_name": task_path.name,
@@ -6885,18 +8324,72 @@ def stage_task_for_sandbox(
         "staged": False,
         "app_skills_mount_patch_applied": False,
         "apt_retry_patch_applied": False,
+        "dockerfile_apt_source_mode": "",
+        "dockerfile_apt_transport_mode": "",
+        "dockerfile_ubuntu_apt_mirror_patch_required": False,
+        "dockerfile_ubuntu_apt_mirror_patch_applied": False,
+        "dockerfile_ubuntu_apt_mirror_host": "",
+        "dockerfile_ubuntu_apt_mirror_raw_url_recorded": False,
+        "dockerfile_debian_apt_mirror_patch_required": False,
+        "dockerfile_debian_apt_mirror_patch_applied": False,
+        "dockerfile_debian_apt_mirror_host": "",
+        "dockerfile_debian_apt_mirror_raw_url_recorded": False,
         "dockerfile_pip_install_risk_detected": False,
         "dockerfile_pip_bootstrap_patch_required": False,
         "dockerfile_pip_bootstrap_patch_applied": False,
+        "dockerfile_venv_pip_invocation_patch_required": False,
+        "dockerfile_venv_pip_invocation_patch_applied": False,
+        "dockerfile_gcr_mirror_configured": bool(
+            _normalized_docker_gcr_mirror_prefix(docker_gcr_mirror_prefix)
+        ),
+        "dockerfile_gcr_mirror_patch_required": False,
+        "dockerfile_gcr_mirror_patch_applied": False,
+        "dockerfile_gcr_mirror_raw_prefix_recorded": False,
+        "dockerfile_elan_toolchain_retry_patch_required": False,
+        "dockerfile_elan_toolchain_retry_patch_applied": False,
+        "dockerfile_wget_gpg_key_retry_patch_required": False,
+        "dockerfile_wget_gpg_key_retry_patch_applied": False,
+        "dockerfile_network_download_retry_patch_required": False,
+        "dockerfile_network_download_retry_patch_applied": False,
+        "dockerfile_uv_bootstrap_risk_detected": False,
+        "dockerfile_uv_bootstrap_mirror_patch_required": False,
+        "dockerfile_uv_bootstrap_mirror_patch_applied": False,
+        "dockerfile_uv_bootstrap_pip_fallback_patch_applied": False,
+        "dockerfile_apache_archive_mirror_patch_required": False,
+        "dockerfile_apache_archive_mirror_patch_applied": False,
+        "dockerfile_apache_archive_mirror_host": "",
+        "dockerfile_apache_archive_raw_url_recorded": False,
+        "dockerfile_maven_mirror_patch_required": False,
+        "dockerfile_maven_mirror_patch_applied": False,
+        "dockerfile_maven_mirror_host": "",
+        "dockerfile_maven_mirror_raw_url_recorded": False,
         "codex_acp_runtime_tools_patch_applied": False,
+        "loopx_case_python_runtime_patch_required": False,
+        "loopx_case_python_runtime_patch_applied": False,
+        "empty_skills_build_context_required": False,
+        "empty_skills_build_context_created": False,
         "verifier_uv_bootstrap_risk_detected": False,
+        "verifier_external_download_risk_detected": False,
+        "verifier_package_install_risk_detected": False,
+        "verifier_bootstrap_risk_categories": [],
         "verifier_uv_bootstrap_mirror_patch_required": False,
         "verifier_uv_bootstrap_mirror_patch_applied": False,
         "verifier_uv_bootstrap_pip_fallback_patch_applied": False,
+        "verifier_script_executable_required": False,
+        "verifier_script_executable_ready": False,
+        "verifier_dependency_cache_required": False,
+        "verifier_dependency_cache_env_patch_applied": False,
+        "verifier_dependency_cache_env_key_count": 0,
+        "verifier_dependency_cache_raw_path_recorded": False,
         "benchmark_egress_proxy_verifier_env_patch_required": False,
         "benchmark_egress_proxy_verifier_env_patch_applied": False,
         "benchmark_egress_proxy_verifier_env_key_count": 0,
         "benchmark_egress_proxy_verifier_env_raw_proxy_recorded": False,
+        "benchmark_egress_proxy_dockerfile_env_patch_required": False,
+        "benchmark_egress_proxy_dockerfile_env_patch_applied": False,
+        "benchmark_egress_proxy_dockerfile_java_opts_patch_applied": False,
+        "benchmark_egress_proxy_dockerfile_env_key_count": 0,
+        "benchmark_egress_proxy_dockerfile_env_raw_proxy_recorded": False,
         "task_skills_removed": False,
         "resource_cap_patch": {
             "schema_version": "skillsbench_local_docker_resource_cap_v0",
@@ -6917,10 +8410,51 @@ def stage_task_for_sandbox(
     needs_apt_retry_patch = dockerfile_needs_apt_retry_patch(
         task_path / "environment" / "Dockerfile"
     )
+    needs_ubuntu_apt_mirror_patch = (
+        docker_apt_source_mode == "mirror"
+        and dockerfile_runtime.needs_ubuntu_apt_mirror_patch(
+            task_path / "environment" / "Dockerfile"
+        )
+    )
+    needs_debian_apt_mirror_patch = (
+        docker_apt_source_mode == "mirror"
+        and dockerfile_runtime.needs_debian_apt_mirror_patch(
+            task_path / "environment" / "Dockerfile"
+        )
+    )
     needs_pip_bootstrap_patch = dockerfile_needs_pip_bootstrap_patch(
         task_path / "environment" / "Dockerfile"
     )
-    verifier_risk = skillsbench_verifier_bootstrap_risk(task_path)
+    needs_venv_pip_invocation_patch = (
+        dockerfile_runtime.needs_venv_pip_invocation_patch(
+            task_path / "environment" / "Dockerfile"
+        )
+    )
+    needs_gcr_mirror_patch = dockerfile_needs_gcr_mirror_rewrite(
+        task_path / "environment" / "Dockerfile",
+        mirror_prefix=docker_gcr_mirror_prefix,
+    )
+    needs_elan_toolchain_retry_patch = dockerfile_needs_elan_toolchain_retry_patch(
+        task_path / "environment" / "Dockerfile"
+    )
+    needs_wget_gpg_key_retry_patch = dockerfile_needs_wget_gpg_key_retry_patch(
+        task_path / "environment" / "Dockerfile"
+    )
+    needs_network_download_retry_patch = dockerfile_needs_network_download_retry_patch(
+        task_path / "environment" / "Dockerfile"
+    )
+    needs_dockerfile_uv_mirror_patch = dockerfile_needs_uv_bootstrap_mirror_patch(
+        task_path / "environment" / "Dockerfile"
+    )
+    needs_apache_archive_mirror_patch = (
+        dockerfile_needs_apache_archive_mirror_rewrite(
+            task_path / "environment" / "Dockerfile"
+        )
+    )
+    needs_maven_mirror_patch = dockerfile_needs_maven_mirror_patch(
+        task_path / "environment" / "Dockerfile"
+    )
+    verifier_risk = verifier_bootstrap.skillsbench_verifier_bootstrap_risk(task_path)
     needs_verifier_uv_mirror_patch = bool(
         verifier_risk.get("verifier_uv_bootstrap_risk_detected")
         and verifier_risk.get("verifier_uv_bootstrap_version")
@@ -6928,25 +8462,111 @@ def stage_task_for_sandbox(
     verifier_proxy_exports = _verifier_benchmark_egress_proxy_exports(
         benchmark_egress_proxy_env
     )
+    verifier_script = proxy_runtime.skillsbench_verifier_script(task_path)
+    verifier_script_present = verifier_script.is_file()
     needs_verifier_proxy_env_patch = bool(
-        verifier_proxy_exports and (task_path / "verifier" / "test.sh").exists()
+        verifier_proxy_exports and verifier_script_present
+    )
+    needs_verifier_dependency_cache = bool(
+        verifier_dependency_cache_enabled
+        and verifier_script_present
+        and verifier_risk.get("verifier_bootstrap_risk_detected")
+    )
+    needs_dockerfile_proxy_env_patch = bool(
+        verifier_proxy_exports and (task_path / "environment" / "Dockerfile").exists()
     )
     needs_runtime_tools_patch = (task_path / "environment" / "Dockerfile").exists()
+    needs_loopx_case_python_runtime_patch = bool(
+        loopx_case_runtime_required
+        and (task_path / "environment" / "Dockerfile").exists()
+    )
     metadata["apt_setup_risk_detected"] = needs_apt_retry_patch
     metadata["apt_retry_patch_required"] = needs_apt_retry_patch
     metadata["apt_risk_preflight_blocked"] = False
+    if needs_apt_retry_patch:
+        metadata["dockerfile_apt_source_mode"] = docker_apt_source_mode
+        metadata["dockerfile_apt_transport_mode"] = docker_apt_transport_mode
+    metadata["dockerfile_ubuntu_apt_mirror_patch_required"] = (
+        needs_ubuntu_apt_mirror_patch
+    )
+    if needs_ubuntu_apt_mirror_patch:
+        metadata["dockerfile_ubuntu_apt_mirror_host"] = (
+            dockerfile_runtime.DEFAULT_UBUNTU_APT_MIRROR_HOST
+        )
+    metadata["dockerfile_debian_apt_mirror_patch_required"] = (
+        needs_debian_apt_mirror_patch
+    )
+    if needs_debian_apt_mirror_patch:
+        metadata["dockerfile_debian_apt_mirror_host"] = (
+            dockerfile_runtime.DEFAULT_DEBIAN_APT_MIRROR_HOST
+        )
     metadata["dockerfile_pip_install_risk_detected"] = needs_pip_bootstrap_patch
     metadata["dockerfile_pip_bootstrap_patch_required"] = needs_pip_bootstrap_patch
+    metadata["dockerfile_venv_pip_invocation_patch_required"] = (
+        needs_venv_pip_invocation_patch
+    )
     if needs_pip_bootstrap_patch:
-        metadata["dockerfile_pip_index_host"] = DEFAULT_DOCKER_PIP_INDEX_HOST
+        metadata["dockerfile_pip_index_host"] = docker_pip_index_host
+        metadata["dockerfile_pip_build_mode"] = docker_pip_build_mode
+    metadata["dockerfile_gcr_mirror_patch_required"] = needs_gcr_mirror_patch
+    metadata["dockerfile_elan_toolchain_retry_patch_required"] = (
+        needs_elan_toolchain_retry_patch
+    )
+    metadata["dockerfile_wget_gpg_key_retry_patch_required"] = (
+        needs_wget_gpg_key_retry_patch
+    )
+    metadata["dockerfile_network_download_retry_patch_required"] = (
+        needs_network_download_retry_patch
+    )
+    metadata["dockerfile_uv_bootstrap_risk_detected"] = (
+        needs_dockerfile_uv_mirror_patch
+    )
+    metadata["dockerfile_uv_bootstrap_mirror_patch_required"] = (
+        needs_dockerfile_uv_mirror_patch
+    )
+    if needs_dockerfile_uv_mirror_patch:
+        metadata["dockerfile_uv_bootstrap_mirror_host"] = (
+            DEFAULT_VERIFIER_UV_RELEASE_MIRROR_HOST
+        )
+        versions = _dockerfile_uv_bootstrap_versions(
+            (task_path / "environment" / "Dockerfile").read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
+        )
+        if versions:
+            metadata["dockerfile_uv_bootstrap_version"] = versions[0]
+    metadata["dockerfile_apache_archive_mirror_patch_required"] = (
+        needs_apache_archive_mirror_patch
+    )
+    if needs_apache_archive_mirror_patch:
+        metadata["dockerfile_apache_archive_mirror_host"] = (
+            DEFAULT_DOCKER_APACHE_ARCHIVE_MIRROR_HOST
+        )
+    metadata["dockerfile_maven_mirror_patch_required"] = needs_maven_mirror_patch
+    if needs_maven_mirror_patch:
+        metadata["dockerfile_maven_mirror_host"] = DEFAULT_DOCKER_MAVEN_MIRROR_HOST
     metadata["verifier_bootstrap_risk_detected"] = bool(
         verifier_risk.get("verifier_bootstrap_risk_detected")
     )
     metadata["verifier_uv_bootstrap_risk_detected"] = bool(
         verifier_risk.get("verifier_uv_bootstrap_risk_detected")
     )
+    metadata["verifier_external_download_risk_detected"] = bool(
+        verifier_risk.get("verifier_external_download_risk_detected")
+    )
+    metadata["verifier_package_install_risk_detected"] = bool(
+        verifier_risk.get("verifier_package_install_risk_detected")
+    )
+    metadata["verifier_bootstrap_risk_categories"] = list(
+        verifier_risk.get("verifier_bootstrap_risk_categories") or []
+    )
     metadata["verifier_uv_bootstrap_mirror_patch_required"] = (
         needs_verifier_uv_mirror_patch
+    )
+    metadata["verifier_script_executable_required"] = verifier_script_present
+    metadata["verifier_dependency_cache_required"] = (
+        needs_verifier_dependency_cache
     )
     metadata["benchmark_egress_proxy_verifier_env_patch_required"] = (
         needs_verifier_proxy_env_patch
@@ -6954,19 +8574,42 @@ def stage_task_for_sandbox(
     metadata["benchmark_egress_proxy_verifier_env_key_count"] = len(
         verifier_proxy_exports
     )
+    metadata["benchmark_egress_proxy_dockerfile_env_patch_required"] = (
+        needs_dockerfile_proxy_env_patch
+    )
+    metadata["benchmark_egress_proxy_dockerfile_env_key_count"] = len(
+        verifier_proxy_exports
+    )
     if isinstance(verifier_risk.get("verifier_uv_bootstrap_version"), str):
         metadata["verifier_uv_bootstrap_version"] = verifier_risk[
             "verifier_uv_bootstrap_version"
         ]
     metadata["verifier_bootstrap_risk_preflight_blocked"] = False
+    metadata["loopx_case_python_runtime_patch_required"] = (
+        needs_loopx_case_python_runtime_patch
+    )
     if (
         not has_task_skills
         and not needs_resource_cap
         and not needs_apt_retry_patch
+        and not needs_ubuntu_apt_mirror_patch
+        and not needs_debian_apt_mirror_patch
         and not needs_pip_bootstrap_patch
+        and not needs_venv_pip_invocation_patch
+        and not needs_gcr_mirror_patch
+        and not needs_elan_toolchain_retry_patch
+        and not needs_wget_gpg_key_retry_patch
+        and not needs_network_download_retry_patch
+        and not needs_dockerfile_uv_mirror_patch
+        and not needs_apache_archive_mirror_patch
+        and not needs_maven_mirror_patch
         and not needs_runtime_tools_patch
+        and not needs_loopx_case_python_runtime_patch
         and not needs_verifier_uv_mirror_patch
+        and not verifier_script_present
         and not needs_verifier_proxy_env_patch
+        and not needs_verifier_dependency_cache
+        and not needs_dockerfile_proxy_env_patch
     ):
         metadata["resource_cap_patch"] = {
             "schema_version": "skillsbench_local_docker_resource_cap_v0",
@@ -6992,24 +8635,89 @@ def stage_task_for_sandbox(
     if not include_task_skills and staged_skills_dir.exists():
         shutil.rmtree(staged_skills_dir)
         task_skills_removed = True
+    empty_skills_context_required = dockerfile_references_skills_build_context(
+        staged_path / "environment" / "Dockerfile"
+    )
+    empty_skills_context_created = ensure_empty_skills_build_context(
+        staged_path / "environment" / "Dockerfile"
+    )
     patched = patch_dockerfile_app_skills_mount(
         staged_path / "environment" / "Dockerfile"
     )
+    loopx_case_python_runtime_patched = False
+    if needs_loopx_case_python_runtime_patch:
+        loopx_case_python_runtime_patched = (
+            patch_dockerfile_loopx_case_python_runtime(
+                staged_path / "environment" / "Dockerfile"
+            )
+        )
+    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
+        staged_path / "environment" / "Dockerfile",
+        proxy_env=benchmark_egress_proxy_env,
+    )
     apt_retry_patched = patch_dockerfile_apt_retry(
-        staged_path / "environment" / "Dockerfile"
+        staged_path / "environment" / "Dockerfile",
+        transport_mode=docker_apt_transport_mode,
+    )
+    ubuntu_apt_mirror_patched = bool(
+        needs_ubuntu_apt_mirror_patch
+        and dockerfile_runtime.patch_ubuntu_apt_mirror(
+            staged_path / "environment" / "Dockerfile"
+        )
+    )
+    debian_apt_mirror_patched = bool(
+        needs_debian_apt_mirror_patch
+        and dockerfile_runtime.patch_debian_apt_mirror(
+            staged_path / "environment" / "Dockerfile"
+        )
     )
     pip_bootstrap_patched = patch_dockerfile_pip_bootstrap(
+        staged_path / "environment" / "Dockerfile",
+        index_url=docker_pip_index_url,
+        build_mode=docker_pip_build_mode,
+    )
+    venv_pip_invocation_patched = dockerfile_runtime.patch_venv_pip_invocations(
+        staged_path / "environment" / "Dockerfile"
+    )
+    gcr_mirror_patched = patch_dockerfile_gcr_mirror(
+        staged_path / "environment" / "Dockerfile",
+        mirror_prefix=docker_gcr_mirror_prefix,
+    )
+    elan_toolchain_retry_patched = patch_dockerfile_elan_toolchain_retry(
+        staged_path / "environment" / "Dockerfile"
+    )
+    wget_gpg_key_retry_patched = patch_dockerfile_wget_gpg_key_retry(
+        staged_path / "environment" / "Dockerfile"
+    )
+    dockerfile_uv_mirror_metadata = patch_dockerfile_uv_bootstrap_mirror(
+        staged_path / "environment" / "Dockerfile"
+    )
+    apache_archive_mirror_patched = patch_dockerfile_apache_archive_mirror(
+        staged_path / "environment" / "Dockerfile"
+    )
+    network_download_retry_patched = patch_dockerfile_network_download_retry(
+        staged_path / "environment" / "Dockerfile"
+    )
+    maven_mirror_patched = patch_dockerfile_maven_mirror(
         staged_path / "environment" / "Dockerfile"
     )
     runtime_tools_patched = patch_dockerfile_codex_acp_runtime_tools(
         staged_path / "environment" / "Dockerfile"
     )
-    uv_mirror_metadata = patch_verifier_uv_bootstrap_mirror(
-        staged_path / "verifier" / "test.sh"
+    staged_verifier_script = proxy_runtime.skillsbench_verifier_script(staged_path)
+    uv_mirror_metadata = verifier_bootstrap.patch_verifier_uv_bootstrap_mirror(
+        staged_verifier_script
     )
     verifier_proxy_metadata = patch_verifier_benchmark_egress_proxy_env(
-        staged_path / "verifier" / "test.sh",
+        staged_verifier_script,
         proxy_env=benchmark_egress_proxy_env,
+    )
+    verifier_cache_metadata = verifier_cache.patch_verifier_dependency_cache_env(
+        staged_verifier_script,
+        enabled=needs_verifier_dependency_cache,
+    )
+    verifier_script_executable_ready = ensure_verifier_script_executable(
+        staged_verifier_script
     )
     resource_cap_patch = patch_task_cpu_cap_for_local_docker(
         staged_path / "task.toml",
@@ -7021,11 +8729,92 @@ def stage_task_for_sandbox(
             "staged_task_path": str(staged_path),
             "app_skills_mount_patch_applied": patched,
             "apt_retry_patch_applied": apt_retry_patched,
-            "dockerfile_pip_bootstrap_patch_applied": pip_bootstrap_patched,
-            "dockerfile_pip_index_host": (
-                DEFAULT_DOCKER_PIP_INDEX_HOST if pip_bootstrap_patched else ""
+            "dockerfile_ubuntu_apt_mirror_patch_applied": (
+                ubuntu_apt_mirror_patched
             ),
+            "dockerfile_ubuntu_apt_mirror_host": (
+                dockerfile_runtime.DEFAULT_UBUNTU_APT_MIRROR_HOST
+                if ubuntu_apt_mirror_patched
+                else ""
+            ),
+            "dockerfile_ubuntu_apt_mirror_raw_url_recorded": False,
+            "dockerfile_debian_apt_mirror_patch_applied": (
+                debian_apt_mirror_patched
+            ),
+            "dockerfile_debian_apt_mirror_host": (
+                dockerfile_runtime.DEFAULT_DEBIAN_APT_MIRROR_HOST
+                if debian_apt_mirror_patched
+                else ""
+            ),
+            "dockerfile_debian_apt_mirror_raw_url_recorded": False,
+            "dockerfile_pip_bootstrap_patch_applied": pip_bootstrap_patched,
+            "dockerfile_venv_pip_invocation_patch_applied": (
+                venv_pip_invocation_patched
+            ),
+            "dockerfile_pip_index_host": (
+                docker_pip_index_host if pip_bootstrap_patched else ""
+            ),
+            "dockerfile_pip_build_mode": (
+                docker_pip_build_mode if pip_bootstrap_patched else ""
+            ),
+            "dockerfile_gcr_mirror_patch_applied": gcr_mirror_patched,
+            "dockerfile_gcr_mirror_raw_prefix_recorded": False,
+            "dockerfile_elan_toolchain_retry_patch_applied": (
+                elan_toolchain_retry_patched
+            ),
+            "dockerfile_wget_gpg_key_retry_patch_applied": (
+                wget_gpg_key_retry_patched
+            ),
+            "dockerfile_network_download_retry_patch_applied": (
+                network_download_retry_patched
+            ),
+            "dockerfile_uv_bootstrap_mirror_patch_applied": (
+                bool(
+                    dockerfile_uv_mirror_metadata.get(
+                        "dockerfile_uv_bootstrap_mirror_patch_applied"
+                    )
+                )
+            ),
+            "dockerfile_uv_bootstrap_pip_fallback_patch_applied": (
+                bool(
+                    dockerfile_uv_mirror_metadata.get(
+                        "dockerfile_uv_bootstrap_pip_fallback_patch_applied"
+                    )
+                )
+            ),
+            **uv_cache.stage_uv_binary_cache_context(staged_path / "environment"),
+            "dockerfile_uv_bootstrap_mirror_host": (
+                str(
+                    dockerfile_uv_mirror_metadata.get(
+                        "dockerfile_uv_bootstrap_mirror_host"
+                    )
+                    or ""
+                )
+            ),
+            "dockerfile_apache_archive_mirror_patch_applied": (
+                apache_archive_mirror_patched
+            ),
+            "dockerfile_apache_archive_mirror_host": (
+                DEFAULT_DOCKER_APACHE_ARCHIVE_MIRROR_HOST
+                if apache_archive_mirror_patched
+                else ""
+            ),
+            "dockerfile_apache_archive_raw_url_recorded": False,
+            "dockerfile_maven_mirror_patch_applied": maven_mirror_patched,
+            "dockerfile_maven_mirror_host": (
+                DEFAULT_DOCKER_MAVEN_MIRROR_HOST if maven_mirror_patched else ""
+            ),
+            "dockerfile_maven_mirror_raw_url_recorded": False,
             "codex_acp_runtime_tools_patch_applied": runtime_tools_patched,
+            "loopx_case_python_runtime_patch_required": (
+                needs_loopx_case_python_runtime_patch
+            ),
+            "loopx_case_python_runtime_patch_applied": (
+                loopx_case_python_runtime_patched
+            ),
+            "empty_skills_build_context_required": empty_skills_context_required,
+            "empty_skills_build_context_created": empty_skills_context_created,
+            "verifier_script_executable_ready": verifier_script_executable_ready,
             "app_skills_mount_target": "/app/skills",
             "original_task_mutated": False,
             "task_skills_removed": task_skills_removed,
@@ -7040,13 +8829,61 @@ def stage_task_for_sandbox(
         ):
             continue
         metadata[key] = value
+    for key, value in dockerfile_uv_mirror_metadata.items():
+        if (
+            key == "dockerfile_uv_bootstrap_risk_detected"
+            and value is False
+            and metadata.get(key) is True
+        ):
+            continue
+        if value in ("", False) and metadata.get(key) not in ("", False, None):
+            continue
+        metadata[key] = value
+    metadata.update(dockerfile_proxy_metadata)
     metadata.update(verifier_proxy_metadata)
+    metadata.update(verifier_cache_metadata)
+    if (
+        metadata.get("verifier_script_executable_required") is True
+        and metadata.get("verifier_script_executable_ready") is not True
+    ):
+        raise SkillsBenchSetupPreflightBlocked(
+            "skillsbench staged verifier script is not executable"
+        )
+    if (
+        metadata.get("benchmark_egress_proxy_verifier_env_patch_required") is True
+        and metadata.get("benchmark_egress_proxy_verifier_env_patch_applied")
+        is not True
+    ):
+        raise SkillsBenchSetupPreflightBlocked(
+            "skillsbench verifier egress proxy patch required but not applied"
+        )
+    if (
+        metadata.get("verifier_dependency_cache_required") is True
+        and metadata.get("verifier_dependency_cache_env_patch_applied") is not True
+    ):
+        raise SkillsBenchSetupPreflightBlocked(
+            "skillsbench verifier dependency cache required but not applied"
+        )
     return staged_path, metadata
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     task_id = args.task_id
     route = args.route
+    docker_apt_source_mode = _docker_apt_source_mode(
+        getattr(args, "docker_apt_source_mode", DEFAULT_DOCKER_APT_SOURCE_MODE)
+    )
+    docker_apt_transport_mode = _docker_apt_transport_mode(
+        getattr(
+            args,
+            "docker_apt_transport_mode",
+            DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+        )
+    )
+    _, docker_pip_index_host = _docker_pip_index(args.docker_pip_index_mode)
+    docker_pip_build_mode = _docker_pip_build_mode(
+        getattr(args, "docker_pip_build_mode", DEFAULT_DOCKER_PIP_BUILD_MODE)
+    )
     route_slug = route.replace("-", "_")
     intermediate_soft_verify_policy = product_mode_soft_verify_policy_for_route(
         route,
@@ -7055,19 +8892,17 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     job_name = args.job_name or (
         f"skillsbench-{task_id}-{route}-{_now_stamp()}"
     )
-    if route == LOOPX_PROMPT_POLLING_TEST_ROUTE:
-        rollout_suffix = "loopx_prompt_polling_test"
-    elif route == LOOPX_BLIND_LOOP_TREATMENT_ROUTE:
-        rollout_suffix = "loopx_blind_loop"
-    elif route == LOOPX_GOAL_START_PRODUCT_MODE_ROUTE:
+    if route == LOOPX_GOAL_START_PRODUCT_MODE_ROUTE:
         rollout_suffix = "loopx_goal_start_product_mode"
     elif route == LOOPX_PRODUCT_MODE_ROUTE:
         rollout_suffix = "loopx_product_mode"
     elif route == "raw-codex-autonomous-max5":
         rollout_suffix = "raw_codex_autonomous_max5"
-    elif route == "codex-acp-blind-loop-baseline":
+    elif route == CODEX_ACP_BLIND_LOOP_BASELINE_ROUTE:
         rollout_suffix = "codex_acp_blind_loop"
-    elif route == "codex-app-server-goal-baseline":
+    elif route == CODEX_CLI_GOAL_BASELINE_ROUTE:
+        rollout_suffix = "codex_cli_goal"
+    elif route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE:
         rollout_suffix = "codex_app_server_goal"
     else:
         rollout_suffix = route_slug
@@ -7075,6 +8910,9 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     jobs_dir = Path(args.jobs_dir).expanduser()
     result_path = jobs_dir / job_name / rollout_name / "result.json"
     compact_path = jobs_dir / job_name / rollout_name / "benchmark_run.compact.json"
+    setup_only_preflight_path = (
+        jobs_dir / job_name / "setup_only_preflight.public.json"
+    )
     controller_trace_path = jobs_dir / job_name / "loopx_controller_trace.public.json"
     app_server_goal_worker_trace_dir = (
         jobs_dir / job_name / "app_server_goal_worker_traces"
@@ -7089,8 +8927,27 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     )
     agent_runtime_layer = _benchflow_agent_runtime_layer_contract(args)
     loopx_source_mount = _loopx_source_mount_contract(args)
+    runner_source_fingerprint = runner_source.build_runner_source_fingerprint(repo_root=REPO_ROOT, expected_git_head=getattr(args, "expected_loopx_git_head", ""))
     requires_preinstalled_runtime = bool(agent_runtime_layer.get("required"))
-    is_app_server_goal_route = route == "codex-app-server-goal-baseline"
+    is_app_server_goal_route = route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+    is_codex_cli_goal_route = route == CODEX_CLI_GOAL_BASELINE_ROUTE
+    reasoning_effort = _effective_reasoning_effort(args)
+    app_server_reasoning_effort = _effective_app_server_reasoning_effort(args)
+    codex_cli_reasoning_effort = _effective_codex_cli_reasoning_effort(args)
+    app_server_goal_prompt_style = str(
+        getattr(args, "app_server_goal_prompt_style", "bridge-only")
+        or "bridge-only"
+    )
+    app_server_goal_followup_budget = (
+        max(0, int(getattr(args, "app_server_goal_followup_max", 0) or 0))
+        if is_app_server_goal_route
+        else 0
+    )
+    independent_goal_attempt_budget = (
+        max(1, int(getattr(args, "independent_goal_retries", 1) or 1))
+        if route in INDEPENDENT_GOAL_RETRY_ROUTES
+        else 1
+    )
     codex_api_egress_preflight = _public_codex_api_egress_contract(
         args,
         status=(
@@ -7116,18 +8973,24 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     )
     remote_command_file_bridge_solver_wiring_configured = bool(
         args.host_local_acp_launch
-        and route in PRODUCT_MODE_CONTROLLER_ROUTES
+        and (
+            route in HOST_LOCAL_BRIDGE_ROUTES
+            or route == CODEX_CLI_GOAL_BASELINE_ROUTE
+        )
         and remote_command_file_bridge_materialized
         and remote_command_file_bridge_solver_command_configured
     )
     remote_command_file_bridge_sandbox_auto_wiring_pending = bool(
         args.host_local_acp_launch
-        and route in PRODUCT_MODE_CONTROLLER_ROUTES
+        and (
+            route in HOST_LOCAL_BRIDGE_ROUTES
+            or route == CODEX_CLI_GOAL_BASELINE_ROUTE
+        )
         and remote_command_file_bridge_materialized
         and not remote_command_file_bridge_solver_command_configured
     )
     remote_command_file_bridge_agent_operation_trace_required = bool(
-        _is_loopx_product_mode_route(route)
+        (_is_case_loopx_route(route) or route == CODEX_CLI_GOAL_BASELINE_ROUTE)
         and (
             remote_command_file_bridge_solver_wiring_configured
             or remote_command_file_bridge_sandbox_auto_wiring_pending
@@ -7177,7 +9040,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             task_id=task_id,
             cwd="<skillsbench-task-workspace>",
             model=args.model,
-            reasoning_effort=args.app_server_reasoning_effort,
+            reasoning_effort=app_server_reasoning_effort,
+            prompt_style=app_server_goal_prompt_style,
             sandbox="workspace-write",
             approval_policy="never",
             no_upload=True,
@@ -7192,27 +9056,76 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         route=route,
         max_wall_time_minutes=max(480, (int(args.outer_timeout_sec) + 59) // 60),
     )
+    app_server_goal_round_semantics = (
+        {
+            "schema_version": "skillsbench_app_server_goal_round_semantics_v0",
+            "route": CODEX_APP_SERVER_GOAL_BASELINE_ROUTE,
+            "session_policy": (
+                "single_thread_with_blinded_followups"
+                if app_server_goal_followup_budget
+                else "single_initial_goal_turn"
+            ),
+            "benchflow_max_rounds_budget": args.max_rounds,
+            "max_rounds_budget_applies_to": (
+                "benchflow_outer_controller_budget_not_native_goal_attempts"
+            ),
+            "initial_goal_turn_budget": 1,
+            "same_thread_followup_budget": app_server_goal_followup_budget,
+            "independent_attempt_budget": independent_goal_attempt_budget,
+            "fresh_goal_thread_per_independent_attempt": True,
+            "official_reward_feedback_forwarded_to_worker": False,
+            "verifier_output_forwarded_to_worker": False,
+        }
+        if is_app_server_goal_route
+        else {}
+    )
+    benchmark_canonical_lifecycle = canonical_lifecycle(
+        process_started=True,
+        runner_accepted_args=True,
+    )
     launch_plan = {
         "schema_version": "skillsbench_runner_launch_plan_v0",
         "benchmark_id": args.dataset,
         "task_id": task_id,
         "route": route,
+        "benchmark_canonical_lifecycle": benchmark_canonical_lifecycle,
         "agent": (
             "codex-app-server-goal"
             if is_app_server_goal_route
+            else "codex-cli-goal"
+            if is_codex_cli_goal_route
             else "codex-acp"
         ),
         "model": args.model,
+        "reasoning_effort": reasoning_effort,
+        "codex_cli_reasoning_effort": (
+            codex_cli_reasoning_effort if not is_app_server_goal_route else ""
+        ),
+        "app_server_reasoning_effort": (
+            app_server_reasoning_effort if is_app_server_goal_route else ""
+        ),
+        "app_server_goal_followup_max": app_server_goal_followup_budget,
+        "app_server_goal_round_semantics": app_server_goal_round_semantics,
+        "app_server_goal_prompt_style": (
+            app_server_goal_prompt_style
+            if is_app_server_goal_route
+            else ""
+        ),
         "run_group_id": str(args.run_group_id or ""),
         "sandbox": args.sandbox,
+        "local_codex_provider": str(
+            getattr(args, "local_codex_provider", "exact-host") or "exact-host"
+        ),
+        "docker_apt_source_mode": docker_apt_source_mode,
+        "docker_apt_transport_mode": docker_apt_transport_mode,
+        "docker_pip_index_mode": args.docker_pip_index_mode,
+        "docker_pip_build_mode": docker_pip_build_mode,
         "max_rounds": args.max_rounds,
         "independent_goal_retry": {
             "schema_version": "skillsbench_independent_goal_retry_config_v0",
-            "enabled": bool(int(getattr(args, "independent_goal_retries", 1) or 1) > 1),
-            "attempt_budget": max(
-                1, int(getattr(args, "independent_goal_retries", 1) or 1)
-            ),
-            "route_supported": route == "codex-app-server-goal-baseline",
+            "enabled": bool(independent_goal_attempt_budget > 1),
+            "attempt_budget": independent_goal_attempt_budget,
+            "route_supported": route in INDEPENDENT_GOAL_RETRY_ROUTES,
             "fresh_goal_thread_per_attempt": True,
             "stop_policy": (
                 "stop_after_first_official_reward_1_or_first_terminal_"
@@ -7224,7 +9137,6 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "raw_trajectory_read_into_public_state": False,
             "raw_verifier_output_read_into_public_state": False,
         },
-        "treatment_prompt_style": args.treatment_prompt_style,
         "outer_timeout_sec": args.outer_timeout_sec,
         "sandbox_setup_timeout_sec": args.sandbox_setup_timeout,
         "agent_idle_timeout_sec": args.agent_idle_timeout,
@@ -7233,6 +9145,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "include_task_skills": bool(args.include_task_skills),
         "host_local_acp_launch": bool(args.host_local_acp_launch),
+        "codex_cli_goal_thread_prewarm": bool(getattr(args, "codex_cli_goal_thread_prewarm", False)),
         "bootstrap_light_candidate_required": bool(
             _formal_app_server_goal_bootstrap_light_guard_required(args)
         ),
@@ -7260,14 +9173,23 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "benchflow_agent_runtime_layer": agent_runtime_layer,
         "loopx_source_mount": loopx_source_mount,
+        "loopx_runner_source_fingerprint": runner_source_fingerprint,
         "skillsbench_root": str(Path(args.skillsbench_root).expanduser()),
         "jobs_dir": str(jobs_dir),
         "job_name": job_name,
         "rollout_name": rollout_name,
         "result_json": str(result_path),
         "compact_benchmark_run_json": str(compact_path),
+        "setup_only_public_preflight": bool(
+            getattr(args, "setup_only_public_preflight", False)
+        ),
+        "setup_only_stage_timeout_sec": (
+            _effective_setup_only_stage_timeout_sec(args)
+        ),
+        "setup_only_public_preflight_json": str(setup_only_preflight_path),
         "controller_trace_json": str(controller_trace_path),
-        "build_stall_timeout_sec": int(args.build_stall_timeout_sec or 0),
+        "build_stall_timeout_requested_sec": _requested_build_stall_timeout_sec(args),
+        "build_stall_timeout_sec": _effective_build_stall_timeout_sec(args),
         "app_server_goal_worker_trace_dir": (
             str(app_server_goal_worker_trace_dir)
             if is_app_server_goal_route
@@ -7307,8 +9229,10 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 setup_preflight.get("dockerfile_pip_bootstrap_patch_required")
             ),
             "dockerfile_pip_bootstrap_patch_applied": False,
+            "dockerfile_venv_pip_invocation_patch_required": False,
+            "dockerfile_venv_pip_invocation_patch_applied": False,
             "dockerfile_pip_index_host": (
-                DEFAULT_DOCKER_PIP_INDEX_HOST
+                docker_pip_index_host
                 if setup_preflight.get("dockerfile_pip_bootstrap_patch_required")
                 else ""
             ),
@@ -7343,11 +9267,15 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         },
         "runner_prerequisites": {
             "schema_version": "skillsbench_runner_prerequisites_v0",
+            "benchmark_canonical_lifecycle": benchmark_canonical_lifecycle,
             "benchflow_setup_stall_timeout_enabled": (
-                int(args.build_stall_timeout_sec or 0) > 0
+                _effective_build_stall_timeout_sec(args) > 0
+            ),
+            "benchflow_setup_stall_timeout_requested_sec": (
+                _requested_build_stall_timeout_sec(args)
             ),
             "benchflow_setup_stall_timeout_sec": int(
-                args.build_stall_timeout_sec or 0
+                _effective_build_stall_timeout_sec(args)
             ),
             "benchflow_setup_stall_raw_logs_read": False,
             "codex_acp_runtime_container_bootstrap": (
@@ -7462,6 +9390,13 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "benchmark_egress_proxy_endpoint_port": int(
                 benchmark_egress_proxy.get("proxy_endpoint_port") or 0
             ),
+            "benchmark_egress_no_proxy_configured": bool(
+                benchmark_egress_proxy.get("no_proxy_configured")
+            ),
+            "benchmark_egress_no_proxy_entry_count": int(
+                benchmark_egress_proxy.get("no_proxy_entry_count") or 0
+            ),
+            "benchmark_egress_no_proxy_raw_value_recorded": False,
             "benchmark_egress_proxy_url_recorded": False,
             "benchmark_egress_proxy_agent_env_injected": False,
             "benchmark_egress_proxy_docker_config_injected": False,
@@ -7469,11 +9404,24 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "benchmark_egress_proxy_docker_config_raw_proxy_recorded": False,
             "loopx_workflow_lifecycle_checkpoint": bool(
                 _is_loopx_product_mode_route(args.route)
+                and not _is_goal_start_product_mode_route(args.route)
                 and args.host_local_acp_launch
+            ),
+            **skillsbench_loopx_turn_runner_prerequisites(
+                args.route,
+                getattr(args, "loopx_turn_validation_command", None),
+                max_turns=getattr(args, "loopx_turn_max_turns", 1),
+                progress_exit_code=getattr(
+                    args, "loopx_turn_progress_exit_code", 10
+                ),
+                terminal_policy=getattr(
+                    args, "loopx_turn_terminal_policy", "validator"
+                ),
             ),
             "loopx_product_mode_lifecycle_driver_kind": (
                 BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE
                 if _is_loopx_product_mode_route(args.route)
+                and not _is_goal_start_product_mode_route(args.route)
                 and args.host_local_acp_launch
                 else BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE
                 if _is_loopx_product_mode_route(args.route)
@@ -7481,6 +9429,15 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "goal_start_product_mode": _is_goal_start_product_mode_route(args.route),
             "goal_start_plan_required": _is_goal_start_product_mode_route(args.route),
+            "goal_start_guided_command_required": (
+                _is_goal_start_product_mode_route(args.route)
+            ),
+            "goal_start_agent_authored_plan_required": (
+                _is_goal_start_product_mode_route(args.route)
+            ),
+            "goal_start_host_preseed_forbidden": (
+                _is_goal_start_product_mode_route(args.route)
+            ),
             "goal_start_planned_todo_count_expected": (
                 3 if _is_goal_start_product_mode_route(args.route) else 0
             ),
@@ -7503,10 +9460,18 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "host_local_acp_codex_exec_preflight_stage": "",
             "host_local_acp_codex_exec_preflight_first_blocker": "",
             "container_codex_acp_install_skipped": (
-                True if is_app_server_goal_route else requires_preinstalled_runtime
+                True
+                if (
+                    is_app_server_goal_route
+                    or is_codex_cli_goal_route
+                    or args.host_local_acp_launch
+                )
+                else requires_preinstalled_runtime
             ),
             "benchflow_agent_install_skipped_by_runtime_layer": (
-                True if is_app_server_goal_route else requires_preinstalled_runtime
+                True
+                if is_app_server_goal_route or is_codex_cli_goal_route
+                else requires_preinstalled_runtime
             ),
             "remote_command_file_bridge_materialized": bool(
                 remote_command_file_bridge_materialized
@@ -7581,6 +9546,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "loopx_source_mount_injected": False,
             "loopx_source_mount_read_only": bool(loopx_source_mount.get("read_only")),
             "loopx_source_mount_source_recorded": False,
+            **runner_source.runner_source_prerequisite_fields(runner_source_fingerprint),
             "benchflow_agent_timeout_original_sec": 0,
             "benchflow_agent_timeout_effective_sec": 0,
             "benchflow_agent_timeout_overridden": False,
@@ -7638,6 +9604,10 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 args.final_verifier_timeout_sec or 0
             ),
             "benchflow_final_verifier_timeout_raw_command_recorded": False,
+            "verifier_dependency_cache_mode": (
+                args.verifier_dependency_cache_mode
+            ),
+            "verifier_dependency_cache_raw_path_recorded": False,
             "benchflow_verifier_prep_timeout_sec": int(
                 args.verifier_prep_timeout_sec or 0
             ),
@@ -7655,6 +9625,33 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         launch_plan["app_server_goal_worker_contract"] = (
             app_server_goal_worker_contract
         )
+    launch_plan["observable_handle_registration"] = (
+        build_benchmark_launch_observable_handle(
+            benchmark_id=args.dataset,
+            launch_mode="skillsbench_runner_launch_plan",
+            run_label=rollout_name or job_name,
+            job_basename=job_name,
+            process_state="not_started",
+            compact_artifact_refs=(
+                "result.json",
+                "compact-benchmark-run.json",
+                "controller-trace.json",
+                RUNNER_PREREQUISITES_PUBLIC_FILENAME,
+            ),
+            allowed_poll_command="skillsbench_runner_status_snapshot",
+            scheduler_kind="skillsbench_automation_loop",
+            will_execute=not bool(args.plan_only),
+            read_boundary={
+                "compact_only": True,
+                "task_text_read": False,
+                "raw_logs_read": False,
+                "raw_artifacts_read": False,
+                "trajectory_read": False,
+                "local_paths_recorded": False,
+                "private_handle_values_recorded": False,
+            },
+        )
+    )
     launch_plan["runner_config"] = _public_runner_config(launch_plan)
     return launch_plan
 
@@ -7687,6 +9684,8 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "schema_version": "skillsbench_runner_config_v0",
         "raw_command_recorded": False,
         "raw_env_recorded": False,
+        "ledger_path_recorded": False,
+        "global_ledger_path_recorded": False,
     }
     string_fields = (
         "benchmark_id",
@@ -7694,13 +9693,19 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "route",
         "agent",
         "model",
+        "reasoning_effort",
+        "codex_cli_reasoning_effort",
+        "app_server_reasoning_effort",
+        "app_server_goal_prompt_style",
         "sandbox",
+        "local_codex_provider",
+        "docker_apt_source_mode",
+        "docker_apt_transport_mode",
+        "docker_pip_index_mode",
+        "docker_pip_build_mode",
         "run_group_id",
         "job_name",
         "rollout_name",
-        "treatment_prompt_style",
-        "ledger_path",
-        "global_ledger_path",
         "ledger_scope",
     )
     for field in string_fields:
@@ -7712,7 +9717,9 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "outer_timeout_sec",
         "sandbox_setup_timeout_sec",
         "agent_idle_timeout_sec",
+        "build_stall_timeout_requested_sec",
         "build_stall_timeout_sec",
+        "setup_only_stage_timeout_sec",
         "local_codex_task_output_quiet_timeout_sec",
     )
     for field in int_fields:
@@ -7722,6 +9729,7 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
     for field in (
         "include_task_skills",
         "host_local_acp_launch",
+        "codex_cli_goal_thread_prewarm",
         "bootstrap_light_candidate_required",
         "bootstrap_light_fail_fast_required",
         "allow_staged_bootstrap_repair_run",
@@ -7730,6 +9738,7 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "fail_fast_on_verifier_bootstrap_risk",
         "verifier_bootstrap_fail_fast_defaulted",
         "bootstrap_light_fail_fast_defaulted",
+        "setup_only_public_preflight",
         "global_ledger_sync_enabled",
         "ledger_inherit_enabled",
     ):
@@ -7770,6 +9779,10 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
             "benchmark_egress_proxy_configured",
             "benchmark_egress_proxy_required",
             "benchmark_egress_proxy_url_recorded",
+            "benchmark_egress_direct_fallback_allowed",
+            "benchmark_egress_direct_fallback_active",
+            "benchmark_egress_no_proxy_configured",
+            "benchmark_egress_no_proxy_raw_value_recorded",
             "benchmark_egress_proxy_agent_env_injected",
             "benchmark_egress_proxy_docker_config_injected",
             "benchmark_egress_proxy_docker_config_path_recorded",
@@ -7789,6 +9802,7 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
             "benchmark_egress_proxy_status",
             "benchmark_egress_proxy_error_kind",
             "benchmark_egress_proxy_mode_requested",
+            "benchmark_egress_proxy_mode_effective",
             "benchmark_egress_proxy_source",
             "benchmark_egress_proxy_env_key",
             "benchmark_egress_proxy_scheme",
@@ -7797,13 +9811,233 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
             value = prerequisites.get(field)
             if isinstance(value, str) and value:
                 config[field] = value[:80]
+        config.update(runner_source.compact_runner_source_public_fields(prerequisites))
         value = prerequisites.get("codex_api_reverse_tunnel_proxy_endpoint_port")
         if isinstance(value, int) and not isinstance(value, bool):
             config["codex_api_reverse_tunnel_proxy_endpoint_port"] = value
         value = prerequisites.get("benchmark_egress_proxy_endpoint_port")
         if isinstance(value, int) and not isinstance(value, bool):
             config["benchmark_egress_proxy_endpoint_port"] = value
+        value = prerequisites.get("benchmark_egress_no_proxy_entry_count")
+        if isinstance(value, int) and not isinstance(value, bool):
+            config["benchmark_egress_no_proxy_entry_count"] = value
+        config.update(proxy_runtime.compact_base_image_prewarm_fields(prerequisites))
+    app_server_observability = _app_server_goal_worker_observability(plan)
+    if app_server_observability:
+        config["app_server_goal_worker_observability"] = app_server_observability
     return config
+
+
+def _app_server_goal_worker_observability(
+    plan: dict[str, Any],
+    controller_trace: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a public-safe attribution packet for app-server Goal launches."""
+
+    if str(plan.get("route") or "") != "codex-app-server-goal-baseline":
+        return {}
+
+    trace_summary = plan.get("app_server_goal_worker_trace_summary")
+    if not isinstance(trace_summary, dict):
+        trace_summary = {}
+    if isinstance(controller_trace, dict):
+        trace_summary = {**trace_summary, **controller_trace}
+
+    prereqs = plan.get("runner_prerequisites")
+    if not isinstance(prereqs, dict):
+        prereqs = {}
+    egress = plan.get("codex_api_egress_preflight")
+    if not isinstance(egress, dict):
+        egress = {}
+
+    requested_effort = str(plan.get("app_server_reasoning_effort") or "")[:40]
+    observed_effort = str(
+        trace_summary.get("native_goal_worker_reasoning_effort") or ""
+    )[:40]
+    if requested_effort and observed_effort:
+        if requested_effort == observed_effort:
+            effort_status = "matched"
+        else:
+            effort_status = "mismatch"
+    elif requested_effort:
+        effort_status = "requested_not_yet_observed"
+    else:
+        effort_status = "not_recorded"
+
+    preflight_status = str(
+        egress.get("status")
+        or prereqs.get("codex_api_egress_preflight_status")
+        or ""
+    )[:80]
+    preflight_required = bool(
+        egress.get("required") or prereqs.get("codex_api_egress_preflight_required")
+    )
+    preflight_ready = bool(
+        egress.get("ready") or prereqs.get("codex_api_egress_preflight_ready")
+    )
+    if not preflight_required:
+        preflight_observation_status = "not_required"
+    elif preflight_ready:
+        preflight_observation_status = "executed_ready"
+    elif preflight_status and preflight_status != "pending":
+        preflight_observation_status = "executed_blocked"
+    else:
+        preflight_observation_status = "required_pending"
+
+    def _int_field(name: str) -> int:
+        value = trace_summary.get(name)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        return 0
+
+    summary: dict[str, Any] = {
+        "schema_version": "skillsbench_app_server_goal_worker_observability_v0",
+        "route": "codex-app-server-goal-baseline",
+        "session_policy": str(
+            trace_summary.get("native_goal_worker_session_policy")
+            or (
+                "single_thread_with_blinded_followups"
+                if max(0, int(plan.get("app_server_goal_followup_max") or 0))
+                else "single_initial_goal_turn"
+            )
+        )[:120],
+        "max_rounds_budget_applies_to": str(
+            trace_summary.get("native_goal_worker_max_rounds_budget_applies_to")
+            or "benchflow_outer_controller_budget_not_native_goal_attempts"
+        )[:120],
+        "initial_goal_turn_budget": _int_field(
+            "native_goal_worker_initial_goal_turn_budget"
+        )
+        or 1,
+        "same_thread_followup_budget": max(
+            0, int(plan.get("app_server_goal_followup_max") or 0)
+        ),
+        "independent_attempt_budget": (
+            max(
+                1,
+                int(
+                    (
+                        plan.get("independent_goal_retry")
+                        if isinstance(plan.get("independent_goal_retry"), dict)
+                        else {}
+                    ).get("attempt_budget")
+                    or 1
+                ),
+            )
+        ),
+        "fresh_goal_thread_per_independent_attempt": True,
+        "requested_reasoning_effort": requested_effort,
+        "observed_reasoning_effort": observed_effort,
+        "reasoning_effort_observation_status": effort_status,
+        "reasoning_effort_matches_request": bool(
+            requested_effort and observed_effort and requested_effort == observed_effort
+        ),
+        "requested_normal_followup_max": max(
+            0, int(plan.get("app_server_goal_followup_max") or 0)
+        ),
+        "normal_followup_attempted_count": _int_field(
+            "native_goal_worker_normal_followup_attempted_count"
+        ),
+        "normal_followup_succeeded_count": _int_field(
+            "native_goal_worker_normal_followup_succeeded_count"
+        ),
+        "normal_followup_start_attempted_count": _int_field(
+            "native_goal_worker_normal_followup_start_attempted_count"
+        ),
+        "normal_followup_start_succeeded_count": _int_field(
+            "native_goal_worker_normal_followup_start_succeeded_count"
+        ),
+        "trace_dir_configured": bool(plan.get("app_server_goal_worker_trace_dir")),
+        "trace_dir_present": bool(
+            trace_summary.get("native_goal_worker_trace_dir_present")
+        ),
+        "public_trace_read": bool(
+            trace_summary.get("native_goal_worker_public_trace_read")
+        ),
+        "trace_count": _int_field("native_goal_worker_trace_count"),
+        "lifecycle_trace_count": _int_field(
+            "native_goal_worker_lifecycle_trace_count"
+        ),
+        "prompt_received_count": _int_field(
+            "native_goal_worker_prompt_received_count"
+        ),
+        "goal_get_count": _int_field("native_goal_worker_goal_get_count"),
+        "turn_start_count": _int_field("native_goal_worker_turn_start_count"),
+        "turn_completed_observed_count": _int_field(
+            "native_goal_worker_turn_completed_observed_count"
+        ),
+        "assistant_message_present_count": _int_field(
+            "native_goal_worker_assistant_message_present_count"
+        ),
+        "effective_action_observed_count": _int_field(
+            "native_goal_worker_effective_action_observed_count"
+        ),
+        "first_action_observed_count": _int_field(
+            "native_goal_worker_first_action_observed_count"
+        ),
+        "raw_material_recorded": bool(
+            trace_summary.get("native_goal_worker_raw_material_recorded")
+        ),
+        "codex_api_egress_preflight_required": preflight_required,
+        "codex_api_egress_preflight_ready": preflight_ready,
+        "codex_api_egress_preflight_status": preflight_status,
+        "codex_api_egress_preflight_observation_status": (
+            preflight_observation_status
+        ),
+        "codex_api_egress_mode_resolved": str(
+            egress.get("resolved_mode")
+            or prereqs.get("codex_api_egress_mode_resolved")
+            or ""
+        )[:80],
+        "codex_api_reverse_tunnel_required": bool(
+            egress.get("reverse_tunnel_required")
+            or prereqs.get("codex_api_reverse_tunnel_required")
+        ),
+        "codex_api_reverse_tunnel_proxy_configured": bool(
+            egress.get("proxy_configured")
+            or prereqs.get("codex_api_reverse_tunnel_proxy_configured")
+        ),
+        "codex_api_reverse_tunnel_proxy_source": str(
+            egress.get("proxy_source")
+            or prereqs.get("codex_api_reverse_tunnel_proxy_source")
+            or ""
+        )[:40],
+        "codex_api_reverse_tunnel_proxy_scheme": str(
+            egress.get("proxy_scheme")
+            or prereqs.get("codex_api_reverse_tunnel_proxy_scheme")
+            or ""
+        )[:20],
+        "codex_api_reverse_tunnel_proxy_endpoint_kind": str(
+            egress.get("proxy_endpoint_kind")
+            or prereqs.get("codex_api_reverse_tunnel_proxy_endpoint_kind")
+            or ""
+        )[:40],
+        "codex_api_reverse_tunnel_proxy_endpoint_port": int(
+            egress.get("proxy_endpoint_port")
+            or prereqs.get("codex_api_reverse_tunnel_proxy_endpoint_port")
+            or 0
+        ),
+        "codex_api_reverse_tunnel_proxy_url_recorded": False,
+        "codex_api_egress_raw_probe_output_recorded": False,
+    }
+
+    for key in (
+        "native_goal_worker_failure_category",
+        "native_goal_worker_first_blocker",
+    ):
+        value = trace_summary.get(key)
+        if isinstance(value, str) and value:
+            summary[key] = value[:120]
+    efforts = trace_summary.get("native_goal_worker_reasoning_efforts")
+    if isinstance(efforts, list):
+        compact_efforts = [
+            item[:40]
+            for item in efforts
+            if isinstance(item, str) and item
+        ][:8]
+        if compact_efforts:
+            summary["observed_reasoning_efforts"] = compact_efforts
+    return summary
 
 
 def _runner_config_public_path(plan: dict[str, Any]) -> Path | None:
@@ -7857,10 +10091,46 @@ def _write_public_runner_config(plan: dict[str, Any]) -> Path | None:
     return path
 
 
+def _write_setup_only_public_preflight(
+    plan: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> Path:
+    path = Path(str(plan["setup_only_public_preflight_json"]))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_text_atomic(
+        path,
+        json.dumps(
+            dict(result),
+            indent=2,
+            sort_keys=True,
+            default=_json_default,
+        )
+        + "\n",
+    )
+    return path
+
+
 async def run_benchflow_case_with_private_output(
     args: argparse.Namespace,
     plan: dict[str, Any],
-) -> Path:
+) -> Path | dict[str, Any]:
+    if getattr(args, "setup_only_public_preflight", False):
+        plan["runner_output_capture"] = {
+            "schema_version": "skillsbench_runner_output_capture_v0",
+            "enabled": False,
+            "stdout_stderr_redirected": True,
+            "output_policy": "discard",
+            "raw_output_public": False,
+            "private_log_created": False,
+            "private_log_path_public": False,
+        }
+        with open(os.devnull, "w", encoding="utf-8") as stream:
+            with redirect_stdout(stream), redirect_stderr(stream):
+                with _benchmark_egress_proxy_env_applied(args, plan=plan):
+                    _write_public_runner_config(plan)
+                    _write_public_runner_prerequisites(plan)
+                    return await run_benchflow_case(args, plan)
+
     log_path = _private_runner_output_log_path(plan)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     plan["runner_output_capture"] = {
@@ -7878,7 +10148,9 @@ async def run_benchflow_case_with_private_output(
         stream.flush()
         try:
             with redirect_stdout(stream), redirect_stderr(stream):
-                with _benchmark_egress_proxy_env_applied(args):
+                with _benchmark_egress_proxy_env_applied(args, plan=plan):
+                    _write_public_runner_config(plan)
+                    _write_public_runner_prerequisites(plan)
                     result = await run_benchflow_case(args, plan)
         finally:
             stream.write(
@@ -8222,21 +10494,22 @@ def _new_controller_trace(route: str, *, max_rounds: int | None = None) -> dict[
         schema_version="skillsbench_loopx_controller_trace_v0",
     )
     loopx_product_mode = _is_loopx_product_mode_route(route)
+    loopx_case_runtime = _is_case_loopx_route(route)
     goal_start_product_mode = _is_goal_start_product_mode_route(route)
     trace.update(
         {
         "case_goal_state_packet_present": False,
-        "case_goal_state_init_required": loopx_product_mode,
+        "case_goal_state_init_required": loopx_case_runtime,
         "case_goal_state_initialized_before_agent": False,
         "case_goal_state_init_status": "not_applicable",
         "case_goal_state_path": (
             PRODUCT_MODE_CASE_STATE_PATH
-            if loopx_product_mode
+            if loopx_case_runtime
             else ""
         ),
         "case_goal_state_schema_version": (
             PRODUCT_MODE_CASE_STATE_SCHEMA_VERSION
-            if loopx_product_mode
+            if loopx_case_runtime
             else ""
         ),
         "declared_done_requires_no_remaining_goals": loopx_product_mode,
@@ -8273,6 +10546,26 @@ def _new_controller_trace(route: str, *, max_rounds: int | None = None) -> dict[
         "loopx_case_state_reads": 0,
         "loopx_case_state_writes": 0,
         "native_goal_worker_route": route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE,
+        "native_goal_worker_session_policy": (
+            "single_initial_goal_turn"
+            if route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+            else ""
+        ),
+        "native_goal_worker_max_rounds_budget_applies_to": (
+            "benchflow_outer_controller_budget_not_native_goal_attempts"
+            if route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+            else ""
+        ),
+        "native_goal_worker_initial_goal_turn_budget": (
+            1 if route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE else 0
+        ),
+        "native_goal_worker_same_thread_followup_budget": 0,
+        "native_goal_worker_independent_attempt_budget": (
+            1 if route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE else 0
+        ),
+        "native_goal_worker_fresh_goal_thread_per_independent_attempt": (
+            route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+        ),
         "native_goal_worker_connected": False,
         "native_goal_worker_connect_count": 0,
         "native_goal_worker_trace_dir_present": False,
@@ -8287,6 +10580,57 @@ def _new_controller_trace(route: str, *, max_rounds: int | None = None) -> dict[
         }
     )
     return trace
+
+
+def _apply_app_server_goal_round_semantics_to_controller_trace(
+    trace: dict[str, Any],
+    plan: dict[str, Any],
+) -> None:
+    round_semantics = (
+        plan.get("app_server_goal_round_semantics")
+        if isinstance(plan.get("app_server_goal_round_semantics"), dict)
+        else {}
+    )
+    independent_retry = (
+        plan.get("independent_goal_retry")
+        if isinstance(plan.get("independent_goal_retry"), dict)
+        else {}
+    )
+    same_thread_followup_budget = max(
+        0,
+        int(
+            round_semantics.get("same_thread_followup_budget")
+            if isinstance(round_semantics.get("same_thread_followup_budget"), int)
+            and not isinstance(round_semantics.get("same_thread_followup_budget"), bool)
+            else plan.get("app_server_goal_followup_max")
+            or 0
+        ),
+    )
+    independent_attempt_budget = max(
+        1,
+        int(
+            round_semantics.get("independent_attempt_budget")
+            if isinstance(round_semantics.get("independent_attempt_budget"), int)
+            and not isinstance(round_semantics.get("independent_attempt_budget"), bool)
+            else independent_retry.get("attempt_budget")
+            or 1
+        ),
+    )
+    trace["native_goal_worker_route"] = True
+    trace["native_goal_worker_session_policy"] = str(
+        round_semantics.get("session_policy")
+        or (
+            "single_thread_with_blinded_followups"
+            if same_thread_followup_budget
+            else "single_initial_goal_turn"
+        )
+    )[:120]
+    trace["native_goal_worker_same_thread_followup_budget"] = (
+        same_thread_followup_budget
+    )
+    trace["native_goal_worker_independent_attempt_budget"] = (
+        independent_attempt_budget
+    )
 
 
 def _write_controller_trace(plan: dict[str, Any], trace: dict[str, Any] | None) -> None:
@@ -8339,8 +10683,30 @@ def _merge_app_server_goal_worker_trace_summary(
     turn_start_count = 0
     turn_completed_count = 0
     assistant_message_count = 0
+    context_only_assistant_message_count = 0
+    context_only_recovery_attempted_count = 0
+    context_only_recovery_succeeded_count = 0
+    context_only_followup_start_attempted_count = 0
+    context_only_followup_start_succeeded_count = 0
+    normal_followup_attempted_count = 0
+    normal_followup_succeeded_count = 0
+    normal_followup_start_attempted_count = 0
+    normal_followup_start_succeeded_count = 0
+    finish_guard_followup_attempted_count = 0
+    finish_guard_followup_succeeded_count = 0
+    finish_guard_followup_start_attempted_count = 0
+    finish_guard_followup_start_succeeded_count = 0
+    incomplete_turn_status_count = 0
+    incomplete_after_completion_event_count = 0
+    incomplete_turn_statuses: list[str] = []
+    transport_reconnect_attempted_count = 0
+    transport_reconnect_succeeded_count = 0
+    goal_reactivation_attempted_count = 0
+    goal_reactivation_succeeded_count = 0
+    post_context_assistant_chars_total = 0
     first_action_count = 0
     effective_action_count = 0
+    reasoning_efforts: list[str] = []
     raw_material_recorded = False
     for path in files:
         try:
@@ -8386,14 +10752,177 @@ def _merge_app_server_goal_worker_trace_summary(
                 if safe_category not in failure_categories:
                     failure_categories.append(safe_category)
         turn = payload.get("turn") if isinstance(payload.get("turn"), dict) else {}
+        turn_attempts = turn.get("turn_attempt_count")
+        if not isinstance(turn_attempts, int) or isinstance(turn_attempts, bool):
+            turn_attempts = 1
+        turn_attempts = max(1, turn_attempts)
         if turn.get("goal_get_present") is True:
-            goal_get_count += 1
+            goal_get_count += turn_attempts
         if turn.get("turn_id_present") is True:
-            turn_start_count += 1
-        if turn.get("turn_completed_observed") is True:
+            turn_start_count += turn_attempts
+        completed_attempts = turn.get("turn_completed_attempt_count")
+        if isinstance(completed_attempts, int) and not isinstance(
+            completed_attempts, bool
+        ):
+            turn_completed_count += max(0, completed_attempts)
+        elif turn.get("turn_completed_observed") is True:
             turn_completed_count += 1
-        if turn.get("assistant_message_present") is True:
+        assistant_attempts = turn.get("assistant_message_attempt_count")
+        if isinstance(assistant_attempts, int) and not isinstance(
+            assistant_attempts, bool
+        ):
+            assistant_message_count += max(0, assistant_attempts)
+        elif turn.get("assistant_message_present") is True:
             assistant_message_count += 1
+        context_only_attempts = turn.get("context_only_turn_count")
+        if isinstance(context_only_attempts, int) and not isinstance(
+            context_only_attempts, bool
+        ):
+            context_only_assistant_message_count += max(0, context_only_attempts)
+        elif turn.get("assistant_message_context_only") is True:
+            context_only_assistant_message_count += 1
+        recovery = (
+            payload.get("context_only_recovery")
+            if isinstance(payload.get("context_only_recovery"), dict)
+            else {}
+        )
+        if (
+            turn.get("context_only_recovery_attempted") is True
+            or recovery.get("attempted") is True
+        ):
+            context_only_recovery_attempted_count += 1
+        if (
+            turn.get("context_only_recovery_succeeded") is True
+            or recovery.get("succeeded") is True
+        ):
+            context_only_recovery_succeeded_count += 1
+        if (
+            turn.get("context_only_followup_start_attempted") is True
+            or recovery.get("followup_start_attempted") is True
+        ):
+            context_only_followup_start_attempted_count += 1
+        if (
+            turn.get("context_only_followup_start_succeeded") is True
+            or recovery.get("followup_start_succeeded") is True
+        ):
+            context_only_followup_start_succeeded_count += 1
+        normal_followup = (
+            payload.get("normal_followup")
+            if isinstance(payload.get("normal_followup"), dict)
+            else {}
+        )
+        if (
+            turn.get("normal_followup_attempted") is True
+            or normal_followup.get("attempted") is True
+        ):
+            normal_followup_attempted_count += 1
+        if (
+            turn.get("normal_followup_succeeded") is True
+            or normal_followup.get("succeeded") is True
+        ):
+            normal_followup_succeeded_count += 1
+        normal_attempts = turn.get("normal_followup_start_attempted_count")
+        if isinstance(normal_attempts, int) and not isinstance(
+            normal_attempts, bool
+        ):
+            normal_followup_start_attempted_count += max(0, normal_attempts)
+        else:
+            normal_attempts = normal_followup.get("followup_start_attempted_count")
+            if isinstance(normal_attempts, int) and not isinstance(
+                normal_attempts, bool
+            ):
+                normal_followup_start_attempted_count += max(0, normal_attempts)
+        normal_successes = turn.get("normal_followup_start_succeeded_count")
+        if isinstance(normal_successes, int) and not isinstance(
+            normal_successes, bool
+        ):
+            normal_followup_start_succeeded_count += max(0, normal_successes)
+        else:
+            normal_successes = normal_followup.get("followup_start_succeeded_count")
+            if isinstance(normal_successes, int) and not isinstance(
+                normal_successes, bool
+            ):
+                normal_followup_start_succeeded_count += max(0, normal_successes)
+        finish_guard_followup = (
+            payload.get("finish_guard_followup")
+            if isinstance(payload.get("finish_guard_followup"), dict)
+            else {}
+        )
+        if (
+            turn.get("finish_guard_followup_attempted") is True
+            or finish_guard_followup.get("attempted") is True
+        ):
+            finish_guard_followup_attempted_count += 1
+        if (
+            turn.get("finish_guard_followup_succeeded") is True
+            or finish_guard_followup.get("succeeded") is True
+        ):
+            finish_guard_followup_succeeded_count += 1
+        finish_attempts = turn.get("finish_guard_followup_start_attempted_count")
+        if isinstance(finish_attempts, int) and not isinstance(
+            finish_attempts, bool
+        ):
+            finish_guard_followup_start_attempted_count += max(0, finish_attempts)
+        else:
+            finish_attempts = finish_guard_followup.get(
+                "followup_start_attempted_count"
+            )
+            if isinstance(finish_attempts, int) and not isinstance(
+                finish_attempts, bool
+            ):
+                finish_guard_followup_start_attempted_count += max(
+                    0, finish_attempts
+                )
+        finish_successes = turn.get("finish_guard_followup_start_succeeded_count")
+        if isinstance(finish_successes, int) and not isinstance(
+            finish_successes, bool
+        ):
+            finish_guard_followup_start_succeeded_count += max(0, finish_successes)
+        else:
+            finish_successes = finish_guard_followup.get(
+                "followup_start_succeeded_count"
+            )
+            if isinstance(finish_successes, int) and not isinstance(
+                finish_successes, bool
+            ):
+                finish_guard_followup_start_succeeded_count += max(
+                    0, finish_successes
+                )
+        turn_status = str(turn.get("turn_status") or "").strip()
+        if turn_status and turn_status != "completed":
+            incomplete_turn_status_count += 1
+            if turn_status[:80] not in incomplete_turn_statuses:
+                incomplete_turn_statuses.append(turn_status[:80])
+            if turn.get("turn_completed_observed") is True:
+                incomplete_after_completion_event_count += 1
+        if turn.get("transport_reconnect_attempted") is True:
+            transport_reconnect_attempted_count += 1
+        if turn.get("transport_reconnect_succeeded") is True:
+            transport_reconnect_succeeded_count += 1
+        if turn.get("goal_reactivation_attempted") is True:
+            goal_reactivation_attempted_count += 1
+        if turn.get("goal_reactivation_succeeded") is True:
+            goal_reactivation_succeeded_count += 1
+        post_context_chars = turn.get("post_context_assistant_chars")
+        if isinstance(post_context_chars, int) and not isinstance(
+            post_context_chars, bool
+        ):
+            post_context_assistant_chars_total += max(0, post_context_chars)
+        effort = turn.get("reasoning_effort")
+        if isinstance(effort, str) and effort and effort not in reasoning_efforts:
+            reasoning_efforts.append(effort[:40])
+        worker_adapter = (
+            payload.get("worker_adapter")
+            if isinstance(payload.get("worker_adapter"), dict)
+            else {}
+        )
+        adapter_effort = worker_adapter.get("reasoning_effort")
+        if (
+            isinstance(adapter_effort, str)
+            and adapter_effort
+            and adapter_effort not in reasoning_efforts
+        ):
+            reasoning_efforts.append(adapter_effort[:40])
         if turn.get("first_action_observed") is True:
             first_action_count += 1
         if turn.get("effective_action_observed") is True:
@@ -8417,7 +10946,63 @@ def _merge_app_server_goal_worker_trace_summary(
             turn.get("raw_transcript_recorded") is True
             or turn.get("raw_assistant_message_recorded") is True
         )
-    trace["native_goal_worker_route"] = plan.get("route") == "codex-app-server-goal-baseline"
+    is_native_goal_route = plan.get("route") == "codex-app-server-goal-baseline"
+    round_semantics = (
+        plan.get("app_server_goal_round_semantics")
+        if isinstance(plan.get("app_server_goal_round_semantics"), dict)
+        else {}
+    )
+    independent_retry = (
+        plan.get("independent_goal_retry")
+        if isinstance(plan.get("independent_goal_retry"), dict)
+        else {}
+    )
+    requested_followup_budget = max(
+        0,
+        int(
+            round_semantics.get("same_thread_followup_budget")
+            if isinstance(round_semantics.get("same_thread_followup_budget"), int)
+            and not isinstance(round_semantics.get("same_thread_followup_budget"), bool)
+            else plan.get("app_server_goal_followup_max")
+            or 0
+        ),
+    )
+    independent_attempt_budget = max(
+        1,
+        int(
+            round_semantics.get("independent_attempt_budget")
+            if isinstance(round_semantics.get("independent_attempt_budget"), int)
+            and not isinstance(round_semantics.get("independent_attempt_budget"), bool)
+            else independent_retry.get("attempt_budget")
+            or 1
+        ),
+    )
+    trace["native_goal_worker_route"] = is_native_goal_route
+    trace["native_goal_worker_session_policy"] = str(
+        round_semantics.get("session_policy")
+        or (
+            "single_thread_with_blinded_followups"
+            if requested_followup_budget
+            else "single_initial_goal_turn"
+        )
+    )[:120] if is_native_goal_route else ""
+    trace["native_goal_worker_max_rounds_budget_applies_to"] = str(
+        round_semantics.get("max_rounds_budget_applies_to")
+        or "benchflow_outer_controller_budget_not_native_goal_attempts"
+    )[:120] if is_native_goal_route else ""
+    trace["native_goal_worker_initial_goal_turn_budget"] = (
+        1 if is_native_goal_route else 0
+    )
+    trace["native_goal_worker_same_thread_followup_budget"] = (
+        requested_followup_budget if is_native_goal_route else 0
+    )
+    trace["native_goal_worker_independent_attempt_budget"] = (
+        independent_attempt_budget if is_native_goal_route else 0
+    )
+    trace["native_goal_worker_fresh_goal_thread_per_independent_attempt"] = bool(
+        is_native_goal_route
+        and round_semantics.get("fresh_goal_thread_per_independent_attempt") is not False
+    )
     trace["native_goal_worker_trace_dir_present"] = trace_dir.exists()
     trace["native_goal_worker_trace_count"] = worker_trace_count
     trace["native_goal_worker_lifecycle_trace_count"] = lifecycle_trace_count
@@ -8438,12 +11023,126 @@ def _merge_app_server_goal_worker_trace_summary(
     trace["native_goal_worker_assistant_message_present_count"] = (
         assistant_message_count
     )
+    trace["native_goal_worker_assistant_context_only_count"] = (
+        context_only_assistant_message_count
+    )
+    trace["native_goal_worker_context_only_recovery_attempted_count"] = (
+        context_only_recovery_attempted_count
+    )
+    trace["native_goal_worker_context_only_recovery_succeeded_count"] = (
+        context_only_recovery_succeeded_count
+    )
+    trace["native_goal_worker_context_only_followup_start_attempted_count"] = (
+        context_only_followup_start_attempted_count
+    )
+    trace["native_goal_worker_context_only_followup_start_succeeded_count"] = (
+        context_only_followup_start_succeeded_count
+    )
+    trace["native_goal_worker_normal_followup_attempted_count"] = (
+        normal_followup_attempted_count
+    )
+    trace["native_goal_worker_normal_followup_succeeded_count"] = (
+        normal_followup_succeeded_count
+    )
+    trace["native_goal_worker_normal_followup_start_attempted_count"] = (
+        normal_followup_start_attempted_count
+    )
+    trace["native_goal_worker_normal_followup_start_succeeded_count"] = (
+        normal_followup_start_succeeded_count
+    )
+    trace["native_goal_worker_finish_guard_followup_attempted_count"] = (
+        finish_guard_followup_attempted_count
+    )
+    trace["native_goal_worker_finish_guard_followup_succeeded_count"] = (
+        finish_guard_followup_succeeded_count
+    )
+    trace["native_goal_worker_finish_guard_followup_start_attempted_count"] = (
+        finish_guard_followup_start_attempted_count
+    )
+    trace["native_goal_worker_finish_guard_followup_start_succeeded_count"] = (
+        finish_guard_followup_start_succeeded_count
+    )
+    trace["native_goal_worker_incomplete_turn_status_count"] = (
+        incomplete_turn_status_count
+    )
+    trace["native_goal_worker_incomplete_after_completion_event_count"] = (
+        incomplete_after_completion_event_count
+    )
+    trace["native_goal_worker_incomplete_turn_statuses"] = incomplete_turn_statuses
+    trace["native_goal_worker_transport_reconnect_attempted_count"] = (
+        transport_reconnect_attempted_count
+    )
+    trace["native_goal_worker_transport_reconnect_succeeded_count"] = (
+        transport_reconnect_succeeded_count
+    )
+    trace["native_goal_worker_goal_reactivation_attempted_count"] = (
+        goal_reactivation_attempted_count
+    )
+    trace["native_goal_worker_goal_reactivation_succeeded_count"] = (
+        goal_reactivation_succeeded_count
+    )
+    trace["native_goal_worker_post_context_assistant_chars_total"] = (
+        post_context_assistant_chars_total
+    )
+    trace["native_goal_worker_reasoning_efforts"] = reasoning_efforts
+    trace["native_goal_worker_reasoning_effort"] = (
+        reasoning_efforts[0] if reasoning_efforts else ""
+    )
     trace["native_goal_worker_first_action_observed_count"] = first_action_count
     trace["native_goal_worker_effective_action_observed_count"] = (
         effective_action_count
     )
     trace["native_goal_worker_public_trace_read"] = worker_trace_count > 0
     trace["native_goal_worker_raw_material_recorded"] = raw_material_recorded
+    public_summary_keys = (
+        "native_goal_worker_route",
+        "native_goal_worker_trace_dir_present",
+        "native_goal_worker_trace_count",
+        "native_goal_worker_lifecycle_trace_count",
+        "native_goal_worker_prompt_received_count",
+        "native_goal_worker_ok_count",
+        "native_goal_worker_failure_trace_count",
+        "native_goal_worker_failure_categories",
+        "native_goal_worker_failure_category",
+        "native_goal_worker_first_blockers",
+        "native_goal_worker_first_blocker",
+        "native_goal_worker_goal_get_count",
+        "native_goal_worker_turn_start_count",
+        "native_goal_worker_turn_completed_observed_count",
+        "native_goal_worker_assistant_message_present_count",
+        "native_goal_worker_assistant_context_only_count",
+        "native_goal_worker_context_only_recovery_attempted_count",
+        "native_goal_worker_context_only_recovery_succeeded_count",
+        "native_goal_worker_context_only_followup_start_attempted_count",
+        "native_goal_worker_context_only_followup_start_succeeded_count",
+        "native_goal_worker_normal_followup_attempted_count",
+        "native_goal_worker_normal_followup_succeeded_count",
+        "native_goal_worker_normal_followup_start_attempted_count",
+        "native_goal_worker_normal_followup_start_succeeded_count",
+        "native_goal_worker_finish_guard_followup_attempted_count",
+        "native_goal_worker_finish_guard_followup_succeeded_count",
+        "native_goal_worker_finish_guard_followup_start_attempted_count",
+        "native_goal_worker_finish_guard_followup_start_succeeded_count",
+        "native_goal_worker_incomplete_turn_status_count",
+        "native_goal_worker_incomplete_after_completion_event_count",
+        "native_goal_worker_incomplete_turn_statuses",
+        "native_goal_worker_transport_reconnect_attempted_count",
+        "native_goal_worker_transport_reconnect_succeeded_count",
+        "native_goal_worker_goal_reactivation_attempted_count",
+        "native_goal_worker_goal_reactivation_succeeded_count",
+        "native_goal_worker_post_context_assistant_chars_total",
+        "native_goal_worker_reasoning_efforts",
+        "native_goal_worker_reasoning_effort",
+        "native_goal_worker_first_action_observed_count",
+        "native_goal_worker_effective_action_observed_count",
+        "native_goal_worker_public_trace_read",
+        "native_goal_worker_raw_material_recorded",
+    )
+    plan["app_server_goal_worker_trace_summary"] = {
+        key: trace[key]
+        for key in public_summary_keys
+        if key in trace
+    }
     if worker_trace_count:
         trace["last_decision"] = "host_app_server_goal_worker_trace_recorded"
 
@@ -8467,6 +11166,8 @@ def _merge_host_local_acp_relay_trace_summary(
     probe_ready_count = 0
     operation_count = 0
     codex_exec_failure_trace_count = 0
+    codex_exec_recoverable_failure_trace_count = 0
+    codex_exec_fatal_failure_trace_count = 0
     codex_exec_failure_categories: list[str] = []
     agent_bridge_trace_count = 0
     agent_bridge_request_count = 0
@@ -8496,7 +11197,19 @@ def _merge_host_local_acp_relay_trace_summary(
     driver_lifecycle_command_counts: dict[str, int] = {}
     driver_lifecycle_returncode_counts: dict[str, int] = {}
     driver_lifecycle_execution_style = ""
+    codex_cli_goal_trace_count = 0
+    codex_cli_goal_ok_count = 0
+    codex_cli_goal_active_count = 0
+    codex_cli_goal_terminal_count = 0
+    codex_cli_goal_first_action_count = 0
+    codex_cli_goal_bridge_request_count = 0
+    codex_cli_goal_task_facing_success_count = 0
+    codex_cli_goal_recovery_summary = new_codex_cli_goal_recovery_summary()
+    codex_cli_goal_stages: list[str] = []
+    codex_cli_goal_reasoning_efforts: list[str] = []
+    loopx_turn_summary = SkillsBenchTurnTraceSummary()
     raw_material_recorded = False
+    payloads: list[dict[str, Any]] = []
     for path in files:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -8509,10 +11222,56 @@ def _merge_host_local_acp_relay_trace_summary(
             != "skillsbench_host_local_acp_relay_public_trace_v0"
         ):
             continue
+        payloads.append(payload)
+
+    latest_agent_snapshot_indexes: dict[str, tuple[int, int]] = {}
+    for payload_index, payload in enumerate(payloads):
+        if payload.get("trace_kind") != "remote_command_file_bridge_agent_operations":
+            continue
+        agent_ops = payload.get("remote_command_file_bridge_agent_operations")
+        if not isinstance(agent_ops, dict):
+            continue
+        snapshot_id = agent_ops.get("snapshot_id")
+        snapshot_index = agent_ops.get("snapshot_index")
+        if (
+            agent_ops.get("snapshot_semantics") != "cumulative"
+            or not isinstance(snapshot_id, str)
+            or not snapshot_id
+            or len(snapshot_id) > 128
+            or not isinstance(snapshot_index, int)
+            or isinstance(snapshot_index, bool)
+            or snapshot_index < 1
+        ):
+            continue
+        current = latest_agent_snapshot_indexes.get(snapshot_id)
+        if current is None or snapshot_index >= current[0]:
+            latest_agent_snapshot_indexes[snapshot_id] = (
+                snapshot_index,
+                payload_index,
+            )
+
+    superseded_agent_snapshot_count = 0
+    for payload_index, payload in enumerate(payloads):
         boundary = (
             payload.get("boundary")
             if isinstance(payload.get("boundary"), dict)
             else {}
+        )
+        raw_material_recorded = raw_material_recorded or any(
+            boundary.get(field) is True
+            for field in (
+                "raw_command_recorded",
+                "raw_stdout_recorded",
+                "raw_stderr_recorded",
+                "raw_task_text_recorded",
+                "raw_logs_recorded",
+                "raw_trajectory_recorded",
+                "credential_values_recorded",
+                "host_paths_recorded",
+                "remote_paths_recorded",
+                "upload_performed",
+                "submit_performed",
+            )
         )
         trace_kind = payload.get("trace_kind")
         if trace_kind == "remote_command_file_bridge_solver_consumption":
@@ -8537,6 +11296,16 @@ def _merge_host_local_acp_relay_trace_summary(
             )
             codex_exec_failure_trace_count += 1
             category = process.get("failure_category")
+            recoverable_turn_failure = process.get("recoverable_turn_failure")
+            if not isinstance(recoverable_turn_failure, bool):
+                recoverable_turn_failure = (
+                    isinstance(category, str)
+                    and category in RECOVERABLE_CODEX_TURN_FAILURE_CATEGORIES
+                )
+            if recoverable_turn_failure:
+                codex_exec_recoverable_failure_trace_count += 1
+            else:
+                codex_exec_fatal_failure_trace_count += 1
             if (
                 isinstance(category, str)
                 and category
@@ -8556,6 +11325,17 @@ def _merge_host_local_acp_relay_trace_summary(
             raw_material_recorded = raw_material_recorded or (
                 agent_ops.get("raw_material_recorded") is True
             )
+            snapshot_id = agent_ops.get("snapshot_id")
+            snapshot_index = agent_ops.get("snapshot_index")
+            if (
+                agent_ops.get("snapshot_semantics") == "cumulative"
+                and isinstance(snapshot_id, str)
+                and snapshot_id in latest_agent_snapshot_indexes
+                and latest_agent_snapshot_indexes[snapshot_id]
+                != (snapshot_index, payload_index)
+            ):
+                superseded_agent_snapshot_count += 1
+                continue
             count_fields = {
                 "request_count": "request",
                 "success_count": "success",
@@ -8686,24 +11466,62 @@ def _merge_host_local_acp_relay_trace_summary(
                     target_counts[safe_key] = (
                         target_counts.get(safe_key, 0) + max(0, value)
                     )
+        elif trace_kind == "codex_cli_goal_tui":
+            goal_trace = (
+                payload.get("codex_cli_goal")
+                if isinstance(payload.get("codex_cli_goal"), dict)
+                else {}
+            )
+            codex_cli_goal_trace_count += 1
+            if payload.get("ok") is True:
+                codex_cli_goal_ok_count += 1
+            if goal_trace.get("goal_active_observed") is True:
+                codex_cli_goal_active_count += 1
+            if goal_trace.get("goal_terminal_observed") is True:
+                codex_cli_goal_terminal_count += 1
+            if goal_trace.get("first_action_observed") is True:
+                codex_cli_goal_first_action_count += 1
+            bridge_requests = goal_trace.get("bridge_request_count")
+            if isinstance(bridge_requests, int) and not isinstance(
+                bridge_requests, bool
+            ):
+                codex_cli_goal_bridge_request_count += max(0, bridge_requests)
+            task_facing_successes = goal_trace.get("task_facing_success_count")
+            if isinstance(task_facing_successes, int) and not isinstance(
+                task_facing_successes, bool
+            ):
+                codex_cli_goal_task_facing_success_count += max(
+                    0,
+                    task_facing_successes,
+                )
+            merge_codex_cli_goal_recovery_trace(
+                codex_cli_goal_recovery_summary,
+                goal_trace,
+            )
+            stage = goal_trace.get("stage")
+            if isinstance(stage, str) and stage:
+                safe_stage = stage[:80]
+                if safe_stage not in codex_cli_goal_stages:
+                    codex_cli_goal_stages.append(safe_stage)
+            effort = goal_trace.get("reasoning_effort")
+            if isinstance(effort, str) and effort:
+                safe_effort = effort[:40]
+                if safe_effort not in codex_cli_goal_reasoning_efforts:
+                    codex_cli_goal_reasoning_efforts.append(safe_effort)
+            raw_material_recorded = raw_material_recorded or any(
+                goal_trace.get(field) is True
+                for field in (
+                    "raw_tui_capture_recorded",
+                    "raw_task_text_recorded",
+                    "raw_stdout_recorded",
+                    "raw_stderr_recorded",
+                    "credential_values_recorded",
+                )
+            )
+        elif trace_kind == "loopx_turn_execution":
+            loopx_turn_summary.merge(payload, boundary)
         else:
             continue
-        raw_material_recorded = raw_material_recorded or any(
-            boundary.get(field) is True
-            for field in (
-                "raw_command_recorded",
-                "raw_stdout_recorded",
-                "raw_stderr_recorded",
-                "raw_task_text_recorded",
-                "raw_logs_recorded",
-                "raw_trajectory_recorded",
-                "credential_values_recorded",
-                "host_paths_recorded",
-                "remote_paths_recorded",
-                "upload_performed",
-                "submit_performed",
-            )
-        )
     consumed_by_solver = solver_trace_count > 0 and probe_ready_count > 0
     agent_bridge_failure_category = ""
     for category, count in sorted(agent_bridge_failure_category_counts.items()):
@@ -8729,6 +11547,12 @@ def _merge_host_local_acp_relay_trace_summary(
     trace["host_local_acp_codex_exec_failure_trace_count"] = (
         codex_exec_failure_trace_count
     )
+    trace["host_local_acp_codex_exec_recoverable_failure_trace_count"] = (
+        codex_exec_recoverable_failure_trace_count
+    )
+    trace["host_local_acp_codex_exec_fatal_failure_trace_count"] = (
+        codex_exec_fatal_failure_trace_count
+    )
     trace["host_local_acp_codex_exec_failure_trace_present"] = (
         codex_exec_failure_trace_count > 0
     )
@@ -8746,6 +11570,9 @@ def _merge_host_local_acp_relay_trace_summary(
     )
     trace["remote_command_file_bridge_agent_operation_trace_present"] = (
         agent_bridge_trace_count > 0
+    )
+    trace["remote_command_file_bridge_agent_superseded_snapshot_count"] = (
+        superseded_agent_snapshot_count
     )
     prerequisites = plan.setdefault("runner_prerequisites", {})
     agent_trace_required = (
@@ -8922,6 +11749,39 @@ def _merge_host_local_acp_relay_trace_summary(
     trace["remote_command_file_bridge_driver_lifecycle_raw_material_recorded"] = (
         raw_material_recorded
     )
+    trace["codex_cli_goal_tui_trace_count"] = codex_cli_goal_trace_count
+    trace["codex_cli_goal_tui_trace_present"] = codex_cli_goal_trace_count > 0
+    trace["codex_cli_goal_tui_ok_count"] = codex_cli_goal_ok_count
+    trace["codex_cli_goal_tui_goal_active_observed_count"] = (
+        codex_cli_goal_active_count
+    )
+    trace["codex_cli_goal_tui_goal_terminal_observed_count"] = (
+        codex_cli_goal_terminal_count
+    )
+    trace["codex_cli_goal_tui_first_action_observed_count"] = (
+        codex_cli_goal_first_action_count
+    )
+    trace["codex_cli_goal_tui_bridge_request_count"] = (
+        codex_cli_goal_bridge_request_count
+    )
+    trace["codex_cli_goal_tui_task_facing_success_count"] = (
+        codex_cli_goal_task_facing_success_count
+    )
+    trace.update(codex_cli_goal_recovery_public_fields(codex_cli_goal_recovery_summary))
+    trace["codex_cli_goal_tui_stages"] = codex_cli_goal_stages
+    trace["codex_cli_goal_tui_stage"] = (
+        codex_cli_goal_stages[0] if codex_cli_goal_stages else ""
+    )
+    trace["codex_cli_goal_tui_reasoning_efforts"] = (
+        codex_cli_goal_reasoning_efforts
+    )
+    trace["codex_cli_goal_tui_reasoning_effort"] = (
+        codex_cli_goal_reasoning_efforts[0]
+        if codex_cli_goal_reasoning_efforts
+        else ""
+    )
+    trace["codex_cli_goal_tui_raw_material_recorded"] = raw_material_recorded
+    loopx_turn_summary.apply(trace)
     prerequisites["remote_command_file_bridge_solver_trace_dir_present"] = (
         trace_dir.exists()
     )
@@ -8945,6 +11805,12 @@ def _merge_host_local_acp_relay_trace_summary(
     )
     prerequisites["host_local_acp_codex_exec_failure_trace_count"] = (
         codex_exec_failure_trace_count
+    )
+    prerequisites["host_local_acp_codex_exec_recoverable_failure_trace_count"] = (
+        codex_exec_recoverable_failure_trace_count
+    )
+    prerequisites["host_local_acp_codex_exec_fatal_failure_trace_count"] = (
+        codex_exec_fatal_failure_trace_count
     )
     prerequisites["host_local_acp_codex_exec_failure_trace_present"] = (
         codex_exec_failure_trace_count > 0
@@ -9075,6 +11941,44 @@ def _merge_host_local_acp_relay_trace_summary(
     prerequisites[
         "remote_command_file_bridge_driver_lifecycle_raw_material_recorded"
     ] = raw_material_recorded
+    prerequisites["codex_cli_goal_tui_trace_count"] = codex_cli_goal_trace_count
+    prerequisites["codex_cli_goal_tui_trace_present"] = (
+        codex_cli_goal_trace_count > 0
+    )
+    prerequisites["codex_cli_goal_tui_ok_count"] = codex_cli_goal_ok_count
+    prerequisites["codex_cli_goal_tui_goal_active_observed_count"] = (
+        codex_cli_goal_active_count
+    )
+    prerequisites["codex_cli_goal_tui_goal_terminal_observed_count"] = (
+        codex_cli_goal_terminal_count
+    )
+    prerequisites["codex_cli_goal_tui_first_action_observed_count"] = (
+        codex_cli_goal_first_action_count
+    )
+    prerequisites["codex_cli_goal_tui_bridge_request_count"] = (
+        codex_cli_goal_bridge_request_count
+    )
+    prerequisites["codex_cli_goal_tui_task_facing_success_count"] = (
+        codex_cli_goal_task_facing_success_count
+    )
+    prerequisites.update(
+        codex_cli_goal_recovery_public_fields(codex_cli_goal_recovery_summary)
+    )
+    prerequisites["codex_cli_goal_tui_stages"] = codex_cli_goal_stages
+    prerequisites["codex_cli_goal_tui_stage"] = (
+        codex_cli_goal_stages[0] if codex_cli_goal_stages else ""
+    )
+    prerequisites["codex_cli_goal_tui_reasoning_efforts"] = (
+        codex_cli_goal_reasoning_efforts
+    )
+    prerequisites["codex_cli_goal_tui_reasoning_effort"] = (
+        codex_cli_goal_reasoning_efforts[0]
+        if codex_cli_goal_reasoning_efforts
+        else ""
+    )
+    prerequisites["codex_cli_goal_tui_raw_material_recorded"] = (
+        raw_material_recorded
+    )
     if consumed_by_solver:
         prerequisites["remote_command_file_bridge_consumption_status"] = (
             "solver_prompt_probe_ready"
@@ -9089,6 +11993,160 @@ def _merge_host_local_acp_relay_trace_summary(
     elif prerequisites.get("remote_command_file_bridge_solver_wiring_configured"):
         prerequisites["remote_command_file_bridge_consumption_status"] = (
             "solver_trace_missing"
+        )
+
+
+def _loopx_turn_terminal_failure_checkpoint(
+    plan: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read the public trace needed to identify a stranded failed Turn."""
+
+    if plan.get("route") != LOOPX_TURN_AGENT_CLI_ROUTE:
+        return None
+    trace: dict[str, Any] = {}
+    _merge_host_local_acp_relay_trace_summary(plan, trace)
+    executions = trace.get("loopx_turn_executions")
+    latest = (
+        executions[-1]
+        if isinstance(executions, list)
+        and executions
+        and isinstance(executions[-1], Mapping)
+        else None
+    )
+    if latest is None or loopx_turn_execution_committed(latest):
+        return None
+    receipt = latest.get("receipt")
+    receipt = receipt if isinstance(receipt, Mapping) else {}
+    terminal_failure = bool(
+        latest.get("status") in {"failed", "validation_failed"}
+        or receipt.get("status") == "failed"
+        or receipt.get("failed_phase")
+    )
+    if (
+        not terminal_failure
+        or loopx_turn_execution_has_durable_effects(latest)
+        or trace.get("host_local_acp_codex_exec_failure_trace_present") is not True
+    ):
+        return None
+
+    def safe_label(value: Any, *, default: str) -> str:
+        text = str(value or "")
+        if re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", text):
+            return text
+        return default
+
+    return {
+        "schema_version": "skillsbench_loopx_turn_terminal_failure_checkpoint_v0",
+        "status": safe_label(latest.get("status"), default="failed"),
+        "result_kind": safe_label(
+            receipt.get("result_kind") or latest.get("result_kind"),
+            default="unknown",
+        ),
+        "failed_phase": safe_label(
+            receipt.get("failed_phase"),
+            default="unknown",
+        ),
+        "failure_category": safe_label(
+            trace.get("host_local_acp_codex_exec_failure_category"),
+            default="unknown",
+        ),
+        "durable_effects_observed": False,
+        "raw_material_recorded": False,
+    }
+
+
+async def _await_benchflow_task_with_loopx_turn_closeout_watchdog(
+    task: asyncio.Task[Any],
+    plan: dict[str, Any],
+    *,
+    grace_seconds: float = DEFAULT_LOOPX_TURN_TERMINAL_FAILURE_GRACE_SEC,
+    poll_interval_seconds: float = LOOPX_TURN_TERMINAL_FAILURE_POLL_SEC,
+    cancel_timeout_seconds: float = 5.0,
+) -> Any:
+    """Let BenchFlow close normally, but fail closed when a failed Turn strands it."""
+
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    enabled = bool(
+        plan.get("route") == LOOPX_TURN_AGENT_CLI_ROUTE
+        and (
+            prerequisites.get("host_local_acp_launch") is True
+            or prerequisites.get("agent_execution_mode") == "host_local_acp"
+        )
+    )
+    prerequisites["benchflow_loopx_turn_terminal_failure_watchdog_enabled"] = enabled
+    prerequisites["benchflow_loopx_turn_terminal_failure_grace_sec"] = max(
+        0,
+        int(grace_seconds),
+    )
+    prerequisites["benchflow_loopx_turn_terminal_failure_raw_material_recorded"] = (
+        False
+    )
+    if not enabled:
+        return await task
+
+    failure_observed_at: float | None = None
+    while True:
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=max(0.01, poll_interval_seconds),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if done:
+            return await task
+        if prerequisites.get("benchflow_final_verifier_started") is True:
+            return await task
+        checkpoint = _loopx_turn_terminal_failure_checkpoint(plan)
+        if checkpoint is None:
+            continue
+        if failure_observed_at is None:
+            failure_observed_at = asyncio.get_running_loop().time()
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_observed"
+            ] = True
+            prerequisites["benchflow_loopx_turn_terminal_failure_status"] = str(
+                checkpoint["status"]
+            )
+            prerequisites["benchflow_loopx_turn_terminal_failure_category"] = str(
+                checkpoint["failure_category"]
+            )
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="loopx_turn_terminal_failure_waiting_for_closeout",
+                worker_status="agent_active",
+            )
+        if (
+            asyncio.get_running_loop().time() - failure_observed_at
+            < max(0.0, grace_seconds)
+        ):
+            continue
+
+        prerequisites["benchflow_loopx_turn_terminal_failure_triggered"] = True
+        prerequisites[
+            "benchflow_loopx_turn_terminal_failure_task_cancel_requested"
+        ] = True
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="loopx_turn_terminal_failure_closeout_stalled",
+            worker_status="agent_active",
+        )
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=max(0.01, cancel_timeout_seconds))
+        except asyncio.CancelledError:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged"
+            ] = True
+        except asyncio.TimeoutError:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_timeout"
+            ] = True
+        except Exception:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged"
+            ] = True
+        cleanup_host_local_acp_attempt_children(plan)
+        raise SkillsBenchLoopXTurnTerminalFailureStall(
+            "SkillsBench LoopX Turn terminal failure did not close BenchFlow"
         )
 
 
@@ -9431,63 +12489,10 @@ def _record_product_mode_declared_done_below_passing_reward(
     trace["product_mode_declared_done_below_passing_reward_count"] = current + 1
 
 
-def _record_product_mode_no_open_todo_below_passing_reward(
-    trace: dict[str, Any],
-    *,
-    agent_round: int,
-    reward: float | None,
-) -> bool:
-    current = trace.get("product_mode_no_open_todo_below_passing_reward_streak")
-    if not isinstance(current, int) or isinstance(current, bool):
-        current = 0
-    streak = current + 1
-    threshold = PRODUCT_MODE_NO_OPEN_TODO_STOP_STREAK_THRESHOLD
-    trace["open_todo_count"] = 0
-    trace["product_mode_no_open_todo_below_passing_reward_open_todo_count_public"] = 0
-    trace["product_mode_no_open_todo_below_passing_reward_streak"] = streak
-    trace["product_mode_no_open_todo_below_passing_reward_streak_threshold"] = (
-        threshold
-    )
-    trace.setdefault("product_mode_no_open_todo_below_passing_reward_stop", False)
-    trace["product_mode_no_open_todo_below_passing_reward_round"] = agent_round
-    if reward is None:
-        trace["product_mode_no_open_todo_below_passing_reward_score_status"] = (
-            "missing"
-        )
-    else:
-        trace["product_mode_no_open_todo_below_passing_reward_score"] = reward
-        trace["product_mode_no_open_todo_below_passing_reward_score_status"] = (
-            "observed_below_passing"
-        )
-    if streak < threshold:
-        return False
-    trace["product_mode_no_open_todo_below_passing_reward_stop"] = True
-    trace["product_mode_no_open_todo_below_passing_reward_stop_round"] = agent_round
-    trace["product_mode_declared_done_policy"] = (
-        "stop_after_two_no_open_todo_rounds_without_passing_reward"
-    )
-    stop_count = trace.get("product_mode_no_open_todo_below_passing_reward_stop_count")
-    if not isinstance(stop_count, int) or isinstance(stop_count, bool):
-        stop_count = 0
-    trace["product_mode_no_open_todo_below_passing_reward_stop_count"] = (
-        stop_count + 1
-    )
-    return True
-
-
-def _product_mode_no_open_todo_below_passing_reward_applicable(
-    trace: dict[str, Any],
-    *,
-    reward: float | None,
-) -> bool:
-    if not isinstance(reward, (int, float)) or isinstance(reward, bool):
-        return False
-    if reward >= 1.0:
-        return False
-    return _product_mode_agent_bridge_closeout_observed(trace)
-
-
 def _product_mode_depth_gate_satisfied(trace: dict[str, Any]) -> bool:
+    if _product_mode_agent_lifecycle_gate_satisfied(trace):
+        return True
+
     def count(*fields: str) -> int:
         values = [
             trace.get(field)
@@ -9549,6 +12554,38 @@ def _product_mode_depth_gate_satisfied(trace: dict[str, Any]) -> bool:
 
 def _product_mode_agent_lifecycle_gate_satisfied(trace: dict[str, Any]) -> bool:
     """Return true only after the solver agent, not only the driver, touched LoopX."""
+
+    # Relay snapshots may expose successful commands before cumulative counters catch up.
+    successful_commands = {
+        record.get("subcommand")
+        for record in _goal_start_public_command_records(
+            trace.get(
+                "remote_command_file_bridge_agent_successful_loopx_command_records"
+            )
+        )
+    }
+    successful_read_observed = bool(
+        successful_commands
+        & {"start-goal", "quota should-run", "status", "diagnose"}
+    )
+    successful_write_observed = bool(
+        successful_commands
+        & {
+            "refresh-state",
+            "quota spend-slot",
+            "todo add",
+            "todo claim",
+            "todo update",
+            "todo complete",
+            "todo supersede",
+            "todo archive-completed",
+        }
+    )
+    successful_lifecycle_observed = bool(
+        successful_read_observed and successful_write_observed
+    )
+    if successful_lifecycle_observed:
+        return True
 
     remote_agent_trace_required = (
         trace.get("remote_command_file_bridge_agent_operation_trace_required") is True
@@ -10014,7 +13051,7 @@ def _build_blind_loop_user(
     route: str,
     max_rounds: int,
     trace: dict[str, Any],
-    treatment_prompt_style: str = "structured",
+    plan: dict[str, Any] | None = None,
 ):
     from benchflow.sandbox.user import BaseUser, RoundResult
 
@@ -10053,6 +13090,38 @@ def _build_blind_loop_user(
                     "stop_after_blind_loop_official_success_observed_without_feedback"
                 )
                 return None
+            if round_result is not None and _is_loopx_turn_agent_cli_route(route):
+                _merge_host_local_acp_relay_trace_summary(plan or {}, trace)
+                turn_executions = trace.get("loopx_turn_executions")
+                latest_turn = (
+                    turn_executions[-1]
+                    if isinstance(turn_executions, list) and turn_executions
+                    else None
+                )
+                if isinstance(latest_turn, Mapping) and loopx_turn_execution_committed(
+                    latest_turn
+                ):
+                    _inc_counter(trace, "controller_action_decisions")
+                    _inc_counter(trace, "stop_decision_count")
+                    trace["last_decision"] = "stop_after_loopx_turn_commit"
+                    return None
+                handled, response = resolve_skillsbench_typed_repair_response(
+                    trace,
+                    agent_round=round,
+                    max_rounds=max_rounds,
+                    continuation_prompt=build_blind_loop_continuation_prompt(
+                        scheduled_round=round + 1,
+                        max_rounds=max_rounds,
+                        persistent_constraint_clause=self._persistent_constraint_clause,
+                        route=route,
+                    ),
+                    case_state_path=PRODUCT_MODE_CASE_STATE_PATH,
+                    persistent_constraint_clause=self._persistent_constraint_clause,
+                    outer_turn_owns_lifecycle=True,
+                    task_instruction=instruction,
+                )
+                if handled:
+                    return response
             if round >= max_rounds:
                 _inc_counter(trace, "controller_action_decisions")
                 _inc_counter(trace, "stop_decision_count")
@@ -10075,7 +13144,6 @@ def _build_blind_loop_user(
                 return build_blind_loop_initial_prompt(
                     route=route,
                     instruction=instruction,
-                    treatment_prompt_style=treatment_prompt_style,
                     benchmark_surface="official SkillsBench sandbox",
                 )
 
@@ -10086,35 +13154,11 @@ def _build_blind_loop_user(
                 scheduled_round=round + 1,
                 max_rounds=max_rounds,
                 persistent_constraint_clause=self._persistent_constraint_clause,
+                route=route,
             )
 
     return BlindLoopUser()
 
-
-def _build_codex_goal_mode_baseline_user():
-    from benchflow.sandbox.user import BaseUser, RoundResult
-
-    class CodexGoalModeBaselineUser(BaseUser):
-        """Scheduler-side user that sends one slash-goal-style prompt request."""
-
-        async def run(
-            self,
-            round: int,
-            instruction: str,
-            round_result: RoundResult | None = None,
-        ) -> str | None:
-            if round != 0:
-                return None
-            return (
-                "/goal Complete the following SkillsBench task. Keep working "
-                "until the task is done, validated, or blocked by the benchmark "
-                "environment. Do not use external LoopX CLI, upload, "
-                "submit, or ask the human for routine execution choices.\n\n"
-                "--- TASK INSTRUCTION ---\n"
-                f"{instruction}"
-            )
-
-    return CodexGoalModeBaselineUser()
 
 def _build_product_mode_user(
     *,
@@ -10136,11 +13180,14 @@ def _build_product_mode_user(
     case_agent_id = str(payload.get("case_agent_id") or BENCHMARK_CASE_LOOPX_AGENT_ID)
     case_todo_id = str(payload.get("case_todo_id") or BENCHMARK_CASE_LOOPX_TODO_ID)
     planned_todo_count = payload.get("planned_todo_count")
-    selected_p0_todo_id = str(payload.get("selected_p0_todo_id") or case_todo_id)
     case_cli_prefix = benchmark_case_loopx_command_prefix(
         case_cli_path=str(payload.get("case_cli_path") or "/app/.local/bin/loopx"),
         case_registry_path=str(payload.get("case_registry_path") or "/app/.loopx/registry.json"),
         case_runtime_root=str(payload.get("case_runtime_root") or "/app/.loopx/runtime"),
+    )
+    case_quota_guard = benchmark_case_outer_controller_quota_guard_command(
+        cli_prefix=case_cli_prefix,
+        goal_id=case_goal_id, agent_id=case_agent_id,
     )
     plan_prerequisites = (
         (plan or {}).get("runner_prerequisites")
@@ -10151,6 +13198,7 @@ def _build_product_mode_user(
         plan_prerequisites = {}
     workflow_lifecycle_driver = bool(
         treatment
+        and not goal_start_product_mode
         and payload.get("canonical_product_mode_lifecycle_driver") is True
         and (
             plan_prerequisites.get("loopx_workflow_lifecycle_checkpoint") is True
@@ -10168,9 +13216,13 @@ def _build_product_mode_user(
         if not goal_start_product_mode:
             return ""
         return (
-            "Goal-start loop alignment: this benchmark treatment models "
-            "headless `/loopx goal-start`, not a bare benchmark prompt and not "
-            "a live-user chat. The case-local `quota should-run` guard carries "
+            "Slash-command alignment: this benchmark treatment executes the "
+            "actual agent contract for `/loopx <task objective>`, not a "
+            "host-preseeded approximation and not a live-user chat. The host "
+            "only connected the case-local registry and registered the agent; "
+            "it did not create the ranked plan, write todos, refresh state, or "
+            "run quota on the solver's behalf. The case-local `quota "
+            "should-run` guard carries "
             "the same machine loop fields as `heartbeat-prompt` and Codex CLI "
             "TUI `/goal`: read `interaction_contract`, `workspace_guard`, "
             "`goal_boundary`, `execution_obligation`, and `scheduler_hint` "
@@ -10188,6 +13240,45 @@ def _build_product_mode_user(
             "exactly once only after the validated closeout sequence. "
         )
 
+    def bridge_request_command_sequence(commands: list[str]) -> str:
+        return "".join(
+            f"- Send one separate `operation=exec` bridge request: `{command}`\n"
+            for command in commands
+        )
+
+    def goal_start_plan_write_contract(planned_count: int) -> str:
+        todo_template = (
+            f"{case_cli_prefix} todo add --goal-id {case_goal_id} --role agent "
+            "--todo-id <TODO_ID> --text <SHELL_QUOTED_TODO_TEXT> "
+            "--task-class advancement_task --action-kind <ACTION_KIND>"
+        )
+        commands = [todo_template for _ in range(planned_count)]
+        commands.extend(
+            [
+                (
+                    f"{case_cli_prefix} refresh-state --goal-id {case_goal_id} "
+                    "--classification benchmark_case_agent_goal_start "
+                    "--delivery-batch-scale single_surface "
+                    "--delivery-outcome surface_only --no-global-sync"
+                ),
+                case_quota_guard,
+                (
+                    f"{case_cli_prefix} todo claim --goal-id {case_goal_id} "
+                    f"--todo-id <SELECTED_TODO_ID> --claimed-by {case_agent_id}"
+                ),
+            ]
+        )
+        return (
+            f"Author exactly {planned_count} ordered public-safe todos from the "
+            "guided transaction. Choose the todo ids, texts, and action kinds "
+            "yourself; ids must be unique. Replace every placeholder below, "
+            "select the first ranked todo or an explicit P0 you authored, and "
+            "preserve write order as plan order. Exactly one LoopX CLI command "
+            "is allowed in each `operation=exec` bridge request: never batch "
+            "commands with a newline, semicolon, `&&`, `||`, or pipe.\n"
+            + bridge_request_command_sequence(commands)
+        )
+
     def treatment_state_contract() -> str:
         goal_start_clause = ""
         goal_start_alignment = goal_start_loop_alignment_contract()
@@ -10200,12 +13291,40 @@ def _build_product_mode_user(
                 else 3
             )
             goal_start_clause = (
-                "This route models `/loopx goal-start <task objective>`: "
-                f"a compact ranked {planned_count}-todo plan must exist before "
-                "todo writes, "
-                f"with selected runnable P0 todo `{selected_p0_todo_id}` entering "
-                "the lifecycle. Non-selected todos remain open or deferred until "
-                "the selected P0 is validated. "
+                "This route executes `/loopx <task objective>`: "
+                f"the agent must author a compact ranked {planned_count}-todo "
+                "plan after the guided preview and before todo writes, "
+                "with the first ranked todo or an explicit P0 authored by the "
+                "agent entering the lifecycle. Non-selected todos remain open or "
+                "deferred until the selected P0 is validated. "
+            )
+            return (
+                "LoopX slash-command treatment contract: official case-local "
+                f"LoopX is connected before the agent starts at `{case_state_path}`, "
+                "but no plan or todo has been seeded. The benchmark task remains "
+                "the primary objective. After the bridge packet's required "
+                "connectivity probe and before prose planning, your first LoopX "
+                "CLI action must invoke `start-goal --guided --project /app` "
+                "through the private JSON bridge. Pass the exact visible TASK "
+                "INSTRUCTION as one shell-safe `--goal-text` argument; also pass "
+                f"`--goal-id {case_goal_id}`, `--agent-id {case_agent_id}`, and "
+                "`--host-surface shell`. Do not summarize, truncate, or replace "
+                "the task text, and do not expose that private command or its "
+                "output in public artifacts. Read the guided transaction, then "
+                "author and write the plan through the same bridge:\n\n"
+                f"{goal_start_plan_write_contract(planned_count)}"
+                "The benchmark controller is the already-active host loop, so "
+                "do not create or modify an external automation. Only after the "
+                "guided start, ordered todo writeback, refresh, quota guard, and "
+                "selected P0 claim may task-facing solving begin. "
+                f"{goal_start_clause}"
+                f"{goal_start_alignment}"
+                "After meaningful local task evidence or validation, update the "
+                "selected todo. Only after task-facing work indicates completion "
+                "may you use `todo complete`, then `refresh-state`, then `quota "
+                "spend-slot --source adapter --execute`. Do not run closeout as "
+                "setup, edit Markdown state as the source of truth, or answer "
+                "with prose only. "
             )
         if workflow_lifecycle_driver:
             return (
@@ -10258,8 +13377,7 @@ def _build_product_mode_user(
             "invoke that private JSON bridge from your shell tool and send each "
             "command as an `operation=exec` request with `cwd=/app`; do not try "
             "to run `/app/...` commands directly in the host-local temp cwd. "
-            f"`{case_cli_prefix} quota should-run --goal-id {case_goal_id} "
-            f"--agent-id {case_agent_id}` and claim the selected case todo "
+            f"`{case_quota_guard}` and claim the selected case todo "
             f"with `{case_cli_prefix} todo claim --goal-id {case_goal_id} "
             f"--todo-id {case_todo_id} --claimed-by {case_agent_id}`. "
             "After meaningful local task evidence or validation, update the "
@@ -10272,7 +13390,36 @@ def _build_product_mode_user(
             "source of truth. "
         )
 
+    def entry_lifecycle_requirement() -> str:
+        if goal_start_product_mode:
+            return (
+                "run the guided `start-goal` preview with the exact task text, "
+                "then author the ordered P0/P1/P2 todos, refresh state, run "
+                "quota, and claim the selected P0 through the solver bridge "
+                "before task-facing solving"
+            )
+        return (
+            "run the case-local quota/todo commands through the solver bridge "
+            "before task inspection or solving"
+        )
+
     def lifecycle_checkpoint_commands(round_number: int) -> str:
+        if goal_start_product_mode:
+            planned_count = (
+                planned_todo_count
+                if isinstance(planned_todo_count, int)
+                and not isinstance(planned_todo_count, bool)
+                and planned_todo_count > 0
+                else 3
+            )
+            return (
+                "First invoke `start-goal --guided --project /app` through the "
+                "private bridge with the exact TASK INSTRUCTION from the prior "
+                "turn as the single shell-safe `--goal-text` value. After "
+                "reading that private guided transaction, author and write the "
+                "ordered public-safe plan.\n\n"
+                f"{goal_start_plan_write_contract(planned_count)}"
+            )
         safe_round = max(1, round_number)
         checkpoint_note = shlex.quote(
             f"round {safe_round} product-mode lifecycle checkpoint"
@@ -10283,8 +13430,7 @@ def _build_product_mode_user(
         classification = shlex.quote("benchmark_case_lifecycle_checkpoint")
         return (
             "```bash\n"
-            f"{case_cli_prefix} quota should-run --goal-id {case_goal_id} "
-            f"--agent-id {case_agent_id}\n"
+            f"{case_quota_guard}\n"
             f"{case_cli_prefix} todo claim --goal-id {case_goal_id} "
             f"--todo-id {case_todo_id} --claimed-by {case_agent_id}\n"
             f"{case_cli_prefix} todo update --goal-id {case_goal_id} "
@@ -10306,20 +13452,33 @@ def _build_product_mode_user(
             "public-safe closeout: task-facing work validated and case todo complete"
         )
         classification = shlex.quote("benchmark_case_agent_closeout")
-        return (
-            "```bash\n"
+        selected_todo_ref = (
+            "<SELECTED_TODO_ID>" if goal_start_product_mode else case_todo_id
+        )
+        commands = [
             f"{case_cli_prefix} todo complete --goal-id {case_goal_id} "
-            f"--todo-id {case_todo_id} --note {complete_note} "
-            f"--evidence {complete_evidence}\n"
+            f"--todo-id {selected_todo_ref} --note {complete_note} "
+            f"--evidence {complete_evidence}",
             f"{case_cli_prefix} refresh-state --goal-id {case_goal_id} "
             f"--classification {classification} "
             "--delivery-batch-scale implementation "
             "--delivery-outcome primary_goal_outcome "
             f"--agent-id {case_agent_id} --agent-lane benchmark_case "
-            "--no-global-sync\n"
+            "--no-global-sync",
             f"{case_cli_prefix} quota spend-slot --goal-id {case_goal_id} "
-            f"--agent-id {case_agent_id} --source adapter --execute\n"
-            "```\n"
+            f"--agent-id {case_agent_id} --source adapter --execute",
+        ]
+        placeholder_clause = (
+            "Replace `<SELECTED_TODO_ID>` with the selected id from your own "
+            "ranked plan. "
+            if goal_start_product_mode
+            else ""
+        )
+        return (
+            placeholder_clause
+            + "Send each closeout command in its own bridge request. "
+            "Do not batch the sequence into one shell command.\n"
+            + bridge_request_command_sequence(commands)
         )
 
     def lifecycle_checkpoint_prompt(round_number: int) -> str:
@@ -10336,27 +13495,6 @@ def _build_product_mode_user(
             "After meaningful local validation or completion, update the same "
             "case todo again; only spend quota after validated work or final "
             "closeout."
-        )
-
-    def workflow_bootstrap_prompt() -> str:
-        return (
-            "LoopX product-mode treatment round 1. "
-            "You are running inside the official SkillsBench sandbox transport, "
-            "but this local Codex process is outside the scored sandbox. "
-            f"{feedback_policy_clause}"
-            "--- LOOPX PRODUCT-MODE CONTROL PLANE ---\n"
-            "The canonical workflow lifecycle driver has already executed the "
-            "case-local quota/todo/update/refresh checkpoint through the sandbox "
-            "bridge before this prompt. This route models `/loopx goal-start "
-            "<task objective>`: a compact ranked todo plan and selected P0 "
-            "todo have already been seeded in the case-local LoopX state. "
-            f"{goal_start_loop_alignment_contract()}"
-            "Do not repeat setup lifecycle, do not solve from prose, and do not "
-            "declare done in this bootstrap round. Your only job in this round "
-            "is to prove task-facing sandbox access: copy and run the bridge "
-            "packet's FIRST ACTION REQUIRED shell command exactly, then briefly "
-            "report that bridge access is available. The benchmark task "
-            "instruction will be sent after that bridge action is observed."
         )
 
     def solver_activity_prompt(
@@ -10689,6 +13827,20 @@ def _build_product_mode_user(
                             scheduled_round=round + 1,
                             task_instruction=instruction,
                         )
+                    handled, response = resolve_skillsbench_typed_repair_response(
+                        trace,
+                        agent_round=round,
+                        max_rounds=max_rounds,
+                        task_instruction_sent=self._task_instruction_sent,
+                        continuation_prompt=self._scheduled_continuation_prompt(
+                            scheduled_round=round + 1,
+                        ),
+                        case_state_path=case_state_path,
+                        loop_alignment_contract=goal_start_loop_alignment_contract(),
+                        persistent_constraint_clause=self._persistent_constraint_clause,
+                    )
+                    if handled:
+                        return response
                     if (
                         self._task_instruction_sent
                         and product_mode_entry_lifecycle_gate_satisfied()
@@ -10831,25 +13983,6 @@ def _build_product_mode_user(
                             ),
                         )
                         _inc_counter(trace, "controller_action_decisions")
-                        no_open_todo_stop = (
-                            _record_product_mode_no_open_todo_below_passing_reward(
-                                trace,
-                                agent_round=round,
-                                reward=(
-                                    float(reward)
-                                    if isinstance(reward, (int, float))
-                                    and not isinstance(reward, bool)
-                                    else None
-                                ),
-                            )
-                        )
-                        if no_open_todo_stop:
-                            _inc_counter(trace, "stop_decision_count")
-                            trace["last_decision"] = (
-                                "stop_after_product_mode_two_no_open_todo_rounds_"
-                                "without_passing_reward"
-                            )
-                            return None
                         if round >= max_rounds:
                             _inc_counter(trace, "stop_decision_count")
                             trace["last_decision"] = (
@@ -10857,49 +13990,57 @@ def _build_product_mode_user(
                                 "declared_done_below_passing_reward"
                             )
                             return None
+                        if not (
+                            isinstance(reward, (int, float))
+                            and not isinstance(reward, bool)
+                            and reward < 1.0
+                            and _product_mode_agent_bridge_closeout_observed(trace)
+                            and skillsbench_projected_open_todo_count(trace) == 0
+                        ):
+                            _inc_counter(trace, "followup_prompt_count")
+                            trace["last_decision"] = (
+                                "send_product_mode_success_or_budget_"
+                                "continuation_after_declared_done"
+                            )
+                            return self._scheduled_continuation_prompt(
+                                scheduled_round=round + 1,
+                                declared_done_continuation=True,
+                            )
+                        repair_started = begin_skillsbench_typed_repair(
+                            trace,
+                            trigger_round=round,
+                            scheduled_round=round + 1,
+                        )
+                        if not repair_started:
+                            record_skillsbench_typed_repair_terminal(
+                                trace,
+                                agent_round=round,
+                                reason="unchanged_frontier_already_repaired",
+                            )
+                            _inc_counter(trace, "stop_decision_count")
+                            trace["last_decision"] = (
+                                "stop_after_product_mode_typed_repair_repeated_frontier"
+                            )
+                            return None
                         _inc_counter(trace, "followup_prompt_count")
                         trace["last_decision"] = (
-                            "send_product_mode_success_or_budget_"
-                            "continuation_after_declared_done"
+                            "send_product_mode_typed_repair_after_declared_done"
                         )
-                        return self._scheduled_continuation_prompt(
+                        return build_skillsbench_typed_repair_prompt(
                             scheduled_round=round + 1,
-                            declared_done_continuation=True,
+                            max_rounds=max_rounds,
+                            case_state_path=case_state_path,
+                            loop_alignment_contract=(
+                                goal_start_loop_alignment_contract()
+                            ),
+                            persistent_constraint_clause=(
+                                self._persistent_constraint_clause
+                            ),
                         )
                     _inc_counter(trace, "controller_action_decisions")
                     _inc_counter(trace, "stop_decision_count")
                     _record_declared_done(trace, agent_round=round, reward=reward)
                     trace["last_decision"] = "stop_after_agent_declared_done"
-                    return None
-            observed_reward = (
-                float(reward)
-                if isinstance(reward, (int, float)) and not isinstance(reward, bool)
-                else None
-            )
-            if (
-                treatment
-                and round_result is not None
-                and self._task_instruction_sent
-                and product_mode_entry_lifecycle_gate_satisfied()
-                and _product_mode_no_open_todo_below_passing_reward_applicable(
-                    trace,
-                    reward=observed_reward,
-                )
-            ):
-                no_open_todo_stop = (
-                    _record_product_mode_no_open_todo_below_passing_reward(
-                        trace,
-                        agent_round=round,
-                        reward=observed_reward,
-                    )
-                )
-                if no_open_todo_stop:
-                    _inc_counter(trace, "controller_action_decisions")
-                    _inc_counter(trace, "stop_decision_count")
-                    trace["last_decision"] = (
-                        "stop_after_product_mode_two_no_open_todo_rounds_"
-                        "without_passing_reward"
-                    )
                     return None
             if reward is not None and reward >= 1.0:
                 _inc_counter(trace, "controller_action_decisions")
@@ -10977,17 +14118,6 @@ def _build_product_mode_user(
                 if treatment:
                     prefix = "LoopX product-mode treatment round 1. "
                     trace["case_goal_state_packet_present"] = True
-                    if workflow_lifecycle_driver and goal_start_product_mode:
-                        self._task_instruction_sent = False
-                        trace[
-                            "product_mode_task_instruction_deferred_until_agent_lifecycle"
-                        ] = True
-                        trace["product_mode_task_instruction_sent_initially"] = False
-                        trace["last_decision"] = (
-                            "send_goal_start_workflow_bridge_bootstrap_prompt"
-                        )
-                        return workflow_bootstrap_prompt()
-
                     self._task_instruction_sent = True
                     trace[
                         "product_mode_task_instruction_deferred_until_agent_lifecycle"
@@ -11021,9 +14151,8 @@ def _build_product_mode_user(
                             "answer. "
                             if workflow_lifecycle_driver
                             else
-                            "first run the case-local quota/todo commands above "
-                            "through the solver bridge before any task inspection, "
-                            "planning, solving, or final answer. "
+                            f"{entry_lifecycle_requirement()} before any final "
+                            "answer. "
                         )
                         + "The benchmark task instruction is visible in this "
                         "first round so the task semantics stay aligned with the "
@@ -11054,8 +14183,8 @@ def _build_product_mode_user(
                         "\n\n--- LOOPX PRODUCT-MODE CONTROL PLANE ---\n"
                         f"{control_clause}"
                         "For this treatment, LoopX lifecycle evidence is a "
-                        "hard product-mode requirement: first run the "
-                        "case-local quota/todo commands above, then solve and "
+                        "hard product-mode requirement: "
+                        f"{entry_lifecycle_requirement()}, then solve and "
                         "validate the benchmark task. Do not run case closeout "
                         "or declare done until after meaningful task-facing work "
                         "or local validation. If you later declare done without "
@@ -11101,9 +14230,16 @@ def _build_product_mode_user(
     return ProductModeUser()
 
 
-async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> Path:
+async def run_benchflow_case(
+    args: argparse.Namespace,
+    plan: dict[str, Any],
+) -> Path | dict[str, Any]:
     prerequisites = plan.setdefault("runner_prerequisites", {})
     prerequisites["benchflow_run_stage"] = "entered"
+    source_fingerprint = plan.get("loopx_runner_source_fingerprint")
+    if isinstance(source_fingerprint, dict) and source_fingerprint.get("first_blocker"):
+        prerequisites["benchflow_run_stage"] = "runner_source_fingerprint_check"
+        raise RuntimeError(str(source_fingerprint["first_blocker"]))
     skillsbench_root = Path(args.skillsbench_root).expanduser().resolve()
     prerequisites["benchflow_run_stage"] = "task_path_check"
     task_path = skillsbench_root / "tasks" / args.task_id
@@ -11116,6 +14252,10 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             "LoopX source mount requested but local source files are missing; "
             "use --no-loopx-source-mount to test the public GitHub installer instead"
         )
+    verifier_dependency_cache_policy_enabled = verifier_cache.dependency_cache_enabled(
+        sandbox=args.sandbox,
+        mode=args.verifier_dependency_cache_mode,
+    )
     prerequisites["benchflow_run_stage"] = "task_staging"
     effective_task_path, staging_metadata = stage_task_for_sandbox(
         task_path=task_path,
@@ -11124,14 +14264,61 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         sandbox=args.sandbox,
         include_task_skills=bool(args.include_task_skills),
         benchmark_egress_proxy_env=_benchmark_egress_proxy_env(args),
+        docker_apt_source_mode=getattr(
+            args, "docker_apt_source_mode", DEFAULT_DOCKER_APT_SOURCE_MODE
+        ),
+        docker_apt_transport_mode=getattr(
+            args,
+            "docker_apt_transport_mode",
+            DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+        ),
+        docker_pip_index_mode=args.docker_pip_index_mode,
+        docker_pip_build_mode=args.docker_pip_build_mode,
+        docker_gcr_mirror_prefix=args.docker_gcr_mirror_prefix,
+        verifier_dependency_cache_enabled=(
+            verifier_dependency_cache_policy_enabled
+        ),
+        loopx_case_runtime_required=_is_case_loopx_route(args.route),
     )
     plan["task_staging"] = staging_metadata
     plan["effective_task_path"] = str(effective_task_path)
+    verifier_dependency_cache_root, verifier_dependency_cache_contract = (
+        verifier_cache.prepare_dependency_cache(
+            args.verifier_dependency_cache_root,
+            requested=bool(
+                staging_metadata.get("verifier_dependency_cache_required")
+            ),
+            sandbox_user=str(args.sandbox_user),
+        )
+    )
+    verifier_dependency_cache_contract["verifier_dependency_cache_mode"] = (
+        args.verifier_dependency_cache_mode
+    )
+    prerequisites.update(verifier_dependency_cache_contract)
+    prerequisites["benchflow_run_stage"] = "base_image_prewarm"
+    _write_public_runner_config(plan)
+    _write_public_runner_prerequisites(plan)
+    prerequisites.update(
+        proxy_runtime.prewarm_dockerfile_base_images(
+            effective_task_path / "environment" / "Dockerfile",
+            enabled=(
+                args.sandbox == "docker"
+                and bool(_benchmark_egress_proxy_env(args))
+            ),
+        )
+    )
+    prerequisites["benchflow_run_stage"] = "base_image_prewarm_complete"
+    _write_public_runner_config(plan)
+    _write_public_runner_prerequisites(plan)
 
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
 
-    prerequisites["benchflow_run_stage"] = "benchflow_import"
+    _write_public_runner_lifecycle_receipt(
+        plan,
+        run_stage="benchflow_import",
+        worker_status="runtime_preparing",
+    )
     import benchflow.acp.runtime as benchflow_acp_runtime
     import benchflow.rollout as benchflow_rollout_module
     import benchflow.sandbox.setup as benchflow_sandbox_setup_module
@@ -11153,7 +14340,11 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         prerequisites["host_local_acp_connect_as_unpack_return_arity"] = (
             connect_as_return_arity
         )
-    prerequisites["benchflow_run_stage"] = "runtime_prepare"
+    _write_public_runner_lifecycle_receipt(
+        plan,
+        run_stage="runtime_prepare",
+        worker_status="runtime_preparing",
+    )
 
     host_local_acp_command = _host_local_acp_launch_command(args, plan)
     runtime_mounts = (
@@ -11162,7 +14353,55 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         else []
     )
     loopx_source_mounts = _loopx_source_mounts(args)
-    container_mounts = [*runtime_mounts, *loopx_source_mounts]
+    verifier_dependency_cache_mounts = verifier_cache.dependency_cache_mount(
+        verifier_dependency_cache_root
+    )
+    container_mounts = [
+        *runtime_mounts,
+        *loopx_source_mounts,
+        *verifier_dependency_cache_mounts,
+    ]
+
+    async def run_host_local_acp_codex_exec_preflight_after_environment(
+        env: Any,
+    ) -> None:
+        prerequisites = plan.setdefault("runner_prerequisites", {})
+        prerequisites["host_local_acp_codex_exec_preflight_placement"] = (
+            "after_sandbox_setup_before_agent"
+        )
+        sandbox_bridge_command = _host_local_acp_docker_bridge_command(
+            env,
+            args,
+            plan,
+        )
+        if (
+            _host_local_acp_codex_exec_preflight_requires_bridge_action(
+                args,
+                require_materialized_sandbox_bridge=True,
+            )
+            and not sandbox_bridge_command
+        ):
+            prerequisites["host_local_acp_codex_exec_preflight_status"] = "failed"
+            prerequisites["host_local_acp_codex_exec_preflight_ready"] = False
+            prerequisites["host_local_acp_codex_exec_preflight_first_blocker"] = (
+                "skillsbench_host_local_acp_sandbox_bridge_missing_after_setup"
+            )
+            prerequisites["host_local_acp_codex_exec_failure_category"] = (
+                "codex_sandbox_bridge_unavailable"
+            )
+            raise RuntimeError(
+                "host-local ACP sandbox bridge missing after environment setup"
+            )
+        try:
+            await asyncio.to_thread(
+                _run_host_local_acp_codex_exec_preflight,
+                args,
+                plan,
+                sandbox_bridge_command=sandbox_bridge_command,
+            )
+        finally:
+            _write_public_runner_config(plan)
+            _write_public_runner_prerequisites(plan)
 
     async def connect_host_local_acp(
         env: Any,
@@ -11189,7 +14428,11 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         from benchflow.acp.transport import StdioTransport
 
         prerequisites = plan.setdefault("runner_prerequisites", {})
-        prerequisites["host_local_acp_launch_status"] = "connecting"
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            worker_status="acp_connecting",
+            host_local_acp_status="connecting",
+        )
         local_acp_command = list(host_local_acp_command)
         sandbox_bridge_command = _host_local_acp_docker_bridge_command(
             env,
@@ -11219,7 +14462,7 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             prerequisites["remote_command_file_bridge_consumption_status"] = (
                 "solver_wiring_configured_pending_prompt"
             )
-            if _is_loopx_product_mode_route(args.route):
+            if _is_case_loopx_route(args.route):
                 prerequisites[
                     "remote_command_file_bridge_agent_operation_trace_required"
                 ] = True
@@ -11260,7 +14503,11 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             )
             if model:
                 await asyncio.wait_for(client.set_model(model), timeout=60)
-            prerequisites["host_local_acp_launch_status"] = "connected"
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                worker_status="acp_connected",
+                host_local_acp_status="connected",
+            )
             if isinstance(controller_trace, dict):
                 controller_trace["native_goal_worker_route"] = (
                     args.route == "codex-app-server-goal-baseline"
@@ -11292,7 +14539,11 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
                 return client, session, session_adapter, agent_name
             return client, session, agent_name
         except Exception:
-            prerequisites["host_local_acp_launch_status"] = "failed"
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                worker_status="acp_connect_failed",
+                host_local_acp_status="failed",
+            )
             with contextlib.suppress(Exception):
                 await client.close()
             raise
@@ -11357,12 +14608,12 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         prerequisites["codex_acp_runtime_launch_preflight_status"] = "passed"
 
     async def seed_product_mode_case_state(env: Any) -> None:
-        if not _is_loopx_product_mode_route(args.route):
+        if not _is_case_loopx_route(args.route):
             return
         payload = benchmark_case_loopx_install_payload(
             benchmark_id="skillsbench",
             case_id=args.task_id,
-            arm_id=_product_mode_arm_id_for_route(args.route),
+            arm_id=_loopx_case_arm_id_for_route(args.route),
             route=args.route,
             max_rounds=args.max_rounds,
             case_loopx_source_path=_loopx_case_source_path_for_container(args),
@@ -11433,7 +14684,7 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         trace["loopx_case_cli_installed_before_agent"] = True
 
     async def ensure_loopx_source_available(env: Any) -> None:
-        if not _is_loopx_product_mode_route(args.route):
+        if not _is_case_loopx_route(args.route):
             return
         prerequisites = plan.setdefault("runner_prerequisites", {})
         source_contract = _loopx_source_mount_contract(args)
@@ -11539,35 +14790,19 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         if original_create_environment is None:
             raise RuntimeError("BenchFlow rollout planes create_environment missing")
         env = original_create_environment(self, *call_args, **call_kwargs)
-        prerequisites = plan.setdefault("runner_prerequisites", {})
         environment = str(call_args[0]) if call_args else ""
-        if container_mounts and environment == "docker":
-            existing_mounts = getattr(env, "_mounts_json", None) or []
-            setattr(env, "_mounts_json", [*existing_mounts, *container_mounts])
-            if runtime_mounts:
-                prerequisites["benchflow_agent_runtime_mount_injected"] = True
-                prerequisites["benchflow_agent_runtime_mount_read_only"] = True
-                prerequisites["benchflow_agent_runtime_mount_source_recorded"] = False
-            if loopx_source_mounts:
-                prerequisites["loopx_source_mount_injected"] = True
-                prerequisites["loopx_source_mount_read_only"] = True
-                prerequisites["loopx_source_mount_source_recorded"] = False
-        elif container_mounts:
-            if runtime_mounts:
-                prerequisites["benchflow_agent_runtime_mount_injected"] = False
-                prerequisites["benchflow_agent_runtime_mount_read_only"] = True
-                prerequisites["benchflow_agent_runtime_mount_source_recorded"] = False
-            if loopx_source_mounts:
-                prerequisites["loopx_source_mount_injected"] = False
-                prerequisites["loopx_source_mount_read_only"] = True
-                prerequisites["loopx_source_mount_source_recorded"] = False
-        return env
+        return _record_container_mount_injection(env, environment)
 
     def _record_container_mount_injection(env: Any, environment: str) -> Any:
         prerequisites = plan.setdefault("runner_prerequisites", {})
+        if args.host_local_acp_launch and environment == "docker":
+            install_benchflow_docker_exec_output_capture(env, plan=plan)
         if container_mounts and environment == "docker":
             existing_mounts = getattr(env, "_mounts_json", None) or []
-            setattr(env, "_mounts_json", [*existing_mounts, *container_mounts])
+            missing_mounts = [
+                mount for mount in container_mounts if mount not in existing_mounts
+            ]
+            setattr(env, "_mounts_json", [*existing_mounts, *missing_mounts])
             if runtime_mounts:
                 prerequisites["benchflow_agent_runtime_mount_injected"] = True
                 prerequisites["benchflow_agent_runtime_mount_read_only"] = True
@@ -11576,6 +14811,9 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
                 prerequisites["loopx_source_mount_injected"] = True
                 prerequisites["loopx_source_mount_read_only"] = True
                 prerequisites["loopx_source_mount_source_recorded"] = False
+            if verifier_dependency_cache_mounts:
+                prerequisites["verifier_dependency_cache_mount_injected"] = True
+                prerequisites["verifier_dependency_cache_raw_path_recorded"] = False
         elif container_mounts:
             if runtime_mounts:
                 prerequisites["benchflow_agent_runtime_mount_injected"] = False
@@ -11585,6 +14823,9 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
                 prerequisites["loopx_source_mount_injected"] = False
                 prerequisites["loopx_source_mount_read_only"] = True
                 prerequisites["loopx_source_mount_source_recorded"] = False
+            if verifier_dependency_cache_mounts:
+                prerequisites["verifier_dependency_cache_mount_injected"] = False
+                prerequisites["verifier_dependency_cache_raw_path_recorded"] = False
         return env
 
     def create_environment_function_with_runtime_mount(
@@ -11620,7 +14861,35 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         )
         prerequisites["codex_acp_runtime_launch_preflight_status"] = "skipped"
         prerequisites["codex_acp_runtime_launch_preflight_raw_logs_read"] = False
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            worker_status="sandbox_installing",
+            host_local_acp_status="installing_sandbox",
+        )
         try:
+            prerequisites["host_local_acp_install_stage"] = (
+                "docker_exec_capture_preflight"
+            )
+            capture_probe = await self._env.exec(
+                "printf loopx-exec-stdout; "
+                "printf loopx-exec-stderr >&2; "
+                "exit 7",
+                timeout_sec=10,
+            )
+            capture_probe_ok = (
+                int(getattr(capture_probe, "return_code", 0)) == 7
+                and (getattr(capture_probe, "stdout", "") or "")
+                == "loopx-exec-stdout"
+                and (getattr(capture_probe, "stderr", "") or "")
+                == "loopx-exec-stderr"
+            )
+            prerequisites["host_local_acp_docker_exec_capture_preflight"] = (
+                capture_probe_ok
+            )
+            if not capture_probe_ok:
+                raise RuntimeError(
+                    "host-local ACP Docker exec capture preflight failed"
+                )
             prerequisites["host_local_acp_install_stage"] = "pwd_probe"
             try:
                 cwd_result = await self._env.exec("pwd", timeout_sec=10)
@@ -11718,7 +14987,7 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
                     getattr(self, "_task", None),
                     include_task_skills=cfg.include_task_skills,
                 )
-            if _is_loopx_product_mode_route(args.route):
+            if _is_case_loopx_route(args.route):
                 prerequisites["host_local_acp_install_stage"] = (
                     "loopx_source_upload_fallback"
                 )
@@ -11742,7 +15011,7 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
                 await benchflow_rollout_module.lockdown_paths(
                     self._env, self._effective_locked
                 )
-            if _is_loopx_product_mode_route(args.route):
+            if _is_case_loopx_route(args.route):
                 prerequisites["host_local_acp_install_stage"] = "seed_loopx_case_state"
                 if isinstance(controller_trace, dict):
                     controller_trace["case_goal_state_init_invocation_stage"] = (
@@ -11753,16 +15022,25 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             prerequisites["host_local_acp_install_failed_stage"] = str(
                 prerequisites.get("host_local_acp_install_stage") or "unknown"
             )
-            prerequisites["host_local_acp_launch_status"] = "sandbox_install_failed"
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                worker_status="sandbox_install_failed",
+                host_local_acp_status="sandbox_install_failed",
+                host_local_acp_install_stage=str(
+                    prerequisites.get("host_local_acp_install_stage") or "unknown"
+                ),
+            )
             raise
-        prerequisites["host_local_acp_install_stage"] = "sandbox_installed"
-        prerequisites["host_local_acp_launch_status"] = "sandbox_installed"
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            worker_status="sandbox_installed",
+            host_local_acp_status="sandbox_installed",
+            host_local_acp_install_stage="sandbox_installed",
+        )
         self._phase = "installed"
 
     async def install_agent_with_launch_preflight(self: Any) -> Any:
         prerequisites = plan.setdefault("runner_prerequisites", {})
-        prerequisites["benchflow_agent_install_started"] = True
-        prerequisites["benchflow_run_stage"] = "agent_install_started"
         original_timeout = getattr(self, "_timeout", None)
         requested_timeout = _effective_benchflow_agent_timeout_sec(args)
         prerequisites["benchflow_agent_timeout_requested_sec"] = requested_timeout
@@ -11788,6 +15066,12 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
                 effective_timeout != original_timeout
             )
             self._timeout = effective_timeout
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="agent_install_started",
+            worker_status="agent_install_started",
+            agent_install_started=True,
+        )
         if args.host_local_acp_launch:
             return await install_agent_host_local_acp(self)
         result = await original_install_agent(self)
@@ -11802,10 +15086,13 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             await run_codex_acp_launch_preflight(env)
         return result
 
+    setup_only_public_preflight = bool(
+        getattr(args, "setup_only_public_preflight", False)
+    )
     controller_user = None
     controller_trace: dict[str, Any] | None = None
     product_mode_case_payload: dict[str, Any] | None = None
-    if _is_loopx_product_mode_route(args.route):
+    if not setup_only_public_preflight and _is_loopx_product_mode_route(args.route):
         product_mode_case_payload = benchmark_case_loopx_install_payload(
             benchmark_id="skillsbench",
             case_id=args.task_id,
@@ -11815,19 +15102,17 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             case_loopx_source_path=_loopx_case_source_path_for_container(args),
             goal_start_product_mode=_is_goal_start_product_mode_route(args.route),
         )
-    if args.route in {
+    if not setup_only_public_preflight and args.route in {
         CODEX_ACP_BLIND_LOOP_BASELINE_ROUTE,
-        LOOPX_BLIND_LOOP_TREATMENT_ROUTE,
-        LOOPX_PROMPT_POLLING_TEST_ROUTE,
+        LOOPX_TURN_AGENT_CLI_ROUTE,
     }:
         controller_trace = _new_controller_trace(args.route, max_rounds=args.max_rounds)
         controller_user = _build_blind_loop_user(
             route=args.route,
             max_rounds=args.max_rounds,
-            trace=controller_trace,
-            treatment_prompt_style=args.treatment_prompt_style,
+            trace=controller_trace, plan=plan,
         )
-    elif args.route in PRODUCT_MODE_CONTROLLER_ROUTES:
+    elif not setup_only_public_preflight and args.route in PRODUCT_MODE_CONTROLLER_ROUTES:
         controller_trace = _new_controller_trace(args.route, max_rounds=args.max_rounds)
         controller_user = _build_product_mode_user(
             route=args.route,
@@ -11836,11 +15121,18 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             plan=plan,
             case_payload=product_mode_case_payload,
         )
-    elif args.route == "codex-goal-mode-baseline":
-        controller_user = _build_codex_goal_mode_baseline_user()
-    elif args.route == "codex-app-server-goal-baseline":
+    elif not setup_only_public_preflight and args.route == CODEX_CLI_GOAL_BASELINE_ROUTE:
         controller_trace = _new_controller_trace(args.route, max_rounds=args.max_rounds)
-        controller_trace["native_goal_worker_route"] = True
+        controller_trace["last_decision"] = "host_codex_cli_tui_goal_worker_selected"
+    elif (
+        not setup_only_public_preflight
+        and args.route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+    ):
+        controller_trace = _new_controller_trace(args.route, max_rounds=args.max_rounds)
+        _apply_app_server_goal_round_semantics_to_controller_trace(
+            controller_trace,
+            plan,
+        )
         controller_trace["last_decision"] = "host_app_server_goal_worker_selected"
 
     original_user_loop = install_benchflow_user_loop_final_verify_recovery(
@@ -11865,12 +15157,21 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
 
     pre_agent_hooks = (
         []
-        if args.host_local_acp_launch
+        if setup_only_public_preflight
+        or args.host_local_acp_launch
         or args.require_preinstalled_benchflow_agent_runtime
         else [ensure_codex_acp_runtime_deps]
     )
-    if _is_loopx_product_mode_route(args.route) and not args.host_local_acp_launch:
-        pre_agent_hooks.append(seed_product_mode_case_state)
+    if _is_case_loopx_route(args.route) and not args.host_local_acp_launch:
+        if not setup_only_public_preflight:
+            pre_agent_hooks.append(seed_product_mode_case_state)
+    if (
+        not setup_only_public_preflight
+        and _host_local_acp_codex_exec_preflight_should_run(args)
+    ):
+        pre_agent_hooks.append(
+            run_host_local_acp_codex_exec_preflight_after_environment
+        )
 
     agent_env: dict[str, str] = {}
     if runtime_mounts:
@@ -11908,13 +15209,21 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
     )
     result_path: Path | None = None
     prerequisites = plan.setdefault("runner_prerequisites", {})
-    build_stall_timeout_sec = max(0, int(args.build_stall_timeout_sec or 0))
+    requested_build_stall_timeout_sec = _requested_build_stall_timeout_sec(args)
+    build_stall_timeout_sec = _effective_build_stall_timeout_sec(args)
     prerequisites["benchflow_setup_stall_timeout_enabled"] = (
         build_stall_timeout_sec > 0
     )
+    prerequisites["benchflow_setup_stall_timeout_requested_sec"] = (
+        requested_build_stall_timeout_sec
+    )
     prerequisites["benchflow_setup_stall_timeout_sec"] = build_stall_timeout_sec
     prerequisites["benchflow_setup_stall_raw_logs_read"] = False
-    prerequisites["benchflow_run_stage"] = "before_benchflow_run"
+    _write_public_runner_lifecycle_receipt(
+        plan,
+        run_stage="before_benchflow_run",
+        worker_status="worker_prepared",
+    )
 
     def agent_lifecycle_started() -> bool:
         if prerequisites.get("benchflow_agent_install_started") is True:
@@ -11940,39 +15249,63 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         return False
 
     async def run_benchflow_with_setup_stall_watchdog() -> None:
-        prerequisites["benchflow_run_stage"] = "benchflow_run_started"
+        async def await_task_completion(monitored_task: asyncio.Task[Any]) -> None:
+            await monitored_task
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="benchflow_run_completed",
+                worker_status="worker_completed",
+            )
+
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="benchflow_run_started",
+            worker_status="worker_running",
+        )
         task = asyncio.create_task(benchflow_run(config))
+        monitored_task = asyncio.create_task(
+            _await_benchflow_task_with_loopx_turn_closeout_watchdog(
+                task,
+                plan,
+            )
+        )
         if build_stall_timeout_sec <= 0:
-            await task
-            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            await await_task_completion(monitored_task)
             return
         done, _pending = await asyncio.wait(
-            {task},
+            {monitored_task},
             timeout=build_stall_timeout_sec,
             return_when=asyncio.FIRST_COMPLETED,
         )
         if done:
-            await task
-            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            await await_task_completion(monitored_task)
             return
         if agent_lifecycle_started():
-            prerequisites["benchflow_run_stage"] = (
-                "benchflow_run_continues_after_agent_lifecycle_started"
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="benchflow_run_continues_after_agent_lifecycle_started",
+                worker_status="agent_active",
             )
-            await task
-            prerequisites["benchflow_run_stage"] = "benchflow_run_completed"
+            await await_task_completion(monitored_task)
             return
         prerequisites["benchflow_setup_stall_timeout_triggered"] = True
         prerequisites["benchflow_setup_stall_before_agent_lifecycle"] = True
-        prerequisites["benchflow_run_stage"] = "build_or_setup_stall_before_agent"
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="build_or_setup_stall_before_agent",
+            worker_status="setup_stalled",
+        )
         prerequisites["benchflow_setup_stall_task_cancel_requested"] = True
         task.cancel()
+        monitored_task.cancel()
         try:
             await asyncio.wait_for(task, timeout=5)
         except asyncio.CancelledError:
             prerequisites["benchflow_setup_stall_task_cancel_acknowledged"] = True
         except asyncio.TimeoutError:
             prerequisites["benchflow_setup_stall_task_cancel_timeout"] = True
+        with contextlib.suppress(asyncio.CancelledError):
+            await monitored_task
         cleanup_benchflow_setup_stall_children(plan)
         raise asyncio.TimeoutError(
             "skillsbench docker compose build/setup stall timeout before agent lifecycle"
@@ -12003,11 +15336,36 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
             and original_rollout_planes_class_connect_acp is not None
         ):
             rollout_planes_class.connect_acp = connect_host_local_acp_method
+    setup_only_result: dict[str, Any] | None = None
     try:
-        await run_benchflow_with_setup_stall_watchdog()
-        result_path = discover_benchflow_result_path(plan)
-        if result_path.exists():
-            _merge_final_result_round_reward(controller_trace, result_path)
+        if setup_only_public_preflight:
+            setup_only_result = await run_setup_only_public_preflight(
+                rollout_type=Rollout,
+                config=config,
+                task_staging=plan.get("task_staging"),
+                setup_preflight=plan.get("task_setup_preflight"),
+                stage_timeout_sec=float(
+                    _effective_setup_only_stage_timeout_sec(args)
+                ),
+                progress_callback=lambda progress: _write_setup_only_public_preflight(
+                    plan,
+                    progress,
+                ),
+                environment_ready_hook=(
+                    run_host_local_acp_codex_exec_preflight_after_environment
+                    if _host_local_acp_codex_exec_preflight_should_run(args)
+                    else None
+                ),
+            )
+            plan["setup_only_public_preflight_result"] = setup_only_result
+            prerequisites["benchflow_run_stage"] = str(
+                setup_only_result.get("stage") or "setup_only_preflight_complete"
+            )
+        else:
+            await run_benchflow_with_setup_stall_watchdog()
+            result_path = discover_benchflow_result_path(plan)
+            if result_path.exists():
+                _merge_final_result_round_reward(controller_trace, result_path)
     finally:
         Rollout.install_agent = original_install_agent
         Rollout._run_user_loop = original_user_loop
@@ -12046,6 +15404,8 @@ async def run_benchflow_case(args: argparse.Namespace, plan: dict[str, Any]) -> 
         _merge_app_server_goal_worker_trace_summary(plan, controller_trace)
         _merge_host_local_acp_relay_trace_summary(plan, controller_trace)
         _write_controller_trace(plan, controller_trace)
+    if setup_only_result is not None:
+        return setup_only_result
     if result_path is None:
         result_path = discover_benchflow_result_path(plan)
     if not result_path.exists():
@@ -12063,10 +15423,10 @@ def reduce_result(
     from loopx.benchmark import (
         build_skillsbench_benchflow_result_benchmark_run,
     )
-    from loopx.status import (
+    from loopx.benchmarks.read_models.skillsbench_post_run_debug import (
         build_skillsbench_post_run_debug_gate,
-        compact_benchmark_run,
     )
+    from loopx.status import compact_benchmark_run
 
     controller_trace = _read_controller_trace(plan)
     _merge_acp_trajectory_summary(plan, controller_trace)
@@ -12094,6 +15454,7 @@ def reduce_result(
     compact = compact_benchmark_run(benchmark_run)
     if compact is None:
         raise RuntimeError("SkillsBench treatment reducer produced non-compact run")
+    sync_skillsbench_loopx_turn_trace_into_compact(compact, controller_trace)
     if runner_prerequisites:
         compact["runner_prerequisites"] = runner_prerequisites
         _sync_relay_closeout_counts_into_compact(compact, runner_prerequisites)
@@ -12101,6 +15462,8 @@ def reduce_result(
             compact,
             runner_prerequisites,
         )
+    _apply_native_goal_worker_finish_guard_attribution(compact)
+    _apply_codex_cli_goal_countability_guard_attribution(compact)
     prereq_failure = _runner_prerequisite_failure_attribution(
         plan.get("runner_prerequisites")
     )
@@ -12119,7 +15482,7 @@ def reduce_result(
         ):
             _exception_type, score_failure_attribution, labels = prereq_failure
             compact["score_failure_attribution"] = score_failure_attribution
-            compact.setdefault("first_blocker", score_failure_attribution)
+            _sync_specific_runner_failure_root_blockers(compact)
             existing_labels = [
                 label
                 for label in compact.get("failure_attribution_labels", [])
@@ -12147,7 +15510,7 @@ def reduce_result(
                 ):
                     label = "skillsbench_host_local_acp_empty_trajectory_after_install"
                     compact["score_failure_attribution"] = label
-                    compact.setdefault("first_blocker", label)
+                    _sync_specific_runner_failure_root_blockers(compact)
                     existing_labels = [
                         item
                         for item in compact.get("failure_attribution_labels", [])
@@ -12157,6 +15520,13 @@ def reduce_result(
                         if item not in existing_labels:
                             existing_labels.append(item)
                     compact["failure_attribution_labels"] = existing_labels
+    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+        compact,
+        task_staging=task_staging,
+        setup_preflight=_public_task_setup_preflight(
+            plan.get("task_setup_preflight")
+        ),
+    )
     if task_staging:
         compact["task_staging"] = task_staging
     discovery = plan.get("result_discovery")
@@ -12183,12 +15553,20 @@ def reduce_result(
     diagnostic = build_compose_setup_diagnostic(compact, plan)
     if diagnostic.get("status") != "not_applicable":
         compact["compose_setup_diagnostic"] = diagnostic
+        apply_skillsbench_pre_agent_setup_diagnostic_attribution(compact)
+    _sync_specific_runner_failure_root_blockers(compact)
     runner_output_capture = _public_runner_output_capture(plan)
     if runner_output_capture:
         compact["runner_output_capture"] = runner_output_capture
     runner_config = _public_runner_config(plan)
     if runner_config:
         compact["runner_config"] = runner_config
+    app_server_observability = _app_server_goal_worker_observability(
+        plan,
+        controller_trace,
+    )
+    if app_server_observability:
+        compact["app_server_goal_worker_observability"] = app_server_observability
     goal_start_control_score = _build_goal_start_product_mode_control_score(
         compact,
         plan,
@@ -12196,7 +15574,11 @@ def reduce_result(
     if goal_start_control_score:
         compact["goal_start_product_mode_control_score"] = goal_start_control_score
     compact["case_event_timeline"] = _build_case_event_timeline(compact, plan)
-    compact["post_run_debug_gate"] = build_skillsbench_post_run_debug_gate(compact)
+    post_run_debug_gate = build_skillsbench_post_run_debug_gate(compact)
+    compact["post_run_debug_gate"] = post_run_debug_gate
+    solution_quality = post_run_debug_gate.get("solution_quality")
+    if isinstance(solution_quality, dict):
+        compact["solution_quality_signals"] = solution_quality
     return compact
 
 
@@ -12461,6 +15843,25 @@ def _recover_runner_failure_score_from_controller_trace(
             counters.get("product_mode_no_open_todo_below_passing_reward_stop")
             is True
         ),
+        "product_mode_typed_repair_required": (
+            counters.get("product_mode_typed_repair_required") is True
+        ),
+        "product_mode_typed_repair_todo_identity_observed": (
+            counters.get("product_mode_typed_repair_todo_identity_observed") is True
+        ),
+        "product_mode_typed_repair_task_or_validation_delta": (
+            counters.get("product_mode_typed_repair_task_or_validation_delta") is True
+        ),
+        "product_mode_typed_repair_delta_observed": (
+            counters.get("product_mode_typed_repair_delta_observed") is True
+        ),
+        "product_mode_typed_repair_terminal": (
+            counters.get("product_mode_typed_repair_terminal") is True
+        ),
+        "product_mode_typed_repair_terminal_receipt_consistent": (
+            counters.get("product_mode_typed_repair_terminal_receipt_consistent")
+            is True
+        ),
         "official_score_policy": (
             "final_observed_controller_trace_reward_after_runner_interruption"
         ),
@@ -12473,6 +15874,13 @@ def _recover_runner_failure_score_from_controller_trace(
         "product_mode_no_open_todo_below_passing_reward_round",
         "product_mode_no_open_todo_below_passing_reward_stop_round",
         "product_mode_no_open_todo_below_passing_reward_open_todo_count_public",
+        "product_mode_typed_repair_trigger_round",
+        "product_mode_typed_repair_round_entered",
+        "product_mode_typed_repair_round_entered_count",
+        "product_mode_typed_repair_resolved_round",
+        "product_mode_typed_repair_task_facing_success_delta",
+        "product_mode_typed_repair_terminal_round",
+        "product_mode_typed_repair_open_todo_count_public",
     ):
         value = counters.get(source_key)
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
@@ -12491,6 +15899,13 @@ def _recover_runner_failure_score_from_controller_trace(
         round_reward_trace[
             "product_mode_no_open_todo_below_passing_reward_score"
         ] = no_open_todo_score
+    for source_key in (
+        "product_mode_typed_repair_policy_id",
+        "product_mode_typed_repair_terminal_reason",
+    ):
+        value = counters.get(source_key)
+        if isinstance(value, str) and value:
+            round_reward_trace[source_key] = value
     round_reward_trace.update(stats)
 
     interaction_counters = compact.get("interaction_counters")
@@ -12863,6 +16278,72 @@ def _recover_runner_failure_score_from_verifier_artifact(
     return True
 
 
+def _apply_runner_failure_attempt_accounting_from_public_activity(
+    compact: dict[str, Any],
+    runner_prerequisites: Mapping[str, Any],
+) -> None:
+    """Count a solver attempt when public bridge evidence proves task work."""
+
+    task_operation_count = _nonbool_int(
+        runner_prerequisites.get(
+            "remote_command_file_bridge_agent_task_facing_operation_count"
+        )
+    )
+    raw_task_success_count = runner_prerequisites.get(
+        "remote_command_file_bridge_agent_task_facing_success_count"
+    )
+    if isinstance(raw_task_success_count, int) and not isinstance(
+        raw_task_success_count, bool
+    ):
+        task_success_count = max(0, raw_task_success_count)
+    else:
+        raw_request_count = runner_prerequisites.get(
+            "remote_command_file_bridge_agent_request_count"
+        )
+        raw_success_count = runner_prerequisites.get(
+            "remote_command_file_bridge_agent_success_count"
+        )
+        if (
+            isinstance(raw_request_count, int)
+            and not isinstance(raw_request_count, bool)
+            and raw_request_count >= task_operation_count
+            and isinstance(raw_success_count, int)
+            and not isinstance(raw_success_count, bool)
+            and 0 <= raw_success_count <= raw_request_count
+        ):
+            non_task_operation_count = raw_request_count - task_operation_count
+            task_success_count = max(
+                0,
+                raw_success_count - non_task_operation_count,
+            )
+        else:
+            task_success_count = 0
+    if task_operation_count <= 0 or task_success_count <= 0:
+        return
+
+    from loopx.benchmark_core import (
+        BenchmarkFailureClass,
+        build_benchmark_attempt_accounting,
+        canonical_lifecycle,
+    )
+
+    failure_label = str(compact.get("score_failure_attribution") or "")
+    compact["attempt_accounting"] = build_benchmark_attempt_accounting(
+        lifecycle=canonical_lifecycle(
+            process_started=True,
+            runner_accepted_args=True,
+            job_root_materialized=True,
+            trial_started=True,
+            worker_started=True,
+        ),
+        failure_label=failure_label,
+        failure_class=BenchmarkFailureClass.SOLVER_FAILED,
+        solver_attempted=True,
+        verifier_attempted=False,
+        official_score_attempted=False,
+    )
+
+
 def build_runner_failure_compact(
     args: argparse.Namespace,
     plan: dict[str, Any],
@@ -12877,10 +16358,10 @@ def build_runner_failure_compact(
         skillsbench_runner_error_attribution,
         skillsbench_runner_error_fingerprint,
     )
-    from loopx.status import (
+    from loopx.benchmarks.read_models.skillsbench_post_run_debug import (
         build_skillsbench_post_run_debug_gate,
-        compact_benchmark_run,
     )
+    from loopx.status import compact_benchmark_run
 
     plan.setdefault("runner_prerequisites", {})
     _ensure_runner_interruption_prerequisites(plan, exc)
@@ -12890,6 +16371,10 @@ def build_runner_failure_compact(
         exc,
         cleanup_if_missing=True,
     )
+    controller_trace = _read_controller_trace(plan)
+    _merge_app_server_goal_worker_trace_summary(plan, controller_trace)
+    _merge_host_local_acp_relay_trace_summary(plan, controller_trace)
+    _write_controller_trace(plan, controller_trace)
     _write_public_runner_config(plan)
     _write_public_runner_prerequisites(plan)
 
@@ -12980,6 +16465,7 @@ def build_runner_failure_compact(
     diagnostic = build_compose_setup_diagnostic(compact, plan)
     if diagnostic.get("status") != "not_applicable":
         compact["compose_setup_diagnostic"] = diagnostic
+        apply_skillsbench_pre_agent_setup_diagnostic_attribution(compact)
     trials = compact.get("trials")
     if isinstance(trials, list) and trials:
         trial = trials[0]
@@ -13000,6 +16486,11 @@ def build_runner_failure_compact(
         "no_raw_trajectory_read": True,
         "no_leaderboard_upload_requested": True,
     }
+    if runner_prerequisites:
+        _apply_runner_failure_attempt_accounting_from_public_activity(
+            compact,
+            runner_prerequisites,
+        )
     reduced = compact_benchmark_run(compact)
     if reduced is None:
         raise RuntimeError("SkillsBench runner failure reducer produced non-compact run")
@@ -13018,11 +16509,29 @@ def build_runner_failure_compact(
     runner_config = _public_runner_config(plan)
     if runner_config:
         reduced["runner_config"] = runner_config
+    app_server_observability = _app_server_goal_worker_observability(
+        plan,
+        controller_trace,
+    )
+    if app_server_observability:
+        reduced["app_server_goal_worker_observability"] = app_server_observability
     recovered = _recover_runner_failure_score_from_controller_trace(reduced, plan)
     if not recovered:
         _recover_runner_failure_score_from_verifier_artifact(reduced, plan)
+    _apply_codex_cli_goal_countability_guard_attribution(reduced)
+    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+        reduced,
+        task_staging=_effective_public_task_staging(plan),
+        setup_preflight=_public_task_setup_preflight(
+            plan.get("task_setup_preflight")
+        ),
+    )
     reduced["case_event_timeline"] = _build_case_event_timeline(reduced, plan)
-    reduced["post_run_debug_gate"] = build_skillsbench_post_run_debug_gate(reduced)
+    post_run_debug_gate = build_skillsbench_post_run_debug_gate(reduced)
+    reduced["post_run_debug_gate"] = post_run_debug_gate
+    solution_quality = post_run_debug_gate.get("solution_quality")
+    if isinstance(solution_quality, dict):
+        reduced["solution_quality_signals"] = solution_quality
     return reduced
 
 
@@ -13032,15 +16541,17 @@ def update_ledger(
     *,
     compact_path: Path | None = None,
 ) -> dict[str, Any]:
-    from loopx.benchmark_ledger import update_benchmark_run_ledger
+    from loopx.benchmark_ledger import (
+        build_benchmark_run_ledger_current_aggregate,
+        load_benchmark_run_ledger,
+        update_benchmark_run_ledger,
+    )
 
     note_route = (
-        "LoopX prompt-driven polling test"
-        if args.route == LOOPX_PROMPT_POLLING_TEST_ROUTE
-        else "LoopX blind-loop treatment"
-        if args.route == LOOPX_BLIND_LOOP_TREATMENT_ROUTE
-        else "Codex ACP blind-loop baseline"
+        "Codex ACP blind-loop baseline"
         if args.route == "codex-acp-blind-loop-baseline"
+        else "Codex CLI /goal baseline"
+        if args.route == CODEX_CLI_GOAL_BASELINE_ROUTE
         else "LoopX goal-start product-mode treatment"
         if args.route == LOOPX_GOAL_START_PRODUCT_MODE_ROUTE
         else "LoopX product-mode treatment"
@@ -13088,6 +16599,51 @@ def update_ledger(
             dry_run=dry_run,
         )
 
+    current_aggregate_update: dict[str, Any] = {
+        "schema_version": "skillsbench_current_aggregate_update_v0",
+        "requested": bool(args.update_current_aggregate),
+        "updated": False,
+    }
+    if args.update_current_aggregate:
+        current_aggregate_path = _expanded_path(args.current_aggregate_path)
+        current_aggregate_update.update(
+            {
+                "output_path": str(current_aggregate_path),
+                "raw_logs_read": False,
+                "raw_task_text_read": False,
+                "raw_trajectory_read": False,
+            }
+        )
+        if dry_run:
+            current_aggregate_update["status"] = "dry_run"
+        else:
+            ledger_for_aggregate_path = (
+                global_ledger_path
+                if not args.skip_global_ledger_sync
+                else primary_ledger_path
+            )
+            ledger_for_aggregate = load_benchmark_run_ledger(ledger_for_aggregate_path)
+            aggregate = build_benchmark_run_ledger_current_aggregate(
+                ledger_for_aggregate,
+                benchmark_id="skillsbench@1.1",
+                source_ledger_count=1,
+            )
+            current_aggregate_path.parent.mkdir(parents=True, exist_ok=True)
+            current_aggregate_path.write_text(
+                json.dumps(aggregate, ensure_ascii=False, indent=2, sort_keys=True)
+                + "\n",
+                encoding="utf-8",
+            )
+            current_aggregate_update.update(
+                {
+                    "status": "updated",
+                    "updated": True,
+                    "canonical_total": aggregate.get("canonical_total"),
+                    "canonical_covered": aggregate.get("canonical_covered"),
+                    "distribution": aggregate.get("distribution"),
+                }
+            )
+
     result = dict(primary_update)
     result["ledger_scope"] = _ledger_scope_label(primary_ledger_path, global_ledger_path)
     result["primary_ledger_update"] = primary_update
@@ -13095,6 +16651,7 @@ def update_ledger(
     result["global_ledger_sync_enabled"] = not bool(args.skip_global_ledger_sync)
     result["global_ledger_update"] = global_update
     result["global_ledger_inheritance"] = ledger_inheritance
+    result["current_aggregate_update"] = current_aggregate_update
     return result
 
 
@@ -13106,18 +16663,17 @@ def append_history(args: argparse.Namespace, compact_path: Path) -> dict[str, An
             "appended": False,
         }
     classification_by_route = {
-        "loopx-blind-loop-treatment": "skillsbench_loopx_blind_loop_treatment_result_v0",
-        "loopx-prompt-polling-test": "skillsbench_loopx_prompt_polling_test_result_v0",
         "codex-acp-blind-loop-baseline": "skillsbench_codex_acp_blind_loop_baseline_result_v0",
+        "codex-cli-goal-baseline": "skillsbench_codex_cli_goal_baseline_result_v0",
         "loopx-product-mode": "skillsbench_loopx_product_mode_result_v0",
         "loopx-goal-start-product-mode": "skillsbench_loopx_goal_start_product_mode_result_v0",
+        "loopx-turn-agent-cli": "skillsbench_loopx_turn_agent_cli_result_v0",
         "raw-codex-autonomous-max5": "skillsbench_raw_codex_autonomous_max5_result_v0",
         "codex-app-server-goal-baseline": "skillsbench_codex_app_server_goal_baseline_result_v0",
-        "codex-goal-mode-baseline": "skillsbench_codex_goal_mode_baseline_result_v0",
     }
     classification = classification_by_route.get(
         args.route,
-        "skillsbench_codex_goal_mode_baseline_result_v0",
+        "skillsbench_unknown_route_result_v0",
     )
     cmd = [
         sys.executable,
@@ -13244,40 +16800,54 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "case behavior."
         ),
     )
+    parser.add_argument(
+        "--batch-case-start-gap-sec",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum delay between starting consecutive cases in a "
+            "--task-ids batch. This is useful for host-agent routes whose "
+            "backend session startup is rate limited; 0 preserves the "
+            "previous immediate-start behavior."
+        ),
+    )
     parser.add_argument("--dataset", default="skillsbench@1.1")
     parser.add_argument(
         "--route",
-        choices=SUPPORTED_ROUTES,
         default=DEFAULT_ROUTE,
         help=(
-            "codex-app-server-goal-baseline is the native Codex Goal baseline; "
-            "loopx-prompt-polling-test is the current no-reward-feedback "
-            "test route with scheduled continuation prompts; "
-            "loopx-blind-loop-treatment is the historical SkillsBench "
-            "alias for the same polling semantics; codex-acp-blind-loop-baseline "
-            "is the ordinary Codex no-goal baseline with the same loop budget; "
+            "codex-cli-goal-baseline is the canonical Codex Goal baseline "
+            "using the host Codex CLI TUI /goal slash command; "
+            "codex-acp-blind-loop-baseline is the ordinary Codex no-goal "
+            "baseline with a fixed no-feedback loop budget; "
             "raw-codex-autonomous-max5 and loopx-goal-start-product-mode are "
             "the main-table raw/new comparison routes; "
             "loopx-goal-start-product-mode adds /loopx goal-start planning "
             "with a compact ranked todo plan before selected-P0 lifecycle; "
-            "codex-app-server-goal-baseline is the native Codex Goal baseline "
-            "contract using app-server thread/goal/set/get and turn/start; "
-            "codex-goal-mode-baseline sends one /goal-prefixed prompt request "
-            "with no reward follow-up, but native goal-mode invocation remains "
-            "unconfirmed without CLI slash-command/goal-state evidence and is "
-            "blocked by default except for --plan-only or explicit experiments. "
+            "codex-app-server-goal-baseline is a deprecated legacy app-server "
+            "Goal route retained for explicit compatibility experiments only; "
             "Routes that return official verifier feedback to the agent are "
             "unsupported because they leak oracle signal into the loop."
         ),
     )
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument(
+        "--reasoning-effort",
+        default=None,
+        help=(
+            "Generic Codex reasoning effort for routes backed by Codex. "
+            "For codex-acp routes this is forwarded to codex exec via "
+            "-c model_reasoning_effort=...; for native app-server Goal routes "
+            "it overrides --app-server-reasoning-effort."
+        ),
+    )
+    parser.add_argument(
         "--app-server-reasoning-effort",
         default="high",
         help=(
-            "Reasoning effort passed as turn/start effort for native "
-            "codex-app-server-goal-baseline runs. Formal benchmark runs "
-            "default to high."
+            "Legacy/native app-server-only reasoning effort passed as "
+            "turn/start effort for codex-app-server-goal-baseline runs. "
+            "Prefer --reasoning-effort for cross-route benchmark runs."
         ),
     )
     parser.add_argument("--sandbox", default="docker")
@@ -13306,31 +16876,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=int,
         default=1,
         help=(
-            "Run the same codex-app-server-goal-baseline case as multiple "
-            "independent native Goal attempts. Each attempt gets a fresh "
+            "Run the same native Goal case as multiple independent attempts "
+            "for supported goal routes. Each attempt gets a fresh "
             "job/rollout/thread; official verifier reward is observed only by "
             "the runner to decide whether to stop before the retry budget, and "
             "is never forwarded to the worker."
         ),
     )
     parser.add_argument(
-        "--treatment-prompt-style",
-        choices=("structured", "baseline-safe"),
-        default="structured",
-        help=(
-            "Diagnostic prompt wrapper for loopx-blind-loop-treatment. "
-            "Also applies to loopx-prompt-polling-test. "
-            "baseline-safe keeps treatment routing/ledger metadata while using "
-            "the baseline-style first prompt to isolate ACP prompt-wrapper issues."
-        ),
-    )
-    parser.add_argument(
-        "--allow-unverified-goal-prefix-baseline",
+        "--allow-deprecated-app-server-goal-route",
         action="store_true",
         help=(
-            "Allow the codex-goal-mode-baseline route to run as an explicit "
-            "slash-prefix experiment. This does not prove native Codex Goal "
-            "mode and must not be used for A/B uplift claims."
+            "Allow codex-app-server-goal-baseline to execute as an explicit "
+            "legacy compatibility experiment. Normal SkillsBench Goal baselines "
+            "must use codex-cli-goal-baseline."
         ),
     )
     parser.add_argument("--outer-timeout-sec", type=int, default=DEFAULT_TIMEOUT_SEC)
@@ -13338,11 +16897,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--build-stall-timeout-sec",
         type=int,
-        default=0,
+        default=DEFAULT_BUILD_STALL_TIMEOUT_SEC,
         help=(
             "Optional public-safe watchdog for Docker build/setup before any "
-            "agent lifecycle starts. 0 keeps the historical behavior and relies "
-            "only on --outer-timeout-sec."
+            "agent lifecycle starts. Defaults to "
+            f"{DEFAULT_BUILD_STALL_TIMEOUT_SEC}s; pass 0 to disable the "
+            "watchdog. Positive values are honored for setup-stall attribution."
         ),
     )
     parser.add_argument("--agent-idle-timeout", type=int, default=900)
@@ -13364,6 +16924,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "0 preserves upstream verifier behavior; nonzero failures close "
             "out with compact public-safe verifier-timeout attribution and no "
             "raw verifier output."
+        ),
+    )
+    parser.add_argument(
+        "--verifier-dependency-cache-mode",
+        choices=("off", "shared"),
+        default="shared",
+        help=(
+            "Reuse package-manager and browser artifacts for Docker verifier "
+            "bootstrap. shared is the default; tasks without detected verifier "
+            "bootstrap risk do not receive the cache mount."
+        ),
+    )
+    parser.add_argument(
+        "--verifier-dependency-cache-root",
+        default=os.environ.get(
+            "LOOPX_SKILLSBENCH_VERIFIER_DEPENDENCY_CACHE_ROOT",
+            verifier_cache.DEFAULT_VERIFIER_DEPENDENCY_CACHE_ROOT,
+        ),
+        help=(
+            "Private host cache root for verifier dependency artifacts. The "
+            "path is never written to public benchmark output."
         ),
     )
     parser.add_argument(
@@ -13400,27 +16981,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "--agent-idle-timeout for long-running native Goal cases."
         ),
     )
+    parser.add_argument(
+        "--app-server-goal-followup-max",
+        type=int,
+        default=0,
+        help=(
+            "Experimental same-thread continuation budget for ordinary "
+            "completed codex-app-server-goal-baseline turns. The follow-up "
+            "prompt provides no verifier/reward/pass-fail feedback to the "
+            "worker. 0 preserves the native single-turn baseline."
+        ),
+    )
+    parser.add_argument(
+        "--app-server-goal-prompt-style",
+        choices=("bridge-only", "native-goal", "cli-exec-like"),
+        default="bridge-only",
+        help=(
+            "Prompt framing for codex-app-server-goal-baseline. bridge-only "
+            "keeps the bare app-server baseline to task prompt plus sandbox "
+            "bridge; native-goal adds app closeout framing; cli-exec-like keeps "
+            "the worker prompt closer to Codex exec for diagnostic compatibility."
+        ),
+    )
     parser.add_argument("--max-verifier-output-chars", type=int, default=0)
     parser.add_argument("--skillsbench-root", default=str(DEFAULT_SKILLSBENCH_ROOT))
-    parser.add_argument(
-        "--loopx-source-dir",
-        default=str(REPO_ROOT),
-        help=(
-            "Local LoopX checkout mounted read-only into docker product-mode "
-            "runs, or uploaded as a source fallback for older BenchFlow "
-            "host-local sandboxes, and executed with the real loopx.cli module. "
-            "Public compact artifacts record only the target/status, not this "
-            "host path."
-        ),
-    )
-    parser.add_argument(
-        "--no-loopx-source-mount",
-        action="store_true",
-        help=(
-            "Do not mount the local LoopX checkout for product-mode runs; the "
-            "case init falls back to the README GitHub installer."
-        ),
-    )
+    parser.add_argument("--loopx-source-dir", default=str(REPO_ROOT), help="Local LoopX checkout for case-runtime source mount/upload; the path is not recorded.")
+    parser.add_argument("--expected-loopx-git-head", default="", help="Fail before task execution unless runner LoopX checkout HEAD starts with this public commit prefix.")
+    parser.add_argument("--no-loopx-source-mount", action="store_true", help="Disable case-runtime LoopX source mount/upload and use the public installer path.")
     parser.add_argument(
         "--jobs-dir",
         default=str(REPO_ROOT / ".local/private-benchmark-jobs"),
@@ -13431,14 +17018,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--run-group-id",
         default=None,
     )
-    parser.add_argument("--ledger-path", default=str(DEFAULT_LEDGER))
+    parser.add_argument("--ledger-path", default=None)
     parser.add_argument(
         "--global-ledger-path",
-        default=str(DEFAULT_LEDGER),
+        default=None,
         help=(
-            "Canonical benchmark_run_ledger_v0 JSON. When --ledger-path points "
-            "to a run-group/local ledger, the runner inherits this ledger first "
-            "and syncs the new row back here unless --skip-global-ledger-sync is set."
+            "Canonical benchmark_run_ledger_v0 JSON. Defaults to a private "
+            ".local ledger unless --publish-public-ledger is set. When "
+            "--ledger-path points to a run-group/local ledger, the runner "
+            "inherits this ledger first and syncs the new row back here unless "
+            "--skip-global-ledger-sync is set."
+        ),
+    )
+    parser.add_argument(
+        "--publish-public-ledger",
+        action="store_true",
+        help=(
+            "Use the repository research ledger as the default --ledger-path "
+            "and --global-ledger-path. Without this explicit publish intent, "
+            "benchmark update-ledger writes default to a private .local ledger."
         ),
     )
     parser.add_argument(
@@ -13451,6 +17049,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Do not initialize a missing run-group/local ledger from --global-ledger-path.",
     )
+    parser.add_argument(
+        "--current-aggregate-path",
+        default=None,
+        help=(
+            "Path for the public-safe current aggregate projection refreshed "
+            "after --update-ledger. Defaults to current-aggregate-status.v3.json "
+            "next to --global-ledger-path."
+        ),
+    )
+    parser.add_argument(
+        "--skip-current-aggregate-update",
+        dest="update_current_aggregate",
+        action="store_false",
+        help="Do not refresh the current aggregate projection after writing the run ledger.",
+    )
+    parser.set_defaults(update_current_aggregate=True)
     parser.add_argument("--goal-id", default=DEFAULT_GOAL_ID)
     parser.add_argument("--registry", default=str(REPO_ROOT / ".loopx/registry.json"))
     parser.add_argument("--runtime-root", default=str(REPO_ROOT / ".local"))
@@ -13460,6 +17074,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--plan-only",
         action="store_true",
         help="Print launch plan without importing BenchFlow or running a task.",
+    )
+    parser.add_argument(
+        "--setup-only-public-preflight",
+        action="store_true",
+        help=(
+            "Materialize the BenchFlow job root and environment, then stop "
+            "before agent install, agent execution, and verification. Emit only "
+            "a compact public-safe setup classification."
+        ),
     )
     parser.add_argument(
         "--reduce-only",
@@ -13479,6 +17102,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--local-codex-bin",
         default="codex",
         help="Codex CLI binary for --local-codex-participant-ping.",
+    )
+    parser.add_argument(
+        "--local-codex-provider",
+        choices=("exact-host", "reverse-channel"),
+        default="exact-host",
+        help=(
+            "Structured host placement for Codex. reverse-channel enables the "
+            "fixed pre-agent bridge receipt for split-control launches."
+        ),
     )
     parser.add_argument(
         "--local-codex-sandbox",
@@ -13506,9 +17138,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help=(
             "Optional watchdog for the first sandbox bridge operation from a "
-            "host-local Codex turn. Omit to use the app-server Goal default "
+            "host-local Codex turn. Omit to use the Codex CLI Goal default "
+            f"({DEFAULT_CODEX_CLI_GOAL_FIRST_ACTION_TIMEOUT_SEC}s) for "
+            "codex-cli-goal-baseline, or the app-server Goal default "
             f"({DEFAULT_APP_SERVER_GOAL_FIRST_ACTION_TIMEOUT_SEC}s) for "
             "codex-app-server-goal-baseline; 0 disables the watchdog."
+        ),
+    )
+    parser.add_argument(
+        "--local-codex-goal-active-timeout-sec",
+        type=int,
+        default=None,
+        help=(
+            "Optional watchdog for observing Codex CLI /goal active state before "
+            "the first sandbox bridge operation. Omit to use the independent "
+            f"codex-cli-goal-baseline startup watchdog ({DEFAULT_CODEX_CLI_GOAL_ACTIVE_TIMEOUT_SEC}s); "
+            "0 disables this startup watchdog."
         ),
     )
     parser.add_argument(
@@ -13533,12 +17178,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "0 disables the watchdog."
         ),
     )
-    parser.add_argument(
-        "--local-codex-ping-timeout-sec",
-        type=int,
-        default=120,
-        help="Timeout for --local-codex-participant-ping.",
-    )
+    parser.add_argument("--local-codex-ping-timeout-sec", type=int, default=120, help="Timeout for --local-codex-participant-ping.")
+    parser.add_argument("--codex-cli-goal-thread-prewarm", action="store_true", help="Prewarm the Codex CLI TUI thread before codex-cli-goal /goal startup canaries.")
     parser.add_argument(
         "--local-driver-worker-handshake-preflight",
         action="store_true",
@@ -13621,11 +17262,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=CODEX_API_EGRESS_MODE_CHOICES,
         default=os.environ.get("LOOPX_CODEX_API_EGRESS_MODE", "auto"),
         help=(
-            "How native app-server goal workers reach the Codex backend. "
-            "For formal host-local app-server benchmark runs, auto resolves "
-            "to reverse-tunnel so the runner fails fast unless a checked HTTP "
-            "CONNECT reverse tunnel proxy is configured. direct is intended "
-            "only for explicit local debugging."
+            "How host-local Codex workers reach the Codex backend. For formal "
+            "host-local app-server benchmark runs, auto resolves to "
+            "reverse-tunnel so the runner fails fast unless a checked HTTP "
+            "CONNECT reverse tunnel proxy is configured. For other host-local "
+            "routes, explicit reverse-tunnel/direct requests are honored; "
+            "direct is intended only for explicit local debugging."
         ),
     )
     parser.add_argument(
@@ -13661,12 +17303,73 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--benchmark-egress-no-proxy",
+        default=os.environ.get("LOOPX_SKILLSBENCH_EGRESS_NO_PROXY", ""),
+        help=(
+            "Comma-separated NO_PROXY additions for benchmark setup/verifier "
+            "egress. The value is merged with loopback and public benchmark "
+            "endpoint defaults, forwarded only to private subprocess/worker "
+            "environments, and never recorded raw in public artifacts."
+        ),
+    )
+    parser.add_argument(
         "--benchmark-egress-proxy-preflight-timeout-sec",
         type=float,
         default=DEFAULT_BENCHMARK_EGRESS_PROXY_PREFLIGHT_TIMEOUT_SEC,
         help=(
             "Timeout for the benchmark setup/verifier egress proxy preflight. "
             "The probe records no raw proxy URL or raw response output."
+        ),
+    )
+    parser.add_argument(
+        "--docker-apt-source-mode",
+        choices=DOCKER_APT_SOURCE_MODES,
+        default=DEFAULT_DOCKER_APT_SOURCE_MODE,
+        help=(
+            "Apt source policy used by staged Dockerfile repair. mirror "
+            "preserves the default fixed mirrors; primary keeps the task's "
+            "original sources as a bounded fallback after a typed mirror "
+            "network failure."
+        ),
+    )
+    parser.add_argument(
+        "--docker-apt-transport-mode",
+        choices=DOCKER_APT_TRANSPORT_MODES,
+        default=DEFAULT_DOCKER_APT_TRANSPORT_MODE,
+        help=(
+            "Apt transport policy used by staged Dockerfile repair. default "
+            "preserves current retry behavior; proxy-compatible additionally "
+            "disables HTTP(S) pipelining and forces IPv4 without recording "
+            "or changing proxy endpoints."
+        ),
+    )
+    parser.add_argument(
+        "--docker-pip-index-mode",
+        choices=tuple(DOCKER_PIP_INDEX_MODES),
+        default=DEFAULT_DOCKER_PIP_INDEX_MODE,
+        help=(
+            "Public package index used by the staged Dockerfile pip bootstrap "
+            "repair. mirror preserves the default; primary provides a bounded "
+            "fallback after a typed mirror-network setup failure."
+        ),
+    )
+    parser.add_argument(
+        "--docker-pip-build-mode",
+        choices=DOCKER_PIP_BUILD_MODES,
+        default=DEFAULT_DOCKER_PIP_BUILD_MODE,
+        help=(
+            "Build-isolation policy used by the staged Dockerfile pip bootstrap. "
+            "isolated preserves the default; no-isolation is a bounded fallback "
+            "after a typed build-dependency subprocess failure."
+        ),
+    )
+    parser.add_argument(
+        "--docker-gcr-mirror-prefix",
+        default=os.environ.get("LOOPX_SKILLSBENCH_GCR_MIRROR_PREFIX", ""),
+        help=(
+            "Optional private runtime registry prefix used only for staged "
+            "Dockerfile FROM rewrites of gcr.io/oss-fuzz-base images. Public "
+            "artifacts record only booleans and never the raw prefix."
         ),
     )
     parser.add_argument(
@@ -13769,6 +17472,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "requests, not only driver checkpoints."
         ),
     )
+    add_skillsbench_loopx_turn_arguments(parser)
     parser.add_argument(
         "--remote-command-file-bridge-probe-timeout-sec",
         type=float,
@@ -13808,6 +17512,38 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     apt_fail_fast_explicit = "--fail-fast-on-apt-risk" in raw_argv
     verifier_fail_fast_explicit = "--fail-fast-on-verifier-bootstrap-risk" in raw_argv
     args = parser.parse_args(raw_argv)
+    if args.route in HISTORICAL_REDUCER_ROUTES:
+        if not args.reduce_only:
+            parser.error(
+                "historical prompt-polling routes are read-only and require "
+                "--reduce-only"
+            )
+    elif args.route not in SUPPORTED_ROUTES:
+        parser.error(
+            f"unsupported --route {args.route!r}; choose one of "
+            + ", ".join(SUPPORTED_ROUTES)
+        )
+    if args.setup_only_public_preflight and (args.plan_only or args.reduce_only):
+        parser.error(
+            "--setup-only-public-preflight is incompatible with --plan-only "
+            "and --reduce-only"
+        )
+    if args.setup_only_public_preflight and (args.append_history or args.update_ledger):
+        parser.error(
+            "--setup-only-public-preflight does not append history or update ledgers"
+        )
+    default_ledger = (
+        PUBLIC_BENCHMARK_RUN_LEDGER if args.publish_public_ledger else DEFAULT_LEDGER
+    )
+    if args.ledger_path is None:
+        args.ledger_path = str(default_ledger)
+    if args.global_ledger_path is None:
+        args.global_ledger_path = str(default_ledger)
+    if args.current_aggregate_path is None:
+        args.current_aggregate_path = str(
+            Path(args.global_ledger_path).expanduser().parent
+            / DEFAULT_CURRENT_AGGREGATE_FILENAME
+        )
     args.apt_risk_fail_fast_defaulted = False
     args.verifier_bootstrap_fail_fast_defaulted = False
     args.bootstrap_light_fail_fast_defaulted = False
@@ -13832,6 +17568,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     if args.parallel_cases < 1:
         parser.error("--parallel-cases must be >= 1")
+    if args.batch_case_start_gap_sec < 0:
+        parser.error("--batch-case-start-gap-sec must be >= 0")
     batch_task_ids = _split_task_ids_arg(args.task_ids)
     if args.task_ids is not None and not batch_task_ids:
         parser.error("--task-ids must contain at least one task id")
@@ -13842,10 +17580,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     if args.independent_goal_retries < 1:
         parser.error("--independent-goal-retries must be >= 1")
     if args.independent_goal_retries > 1:
-        if args.route != "codex-app-server-goal-baseline":
+        if args.setup_only_public_preflight:
+            parser.error(
+                "--setup-only-public-preflight does not use independent goal retries"
+            )
+        if args.route not in INDEPENDENT_GOAL_RETRY_ROUTES:
             parser.error(
                 "--independent-goal-retries currently applies only to "
-                "codex-app-server-goal-baseline"
+                "native Goal routes"
             )
         if args.reduce_only:
             parser.error("--independent-goal-retries is not compatible with --reduce-only")
@@ -13858,6 +17600,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         args.route in PRODUCT_MODE_CONTROLLER_ROUTES
         and not args.plan_only
         and not args.reduce_only
+        and not args.setup_only_public_preflight
         and args.max_rounds < PRODUCT_MODE_MIN_FORMAL_MAX_ROUNDS
     ):
         parser.error(
@@ -13884,6 +17627,38 @@ async def async_main(
         plan = build_plan(args)
     if args.plan_only:
         return {"ok": True, "plan_only": True, "launch_plan": plan}
+    if not args.reduce_only:
+        write_benchmark_run_observable_status(
+            jobs_dir=plan.get("jobs_dir"),
+            job_name=plan.get("job_name"),
+            status="running",
+            record_pid=True,
+        )
+    runner_status_written = False
+    try:
+        return await _async_main_with_observable_handle(args, plan)
+    except BaseException as exc:
+        if not args.reduce_only:
+            write_benchmark_run_observable_status(
+                jobs_dir=plan.get("jobs_dir"),
+                job_name=plan.get("job_name"),
+                status=f"exception={type(exc).__name__}",
+            )
+            runner_status_written = True
+        raise
+    finally:
+        if not args.reduce_only and not runner_status_written:
+            write_benchmark_run_observable_status(
+                jobs_dir=plan.get("jobs_dir"),
+                job_name=plan.get("job_name"),
+                status="rc=0",
+            )
+
+
+async def _async_main_with_observable_handle(
+    args: argparse.Namespace,
+    plan: dict[str, Any],
+) -> dict[str, Any]:
     runtime_layer = (
         plan.get("benchflow_agent_runtime_layer")
         if isinstance(plan.get("benchflow_agent_runtime_layer"), dict)
@@ -13891,6 +17666,7 @@ async def async_main(
     )
     if (
         getattr(args, "require_preinstalled_benchflow_agent_runtime", False)
+        and not args.setup_only_public_preflight
         and runtime_layer.get("ready") is not True
     ):
         prerequisites = plan.setdefault("runner_prerequisites", {})
@@ -13963,7 +17739,11 @@ async def async_main(
         )
     if (
         not args.reduce_only
-        and setup_preflight.get("status") == "task_missing_from_canonical_tasks"
+        and setup_preflight.get("status")
+        in {
+            "task_missing_from_canonical_tasks",
+            "task_excluded_from_formal_tasks",
+        }
     ):
         staging = plan.setdefault("task_staging", {})
         if isinstance(staging, dict):
@@ -13975,14 +17755,32 @@ async def async_main(
                     args=args,
                 )
             staging["task_source_preflight_blocked"] = True
+            if setup_preflight.get("status") == "task_excluded_from_formal_tasks":
+                staging["task_source_excluded_preflight_blocked"] = True
+                staging["task_source_excluded"] = True
+        if setup_preflight.get("status") == "task_excluded_from_formal_tasks":
+            raise SkillsBenchSetupPreflightBlocked(
+                "skillsbench task source excluded: "
+                "task is excluded from formal tasks source before full case run"
+            )
         raise SkillsBenchSetupPreflightBlocked(
             "skillsbench task source preflight blocked: "
             "task missing from canonical tasks source before full case run"
         )
 
+    codex_runtime.run_preflight_if_required(
+        args,
+        plan,
+        writeback=lambda: (
+            _write_public_runner_config(plan),
+            _write_public_runner_prerequisites(plan),
+        ),
+    )
+
     if (
         _codex_api_egress_preflight_required(args)
         and not args.reduce_only
+        and not args.setup_only_public_preflight
     ):
         try:
             _run_codex_api_egress_preflight(args, plan)
@@ -13996,13 +17794,6 @@ async def async_main(
         finally:
             _write_public_runner_config(plan)
             _write_public_runner_prerequisites(plan)
-
-    if (
-        _host_local_acp_codex_exec_preflight_should_run(args)
-        and args.host_local_acp_launch
-        and not args.reduce_only
-    ):
-        _run_host_local_acp_codex_exec_preflight(args, plan)
 
     if not args.reduce_only:
         _write_public_runner_config(plan)
@@ -14018,12 +17809,32 @@ async def async_main(
         _merge_final_result_round_reward(controller_trace, result_path)
         _write_controller_trace(plan, controller_trace)
     else:
-        result_path = await asyncio.wait_for(
+        case_result = await asyncio.wait_for(
             run_benchflow_case_with_private_output(args, plan),
             timeout=args.outer_timeout_sec,
         )
-        _write_public_runner_config(plan)
-        _write_public_runner_prerequisites(plan)
+        if args.setup_only_public_preflight:
+            if not isinstance(case_result, dict):
+                raise TypeError("setup-only preflight returned a non-object result")
+            preflight_path = _write_setup_only_public_preflight(plan, case_result)
+            _write_public_runner_config(plan)
+            _write_public_runner_prerequisites(plan)
+            passed = case_result.get("status") == "passed"
+            return {
+                "ok": passed,
+                "setup_only_public_preflight": True,
+                "task_id": str(args.task_id),
+                "route": str(args.route),
+                "run_group_id": str(args.run_group_id or ""),
+                "job_name": str(plan.get("job_name") or ""),
+                "preflight": case_result,
+                "setup_only_public_preflight_json": preflight_path.name,
+                "compact_closeout_recorded": True,
+                "runner_returncode": 0 if passed else 1,
+            }
+        if not isinstance(case_result, Path):
+            raise TypeError("SkillsBench case returned a non-path result")
+        result_path = case_result
     compact = reduce_result(args, result_path, plan)
     compact_path = Path(plan["compact_benchmark_run_json"])
     compact_path.parent.mkdir(parents=True, exist_ok=True)
@@ -14045,76 +17856,6 @@ async def async_main(
         "ledger_update": ledger_update,
         "history_append": history_append,
     }
-
-
-def _batch_task_ids(args: argparse.Namespace) -> list[str]:
-    return _split_task_ids_arg(getattr(args, "task_ids", None)) or [
-        str(args.task_id)
-    ]
-
-
-def _clone_args_for_batch_case(
-    args: argparse.Namespace,
-    *,
-    task_id: str,
-    index: int,
-    total: int,
-    run_group_id: str,
-) -> argparse.Namespace:
-    case_args = argparse.Namespace(**vars(args))
-    case_args.task_id = task_id
-    case_args.task_ids = None
-    case_args.run_group_id = run_group_id
-    if total > 1:
-        suffix = _safe_batch_suffix(task_id, index)
-        if args.job_name:
-            case_args.job_name = f"{args.job_name}-{suffix}"
-        if args.rollout_name:
-            case_args.rollout_name = f"{args.rollout_name}-{suffix}"
-    return case_args
-
-
-def _batch_case_args_to_cli(case_args: argparse.Namespace) -> list[str]:
-    cli: list[str] = []
-    for key, value in sorted(vars(case_args).items()):
-        if key == "task_ids":
-            continue
-        if key in BATCH_CASE_INTERNAL_ARG_KEYS:
-            continue
-        if (
-            key == "fail_fast_on_apt_risk"
-            and getattr(case_args, "apt_risk_fail_fast_defaulted", False)
-        ):
-            continue
-        if (
-            key == "fail_fast_on_verifier_bootstrap_risk"
-            and getattr(case_args, "verifier_bootstrap_fail_fast_defaulted", False)
-        ):
-            continue
-        option = "--" + key.replace("_", "-")
-        if key == "parallel_cases":
-            value = 1
-        if value is None:
-            continue
-        if isinstance(value, bool):
-            if value:
-                cli.append(option)
-            continue
-        cli.extend([option, str(value)])
-    return cli
-
-
-def _parallel_batch_requires_subprocess_isolation(parallel_cases: int) -> bool:
-    return parallel_cases > 1
-
-
-BATCH_CASE_INTERNAL_ARG_KEYS = frozenset(
-    {
-        "apt_risk_fail_fast_defaulted",
-        "bootstrap_light_fail_fast_defaulted",
-        "verifier_bootstrap_fail_fast_defaulted",
-    }
-)
 
 
 def _load_json_object_from_mixed_text(text: str) -> tuple[dict[str, Any], bool]:
@@ -14235,9 +17976,8 @@ async def async_batch_main(
     )
     parallel_cases = min(max(1, int(args.parallel_cases or 1)), len(selected_task_ids))
     semaphore = asyncio.Semaphore(parallel_cases)
-    isolate_case_processes = _parallel_batch_requires_subprocess_isolation(
-        parallel_cases
-    )
+    isolate_case_processes = _parallel_isolation_required(parallel_cases)
+    case_start_pacer = BatchCaseStartPacer(args.batch_case_start_gap_sec)
 
     async def run_one(index: int, task_id: str) -> dict[str, Any]:
         case_args = _clone_args_for_batch_case(
@@ -14247,14 +17987,18 @@ async def async_batch_main(
             total=len(selected_task_ids),
             run_group_id=run_group_id,
         )
-        case_plan = build_plan(case_args)
         async with semaphore:
+            case_start_wait_sec = await case_start_pacer.wait_for_slot()
+            case_plan = build_plan(case_args)
             try:
                 if isolate_case_processes:
-                    return await _run_batch_case_subprocess(case_args)
+                    return case_start_pacer.annotate_payload(
+                        await _run_batch_case_subprocess(case_args),
+                        case_start_wait_sec,
+                    )
                 payload = await async_main(case_args, plan=case_plan)
-                payload["runner_returncode"] = 0
-                return payload
+                payload.setdefault("runner_returncode", 0)
+                return case_start_pacer.annotate_payload(payload, case_start_wait_sec)
             except Exception as exc:
                 payload, returncode = _build_runner_exception_closeout_payload(
                     case_args,
@@ -14262,7 +18006,7 @@ async def async_batch_main(
                     exc,
                 )
                 payload["runner_returncode"] = returncode
-                return payload
+                return case_start_pacer.annotate_payload(payload, case_start_wait_sec)
 
     results = await asyncio.gather(
         *(run_one(index, task_id) for index, task_id in enumerate(selected_task_ids))
@@ -14274,6 +18018,7 @@ async def async_batch_main(
         "task_count": len(selected_task_ids),
         "parallel_cases": parallel_cases,
         "case_process_isolation": isolate_case_processes,
+        "case_start_gap_sec": case_start_pacer.start_gap_sec,
         "run_group_id": run_group_id,
         "results": results,
         "runner_returncode": returncode,
@@ -14534,29 +18279,125 @@ async def async_independent_goal_retry_main(args: argparse.Namespace) -> dict[st
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     logging.getLogger().setLevel(logging.WARNING)
+    if args.local_codex_participant_ping:
+        payload = codex_runtime.materialize_local_codex_participant(
+            codex_bin=args.local_codex_bin,
+            timeout_sec=args.local_codex_ping_timeout_sec,
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
+        return 0 if payload.get("codex_cli_invoked") is True else 1
+    if args.local_driver_worker_handshake_preflight:
+        ensure_skillsbench_dependency_python(args)
+        payload = inspect_skillsbench_worker_handshake(
+            skillsbench_root=args.skillsbench_root,
+            dataset=args.dataset,
+            task_id=args.task_id,
+            local_codex_cli_participant_ready=args.local_codex_cli_participant_ready,
+            local_acp_relay_command=args.local_acp_relay_command,
+            probe_local_acp_relay=args.local_acp_relay_probe,
+            local_acp_relay_probe_timeout_sec=args.local_acp_relay_probe_timeout_sec,
+            probe_host_local_acp_transport=args.host_local_acp_transport_probe,
+            host_local_acp_transport_probe_timeout_sec=(
+                args.host_local_acp_transport_probe_timeout_sec
+            ),
+            probe_remote_command_file_bridge=args.remote_command_file_bridge_probe,
+            remote_command_file_bridge_probe_command=(
+                args.remote_command_file_bridge_probe_command
+            ),
+            remote_command_file_bridge_probe_timeout_sec=(
+                args.remote_command_file_bridge_probe_timeout_sec
+            ),
+            remote_command_file_bridge_ready=args.remote_command_file_bridge_ready,
+            remote_executor_ready=True,
+            remote_task_data_ready=True,
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
+        return 0
     if (
-        args.route == "codex-goal-mode-baseline"
+        args.route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
         and not args.plan_only
-        and not args.allow_unverified_goal_prefix_baseline
+        and not args.reduce_only
+        and not args.setup_only_public_preflight
+        and not args.allow_deprecated_app_server_goal_route
     ):
         payload = {
             "ok": False,
-            "error_type": "CodexGoalModeBaselineUnverified",
+            "error_type": "SkillsBenchAppServerGoalRouteDeprecated",
             "route": args.route,
             "reason": (
-                "codex-goal-mode-baseline currently sends a slash-goal-style "
-                "prompt through BenchFlow; it is not proven to enter native "
-                "Codex Goal mode or attach persistent goal state"
+                "codex-app-server-goal-baseline is deprecated for normal "
+                "SkillsBench baseline/treatment collection. It exercises the "
+                "Codex app-server surface, while the current LoopX treatment "
+                "and baseline policy requires the Codex CLI TUI /goal product "
+                "path."
             ),
             "next_action": (
-                "prove a stable Codex CLI /goal trigger with goal-state evidence, "
-                "or rerun with --allow-unverified-goal-prefix-baseline only as a "
-                "non-claiming slash-prefix experiment"
+                "rerun with --route codex-cli-goal-baseline --reasoning-effort "
+                "xhigh --host-local-acp-launch and a materialized command/file "
+                "bridge; use --allow-deprecated-app-server-goal-route only for "
+                "explicit legacy compatibility experiments"
             ),
         }
         print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
         return 2
-    if args.route == "codex-app-server-goal-baseline" and not args.plan_only:
+    if (
+        args.route == CODEX_CLI_GOAL_BASELINE_ROUTE
+        and not args.plan_only
+        and not args.reduce_only
+        and not args.setup_only_public_preflight
+    ):
+        bridge_ready = bool(
+            args.remote_command_file_bridge_ready
+            or args.remote_command_file_bridge_probe
+        )
+        bridge_command_configured = bool(args.remote_command_file_bridge_solver_command)
+        bridge_sandbox_auto_wiring_pending = bool(
+            args.host_local_acp_launch
+            and bridge_ready
+            and not bridge_command_configured
+        )
+        if (
+            not args.host_local_acp_launch
+            or not bridge_ready
+            or not (bridge_command_configured or bridge_sandbox_auto_wiring_pending)
+        ):
+            payload = {
+                "ok": False,
+                "error_type": "SkillsBenchCodexCliGoalDriverRequired",
+                "route": args.route,
+                "reason": (
+                    "codex-cli-goal-baseline must run the host Codex CLI TUI "
+                    "with a real /goal slash command and a materialized "
+                    "command/file bridge into the scored SkillsBench sandbox. "
+                    "A container-local codex-acp or slash-prefix prompt would "
+                    "not prove native CLI Goal mode."
+                ),
+                "next_action": (
+                    "rerun with --host-local-acp-launch plus "
+                    "--remote-command-file-bridge-ready or "
+                    "--remote-command-file-bridge-probe after provisioning the "
+                    "sandbox bridge, and pass "
+                    "--remote-command-file-bridge-solver-command so the host "
+                    "CLI goal worker can operate on the scored sandbox"
+                ),
+                "canonical_codex_cli_goal_driver_required": True,
+                "host_local_acp_launch": bool(args.host_local_acp_launch),
+                "remote_command_file_bridge_ready": bridge_ready,
+                "remote_command_file_bridge_solver_command_configured": (
+                    bridge_command_configured
+                ),
+                "remote_command_file_bridge_sandbox_auto_wiring_pending": (
+                    bridge_sandbox_auto_wiring_pending
+                ),
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
+            return 2
+    if (
+        args.route == CODEX_APP_SERVER_GOAL_BASELINE_ROUTE
+        and not args.plan_only
+        and not args.reduce_only
+        and not args.setup_only_public_preflight
+    ):
         bridge_ready = bool(
             args.remote_command_file_bridge_ready
             or args.remote_command_file_bridge_probe
@@ -14614,7 +18455,7 @@ def main(argv: list[str] | None = None) -> int:
         args.remote_command_file_bridge_solver_command
     )
     product_host_local_bridge_sandbox_auto_wiring_pending = bool(
-        args.route in PRODUCT_MODE_CONTROLLER_ROUTES
+        args.route in HOST_LOCAL_BRIDGE_ROUTES
         and args.host_local_acp_launch
         and product_host_local_bridge_materialized
         and not product_host_local_bridge_command_configured
@@ -14625,6 +18466,7 @@ def main(argv: list[str] | None = None) -> int:
         and not args.local_driver_worker_handshake_preflight
         and not args.plan_only
         and not args.reduce_only
+        and not args.setup_only_public_preflight
     ):
         payload = {
             "ok": False,
@@ -14650,17 +18492,21 @@ def main(argv: list[str] | None = None) -> int:
         }
         print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
         return 2
+    if payload := skillsbench_loopx_turn_launch_error(args):
+        print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
+        return 2
     product_host_local_bridge_fixture_solver = (
         skillsbench_remote_command_file_bridge_command_is_fixture_probe(
             args.remote_command_file_bridge_solver_command
         )
     )
     if (
-        args.route in PRODUCT_MODE_CONTROLLER_ROUTES
+        args.route in HOST_LOCAL_BRIDGE_ROUTES
         and args.host_local_acp_launch
         and product_host_local_bridge_fixture_solver
         and not args.local_driver_worker_handshake_preflight
         and not args.plan_only
+        and not args.setup_only_public_preflight
     ):
         payload = {
             "ok": False,
@@ -14693,7 +18539,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
         return 2
     if (
-        args.route in PRODUCT_MODE_CONTROLLER_ROUTES
+        args.route in HOST_LOCAL_BRIDGE_ROUTES
         and args.host_local_acp_launch
         and not (
             product_host_local_bridge_materialized
@@ -14704,6 +18550,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         and not args.local_driver_worker_handshake_preflight
         and not args.plan_only
+        and not args.setup_only_public_preflight
     ):
         payload = {
             "ok": False,
@@ -14740,40 +18587,6 @@ def main(argv: list[str] | None = None) -> int:
         }
         print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
         return 2
-    if args.local_codex_participant_ping:
-        payload = materialize_local_codex_participant(
-            codex_bin=args.local_codex_bin,
-            timeout_sec=args.local_codex_ping_timeout_sec,
-        )
-        print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
-        return 0 if payload.get("codex_cli_invoked") is True else 1
-    if args.local_driver_worker_handshake_preflight:
-        ensure_skillsbench_dependency_python(args)
-        payload = inspect_skillsbench_worker_handshake(
-            skillsbench_root=args.skillsbench_root,
-            dataset=args.dataset,
-            task_id=args.task_id,
-            local_codex_cli_participant_ready=args.local_codex_cli_participant_ready,
-            local_acp_relay_command=args.local_acp_relay_command,
-            probe_local_acp_relay=args.local_acp_relay_probe,
-            local_acp_relay_probe_timeout_sec=args.local_acp_relay_probe_timeout_sec,
-            probe_host_local_acp_transport=args.host_local_acp_transport_probe,
-            host_local_acp_transport_probe_timeout_sec=(
-                args.host_local_acp_transport_probe_timeout_sec
-            ),
-            probe_remote_command_file_bridge=args.remote_command_file_bridge_probe,
-            remote_command_file_bridge_probe_command=(
-                args.remote_command_file_bridge_probe_command
-            ),
-            remote_command_file_bridge_probe_timeout_sec=(
-                args.remote_command_file_bridge_probe_timeout_sec
-            ),
-            remote_command_file_bridge_ready=args.remote_command_file_bridge_ready,
-            remote_executor_ready=True,
-            remote_task_data_ready=True,
-        )
-        print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
-        return 0
     task_ids = _batch_task_ids(args)
     batch_mode = len(task_ids) > 1
     independent_retry_mode = _independent_goal_retry_enabled(args) and not args.plan_only

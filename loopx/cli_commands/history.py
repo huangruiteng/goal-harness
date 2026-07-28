@@ -9,8 +9,19 @@ from pathlib import Path
 from ..benchmark_adapters.agents_last_exam import (
     build_agents_last_exam_result_benchmark_report,
 )
-from ..delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
-from ..delivery_outcome import DELIVERY_OUTCOME_CHOICES
+from ..benchmarks.read_models.benchmark_comparison import (
+    compact_benchmark_comparison,
+)
+from ..benchmarks.read_models.benchmark_experiment_report import (
+    compact_benchmark_experiment_report,
+)
+from ..benchmarks.read_models.benchmark_learning_ledger import (
+    compact_benchmark_learning_ledger,
+)
+from ..benchmarks.read_models.benchmark_result import compact_benchmark_result
+from ..control_plane.work_items.delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
+from ..control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES
+from ..control_plane.runtime.trajectory_hygiene import build_trajectory_hygiene_summary
 from ..global_registry import sync_project_registry_to_global
 from ..history import (
     append_active_user_assisted_pilot,
@@ -23,6 +34,7 @@ from ..history import (
     inspect_index_duplicates,
     load_registry,
     repair_index_duplicates,
+    rebuild_index_artifact_collisions,
     render_active_user_assisted_pilot_append_markdown,
     render_benchmark_comparison_append_markdown,
     render_benchmark_experiment_report_append_markdown,
@@ -32,14 +44,14 @@ from ..history import (
     render_history_markdown,
     render_index_duplicate_inspection_markdown,
     render_index_duplicate_repair_markdown,
+    render_index_collision_rebuild_markdown,
 )
 from ..paths import resolve_runtime_root
+from ..presentation.renderers.trajectory_hygiene_markdown import (
+    render_trajectory_hygiene_markdown,
+)
 from ..status import (
     compact_active_user_assisted_pilot,
-    compact_benchmark_comparison,
-    compact_benchmark_experiment_report,
-    compact_benchmark_learning_ledger,
-    compact_benchmark_result,
     compact_benchmark_run,
 )
 
@@ -69,12 +81,15 @@ def register_history_command(subparsers: argparse._SubParsersAction) -> None:
             "append-active-user-assisted-pilot",
             "inspect-index-duplicates",
             "repair-index-duplicates",
+            "rebuild-index-collisions",
+            "trajectory-hygiene",
         ],
         help=(
             "Append a compact benchmark_run_v0, benchmark_result_v0, benchmark_comparison_v0, "
             "benchmark_learning_ledger_v0, benchmark_experiment_report_v0, ALE compact result report, or "
             "active_user_assisted_pilot_v0 event; inspect duplicate run-index identities; "
-            "or repair safe duplicate index rows."
+            "repair safe duplicate index rows; rebuild reviewed artifact collisions without deleting events; "
+            "or audit compact-history trajectory hygiene."
         ),
     )
     history_parser.add_argument("--goal-id", help="Only show one goal.")
@@ -115,6 +130,13 @@ def register_history_command(subparsers: argparse._SubParsersAction) -> None:
     history_parser.add_argument(
         "--active-user-pilot-json",
         help="Path to an active_user_assisted_pilot_v0 JSON object. Use '-' to read stdin.",
+    )
+    history_parser.add_argument(
+        "--review-plan-json",
+        help=(
+            "For rebuild-index-collisions --execute, a JSON review plan emitted by the dry-run. "
+            "Use '-' to read stdin."
+        ),
     )
     history_parser.add_argument("--classification")
     history_parser.add_argument(
@@ -157,6 +179,36 @@ def handle_history_command(
     append_benchmark_run_rollout_event: BenchmarkRolloutEventAppender,
     append_benchmark_result_rollout_event: BenchmarkRolloutEventAppender,
 ) -> int:
+    if args.history_action == "trajectory-hygiene":
+        try:
+            if not args.goal_id:
+                raise ValueError("history trajectory-hygiene requires --goal-id")
+            registry = load_registry(registry_path)
+            runtime_root = resolve_runtime_root(
+                registry,
+                runtime_root_arg,
+                registry_path=registry_path,
+            )
+            history = collect_history(
+                registry_path=registry_path,
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+                limit=max(0, args.limit),
+            )
+            payload = build_trajectory_hygiene_summary(history)
+            payload["registry"] = str(registry_path)
+            payload["runtime_root"] = str(runtime_root)
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": runtime_root_arg,
+                "goal_filter": args.goal_id,
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_trajectory_hygiene_markdown)
+        return 0 if payload.get("ok") else 1
+
     if args.history_action == "inspect-index-duplicates":
         try:
             payload = inspect_index_duplicates(
@@ -167,7 +219,11 @@ def handle_history_command(
             )
         except Exception as exc:
             registry = load_registry(registry_path)
-            runtime_root = resolve_runtime_root(registry, runtime_root_arg)
+            runtime_root = resolve_runtime_root(
+                registry,
+                runtime_root_arg,
+                registry_path=registry_path,
+            )
             payload = {
                 "ok": False,
                 "registry": str(registry_path),
@@ -189,7 +245,11 @@ def handle_history_command(
             )
         except Exception as exc:
             registry = load_registry(registry_path)
-            runtime_root = resolve_runtime_root(registry, runtime_root_arg)
+            runtime_root = resolve_runtime_root(
+                registry,
+                runtime_root_arg,
+                registry_path=registry_path,
+            )
             payload = {
                 "ok": False,
                 "dry_run": not bool(args.execute),
@@ -199,6 +259,48 @@ def handle_history_command(
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_index_duplicate_repair_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.history_action == "rebuild-index-collisions":
+        try:
+            if args.dry_run and args.execute:
+                raise ValueError(
+                    "history rebuild-index-collisions accepts either --dry-run or --execute, not both"
+                )
+            reviewed_plan = None
+            if args.review_plan_json:
+                raw_plan = (
+                    sys.stdin.read()
+                    if args.review_plan_json == "-"
+                    else Path(args.review_plan_json).expanduser().read_text(encoding="utf-8")
+                )
+                reviewed_plan = json.loads(raw_plan)
+                if not isinstance(reviewed_plan, dict):
+                    raise ValueError("--review-plan-json must contain a JSON object")
+            payload = rebuild_index_artifact_collisions(
+                registry_path=registry_path,
+                runtime_root_override=runtime_root_arg,
+                goal_id=args.goal_id,
+                limit=args.limit,
+                reviewed_plan=reviewed_plan,
+                execute=bool(args.execute),
+            )
+        except Exception as exc:
+            registry = load_registry(registry_path)
+            runtime_root = resolve_runtime_root(
+                registry,
+                runtime_root_arg,
+                registry_path=registry_path,
+            )
+            payload = {
+                "ok": False,
+                "dry_run": not bool(args.execute),
+                "registry": str(registry_path),
+                "runtime_root": str(runtime_root),
+                "goal_filter": args.goal_id,
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_index_collision_rebuild_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.history_action == "append-benchmark-run":
@@ -664,7 +766,11 @@ def handle_history_command(
 
     try:
         registry = load_registry(registry_path)
-        runtime_root = resolve_runtime_root(registry, runtime_root_arg)
+        runtime_root = resolve_runtime_root(
+            registry,
+            runtime_root_arg,
+            registry_path=registry_path,
+        )
         payload = collect_history(
             registry_path=registry_path,
             runtime_root=runtime_root,

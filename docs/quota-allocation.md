@@ -245,6 +245,15 @@ unchanged monitor polls are quiet no-spend checks with `should_run=false` and
 `effective_action=monitor_quiet_skip`. This keeps monitoring useful without
 letting it consume every eligible turn, and it keeps the hard routing rule in
 one small machine contract.
+When the current agent lane has only monitor work and no current, unclaimed, or
+other-agent advancement frontier, a future `next_due_at` is not enough to make
+the lane quiet. Quota must first project `autonomous_replan_required` unless a
+recent same-agent autonomous replan ACK explicitly carries
+`watch_lane_continuation`. Generic frontier deltas such as a vision patch,
+no-follow-up rationale, or active next action may settle their own replan
+obligations, but cannot silently convert an empty active-goal frontier into a
+monitor wait. Projected ACKs from a different agent lane are diagnostic only
+for this decision and cannot clear the current lane's empty-frontier obligation.
 
 Executable todos can also declare explicit write-scope requirements through
 todo metadata, for example `required_write_scopes=runner%2F%2A%2A` or the CLI
@@ -317,9 +326,30 @@ turn that ordering into an automatic final choice. Blocked higher-priority
 candidates stay visible in `blocked_candidates`. If every visible executable
 candidate is missing a capability, the gate returns
 `action=repair_bridge` for repairable local bridges such as
-`benchmark_runner`/`external_evidence_poll`, `action=ask_owner` for owner-held
-capabilities such as `network`/`credentials`/`production_access`, or
+`benchmark_runner`/`external_evidence_poll` and runtime provisioning such as
+`network`, `action=ask_owner` for owner-held capabilities such as
+`credentials`/`production_access`, or
 `action=skip` for unsupported capability classes.
+
+Blocked candidates retain typed `resolution_bindings` even when another todo is
+runnable. Each binding names the capability, its resolution owner, and the
+exact `blocked_todo_ids`. The interaction contract turns an owner-held binding
+into an idempotent scoped `user_gate` write linked by `unblocks_todo_id`, while
+an agent-repairable binding becomes an idempotent advancement todo with the
+capability in `target_capabilities`. The user gate does not block unrelated
+runnable todos. `quota should-run` remains read-only; the agent or host executes
+the projected todo write before normal writeback.
+
+Completing a repair or owner todo is not proof that the runtime capability is
+available. The current host must still verify the real callsite and pass the
+capability through `--available-capability` on both preflight and spend. This
+keeps capability truth session-scoped and prevents stale persistent grants.
+
+Runtime capability absence is not permission authority. A missing `network`
+declaration therefore remains in the agent repair lane: the agent should
+observe or repair the launcher/runtime bridge, truthfully pass
+`--available-capability network` once verified, or write a concrete runtime
+blocker. LoopX must not turn that condition into a user approval request.
 
 When a missing repairable bridge is itself the target of the todo, for example
 `required_capabilities=shell` plus `target_capabilities=benchmark_runner`, the
@@ -328,24 +358,20 @@ candidate remains in `runnable_candidates` with `capability_repair_mode=true`,
 `missing_target_capabilities`. This avoids a circular gate where a todo cannot
 develop `benchmark_runner` because it does not already have `benchmark_runner`.
 
-For multi-agent goals, executable primary-review handoffs can carry
-`blocks_agent=<side-agent>` and `unblocks_todo_id=<todo_id>`. When the current
-agent is the primary agent and the handoff is already claimed by that primary
-agent, `agent_lane_next_action` ranks that explicit unblock ahead of ordinary
-same-priority backlog, even if the goal-level `Next Action` prose is stale.
-The same tie-breaker orders `capability_gate.runnable_candidates`, so the
-first visible runnable candidate matches the selected inter-agent unblock
-rather than burying it behind ordinary same-priority work.
-This is only a scheduling hint: capability gates, write-scope checks, user
-gates, and validation still apply.
+Multi-agent handoffs use the same ordering as all other agent todos. Review is
+an `action_kind`, not a scheduling rank. `excluded_agents` can prevent named
+peers from claiming or executing an otherwise ordinary handoff, while
+`unblocks_todo_id` records dependency lineage. Active-next alignment, claims,
+priority, capability gates, write scopes, user gates, and validation continue
+to determine the executable action.
 
 Deferred todo visibility is a separate gate-resume lane, not executable
 backlog and not part of the no-candidate quiet-wait semantics. Status/quota may
 expose up to eight sorted `deferred_items` and up to eight ready
 `deferred_resume_candidates` after the sorted open todo lanes. In agent-scoped
-`quota should-run --agent-id <side-agent>`, all deferred items may remain
+`quota should-run --agent-id <peer>`, all deferred items may remain
 visible for diagnosis, but only ready candidates claimed by the current agent
-or left unclaimed can wake that side agent. If such a candidate exists and no
+or left unclaimed can wake that peer. If such a candidate exists and no
 open current-agent/unclaimed advancement todo exists, quota returns
 `effective_action=successor_replan_required`, `normal_delivery_allowed=false`,
 and `execution_obligation.contract = deferred_resume_projection`. The worker
@@ -354,11 +380,31 @@ ordinary delivery work. Only when no ready current-agent/unclaimed deferred
 resume exists should agent-scoped quota fall through to `agent_scope_wait`,
 `reassignment_required`, or `scope_exhausted`.
 
+Priority remains authoritative across the resume boundary. When a ready
+current-agent or unclaimed deferred successor has strictly higher priority than
+the selected open advancement todo, quota also returns
+`successor_replan_required` before lower-priority delivery. The deferred item
+does not become executable in place: `selected_todo` points to the deferred
+successor so the worker can reopen, supersede, or close it explicitly, while
+`goal_frontier_projection.deferred_successors.top_ready_todo_id` reports the
+same lifecycle target. An equal-priority open todo remains executable, avoiding
+unnecessary lifecycle churn within a priority bucket.
+
 Open todos with `resume_when` use the same readiness signal before they enter
 ordinary execution lanes. Until `resume_ready=true`, quota must not include the
 todo in `capability_gate.runnable_candidates` or `agent_lane_next_action`; it
 may continue with a lower-priority executable fallback when the interaction
 contract allows safe scoped fallback work.
+
+If an active per-agent vision has no other selectable advancement and its
+existing current-agent or unclaimed successor is blocked by an exact supported
+`resume_when`, quota projects `vision_wait_state.state=waiting` and
+`agent_scope_wait` instead of deriving another autonomous vision replan. The
+wait payload preserves the todo id, condition, and automatic-resume contract.
+Once `resume_ready=true`, the wait disappears and ordinary open-todo or
+deferred-successor selection runs again. Missing vision checkpoints, closed
+stage succession, unsupported conditions, and continuous-monitor-as-gate
+repairs remain fail-closed and are not hidden by this wait path.
 
 For completed handoff gates, record that rationale structurally as
 `no_followup=true`; status projects the gate as `cleared_no_followup` instead
@@ -401,11 +447,16 @@ loopx quota monitor-poll --goal-id <GOAL_ID> \
 
 When a poll sees a material transition, add `--material-change` and optionally
 `--next-agent-todo` or `--next-user-todo` so the monitor produces a concrete
-follow-up instead of staying as an opaque watch:
+follow-up instead of staying as an opaque watch. A user follow-up must declare
+`--next-user-task-class user_gate|user_action` explicitly: use `user_gate` for
+a blocking owner decision and `user_action` for a visible reminder that must
+not block the bound agent lane. Omitting the task class fails before writeback:
 
 ```bash
 loopx quota monitor-poll --goal-id <GOAL_ID> \
   --target-key <TARGET_KEY> --result-hash <HASH> --material-change \
+  --next-user-todo "<PUBLIC_SAFE_REVIEW_REMINDER>" \
+  --next-user-task-class user_action \
   --next-agent-todo "<PUBLIC_SAFE_FOLLOW_UP>" --execute
 ```
 
@@ -433,10 +484,39 @@ concrete blocker appears.
 The same guard exposes `automation_liveness`. For
 `monitor_quiet_skip`, it must say `automation_action=keep_active_quiet`,
 `keep_active=true`, and `pause_allowed=false`: unchanged monitor-only polls are
-not a reason to cancel recurring automation. Pausing/deleting is reserved for a
-bounded self-repair or replan path that is itself stuck for two more eligible
-turns. This keeps recurring controllers alive while still preventing quota
-spend on empty monitor checks.
+not a reason to cancel recurring automation. Pausing/deleting is reserved for
+either a read-only terminal state derived by LoopX from complete, valid todo
+sources, no-follow-up closure evidence, and an empty normalized frontier, or a
+bounded self-repair/replan path that is itself stuck for two more eligible
+turns. The terminal case projects
+`automation_action=stop_terminal_no_followup`, `keep_active=false`, and
+`pause_allowed=true`; raw status/attention fields are not terminal authority.
+Missing or malformed sources and any open todo, monitor, successor, acceptance
+gap, autonomy blocker, or replan obligation fail closed. This keeps recurring
+controllers alive during ordinary waits while honoring an explicit completed
+goal shutdown without another quota-spending turn.
+
+An individual registered peer can instead be put in `monitor_only` work mode:
+
+```bash
+loopx configure-goal --goal-id <goal-id> \
+  --agent-work-mode <agent-id>=monitor_only --execute
+```
+
+This suppresses that peer's advancement, autonomous replan, repair, fallback,
+and new-topic lanes while preserving due `continuous_monitor` todos and verified
+direct operator replies. A future or unchanged monitor stays quiet and no-spend;
+a due monitor may spend only after a validated material transition. Other peers
+remain active. Use `--clear-agent-work-mode <agent-id>` (or set `=active`) to
+resume ordinary advancement.
+
+The read model exposes that derivation as
+`goal_frontier_projection.terminal_state={kind:no_followup, derived:true,
+source:validated_goal_closure}` plus
+`source_completeness.user_todos=valid` and
+`source_completeness.agent_todos=valid`. Producers derive the source proof and
+closure intent from structured todo items; callers cannot authorize shutdown by
+writing `attention_queue.status` or registry attention text.
 
 `automation_liveness` deliberately does not set the polling cadence. The guard
 also exposes `scheduler_hint`, which is the host-runtime scheduling contract:
@@ -446,6 +526,14 @@ run one final `quota should-run` replan check after their unchanged-poll limit
 and exit or stop only if the guard is still unchanged. Cadence changes, final
 checks, and self-stop turns never spend quota; only validated delivery or
 allowed writeback does.
+
+Scheduler ownership is explicit. A bare `quota should-run` can still expose the
+quota decision, but its `scheduler_hint` fails closed with
+`repair_scheduler_execution_context`; it never assumes Codex App. Generated
+Codex App heartbeats pass the explicit `codex_app_heartbeat` profile; generated
+commands use its compact alias `--codex-app`. Other hosts
+pass the typed `--host-surface`, `--scheduler-owner`, and `--execution-mode`
+triple that describes the runtime which will consume the hint.
 
 ## Compute States
 
@@ -497,7 +585,7 @@ The first read-only or preview commands are:
 ```bash
 loopx quota status
 loopx quota plan
-loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <goal-id>
+loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <goal-id> --runtime-profile codex_app_heartbeat
 loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <goal-id> --slots 1
 loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <goal-id> --slots 1 --execute
 ```
@@ -523,6 +611,12 @@ the displayed gate, evidence, or health reason.
 `quota should-run` is the per-goal guard for heartbeat jobs. It returns a small
 JSON or Markdown decision:
 
+Its health gate is also per-goal: global contract errors and errors owned by
+the selected goal fail closed, while errors owned by other goals remain visible
+in broad status inventory without blocking this decision. Error ownership comes
+from structured contract diagnostics, never from parsing a goal-id prefix out
+of an error string.
+
 ```json
 {
   "goal_id": "project-main-control",
@@ -543,7 +637,7 @@ JSON or Markdown decision:
     "action": "backoff_waiting_for_user",
     "codex_app": {
       "recommended_interval_minutes": 30,
-      "example_progression_minutes": [30, 60, 120]
+      "example_progression_minutes": [30, 60]
     },
     "unchanged_poll": {
       "limits": {
@@ -564,7 +658,7 @@ JSON or Markdown decision:
       "schema_version": "scheduler_hint_detail_v0",
       "omitted_by_default": true,
       "execution_required": false,
-      "request": "loopx quota should-run --include-scheduler-detail",
+      "request": "loopx quota should-run --include-detail scheduler",
       "hot_path_runtime_fields": [
         "codex_app",
         "unchanged_poll",
@@ -574,21 +668,17 @@ JSON or Markdown decision:
         "local_scheduler",
         "codex_cli_tui",
         "claude_code_loop",
-        "final_quota_replan_check"
+        "final_quota_replan_check",
+        "reset_policy_detail",
+        "stateful_backoff_detail"
       ]
     },
     "reset_policy": {
-      "schema_version": "scheduler_reset_policy_v0",
-      "reset_to": "profile_initial_interval",
       "reset_token": "0123456789abcdef",
       "host_state_key": "scheduler_hint.reset_policy.reset_token",
       "codex_app_initial_interval_minutes": 30,
       "codex_app_initial_rrule": "FREQ=MINUTELY;INTERVAL=30",
-      "clear_unchanged_poll_state": true,
-      "identity_key_count": 6,
-      "identity_signature": "123456789abc",
-      "profile_signature": "abcdef123456",
-      "reset_condition_summary": "token_changed|user_feedback|new_or_reassigned_todo|gate_or_material_transition|active_work_projected"
+      "identity_signature": "123456789abc"
     }
   },
   "operator_question": "是否同意 project-main-control 先做 read-only map dry-run？",
@@ -616,6 +706,17 @@ report must still list the existing open user todos instead of saying that
 there is no user action. If `agent_todo_summary.open_count > 0`, the agent
 should use that summary as its next safe follow-up checklist instead of mining
 chat history or an overlong `Next Action`.
+
+For an agent-scoped quota request, `user_todo_summary.open_count` counts only
+user todos bound to that agent plus explicit `goal_bound=true` items. Todos
+bound to another agent remain in
+`other_agent_bound_user_action_items` for diagnosis, but they must not preserve
+an inherited `operator_gate`, enter `interaction_contract.user_channel`, or
+trigger a heartbeat notification. In multi-agent goals, todo authoring must use
+`--bound-agent <registered-agent>` (or `--agent-id` when the author and bound
+lane are the same) or `--goal-bound`; `claimed_by` is not a user-todo routing
+field.
+
 For `state=focus_wait`, `state=waiting`, or
 `waiting_on=external_evidence`, an open user todo can be the smallest unlock
 for a quiet project. In that case, `quota should-run` should set
@@ -624,22 +725,47 @@ target heartbeat should return a compact `NOTIFY` listing at most three open
 user todos and the expected reply (`done`, `defer/not now`, or new evidence
 link/date/conclusion), while skipping delivery work and quota spend for that
 blocker-push turn. If quota also sets
-`open_todo_notification_policy=repeat_until_resolved`, repeat
-that notification until the todo is done, deferred, or replaced. Otherwise,
+`open_todo_notification_policy=repeat_until_resolved`, repeat that notification
+until the todo is done, deferred, or replaced. If a failed host cadence update
+leaves a tighter poll, `user_gate_notification_cooldown_v0` keeps the gate open
+but suppresses duplicate notices outside a bounded reminder window. Otherwise,
 blocker-push cases may still be de-duplicated when the same blocker was already
 surfaced recently. Eligible monitor-only polls with no material transition keep
 the open user todo visible in `user_todo_summary`, but do not force a repeated
 notification, make the turn a user-action gate, or leave the top-level
 `should_run` set for an otherwise quiet no-op.
+
+Monitor catch-up is also bounded across runnable lanes. After two consecutive
+unchanged monitor-only work turns, `monitor_debt_arbitration_v0` prefers a
+same- or higher-priority advancement todo over another overdue monitor,
+including inside scoped user-gate fallback selection. Scheduler/accounting and
+state-refresh rows do not break the streak; real advancement or a material
+monitor transition does. Direct Lark inbox `reply_due` work remains a stronger
+preemption and is never delayed by this fairness backoff.
+
 For every registered goal, `quota should-run` also includes a `todo_write_hint`
 so agent executors know to write newly discovered user/owner work with
-`loopx todo add --role user` instead of hiding it in `Next Action`,
-review docs, or chat.
+`loopx todo add --role user --task-class user_gate|user_action` instead of
+hiding it in `Next Action`, review docs, or chat. Multi-agent writes must also
+name `--bound-agent <registered-agent>` or `--goal-bound`; agent-scoped
+`user_gate` writes bind to the same agent named by `--blocks-agent`.
 When available, `quota should-run` also keeps next-action signals separate:
 `active_state_next_action` is the durable `## Next Action`,
 `latest_run_recommended_action` is the latest non-agent-lane run's
 recommendation, and `agent_lane_next_action` is the current `--agent-id`
-slice. If the active-state and latest-run actions differ,
+slice. Agent-scoped payloads may also include
+`goal_route_hint.schema_version=goal_route_hint_v0`, a compact read-only
+synthesis that says whether the current lane should run, claim, wait, or
+reassign while preserving `## Next Action` as durable goal-level guidance. It
+is an advisory routing hint, not a writeback instruction and not a replacement
+for `agent_todo_summary`.
+When projected, `goal_frontier_projection.schema_version =
+goal_frontier_projection_v0` is the per-goal progress/frontier view used before
+lane-local quiet or wait decisions. Its `autonomous_replan_decision` says that a
+required replan must be selected independently of `monitor_quiet_skip` or
+`agent_scope_wait`; the policy lives in `loopx.control_plane.goals.goal_frontier`, while
+quota only wires the selected mode into `interaction_contract`.
+If the active-state and latest-run actions differ,
 `next_action_projection_warning` asks the executor to explicitly write back the
 intended durable route with a primary goal-scope `refresh-state --next-action`
 or keep treating the signals as distinct.
@@ -708,40 +834,102 @@ The response also includes `scheduler_hint.schema_version=scheduler_hint_v0`.
 That hint is not a delivery permission. It is the cross-runtime wait policy:
 `run_now` keeps the active cadence for required work; `backoff_waiting_for_user`
 slows Codex App and stops CLI/Claude loops after repeated unchanged polls;
-`backoff_until_reassigned` handles side-agent scope waits without dropping
+`backoff_until_reassigned` handles peer reassignment waits without dropping
 agent-to-agent handoff cadence too quickly;
 `backoff_until_material_transition` handles monitor-only quiet polls; and
 `backoff_until_fresh_evidence` handles mapped or post-handoff no-op waits.
 For Codex App and local schedulers, `recommended_interval_minutes` is the next
-target interval; if the same `unchanged_identity_keys` remain unchanged, the
-host multiplies the applied interval by
-`unchanged_poll_backoff_multiplier` until `max_interval_minutes`. Human gates
-can move to `[30, 60, 120]` after the concrete user todo has been surfaced.
+target interval. For Codex App heartbeats, `recommended_rrule` is emitted only
+when `codex_app.stateful_backoff.apply_needed=true`; if the desired RRULE is
+already applied, it is omitted so the agent does not call a host tool again.
+If that match still needs a reset-token/identity binding,
+`stateful_backoff.ack_needed=true` and the bound ack runs without a host update.
+After a successful host RRULE update, the agent records that fact with
+`loopx` plus `codex_app.ack_hint.cli_args`; current payloads use
+`quota scheduler-ack-current` to re-read the latest scheduler hint before LoopX
+advances the per goal/agent scheduler state without spending quota. Human gates
+can move Codex App heartbeats through `[30, 60]` after the concrete user todo
+has been surfaced. LoopX caps the Codex App integration at 60 minutes; coarser
+waits remain available to the local scheduler instead of being emitted as App
+heartbeat RRULEs.
+CLI-produced ACK hints bind that argument vector to the exact registry and
+effective runtime root that produced `quota should-run`. Hosts must execute the
+complete vector; stripping its leading global options can route a
+project-launched ACK into project-local scheduler state instead of the shared
+control plane.
+Monitor-only quiet waits move through `[15, 30, 60]` while preserving the
+same no-spend monitor-poll contract, unless a monitor cadence or due time caps
+the progression earlier.
 Agent-scope waits use a more conservative adjustment curve such as
 `[10, 20, 30, 60]`, so a 600-second local tick stays close to the existing
 agent-to-agent interaction cadence before cooling further.
-Each hint also carries `reset_policy.schema_version=scheduler_reset_policy_v0`.
-Hosts should cache and compare `reset_policy.reset_token` across unchanged
-polls and reset the unchanged streak whenever the token changes. The token is
-derived from scheduler action plus the current identity/profile inputs, while
-the hot path only exposes short `identity_signature` and `profile_signature`
-debug aids instead of full snapshots. Hosts should also reset when an external
-event makes the goal actionable again, such as user feedback in the thread, a
-new or reassigned todo, a resolved gate, or material evidence transition. A
-reset applies
-`codex_app_initial_interval_minutes` (and the matching local scheduler initial
-interval) before starting unchanged backoff again; it never spends quota.
-For Codex App heartbeats, hosts and agents should use `automation_update` with
-`codex_app.recommended_rrule` for the current cadence and
-`reset_policy.codex_app_initial_rrule` when the stored
-`reset_policy.reset_token` changes. This gives host runtimes a compact state key
-instead of requiring them to diff the whole quota payload. The token is derived
-from scheduler action plus identity/profile inputs, so a changed initial RRULE
-or scheduler profile also produces a new generation without projecting full
-snapshots in `quota should-run` JSON. User
-feedback, newly runnable work, reassignment, or material evidence should
-therefore restore the automation to the current profile's initial interval
-before backoff resumes.
+The compact hot path carries only the reset fields hosts need to act:
+`reset_policy.reset_token`, `host_state_key`,
+`codex_app_initial_interval_minutes`, `codex_app_initial_rrule`, and the short
+`identity_signature`. Hosts should cache and compare `reset_token` across
+unchanged polls and reset the unchanged streak whenever the token changes. The
+token is derived from scheduler action plus the current identity/profile inputs;
+the explanatory reset profile, profile signature, reset condition summary, and
+stateful-backoff policy live in `scheduler_hint.cold_path_detail` when callers
+request `loopx quota should-run --include-detail scheduler`. Hosts should also
+reset when an external event makes the goal actionable again, such as user
+feedback in the thread, a new or reassigned todo, a resolved gate, or material
+evidence transition. A reset applies `codex_app_initial_interval_minutes` (and
+the matching local scheduler initial interval) before starting unchanged
+backoff again; it never spends quota.
+For Codex App heartbeats, hosts and agents should use `automation_update` only
+when `codex_app.stateful_backoff.apply_needed=true` and
+`codex_app.recommended_rrule` is present. After `automation_update` succeeds,
+the agent must run `codex_app.ack_hint.cli_args`. Current payloads use
+`quota scheduler-ack-current`, so LoopX then persists `reset_token`,
+`identity_signature`, `progression_index`, and
+`last_applied_rrule` under the runtime root. Repeated unchanged identity
+advances through `progression_minutes` only after the applied RRULE has had one
+real interval to run. An immediate post-ACK reconciliation therefore verifies
+the settled target instead of manufacturing the next backoff target in the
+same turn. A changed `reset_policy.reset_token`
+returns to the current profile's initial interval. This gives hosts a compact
+post-update ack protocol instead of requiring them to own or diff the whole
+quota state. If `apply_needed=false` and `ack_needed=true`, the same command
+records an exact matching host readback without calling `automation_update`.
+If `automation_update` fails or times out, the agent must not ACK. LoopX keeps
+the observed host RRULE authoritative. The agent runs
+`codex_app.failure_hint.cli_args` once to persist the failed target/observed-host
+pair without quota spend. LoopX retains up to four distinct pairs for 24 hours,
+so active-work and monitor-wait targets cannot overwrite one another while the
+host RRULE remains unchanged. Later heartbeats expose `apply_needed=false` and
+`state_status=host_update_failure_suppressed` for every retained exact pair.
+A changed host observation invalidates failures recorded against the old host,
+and a successful scheduler ACK clears only failures whose target is the
+acknowledged RRULE. A fallback ACK therefore preserves failures for other
+targets observed against the same unchanged host, preventing the next turn
+from retrying a known-bad target/host pair. The legacy
+`host_update_failure` scalar remains as the latest compatibility projection;
+new hosts should consume `host_update_failures`. LoopX never treats an intended
+cadence as an applied cadence.
+For a human gate whose observed host interval is tighter than the failed target,
+the same packet also projects `user_gate_notification_cooldown_v0`. The first
+notice is preserved; short host polls are quiet, one host-sized window opens at
+each target cadence, and a changed gate identity or host RRULE bypasses the old
+cooldown. This changes notification delivery only, not the underlying user todo.
+`scheduler-ack` is not a second `should-run`: it confirms the host update or
+matching readback and does not emit or make immediately due a successor RRULE
+in the same turn. User
+feedback, newly runnable work, reassignment, or material evidence therefore
+restores the automation to the current profile's initial interval before
+backoff resumes.
+
+`quota should-run` also observes the RRULE of a uniquely matched active Codex
+App heartbeat (goal + agent + current thread). The observed host RRULE takes
+precedence over `last_applied_rrule` when computing `apply_needed`, and the
+compact result is exposed as `stateful_backoff.host_observation`. A mismatch is
+`drift_detected`, so an ACK written before the host update—or a later host-side
+cadence regression—cannot permanently suppress the repair. This observation
+contains only cadence metadata. If a reset RRULE already matches but its new
+reset token/identity is not persisted, `apply_needed=false`, `ack_needed=true`,
+and the bound `ack_hint.cli_args` records that exact readback without a no-op
+host write. Missing or mismatched readback still requires `automation_update`;
+LoopX never edits the App manifest directly.
 For Codex CLI TUI and Claude Code loops, the default hot path reads
 `scheduler_hint.unchanged_poll.limits.<runtime>`. A value of `3` means the third
 unchanged poll triggers the compact final quota/replan check named by
@@ -749,12 +937,12 @@ unchanged poll triggers the compact final quota/replan check named by
 still unchanged, the loop applies
 `scheduler_hint.unchanged_poll.after_limits.<runtime>`. Hosts that need the
 older per-runtime detail objects must opt in with
-`quota should-run --include-scheduler-detail` and read
+`quota should-run --include-detail scheduler` and read
 `scheduler_hint.cold_path_detail.local_scheduler`,
 `scheduler_hint.cold_path_detail.codex_cli_tui`, or
 `scheduler_hint.cold_path_detail.claude_code_loop`. That opt-in is diagnostic
 and migration support only: a host or agent that forgets
-`--include-scheduler-detail` must still retain the core scheduling abilities by
+`--include-detail scheduler` must still retain the core scheduling abilities by
 reading the default hot-path fields named in
 `scheduler_hint.detail_ref.hot_path_runtime_fields`.
 The response also includes `execution_obligation`, which is the compatibility
@@ -807,9 +995,19 @@ Post-turn accounting protocol:
   account the latest unspent `outcome_progress` delivery run once; a later
   duplicate spend is rejected because the latest run is then the spend event,
   not the delivery run.
-- for unchanged `monitor_quiet_skip` heartbeat polls, append at most one
-  no-spend `quota monitor-poll --execute` event and rerun `quota should-run`
-  before choosing quiet no-op versus autonomous replan;
+- keep accountable delivery attribution on the worktree that produced it. If
+  `refresh-state` must run from a separate registry checkout, pass
+  `--delivery-workspace-path <delivery-worktree>`; the path is validated locally
+  and omitted from persisted history. Do not point this option at the canonical
+  checkout for peer work.
+- autonomous replans follow the same accountable-outcome rule: spend after a
+  concrete successor, blocker, or `outcome_progress`/`primary_goal_outcome`
+  writeback, but do not spend for a `surface_only` watch-lane continuation or
+  no-follow-up rationale that closes into `monitor_quiet_skip`.
+- give each heartbeat a stable turn id and pass it to `quota should-run`; the
+  guard commits one idempotent receipt, and for unchanged `monitor_quiet_skip`
+  it idempotently appends the no-spend stall observation before returning quiet
+  no-op versus autonomous replan;
 - do not append spend for quiet `should_run=false` skips, preflight failures,
   pure dry-run previews, or duplicate accounting attempts;
 - if `should_run=false` but `safe_bypass_allowed=true` and the agent actually

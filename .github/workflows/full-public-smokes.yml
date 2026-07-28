@@ -1,0 +1,139 @@
+name: Full Public Smokes
+
+on:
+  workflow_dispatch:
+    inputs:
+      timeout_seconds:
+        description: "Per-smoke timeout in seconds"
+        required: false
+        default: "120"
+        type: string
+  schedule:
+    # Daily off-hours sweep. The workflow is intentionally not a PR-required check.
+    - cron: "37 18 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/full-public-smokes.yml"
+      - "README.md"
+      - "README.zh-CN.md"
+      - "docs/**"
+      - "examples/**"
+      - "loopx/**"
+      - "pyproject.toml"
+      - "scripts/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-public-smokes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-public-smokes:
+    if: github.repository == 'huangruiteng/loopx'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 0
+            offset: 0
+          - shard: 1
+            offset: 100
+          - shard: 2
+            offset: 200
+          - shard: 3
+            offset: 300
+          - shard: 4
+            offset: 400
+          - shard: 5
+            offset: 500
+          - shard: 6
+            offset: 600
+    env:
+      SHARD_LIMIT: "100"
+      SMOKE_TIMEOUT_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.timeout_seconds || '120' }}
+      SMOKE_JOBS: "4"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Preview full-public shard
+        run: |
+          python3 examples/run-smokes.py \
+            --suite full-public \
+            --offset "${{ matrix.offset }}" \
+            --limit "${SHARD_LIMIT}" \
+            --timeout-seconds "${SMOKE_TIMEOUT_SECONDS}" \
+            --jobs "${SMOKE_JOBS}" \
+            --no-execute
+
+      - name: Run full-public shard
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-results
+          python3 examples/run-smokes.py \
+            --suite full-public \
+            --offset "${{ matrix.offset }}" \
+            --limit "${SHARD_LIMIT}" \
+            --timeout-seconds "${SMOKE_TIMEOUT_SECONDS}" \
+            --jobs "${SMOKE_JOBS}" \
+            --json \
+            | tee "smoke-results/full-public-shard-${{ matrix.shard }}.json"
+
+      - name: Upload smoke result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-public-smokes-shard-${{ matrix.shard }}
+          path: smoke-results/full-public-shard-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+
+  smoke-fleet-health:
+    if: always()
+    needs: full-public-smokes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Download full-public receipts
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: full-public-smokes-shard-*
+          path: smoke-results
+          merge-multiple: true
+
+      - name: Build compact smoke fleet health
+        run: |
+          mkdir -p smoke-health
+          python -m loopx.cli --format json canary smoke-health \
+            --receipt smoke-results \
+            > smoke-health/smoke-fleet-health.json
+          jq -e '.ready == true' smoke-health/smoke-fleet-health.json
+
+      - name: Upload smoke fleet health
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-fleet-health
+          path: smoke-health/smoke-fleet-health.json
+          if-no-files-found: ignore

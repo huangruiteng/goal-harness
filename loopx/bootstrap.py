@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import re
 import shlex
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .control_plane.runtime.time import now_local_iso
 from .execution_profile import (
     build_execution_profile,
     compact_execution_profile,
@@ -25,6 +25,9 @@ from .todos import add_todo_to_lines
 
 DEFAULT_OBJECTIVE = "Improve this project through bounded, verified goal segments."
 DEFAULT_DOMAIN = "project-goal-control-plane"
+GENERIC_ONBOARDING_ADAPTER_KINDS = frozenset(
+    {"generic_project_goal_v0", "read_only_project_map_v0"}
+)
 NO_CLONE_INSTALL_URL = "https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh"
 NO_CLONE_INSTALL_REPAIR_COMMAND = (
     f"curl -fsSL {NO_CLONE_INSTALL_URL} | bash\n"
@@ -66,7 +69,7 @@ def default_goal_id(project: Path) -> str:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
+    return now_local_iso()
 
 
 def read_json_if_exists(path: Path) -> dict[str, Any]:
@@ -257,15 +260,32 @@ def onboarding_agent_review_todo_text(
     return text
 
 
+def onboarding_connection_validation_action(adapter_kind: str) -> dict[str, str] | None:
+    if adapter_kind not in GENERIC_ONBOARDING_ADAPTER_KINDS:
+        return None
+    return {
+        "text": (
+            "[P1] Run `loopx check` against the project registry and record the first "
+            "project-specific adapter signal or an explicit no-follow-up rationale."
+        ),
+        "task_class": "advancement_task",
+        "action_kind": "onboarding_connection_validation",
+    }
+
+
 def onboarding_next_action(
     *,
+    adapter_kind: str,
     onboarding_scan: dict[str, Any] | None,
     accept_onboarding_agent_todos: bool,
     begin_autonomous_advance: bool,
     codex_app_heartbeat: str,
 ) -> str:
     if not onboarding_scan:
-        return "Run `loopx check` against the project registry and decide the first project-specific adapter signal."
+        validation_action = onboarding_connection_validation_action(adapter_kind)
+        if validation_action:
+            return validation_action["text"]
+        return "Initial routing is owned by the connected domain adapter."
     need_heartbeat_choice = codex_app_heartbeat == "ask"
     if not accept_onboarding_agent_todos or not begin_autonomous_advance or need_heartbeat_choice:
         asks: list[str] = []
@@ -308,13 +328,26 @@ def onboarding_next_action(
 def apply_onboarding_todos_to_state(
     text: str,
     *,
+    adapter_kind: str,
+    updated_at: str,
     onboarding_scan: dict[str, Any] | None,
     accept_onboarding_agent_todos: bool,
     begin_autonomous_advance: bool,
     codex_app_heartbeat: str,
 ) -> str:
     if not onboarding_scan:
-        return text
+        lines = text.splitlines()
+        action = onboarding_connection_validation_action(adapter_kind)
+        if action:
+            add_todo_to_lines(
+                lines,
+                role="agent",
+                text=action["text"],
+                task_class=action["task_class"],
+                action_kind=action["action_kind"],
+                updated_at=updated_at,
+            )
+        return "\n".join(lines) + "\n"
     lines = text.splitlines()
     if accept_onboarding_agent_todos:
         for candidate in onboarding_candidates(onboarding_scan):
@@ -327,6 +360,7 @@ def apply_onboarding_todos_to_state(
                 text=todo_text,
                 task_class=str(candidate.get("task_class") or "advancement_task"),
                 action_kind=str(candidate.get("action_kind") or "analyze"),
+                updated_at=updated_at,
             )
 
     acceptance_required = not accept_onboarding_agent_todos
@@ -344,6 +378,7 @@ def apply_onboarding_todos_to_state(
             text=user_todo,
             task_class="user_gate",
             action_kind="onboarding_decision",
+            updated_at=updated_at,
         )
     agent_todo = onboarding_agent_review_todo_text(
         acceptance_required=acceptance_required,
@@ -357,6 +392,7 @@ def apply_onboarding_todos_to_state(
             text=agent_todo,
             task_class="advancement_task",
             action_kind="onboarding_todo_review",
+            updated_at=updated_at,
         )
     return "\n".join(lines) + "\n"
 
@@ -365,6 +401,7 @@ def render_state_markdown(
     *,
     project: Path,
     goal_id: str,
+    adapter_kind: str,
     objective: str,
     updated_at: str,
     goal_doc: Path | None,
@@ -384,6 +421,7 @@ def render_state_markdown(
     )
     onboarding_block = f"\n{onboarding_markdown}\n" if onboarding_markdown else ""
     next_action = onboarding_next_action(
+        adapter_kind=adapter_kind,
         onboarding_scan=onboarding_scan,
         accept_onboarding_agent_todos=accept_onboarding_agent_todos,
         begin_autonomous_advance=begin_autonomous_advance,
@@ -442,6 +480,8 @@ adapter_id: {goal_id}
 """
     return apply_onboarding_todos_to_state(
         state_text,
+        adapter_kind=adapter_kind,
+        updated_at=updated_at,
         onboarding_scan=onboarding_scan,
         accept_onboarding_agent_todos=accept_onboarding_agent_todos,
         begin_autonomous_advance=begin_autonomous_advance,
@@ -486,7 +526,6 @@ def build_goal_entry(
     max_children: int,
     allowed_domains: list[str],
     write_scope: list[str],
-    claim_ttl_minutes: int,
     execution_profile: dict[str, Any] | None,
 ) -> dict[str, Any]:
     authority_sources = []
@@ -523,7 +562,6 @@ def build_goal_entry(
         },
         "coordination": {
             "write_scope": write_scope,
-            "claim_ttl_minutes": max(1, claim_ttl_minutes),
             "requires_parent_approval": [
                 "write",
                 "publish",
@@ -584,7 +622,6 @@ def bootstrap_project(
     max_children: int,
     allowed_domains: list[str] | None,
     write_scope: list[str] | None,
-    claim_ttl_minutes: int,
     execution_minimum_scale: str | None = None,
     execution_must_include: list[str] | None = None,
     execution_small_streak_threshold: int | None = None,
@@ -599,6 +636,7 @@ def bootstrap_project(
     onboarding_max_commits: int = 5,
     onboarding_max_status_paths: int = 12,
     onboarding_max_top_level_files: int = 24,
+    preserve_todos: bool = False,
     force: bool,
     dry_run: bool,
     sync_global: bool,
@@ -659,22 +697,39 @@ def bootstrap_project(
         max_children=max_children,
         allowed_domains=allowed_domains or [],
         write_scope=write_scope or [],
-        claim_ttl_minutes=claim_ttl_minutes,
         execution_profile=execution_profile,
     )
     registry, registry_goal_action = merge_goal(registry, goal_entry, force=force)
 
+    state_exists = state_file.exists()
     state_action = "created"
-    if state_file.exists() and not force:
+    if state_exists and force and preserve_todos:
+        state_action = "kept-existing-preserve-todos"
+    elif state_exists and not force:
         state_action = "kept-existing"
-    elif state_file.exists() and force:
+    elif state_exists and force:
         state_action = "replaced"
 
     dry_state_actions = {
         "created": "would-create",
         "kept-existing": "would-keep-existing",
+        "kept-existing-preserve-todos": "would-keep-existing-preserve-todos",
         "replaced": "would-replace",
     }
+    force_bootstrap_warning = None
+    if state_exists and force:
+        force_bootstrap_warning = {
+            "kind": "force_reconnect_existing_active_state",
+            "state_file": str(state_file),
+            "state_action": state_action,
+            "will_replace_active_state": state_action == "replaced",
+            "preserve_todos_requested": bool(preserve_todos),
+            "recommended_scope_migration": (
+                "Use configure-goal --write-scope ... --execute to change write scope "
+                "without rebuilding the active state."
+            ),
+            "preserve_todos_option": "--preserve-todos",
+        }
     actions = [
         {"path": str(registry_path), "action": "would-write" if dry_run else "wrote", "goal": registry_goal_action},
         {"path": str(state_file), "action": dry_state_actions.get(state_action, "would-write") if dry_run else state_action},
@@ -741,6 +796,7 @@ def bootstrap_project(
                 "runtime_root": str(runtime_root),
                 "registry_goal_action": registry_goal_action,
                 "state_action": state_action,
+                "force_bootstrap_warning": force_bootstrap_warning,
                 "execution_profile": execution_profile,
                 "onboarding_scan": onboarding_scan,
                 "onboarding_agent_todo_candidates": candidates,
@@ -778,6 +834,7 @@ def bootstrap_project(
                 render_state_markdown(
                     project=project,
                     goal_id=goal_id,
+                    adapter_kind=adapter_kind,
                     objective=objective,
                     updated_at=updated_at,
                     goal_doc=goal_doc,
@@ -810,6 +867,7 @@ def bootstrap_project(
         "runtime_root": str(runtime_root),
         "registry_goal_action": registry_goal_action,
         "state_action": state_action,
+        "force_bootstrap_warning": force_bootstrap_warning,
         "execution_profile": execution_profile,
         "onboarding_scan": onboarding_scan,
         "onboarding_agent_todo_candidates": candidates,
@@ -839,7 +897,7 @@ def bootstrap_project(
             f"loopx --registry {relative_state_file(project, registry_path)} registry",
             f"loopx --registry {relative_state_file(project, registry_path)} status",
             f"loopx --registry {relative_state_file(project, registry_path)} check --scan-root {project}",
-            f"loopx --format json --registry {runtime_root / 'registry.global.json'} quota should-run --goal-id {goal_id}",
+            f"loopx --format json --registry {runtime_root / 'registry.global.json'} quota should-run --goal-id {goal_id} --runtime-profile generic_cli",
             f"loopx --registry {relative_state_file(project, registry_path)} refresh-state --goal-id {goal_id}",
             f"loopx --registry {runtime_root / 'registry.global.json'} status",
             f"loopx --registry {relative_state_file(project, registry_path)} history --goal-id {goal_id}",
@@ -887,6 +945,20 @@ def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
     ]
     for action in payload.get("actions") or []:
         lines.append(f"- `{action.get('path')}`: {action.get('action')} ({action.get('goal', '')})")
+
+    force_warning = payload.get("force_bootstrap_warning")
+    if isinstance(force_warning, dict):
+        lines.extend(
+            [
+                "",
+                "## Force Bootstrap Warning",
+                f"- state_file: `{force_warning.get('state_file')}`",
+                f"- will_replace_active_state: `{force_warning.get('will_replace_active_state')}`",
+                f"- preserve_todos_requested: `{force_warning.get('preserve_todos_requested')}`",
+                f"- recommended_scope_migration: {force_warning.get('recommended_scope_migration')}",
+                f"- preserve_todos_option: `{force_warning.get('preserve_todos_option')}`",
+            ]
+        )
 
     onboarding_scan = payload.get("onboarding_scan")
     if isinstance(onboarding_scan, dict):

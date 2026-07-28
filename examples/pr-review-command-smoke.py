@@ -14,7 +14,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 import loopx.pr_review as pr_review_module
-from loopx.pr_review import _github_search_date
+from loopx.pr_review import (
+    _github_search_date,
+    build_pr_review_packet,
+    load_pr_fixture,
+)
 
 FIXTURE = REPO_ROOT / "examples" / "fixtures" / "pr-review.public.json"
 PR_REVIEW_SKILL = REPO_ROOT / "skills" / "loopx-pr-review" / "SKILL.md"
@@ -56,6 +60,9 @@ def main() -> int:
         "pull_requests[].evidence_commands",
         "Do not pipe the first packet through `jq`",
         "Do not fill the five-block review from title, labels, changed-file counts, or metadata risk hints alone",
+        "Code Volume And Simplification Review",
+        "Classify the volume as `necessary`, `partly avoidable`, or `not yet proven`",
+        "A code-volume conclusion without diff and call-site evidence is incomplete",
         "Do not use this skill to approve",
         "Route those decisions to `loopx-pr-merge`",
     ):
@@ -136,6 +143,8 @@ def main() -> int:
     assert request["dry_run"] is True, request
     assert request["repository"] == "owner/repo", request
     assert request["state_filter"] == "all", request
+    assert "result_completeness" in request["include"], request
+    assert payload["result_completeness"]["complete"] is True, payload
     assert payload["summary"]["total_pr_count"] == 4, payload["summary"]
     assert payload["summary"]["open_pr_count"] == 3, payload["summary"]
     assert payload["summary"]["merged_pr_count"] == 1, payload["summary"]
@@ -147,6 +156,7 @@ def main() -> int:
     assert groups["merged"]["group_id"] == "merged", groups
     assert groups["unmerged"]["count"] == 3, groups
     assert groups["merged"]["count"] == 1, groups
+    assert groups["merged"]["complete"] is True, groups
     assert 770 not in groups["unmerged"]["pr_numbers"], groups
     assert groups["merged"]["pr_numbers"] == [770], groups
     assert groups["unmerged"]["review_sequence"][0]["number"] == 773, groups
@@ -166,7 +176,7 @@ def main() -> int:
     template = first["review_template"]
     assert template["schema_version"] == "pr_review_five_block_template_v0", template
     assert "Empty scaffold only" in template["purpose"], template
-    assert "100-200 Chinese characters" in template["output_hint"], template
+    assert "reader unfamiliar with the PR" in template["output_hint"], template
     labels = [section["label"] for section in template["sections"]]
     assert labels == ["动机", "改动思路", "具体改动", "对主干的风险", "我的整体评价"], template
     for section in template["sections"]:
@@ -174,6 +184,15 @@ def main() -> int:
         assert section["word_hint"], section
         assert section["agent_instruction"], section
         assert "quota.py" not in section["agent_instruction"], section
+    assert [section["word_hint"] for section in template["sections"]] == [
+        "200-350字",
+        "250-450字",
+        "300-600字",
+        "250-500字",
+        "150-300字",
+    ], template
+    assert "headRefOid" in first["evidence_commands"][0], first["evidence_commands"]
+    assert "headRefOid" in first["evidence_commands"][-1], first["evidence_commands"]
     assert template["review_order"][0] == "docs/guides/newcomer-command-path.md", template
     assert first["checks"]["counts"]["success"] == 2, first["checks"]
     assert "public_docs" in first["areas"], first["areas"]
@@ -188,6 +207,66 @@ def main() -> int:
     assert main_risk["post_merge_review"] is False, main_risk
     assert main_risk["potential_regressions"], main_risk
     assert main_risk["bug_risks"], main_risk
+
+    default_payload = json.loads(
+        run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE)).stdout
+    )
+    assert default_payload["request"]["limit"] == 100, default_payload["request"]
+
+    repository, fixture_prs = load_pr_fixture(FIXTURE)
+    merged_fixture = next(item for item in fixture_prs if item.get("state") == "MERGED")
+    busy_window = []
+    for offset in range(105):
+        item = dict(merged_fixture)
+        item["number"] = 1000 + offset
+        item["url"] = f"https://github.com/owner/repo/pull/{1000 + offset}"
+        busy_window.append(item)
+    truncated = build_pr_review_packet(
+        pull_requests=busy_window,
+        repository=repository,
+        limit=100,
+        source="fixture",
+        state_filter="merged",
+    )
+    completeness = truncated["result_completeness"]
+    assert completeness["complete"] is False, completeness
+    assert completeness["groups"]["merged"] == {
+        "complete": False,
+        "observed_count": 105,
+        "included_count": 100,
+        "truncated": True,
+    }, completeness
+    assert completeness["recommended_limit"] >= 106, completeness
+    assert truncated["review_groups"]["merged"]["truncated"] is True, truncated
+
+    saturated_source = build_pr_review_packet(
+        pull_requests=busy_window[:100],
+        repository=repository,
+        limit=100,
+        source="github_cli",
+        state_filter="merged",
+        source_scan={
+            "schema_version": "pr_review_source_scan_v0",
+            "complete": False,
+            "pull_requests": busy_window[:100],
+            "states": [
+                {
+                    "state": "merged",
+                    "fetch_limit": 100,
+                    "fetched_count": 100,
+                    "included_after_window": 100,
+                    "source_saturated": True,
+                    "source_read_valid": True,
+                }
+            ],
+        },
+    )
+    saturated_completeness = saturated_source["result_completeness"]
+    assert saturated_completeness["complete"] is False, saturated_completeness
+    assert saturated_completeness["source_scan_complete"] is False, saturated_completeness
+    assert saturated_completeness["observed_count_is_lower_bound"] is True, saturated_completeness
+    assert "pull_requests" not in saturated_completeness["source_scan"], saturated_completeness
+    assert saturated_completeness["recommended_limit"] == 200, saturated_completeness
     assert main_risk["verification_focus"], main_risk
     assert "quota.py" not in json.dumps(main_risk), main_risk
     response_contract = payload["agent_response_contract"]
@@ -198,6 +277,7 @@ def main() -> int:
     assert response_contract["queue_table_role"] == "preface_only", response_contract
     assert response_contract["required_packet_fields_to_preserve"] == [
         "agent_response_contract",
+        "result_completeness",
         "review_groups",
         "pull_requests[].review_template",
         "pull_requests[].evidence_commands",
@@ -209,6 +289,14 @@ def main() -> int:
         "对主干的风险",
         "我的整体评价",
     ], response_contract
+    depth = response_contract["explanation_depth_contract"]
+    assert depth["schema_version"] == "pr_review_explanation_depth_v0", depth
+    assert "may not know" in depth["reader_profile"], depth
+    assert len(depth["evidence_layers"]) == 4, depth
+    assert len(depth["necessity_questions"]) == 3, depth
+    assert depth["runtime_walkthroughs"]["positive"], depth
+    assert "authority, permission, or scope bypass" in depth["risk_scan"], depth
+    assert "head SHA" in depth["freshness"], depth
     assert any("Do not stop at the queue/table summary" in item for item in response_contract["instructions"])
     assert any("open, closed, merged, today" in item for item in response_contract["instructions"])
     assert any("drops agent_response_contract" in item or "Do not pipe the JSON packet" in item for item in response_contract["instructions"])
@@ -284,6 +372,8 @@ def main() -> int:
     assert "final answer contract: queue/table is only a preface" in markdown, markdown
     assert "## Agent Output Contract" in markdown, markdown
     assert "Do not stop at the queue/table summary" in markdown, markdown
+    assert "explanation_depth_contract" in markdown, markdown
+    assert "remote head SHA" in markdown, markdown
     assert "Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`" in markdown, markdown
     assert "## Unmerged PRs" in markdown, markdown
     assert "## Merged PRs" in markdown, markdown
@@ -294,11 +384,11 @@ def main() -> int:
     assert "template below is intentionally blank" in markdown, markdown
     assert "- 推荐阅读顺序:" in markdown, markdown
     assert "- 五块模板（留空给 agentloop 填写）:" in markdown, markdown
-    assert "动机（40-80字）" in markdown, markdown
-    assert "改动思路（40-100字）" in markdown, markdown
-    assert "具体改动（60-140字）" in markdown, markdown
-    assert "对主干的风险（40-100字）" in markdown, markdown
-    assert "我的整体评价（30-80字）" in markdown, markdown
+    assert "动机（200-350字）" in markdown, markdown
+    assert "改动思路（250-450字）" in markdown, markdown
+    assert "具体改动（300-600字）" in markdown, markdown
+    assert "对主干的风险（250-500字）" in markdown, markdown
+    assert "我的整体评价（150-300字）" in markdown, markdown
     assert "main regression risk:" not in markdown, markdown
     assert "## Combined Review Sequence" in markdown, markdown
     assert "PR #773" in markdown, markdown

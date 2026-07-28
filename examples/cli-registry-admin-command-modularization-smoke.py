@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "loopx" / "cli.py"
 MODULE = ROOT / "loopx" / "cli_commands" / "registry_admin.py"
+AUTHORITY_MODULE = ROOT / "loopx" / "cli_commands" / "registry_authority.py"
 INIT = ROOT / "loopx" / "cli_commands" / "__init__.py"
 GOAL_ID = "registry-admin-smoke"
 
@@ -81,7 +82,7 @@ def write_fixture(project: Path) -> tuple[Path, Path, Path, Path]:
         "adapter": {"kind": "read_only_project_map_v0", "status": "connected-read-only"},
         "coordination": {
             "registered_agents": [{"id": "codex-main-control", "role": "primary"}],
-            "primary_agent": "codex-main-control",
+            "agent_model": "peer_v1",
         },
         "guards": ["dry-run registry admin smoke fixture only"],
     }
@@ -134,12 +135,15 @@ def write_fixture(project: Path) -> tuple[Path, Path, Path, Path]:
 def main() -> None:
     cli_source = CLI.read_text(encoding="utf-8")
     module_source = MODULE.read_text(encoding="utf-8")
+    authority_source = AUTHORITY_MODULE.read_text(encoding="utf-8")
+    registry_admin_family_source = module_source + "\n" + authority_source
     init_source = INIT.read_text(encoding="utf-8")
 
     forbidden_cli_markers = [
         "configure_goal_parser = sub.add_parser",
         "register_agent_parser = sub.add_parser",
         "archive_runtime_parser = sub.add_parser",
+        "retire_global_goal_parser = sub.add_parser",
         "sync_global_parser = sub.add_parser",
         "migrate_state_parser = sub.add_parser",
         "authority_parser = sub.add_parser",
@@ -147,12 +151,14 @@ def main() -> None:
         "register_agent_via_source_registry(",
         "configure_goal(",
         "archive_runtime_goal(",
+        "retire_global_registry_goals(",
         "migrate_legacy_state(",
         "register_authority_source(",
         "import_doc_registry_authority(",
         'if args.command == "configure-goal":',
         'if args.command == "register-agent":',
         'if args.command == "archive-runtime":',
+        'if args.command == "retire-global-goal":',
         'if args.command == "uninstall-project":',
         'if args.command == "sync-global":',
         'if args.command == "migrate-state":',
@@ -169,13 +175,26 @@ def main() -> None:
         "configure-goal",
         "register-agent",
         "archive-runtime",
+        "retire-global-goal",
         "uninstall-project",
         "sync-global",
         "migrate-state",
         "register-authority-source",
         "import-doc-registry-authority",
     ):
-        require(marker in module_source, f"registry admin module missing {marker}")
+        require(marker in registry_admin_family_source, f"registry admin command family missing {marker}")
+    for marker in (
+        "REGISTRY_AUTHORITY_COMMANDS",
+        "register_registry_authority_commands",
+        "handle_registry_authority_command",
+        'if args.command == "register-authority-source":',
+        'if args.command != "import-doc-registry-authority":',
+        "register_authority_source(",
+        "import_doc_registry_authority(",
+    ):
+        require(marker in authority_source, f"registry authority module missing {marker}")
+    for marker in ("register_registry_authority_commands", "handle_registry_authority_command"):
+        require(marker in module_source, f"registry admin module should delegate authority commands through {marker}")
     require("register_registry_admin_commands" in cli_source, "cli.py did not register registry admin commands")
     require("handle_registry_admin_command" in cli_source, "cli.py did not dispatch registry admin commands")
     require("register_registry_admin_commands" in init_source, "__init__ did not export registry admin registration")
@@ -183,8 +202,9 @@ def main() -> None:
 
     for command, options in {
         "configure-goal": ("--quota-compute", "--registered-agent", "--execute"),
-        "register-agent": ("--agent-id", "--primary-agent", "--execute"),
+        "register-agent": ("--agent-id", "--execute"),
         "archive-runtime": ("--archive-root", "--allow-registered", "--execute"),
+        "retire-global-goal": ("--goal-id", "--execute"),
         "uninstall-project": ("--goal-id", "--archive-state", "--remove-empty-registry", "--execute"),
         "sync-global": ("--replace-state", "--dry-run"),
         "migrate-state": ("--legacy-registry", "--goal-id-map", "--copy-runtime"),

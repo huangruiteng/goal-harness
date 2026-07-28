@@ -1,0 +1,212 @@
+.TH LOOPX 1 "" "LoopX 0.2.13" "User Commands"
+.SH NAME
+loopx \- control-plane helper for long-running agent work
+.SH SYNOPSIS
+.B loopx
+[\fB\-\-registry\fR \fIPATH\fR]
+[\fB\-\-runtime\-root\fR \fIPATH\fR]
+[\fB\-\-format\fR \fImarkdown|json\fR]
+\fICOMMAND\fR
+[\fIARGS\fR]
+.br
+.B loopx
+\fICOMMAND\fR
+\fB\-\-help\fR
+.br
+.B loopx commands
+.SH DESCRIPTION
+LoopX keeps long-running agent work moving by preserving goals, todos, gates,
+quota, and evidence between agent turns.
+.PP
+The command sections below are generated from the same canonical catalog used by
+\fBloopx commands\fR. Command-specific flags remain available through
+\fBloopx COMMAND \-\-help\fR.
+.SH START HERE
+.TP
+\fB/loopx\fR
+Ask the agent to inspect LoopX status, gates, todos, and next action.
+.TP
+\fB/loopx <goal text>\fR
+Start or continue one concrete long\-running goal through the agent.
+.TP
+\fBloopx doctor\fR
+Check install, PATH, release snapshot, skills, and import health.
+.TP
+\fBloopx slash\-commands \-\-install\fR
+Refresh host slash\-command prompt and skill files.
+.TP
+\fBloopx preset list\fR
+Show beginner\-safe and opt\-in advanced loop start packets.
+.TP
+\fBloopx ready\-score \-\-goal\-id <goal\-id>\fR
+Score install, status, quota, scheduler, todo, and evidence readiness without writing badges.
+.TP
+\fBloopx start\-goal \-\-guided \-\-project . \-\-goal\-text "<goal>"\fR
+Preview the shell fallback for the same agent\-safe `/loopx <goal>` path.
+.TP
+\fBloopx agent\-onboard \-\-agent\-type codex\-cli \-\-project .\fR
+Generate the exact host\-loop activation packet for one agent runtime.
+.TP
+\fBloopx agent\-onboard \-\-agent\-type codex\-app\-ssh \-\-project .\fR
+Use visible /goal when Codex App runs over SSH without automation tools.
+.TP
+\fBloopx bootstrap\-command\-pack \-\-project .\fR
+Generate the lower\-level host handoff packet.
+.SH DAILY OPERATOR COMMANDS
+.TP
+\fBloopx status\fR
+Show goals, gates, attention queue, and next action.
+.TP
+\fBloopx diagnose \-\-goal\-id <goal\-id>\fR
+Build a compact evidence packet when behavior is surprising.
+.TP
+\fBloopx review\-packet \-\-goal\-id <goal\-id>\fR
+Render a handoff or review packet with any required evidence\-log reads.
+.TP
+\fBloopx evidence\-log \-\-goal\-id <goal\-id> \-\-agent\-id <agent\-id> \-\-thin\fR
+Read the current agent's thin public\-safe ledger before replan or handoff.
+.TP
+\fBloopx todo \-\-help\fR
+Show todo lifecycle commands.
+.TP
+\fBloopx task\-lease \-\-help\fR
+Acquire, renew, transfer, release, or inspect a hard per\-todo lease.
+.TP
+\fBloopx quota should\-run\fR
+Decide whether the next agent turn should run.
+.TP
+\fBloopx history \-\-goal\-id <goal\-id>\fR
+Read compact run history.
+.TP
+\fBloopx history trajectory\-hygiene \-\-goal\-id <goal\-id> \-\-limit 100\fR
+Measure controller density and attribution gaps from compact history without reading raw sessions.
+.SH LOOP DRIVER HINTS
+.TP
+\fBCodex App automation\fR
+Use `/loopx <goal>` and let the app create or refresh the heartbeat automation.
+.TP
+\fBCodex CLI visible goal\fR
+Stay in the visible TUI; use `loopx codex\-cli\-bootstrap\-message` for setup when needed.
+.TP
+\fBClaude Code /loop\fR
+Use installed slash skills for `/loopx`; enable the adapter only when native `/loop` should be gated by LoopX.
+.TP
+\fBOpenCode goal bridge\fR
+Opt into `\-\-with\-goal\-bridge`, then use `loopx_goal_activate` to bind the quota\-gated bridge.
+.TP
+\fBOther agent or shell\fR
+Use a CLI, task, automation, heartbeat, or scheduler hook; otherwise drive LoopX manually.
+.TP
+\fBloopx turn plan \-\-goal\-id <goal\-id> \-\-agent\-id <agent\-id>\fR
+Plan one governed external\-host turn from live LoopX state without launching an agent or writing state.
+.TP
+\fBloopx host\-mode\-plan \-\-goal\-id <goal\-id> \-\-intent <intent> \-\-host\-capability <capability>\fR
+Select a safe host mode (visible, isolated headless Turn, gateway, timer, hybrid) and show the matching Turn/quota preview commands.
+.SH SETUP AND AUTOMATION COMMANDS
+.TP
+\fBloopx bootstrap / loopx connect\fR
+Create or connect project\-local state.
+.TP
+\fBloopx new\-project\-prompt\fR
+Generate a copy\-paste project connection prompt for an agent.
+.TP
+\fBloopx codex\-cli\-bootstrap\-message\fR
+Generate the visible Codex CLI TUI setup message.
+.TP
+\fBloopx codex\-cli\-tui\-bootstrap\-smoke\-bundle\fR
+Generate a transcript\-free Codex CLI first\-run smoke bundle.
+.TP
+\fBloopx codex\-cli\-visible\-attach\-acceptance\fR
+Check public\-safe visible Codex CLI attach evidence.
+.TP
+\fBloopx heartbeat\-prompt\fR
+Generate a guarded heartbeat automation body.
+.TP
+\fBloopx supervisor\-prompt\fR
+Generate the dedicated task body for an opt\-in proposal\-only peer supervisor.
+.TP
+\fBloopx supervisor\-observe\fR
+Read one public\-safe supervisor packet over peer status and evidence.
+.TP
+\fBloopx supervisor\-event\fR
+Preview, append, or read supervisor proposals and host execution receipts.
+.TP
+\fBloopx upgrade\-plan\fR
+Plan default heartbeat upgrade propagation.
+.TP
+\fBloopx update\fR
+Check, dry\-run, or execute the no\-clone update path.
+.TP
+\fBloopx project\-skill \-\-help\fR
+Install, inspect, or remove release\-owned skills in selected project agent hosts.
+.SH MAINTAINER AND ADAPTER COMMANDS
+.TP
+\fBloopx check\fR
+Run contract and public/private boundary checks.
+.TP
+\fBloopx change\-quality \-\-help\fR
+Qualify one exact final diff against an enabled project policy and receipt contract.
+.TP
+\fBloopx registry\fR
+Inspect registered goals and adapters.
+.TP
+\fBloopx sync\-global\fR
+Merge project state into the shared registry.
+.TP
+\fBloopx retire\-global\-goal\fR
+Safely retire explicitly named orphaned global goal routes.
+.TP
+\fBloopx register\-agent\fR
+Register an automation agent.
+.TP
+\fBloopx lark\-kanban\fR
+Project LoopX state into a Feishu/Lark Base board.
+.TP
+\fBloopx presentation\fR
+Package, roll back, and verify provider\-neutral static presentation artifacts.
+.TP
+\fBloopx explore\fR
+Record the exploration topology (nodes, edges, findings) and project it to a Feishu/Lark result board.
+.TP
+\fBloopx extension\fR
+Inspect and manage doctor\-verified subprocess extension activations.
+.TP
+\fBloopx issue\-fix\fR
+Build public\-safe issue or PR fix workflow packets.
+.TP
+\fBloopx review\-batch\fR
+Compose provider\-neutral bounded review packets and bind exact decisions.
+.TP
+\fBloopx periodic\-report\fR
+Resolve a portable weekly profile, evaluate report triggers, and compose provider\-neutral run receipts.
+.TP
+\fBloopx auto\-research\fR
+Project public\-safe research frontiers.
+.TP
+\fBloopx multi\-agent\fR
+Launch visible role\-scoped Codex TUI agents.
+.TP
+\fBloopx canary\fR
+Plan or run catalog\-informed smoke profiles.
+.TP
+\fBloopx benchmark\fR
+Use fixture\-only benchmark runner skeletons by default.
+.SH MORE
+.TP
+\fBloopx COMMAND \-\-help\fR
+Show flags for one command.
+.TP
+\fBman loopx\fR
+Open this installed manual page.
+.TP
+\fBdocs/guides/getting\-started.md#command\-reference\fR
+Read the longer operator and contributor guide.
+.SH INSTALL NOTES
+The LoopX local installer writes this manual to
+\fI$HOME/.local/share/man/man1/loopx.1.gz\fR by default and adds
+\fI$HOME/.local/share/man\fR to MANPATH in the selected shell profile.
+If the current shell has not reloaded that profile, run:
+.PP
+\fBMANPATH=\"$HOME/.local/share/man:${MANPATH:\-}\" man loopx\fR
+.SH SEE ALSO
+.BR man (1)

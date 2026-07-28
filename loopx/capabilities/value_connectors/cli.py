@@ -6,13 +6,20 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from .github_public import (
+from ..issue_fix.github_public import (
     build_github_public_channel_probe_packet,
     build_github_public_reply_monitor_packet,
-    build_value_connector_install_check_packet,
     render_github_public_channel_probe_markdown,
     render_github_public_reply_monitor_markdown,
+)
+from .install_check import (
+    build_value_connector_install_check_packet,
     render_value_connector_install_check_markdown,
+)
+from .finance_extension_migration import (
+    LEGACY_FINANCE_CONNECTOR_ID,
+    build_finance_extension_migration_contract,
+    render_finance_extension_migration_markdown,
 )
 from .planner import (
     ALLOWED_CONNECTOR_KINDS,
@@ -22,6 +29,11 @@ from .planner import (
     build_value_connector_plan_fixture,
     build_value_connector_plan_packet,
     render_value_connector_plan_markdown,
+)
+from .source_map import (
+    SOURCE_PROFILE_IDS,
+    build_value_connector_source_map_packet,
+    render_value_connector_source_map_markdown,
 )
 
 
@@ -61,6 +73,8 @@ def register_value_connector_commands(
         "--connector",
         choices=[
             "all",
+            "agent_reach_ops_source_map",
+            "finance_market_snapshot",
             "github_public_channel",
             "botmail_identity",
             "community_channel",
@@ -68,6 +82,20 @@ def register_value_connector_commands(
         ],
         default="all",
         help="Connector profile to check.",
+    )
+    source_map_parser = sub.add_parser(
+        "source-map",
+        help=(
+            "Render a read-first source-map packet so agents can use proven "
+            "connectors without opening internal docs."
+        ),
+    )
+    add_subcommand_format(source_map_parser)
+    source_map_parser.add_argument(
+        "--connector",
+        choices=sorted(SOURCE_PROFILE_IDS),
+        default="all",
+        help="Connector source profile to render.",
     )
     plan_parser = sub.add_parser(
         "plan",
@@ -84,7 +112,9 @@ def register_value_connector_commands(
         default="external_value_channel_queue",
         help="Fixture scenario label when --connector-id is omitted.",
     )
-    plan_parser.add_argument("--connector-id", help="Build a single-call plan for this connector id.")
+    plan_parser.add_argument(
+        "--connector-id", help="Build a single-call plan for this connector id."
+    )
     plan_parser.add_argument(
         "--connector-kind",
         choices=sorted(ALLOWED_CONNECTOR_KINDS),
@@ -98,17 +128,29 @@ def register_value_connector_commands(
         default="observe",
         help="Connector stage for a single-call plan.",
     )
-    plan_parser.add_argument("--target-ref", help="Public-safe target label for a single-call plan.")
-    plan_parser.add_argument("--target-url", help="Optional public https target URL without query or fragment.")
+    plan_parser.add_argument(
+        "--target-ref", help="Public-safe target label for a single-call plan."
+    )
+    plan_parser.add_argument(
+        "--target-url",
+        help="Optional public https target URL without query or fragment.",
+    )
     plan_parser.add_argument(
         "--value-axis",
         choices=sorted(ALLOWED_VALUE_AXES),
         default="revenue",
         help="Primary value axis for a single-call plan.",
     )
-    plan_parser.add_argument("--money-metric", help="Required money/cost/demand proxy for a single-call plan.")
-    plan_parser.add_argument("--success-metric", help="Required success metric for a single-call plan.")
-    plan_parser.add_argument("--kill-condition", help="Required stop condition for a single-call plan.")
+    plan_parser.add_argument(
+        "--money-metric",
+        help="Required money/cost/demand proxy for a single-call plan.",
+    )
+    plan_parser.add_argument(
+        "--success-metric", help="Required success metric for a single-call plan."
+    )
+    plan_parser.add_argument(
+        "--kill-condition", help="Required stop condition for a single-call plan."
+    )
     plan_parser.add_argument(
         "--audience",
         default="external operators running long-lived agent workflows",
@@ -220,6 +262,16 @@ def handle_value_connector_command(
                 render_value_connector_install_check_markdown,
             )
             return 0
+        if args.value_connectors_command == "source-map":
+            payload = build_value_connector_source_map_packet(
+                connector=args.connector,
+            )
+            print_payload(
+                payload,
+                output_format(args),
+                render_value_connector_source_map_markdown,
+            )
+            return 0
         if args.value_connectors_command == "github-public-probe":
             payload = build_github_public_channel_probe_packet(
                 url=args.url,
@@ -234,7 +286,9 @@ def handle_value_connector_command(
             return 0 if payload.get("ok") else 1
         if args.value_connectors_command == "github-reply-monitor":
             if args.fetch_metadata and args.metadata_json:
-                raise ValueError("--fetch-metadata cannot be combined with --metadata-json")
+                raise ValueError(
+                    "--fetch-metadata cannot be combined with --metadata-json"
+                )
             payload = build_github_public_reply_monitor_packet(
                 issue_url=args.issue_url,
                 after_comment_url=args.after_comment_url,
@@ -253,8 +307,16 @@ def handle_value_connector_command(
         if args.value_connectors_command != "plan":
             raise ValueError(
                 "value-connectors requires `install-check`, `plan`, "
-                "`github-public-probe`, or `github-reply-monitor`"
+                "`source-map`, `github-public-probe`, or `github-reply-monitor`"
             )
+        if args.connector_id == LEGACY_FINANCE_CONNECTOR_ID:
+            payload = build_finance_extension_migration_contract()
+            print_payload(
+                payload,
+                output_format(args),
+                render_finance_extension_migration_markdown,
+            )
+            return 0
         if args.connector_id:
             missing = [
                 name
@@ -269,7 +331,8 @@ def handle_value_connector_command(
             ]
             if missing:
                 raise ValueError(
-                    "single-call plan requires " + ", ".join(f"--{name.replace('_', '-')}" for name in missing)
+                    "single-call plan requires "
+                    + ", ".join(f"--{name.replace('_', '-')}" for name in missing)
                 )
             plan = build_single_value_connector_plan(
                 connector_id=args.connector_id,
@@ -304,7 +367,11 @@ def handle_value_connector_command(
                 "external_reads_performed": False,
                 "external_writes_performed": False,
             }
-            print_payload(payload, output_format(args), render_github_public_channel_probe_markdown)
+            print_payload(
+                payload,
+                output_format(args),
+                render_github_public_channel_probe_markdown,
+            )
             return 1
         if getattr(args, "value_connectors_command", None) == "github-reply-monitor":
             payload = {
@@ -315,10 +382,20 @@ def handle_value_connector_command(
                 "external_reads_performed": False,
                 "external_writes_performed": False,
             }
-            print_payload(payload, output_format(args), render_github_public_reply_monitor_markdown)
+            print_payload(
+                payload,
+                output_format(args),
+                render_github_public_reply_monitor_markdown,
+            )
             return 1
-        payload = {"ok": False, "schema_version": "value_connector_plan_error_v0", "error": str(exc)}
-        print_payload(payload, output_format(args), render_value_connector_plan_markdown)
+        payload = {
+            "ok": False,
+            "schema_version": "value_connector_plan_error_v0",
+            "error": str(exc),
+        }
+        print_payload(
+            payload, output_format(args), render_value_connector_plan_markdown
+        )
         return 1
     print_payload(payload, output_format(args), render_value_connector_plan_markdown)
     return 0

@@ -61,7 +61,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Delegate each ACP prompt to scripts/skillsbench_host_codex_goal_worker.py "
-            "instead of codex exec. This is the native Codex Goal baseline path."
+            "instead of codex exec. Deprecated for SkillsBench scored runs; "
+            "prefer --codex-cli-goal-worker."
+        ),
+    )
+    parser.add_argument(
+        "--codex-cli-goal-worker",
+        action="store_true",
+        help=(
+            "Delegate each ACP prompt to a host Codex CLI TUI and submit it "
+            "with a real /goal slash command. This is the canonical Codex "
+            "Goal baseline path."
         ),
     )
     parser.add_argument("--dataset", default="skillsbench-v1.1")
@@ -72,10 +82,31 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--approval-policy", default="never")
     parser.add_argument(
         "--reasoning-effort",
-        default="high",
+        default=None,
         help=(
-            "Codex app-server turn/start effort for --app-server-goal-worker. "
-            "Formal benchmark runs default to high."
+            "Reasoning effort passed to Codex. For codex exec and "
+            "--codex-cli-goal-worker this maps to -c "
+            "model_reasoning_effort=...; for --app-server-goal-worker this "
+            "maps to the deprecated app-server turn/start effort."
+        ),
+    )
+    parser.add_argument(
+        "--codex-api-proxy",
+        default=None,
+        help=(
+            "Private HTTP proxy URL injected into the Codex CLI /goal process "
+            "environment. The raw URL must not be written to public compact "
+            "artifacts."
+        ),
+    )
+    parser.add_argument(
+        "--codex-cli-goal-thread-prewarm",
+        action="store_true",
+        help=(
+            "Opt into the legacy Codex CLI TUI thread prewarm prompt before "
+            "submitting /goal. The default path submits the file-backed /goal "
+            "objective directly so model startup latency is attributed to the "
+            "real goal/bridge watchdogs."
         ),
     )
     parser.add_argument(
@@ -100,6 +131,37 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Optional timeout for observing the first sandbox bridge operation "
             "from a Codex turn. 0 disables the watchdog."
+        ),
+    )
+    parser.add_argument(
+        "--goal-active-timeout-sec",
+        type=float,
+        default=CodexExecConfig.goal_active_timeout_sec,
+        help=(
+            "Optional timeout for observing Codex CLI /goal active state before "
+            "the first sandbox bridge operation. 0 disables the startup watchdog."
+        ),
+    )
+    parser.add_argument(
+        "--app-server-goal-followup-max",
+        type=int,
+        default=0,
+        help=(
+            "Experimental same-thread continuation budget for ordinary "
+            "completed app-server Goal worker turns. No verifier/reward "
+            "feedback is forwarded. 0 preserves the single-turn baseline."
+        ),
+    )
+    parser.add_argument(
+        "--app-server-goal-prompt-style",
+        choices=("bridge-only", "native-goal", "cli-exec-like"),
+        default="bridge-only",
+        help=(
+            "Prompt framing for --app-server-goal-worker. bridge-only keeps "
+            "the bare app-server baseline to task prompt plus sandbox bridge; "
+            "native-goal adds app closeout framing; cli-exec-like keeps the "
+            "worker prompt closer to the Codex exec bridge prompt for "
+            "diagnostic compatibility."
         ),
     )
     parser.add_argument(
@@ -166,6 +228,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "through the remote bridge before each Codex prompt."
         ),
     )
+    parser.add_argument(
+        "--loopx-turn-agent-cli",
+        action="store_true",
+        help=(
+            "Wrap each solver prompt in one real LoopX Turn transaction. The "
+            "case-local registry stays behind the scored-workspace bridge and "
+            "the host Agent CLI is committed only after independent validation."
+        ),
+    )
+    parser.add_argument(
+        "--loopx-turn-validation-command",
+        default=None,
+        help=(
+            "Private scored-workspace postcondition command for LoopX Turn. "
+            "Its output is never copied into public traces."
+        ),
+    )
+    parser.add_argument("--loopx-turn-max-turns", type=int, default=1)
+    parser.add_argument("--loopx-turn-progress-exit-code", type=int, default=10)
+    parser.add_argument(
+        "--loopx-turn-terminal-policy",
+        choices=("validator", "fixed-n", "stability"),
+        default="validator",
+    )
     parser.add_argument("--loopx-case-goal-id", default="skillsbench-case")
     parser.add_argument("--loopx-case-agent-id", default="codex-benchmark-agent")
     parser.add_argument("--loopx-case-todo-id", default=BENCHMARK_CASE_LOOPX_TODO_ID)
@@ -186,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout_sec=args.timeout_sec,
             dry_run_response=args.dry_run_response,
             app_server_goal_worker=args.app_server_goal_worker,
+            codex_cli_goal_worker=args.codex_cli_goal_worker,
             dataset=args.dataset,
             task_id=args.task_id,
             run_group_id=args.run_group_id,
@@ -193,10 +280,15 @@ def main(argv: list[str] | None = None) -> int:
             rollout_name=args.rollout_name,
             approval_policy=args.approval_policy,
             reasoning_effort=args.reasoning_effort,
+            codex_api_proxy=args.codex_api_proxy,
+            codex_cli_goal_thread_prewarm=args.codex_cli_goal_thread_prewarm,
             response_timeout_sec=args.response_timeout_sec,
             worker_script=args.worker_script,
             stream_heartbeat_interval_sec=args.stream_heartbeat_interval_sec,
             first_action_timeout_sec=args.first_action_timeout_sec,
+            goal_active_timeout_sec=args.goal_active_timeout_sec,
+            app_server_goal_followup_max=args.app_server_goal_followup_max,
+            app_server_goal_prompt_style=args.app_server_goal_prompt_style,
             bridge_idle_timeout_sec=args.bridge_idle_timeout_sec,
             task_output_quiet_timeout_sec=args.task_output_quiet_timeout_sec,
             worker_public_trace_dir=args.worker_public_trace_dir,
@@ -212,6 +304,11 @@ def main(argv: list[str] | None = None) -> int:
             loopx_workflow_lifecycle_checkpoint=(
                 args.loopx_workflow_lifecycle_checkpoint
             ),
+            loopx_turn_agent_cli=args.loopx_turn_agent_cli,
+            loopx_turn_validation_command=args.loopx_turn_validation_command,
+            loopx_turn_max_turns=args.loopx_turn_max_turns,
+            loopx_turn_progress_exit_code=args.loopx_turn_progress_exit_code,
+            loopx_turn_terminal_policy=args.loopx_turn_terminal_policy,
             loopx_case_goal_id=args.loopx_case_goal_id,
             loopx_case_agent_id=args.loopx_case_agent_id,
             loopx_case_todo_id=args.loopx_case_todo_id,

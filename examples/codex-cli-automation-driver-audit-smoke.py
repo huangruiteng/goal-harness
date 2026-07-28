@@ -16,28 +16,39 @@ def main() -> int:
     index = PRODUCT_INDEX.read_text()
 
     required_contracts = [
-        "one LoopX-generated message",
-        "does not expose a mature native recurring scheduler",
-        "recurrence as a LoopX local-driver concern",
-        "codex resume [SESSION_ID] [PROMPT]",
-        "codex exec",
-        "remote-control",
-        "loopx codex-cli-visible-driver-plan",
-        "loopx codex-cli-exec-handoff",
-        "TUI bootstrap primary",
-        "headless-disabled boundary",
-        "idle guard",
-        "validated writeback",
+        "loopx_turn_v0",
+        "loopx turn plan",
+        "loopx turn run-once",
+        "interactive-visible",
+        "isolated-headless",
+        "must never switch",
+        "independent validation",
+        "durable writeback",
+        "quota",
+        "scheduler state",
+        "generic-cli",
+        "typed candidate result",
     ]
     for phrase in required_contracts:
         assert phrase in doc, phrase
 
     boundary_terms = [
-        "raw Codex transcripts",
+        "Raw host material stays outside LoopX state",
+        "raw task text",
+        "raw trajectories",
         "credentials",
-        "hidden session files",
+        "local artifact paths",
     ]
     for phrase in boundary_terms:
+        assert phrase in doc, phrase
+
+    unfinished_boundaries = [
+        "interactive-visible` still needs",
+        "Trae still needs a thin adapter",
+        "recurring external scheduling must compose",
+        "benchmark promotion still requires",
+    ]
+    for phrase in unfinished_boundaries:
         assert phrase in doc, phrase
 
     assert "codex-cli-automation-driver.md" in index, "product index link"

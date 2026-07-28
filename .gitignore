@@ -1,7 +1,9 @@
 .DS_Store
 .venv/
+.idea
 node_modules/
 apps/dashboard/public/*.local.json
+apps/presentation/dashboard/public/*.local.json
 __pycache__/
 *.pyc
 *.tsbuildinfo
@@ -10,6 +12,10 @@ build/
 dist/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
 .playwright-cli/
 output/playwright/
 
@@ -24,7 +30,8 @@ skills/loopx-social-media/
 .goal-harness/
 .goal-wrapper.local/
 .codex/goals/
+.opencode/goals/
 goals/**/ACTIVE_GOAL_STATE.md
 goals/**/ACTIVE_GOAL_STATE.md.lock
-runtime/
+/runtime/
 logs/

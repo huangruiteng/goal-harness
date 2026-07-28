@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from .file_lock import exclusive_file_lock
+
 
 ROLLOUT_EVENT_SCHEMA_VERSION = "loopx_rollout_event_v0"
 ROLLOUT_EVENT_SUMMARY_SCHEMA_VERSION = "loopx_rollout_event_summary_v0"
@@ -16,10 +18,12 @@ ROLLOUT_EVENT_KINDS = {
     "benchmark_launch",
     "benchmark_status",
     "codex_session_observed",
+    "capability_gap",
     "compact_blocker",
     "compact_case_result",
     "failure_attribution",
     "pr_merge",
+    "pr_review_ack",
     "quota_monitor_poll",
     "quota_should_run",
     "quota_spend",
@@ -78,9 +82,7 @@ RAW_KEY_HINTS = (
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _compact_text(value: Any, *, limit: int = 500, field: str = "value") -> str | None:
@@ -170,13 +172,19 @@ def _normalized_event_kind(event_kind: str) -> str:
 
 
 def _event_id(payload: Mapping[str, Any]) -> str:
+    """Identify one event occurrence, including its observation timestamp."""
+
     stable = {
         key: value
         for key, value in payload.items()
-        if key not in {"event_id", "recorded_at"}
+        if key != "event_id"
     }
     encoded = json.dumps(stable, sort_keys=True, ensure_ascii=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _idempotency_body(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key != "event_id"}
 
 
 def rollout_event_log_path(runtime_root: Path, goal_id: str) -> Path:
@@ -357,13 +365,75 @@ def build_rollout_event(
 
 
 def append_rollout_event(log_path: Path, event: Mapping[str, Any]) -> dict[str, Any]:
+    """Append once by event id, preserving distinct timestamped observations."""
+
     payload = dict(event)
     if payload.get("schema_version") != ROLLOUT_EVENT_SCHEMA_VERSION:
         raise ValueError("unsupported rollout event schema")
+    event_id = str(payload.get("event_id") or "").strip()
+    if not event_id:
+        raise ValueError("rollout event_id is required")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, sort_keys=True, ensure_ascii=False) + "\n")
+    with exclusive_file_lock(log_path):
+        with log_path.open("a+", encoding="utf-8") as handle:
+            handle.seek(0)
+            for line in handle:
+                if event_id not in line:
+                    continue
+                try:
+                    existing = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(existing, dict) or existing.get("event_id") != event_id:
+                    continue
+                if _idempotency_body(existing) == _idempotency_body(payload):
+                    return existing
+                raise ValueError(f"conflicting rollout event_id: {event_id}")
+            handle.write(json.dumps(payload, sort_keys=True, ensure_ascii=False) + "\n")
     return payload
+
+
+def append_rollout_event_once(
+    log_path: Path,
+    event: Mapping[str, Any],
+    *,
+    identity_fields: Sequence[str],
+) -> tuple[dict[str, Any], bool]:
+    """Append once by a stable public identity, returning whether it was new."""
+
+    payload = dict(event)
+    if payload.get("schema_version") != ROLLOUT_EVENT_SCHEMA_VERSION:
+        raise ValueError("unsupported rollout event schema")
+    fields = tuple(str(field).strip() for field in identity_fields if str(field).strip())
+    if not fields:
+        raise ValueError("rollout idempotency identity_fields are required")
+    missing = [field for field in fields if payload.get(field) in {None, ""}]
+    if missing:
+        raise ValueError(
+            "rollout idempotency fields must be populated: " + ", ".join(missing)
+        )
+    event_id = str(payload.get("event_id") or "").strip()
+    if not event_id:
+        raise ValueError("rollout event_id is required")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with exclusive_file_lock(log_path):
+        with log_path.open("a+", encoding="utf-8") as handle:
+            handle.seek(0)
+            for line in handle:
+                try:
+                    existing = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(existing, dict):
+                    continue
+                if all(existing.get(field) == payload.get(field) for field in fields):
+                    return existing, False
+                if existing.get("event_id") == event_id:
+                    if _idempotency_body(existing) == _idempotency_body(payload):
+                        return existing, False
+                    raise ValueError(f"conflicting rollout event_id: {event_id}")
+            handle.write(json.dumps(payload, sort_keys=True, ensure_ascii=False) + "\n")
+    return payload, True
 
 
 def load_rollout_events(log_path: Path, *, limit: int | None = None) -> list[dict[str, Any]]:

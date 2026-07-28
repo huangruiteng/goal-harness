@@ -1,11 +1,29 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from importlib import import_module
+import json
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from ..delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
-from ..delivery_outcome import DELIVERY_OUTCOME_CHOICES
+from ..capabilities.explore.activation import (
+    sync_explore_graph_after_material_refresh,
+)
+from ..control_plane.agents.capability_gate import (
+    runtime_capabilities_for_cli_projection,
+)
+from ..control_plane.goals.goal_vision_policy import (
+    GOAL_VISION_ADVANCEMENT_POLICY_CHOICES,
+)
+from ..control_plane.work_items.delivery_batch_scale import (
+    DELIVERY_BATCH_SCALE_INPUT_CHOICES,
+)
+from ..control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES
+from ..extensions.runtime import (
+    default_extension_state_file,
+    resolve_extension_activation,
+)
+from ..history import load_registry
 from ..feedback import LESSON_KINDS, append_human_reward, compact_reward, render_reward_markdown
 from ..operator_gate import (
     DEFAULT_OPERATOR_GATE,
@@ -18,6 +36,7 @@ from ..project_map import (
     read_only_project_map_run,
     render_read_only_project_map_markdown,
 )
+from ..paths import resolve_runtime_root
 from ..state_refresh import (
     DEFAULT_REFRESH_ACTION,
     DEFAULT_REFRESH_CLASSIFICATION,
@@ -41,6 +60,73 @@ PROJECT_LIFECYCLE_COMMANDS = {
     "reward",
     "operator-gate",
 }
+
+INLINE_VISION_FIELDS = {
+    "vision_summary": "vision_summary",
+    "vision_role_scope": "role_scope",
+    "vision_acceptance": "acceptance_summary",
+    "vision_advancement_policy": "advancement_policy",
+    "vision_replan_trigger": "replan_trigger_summary",
+    "vision_dreaming_policy": "dreaming_policy",
+    "vision_last_patch": "last_patch_summary",
+}
+
+
+def _lark_explore_graph_syncer(
+    runtime_root_arg: str | None,
+    *,
+    registry_path: Path,
+) -> Callable[..., Mapping[str, object]]:
+    extension_runtime_root = resolve_runtime_root(
+        load_registry(registry_path), runtime_root_arg
+    )
+
+    def sync(**kwargs: object) -> Mapping[str, object]:
+        provider = import_module("loopx.extensions.lark")
+        activation = resolve_extension_activation(
+            str(provider.LARK_EXTENSION_ID),
+            state_file=default_extension_state_file(extension_runtime_root),
+            required_permissions=(str(provider.LARK_PROJECTION_SINK_PERMISSION),),
+        )
+        implementation = import_module(
+            "loopx.extensions.lark.presentation.explore_results"
+        )
+        result = dict(
+            implementation.sync_issue_fix_explore_on_material_change(**kwargs)
+        )
+        result["extension_activation"] = activation
+        return result
+
+    return sync
+
+
+def _inline_agent_vision_packet(args: argparse.Namespace) -> dict[str, object] | None:
+    patch = {
+        field: str(value).strip()
+        for attr, field in INLINE_VISION_FIELDS.items()
+        for value in [getattr(args, attr, None)]
+        if str(value or "").strip()
+    }
+    todo_delta = [
+        str(item or "").strip()
+        for item in (getattr(args, "vision_todo_delta", None) or [])
+        if str(item or "").strip()
+    ]
+    state = str(getattr(args, "vision_state", None) or "").strip()
+    if not patch and not todo_delta and not state:
+        return None
+    if not str(getattr(args, "agent_id", None) or "").strip():
+        raise ValueError("inline agent vision requires --agent-id")
+    if not patch:
+        raise ValueError("inline agent vision requires at least one --vision-* patch field")
+    packet: dict[str, object] = {
+        "schema_version": "goal_vision_replan_contract_v0",
+        "vision_patch": patch,
+        "todo_delta": todo_delta,
+    }
+    if state:
+        packet["state"] = state
+    return packet
 
 
 def register_project_lifecycle_commands(
@@ -69,7 +155,10 @@ def register_project_lifecycle_commands(
     )
     refresh_state_parser.add_argument(
         "--recommended-action",
-        help=f"Public-safe next action. Defaults to: {DEFAULT_REFRESH_ACTION}",
+        help=(
+            "Local-control next action. Private project refs are allowed; "
+            f"inline secrets are rejected. Defaults to: {DEFAULT_REFRESH_ACTION}"
+        ),
     )
     refresh_state_parser.add_argument(
         "--next-action",
@@ -81,13 +170,25 @@ def register_project_lifecycle_commands(
     )
     refresh_state_parser.add_argument(
         "--delivery-batch-scale",
-        choices=DELIVERY_BATCH_SCALE_CHOICES,
-        help="Optional explicit delivery scale for this refresh run, overriding classification-name inference.",
+        choices=DELIVERY_BATCH_SCALE_INPUT_CHOICES,
+        help=(
+            "Optional explicit delivery scale for this refresh run, overriding "
+            "classification-name inference. Accepts canonical scales plus "
+            "single_segment/bounded_segment aliases for single_surface."
+        ),
     )
     refresh_state_parser.add_argument(
         "--delivery-outcome",
         choices=DELIVERY_OUTCOME_CHOICES,
         help="Optional explicit outcome-floor signal for this refresh run.",
+    )
+    refresh_state_parser.add_argument(
+        "--delivery-workspace-path",
+        help=(
+            "Local git worktree that produced this accountable delivery. Use when "
+            "refresh-state must run from a separate registry checkout; the local "
+            "path is validated but is not persisted."
+        ),
     )
     refresh_state_parser.add_argument(
         "--autonomous-replan-recorded",
@@ -109,10 +210,83 @@ def register_project_lifecycle_commands(
         ),
     )
     refresh_state_parser.add_argument(
+        "--agent-vision-json",
+        help=(
+            "Path to a complete generated goal_vision_replan_contract_v0 update. "
+            "The CLI enforces budgets; any autonomous replan that changes durable "
+            "mainline fields requires goal_path_delta_v0."
+        ),
+    )
+    refresh_state_parser.add_argument(
+        "--vision-state",
+        help=(
+            "Optional lower snake_case lifecycle state for an inline "
+            "goal_vision_replan_contract_v0 patch. Closure aliases such as "
+            "satisfied and vision_satisfied normalize to vision_closed; "
+            "custom states remain open until explicitly closed."
+        ),
+    )
+    refresh_state_parser.add_argument(
+        "--vision-summary",
+        help=(
+            "Inline bounded vision_summary for a field-level patch merged into the "
+            "current agent's latest active vision."
+        ),
+    )
+    refresh_state_parser.add_argument(
+        "--vision-role-scope",
+        help="Inline bounded role_scope for the current agent's vision patch.",
+    )
+    refresh_state_parser.add_argument(
+        "--vision-acceptance",
+        help="Inline bounded acceptance_summary for the current agent's vision patch.",
+    )
+    refresh_state_parser.add_argument(
+        "--vision-advancement-policy",
+        choices=GOAL_VISION_ADVANCEMENT_POLICY_CHOICES,
+        help=(
+            "Whether open acceptance needs advancement only as needed or must "
+            "keep a runnable advancement frontier until the vision closes."
+        ),
+    )
+    refresh_state_parser.add_argument(
+        "--vision-replan-trigger",
+        help="Inline bounded replan_trigger_summary that quota can project as an acceptance gap.",
+    )
+    refresh_state_parser.add_argument(
+        "--vision-dreaming-policy",
+        help="Inline bounded dreaming_policy for the current agent's vision patch.",
+    )
+    refresh_state_parser.add_argument(
+        "--vision-last-patch",
+        help="Inline bounded last_patch_summary for the current agent's vision patch.",
+    )
+    refresh_state_parser.add_argument(
+        "--vision-todo-delta",
+        action="append",
+        help="Compact todo delta for an inline vision patch. Repeat for multiple deltas.",
+    )
+    refresh_state_parser.add_argument(
+        "--vision-unchanged-reason",
+        help=(
+            "Compact reason why a required vision checkpoint is intentionally unchanged."
+        ),
+    )
+    refresh_state_parser.add_argument(
         "--agent-id",
         help=(
             "Registered agent id for agent-lane state refreshes. When set, the "
             "refresh is visible in run history but does not replace goal-level status."
+        ),
+    )
+    refresh_state_parser.add_argument(
+        "--available-capability",
+        dest="available_capabilities",
+        action="append",
+        help=(
+            "Preserve one observed public-safe runtime capability from the scoped "
+            "quota decision. Repeatable; this context does not grant authority or "
+            "change refresh-state write scope."
         ),
     )
     refresh_state_parser.add_argument(
@@ -124,7 +298,7 @@ def register_project_lifecycle_commands(
         choices=PROGRESS_SCOPE_CHOICES,
         help=(
             "Refresh scope. In multi-agent goals, use agent_lane for per-agent runnable "
-            "status, or goal with the primary agent for durable goal-level status/Next Action."
+            "status, or goal with any registered peer for durable goal-level status/Next Action."
         ),
     )
     refresh_state_parser.add_argument(
@@ -136,6 +310,14 @@ def register_project_lifecycle_commands(
         "--no-global-sync",
         action="store_true",
         help="Do not refresh the shared global registry after writing the state run.",
+    )
+    refresh_state_parser.add_argument(
+        "--suppress-external-sinks",
+        action="store_true",
+        help=(
+            "Keep enabled local projections active but suppress configured external "
+            "sink writes for this refresh. Pending sink digests remain retryable."
+        ),
     )
 
     read_only_map_parser = subparsers.add_parser(
@@ -160,7 +342,11 @@ def register_project_lifecycle_commands(
     )
     read_only_map_parser.add_argument(
         "--recommended-action",
-        help="Public-safe next action. Defaults to the first public-safe item from the active state's Next Action.",
+        help=(
+            "Local-control next action. Private project refs are allowed; "
+            "inline secrets are rejected. Defaults to the first item from the "
+            "active state's Next Action."
+        ),
     )
     read_only_map_parser.add_argument(
         "--dry-run",
@@ -257,7 +443,10 @@ def register_project_lifecycle_commands(
         "--agent-command",
         help="Target-agent command that becomes valid after approval. Defaults for read_only_map_opt_in approvals.",
     )
-    gate_parser.add_argument("--recommended-action", help="Public-safe next action for status/dashboard.")
+    gate_parser.add_argument(
+        "--recommended-action",
+        help="Local-control next action for status/dashboard; inline secrets are rejected.",
+    )
     gate_parser.add_argument("--dry-run", action="store_true", help="Print the decision run without appending it.")
     gate_parser.add_argument(
         "--no-global-sync",
@@ -279,6 +468,34 @@ def handle_project_lifecycle_command(
 
     fmt = output_format(args)
     if args.command == "refresh-state":
+        agent_vision_packet: dict[str, object] | None = None
+        merge_agent_vision_patch = False
+        try:
+            inline_agent_vision_packet = _inline_agent_vision_packet(args)
+            if args.agent_vision_json and inline_agent_vision_packet:
+                raise ValueError(
+                    "--agent-vision-json cannot be combined with inline --vision-* fields"
+                )
+            if args.agent_vision_json:
+                agent_vision_packet = json.loads(
+                    Path(args.agent_vision_json).expanduser().read_text(encoding="utf-8")
+                )
+            elif inline_agent_vision_packet:
+                agent_vision_packet = inline_agent_vision_packet
+                merge_agent_vision_patch = True
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "goal_id": args.goal_id,
+                "classification": args.classification,
+                "appended": False,
+                "dry_run": bool(args.dry_run),
+                "error": str(exc),
+            }
+            print_payload(payload, fmt, render_state_refresh_markdown)
+            return 1
         try:
             payload = refresh_state_run(
                 registry_path=registry_path,
@@ -291,11 +508,19 @@ def handle_project_lifecycle_command(
                 next_action=args.next_action,
                 delivery_batch_scale=args.delivery_batch_scale,
                 delivery_outcome=args.delivery_outcome,
+                delivery_workspace_path=(
+                    Path(args.delivery_workspace_path).expanduser()
+                    if args.delivery_workspace_path
+                    else None
+                ),
                 agent_id=args.agent_id,
                 agent_lane=args.agent_lane,
                 progress_scope=args.progress_scope,
                 autonomous_replan_recorded=bool(args.autonomous_replan_recorded),
                 repair_delta_kinds=args.repair_delta_kinds,
+                agent_vision_packet=agent_vision_packet,
+                merge_agent_vision_patch=merge_agent_vision_patch,
+                vision_unchanged_reason=args.vision_unchanged_reason,
                 dry_run=bool(args.dry_run),
                 sync_global=not bool(args.no_global_sync),
             )
@@ -310,6 +535,14 @@ def handle_project_lifecycle_command(
                 "dry_run": bool(args.dry_run),
                 "error": str(exc),
             }
+        projected_capabilities = runtime_capabilities_for_cli_projection(
+            args.available_capabilities
+        )
+        if projected_capabilities:
+            payload["available_capabilities"] = projected_capabilities
+        payload["external_sink_delivery_authorized"] = not bool(
+            args.suppress_external_sinks
+        )
         if payload.get("ok") and payload.get("appended") and not payload.get("dry_run"):
             append_cli_rollout_event(
                 payload,
@@ -335,6 +568,37 @@ def handle_project_lifecycle_command(
                     ),
                 },
             )
+            graph_sync = sync_explore_graph_after_material_refresh(
+                registry_path=registry_path,
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                project=Path(args.project).expanduser() if args.project else None,
+                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                external_sink_delivery_authorized=not bool(
+                    args.suppress_external_sinks
+                ),
+                syncer=_lark_explore_graph_syncer(
+                    args.runtime_root,
+                    registry_path=registry_path,
+                ),
+            )
+            payload["explore_graph_sync"] = graph_sync
+            graph_postcondition = (
+                graph_sync.get("delivery_postcondition")
+                if isinstance(graph_sync.get("delivery_postcondition"), dict)
+                else {}
+            )
+            if graph_sync.get("enabled") and not graph_postcondition.get("satisfied"):
+                payload.setdefault("warnings", []).append(
+                    "enabled Explore Graph delivery postcondition is unsatisfied; "
+                    "the unchanged sink digest keeps it retryable"
+                )
+                if graph_postcondition.get("blocks_delivery"):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        "enabled Explore Graph sync/readback failed after the material "
+                        "refresh; retry it before delivery"
+                    )
         print_payload(payload, fmt, render_state_refresh_markdown)
         return 0 if payload.get("ok") else 1
 

@@ -141,6 +141,8 @@ prefer the CLI helper instead of hand-editing section names:
 loopx todo add \
   --goal-id <goal-id> \
   --role user \
+  --task-class user_gate \
+  --blocks-agent <agent-id> \
   --text "Read the short review packet before approving delivery."
 
 loopx todo add \

@@ -41,6 +41,21 @@ class CodexAppServerGoalTurn:
     session_event_count: int = 0
     session_log_observed: bool = False
     session_task_complete_observed: bool = False
+    stream_eof_observed: bool = False
+    stream_error_observed: bool = False
+    process_exit_observed: bool = False
+    process_returncode: int | None = None
+    transport_reconnect_attempted: bool = False
+    transport_reconnect_succeeded: bool = False
+    transport_reconnect_reason: str = ""
+    goal_reactivation_attempted: bool = False
+    goal_reactivation_succeeded: bool = False
+    goal_reactivation_previous_status: str = ""
+    goal_reactivation_result_status: str = ""
+    post_turn_goal_refresh_attempted: bool = False
+    post_turn_goal_refresh_succeeded: bool = False
+    post_turn_goal_status: str = ""
+    post_turn_goal_refresh_error_type: str = ""
     notifications: list[str] = field(default_factory=list)
     _responses: "queue.Queue[dict[str, Any] | Exception] | None" = field(
         default=None,
@@ -114,7 +129,11 @@ def _codex_session_jsonl_paths(turn: CodexAppServerGoalTurn) -> list[Path]:
         fd_dir = proc_root / str(pid) / "fd"
         if not fd_dir.exists():
             continue
-        for fd in fd_dir.iterdir():
+        try:
+            fds = tuple(fd_dir.iterdir())
+        except OSError:
+            continue
+        for fd in fds:
             try:
                 target = Path(os.readlink(fd))
             except OSError:
@@ -126,9 +145,12 @@ def _codex_session_jsonl_paths(turn: CodexAppServerGoalTurn) -> list[Path]:
 
 def _send_json(proc: subprocess.Popen[str], message: dict[str, Any]) -> None:
     if proc.stdin is None:
-        raise CodexAppServerGoalDriverError("codex app-server stdin is closed")
-    proc.stdin.write(json.dumps(message) + "\n")
-    proc.stdin.flush()
+        raise CodexAppServerGoalDriverError("codex_app_server_stdin_closed")
+    try:
+        proc.stdin.write(json.dumps(message) + "\n")
+        proc.stdin.flush()
+    except BrokenPipeError as exc:
+        raise CodexAppServerGoalDriverError("codex_app_server_stdin_broken_pipe") from exc
 
 
 def _wait_for_response(
@@ -147,7 +169,7 @@ def _wait_for_response(
         except queue.Empty:
             continue
         if isinstance(msg, EOFError):
-            raise CodexAppServerGoalDriverError("codex app-server exited before response")
+            raise CodexAppServerGoalDriverError("codex_app_server_exited_before_response")
         if isinstance(msg, Exception):
             raise CodexAppServerGoalDriverError(str(msg))
         if msg.get("id") == request_id:
@@ -166,6 +188,58 @@ def _wait_for_response(
     raise CodexAppServerGoalDriverError(
         f"timed out waiting for app-server response id={request_id}"
     )
+
+
+def _start_stdio_app_server_process(
+    *,
+    codex_bin: str,
+    work_dir: Path,
+) -> tuple[subprocess.Popen[str], "queue.Queue[dict[str, Any] | Exception]"]:
+    proc = subprocess.Popen(
+        [codex_bin, "app-server", "--listen", "stdio://", "--enable", "goals"],
+        cwd=str(work_dir),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+    responses: "queue.Queue[dict[str, Any] | Exception]" = queue.Queue()
+    assert proc.stdout is not None
+    thread = threading.Thread(target=_reader_thread, args=(proc.stdout, responses))
+    thread.daemon = True
+    thread.start()
+    return proc, responses
+
+
+def _initialize_app_server(
+    *,
+    proc: subprocess.Popen[str],
+    responses: "queue.Queue[dict[str, Any] | Exception]",
+    notifications: list[str],
+    response_timeout_sec: float,
+) -> None:
+    initialize = {
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "clientInfo": {
+                "name": "loopx_benchmark_host_agent",
+                "title": "LoopX Benchmark Host Agent",
+                "version": "0.1.0",
+            },
+            "capabilities": {"experimentalApi": True},
+        },
+    }
+    _send_json(proc, initialize)
+    _wait_for_response(
+        proc,
+        responses,
+        1,
+        notifications=notifications,
+        timeout_sec=response_timeout_sec,
+    )
+    _send_json(proc, {"method": "initialized", "params": {}})
 
 
 def _extract_thread_id(result: dict[str, Any]) -> str:
@@ -287,6 +361,11 @@ def _record_turn_event(
     raise_on_error: bool,
 ) -> bool:
     if isinstance(msg, EOFError):
+        turn.stream_eof_observed = True
+        returncode = turn.process.poll()
+        if returncode is not None:
+            turn.process_exit_observed = True
+            turn.process_returncode = int(returncode)
         if raise_on_error:
             raise CodexAppServerGoalDriverError(
                 "codex app-server exited before turn completion"
@@ -294,6 +373,7 @@ def _record_turn_event(
         turn.notifications.append("stream/eof")
         return False
     if isinstance(msg, Exception):
+        turn.stream_error_observed = True
         if raise_on_error:
             raise CodexAppServerGoalDriverError(str(msg))
         turn.notifications.append("stream/error")
@@ -307,6 +387,21 @@ def _record_turn_event(
         return False
     msg_turn_id = _notification_turn_id(params)
     msg_thread_id = _notification_thread_id(params)
+    if (
+        method == "turn/started"
+        and msg_turn_id
+        and msg_turn_id != turn.turn_id
+        and turn.turn_id_source == "turn_start_response"
+        and turn.turn_start_response_turn_id_present
+        and not turn.turn_event_stream_turn_id_present
+    ):
+        # Some app-server/model paths return a placeholder turn id in the
+        # turn/start response, then stream the real turn id on turn/started.
+        # Treat the streamed id as canonical so subsequent item/turn events are
+        # not filtered out as belonging to an unrelated turn.
+        turn.turn_id = msg_turn_id
+        turn.turn_id_source = "event_stream"
+        turn.turn_event_stream_turn_id_present = True
     if msg_turn_id and msg_turn_id != turn.turn_id:
         return False
     if msg_thread_id and msg_thread_id != turn.thread_id:
@@ -330,6 +425,8 @@ def _record_turn_event(
         if role == "user":
             turn.user_message_item_count += 1
             return False
+        if role != "assistant":
+            return False
         if item_text:
             turn._assistant_message_parts.append(item_text)
         turn.agent_message_item_count += 1
@@ -341,10 +438,12 @@ def _record_turn_event(
     if event_name == "response_item:reasoning":
         return False
     if event_name == "event_msg:task_started":
-        turn.turn_status = "inProgress"
+        if not turn.turn_completed_observed:
+            turn.turn_status = "inProgress"
         return False
     if method == "turn/started":
-        turn.turn_status = _extract_turn_status(params) or turn.turn_status
+        if not turn.turn_completed_observed:
+            turn.turn_status = _extract_turn_status(params) or turn.turn_status
         return False
     if method == "item/completed":
         turn.item_completed_count += 1
@@ -362,7 +461,7 @@ def _record_turn_event(
         return False
     if method == "turn/completed":
         turn.turn_completed_observed = True
-        turn.turn_status = _extract_turn_status(params) or turn.turn_status
+        turn.turn_status = "completed"
         turn.assistant_message = "".join(turn._assistant_message_parts)
         return True
     if event_name in {
@@ -371,7 +470,7 @@ def _record_turn_event(
         "event_msg:turn_completed",
     }:
         turn.turn_completed_observed = True
-        turn.turn_status = _extract_turn_status(params) or "completed"
+        turn.turn_status = "completed"
         turn.assistant_message = "".join(turn._assistant_message_parts)
         return True
     if method == "error":
@@ -429,6 +528,10 @@ def observe_codex_app_server_goal_turn(
     """Drain app-server turn events without making completion a success gate."""
     if turn._responses is None:
         return bool(turn.turn_completed_observed)
+    returncode = turn.process.poll()
+    if returncode is not None:
+        turn.process_exit_observed = True
+        turn.process_returncode = int(returncode)
     if _observe_codex_session_events(turn):
         return True
     deadline = time.monotonic() + max(0.0, timeout_sec)
@@ -441,6 +544,12 @@ def observe_codex_app_server_goal_turn(
         except queue.Empty:
             if _observe_codex_session_events(turn):
                 return True
+            returncode = turn.process.poll()
+            if returncode is not None:
+                turn.process_exit_observed = True
+                turn.process_returncode = int(returncode)
+                if not turn.turn_completed_observed:
+                    turn.notifications.append("process/exited")
             if not until_completed or time.monotonic() >= deadline:
                 return bool(turn.turn_completed_observed)
             continue
@@ -468,6 +577,59 @@ def _wait_for_turn_completion(
         raise CodexAppServerGoalDriverError("timed out waiting for turn completion")
 
 
+def refresh_codex_app_server_goal_status(
+    turn: CodexAppServerGoalTurn,
+    *,
+    response_timeout_sec: float = 5.0,
+) -> bool:
+    """Refresh goal status after turn completion without recording raw output."""
+    turn.post_turn_goal_refresh_attempted = True
+    if turn._responses is None:
+        turn.post_turn_goal_refresh_error_type = "codex_app_server_no_response_queue"
+        return False
+    if not turn.thread_id:
+        turn.post_turn_goal_refresh_error_type = "codex_app_server_thread_id_missing"
+        return False
+    request_id = int(turn.next_request_id or 6)
+    turn.next_request_id = request_id + 1
+    side_events: list[dict[str, Any]] = []
+    try:
+        _send_json(
+            turn.process,
+            {
+                "id": request_id,
+                "method": "thread/goal/get",
+                "params": {"threadId": turn.thread_id},
+            },
+        )
+        goal_result = _wait_for_response(
+            turn.process,
+            turn._responses,
+            request_id,
+            notifications=turn.notifications,
+            timeout_sec=max(0.1, float(response_timeout_sec or 0.1)),
+            side_events=side_events,
+        )
+    except CodexAppServerGoalDriverError as exc:
+        detail = str(exc)
+        turn.post_turn_goal_refresh_error_type = (
+            detail
+            if detail.startswith("codex_app_server_")
+            else "codex_app_server_goal_refresh_failed"
+        )
+        return False
+    for event in side_events:
+        _record_turn_event(turn, event, raise_on_error=False)
+    goal_status = _extract_goal_status(goal_result)
+    turn.post_turn_goal_status = goal_status
+    if not goal_status:
+        turn.post_turn_goal_refresh_error_type = "codex_app_server_goal_status_missing"
+        return False
+    turn.post_turn_goal_refresh_succeeded = True
+    turn.post_turn_goal_refresh_error_type = ""
+    return True
+
+
 def start_codex_app_server_goal_turn(
     *,
     codex_bin: str,
@@ -483,43 +645,18 @@ def start_codex_app_server_goal_turn(
     turn_timeout_sec: float | None = None,
 ) -> CodexAppServerGoalTurn:
     work_dir.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.Popen(
-        [codex_bin, "app-server", "--listen", "stdio://", "--enable", "goals"],
-        cwd=str(work_dir),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        bufsize=1,
-    )
-    responses: "queue.Queue[dict[str, Any] | Exception]" = queue.Queue()
     notifications: list[str] = []
-    assert proc.stdout is not None
-    thread = threading.Thread(target=_reader_thread, args=(proc.stdout, responses))
-    thread.daemon = True
-    thread.start()
+    proc, responses = _start_stdio_app_server_process(
+        codex_bin=codex_bin,
+        work_dir=work_dir,
+    )
     try:
-        initialize = {
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "clientInfo": {
-                    "name": "loopx_benchmark_host_agent",
-                    "title": "LoopX Benchmark Host Agent",
-                    "version": "0.1.0",
-                },
-                "capabilities": {"experimentalApi": True},
-            },
-        }
-        _send_json(proc, initialize)
-        _wait_for_response(
-            proc,
-            responses,
-            1,
+        _initialize_app_server(
+            proc=proc,
+            responses=responses,
             notifications=notifications,
-            timeout_sec=response_timeout_sec,
+            response_timeout_sec=response_timeout_sec,
         )
-        _send_json(proc, {"method": "initialized", "params": {}})
 
         thread_start = {
             "id": 2,
@@ -643,51 +780,162 @@ def start_codex_app_server_goal_turn(
         raise
 
 
-def start_codex_app_server_goal_followup_turn(
-    turn: CodexAppServerGoalTurn,
+def _resume_codex_app_server_goal_thread(
     *,
+    codex_bin: str,
+    work_dir: Path,
+    thread_id: str,
+    model_name: str | None,
+    approval_policy: str,
+    sandbox: str,
+    response_timeout_sec: float,
+) -> tuple[subprocess.Popen[str], "queue.Queue[dict[str, Any] | Exception]", list[str], int]:
+    proc, responses = _start_stdio_app_server_process(
+        codex_bin=codex_bin,
+        work_dir=work_dir,
+    )
+    notifications: list[str] = []
+    try:
+        _initialize_app_server(
+            proc=proc,
+            responses=responses,
+            notifications=notifications,
+            response_timeout_sec=response_timeout_sec,
+        )
+        resume_params: dict[str, Any] = {
+            "threadId": thread_id,
+            "cwd": str(work_dir),
+            "approvalPolicy": approval_policy,
+            "sandbox": sandbox,
+            "excludeTurns": True,
+        }
+        if model_name:
+            resume_params["model"] = model_name
+        _send_json(
+            proc,
+            {
+                "id": 2,
+                "method": "thread/resume",
+                "params": resume_params,
+            },
+        )
+        resume_result = _wait_for_response(
+            proc,
+            responses,
+            2,
+            notifications=notifications,
+            timeout_sec=response_timeout_sec,
+        )
+        resumed_thread_id = _extract_thread_id(resume_result)
+        if resumed_thread_id and resumed_thread_id != thread_id:
+            raise CodexAppServerGoalDriverError(
+                "codex_app_server_thread_resume_id_mismatch"
+            )
+        return proc, responses, notifications, 3
+    except Exception:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:  # pragma: no cover - defensive path.
+            proc.kill()
+        raise
+
+
+def _start_followup_turn_on_transport(
+    *,
+    proc: subprocess.Popen[str],
+    responses: "queue.Queue[dict[str, Any] | Exception]",
+    request_id: int,
+    notifications: list[str],
+    thread_id: str,
     work_dir: Path,
     prompt: str,
-    model_name: str | None = None,
-    reasoning_effort: str | None = None,
-    approval_policy: str = "never",
-    response_timeout_sec: float = 30.0,
-    wait_for_completion: bool = False,
-    turn_timeout_sec: float | None = None,
-) -> CodexAppServerGoalTurn:
-    """Start a follow-up turn in the same app-server thread and goal."""
-
-    if turn._responses is None:
-        raise CodexAppServerGoalDriverError("follow-up turn has no response stream")
-    if turn.process.poll() is not None:
-        raise CodexAppServerGoalDriverError("codex app-server is not running")
-    request_id = max(1, int(turn.next_request_id))
-    notifications = turn.notifications
-
+    model_name: str | None,
+    reasoning_effort: str | None,
+    objective: str | None,
+    approval_policy: str,
+    reactivate_inactive_goal: bool,
+    response_timeout_sec: float,
+) -> tuple[CodexAppServerGoalTurn, int]:
     goal_get = {
         "id": request_id,
         "method": "thread/goal/get",
         "params": {
-            "threadId": turn.thread_id,
+            "threadId": thread_id,
         },
     }
-    _send_json(turn.process, goal_get)
+    _send_json(proc, goal_get)
     goal_result = _wait_for_response(
-        turn.process,
-        turn._responses,
+        proc,
+        responses,
         request_id,
         notifications=notifications,
         timeout_sec=response_timeout_sec,
     )
     request_id += 1
     goal_status = _extract_goal_status(goal_result)
+    goal_reactivation_attempted = False
+    goal_reactivation_succeeded = False
+    goal_reactivation_previous_status = ""
+    goal_reactivation_result_status = ""
     if goal_status != "active":
-        raise CodexAppServerGoalDriverError(
-            f"thread/goal/get did not confirm active goal: {goal_status or 'missing'}"
+        if not reactivate_inactive_goal:
+            raise CodexAppServerGoalDriverError(
+                f"codex_app_server_goal_not_active:{goal_status or 'missing'}"
+            )
+        goal_reactivation_attempted = True
+        goal_reactivation_previous_status = goal_status or "missing"
+        goal_set_params: dict[str, Any] = {
+            "threadId": thread_id,
+            "status": "active",
+        }
+        if objective:
+            goal_set_params["objective"] = objective
+        _send_json(
+            proc,
+            {
+                "id": request_id,
+                "method": "thread/goal/set",
+                "params": goal_set_params,
+            },
         )
+        goal_set_result = _wait_for_response(
+            proc,
+            responses,
+            request_id,
+            notifications=notifications,
+            timeout_sec=response_timeout_sec,
+        )
+        request_id += 1
+        goal_reactivation_result_status = _extract_goal_status(goal_set_result)
+        goal_get = {
+            "id": request_id,
+            "method": "thread/goal/get",
+            "params": {
+                "threadId": thread_id,
+            },
+        }
+        _send_json(proc, goal_get)
+        goal_result = _wait_for_response(
+            proc,
+            responses,
+            request_id,
+            notifications=notifications,
+            timeout_sec=response_timeout_sec,
+        )
+        request_id += 1
+        goal_status = _extract_goal_status(goal_result)
+        goal_reactivation_result_status = (
+            goal_status or goal_reactivation_result_status or "missing"
+        )
+        goal_reactivation_succeeded = goal_status == "active"
+        if goal_status != "active":
+            raise CodexAppServerGoalDriverError(
+                f"codex_app_server_goal_reactivation_failed:{goal_status or 'missing'}"
+            )
 
     turn_params: dict[str, Any] = {
-        "threadId": turn.thread_id,
+        "threadId": thread_id,
         "input": [{"type": "text", "text": prompt}],
         "cwd": str(work_dir),
         "approvalPolicy": approval_policy,
@@ -701,11 +949,11 @@ def start_codex_app_server_goal_followup_turn(
         "method": "turn/start",
         "params": turn_params,
     }
-    _send_json(turn.process, turn_start)
+    _send_json(proc, turn_start)
     turn_start_side_events: list[dict[str, Any]] = []
     turn_result = _wait_for_response(
-        turn.process,
-        turn._responses,
+        proc,
+        responses,
         request_id,
         notifications=notifications,
         timeout_sec=response_timeout_sec,
@@ -716,11 +964,11 @@ def start_codex_app_server_goal_followup_turn(
     event_stream_turn_id = _event_stream_turn_id(turn_start_side_events)
     turn_id = event_stream_turn_id or response_turn_id
     if not turn_id:
-        raise CodexAppServerGoalDriverError("turn/start did not return turn id")
+        raise CodexAppServerGoalDriverError("codex_app_server_turn_start_id_missing")
 
     followup = CodexAppServerGoalTurn(
-        process=turn.process,
-        thread_id=turn.thread_id,
+        process=proc,
+        thread_id=thread_id,
         turn_id=turn_id,
         work_dir=work_dir,
         turn_id_source="event_stream" if event_stream_turn_id else "turn_start_response",
@@ -729,11 +977,111 @@ def start_codex_app_server_goal_followup_turn(
         next_request_id=request_id,
         goal_status=goal_status,
         turn_status=_extract_turn_status(turn_result),
+        goal_reactivation_attempted=goal_reactivation_attempted,
+        goal_reactivation_succeeded=goal_reactivation_succeeded,
+        goal_reactivation_previous_status=goal_reactivation_previous_status,
+        goal_reactivation_result_status=goal_reactivation_result_status,
         notifications=notifications,
-        _responses=turn._responses,
+        _responses=responses,
     )
     for event in turn_start_side_events:
         _record_turn_event(followup, event, raise_on_error=False)
+    return followup, request_id
+
+
+def start_codex_app_server_goal_followup_turn(
+    turn: CodexAppServerGoalTurn,
+    *,
+    codex_bin: str | None = None,
+    work_dir: Path,
+    prompt: str,
+    model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    objective: str | None = None,
+    approval_policy: str = "never",
+    sandbox: str = "danger-full-access",
+    reconnect_if_needed: bool = True,
+    reactivate_inactive_goal: bool = False,
+    response_timeout_sec: float = 30.0,
+    wait_for_completion: bool = False,
+    turn_timeout_sec: float | None = None,
+) -> CodexAppServerGoalTurn:
+    """Start a follow-up turn in the same app-server thread and goal."""
+
+    if turn._responses is None:
+        raise CodexAppServerGoalDriverError("codex_app_server_followup_no_response_stream")
+    request_id = max(1, int(turn.next_request_id))
+    notifications = list(turn.notifications)
+    reconnect_reason = ""
+    proc = turn.process
+    responses = turn._responses
+    returncode = proc.poll()
+    if returncode is not None:
+        turn.process_exit_observed = True
+        turn.process_returncode = int(returncode)
+        reconnect_reason = "process_exited"
+    try:
+        if reconnect_reason:
+            raise CodexAppServerGoalDriverError("codex_app_server_followup_transport_unavailable")
+        followup, request_id = _start_followup_turn_on_transport(
+            proc=proc,
+            responses=responses,
+            request_id=request_id,
+            notifications=notifications,
+            thread_id=turn.thread_id,
+            work_dir=work_dir,
+            prompt=prompt,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            objective=objective,
+            approval_policy=approval_policy,
+            reactivate_inactive_goal=reactivate_inactive_goal,
+            response_timeout_sec=response_timeout_sec,
+        )
+    except CodexAppServerGoalDriverError as exc:
+        reconnectable = str(exc) in {
+            "codex_app_server_followup_transport_unavailable",
+            "codex_app_server_exited_before_response",
+            "codex_app_server_stdin_closed",
+            "codex_app_server_stdin_broken_pipe",
+        }
+        if (
+            not reconnect_if_needed
+            or not reconnectable
+            or not codex_bin
+            or not turn.thread_id
+        ):
+            raise
+        reconnect_reason = reconnect_reason or str(exc).removeprefix(
+            "codex_app_server_"
+        )
+        proc, responses, notifications, request_id = _resume_codex_app_server_goal_thread(
+            codex_bin=codex_bin,
+            work_dir=work_dir,
+            thread_id=turn.thread_id,
+            model_name=model_name,
+            approval_policy=approval_policy,
+            sandbox=sandbox,
+            response_timeout_sec=response_timeout_sec,
+        )
+        followup, request_id = _start_followup_turn_on_transport(
+            proc=proc,
+            responses=responses,
+            request_id=request_id,
+            notifications=notifications,
+            thread_id=turn.thread_id,
+            work_dir=work_dir,
+            prompt=prompt,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            objective=objective,
+            approval_policy=approval_policy,
+            reactivate_inactive_goal=reactivate_inactive_goal,
+            response_timeout_sec=response_timeout_sec,
+        )
+        followup.transport_reconnect_attempted = True
+        followup.transport_reconnect_succeeded = True
+        followup.transport_reconnect_reason = reconnect_reason
     if wait_for_completion:
         _wait_for_turn_completion(
             followup,
@@ -767,6 +1115,26 @@ def compact_turn_metadata(turn: CodexAppServerGoalTurn) -> dict[str, Any]:
         "session_log_observed": bool(turn.session_log_observed),
         "session_event_count": int(turn.session_event_count),
         "session_task_complete_observed": bool(turn.session_task_complete_observed),
+        "stream_eof_observed": bool(turn.stream_eof_observed),
+        "stream_error_observed": bool(turn.stream_error_observed),
+        "process_exit_observed": bool(turn.process_exit_observed),
+        "process_returncode": turn.process_returncode,
+        "transport_reconnect_attempted": bool(turn.transport_reconnect_attempted),
+        "transport_reconnect_succeeded": bool(turn.transport_reconnect_succeeded),
+        "transport_reconnect_reason": turn.transport_reconnect_reason,
+        "goal_reactivation_attempted": bool(turn.goal_reactivation_attempted),
+        "goal_reactivation_succeeded": bool(turn.goal_reactivation_succeeded),
+        "goal_reactivation_previous_status": turn.goal_reactivation_previous_status,
+        "goal_reactivation_result_status": turn.goal_reactivation_result_status,
+        "post_turn_goal_refresh_attempted": bool(
+            turn.post_turn_goal_refresh_attempted
+        ),
+        "post_turn_goal_refresh_succeeded": bool(
+            turn.post_turn_goal_refresh_succeeded
+        ),
+        "post_turn_goal_get_present": bool(turn.post_turn_goal_status),
+        "post_turn_goal_status": turn.post_turn_goal_status,
+        "post_turn_goal_refresh_error_type": turn.post_turn_goal_refresh_error_type,
         "assistant_message_present": bool(assistant_message),
         "assistant_message_chars": len(assistant_message),
         "assistant_message_sha256": sha256(assistant_message.encode()).hexdigest()

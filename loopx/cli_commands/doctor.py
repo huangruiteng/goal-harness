@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Callable
 
 from ..doctor import collect_doctor, render_doctor_markdown
+from ..host_loop_activation import SUPPORTED_AGENT_TYPES
 
 
 PrintPayload = Callable[
@@ -13,13 +14,30 @@ PrintPayload = Callable[
 
 
 def register_doctor_command(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    return subparsers.add_parser(
+    parser = subparsers.add_parser(
         "doctor",
         help="Diagnose local CLI installation, PATH, wrapper, and import health.",
     )
+    parser.add_argument(
+        "--deep",
+        action="store_true",
+        help="Run slower representative release-candidate checks.",
+    )
+    parser.add_argument(
+        "--agent-type",
+        choices=SUPPORTED_AGENT_TYPES,
+        help=(
+            "Evaluate host-specific integration checks. For other-agent, custom-host "
+            "skill delivery replaces the Codex skill-directory check."
+        ),
+    )
+    return parser
 
 
 def handle_doctor_command(args: argparse.Namespace, print_payload: PrintPayload) -> int:
-    payload = collect_doctor()
+    payload = collect_doctor(
+        deep=bool(args.deep),
+        agent_type=args.agent_type,
+    )
     print_payload(payload, args.format, render_doctor_markdown)
     return 0 if payload.get("ok") else 1

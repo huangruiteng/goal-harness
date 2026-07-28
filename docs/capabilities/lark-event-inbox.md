@@ -1,0 +1,317 @@
+# Lark event inbox
+
+LoopX can consume Lark feedback without keeping an agent process alive. The
+integration deliberately separates collection from interpretation:
+
+```text
+Lark event stream
+  -> host-managed collector
+  -> .loopx/inbox/<channel>/*.json
+  -> loopx lark-inbox drain
+  -> domain agent writes a todo, vision correction, artifact update, or rationale
+  -> direct bot question: loopx lark-inbox reply (optional, configured sender only)
+  -> loopx lark-inbox ack --message-id ... --execute
+```
+
+The collector is host infrastructure. LoopX can validate a local-private
+collector config, preview or explicitly install a macOS `launchd` / Linux
+`systemd` user service, and report supervisor plus event-bus health. The
+installed service runs a small LoopX collector runtime around
+`lark-cli --profile <configured-profile> event consume` with a bounded timeout,
+so stdin EOF under a supervisor cannot terminate an otherwise unbounded
+consumer. When the official npm package exposes a Node wrapper, LoopX records
+absolute paths for both Node and the wrapper so launchd does not depend on an
+interactive-shell PATH. It filters before persistence and writes one compact
+event per Lark `event_id`/`message_id`. Direct mentions are persisted
+immediately. For a message without a direct mention, the runtime reads back the
+current message and its direct parent, then marks it actionable only when the
+parent sender is the app id of the configured profile. A reply to a person,
+another app, or an unverifiable parent remains captured but does not wake the
+agent. The agent does not need to keep a websocket open.
+
+Use `addressed_only` only when direct bot mentions are the entire feedback
+contract. A review or collaboration inbox that accepts non-mention replies to
+bot messages should use `configured_chat_all`: the host collector filters by
+its local-private chat id, persists every message from that chat, and verifies
+the reply relation through message readback before scheduling a reply. Full-chat
+capture is not full-chat activation; unrelated conversation remains available
+to domain interpretation without being treated as addressed to the bot.
+
+## Activate the provider
+
+Install and explicitly activate the bundled provider once in the LoopX runtime
+used by the project:
+
+```bash
+loopx extension install --bundled loopx-lark --execute --format json
+```
+
+Configured `lark-inbox` commands fail closed when `loopx-lark` is absent,
+disabled, or no longer matches its doctor-verified revision. Each operation
+also requires its manifest permission: inbox read/write, reply send, or
+collector management. `extension upgrade` and `extension rollback` probe the
+candidate revision before switching it. A goal with no Lark inbox pointer still
+returns the existing quiet disabled drain projection and does not require the
+extension, so projects that do not use Lark remain unaffected.
+
+Quota and Turn planning also resolve `lark.inbox.read` before the extension
+opens the local-private profile/chat config. A missing, disabled, or stale
+extension yields an unavailable urgency projection, does not read that config,
+and cannot schedule a Lark reply lane. The compatibility CLI performs this
+composition internally; agents do not pass a provider, profile, or alias.
+
+The collector service is a separate host lifecycle. Disabling or switching the
+extension blocks its next `collector-run` start but does not signal a process
+that is already consuming events. Stop or restart the configured launchd or
+systemd user service when disabling, upgrading, or rolling back the provider.
+
+## Local-private configuration
+
+The inbox is opt-in. Create a local-private generic Lark inbox config:
+
+```json
+{
+  "schema_version": "lark_event_inbox_config_v0",
+  "enabled": true,
+  "inbox_dir": ".loopx/inbox/team-feedback",
+  "capture_scope": "configured_chat_all"
+}
+```
+
+`inbox_dir` must stay under `.loopx/inbox`. Destination ids, member ids,
+profile names, raw provider payloads, and credentials stay in local-private
+configuration or host state and must not enter public LoopX packets.
+
+`capture_scope` defaults to `addressed_only` for compatibility. Drain output
+reports `thread_complete=false` and a coverage warning for that mode. For
+`configured_chat_all`, the collector's jq filter should select the configured
+chat only; do not add a content-level `@bot` predicate.
+
+Optional source-thread replies are a separate, default-off boundary. Enable
+them only for a `configured_chat_all` inbox and bind an explicit non-default
+bot profile to the same local-private chat:
+
+```json
+{
+  "schema_version": "lark_event_inbox_config_v0",
+  "enabled": true,
+  "inbox_dir": ".loopx/inbox/team-feedback",
+  "capture_scope": "configured_chat_all",
+  "reply": {
+    "enabled": true,
+    "sender_profile": "project-review-bot",
+    "sender_identity": "bot",
+    "bot_display_name": "Project Review Bot",
+    "chat_id": "oc_<local-private-chat-id>"
+  }
+}
+```
+
+The reply path never uses the machine default profile. Before any send it
+verifies that the named profile resolves to the expected bot and that the bot
+can read the configured chat. A profile/app mismatch fails with
+`lark_inbox_reply_sender_identity_mismatch`; a profile that cannot access the
+configured chat fails with
+`lark_inbox_reply_sender_not_in_configured_chat`. Neither failure falls back
+to another app. Public results contain only compact status/receipt fields, not
+the profile, chat id, message id, reply text, or provider payload.
+
+## Host collector lifecycle
+
+Keep the collector config ignored and untracked. It references the generic
+inbox config but owns host-only details such as the chat id and supervisor:
+
+```json
+{
+  "schema_version": "lark_event_collector_config_v0",
+  "enabled": true,
+  "service_name": "loopx-lark-feedback",
+  "event_key": "im.message.receive_v1",
+  "identity": "bot",
+  "profile": "project-review-bot",
+  "supervisor": "launchd",
+  "chat_id": "oc_<local-private-chat-id>",
+  "consume_timeout": "30m",
+  "lark_cli_bin": "lark-cli",
+  "event_inbox_config": ".loopx/config/lark/event-inbox.json"
+}
+```
+
+The packaged v0 lifecycle accepts only `im.message.receive_v1`, bot identity,
+an isolated `loopx-` service name, and `configured_chat_all`. These constraints
+match the canonical inbox schema, avoid collisions with unrelated user services,
+and make thread completeness explicit instead of pretending that an
+`addressed_only` consumer sees later unaddressed replies. Plan and install
+output never returns the chat id, local paths, generated jq, or credentials.
+
+An enabled collector must bind an explicit non-default Lark CLI profile. When
+`profile` is omitted, LoopX may reuse the enabled inbox reply
+`sender_profile`; when both are present they must match. The generated service
+passes the profile-bound collector config to the LoopX runtime, which places
+`--profile` before both `event consume` and message readback calls. Collection,
+reply-target verification, and optional replies therefore cannot silently use
+different app identities. Public plan/status packets expose only whether a
+profile is bound and where the binding came from, never its value.
+When the CLI uses a custom `--runtime-root`, the generated service records that
+same root before `lark-inbox collector-run`; a supervisor restart therefore
+resolves the same extension activation state that was validated at install.
+
+```bash
+loopx lark-inbox collector-plan \
+  --project . \
+  --config .loopx/config/lark/collector.json
+
+# Preview first; this writes nothing and starts no process.
+loopx lark-inbox collector-install \
+  --project . \
+  --config .loopx/config/lark/collector.json
+
+# Explicitly write the user service and start/restart it.
+loopx lark-inbox collector-install \
+  --project . \
+  --config .loopx/config/lark/collector.json \
+  --execute
+
+# Read-only supervisor, event-bus, and real-event evidence check.
+loopx lark-inbox collector-status \
+  --project . \
+  --config .loopx/config/lark/collector.json \
+  --probe-event-bus
+```
+
+Missing `lark-cli` produces a non-blocking install hint. Reply-target
+verification also requires the configured bot to read messages in the selected
+chat. Missing scopes or bot configuration still belong to `lark-cli`; LoopX
+does not authenticate a bot,
+copy app credentials, or silently install packages. Service installation is a
+local host write and therefore requires explicit `--execute`. Status separates
+`healthy` from `real_event_evidence_present`: a running subscriber can be
+healthy before the first message, while acceptance of a real integration still
+requires one post-install event to appear in the inbox.
+
+Register the generic inbox pointer once at the goal boundary:
+
+```bash
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --lark-event-inbox-config .loopx/config/lark/event-inbox.json
+
+# Review the preview, then apply explicitly.
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --lark-event-inbox-config .loopx/config/lark/event-inbox.json \
+  --execute
+```
+
+The configuration catalog exposes this optional capability on demand. Quota
+projects `enabled`, `config_pointer_registered`, a local control command, and a
+content-free urgency summary; it never projects the private path, message ids,
+senders, or message bodies. The summary includes
+pending/direct-question/direct-mention/verified-bot-reply counts and the oldest
+pending age. A configured direct mention or verified reply to a message authored
+by the configured bot becomes a high-priority `lark_event_inbox` work lane
+before ordinary monitor or advancement work. Generated heartbeat bodies run the
+actual goal-boundary `drain_command`;
+`loopx --registry <invoked-registry> lark-inbox drain --goal-id <goal-id>`
+follows a shared registry's `source_registry` to the canonical project before
+resolving the ignored config. It therefore remains correct from linked or
+independent worktrees without binding control state to `--project .`. A disabled or empty inbox
+is a quiet zero-spend path, so projects without Lark keep the default behavior.
+
+## Drain and acknowledge
+
+```bash
+loopx lark-inbox drain \
+  --project . \
+  --config .loopx/config/lark/event-inbox.json
+
+loopx lark-inbox ack \
+  --project . \
+  --config .loopx/config/lark/event-inbox.json \
+  --message-id om_xxx \
+  --execute
+```
+
+Drain is read-only and returns bounded local-private message content. A message
+must be acknowledged only after its effect is written back. Duplicate event
+files collapse by `message_id`; repeated acknowledgement is idempotent.
+
+Urgency classification stays local: explicit `@` mentions of the configured
+bot/LoopX, bounded question signals on addressed events, and provider-verified
+direct replies to the configured bot produce counts only. A question elsewhere in the
+group or a reply to a human does not become `reply_due`. The agent still drains
+and interprets the source event before deciding the durable effect or reply; the
+summary is a scheduling signal, not semantic authority.
+
+For a direct question, explicit bot mention, or verified reply to the configured
+bot, write the requested durable effect first, preview one concise source-thread
+reply, execute it, require readback, and only then ACK:
+
+```bash
+loopx lark-inbox reply \
+  --project . \
+  --config .loopx/config/lark/event-inbox.json \
+  --message-id om_xxx \
+  --text '已记录并修正。'
+
+loopx lark-inbox reply \
+  --project . \
+  --config .loopx/config/lark/event-inbox.json \
+  --message-id om_xxx \
+  --text '已记录并修正。' \
+  --execute
+```
+
+The command uses an idempotency key derived from the source message and reply
+text, sends with `--reply-in-thread`, and reads the created message back through
+the same configured profile. Ordinary chatter remains a no-reply path;
+enabling this capability does not grant reviewer-notification or other
+outbound authority.
+
+For text replies containing Lark `<at user_id="...">...</at>` mentions, provider
+readback may replace the markup with tokens such as `@_user_1`. Verification
+therefore compares the normalized visible-text template and requires every
+mention token to resolve to the identity requested at send time. A missing,
+extra, or differently resolved mention remains `sent_unverified`; display-name
+or raw-markup similarity alone is not accepted.
+
+## Bounded history reconciliation
+
+Real-time event subscriptions do not backfill messages sent before a collector
+started, and an earlier `addressed_only` collector will already have omitted
+unaddressed replies. Fetch the bounded source conversation with the Lark CLI,
+project each message into `lark_event_inbox_event_v0`, then pipe the JSON array
+or NDJSON into the generic importer:
+
+```bash
+<bounded-lark-message-export> \
+  | loopx lark-inbox ingest \
+      --project . \
+      --config .loopx/config/lark/event-inbox.json \
+      --execute
+```
+
+Ingest validates ids and schema, deduplicates by `message_id`, writes only to
+the configured local-private inbox, and returns counts rather than message
+content. It does not acknowledge imported messages; the domain agent must still
+write each actionable effect before ACK.
+
+Reviewer notification dedupe uses durable lifecycle receipts first, then exact
+PR-link evidence in the persisted `configured_chat_all` inbox, and finally a
+bounded user-identity search of the configured chat. Missing `search:message`
+permission degrades to the two persisted sources and does not create a user
+gate; other provider read failures remain blockers because absence cannot be
+established safely.
+
+## Domain bindings
+
+The inbox itself does not know why a message matters. A domain capability binds
+the generic event stream to its own interpretation and writeback rules. For
+example, issue-fix can turn reviewer-group messages into PR-description
+updates, Kanban context, vision corrections, or explicit no-follow-up
+rationale. Other domains can consume the same inbox without adopting any
+issue-fix schema or lifecycle.
+
+For issue-fix, outbound GitHub reviewer requests and outbound Lark
+notifications remain independent obligations. The Lark inbox is only the
+inbound feedback path.

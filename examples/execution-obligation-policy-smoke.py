@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.policies.execution_obligation import build_execution_obligation  # noqa: E402
+from loopx.control_plane.work_items.execution_obligation import build_execution_obligation  # noqa: E402
 
 
 def obligation(
@@ -56,21 +56,21 @@ def assert_exact_mode(
 
 
 def main() -> int:
-    side_agent = obligation(
+    peer_workspace = obligation(
         recommendation={
-            "recommended_mode": "repair_side_agent_workspace",
+            "recommended_mode": "repair_agent_workspace",
             "spend_policy": "no spend until relocated",
         }
     )
     assert_exact_mode(
-        "side-agent-workspace",
-        side_agent,
-        kind="side_agent_workspace_repair",
+        "peer-agent-workspace",
+        peer_workspace,
+        kind="agent_workspace_repair",
         minimum="one_workspace_move_then_guard_rerun",
-        contract="side_agent_workspace_guard",
+        contract="agent_workspace_guard",
         delivery_allowed=False,
     )
-    assert side_agent["spend_policy"] == "no spend until relocated", side_agent
+    assert peer_workspace["spend_policy"] == "no spend until relocated", peer_workspace
 
     evidence = obligation(
         should_run=False,
@@ -115,6 +115,26 @@ def main() -> int:
         minimum="one_bounded_replan_segment",
     )
     assert replan["stall_threshold"] == 6, replan
+
+    empty_frontier_replan = obligation(
+        recommendation={
+            "recommended_mode": "autonomous_replan_required",
+            "replan_obligation": {
+                "stall_threshold": 2,
+                "agent_todo_writeback_required": True,
+            },
+        }
+    )
+    assert_exact_mode(
+        "empty-frontier-autonomous-replan",
+        empty_frontier_replan,
+        kind="autonomous_replan_required",
+        minimum="one_bounded_replan_with_agent_todo_writeback",
+        contract="autonomous_replan_agent_todo_writeback",
+    )
+    assert "create a concrete runnable agent todo" in empty_frontier_replan[
+        "contract_obligation"
+    ], empty_frontier_replan
 
     successor = obligation(
         recommendation={

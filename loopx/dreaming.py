@@ -5,19 +5,23 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .feedback import validate_public_safe_text
-from .global_registry import sync_project_registry_to_global
+from .agent_registry import registered_agent_ids_from_registry
+from .feedback import validate_local_control_text, validate_public_safe_text
 from .history import collect_history, load_registry, write_reserved_run_artifacts
 from .paths import resolve_runtime_root
 from .registry import registry_goals
 from .runtime import validate_goal_id_path_segment
+from .control_plane.runtime.public_safety import public_safe_compact_text
 from .status import (
     DREAMING_ADVISORY_CLASSIFICATIONS,
     STATUS_NEUTRAL_CLASSIFICATIONS,
-    public_safe_compact_text,
 )
 from .state_refresh import now_local
 from .todos import add_goal_todo, update_goal_todo
+from .control_plane.runtime.shared_runtime_material_projection import (
+    finalize_material_projection,
+    prepare_material_projection_route,
+)
 
 
 DREAMING_DRY_RUN_SCHEMA_VERSION = "dreaming_dry_run_proposal_v0"
@@ -426,6 +430,12 @@ def record_dreaming_proposal_decision(
 
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    projection_route, compact_projection_route = prepare_material_projection_route(
+        registry_path=registry_path,
+        goal_id=safe_goal_id,
+        source_runtime_root=runtime_root,
+        sync_global=sync_global,
+    )
     history_payload = collect_history(
         registry_path=registry_path,
         runtime_root=runtime_root,
@@ -455,7 +465,11 @@ def record_dreaming_proposal_decision(
                 dry_run=False,
             )
             promoted_todo_id = str(todo_result.get("todo_id") or "") or None
-            if promoted_todo_id:
+            registered_agents = registered_agent_ids_from_registry(
+                registry_path,
+                safe_goal_id,
+            )
+            if promoted_todo_id and (claimed_by or len(registered_agents) <= 1):
                 todo_evidence_result = update_goal_todo(
                     registry_path=registry_path,
                     goal_id=safe_goal_id,
@@ -463,6 +477,7 @@ def record_dreaming_proposal_decision(
                     todo_id=promoted_todo_id,
                     evidence=f"dreaming_proposal:{proposal_id}",
                     note="Approved dreaming proposal promoted to normal Agent Todo.",
+                    agent_id=claimed_by,
                     dry_run=False,
                 )
             active_state_mutated = bool(
@@ -489,7 +504,7 @@ def record_dreaming_proposal_decision(
     if claimed_by and decision == "approve":
         decision_payload["claimed_by"] = claimed_by
     recommended_action = _recommended_action_for_decision(decision, promoted_todo_id)
-    validate_public_safe_text("recommended_action", recommended_action)
+    validate_local_control_text("recommended_action", recommended_action)
     registry_goal = _registry_goal(registry, safe_goal_id)
     record = build_dreaming_decision_record(
         goal_id=safe_goal_id,
@@ -500,6 +515,7 @@ def record_dreaming_proposal_decision(
         source_proposal=source_proposal,
         decision_payload=decision_payload,
     )
+    record["runtime_projection_route"] = compact_projection_route
 
     runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
     index_record = {
@@ -510,6 +526,7 @@ def record_dreaming_proposal_decision(
         "health_check": record["health_check"],
         "dreaming_decision": decision_payload,
         "source_dreaming_proposal": source_proposal,
+        "runtime_projection_route": compact_projection_route,
     }
     runtime_history_appended = not dry_run
     payload: dict[str, Any] = {
@@ -528,6 +545,7 @@ def record_dreaming_proposal_decision(
         "decision": decision,
         "dreaming_decision": decision_payload,
         "source_dreaming_proposal": source_proposal,
+        "runtime_projection_route": compact_projection_route,
         "todo_result": todo_result,
         "todo_evidence_result": todo_evidence_result,
         "side_effects": {
@@ -561,15 +579,23 @@ def record_dreaming_proposal_decision(
             payload=payload,
             render_markdown=render_dreaming_decision_markdown,
         )
-    if sync_global:
-        payload["global_sync"] = sync_project_registry_to_global(
-            registry_path=registry_path,
-            runtime_root_override=str(runtime_root),
-            goal_id=safe_goal_id,
-            dry_run=dry_run,
-        )
-    else:
-        payload["global_sync"] = {"enabled": False}
+    projection_result = finalize_material_projection(
+        registry_path=registry_path,
+        source_runtime_root=runtime_root,
+        goal_id=safe_goal_id,
+        source_row=index_record,
+        projection_kind="dreaming_decision",
+        route=projection_route,
+        sync_global=sync_global,
+        dry_run=dry_run,
+    )
+    payload["global_sync"] = projection_result["global_sync"]
+    payload["shared_runtime_material_projection"] = projection_result[
+        "shared_runtime_material_projection"
+    ]
+    if not projection_result["ok"]:
+        payload["ok"] = False
+        payload["partial_write"] = projection_result["partial_write"]
     return payload
 
 

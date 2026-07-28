@@ -139,6 +139,16 @@ work item without re-reading stale thread context. Detailed action packets,
 review materials, run history, and raw adapter fields remain drill-down
 surfaces.
 
+In a multi-agent goal, every open user todo has an explicit response binding:
+`bound_agent=<registered-agent>` routes reminders and post-response continuation
+to one agent lane, while `goal_bound=true` makes the item intentionally visible
+to every lane in the goal. This relation is independent of gating. A
+`user_action` remains non-blocking; a `user_gate` separately uses
+`blocks_agent` or `global_gate=true` to stop work. `claimed_by` remains executor
+ownership for agent todos and must not encode a user-todo binding. Agent-scoped
+quota projections retain other-lane user todos as diagnostics, but exclude them
+from the current lane's `open_count` and user notification channel.
+
 ## Three-Actor Interaction Protocol
 
 The current failure mode is not lack of prompt detail. It is ambiguity about
@@ -158,6 +168,33 @@ The guard's `interaction_contract` is the first-class protocol. Older fields
 such as `execution_obligation`, `heartbeat_recommendation`,
 `work_lane_contract`, `external_evidence_observation`, `goal_boundary`, and
 `protocol_action_packet` remain compatibility and drill-down fields.
+Executors should treat `interaction_contract.agent_channel.primary_action` as
+the single action entrypoint for the current turn. If it carries a
+`resolution_trace`, that trace is only a compact explanation of which projected
+signal the primary action matched and whether `Next Action` / latest-run drift
+exists; it is not a second action source and does not authorize state sync by
+itself.
+When the final contract is a blocking user gate, it also carries a compact
+`interaction_response_plan_v0`: `kind=surface_user_gate`,
+`decision=ask_user`, ordered `action_sequence=[notify, wait]`, and
+`silent_wait_allowed=false`. The same plan
+is projected into TurnEnvelope so a real executor and a model-behavior
+qualification actor consume one typed behavior source. The automation prompt
+remains a thin dispatcher; it does not duplicate this gate rule as prose.
+For a registered agent, scoped state and accounting commands in
+`interaction_contract.cli_channel.next_cli_actions` preserve the normalized
+effective `--available-capability` envelope from the same quota decision.
+Capabilities describe observed execution support; they do not grant authority
+or replace user, repository-policy, or production gates. Owner-held authority
+labels such as credentials and production access are excluded from this CLI
+projection.
+The adjacent `task_scope=goal_all_read_claimed_run_global_read_v0`
+contract defines task discovery without turning visibility into authority. A
+peer reads the current goal's ordinary todo backlog, selects only its own
+claimed or an eligible unclaimed candidate, and claims before execution.
+Other-agent claims remain diagnostic. Cross-goal inventory is available only
+through an explicit read-only global-manager command and cannot enter the
+goal-local execution queue.
 Legacy Markdown parsing is even lower authority: it is a deterministic lint for
 unprojected prose in `Next Action`, not a source of gate truth. The hot path
 should not call an LLM to decide whether the user is gated, because that adds
@@ -268,7 +305,7 @@ surfaces:
 - `bounded_delivery`: Codex owns one validated work segment. It should run the
   steering audit, choose a P0/P1/P2 lane, implement, validate, write back, and
   spend exactly once after delivery.
-- `user_gate`: the user/controller owns the next decision. The agent asks a
+- `user_gate`: the user/operator owns the next decision. The agent asks a
   concise question and does not run the gated path. If the CLI exposes safe
   bypass, a later turn may do unrelated bounded P1/P2 work after the gate has
   been surfaced.
@@ -278,6 +315,8 @@ surfaces:
   selected fallback; the gated action itself must not run.
 - `user_todo_blocker_push`: the user owns an open todo. The agent notifies,
   does not spend, and should not describe the turn as "no user action".
+  In a multi-agent goal this applies only to the lane selected by
+  `bound_agent`, or to every lane when `goal_bound=true`.
 - `successor_replan_required`: a deferred todo's resume gate is satisfied, but
   the item is still deferred. The agent does not run ordinary delivery yet; it
   reopens the todo, supersedes it with a current successor, or records a
@@ -289,9 +328,11 @@ surfaces:
   `waiting_on=external_evidence` goals and to already-launched long-running
   work whose current action is compact-result polling. If no handle exists,
   write a compact blocker instead of quiet waiting.
-- `monitor_quiet_skip`: no material transition is present. The agent may append
-  at most one no-spend monitor-poll event, rerun the guard, then stay quiet.
-  The automation stays active.
+- `monitor_quiet_skip`: no material transition is present. The heartbeat's
+  turn-scoped `quota should-run` guard idempotently commits one receipt and its
+  no-spend stall observation, then returns the follow-up decision. A retry
+  reuses the same turn id and repairs a partial write; a later heartbeat uses a
+  new id. The automation stays active.
 - `autonomous_replan`: repeated no-progress evidence has crossed the self-repair
   threshold. Codex must run one bounded replan/repair segment or write a
   concrete blocker before another quiet no-op.
@@ -475,7 +516,7 @@ treated as required.
 | Store | Owner | Reader | Writer | Purpose |
 | --- | --- | --- | --- | --- |
 | Project registry | Project goal | CLI, executor, status | `connect`, `bootstrap`, narrow project setup | Declares goal identity, repo, adapter, authority, guards. |
-| Active goal state | Project goal | Executor, adapters, user review | Executor or project controller | Durable context, latest progress, next action, validation surfaces. |
+| Active goal state | Project goal | Executor, adapters, user review | Eligible peer or operator | Durable context, latest progress, next action, validation surfaces. |
 | Shared global registry | Local control plane | Status, dashboard, any project shell | `connect`, `refresh-state`, `sync-global` | Multi-project discovery without manually copying registry entries. |
 | Run payloads | Goal runtime | Executor, local reviewer | Adapters, `refresh-state`, `read-only-map` | Rich private evidence for one run. |
 | Compact run index | Goal runtime | Status, dashboard, heartbeats | Adapters, reward overlay writer | Public-safe timeline and latest status. |

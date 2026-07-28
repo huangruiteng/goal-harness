@@ -15,6 +15,20 @@ and newly discovered tasks should be created with `loopx todo add`,
 `loopx todo complete --next-*`, `loopx todo supersede`, or a typed planning
 intake, then projected back to Lark with `sync-loopx-todos`.
 
+## Authentication Boundary
+
+The adapter passes Lark resource identifiers such as `base_token`, `table_id`,
+`view_id`, and `record_id` to `lark-cli`. These identifiers remain visible in
+command evidence because they are useful for operating and auditing the board;
+the adapter does not treat them as AK/SK secrets.
+
+Authentication stays inside the selected `lark-cli` identity and its local auth
+store. Adapter-generated commands must never contain application auth material
+such as AK/SK or app-secret arguments. The command runner rejects those inline
+secret-bearing options before a subprocess starts. Use `lark-cli auth
+login/status` to manage authentication instead of extending the Kanban config
+or command payload with auth material.
+
 ## Mapping
 
 | LoopX concept | Lark Base field |
@@ -29,9 +43,16 @@ intake, then projected back to Lark with `sync-loopx-todos`.
 | Scope | `Scope` text, advisory in v0. |
 | Quota | Omitted in v0; the prototype assumes no quota limit. |
 | Worker launch | `Worker Command` and `Workdir`, consumed by heartbeat. |
+| Issue-fix outcome | One stable `Work Item Type=Issue Fix` row with `Repository`, `Issue`, `Pull Request`, `Route`, `Stage`, `Validation`, `Outcome`, and bounded multi-select `Context Tags`. |
 
 The Kanban view groups by `Status`, so the board is the operator-facing
 control surface. Agent workers use the filtered `Worker Queue` view.
+
+Issue-fix execution todos and issue outcomes deliberately remain different
+rows. Todos answer what should happen next. The outcome row answers what has
+happened to one issue and stays keyed by repository plus issue across PR
+lifecycle changes. It is a read model derived from existing LoopX issue-fix
+state, not a second workflow ledger.
 
 ## Operator View
 
@@ -48,6 +69,18 @@ fields visible on the card:
 All other fields remain in the record detail and `All Tasks` grid. This keeps
 the first page light enough to scan while preserving complete task context for
 agents, handoff, audit, and recovery.
+
+Issue work has two dedicated views so it does not disappear inside the todo
+queue:
+
+- `Issue Fix Outcomes`: grid view filtered to `Work Item Type=Issue Fix`;
+- `Issue Fix Kanban`: Kanban view with the same filter, grouped by `Stage`.
+
+Their visible fields are `Task`, `Repository`, `Issue`, `Pull Request`,
+`Route`, `Stage`, `Validation`, `Outcome`, `Context Tags`, and `Status`. Context
+tags expose stable route, stage, reproduction, validation, and focused-change
+signals without copying free-form evidence. This keeps the existing todo Kanban
+compact while making per-issue state and output directly scannable.
 
 `lark-cli` 1.0.56 exposes `base +view-set-visible-fields`, so
 `lark-kanban setup` writes this compact Kanban card field list directly. Verify
@@ -113,16 +146,39 @@ When a worker discovers follow-up work, it should classify the need first:
 
 - same-slice continuation: keep evidence in the current row until review;
 - real successor: complete the current LoopX todo with `--next-agent-todo` or
-  `--next-user-todo`;
+  `--next-user-todo` plus an explicit
+  `--next-user-task-class user_action|user_gate`;
 - replacement or narrower split: use `todo supersede --next-agent-todo`;
 - strategy-heavy fan-out: run `complex_request_intake_v0` to create a small
   typed todo batch.
 
-After that writeback, `sync-loopx-todos` updates the status tracker. This keeps
-task identity, `todo_id`, gates, claims, and successor metadata in LoopX while
-letting Kanban remain the operator-visible tracker for current work.
+After that writeback, `sync-loopx-todos` updates the status tracker and derives
+issue-fix outcome rows from existing goal domain state. This keeps task identity,
+`todo_id`, gates, claims, issue/PR lifecycle state, and successor metadata in
+LoopX while letting Kanban remain the operator-visible tracker for current work
+and delivered outputs.
 
 ## Setup And Reuse
+
+A saved `.loopx/lark-kanban.json` file is a reusable destination binding, not
+an automation switch. Normal sync stays user-driven through
+`lark-kanban sync-loopx-todos`. A goal may explicitly opt into best-effort
+heartbeat refresh with:
+
+```bash
+loopx configure-goal \
+  --goal-id <goal-id> \
+  --lark-kanban-heartbeat-sync \
+  --execute
+```
+
+That opt-in does not create a board, authenticate Lark, or turn sink delivery
+into a gate. It projects one `post_writeback_actions` entry through
+`quota should-run.goal_boundary` and `interaction_contract.cli_channel` only
+after material state changes; failures remain nonblocking and cannot preempt
+runnable P0 work. The host automation prompt contains no Kanban-specific
+switch or command. Disable the behavior with
+`--no-lark-kanban-heartbeat-sync`.
 
 The recommended path is `setup`, using user identity by default. It preflights
 `lark-cli`, auth, and the required Base shortcuts, then either reuses the local
@@ -139,6 +195,12 @@ The local config stores the reusable Base token, table id, view ids, identity,
 and synced `goal_id:todo_id -> record_id` mappings. The file lives under
 `.loopx/`, which is gitignored.
 
+Running `setup --execute` against an existing board is also the schema
+reconciliation path. It lists current fields, creates only missing fields,
+creates missing issue-fix views, and then reapplies filters, grouping, and
+visible-field configuration. Existing todo rows and stable outcome record ids
+are reused.
+
 To use someone else's shared board, store its URL or IDs:
 
 ```bash
@@ -148,12 +210,48 @@ python3 -m loopx.cli lark-kanban heartbeat --execute-lark
 ```
 
 `sync-loopx-todos` reads the goal active state from the LoopX registry and
-upserts open user/agent todos into the board. User todos become `User Gate`
+upserts open user/agent todos plus derived issue-fix outcome rows into the board.
+User todos become `User Gate`
 cards; claimed agent todos become `Claimed`; blocked/done todos map to
 `Blocked`/`Done` when included. Synced LoopX todos intentionally leave
 `Worker Command` and `Workdir` empty unless a task row was explicitly authored
 as a worker-launch row; the shared board must not receive raw local checkout or
 active-state paths.
+
+Issue outcomes are derived, not persisted separately. Every feasibility row is
+projected; a PR lifecycle row enriches it only through an explicit matching
+`repo` and `issue_ref`. This avoids title/branch guessing and makes the issue
+grid and stage Kanban part of the default sync path. `--limit` bounds active
+todo rows only; it never truncates the derived issue-outcome source projection.
+The sync receipt publishes this split as `limit_policy` so a successful command
+cannot silently imply completeness after dropping newer outcomes.
+
+Normal projection sync is intentionally non-destructive: rows missing from a
+filtered, limited, or newer payload are never deleted implicitly. When a
+caller owns a complete stable `source_id` namespace, it may request an explicit
+preview-first reconcile:
+
+```bash
+python3 -m loopx.cli lark-kanban sync-projection \
+  --projection-file complete-projection.json \
+  --include-done \
+  --reconcile-source \
+  --source-snapshot-complete
+
+# Run only after reviewing source_reconcile.remote_orphans and local mappings.
+python3 -m loopx.cli lark-kanban sync-projection \
+  --projection-file complete-projection.json \
+  --include-done \
+  --reconcile-source \
+  --source-snapshot-complete \
+  --execute
+```
+
+Reconcile refuses agent-filtered input, a row limit that truncates the source,
+source-id mismatches, omitted done rows, and incomplete remote pagination. It
+deletes only remote records whose synthetic todo id belongs to that exact goal
+and source namespace, then removes corresponding or already-missing stale local
+`goal_id:todo_id -> record_id` mappings. An idempotent retry plans zero deletes.
 
 ## CLI Surface
 
@@ -164,6 +262,7 @@ python3 -m loopx.cli lark-kanban setup --base-name "LoopX Kanban POC" --execute
 python3 -m loopx.cli lark-kanban use --base-url "<shared-base-url>"
 python3 -m loopx.cli lark-kanban config
 python3 -m loopx.cli lark-kanban sync-loopx-todos --goal-id <goal-id> --execute
+python3 -m loopx.cli lark-kanban sync-projection --projection-file <complete.json> --include-done --reconcile-source --source-snapshot-complete
 python3 -m loopx.cli lark-kanban plan-create --base-name "LoopX Kanban POC"
 python3 -m loopx.cli lark-kanban create-board --base-name "LoopX Kanban POC" --execute
 python3 -m loopx.cli lark-kanban seed-task --base-token <base> --table-id <table> --execute

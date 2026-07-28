@@ -37,7 +37,7 @@ The dashboard frontstage now has a separate public-safe share-bundle path for
 showing a live-looking control-plane board without exposing local state:
 
 ```bash
-cd apps/dashboard
+cd apps/presentation/dashboard
 npm run export:frontstage-share
 ```
 
@@ -68,12 +68,60 @@ the artifact with `python3 examples/showcase-animation-prototype-smoke.py`.
 
 ![Hosted LoopX frontstage showing public-safe showcase cases](../assets/frontstage-showcase-first-screen.png)
 
+## Experimental Feature Demos
+
+### Start With A Useful Loop
+
+If you want a lightweight first demo before reading the case studies, start
+with the beginner preset picker. It shows how a useful loop compiles to real
+LoopX commands without granting write authority:
+
+```bash
+loopx preset list
+loopx preset show daily-triage
+loopx preset show ci-sweeper
+```
+
+Daily Triage, Changelog Draft, and PR Watch are beginner report/draft/watch
+paths. CI Sweeper and Dependency Sweeper are visible because they are high-ROI
+maintainer workflows, but they stay opt-in and begin with a dry-run or policy
+report before any isolated worktree patch is attempted.
+
+### Auto Research One-Click Start
+
+The auto-research path is the experimental one-command agent-team demo:
+
+```bash
+loopx auto-research "How should we evaluate whether multi-agent auto research creates value?"
+loopx auto-research start "How should we evaluate whether multi-agent auto research creates value?" --execute
+```
+
+The contract command previews the research brief, evidence boundary, and next
+launch packet. The `start --execute` command opens visible Codex CLI lanes
+through the generic multi-agent kernel; lane-authored evidence still has to be
+written back through LoopX state before the demo can claim progress. See the
+[auto-research command path](../guides/auto-research-command-path.md).
+
+### Review Agent Work
+
+Review Agent Work is also an experimental entry: it uses the read-first
+dashboard path to inspect connected projects, user gates, agent lanes, todos,
+and evidence before granting more control.
+
+```bash
+loopx serve-status --global-registry --port 8766 --limit 80
+cd apps/presentation/dashboard && npm run dev
+```
+
+CLI state remains the source of truth, browser writes require explicit local
+opt-in, and review signals stay separate from execution permission.
+
 ## Canonical PoC Cards
 
 | Case | Pattern | Status | Public Surface |
 | --- | --- | --- | --- |
 | [0617 blocked P0 with safe P1/P2 rotation](cases/0617-blocked-p0-safe-rotation.md) | Blocked priority fallback, concrete user gate, quota discipline | Reproducible synthetic demo | `python3 examples/showcase-0617-blocked-p0-safe-rotation-smoke.py` |
-| [0619 LoopX self-iteration loop](cases/0619-loopx-self-iteration.md) | Self-iteration, side-agent scope, evidence writeback | Public Git evidence case | Commit-backed narrative and workload signal |
+| [0619 LoopX self-iteration loop](cases/0619-loopx-self-iteration.md) | Self-iteration, peer claims, evidence writeback | Public Git evidence case | Commit-backed narrative and workload signal |
 | [0619 dynamic workflow for hardware-agent development](cases/0619-dynamic-workflow-hardware-agent.html) | Dynamic workflow, multi-agent convergence, shared control plane | Public-safe interactive case | Five hardware-agent cases plus companion notes |
 
 The catalog order above is the canonical frontstage order for the PoC. It keeps

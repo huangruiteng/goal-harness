@@ -9,12 +9,26 @@ from pathlib import Path
 from typing import Any
 
 from .benchmark_core import (
+    LEGACY_NONPRODUCT_PROMPT_POLLING_ROUTES,
     classify_benchmark_artifact_path,
     classify_product_mode_main_table_pair,
+)
+from .benchmark_core.lifecycle import compact_benchmark_live_worker_phase_from_run
+from .benchmark_adapters.skillsbench_signals import (
+    build_skillsbench_solution_quality_signals,
+)
+from .benchmark_ledger_countability import (
+    benchmark_run_official_score_countability,
+    official_score_bool_fallback_allowed,
+    official_score_bool_fallback_used,
 )
 
 
 BENCHMARK_RUN_LEDGER_SCHEMA_VERSION = "benchmark_run_ledger_v0"
+BENCHMARK_RUN_LEDGER_CURRENT_AGGREGATE_SCHEMA_VERSION = (
+    "benchmark_run_ledger_current_aggregate_v0"
+)
+OPERATOR_SIMULATOR_RUN_SCHEMA_VERSION = "operator_simulator_run_v0"
 BENCHMARK_RUN_LEDGER_DEFAULT_PATH = Path(
     "docs/research/long-horizon-agent-benchmarks/benchmark-run-ledger.json"
 )
@@ -23,6 +37,27 @@ DEFAULT_AGENT_TIMEOUT_REPAIR_MULTIPLIER = 8
 DEFAULT_AGENT_SETUP_TIMEOUT_REPAIR_MULTIPLIER = 8
 DEFAULT_CODEX_SETUP_TIMEOUT_REPAIR_INSTALL_STRATEGY = "require_existing_codex"
 RUNTIME_CODEX_INSTALL_STRATEGY = "runtime_install_if_missing"
+LEDGER_LOGICAL_BACKFILL_FIELDS = (
+    "artifact_refs",
+    "solution_quality_signals",
+    "round_reward_count",
+    "round_success_observed",
+    "max_rounds_budget",
+    "app_server_goal_round_semantics",
+    "native_goal_session_policy",
+    "max_rounds_budget_applies_to",
+    "native_goal_initial_turn_budget",
+    "native_goal_same_thread_followup_budget",
+    "native_goal_independent_attempt_budget",
+    "native_goal_fresh_thread_per_independent_attempt",
+    "native_goal_official_reward_feedback_forwarded_to_worker",
+    "native_goal_verifier_output_forwarded_to_worker",
+    "official_feedback_blinded",
+    "reward_feedback_forwarded",
+    "benchmark_live_worker_phase",
+    "task_setup_preflight",
+    "task_staging",
+)
 TERMINAL_BENCH_JOB_CASE_ARM_MARKERS = (
     "_codex_goal_mode_baseline",
     "_codex_loopx_treatment",
@@ -40,6 +75,23 @@ PRIVATE_ARTIFACT_REF_PATH_MARKERS = (
     "/var/folders/",
     "/tmp/",
 )
+PUBLIC_LEDGER_LINEAGE_RESULT_FILENAMES = {
+    "benchmark-run.json",
+    "benchmark_run.json",
+    "compact-run.json",
+    "loopx-worker-benchmark-run.json",
+    "result.json",
+    "skillsbench-compact-benchmark-run-v0.json",
+}
+PRIVATE_ARTIFACT_REF_PATH_PARTS = {
+    ".local",
+    "private",
+    "private-benchmark-jobs",
+    "users",
+    "volumes",
+    "var",
+    "tmp",
+}
 
 
 def _now_local_iso() -> str:
@@ -128,6 +180,10 @@ def _compact_task_staging(value: Any) -> dict[str, Any]:
         "dockerfile_pip_install_risk_detected",
         "dockerfile_pip_bootstrap_patch_required",
         "dockerfile_pip_bootstrap_patch_applied",
+        "dockerfile_uv_bootstrap_risk_detected",
+        "dockerfile_uv_bootstrap_mirror_patch_required",
+        "dockerfile_uv_bootstrap_mirror_patch_applied",
+        "dockerfile_uv_bootstrap_pip_fallback_patch_applied",
         "dockerfile_package_bootstrap_risk_preflight_blocked",
         "app_skills_mount_patch_applied",
         "apt_retry_patch_applied",
@@ -139,6 +195,16 @@ def _compact_task_staging(value: Any) -> dict[str, Any]:
         "verifier_uv_bootstrap_mirror_patch_required",
         "verifier_uv_bootstrap_mirror_patch_applied",
         "verifier_bootstrap_risk_preflight_blocked",
+        "dockerfile_apache_archive_mirror_patch_required",
+        "dockerfile_apache_archive_mirror_patch_applied",
+        "dockerfile_apache_archive_raw_url_recorded",
+        "dockerfile_maven_mirror_patch_required",
+        "dockerfile_maven_mirror_patch_applied",
+        "dockerfile_maven_mirror_raw_url_recorded",
+        "benchmark_egress_proxy_dockerfile_env_patch_required",
+        "benchmark_egress_proxy_dockerfile_env_patch_applied",
+        "benchmark_egress_proxy_dockerfile_java_opts_patch_applied",
+        "benchmark_egress_proxy_dockerfile_env_raw_proxy_recorded",
         "codex_acp_runtime_tools_patch_applied",
         "task_skills_removed",
         "original_task_mutated",
@@ -148,8 +214,12 @@ def _compact_task_staging(value: Any) -> dict[str, Any]:
     for field in (
         "dockerfile_pip_index_host",
         "bootstrap_light_blocker_kind",
+        "dockerfile_uv_bootstrap_version",
+        "dockerfile_uv_bootstrap_mirror_host",
         "verifier_uv_bootstrap_version",
         "verifier_uv_bootstrap_mirror_host",
+        "dockerfile_apache_archive_mirror_host",
+        "dockerfile_maven_mirror_host",
     ):
         text = _compact_text(value.get(field), limit=140)
         if text:
@@ -157,6 +227,9 @@ def _compact_task_staging(value: Any) -> dict[str, Any]:
     count = value.get("bootstrap_light_blocking_field_count")
     if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
         compact["bootstrap_light_blocking_field_count"] = count
+    count = value.get("benchmark_egress_proxy_dockerfile_env_key_count")
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+        compact["benchmark_egress_proxy_dockerfile_env_key_count"] = count
     cap = value.get("resource_cap_patch")
     if isinstance(cap, dict):
         safe_cap: dict[str, Any] = {}
@@ -186,6 +259,10 @@ def _compact_task_setup_preflight(value: Any) -> dict[str, Any]:
         "task_id",
         "first_blocker",
         "alternate_source_kind",
+        "canonical_equivalent_status",
+        "registry_source_kind",
+        "registry_source_status",
+        "registry_task_path",
         "selection_recommendation",
     ):
         text = _compact_text(value.get(field), limit=140)
@@ -207,6 +284,9 @@ def _compact_task_setup_preflight(value: Any) -> dict[str, Any]:
         "dockerfile_present",
         "canonical_task_present",
         "alternate_source_supported_by_runner",
+        "registry_task_present",
+        "registry_task_path_recorded",
+        "registry_excluded",
         "task_source_path_recorded",
         "task_source_content_recorded",
         "bootstrap_light_candidate_eligible",
@@ -249,6 +329,8 @@ def _compact_compose_setup_diagnostic(value: Any) -> dict[str, Any]:
         "runner_prerequisite_status",
         "task_setup_preflight_status",
         "runner_error_len_bucket",
+        "primary_setup_failure_category",
+        "retryability",
         "next_diagnostic_action",
     ):
         text = _compact_text(value.get(field), limit=140)
@@ -258,6 +340,7 @@ def _compact_compose_setup_diagnostic(value: Any) -> dict[str, Any]:
         "compose_setup_failure",
         "unclassified_compose_failure",
         "docker_daemon_unavailable",
+        "apt_repository_failure",
         "volume_mount_failure",
         "environment_setup_failure",
         "agent_rounds_started",
@@ -288,6 +371,8 @@ def _compact_compose_setup_diagnostic(value: Any) -> dict[str, Any]:
         "trajectory_tool_call_count",
         "loopx_cli_call_count",
         "round_reward_count",
+        "setup_stall_timeout_requested_sec",
+        "setup_stall_timeout_sec",
         "progress_completed_trials",
         "progress_errored_trials",
     ):
@@ -296,6 +381,14 @@ def _compact_compose_setup_diagnostic(value: Any) -> dict[str, Any]:
     patterns = _compact_list(value.get("fingerprint_matched_patterns"), limit=8)
     if patterns:
         compact["fingerprint_matched_patterns"] = patterns
+    for field in (
+        "terminal_failure_dependency_classes",
+        "terminal_failure_reason_codes",
+        "terminal_failure_dependency_endpoints",
+    ):
+        values = _compact_list(value.get(field), limit=8)
+        if values:
+            compact[field] = values
     return compact
 
 
@@ -305,9 +398,28 @@ def _compact_positive_int(value: Any) -> int | None:
     return None
 
 
+def _compact_nonnegative_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
 def _compact_number(value: Any) -> float | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
+    return None
+
+
+def _numeric_score_value(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
     return None
 
 
@@ -445,6 +557,45 @@ def _run_matches_token(run: dict[str, Any], *needles: str) -> bool:
     return False
 
 
+def _ledger_missing_value(value: Any) -> bool:
+    return value is None or value in ("", [], {})
+
+
+def _ledger_logical_backfill_key(run: dict[str, Any]) -> tuple[str, ...]:
+    values: list[str] = []
+    for field in ("run_group_id", "arm_id", "job_name", "mode"):
+        text = _compact_text(run.get(field), limit=220)
+        if not text:
+            return ()
+        values.append(text)
+    return tuple(values)
+
+
+def _ledger_result_equivalent_for_backfill(
+    run: dict[str, Any],
+    entry: dict[str, Any],
+) -> bool:
+    for field in ("status", "score_status", "official_passed", "failure_class"):
+        if run.get(field) != entry.get(field):
+            return False
+    return run.get("official_score") == entry.get("official_score")
+
+
+def _merge_ledger_logical_backfill_fields(
+    run: dict[str, Any],
+    entry: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    merged = dict(run)
+    changed = False
+    for field in LEDGER_LOGICAL_BACKFILL_FIELDS:
+        if _ledger_missing_value(merged.get(field)) and not _ledger_missing_value(
+            entry.get(field)
+        ):
+            merged[field] = entry[field]
+            changed = True
+    return merged, changed
+
+
 def _product_mode_baseline_run(run: dict[str, Any]) -> bool:
     return _run_matches_token(
         run,
@@ -527,6 +678,149 @@ def _compact_product_mode_lifecycle_contract(value: Any) -> dict[str, Any]:
     return compact
 
 
+def _compact_app_server_goal_round_semantics(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    for field in (
+        "schema_version",
+        "route",
+        "session_policy",
+        "max_rounds_budget_applies_to",
+    ):
+        text = _compact_text(value.get(field), limit=140)
+        if text:
+            compact[field] = text
+    for field in (
+        "benchflow_max_rounds_budget",
+        "initial_goal_turn_budget",
+        "same_thread_followup_budget",
+        "independent_attempt_budget",
+    ):
+        number = _compact_nonnegative_int(value.get(field))
+        if number is not None:
+            compact[field] = number
+    for field in (
+        "fresh_goal_thread_per_independent_attempt",
+        "official_reward_feedback_forwarded_to_worker",
+        "verifier_output_forwarded_to_worker",
+    ):
+        if isinstance(value.get(field), bool):
+            compact[field] = value[field]
+    return compact
+
+
+def _compact_skillsbench_solution_quality_signals(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    for field in (
+        "schema_version",
+        "source",
+        "outcome_class",
+        "rubric_miss_label_status",
+    ):
+        text = _compact_text(value.get(field), limit=120)
+        if text:
+            compact[field] = text
+    for field in ("solution_action_labels", "rubric_miss_labels", "public_limits"):
+        labels = _compact_list(value.get(field), limit=12)
+        if labels:
+            compact[field] = labels
+    worker_activity = (
+        value.get("worker_activity")
+        if isinstance(value.get("worker_activity"), dict)
+        else {}
+    )
+    compact_worker_activity: dict[str, Any] = {}
+    for field in (
+        "task_facing_activity_observed",
+        "worker_turn_or_bridge_observed",
+    ):
+        if isinstance(worker_activity.get(field), bool):
+            compact_worker_activity[field] = worker_activity[field]
+    for field in (
+        "tool_call_count",
+        "bridge_task_facing_operation_count",
+        "bridge_task_facing_success_count",
+    ):
+        raw = worker_activity.get(field)
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            compact_worker_activity[field] = max(0, raw)
+    if compact_worker_activity:
+        compact["worker_activity"] = compact_worker_activity
+    return compact
+
+
+def _compact_operator_simulator_run(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    schema_version = _compact_text(value.get("schema_version"), limit=120)
+    if schema_version != OPERATOR_SIMULATOR_RUN_SCHEMA_VERSION:
+        return {}
+    compact: dict[str, Any] = {"schema_version": OPERATOR_SIMULATOR_RUN_SCHEMA_VERSION}
+    simulator_identity = (
+        value.get("simulator_identity")
+        if isinstance(value.get("simulator_identity"), dict)
+        else {}
+    )
+    for field in (
+        "arm_schema_version",
+        "benchmark_id",
+        "case_id",
+        "task_id",
+        "mode",
+        "simulator_setting",
+    ):
+        raw = (
+            simulator_identity.get("setting")
+            if field == "simulator_setting" and value.get(field) is None
+            else value.get(field)
+        )
+        text = _compact_text(raw, limit=140)
+        if text:
+            compact[field] = text
+    claim_boundary = (
+        value.get("claim_boundary")
+        if isinstance(value.get("claim_boundary"), dict)
+        else {}
+    )
+    for field in (
+        "rubric_generated_before_solver_start",
+        "official_score_claim_allowed",
+        "leaderboard_claim_allowed",
+        "assisted_collaboration_claim_allowed",
+        "assisted_score_kept_separate_from_official",
+    ):
+        if isinstance(value.get(field), bool):
+            compact[field] = value[field]
+        elif isinstance(claim_boundary.get(field), bool):
+            compact[field] = claim_boundary[field]
+    for field in ("intervention_count", "proactive_intervention_count"):
+        raw = value.get(field)
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+            compact[field] = raw
+    assisted_score = value.get("assisted_score")
+    if isinstance(assisted_score, (int, float)) and not isinstance(assisted_score, bool):
+        compact["assisted_score"] = float(assisted_score)
+    return compact
+
+
+def _ledger_skillsbench_solution_quality_signals(
+    benchmark_run: dict[str, Any],
+    *,
+    benchmark_id: str,
+) -> dict[str, Any]:
+    signals = _compact_skillsbench_solution_quality_signals(
+        benchmark_run.get("solution_quality_signals")
+    )
+    if signals or not benchmark_id.lower().startswith("skillsbench"):
+        return signals
+    return _compact_skillsbench_solution_quality_signals(
+        build_skillsbench_solution_quality_signals(benchmark_run)
+    )
+
+
 def _terminal_bench_case_id_from_job_name(
     *,
     benchmark_id: str,
@@ -579,6 +873,24 @@ def _public_ledger_artifact_ref(
         return None
     classification = classify_benchmark_artifact_path(ref)
     if classification.get("allowed_to_read") is not True:
+        normalized = ref.replace("\\", "/").strip("/")
+        parts = [part for part in normalized.split("/") if part]
+        if (
+            not normalized
+            or ref.startswith("/")
+            or ref.startswith("~")
+            or ":" in normalized
+            or len(parts) != len(normalized.split("/"))
+            or any(part in {".", ".."} or part.startswith(".") for part in parts)
+            or any(part.lower() in PRIVATE_ARTIFACT_REF_PATH_PARTS for part in parts)
+            or classification.get("private_raw_surface") is True
+        ):
+            return None
+        basename = _compact_text(classification.get("basename"), limit=160)
+        if basename in PUBLIC_LEDGER_LINEAGE_RESULT_FILENAMES:
+            return normalized
+        if "." not in basename:
+            return normalized
         return None
     normalized = ref.replace("\\", "/")
     if any(marker in normalized for marker in PRIVATE_ARTIFACT_REF_PATH_MARKERS):
@@ -633,12 +945,26 @@ def _official_score(benchmark_run: dict[str, Any]) -> tuple[float | int | None, 
     value = benchmark_run.get("official_score")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return value, value >= 1
-    return None, None
+    if not official_score_bool_fallback_allowed(benchmark_run):
+        return None, None
+    return _official_score_passed_bool_fallback(benchmark_run)
+
+
+def _official_task_score_bool_passed(benchmark_run: dict[str, Any]) -> bool | None:
+    official = (
+        benchmark_run.get("official_task_score")
+        if isinstance(benchmark_run.get("official_task_score"), dict)
+        else {}
+    )
+    passed = official.get("passed")
+    return passed if isinstance(passed, bool) else None
 
 
 def _infer_arm_id_from_job_name(job_name: str) -> str:
     if not job_name:
         return ""
+    if "codex_app_server_goal_baseline" in job_name:
+        return "codex_app_server_goal_baseline"
     if "codex_goal_mode_baseline" in job_name:
         return "codex_goal_mode_baseline"
     if "hardened_codex_baseline" in job_name:
@@ -656,6 +982,23 @@ def _infer_arm_id_from_job_name(job_name: str) -> str:
 
 def _infer_arm_id(benchmark_run: dict[str, Any]) -> str:
     mode = _compact_text(benchmark_run.get("mode"), limit=120)
+    route = _compact_text(benchmark_run.get("route"), limit=120)
+    if (
+        route in LEGACY_NONPRODUCT_PROMPT_POLLING_ROUTES
+        or mode in {
+            "skillsbench_loopx_blind_loop_treatment",
+            "skillsbench_loopx_prompt_polling_test",
+            "loopx_prompt_polling_test",
+        }
+        or benchmark_run.get("historical_route_read_only") is True
+        or _compact_text(
+            benchmark_run.get("skillsbench_route_semantics"), limit=120
+        )
+        == "historical_nonproduct_invalid_for_comparison"
+    ):
+        return "historical_nonproduct_invalid_for_comparison"
+    if mode == "skillsbench_codex_app_server_goal_baseline":
+        return "codex_app_server_goal_baseline"
     if mode == "codex_goal_mode_baseline":
         return "codex_goal_mode_baseline"
     if mode in {"hardened_codex_baseline", "hardened-codex"}:
@@ -678,6 +1021,8 @@ def _infer_arm_id(benchmark_run: dict[str, Any]) -> str:
 
 def _resolved_arm_id(benchmark_run: dict[str, Any], arm_id: str | None) -> str:
     inferred = _infer_arm_id(benchmark_run)
+    if inferred == "historical_nonproduct_invalid_for_comparison":
+        return inferred
     explicit = _compact_text(arm_id, limit=120)
     if explicit in {"baseline", "treatment"} and inferred not in {"", "unknown_arm"}:
         return inferred
@@ -689,10 +1034,84 @@ def _score_status(benchmark_run: dict[str, Any], score: float | int | None, pass
         return "missing"
     explicit = _compact_text(benchmark_run.get("official_score_status"), limit=80)
     if explicit and explicit != "completed":
+        if explicit == "missing" and score is not None and isinstance(passed, bool):
+            return "passed" if passed else "failed"
         return explicit
     if score is None:
         return "missing"
     return "passed" if passed else "failed"
+
+
+def _official_score_passed_bool_fallback(
+    benchmark_run: dict[str, Any],
+) -> tuple[float | None, bool | None]:
+    official_passed = _official_task_score_bool_passed(benchmark_run)
+    if isinstance(official_passed, bool):
+        return (1.0 if official_passed else 0.0), official_passed
+
+    score_status = _compact_text(
+        benchmark_run.get("official_score_status") or benchmark_run.get("score_status"),
+        limit=80,
+    )
+    if score_status not in {"completed", "passed", "failed"}:
+        return None, None
+    if _compact_text(benchmark_run.get("runner_return_status"), limit=120) == (
+        "failed_before_official_result"
+    ):
+        return None, None
+    for container, key in (
+        (benchmark_run, "official_passed"),
+        (benchmark_run, "passed"),
+    ):
+        value = container.get(key) if isinstance(container, dict) else None
+        if isinstance(value, bool):
+            return (1.0 if value else 0.0), value
+    return None, None
+
+
+_SKILLSBENCH_PRE_AGENT_SETUP_STATUS_LABELS = {
+    "compose_setup_blocked_before_agent_rounds": (
+        "skillsbench_compose_setup_blocked_before_agent_rounds"
+    ),
+    "runner_setup_blocked_before_agent_rounds": (
+        "skillsbench_runner_setup_blocked_before_agent_rounds"
+    ),
+}
+
+_SKILLSBENCH_PRE_AGENT_SETUP_FAILURE_CLASSES = frozenset(
+    _SKILLSBENCH_PRE_AGENT_SETUP_STATUS_LABELS.values()
+)
+
+_SKILLSBENCH_SETUP_PREFLIGHT_REPAIR_ATTRIBUTIONS = {
+    "skillsbench_docker_apt_setup_risk_preflight_blocked",
+    "skillsbench_dockerfile_package_bootstrap_risk_preflight_blocked",
+    "skillsbench_verifier_bootstrap_risk_preflight_blocked",
+    "skillsbench_task_source_preflight_blocked",
+}
+
+
+def _skillsbench_pre_agent_setup_failure_class(
+    benchmark_run: dict[str, Any],
+) -> str:
+    diagnostic = (
+        benchmark_run.get("compose_setup_diagnostic")
+        if isinstance(benchmark_run.get("compose_setup_diagnostic"), dict)
+        else {}
+    )
+    label = _SKILLSBENCH_PRE_AGENT_SETUP_STATUS_LABELS.get(
+        _compact_text(diagnostic.get("status"), limit=120)
+    )
+    if not label:
+        return ""
+    mode = _compact_text(benchmark_run.get("mode"), limit=120)
+    route = _compact_text(benchmark_run.get("route"), limit=120)
+    if mode != "skillsbench_codex_app_server_goal_baseline" and route != (
+        "codex-app-server-goal-baseline"
+    ):
+        return ""
+    if diagnostic.get("agent_rounds_started") is True:
+        return ""
+    return label
 
 
 def _failure_class(benchmark_run: dict[str, Any], score: float | int | None) -> str:
@@ -715,6 +1134,10 @@ def _failure_class(benchmark_run: dict[str, Any], score: float | int | None) -> 
         return first_blocker or "post_launch_compact_result_missing"
     if score is not None and score != 0:
         return "none"
+    if score is None:
+        pre_agent_setup = _skillsbench_pre_agent_setup_failure_class(benchmark_run)
+        if pre_agent_setup:
+            return pre_agent_setup
     setup_blocker = _compact_first_from_lists(
         benchmark_run,
         "worker_setup_diagnostic_blockers",
@@ -824,6 +1247,20 @@ def _failure_scope(failure_class: str, score: float | int | None, passed: bool |
     if failure_class.startswith("verifier_"):
         return "verifier_or_infra"
     return "runner_or_setup"
+
+
+def _repair_route_failure_class(
+    benchmark_run: dict[str, Any], failure_class: str
+) -> str:
+    if failure_class not in _SKILLSBENCH_PRE_AGENT_SETUP_FAILURE_CLASSES:
+        return failure_class
+    attribution = _compact_text(
+        benchmark_run.get("score_failure_attribution"),
+        limit=120,
+    )
+    if attribution in _SKILLSBENCH_SETUP_PREFLIGHT_REPAIR_ATTRIBUTIONS:
+        return attribution
+    return failure_class
 
 
 def _repair_route(
@@ -1066,6 +1503,29 @@ def _repair_route(
                     "skillsbench_task_setup_preflight",
                     "canonical_task_present",
                     "nearest_canonical_task_ids",
+                ],
+                "raw_logs_required": False,
+                "raw_task_text_required": False,
+            },
+        }
+    if failure_class == "skillsbench_task_source_excluded":
+        return {
+            "repair_priority": "P1",
+            "repair_class": "skillsbench_task_source_excluded",
+            "next_action": (
+                "exclude this noncanonical SkillsBench source from formal "
+                "87-case scoring, or rerun it only through an explicit "
+                "sanity/source-extra runner"
+            ),
+            "repair_profile": {
+                "schema_version": "benchmark_repair_profile_v0",
+                "repair_class": "skillsbench_task_source_excluded",
+                "rerun_allowed_after_profile_applied": True,
+                "required_preflight": [
+                    "skillsbench_task_setup_preflight",
+                    "task_excluded_from_formal_tasks",
+                    "registry_source_kind=tasks_extra",
+                    "registry_excluded=true",
                 ],
                 "raw_logs_required": False,
                 "raw_task_text_required": False,
@@ -1318,6 +1778,9 @@ def build_benchmark_run_ledger_entry(
     job_name = _compact_text(benchmark_run.get("job_name"), limit=160)
     mode = _compact_text(benchmark_run.get("mode"), limit=120)
     score, passed = _official_score(benchmark_run)
+    bool_fallback_used = official_score_bool_fallback_used(
+        benchmark_run
+    ) and official_score_bool_fallback_allowed(benchmark_run)
     score_status = _score_status(benchmark_run, score, passed)
     failure_class = _failure_class(benchmark_run, score)
     failure_scope = _failure_scope(failure_class, score, passed)
@@ -1416,9 +1879,54 @@ def build_benchmark_run_ledger_entry(
         best_round_passed = round_reward_stats.get("best_round_passed")
     if not isinstance(best_round_is_final, bool):
         best_round_is_final = round_reward_stats.get("best_round_is_final")
+    native_goal_worker_contract = (
+        benchmark_run.get("native_goal_worker_contract")
+        if isinstance(benchmark_run.get("native_goal_worker_contract"), dict)
+        else {}
+    )
+    raw_app_server_goal_round_semantics = (
+        benchmark_run.get("app_server_goal_round_semantics")
+        if isinstance(benchmark_run.get("app_server_goal_round_semantics"), dict)
+        else {}
+    )
+    if not raw_app_server_goal_round_semantics and (
+        benchmark_run.get("route") == "codex-app-server-goal-baseline"
+        or native_goal_worker_contract.get("required") is True
+    ):
+        raw_app_server_goal_round_semantics = native_goal_worker_contract
+    app_server_goal_round_semantics = _compact_app_server_goal_round_semantics(
+        raw_app_server_goal_round_semantics
+    )
+    if (
+        not isinstance(max_rounds_budget, int)
+        or isinstance(max_rounds_budget, bool)
+    ) and (
+        isinstance(app_server_goal_round_semantics.get("benchflow_max_rounds_budget"), int)
+        and not isinstance(
+            app_server_goal_round_semantics.get("benchflow_max_rounds_budget"), bool
+        )
+    ):
+        max_rounds_budget = app_server_goal_round_semantics.get(
+            "benchflow_max_rounds_budget"
+        )
     runner_prerequisites = (
         benchmark_run.get("runner_prerequisites")
         if isinstance(benchmark_run.get("runner_prerequisites"), dict)
+        else {}
+    )
+    runner_failure = (
+        benchmark_run.get("runner_failure")
+        if isinstance(benchmark_run.get("runner_failure"), dict)
+        else {}
+    )
+    verifier_reward_artifact_recovery = (
+        benchmark_run.get("verifier_reward_artifact_recovery")
+        if isinstance(benchmark_run.get("verifier_reward_artifact_recovery"), dict)
+        else {}
+    )
+    validation = (
+        benchmark_run.get("validation")
+        if isinstance(benchmark_run.get("validation"), dict)
         else {}
     )
     runtime_preflight_passed = _codex_acp_runtime_preflight_passed(
@@ -1431,7 +1939,7 @@ def build_benchmark_run_ledger_entry(
         else (first_success_round is not None)
     )
     repair_route = _repair_route(
-        failure_class,
+        _repair_route_failure_class(benchmark_run, failure_class),
         failure_scope,
         agent_model=agent_model,
         round_success_observed=round_success_observed,
@@ -1453,6 +1961,7 @@ def build_benchmark_run_ledger_entry(
         "score_status": score_status,
         "official_score": score,
         "official_passed": passed,
+        "official_score_bool_fallback_used": bool_fallback_used,
         "first_success_round": first_success_round,
         "final_round": final_round,
         "final_round_reward": final_round_reward,
@@ -1483,6 +1992,59 @@ def build_benchmark_run_ledger_entry(
         "max_rounds_budget": max_rounds_budget
         if isinstance(max_rounds_budget, int) and not isinstance(max_rounds_budget, bool)
         else None,
+        "app_server_goal_round_semantics": app_server_goal_round_semantics or None,
+        "native_goal_session_policy": _compact_text(
+            app_server_goal_round_semantics.get("session_policy"), limit=120
+        ),
+        "max_rounds_budget_applies_to": _compact_text(
+            app_server_goal_round_semantics.get("max_rounds_budget_applies_to"),
+            limit=140,
+        ),
+        "native_goal_initial_turn_budget": _compact_nonnegative_int(
+            app_server_goal_round_semantics.get("initial_goal_turn_budget")
+        ),
+        "native_goal_same_thread_followup_budget": _compact_nonnegative_int(
+            app_server_goal_round_semantics.get("same_thread_followup_budget")
+        ),
+        "native_goal_independent_attempt_budget": _compact_nonnegative_int(
+            app_server_goal_round_semantics.get("independent_attempt_budget")
+        ),
+        "native_goal_fresh_thread_per_independent_attempt": (
+            app_server_goal_round_semantics.get(
+                "fresh_goal_thread_per_independent_attempt"
+            )
+            if isinstance(
+                app_server_goal_round_semantics.get(
+                    "fresh_goal_thread_per_independent_attempt"
+                ),
+                bool,
+            )
+            else None
+        ),
+        "native_goal_official_reward_feedback_forwarded_to_worker": (
+            app_server_goal_round_semantics.get(
+                "official_reward_feedback_forwarded_to_worker"
+            )
+            if isinstance(
+                app_server_goal_round_semantics.get(
+                    "official_reward_feedback_forwarded_to_worker"
+                ),
+                bool,
+            )
+            else None
+        ),
+        "native_goal_verifier_output_forwarded_to_worker": (
+            app_server_goal_round_semantics.get(
+                "verifier_output_forwarded_to_worker"
+            )
+            if isinstance(
+                app_server_goal_round_semantics.get(
+                    "verifier_output_forwarded_to_worker"
+                ),
+                bool,
+            )
+            else None
+        ),
         "official_feedback_blinded": round_reward_trace.get("official_feedback_blinded")
         if isinstance(round_reward_trace, dict)
         and isinstance(round_reward_trace.get("official_feedback_blinded"), bool)
@@ -1493,7 +2055,54 @@ def build_benchmark_run_ledger_entry(
         else None,
         "failure_class": failure_class,
         "failure_scope": failure_scope,
-        "failure_labels": _compact_list(benchmark_run.get("failure_attribution_labels"), limit=8),
+        "score_failure_attribution": _compact_text(
+            benchmark_run.get("score_failure_attribution"),
+            limit=120,
+        ),
+        "failure_labels": _compact_list(
+            benchmark_run.get("failure_attribution_labels"),
+            limit=8,
+        ),
+        "runner_return_status": _compact_text(
+            benchmark_run.get("runner_return_status"),
+            limit=120,
+        ),
+        "runner_score_recovered_from_verifier_artifact": (
+            runner_failure.get("score_recovered_from_verifier_artifact")
+            if isinstance(
+                runner_failure.get("score_recovered_from_verifier_artifact"),
+                bool,
+            )
+            else None
+        ),
+        "verifier_reward_artifact_recovery_status": _compact_text(
+            verifier_reward_artifact_recovery.get("status"),
+            limit=120,
+        ),
+        "verifier_reward_artifact_recovered": (
+            validation.get("verifier_reward_artifact_recovered")
+            if isinstance(validation.get("verifier_reward_artifact_recovered"), bool)
+            else (
+                verifier_reward_artifact_recovery.get("reward_present")
+                if isinstance(
+                    verifier_reward_artifact_recovery.get("reward_present"),
+                    bool,
+                )
+                else None
+            )
+        ),
+        "official_result_json_materialized": (
+            verifier_reward_artifact_recovery.get("official_result_json_materialized")
+            if isinstance(
+                verifier_reward_artifact_recovery.get("official_result_json_materialized"),
+                bool,
+            )
+            else (
+                validation.get("official_result_json_materialized")
+                if isinstance(validation.get("official_result_json_materialized"), bool)
+                else None
+            )
+        ),
         "setup_blockers": _compact_list(
             benchmark_run.get("worker_setup_diagnostic_blockers"),
             limit=4,
@@ -1546,6 +2155,20 @@ def build_benchmark_run_ledger_entry(
     )
     if product_mode_lifecycle_contract:
         entry["product_mode_lifecycle_contract"] = product_mode_lifecycle_contract
+    solution_quality_signals = _ledger_skillsbench_solution_quality_signals(
+        benchmark_run,
+        benchmark_id=benchmark_id,
+    )
+    if solution_quality_signals:
+        entry["solution_quality_signals"] = solution_quality_signals
+    operator_simulator_run = _compact_operator_simulator_run(
+        benchmark_run.get("operator_simulator_run")
+    )
+    if operator_simulator_run:
+        entry["operator_simulator_run"] = operator_simulator_run
+    live_worker_phase = compact_benchmark_live_worker_phase_from_run(benchmark_run)
+    if live_worker_phase:
+        entry["benchmark_live_worker_phase"] = live_worker_phase
     attempt_accounting = (
         benchmark_run.get("attempt_accounting")
         if isinstance(benchmark_run.get("attempt_accounting"), dict)
@@ -1565,6 +2188,7 @@ def build_benchmark_run_ledger_entry(
             if isinstance(marker.get("attempt_accounting"), dict)
             else {}
         )
+    has_official_bool_score = bool_fallback_used
     if attempt_accounting:
         for source_field, entry_field in (
             ("lifecycle_phase", "attempt_lifecycle_phase"),
@@ -1582,7 +2206,26 @@ def build_benchmark_run_ledger_entry(
             "official_score_attempt_countable",
         ):
             if isinstance(attempt_accounting.get(field), bool):
-                entry[field] = attempt_accounting[field]
+                entry[field] = (
+                    True
+                    if field == "official_score_attempt_countable"
+                    and has_official_bool_score
+                    else attempt_accounting[field]
+                )
+    for field in (
+        "launcher_attempt_countable",
+        "case_attempt_countable",
+        "solver_attempt_countable",
+        "verifier_attempt_countable",
+        "official_score_attempt_countable",
+    ):
+        if field not in entry and isinstance(benchmark_run.get(field), bool):
+            entry[field] = (
+                True
+                if field == "official_score_attempt_countable"
+                and has_official_bool_score
+                else benchmark_run[field]
+            )
     if source_schema == "terminal_bench_post_launch_materialization_v0":
         marker = (
             benchmark_run.get("compact_failure_marker")
@@ -1670,6 +2313,11 @@ def build_benchmark_run_ledger_entry(
     note = _compact_text(notes, limit=220)
     if note:
         entry["notes"] = note
+    countability = benchmark_run_official_score_countability(entry)
+    entry["official_score_countable"] = countability["countable"]
+    entry["official_score_countability_reason"] = countability["reason"]
+    if countability["countable"] is True and countability.get("score") is not None:
+        entry["countable_score"] = countability["score"]
     return {key: value for key, value in entry.items() if value not in (None, "", [])}
 
 
@@ -1748,7 +2396,10 @@ def _normalize_ledger_run(run: dict[str, Any], *, fallback_benchmark_id: str) ->
         normalized["arm_id"] = resolved_arm
     normalized["benchmark_id"] = benchmark_id
     repair_route = _repair_route(
-        _compact_text(normalized.get("failure_class"), limit=120),
+        _repair_route_failure_class(
+            normalized,
+            _compact_text(normalized.get("failure_class"), limit=120),
+        ),
         _compact_text(normalized.get("failure_scope"), limit=80),
         agent_model=_compact_text(normalized.get("agent_model"), limit=120),
         round_success_observed=normalized.get("round_success_observed") is True
@@ -1762,6 +2413,13 @@ def _normalize_ledger_run(run: dict[str, Any], *, fallback_benchmark_id: str) ->
     for key in ("repair_priority", "repair_class", "next_action", "repair_profile"):
         normalized.pop(key, None)
     normalized.update(repair_route)
+    countability = benchmark_run_official_score_countability(normalized)
+    normalized["official_score_countable"] = countability["countable"]
+    normalized["official_score_countability_reason"] = countability["reason"]
+    if countability["countable"] is True and countability.get("score") is not None:
+        normalized["countable_score"] = countability["score"]
+    else:
+        normalized.pop("countable_score", None)
     archive_state = _compact_text(normalized.get("archive_state"), limit=40)
     if archive_state == "archived":
         normalized["archive_state"] = "archived"
@@ -1778,6 +2436,11 @@ def _normalize_ledger_run(run: dict[str, Any], *, fallback_benchmark_id: str) ->
     else:
         for key in ("archive_state", "archive_reason", "archive_batch_id", "archived_at"):
             normalized.pop(key, None)
+    live_worker_phase = compact_benchmark_live_worker_phase_from_run(normalized)
+    if live_worker_phase:
+        normalized["benchmark_live_worker_phase"] = live_worker_phase
+    else:
+        normalized.pop("benchmark_live_worker_phase", None)
     refs = normalized.get("artifact_refs")
     if isinstance(refs, dict):
         safe_refs: dict[str, str] = {}
@@ -1964,6 +2627,8 @@ def _case_decision(case: dict[str, Any]) -> dict[str, Any]:
             decision = f"{prefix}_verifier_bootstrap_preflight_selection_required"
         elif repair_class == "skillsbench_task_source_preflight_selection":
             decision = f"{prefix}_task_source_preflight_selection_required"
+        elif repair_class == "skillsbench_task_source_excluded":
+            decision = f"{prefix}_task_source_excluded_from_formal_scoring"
         elif repair_class == "worker_verifier_alignment":
             decision = f"{prefix}_worker_verifier_alignment_required"
         elif repair_class == "verifier_or_infra_repair":
@@ -2163,6 +2828,21 @@ def upsert_benchmark_run_ledger_entry(
             runs[index] = entry
             replaced = True
             break
+    if not replaced:
+        entry_backfill_key = _ledger_logical_backfill_key(entry)
+        if entry_backfill_key:
+            for index, run in enumerate(runs):
+                if (
+                    run.get("run_id") == entry.get("run_id")
+                    or _ledger_logical_backfill_key(run) != entry_backfill_key
+                    or not _ledger_result_equivalent_for_backfill(run, entry)
+                ):
+                    continue
+                merged, changed = _merge_ledger_logical_backfill_fields(run, entry)
+                if changed:
+                    runs[index] = merged
+                replaced = True
+                break
     if not replaced:
         runs.append(entry)
     runs.sort(key=lambda run: (str(run.get("recorded_at", "")), str(run.get("run_id", ""))))
@@ -2459,6 +3139,78 @@ def render_benchmark_run_ledger_markdown(ledger: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def update_benchmark_run_ledger_entries(
+    *,
+    ledger_path: str | Path,
+    entries: list[dict[str, Any]],
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Atomically upsert a compact batch of terminal public ledger entries."""
+
+    path = Path(ledger_path)
+    markdown_path = path.with_suffix(".md")
+    accepted = [
+        dict(entry)
+        for entry in entries
+        if isinstance(entry, dict) and _entry_is_public_ledger_closeout(entry)
+    ]
+
+    def apply_entries(ledger: dict[str, Any]) -> dict[str, Any]:
+        for entry in accepted:
+            ledger = upsert_benchmark_run_ledger_entry(ledger, entry)
+        return ledger
+
+    if dry_run:
+        updated = apply_entries(load_benchmark_run_ledger(path))
+    elif accepted:
+        with _LedgerWriteLock(path):
+            updated = apply_entries(load_benchmark_run_ledger(path))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            tmp_markdown_path = markdown_path.with_suffix(markdown_path.suffix + ".tmp")
+            tmp_path.write_text(
+                json.dumps(updated, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            tmp_markdown_path.write_text(
+                render_benchmark_run_ledger_markdown(updated),
+                encoding="utf-8",
+            )
+            tmp_path.replace(path)
+            tmp_markdown_path.replace(markdown_path)
+    else:
+        updated = load_benchmark_run_ledger(path)
+
+    case_decisions = []
+    for entry in accepted:
+        case = (
+            updated.get("benchmarks", {})
+            .get(entry["benchmark_id"], {})
+            .get("cases", {})
+            .get(entry["case_id"], {})
+        )
+        case_decisions.append(
+            {
+                "benchmark_id": entry["benchmark_id"],
+                "case_id": entry["case_id"],
+                "decision": case.get("latest_decision", {}),
+            }
+        )
+    return {
+        "ok": True,
+        "dry_run": dry_run,
+        "updated": bool(accepted) and not dry_run,
+        "schema_version": BENCHMARK_RUN_LEDGER_SCHEMA_VERSION,
+        "ledger_path": str(path),
+        "markdown_path": str(markdown_path),
+        "input_entry_count": len(entries),
+        "accepted_entry_count": len(accepted),
+        "skipped_entry_count": len(entries) - len(accepted),
+        "upserted_count": len(accepted) if not dry_run else 0,
+        "case_decisions": case_decisions,
+    }
+
+
 def update_benchmark_run_ledger(
     *,
     ledger_path: str | Path,
@@ -2499,38 +3251,25 @@ def update_benchmark_run_ledger(
             "entry": entry,
             "case_decision": {},
         }
-    if dry_run:
-        updated = upsert_benchmark_run_ledger_entry(load_benchmark_run_ledger(path), entry)
-    else:
-        with _LedgerWriteLock(path):
-            updated = upsert_benchmark_run_ledger_entry(
-                load_benchmark_run_ledger(path),
-                entry,
-            )
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = path.with_suffix(path.suffix + ".tmp")
-            tmp_markdown_path = markdown_path.with_suffix(markdown_path.suffix + ".tmp")
-            tmp_path.write_text(
-                json.dumps(updated, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-            tmp_markdown_path.write_text(
-                render_benchmark_run_ledger_markdown(updated),
-                encoding="utf-8",
-            )
-            tmp_path.replace(path)
-            tmp_markdown_path.replace(markdown_path)
+    batch = update_benchmark_run_ledger_entries(
+        ledger_path=path,
+        entries=[entry],
+        dry_run=dry_run,
+    )
+    case_decision = (
+        batch["case_decisions"][0]["decision"]
+        if batch.get("case_decisions")
+        else {}
+    )
     return {
         "ok": True,
         "dry_run": dry_run,
-        "updated": not dry_run,
+        "updated": batch["updated"],
         "schema_version": BENCHMARK_RUN_LEDGER_SCHEMA_VERSION,
         "ledger_path": str(path),
         "markdown_path": str(markdown_path),
         "entry": entry,
-        "case_decision": updated["benchmarks"][entry["benchmark_id"]]["cases"][
-            entry["case_id"]
-        ]["latest_decision"],
+        "case_decision": case_decision,
     }
 
 
@@ -2726,7 +3465,11 @@ def archive_benchmark_run_ledger_runs(
     }
 
 
-def _ledger_entry_signature(entry: dict[str, Any]) -> tuple[str, ...]:
+def benchmark_run_ledger_entry_signature(
+    entry: dict[str, Any],
+) -> tuple[str, ...]:
+    """Return the stable logical identity used for ledger drift detection."""
+
     return (
         _compact_text(entry.get("benchmark_id"), limit=120),
         _compact_text(entry.get("case_id"), limit=160),
@@ -2753,6 +3496,37 @@ def _iter_ledger_runs(ledger: dict[str, Any]) -> list[dict[str, Any]]:
                 if isinstance(run, dict):
                     runs.append(run)
     return runs
+
+
+def build_benchmark_run_ledger_current_aggregate(
+    ledger: dict[str, Any],
+    *,
+    benchmark_id: str = "skillsbench@1.1",
+    canonical_case_ids: list[str] | None = None,
+    active_case_ids: list[str] | None = None,
+    source_ledger_count: int = 1,
+    exclude_noncanonical_sanity_sources: bool = True,
+    target_lane_id: str | None = None,
+    target_run_group_contains: list[str] | None = None,
+    target_current_run_group_contains: list[str] | None = None,
+    target_backfill_run_group_contains: list[str] | None = None,
+) -> dict[str, Any]:
+    from .benchmark_ledger_current import (
+        build_benchmark_run_ledger_current_aggregate as _build_current_aggregate,
+    )
+
+    return _build_current_aggregate(
+        ledger,
+        benchmark_id=benchmark_id,
+        canonical_case_ids=canonical_case_ids,
+        active_case_ids=active_case_ids,
+        source_ledger_count=source_ledger_count,
+        exclude_noncanonical_sanity_sources=exclude_noncanonical_sanity_sources,
+        target_lane_id=target_lane_id,
+        target_run_group_contains=target_run_group_contains,
+        target_current_run_group_contains=target_current_run_group_contains,
+        target_backfill_run_group_contains=target_backfill_run_group_contains,
+    )
 
 
 def merge_benchmark_run_ledgers(
@@ -2796,7 +3570,10 @@ def merge_benchmark_run_ledgers(
             for run in _iter_ledger_runs(updated)
             if _compact_text(run.get("run_id"), limit=80)
         }
-        before_signatures = {_ledger_entry_signature(run) for run in _iter_ledger_runs(updated)}
+        before_signatures = {
+            benchmark_run_ledger_entry_signature(run)
+            for run in _iter_ledger_runs(updated)
+        }
         source_ledger_count = 0
         missing_source_count = 0
         source_run_count = 0
@@ -2844,7 +3621,9 @@ def merge_benchmark_run_ledgers(
             for run in after_runs
             if _compact_text(run.get("run_id"), limit=80)
         }
-        after_signatures = {_ledger_entry_signature(run) for run in after_runs}
+        after_signatures = {
+            benchmark_run_ledger_entry_signature(run) for run in after_runs
+        }
         summary = {
             "schema_version": "benchmark_run_ledger_merge_v0",
             "ok": True,
@@ -2922,7 +3701,9 @@ def check_benchmark_run_ledger_drift(
         for run in ledger_runs
         if _compact_text(run.get("run_id"), limit=80)
     }
-    ledger_signatures = {_ledger_entry_signature(run) for run in ledger_runs}
+    ledger_signatures = {
+        benchmark_run_ledger_entry_signature(run) for run in ledger_runs
+    }
 
     checked_history_run_count = 0
     terminal_history_run_count = 0
@@ -2951,7 +3732,7 @@ def check_benchmark_run_ledger_drift(
             continue
         terminal_history_run_count += 1
         run_id = _compact_text(entry.get("run_id"), limit=80)
-        signature = _ledger_entry_signature(entry)
+        signature = benchmark_run_ledger_entry_signature(entry)
         if run_id in ledger_run_ids or signature in ledger_signatures:
             matched_count += 1
             continue

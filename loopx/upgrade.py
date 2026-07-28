@@ -9,13 +9,19 @@ from typing import Any
 
 from .agent_registry import (
     agent_profile_for_goal,
-    primary_agent_id_for_goal,
     registered_agent_ids_for_goal,
 )
 from .heartbeat_prompt import build_heartbeat_prompt
 from .history import load_registry
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from .registry import registry_goals, resolve_state_file
+from .control_plane.agents.legacy_migration import (
+    completed_peer_agent_runtime_migration,
+    legacy_agent_hierarchy_present,
+    peer_agent_runtime_migration_completed,
+    peer_agent_runtime_migration_id,
+)
+from .control_plane.todos.contract import normalize_required_capabilities
 
 
 DEFAULT_UPGRADE_MODES = ("thin",)
@@ -38,6 +44,9 @@ PROJECT_POLICY_MARKERS = (
     "Current controller policy:",
     "Primary stability objective:",
     "Current controller policy",
+)
+AVAILABLE_CAPABILITY_PATTERN = re.compile(
+    r"--available-capability(?:=|\s+)([A-Za-z][A-Za-z0-9_:-]{0,63})"
 )
 STAGE_DEFERRED_ATTENTION_STATUSES = {
     "stage_deferred_not_installed",
@@ -226,6 +235,12 @@ def infer_prompt_mode(prompt: str) -> str:
     return DEFAULT_UPGRADE_MODES[0]
 
 
+def infer_available_capabilities_from_prompt(prompt: str) -> list[str]:
+    return normalize_required_capabilities(
+        AVAILABLE_CAPABILITY_PATTERN.findall(prompt)
+    )
+
+
 def load_codex_app_automation_manifest(root: Path | None = None) -> dict[str, Any]:
     home = root or codex_home()
     automations_root = home / "automations"
@@ -264,6 +279,13 @@ def load_codex_app_automation_manifest(root: Path | None = None) -> dict[str, An
                 "char_count": len(prompt),
                 "line_count": len(prompt.splitlines()),
                 "prompt_policy_audit": prompt_policy_audit(prompt),
+                "available_capabilities": infer_available_capabilities_from_prompt(
+                    prompt
+                ),
+                "rrule": str(automation.get("rrule") or "").strip(),
+                "target_thread_id": str(
+                    automation.get("target_thread_id") or ""
+                ).strip(),
                 "status": status,
                 "installed": status.upper() != "DELETED",
                 "source": "codex_app_automation_toml",
@@ -280,6 +302,52 @@ def load_codex_app_automation_manifest(root: Path | None = None) -> dict[str, An
     }
 
 
+def resolve_codex_app_automation_rrule(
+    *,
+    goal_id: str,
+    agent_id: str | None = None,
+    thread_id: str | None = None,
+    root: Path | None = None,
+) -> dict[str, Any]:
+    """Resolve one active Codex App heartbeat RRULE without exposing its body."""
+
+    manifest = load_codex_app_automation_manifest(root)
+    if not manifest.get("available"):
+        return {"available": False, "reason": manifest.get("reason")}
+    safe_goal_id = str(goal_id or "").strip()
+    safe_agent_id = str(agent_id or "").strip()
+    safe_thread_id = str(thread_id or os.environ.get("CODEX_THREAD_ID") or "").strip()
+    candidates = [
+        entry
+        for entry in manifest.get("entries", [])
+        if isinstance(entry, dict)
+        and entry.get("installed") is True
+        and str(entry.get("goal_id") or "") == safe_goal_id
+        and (not safe_agent_id or str(entry.get("agent_id") or "") == safe_agent_id)
+        and (
+            not safe_thread_id
+            or str(entry.get("target_thread_id") or "") == safe_thread_id
+        )
+        and str(entry.get("rrule") or "").strip()
+    ]
+    if len(candidates) != 1:
+        return {
+            "available": False,
+            "reason": (
+                "Codex App heartbeat RRULE is ambiguous"
+                if candidates
+                else "no matching active Codex App heartbeat RRULE"
+            ),
+            "candidate_count": len(candidates),
+        }
+    entry = candidates[0]
+    return {
+        "available": True,
+        "rrule": entry["rrule"],
+        "source": "codex_app_automation_manifest",
+    }
+
+
 def installed_entry_digest(entry: dict[str, Any]) -> str | None:
     for key in ("prompt_sha256", "task_body_sha256", "sha256"):
         value = entry.get(key)
@@ -289,6 +357,20 @@ def installed_entry_digest(entry: dict[str, Any]) -> str | None:
     if isinstance(task_body, str):
         return prompt_digest(task_body)
     return None
+
+
+def installed_entry_available_capabilities(
+    entry: dict[str, Any] | None,
+) -> list[str]:
+    if not entry:
+        return []
+    explicit = normalize_required_capabilities(entry.get("available_capabilities"))
+    if explicit:
+        return explicit
+    task_body = entry.get("task_body")
+    if isinstance(task_body, str):
+        return infer_available_capabilities_from_prompt(task_body)
+    return []
 
 
 def entry_declares_not_installed(entry: dict[str, Any] | None) -> bool:
@@ -320,6 +402,69 @@ def index_installed_entries(entries: list[dict[str, Any]]) -> dict[tuple[str, st
 
 def prompt_target_key(mode: str, agent_id: str | None) -> str:
     return f"{mode}:{agent_id}" if agent_id else mode
+
+
+def peer_runtime_upgrade_migration(
+    goal: dict[str, Any],
+    *,
+    goal_id: str,
+    installed: dict[str, dict[str, Any]],
+    generated_prompts: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    if peer_agent_runtime_migration_completed(goal):
+        completed = completed_peer_agent_runtime_migration(goal) or {}
+        return {
+            "schema_version": "peer_runtime_automation_migration_v1",
+            "required": False,
+            "status": "completed",
+            "migration_id": completed.get("migration_id"),
+        }
+    if not legacy_agent_hierarchy_present(goal):
+        return {
+            "schema_version": "peer_runtime_automation_migration_v1",
+            "required": False,
+            "status": "not_required",
+        }
+    migration_id = peer_agent_runtime_migration_id(goal_id, goal)
+    host_updates = []
+    for target, prompt_status in installed.items():
+        if not (
+            prompt_status.get("installed") is True
+            and prompt_status.get("requires_update") is True
+        ):
+            continue
+        generated = generated_prompts.get(target) or {}
+        host_updates.append(
+            {
+                "prompt_target": target,
+                "agent_id": prompt_status.get("agent_id"),
+                "automation_id": prompt_status.get("automation_id"),
+                "prompt_command": generated.get("command"),
+                "idempotency_key": migration_id,
+            }
+        )
+    completion_command = (
+        "loopx configure-goal "
+        f"--goal-id {goal_id} "
+        f"--ack-automation-prompt-migration {migration_id} --execute"
+    )
+    return {
+        "schema_version": "peer_runtime_automation_migration_v1",
+        "required": True,
+        "status": "pending",
+        "migration_id": migration_id,
+        "delivery_semantics": "stable_idempotent_until_ack",
+        "host_update_required_once": bool(host_updates),
+        "host_updates": host_updates,
+        "completion_command": completion_command,
+        "ordered_steps": [
+            "update each discovered host automation whose prompt is stale, using the "
+            "stable migration_id as the idempotency key",
+            "run completion_command once; it atomically records completion and removes "
+            "legacy hierarchy fields",
+            "rerun quota should-run with the same registered agent id",
+        ],
+    }
 
 
 def build_loop_activation_summary(
@@ -542,7 +687,6 @@ def build_upgrade_plan(
             deferred.append(stage_deferred_goal_summary(goal, state_file))
             continue
         registered_agents = registered_agent_ids_for_goal(goal)
-        primary_agent = primary_agent_id_for_goal(goal)
         prompt_summaries: dict[str, dict[str, Any]] = {}
         installed: dict[str, dict[str, Any]] = {}
         prompt_targets = [
@@ -552,6 +696,12 @@ def build_upgrade_plan(
         ]
         for mode, agent_id in prompt_targets:
             key = prompt_target_key(mode, agent_id)
+            entry = installed_by_key.get((goal_id, mode, agent_id or ""))
+            legacy_unscoped = False
+            if entry is None and agent_id:
+                entry = installed_by_key.get((goal_id, mode, ""))
+                legacy_unscoped = entry is not None
+            available_capabilities = installed_entry_available_capabilities(entry)
             agent_profile = agent_profile_for_goal(goal, agent_id)
             prompt = build_heartbeat_prompt(
                 goal_id=goal_id,
@@ -565,17 +715,13 @@ def build_upgrade_plan(
                 agent_id=agent_id,
                 agent_profile=agent_profile,
                 registered_agents=registered_agents or None,
-                primary_agent=primary_agent,
+                available_capabilities=available_capabilities,
+                runtime_profile="codex_app_heartbeat",
             )
             summary = prompt_summary(prompt, mode)
             summary["agent_id"] = agent_id
             summary["prompt_target"] = key
             prompt_summaries[key] = summary
-            entry = installed_by_key.get((goal_id, mode, agent_id or ""))
-            legacy_unscoped = False
-            if entry is None and agent_id:
-                entry = installed_by_key.get((goal_id, mode, ""))
-                legacy_unscoped = entry is not None
             expected_digest = str(summary.get("sha256") or "")
             not_installed = entry_declares_not_installed(entry)
             actual_digest = None if not_installed else installed_entry_digest(entry) if entry else None
@@ -629,9 +775,16 @@ def build_upgrade_plan(
                 "legacy_unscoped_match": legacy_unscoped,
                 "prompt_sha256": actual_digest,
                 "expected_sha256": expected_digest,
+                "available_capabilities": available_capabilities,
                 "prompt_policy_audit": policy_audit,
             }
         loop_activation = build_loop_activation_summary(installed=installed)
+        runtime_migration = peer_runtime_upgrade_migration(
+            goal,
+            goal_id=goal_id,
+            installed=installed,
+            generated_prompts=prompt_summaries,
+        )
 
         managed.append(
             {
@@ -639,15 +792,17 @@ def build_upgrade_plan(
                 "adapter_kind": goal_adapter_kind(goal),
                 "adapter_status": goal_adapter_status(goal) or None,
                 "registered_agents": registered_agents,
-                "primary_agent": primary_agent,
+                "agent_model": "peer_v1",
                 "repo": str(repo),
                 "state_file": str(state_file) if state_file else None,
                 "state_file_exists": bool(state_file and state_file.exists()),
                 "generated_prompts": prompt_summaries,
                 "installed_prompts": installed,
                 "host_loop_activation": loop_activation,
+                "peer_runtime_automation_migration": runtime_migration,
                 "requires_update": any(item["requires_update"] for item in installed.values())
-                or loop_activation.get("status") in HOST_LOOP_UPDATE_STATUSES,
+                or loop_activation.get("status") in HOST_LOOP_UPDATE_STATUSES
+                or runtime_migration.get("required") is True,
             }
         )
 
@@ -699,15 +854,28 @@ def build_upgrade_plan(
         if isinstance(goal.get("host_loop_activation"), dict)
         and goal["host_loop_activation"].get("status") in HOST_LOOP_UPDATE_STATUSES
     )
+    peer_runtime_migration_count = sum(
+        1
+        for goal in managed
+        if isinstance(goal.get("peer_runtime_automation_migration"), dict)
+        and goal["peer_runtime_automation_migration"].get("required") is True
+    )
     ready = (
         bool(managed)
         and unknown == 0
         and stale == 0
         and policy_warning_count == 0
         and host_loop_missing == 0
+        and peer_runtime_migration_count == 0
     )
     if ready:
         recommended_action = "promotion propagation is complete"
+    elif peer_runtime_migration_count > 0:
+        recommended_action = (
+            "complete each peer runtime automation migration in the projected order; "
+            "stable migration ids make host updates idempotent and each completion ack "
+            "removes the prompt exactly once"
+        )
     elif host_loop_missing > 0:
         recommended_action = "activate missing host loops from generated scoped heartbeat prompts before claiming autonomous setup"
     elif policy_warning_count > 0:
@@ -735,6 +903,7 @@ def build_upgrade_plan(
         "installed_prompt_policy_warning_prompt_count": policy_warning_prompt_count,
         "host_loop_activated_goal_count": host_loop_activated,
         "host_loop_missing_goal_count": host_loop_missing,
+        "peer_runtime_automation_migration_count": peer_runtime_migration_count,
     }
     default_upgrade_propagation = build_default_upgrade_propagation(
         summary=summary,
@@ -782,6 +951,7 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
         f"- installed_prompt_policy_warning_prompt_count: `{summary.get('installed_prompt_policy_warning_prompt_count')}`",
         f"- host_loop_activated_goal_count: `{summary.get('host_loop_activated_goal_count')}`",
         f"- host_loop_missing_goal_count: `{summary.get('host_loop_missing_goal_count')}`",
+        f"- peer_runtime_automation_migration_count: `{summary.get('peer_runtime_automation_migration_count')}`",
         f"- recommended_action: `{payload.get('recommended_action')}`",
     ]
     manifest = payload.get("installed_manifest") if isinstance(payload.get("installed_manifest"), dict) else {}
@@ -823,6 +993,23 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
         lines.append(
             f"- managed `{target.get('goal_id')}` action=`{target.get('action')}` "
             f"requires_update=`{target.get('requires_update')}` reason=`{target.get('reason')}`"
+        )
+    for goal in payload.get("managed_heartbeats") or []:
+        if not isinstance(goal, dict):
+            continue
+        migration = goal.get("peer_runtime_automation_migration")
+        if not isinstance(migration, dict) or migration.get("required") is not True:
+            continue
+        lines.extend(
+            [
+                "",
+                f"## Peer Runtime Migration: {goal.get('goal_id')}",
+                "",
+                f"- migration_id: `{migration.get('migration_id')}`",
+                f"- delivery_semantics: `{migration.get('delivery_semantics')}`",
+                f"- host_update_required_once: `{migration.get('host_update_required_once')}`",
+                f"- completion_command: `{migration.get('completion_command')}`",
+            ]
         )
     deferred_targets = (
         propagation.get("stage_deferred_targets")

@@ -31,6 +31,56 @@ def run_json(*args: str, env: dict[str, str] | None = None) -> dict[str, object]
     return payload
 
 
+def assert_packet_summary_refs(
+    payload: dict[str, object],
+    *,
+    packet_kind: str,
+    compact_projection_default: bool = False,
+) -> dict[str, object]:
+    summary = payload["packet_summary"]
+    assert isinstance(summary, dict)
+    assert summary["schema_version"] == "loopx_start_goal_packet_summary_v0"
+    assert summary["packet_kind"] == packet_kind
+    compatibility = summary["compatibility"]
+    assert isinstance(compatibility, dict)
+    assert compatibility == {
+        "legacy_fields_retained": not compact_projection_default,
+        "compact_projection_default": compact_projection_default,
+        "removal_gate": "explicit_host_shadow_parity",
+    }
+    detail_refs = summary["detail_refs"]
+    assert isinstance(detail_refs, dict)
+    for detail_ref in detail_refs.values():
+        assert isinstance(detail_ref, dict)
+        assert detail_ref["schema_version"] == "loopx_packet_json_pointer_ref_v0"
+        pointer = str(detail_ref["json_pointer"])
+        assert pointer.startswith("#/"), pointer
+        current: object = payload
+        for escaped_part in pointer[2:].split("/"):
+            part = escaped_part.replace("~1", "/").replace("~0", "~")
+            if isinstance(current, dict):
+                current = current[part]
+            elif isinstance(current, list):
+                current = current[int(part)]
+            else:
+                raise AssertionError((pointer, current))
+    measurement = summary["duplication_measurement"]
+    assert isinstance(measurement, dict)
+    assert measurement["schema_version"] == "loopx_packet_duplication_measurement_v0"
+    assert (
+        measurement["measurement_scope"]
+        == "compatibility_projection_without_packet_summary"
+    )
+    assert int(measurement["serialized_bytes"]) > 0
+    current_bytes = len(
+        json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+    )
+    assert current_bytes > int(measurement["serialized_bytes"])
+    return summary
+
+
 def test_missing_project_stops_before_mutation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project = Path(tmp) / "fresh-project"
@@ -62,6 +112,10 @@ def test_missing_project_stops_before_mutation() -> None:
         assert "LoopX command surface is available. Useful commands:" in onboarding["suggested_user_note"]
         assert "loopx slash-commands" in onboarding["suggested_user_note"]
         assert payload["read_only"] is True
+        summary = assert_packet_summary_refs(
+            payload, packet_kind="bootstrap_command_pack"
+        )
+        assert summary["next_step_kind"] == "confirm_before_bootstrap_mutation"
         assert connection["connection_state"] == "not_connected"
         assert connection["mutation_confirmation_required"] is True
         assert not (project / ".loopx").exists()
@@ -99,6 +153,19 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         )
 
         assert payload["goal_text"] == "Ship the lightweight issue triage workflow"
+        summary = assert_packet_summary_refs(
+            payload, packet_kind="bootstrap_command_pack"
+        )
+        assert summary["objective"] == "Ship the lightweight issue triage workflow"
+        measurement = summary["duplication_measurement"]
+        assert isinstance(measurement, dict)
+        objective_measurement = measurement["objective_content"]
+        assert isinstance(objective_measurement, dict)
+        assert int(objective_measurement["substring_occurrences"]) > 1
+        assert int(objective_measurement["duplicate_occurrences"]) > 0
+        command_measurement = measurement["command_content"]
+        assert isinstance(command_measurement, dict)
+        assert int(command_measurement["duplicate_occurrences"]) > 0
         next_step = payload["recommended_next_step"]
         assert isinstance(next_step, dict)
         assert next_step["kind"] == "goal_plan_write_and_activate"
@@ -136,22 +203,232 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         assert "Preserve that exact order" in plan_prompt
         assert "GitHub issue/PR fix" in plan_prompt
         assert "loopx issue-fix workflow-plan" in plan_prompt
-        assert "external comments, PR creation, merge, publish" in plan_prompt
+        assert "loopx issue-fix feasibility" in plan_prompt
+        assert "loopx issue-fix pr-lifecycle" in plan_prompt
+        assert "loopx issue-fix reviewer-request" in plan_prompt
+        assert "only on confirmed permission denial" in plan_prompt
+        assert "request or fallback comment is visible" in plan_prompt
+        assert "Never create one monitor per PR" in plan_prompt
+        assert "one PR per message" in plan_prompt
+        assert "arbitrary external comments, PR creation, merge" in plan_prompt
         assert "issue_fix_workflow_plan_template" in commands
         issue_fix_template = str(commands["issue_fix_workflow_plan_template"])
         assert "issue-fix workflow-plan" in issue_fix_template
         assert "--url <github-issue-or-pr-url>" in issue_fix_template
         assert "--repo-path <approved-repo>" in issue_fix_template
+        assert "--repository-context-json <compact-context.json>" in issue_fix_template
         assert "--validation-label '<validation command>'" in issue_fix_template
+        assert "issue_fix_feasibility_template" in commands
+        feasibility_template = str(commands["issue_fix_feasibility_template"])
+        assert "issue-fix feasibility" in feasibility_template
+        assert "--reproduction-status" in feasibility_template
+        assert "--scope-class" in feasibility_template
+        assert "--repository-context-json <compact-context.json>" in feasibility_template
+        assert "--goal-id" in feasibility_template
+        assert "issue_fix_pr_lifecycle_template" in commands
+        pr_lifecycle_template = str(commands["issue_fix_pr_lifecycle_template"])
+        assert "issue-fix pr-lifecycle" in pr_lifecycle_template
+        assert "--url <github-pr-url>" in pr_lifecycle_template
+        assert "--goal-id" in pr_lifecycle_template
+        assert str(payload["goal_id"]) in pr_lifecycle_template
+        assert "issue_fix_reviewer_request_template" in commands
+        reviewer_request_template = str(commands["issue_fix_reviewer_request_template"])
+        assert "issue-fix reviewer-request" in reviewer_request_template
+        assert "--url <github-pr-url>" in reviewer_request_template
+        assert "--repo-path <approved-repo>" in reviewer_request_template
+        assert "--execute" in reviewer_request_template
         assert "--agent-id codex-test-agent" in str(commands["goal_start_quota_should_run"])
+        refresh_command = str(commands["goal_start_refresh_state"])
+        assert "--agent-id codex-test-agent" in refresh_command
+        assert "--progress-scope agent_lane" in refresh_command
+        assert "--health-check" not in refresh_command
         assert "Same-priority items use that write order as the tie-breaker" in str(payload["message"])
         assert "preview the issue-fix route before todo writeback" in str(payload["message"])
+        assert "PR lifecycle monitor" in str(payload["message"])
+        assert "default top requestable non-author reviewer" in str(payload["message"])
         domain_routes = goal_start["domain_route_hints"]
         assert domain_routes["issue_fix_workflow"]["when"].startswith("goal text contains")
         assert "workflow-plan" in domain_routes["issue_fix_workflow"]["preview_command"]
+        assert "feasibility" in domain_routes["issue_fix_workflow"]["decision_command"]
+        assert "reviewer-request" in domain_routes["issue_fix_workflow"][
+            "post_pr_reviewer_request_command"
+        ]
+        assert "pr-lifecycle" in domain_routes["issue_fix_workflow"]["post_pr_monitor_command"]
         assert "explicit gates" in domain_routes["issue_fix_workflow"]["writeback"]
+        assert "permission-only reviewer comment fallback" in domain_routes[
+            "issue_fix_workflow"
+        ]["writeback"]
+        assert "domain-state" in domain_routes["issue_fix_workflow"]["writeback"]
         assert not (project / ".loopx").exists()
         assert not (project / ".codex").exists()
+
+
+def test_start_goal_guided_previews_transaction_without_mutation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project = Path(tmp) / "guided-project"
+        project.mkdir()
+        start_args = (
+            "start-goal",
+            "--guided",
+            "--project",
+            str(project),
+            "--goal-id",
+            "guided-goal",
+            "--agent-id",
+            "codex-test-agent",
+            "--goal-text",
+            "Connect this repo and start an auto research lane",
+        )
+        selection = run_json(*start_args)
+        selection_summary = assert_packet_summary_refs(
+            selection,
+            packet_kind="guided_start_host_surface_selection",
+        )
+        assert selection_summary["next_step_kind"] == "select_host_surface"
+        assert selection["guided_transaction"]["blocked_by"] == "host_surface_selection"
+        assert selection["safety_contract"]["writes_registry"] is False
+
+        payload = run_json(*start_args, "--host-surface", "codex-app")
+
+        assert payload["schema_version"] == "loopx_start_goal_guided_v0"
+        assert payload["read_only"] is True
+        assert payload["guided"] is True
+        assert payload["goal_text"] == "Connect this repo and start an auto research lane"
+        assert payload["goal_id"] == "guided-goal"
+        summary = assert_packet_summary_refs(
+            payload,
+            packet_kind="guided_start_goal",
+            compact_projection_default=True,
+        )
+        assert summary["objective"] == "Connect this repo and start an auto research lane"
+        assert summary["next_step_kind"] == "goal_plan_write_and_activate"
+        detail_refs = summary["detail_refs"]
+        assert isinstance(detail_refs, dict)
+        assert (
+            detail_refs["command_pack_summary"]["json_pointer"]
+            == "#/command_pack/packet_summary"
+        )
+        measurement = summary["duplication_measurement"]
+        assert isinstance(measurement, dict)
+        objective_measurement = measurement["objective_content"]
+        assert isinstance(objective_measurement, dict)
+        assert int(objective_measurement["substring_occurrences"]) > 1
+        command_measurement = measurement["command_content"]
+        assert isinstance(command_measurement, dict)
+        assert int(command_measurement["duplicate_occurrences"]) > 0
+
+        safety = payload["safety_contract"]
+        assert isinstance(safety, dict)
+        assert safety["writes_registry"] is False
+        assert safety["writes_state_file"] is False
+        assert safety["creates_heartbeat"] is False
+        assert safety["spends_quota"] is False
+        assert safety["force_bootstrap_allowed"] is False
+
+        transaction = payload["guided_transaction"]
+        assert isinstance(transaction, dict)
+        assert transaction["mode"] == "dry_run_preview"
+        step_ids = [step["id"] for step in transaction["ordered_steps"]]
+        assert step_ids == [
+            "inspect_connection",
+            "connect_if_needed",
+            "plan_ranked_todos",
+            "write_ordered_todos",
+            "refresh_state",
+            "activate_host_loop",
+            "quota_guard",
+            "scheduler_ack_when_needed",
+        ]
+        assert transaction["idempotency_policy"]["safe_to_rerun_preview"] is True
+        assert "do not duplicate" in transaction["idempotency_policy"]["do_not_duplicate_existing_todos"].lower()
+        preserve = transaction["preserve_todos_policy"]
+        assert preserve["force_bootstrap_default"] == "forbidden_in_guided_flow"
+        assert "backup-state" in preserve["before_destructive_reconnect"]
+        assert "configure-goal incremental" in preserve["preferred_scope_change"]
+
+        command_pack = payload["command_pack"]
+        assert isinstance(command_pack, dict)
+        assert command_pack["schema_version"] == "loopx_bootstrap_command_pack_v0"
+        assert command_pack["projection_schema_version"] == "loopx_guided_command_pack_projection_v0"
+        assert command_pack["projection_mode"] == "guided_start_compatibility"
+        assert "--include-command-pack-detail" in str(command_pack["detail_command"])
+        assert command_pack["goal_start_contract"]["planner"]["required_before_todo_write"] is True
+        assert not (project / ".loopx").exists()
+        assert not (project / ".codex").exists()
+
+
+def test_start_goal_guided_requires_explicit_goal_for_multi_goal_project() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project = Path(tmp) / "multi-goal-project"
+        project.mkdir()
+        goals = []
+        for goal_id, status, agent_id in (
+            ("completed-goal", "complete", "codex-completed"),
+            ("active-goal", "active", "codex-active"),
+        ):
+            state_file = project / ".codex" / "goals" / goal_id / "ACTIVE_GOAL_STATE.md"
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            state_file.write_text("# Active Goal State\n", encoding="utf-8")
+            goals.append(
+                {
+                    "id": goal_id,
+                    "status": status,
+                    "repo": str(project),
+                    "state_file": f".codex/goals/{goal_id}/ACTIVE_GOAL_STATE.md",
+                    "coordination": {
+                        "agent_model": "peer_v1",
+                        "registered_agents": [agent_id],
+                    },
+                }
+            )
+        registry = project / ".loopx" / "registry.json"
+        registry.parent.mkdir(parents=True)
+        registry.write_text(
+            json.dumps({"schema_version": "0.1", "goals": goals}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        payload = run_json(
+            "start-goal",
+            "--guided",
+            "--project",
+            str(project),
+            "--host-surface",
+            "codex-app",
+            "--goal-text",
+            "Add a new meta agent without reusing an old lane",
+        )
+
+        assert payload["goal_id"] is None, payload
+        assert payload["agent_id"] is None, payload
+        assert payload["project_connection"]["connection_state"] == "goal_selection_required", payload
+        assert payload["recommended_next_step"]["kind"] == "select_goal", payload
+        transaction = payload["guided_transaction"]
+        assert transaction["blocked_by"] == "goal_selection", transaction
+        assert [step["id"] for step in transaction["ordered_steps"]] == [
+            "inspect_connection",
+            "select_goal",
+        ], transaction
+        gate = payload["goal_selection_gate"]
+        assert gate["schema_version"] == "loopx_goal_selection_gate_v0", gate
+        assert [choice["goal_id"] for choice in gate["choices"]] == [
+            "completed-goal",
+            "active-goal",
+        ], gate
+        for choice in gate["choices"]:
+            assert f"--goal-id {choice['goal_id']}" in choice["rerun_command"], choice
+            assert "--goal-text 'Add a new meta agent without reusing an old lane'" in choice[
+                "rerun_command"
+            ], choice
+        commands = payload["command_pack"]["commands"]
+        assert set(commands) == {"doctor", "status", "goal_selection_choices"}, commands
+        assert payload["safety_contract"]["writes_registry"] is False, payload
+        assert payload["safety_contract"]["creates_heartbeat"] is False, payload
+        assert_packet_summary_refs(
+            payload,
+            packet_kind="guided_start_goal",
+            compact_projection_default=True,
+        )
 
 
 def test_connected_project_reuses_existing_state() -> None:
@@ -345,10 +622,11 @@ def test_skill_slash_fallback_contract() -> None:
     assert "`/loopx`" in skill_text
     assert "`/loopx <goal text>`" in skill_text
     assert "loopx bootstrap-command-pack --project ." in skill_text
+    assert "loopx start-goal --guided --project ." in skill_text
     assert "canonical_project_alias" in skill_text
     assert "worktree-local shadow goal" in skill_text
     assert '--goal-text "<GOAL_TEXT>"' in skill_text
-    assert "read/status-first" in skill_text
+    assert "bare `/loopx` read-only command" in skill_text
     assert "explicit goal-start intent" in normalized
     assert "planner order plus `todo add` write order" in normalized
     assert "do not silently downgrade `/loopx <goal text>`" in normalized
@@ -375,6 +653,8 @@ def test_skill_slash_fallback_contract() -> None:
 def main() -> int:
     test_missing_project_stops_before_mutation()
     test_goal_text_invocation_plans_ranked_todos_before_activation()
+    test_start_goal_guided_previews_transaction_without_mutation()
+    test_start_goal_guided_requires_explicit_goal_for_multi_goal_project()
     test_connected_project_reuses_existing_state()
     test_linked_git_worktree_reuses_canonical_source_registry()
     test_skill_slash_fallback_contract()

@@ -17,29 +17,27 @@ def main() -> int:
         role_id="planner",
         role_profile_ref="coordination.agent_profiles.planner",
         role_profile_command="printf '[LoopX role profile]\\n'",
-        quota_command="printf '{}'",
-        frontier_command="printf '{}'",
         bootstrap_command="printf 'bootstrap'",
+        cli_bin="loopx",
         codex_bin="codex",
         reasoning_effort="high",
         model_name="gpt-5.5",
     )
-    assert "--model gpt-5.5 -c model_reasoning_effort=high" in command, command
-    assert "model_name=%s" in command and "gpt-5.5" in command, command
-    assert "reasoning_effort=high" in command, command
+    assert "LOOPX_CODEX_MODEL=gpt-5.5" in command, command
+    assert 'args.extend(["--model", model])' in command, command
+    assert "LOOPX_CODEX_REASONING_EFFORT=high" in command, command
 
     legacy_command = build_visible_lane_command(
         role_id="worker",
         role_profile_ref="coordination.agent_profiles.worker",
         role_profile_command="printf '[LoopX role profile]\\n'",
-        quota_command="printf '{}'",
-        frontier_command="printf '{}'",
         bootstrap_command="printf 'bootstrap'",
+        cli_bin="loopx",
         codex_bin="codex",
         reasoning_effort="medium",
     )
-    assert "--model" not in legacy_command, legacy_command
-    assert "-c model_reasoning_effort=medium" in legacy_command, legacy_command
+    assert "LOOPX_CODEX_MODEL=''" in legacy_command, legacy_command
+    assert "LOOPX_CODEX_REASONING_EFFORT=medium" in legacy_command, legacy_command
     return 0
 
 

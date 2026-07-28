@@ -1,0 +1,4 @@
+interface:
+  display_name: "LoopX Change Quality"
+  short_description: "Qualify an exact final diff and receipt"
+  default_prompt: "Use the goal policy and LoopX exact-scope packet to review the final diff, apply at most one allowed safe fix, record the receipt, and enforce it at premerge."

@@ -22,7 +22,11 @@ def add_tree(tar: tarfile.TarFile, root: Path, name: str) -> None:
         for child in sorted(path.rglob("*")):
             if ".git" in child.parts or "__pycache__" in child.parts:
                 continue
-            tar.add(child, arcname=str(Path("loopx-main") / child.relative_to(root)))
+            tar.add(
+                child,
+                arcname=str(Path("loopx-main") / child.relative_to(root)),
+                recursive=False,
+            )
     else:
         tar.add(path, arcname=str(Path("loopx-main") / name))
 
@@ -36,6 +40,17 @@ def run(command: list[str], *, env: dict[str, str], cwd: Path) -> subprocess.Com
         text=True,
         capture_output=True,
     )
+
+
+def path_without_loopx(path_text: str) -> str:
+    entries: list[str] = []
+    for entry in path_text.split(os.pathsep):
+        if not entry:
+            continue
+        if (Path(entry).expanduser() / "loopx").exists():
+            continue
+        entries.append(entry)
+    return os.pathsep.join(entries)
 
 
 def main() -> None:
@@ -77,6 +92,7 @@ def main() -> None:
                 add_tree(tar, REPO_ROOT, name)
 
         env = os.environ.copy()
+        host_path_without_loopx = path_without_loopx(env.get("PATH", ""))
         env.update(
             {
                 "HOME": str(home),
@@ -87,7 +103,7 @@ def main() -> None:
                 "LOOPX_ARCHIVE_URL": f"file://{archive}",
                 "LOOPX_INSTALL_CANARY": "0",
                 "CODEX_CALLED_MARKER": str(codex_called_marker),
-                "PATH": f"{fake_bin}:{env.get('PATH', '')}",
+                "PATH": f"{fake_bin}:{host_path_without_loopx}",
             }
         )
         run(["bash", str(install_script)], env=env, cwd=tmp)

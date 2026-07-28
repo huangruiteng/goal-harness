@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Callable
 
-from ..capabilities.lark.kanban import (
+from ..extensions.lark import LARK_EXTENSION_ID, LARK_PROJECTION_SINK_PERMISSION
+from ..extensions.lark.presentation.kanban import (
     DEFAULT_AGENT_ID,
     DEFAULT_CLI_BIN,
     DEFAULT_STATUS_QUEUE_VIEW,
     DEFAULT_TABLE_NAME,
     LarkKanbanConfig,
     build_create_board_plan,
+    compact_lark_kanban_sync_receipt,
     create_lark_kanban_board,
     default_lark_kanban_config_path,
     lark_kanban_doctor,
@@ -31,6 +34,15 @@ from ..capabilities.lark.kanban import (
     sync_loopx_todos_to_lark_kanban,
     use_lark_kanban_board,
 )
+from ..extensions.lark.presentation.explore_results import (
+    sync_issue_fix_explore_on_material_change,
+)
+from ..extensions.runtime import (
+    default_extension_state_file,
+    resolve_extension_activation,
+)
+from ..history import load_registry
+from ..paths import resolve_runtime_root
 
 
 PrintPayload = Callable[
@@ -61,24 +73,40 @@ def register_lark_kanban_commands(
     use = sub.add_parser("use", help="Store an existing shared Lark Base board for this project.")
     add_subcommand_format(use)
     _add_local_config_args(use)
-    use.add_argument("--base-url", help="Shared Lark Base URL. table/view query params are reused when present.")
+    use.add_argument(
+        "--base-url",
+        help="Shared Lark Base URL. table/view query params are reused when present.",
+    )
     use.add_argument("--base-token", help="Base token when --base-url is not used.")
     use.add_argument("--table-id", help="Table id when --base-url does not include table=.")
     use.add_argument("--view-id")
     use.add_argument("--cli-bin", default=DEFAULT_CLI_BIN)
     use.add_argument("--as", dest="identity", default="user", choices=["bot", "user", "auto"])
 
-    setup = sub.add_parser("setup", help="Create or reuse the project Lark Kanban board. Dry-run unless --execute.")
+    setup = sub.add_parser(
+        "setup",
+        help="Create or reuse the project Lark Kanban board. Dry-run unless --execute.",
+    )
     add_subcommand_format(setup)
     _add_local_config_args(setup)
     setup.add_argument("--base-name", default="LoopX Kanban POC")
     setup.add_argument("--table-name", default=DEFAULT_TABLE_NAME)
     setup.add_argument("--base-url", help="Reuse an existing shared Base URL.")
-    setup.add_argument("--base-token", help="Reuse an existing Base token instead of creating a new Base.")
-    setup.add_argument("--table-id", help="Reuse an existing table id instead of creating/configuring a table.")
+    setup.add_argument(
+        "--base-token",
+        help="Reuse an existing Base token instead of creating a new Base.",
+    )
+    setup.add_argument(
+        "--table-id",
+        help="Reuse an existing table id instead of creating/configuring a table.",
+    )
     setup.add_argument("--cli-bin", default=DEFAULT_CLI_BIN)
     setup.add_argument("--as", dest="identity", default="user", choices=["bot", "user", "auto"])
-    setup.add_argument("--execute", action="store_true", help="Actually run lark-cli write commands and save config.")
+    setup.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually run lark-cli write commands and save config.",
+    )
 
     doctor = sub.add_parser("doctor", help="Diagnose lark-cli, auth, local config, and board reachability.")
     add_subcommand_format(doctor)
@@ -86,7 +114,11 @@ def register_lark_kanban_commands(
     doctor.add_argument("--cli-bin", default=DEFAULT_CLI_BIN)
     doctor.add_argument("--as", dest="identity", default="user", choices=["bot", "user", "auto"])
     doctor.add_argument("--no-board-check", action="store_true", help="Skip remote Base read checks.")
-    doctor.add_argument("--require-board", action="store_true", help="Fail if no local board config exists.")
+    doctor.add_argument(
+        "--require-board",
+        action="store_true",
+        help="Fail if no local board config exists.",
+    )
 
     plan = sub.add_parser("plan-create", help="Print lark-cli commands for creating the board.")
     add_subcommand_format(plan)
@@ -120,7 +152,10 @@ def register_lark_kanban_commands(
 
     sync = sub.add_parser(
         "sync-loopx-todos",
-        help="Sync a goal's active LoopX todos into the configured board. Dry-run unless --execute.",
+        help=(
+            "Sync a goal's active LoopX todos and derived issue-fix outcomes into "
+            "the configured board. Dry-run unless --execute."
+        ),
     )
     add_subcommand_format(sync)
     _add_local_config_args(sync)
@@ -130,8 +165,28 @@ def register_lark_kanban_commands(
     sync.add_argument("--project")
     sync.add_argument("--state-file")
     sync.add_argument("--include-done", action="store_true")
-    sync.add_argument("--limit", type=int, default=50)
-    sync.add_argument("--execute", action="store_true", help="Actually upsert records and remember record ids.")
+    sync.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help=(
+            "Maximum active todo rows to sync. Derived issue-fix outcomes always "
+            "use the complete source projection."
+        ),
+    )
+    sync.add_argument(
+        "--include-command-details",
+        action="store_true",
+        help=(
+            "Include full generated commands, provider stdout/stderr, parsed JSON, "
+            "and record values. The default returns a compact operator receipt."
+        ),
+    )
+    sync.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually upsert records and remember record ids.",
+    )
 
     projection = sub.add_parser(
         "sync-projection",
@@ -140,9 +195,19 @@ def register_lark_kanban_commands(
     add_subcommand_format(projection)
     _add_local_config_args(projection)
     _add_lark_target_args(projection)
-    projection.add_argument("--projection-file", required=True)
-    projection.add_argument("--goal-id", help="Only sync this goal id; defaults from the projection payload.")
-    projection.add_argument("--agent-id", help="Only sync rows claimed by, blocking, or projected for this agent id.")
+    projection.add_argument(
+        "--projection-file",
+        required=True,
+        help="Projection JSON file, inline object, or '-' for stdin.",
+    )
+    projection.add_argument(
+        "--goal-id",
+        help="Only sync this goal id; defaults from the projection payload.",
+    )
+    projection.add_argument(
+        "--agent-id",
+        help="Only sync rows claimed by, blocking, or projected for this agent id.",
+    )
     projection.add_argument("--source-id", help="Stable source namespace used in synthetic row ids.")
     projection.add_argument(
         "--sink-visibility",
@@ -152,7 +217,25 @@ def register_lark_kanban_commands(
     )
     projection.add_argument("--include-done", action="store_true")
     projection.add_argument("--limit", type=int, default=50)
-    projection.add_argument("--execute", action="store_true", help="Actually upsert records and remember record ids.")
+    projection.add_argument(
+        "--reconcile-source",
+        action="store_true",
+        help=(
+            "Preview or execute orphan retirement only inside the projection's "
+            "stable source namespace. Requires --source-snapshot-complete and "
+            "--include-done; agent-filtered or row-limited inputs are rejected."
+        ),
+    )
+    projection.add_argument(
+        "--source-snapshot-complete",
+        action="store_true",
+        help="Attest that the projection contains the complete source namespace.",
+    )
+    projection.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually upsert records and remember record ids.",
+    )
 
     heartbeat = sub.add_parser(
         "heartbeat",
@@ -200,14 +283,23 @@ def register_lark_kanban_commands(
 
 
 def _add_local_config_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--config-path", help="Local board config path. Defaults beside the LoopX registry.")
+    parser.add_argument(
+        "--config-path",
+        help="Local board config path. Defaults beside the LoopX registry.",
+    )
 
 
 def _add_create_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base-name", default="LoopX Lark Kanban Control Plane POC")
     parser.add_argument("--table-name", default=DEFAULT_TABLE_NAME)
-    parser.add_argument("--base-token", help="Use an existing Base token instead of creating a new Base.")
-    parser.add_argument("--user-open-id", help="Grant this user full_access to a newly created/existing Base.")
+    parser.add_argument(
+        "--base-token",
+        help="Use an existing Base token instead of creating a new Base.",
+    )
+    parser.add_argument(
+        "--user-open-id",
+        help="Grant this user full_access to a newly created/existing Base.",
+    )
     parser.add_argument("--cli-bin", default=DEFAULT_CLI_BIN)
     parser.add_argument("--as", dest="identity", default="user", choices=["bot", "user", "auto"])
 
@@ -242,6 +334,7 @@ def handle_lark_kanban_command(
     args: argparse.Namespace,
     *,
     registry_path: Path,
+    runtime_root_arg: str | None,
     print_payload: PrintPayload,
     output_format: OutputFormat,
 ) -> int | None:
@@ -254,6 +347,16 @@ def handle_lark_kanban_command(
         else default_lark_kanban_config_path(registry_path)
     )
     try:
+        activation_runtime_root = (
+            Path(runtime_root_arg).expanduser()
+            if runtime_root_arg is not None
+            else resolve_runtime_root(load_registry(registry_path), None)
+        )
+        activation = resolve_extension_activation(
+            LARK_EXTENSION_ID,
+            state_file=default_extension_state_file(activation_runtime_root),
+            required_permissions=(LARK_PROJECTION_SINK_PERMISSION,),
+        )
         if args.lark_kanban_command == "schema":
             payload = lark_kanban_schema_payload(table_name=args.table_name)
         elif args.lark_kanban_command == "config":
@@ -358,8 +461,9 @@ def handle_lark_kanban_command(
             payload["execute"] = bool(args.execute)
             payload["operator_card_fields"] = lark_kanban_operator_card_fields()
         elif args.lark_kanban_command == "sync-loopx-todos":
+            target_config = _target_config(args, config_path=config_path)
             payload = sync_loopx_todos_to_lark_kanban(
-                _target_config(args, config_path=config_path),
+                target_config,
                 registry_path=registry_path,
                 goal_id=args.goal_id,
                 agent_id=args.agent_id,
@@ -370,6 +474,97 @@ def handle_lark_kanban_command(
                 limit=args.limit,
                 execute=bool(args.execute),
             )
+            try:
+                if not payload.get("ok"):
+                    raise RuntimeError("primary Lark Kanban todo sync did not complete")
+                explore_sync = sync_issue_fix_explore_on_material_change(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    project=Path(args.project).expanduser() if args.project else None,
+                    state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                    execute=bool(args.execute),
+                )
+                projection_result = (
+                    explore_sync.get("projection") if isinstance(explore_sync.get("projection"), dict) else {}
+                )
+                lark_sync = explore_sync.get("lark_sync") if isinstance(explore_sync.get("lark_sync"), dict) else {}
+                visual_sync = (
+                    explore_sync.get("visual_sync") if isinstance(explore_sync.get("visual_sync"), dict) else {}
+                )
+                payload["issue_fix_explore_projection"] = {
+                    "ok": projection_result.get("ok"),
+                    "applicable": projection_result.get("applicable"),
+                    "material_change": projection_result.get("material_change"),
+                    "candidate_event_count": projection_result.get("candidate_event_count"),
+                    "material_event_count": projection_result.get("material_event_count"),
+                    "appended_event_count": projection_result.get("appended_event_count"),
+                    "semantic_digest": projection_result.get("semantic_digest"),
+                    "counts": projection_result.get("counts"),
+                    "source_runtime_route": projection_result.get(
+                        "source_runtime_route"
+                    ),
+                }
+                explore_status = str(explore_sync.get("status") or "")
+                payload["issue_fix_explore_lark_sync"] = {
+                    "ok": explore_sync.get("ok"),
+                    "status": explore_sync.get("status"),
+                    "needs_sync": explore_sync.get("needs_sync"),
+                    "needs_row_sync": explore_sync.get("needs_row_sync"),
+                    "needs_visual_sync": explore_sync.get("needs_visual_sync"),
+                    "semantic_digest": explore_sync.get("semantic_digest"),
+                    "canonical_rows_status": (
+                        "source_projection_regression_blocked"
+                        if explore_status == "source_projection_regression_blocked"
+                        else "synced"
+                        if lark_sync.get("ok")
+                        else "unchanged"
+                        if not explore_sync.get("needs_row_sync")
+                        else "sync_failed"
+                    ),
+                    "written_rows": lark_sync.get("written_rows"),
+                    "skipped_rows": lark_sync.get("skipped_rows"),
+                    "duplicate_remote_rows": lark_sync.get("duplicate_remote_rows"),
+                    "visual_status": (
+                        "source_projection_regression_blocked"
+                        if explore_status == "source_projection_regression_blocked"
+                        else visual_sync.get("status")
+                        or (
+                            "unchanged"
+                            if not explore_sync.get("needs_visual_sync")
+                            else "publish_failed"
+                        )
+                    ),
+                    "visual_published": visual_sync.get("published"),
+                    "visual_graph_counts": visual_sync.get("graph_counts"),
+                    "source_runtime_route": explore_sync.get(
+                        "source_runtime_route"
+                    ),
+                    "source_projection_guard": explore_sync.get(
+                        "source_projection_guard"
+                    ),
+                    "external_write_performed": explore_sync.get(
+                        "external_write_performed"
+                    ),
+                    "required_action": explore_sync.get("required_action"),
+                    "error": (
+                        explore_sync.get("error")
+                        or lark_sync.get("error")
+                        or visual_sync.get("error")
+                    ),
+                }
+                payload["ok"] = bool(payload.get("ok")) and bool(explore_sync.get("ok"))
+            except Exception as exc:
+                payload["ok"] = False
+                payload["issue_fix_explore_projection"] = {
+                    "ok": False,
+                    "status": "skipped" if payload.get("error") else "failed",
+                    "error": str(exc),
+                }
+            payload = compact_lark_kanban_sync_receipt(
+                payload,
+                include_command_details=bool(args.include_command_details),
+            )
         elif args.lark_kanban_command == "sync-projection":
             payload = sync_loopx_projection_to_lark_kanban(
                 _target_config(args, config_path=config_path),
@@ -378,6 +573,8 @@ def handle_lark_kanban_command(
                 agent_id=args.agent_id,
                 source_id=args.source_id,
                 sink_visibility=args.sink_visibility,
+                reconcile_source=bool(args.reconcile_source),
+                source_snapshot_complete=bool(args.source_snapshot_complete),
                 config_path=config_path,
                 include_done=bool(args.include_done),
                 limit=args.limit,
@@ -398,6 +595,8 @@ def handle_lark_kanban_command(
             )
         else:
             raise ValueError(f"unknown lark-kanban command: {args.lark_kanban_command}")
+        if payload.get("ok"):
+            payload["extension_activation"] = activation
     except Exception as exc:
         payload = {
             "ok": False,
@@ -409,7 +608,15 @@ def handle_lark_kanban_command(
 
 
 def _load_fixture(path: str) -> dict[str, object]:
-    raw = Path(path).expanduser().read_text(encoding="utf-8")
+    stripped = path.lstrip()
+    if path == "-":
+        raw = sys.stdin.read()
+    elif stripped.startswith("{"):
+        raw = path
+    else:
+        raw = Path(path).expanduser().read_text(encoding="utf-8")
+    if len(raw) > 1_048_576:
+        raise ValueError("fixture JSON exceeds the 1 MiB limit")
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("fixture must be a JSON object")

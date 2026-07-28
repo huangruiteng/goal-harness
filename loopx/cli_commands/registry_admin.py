@@ -1,23 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Callable
 from pathlib import Path
 
-from ..agent_registry import (
-    normalize_registered_agents,
-    primary_agent_id_from_registry,
-)
-from ..authority import (
-    AUTHORITY_SOURCE_BOUNDARIES,
-    import_doc_registry_authority,
-    register_authority_source,
-    render_doc_registry_authority_import_markdown,
-    render_authority_source_markdown,
-)
+from ..agent_registry import normalize_registered_agents
 from ..configure_goal import configure_goal, render_configure_goal_markdown
-from ..global_registry import render_global_sync_markdown, sync_project_registry_to_global
+from ..control_plane.goals.configure_goal_service import (
+    configure_goal_with_global_sync,
+)
+from ..global_registry import (
+    render_global_goal_retirement_markdown,
+    render_global_sync_markdown,
+    retire_global_registry_goals,
+    sync_project_registry_to_global,
+)
 from ..history import load_registry
+from ..orchestration import EXPLORE_HARNESS_PROFILES
 from ..paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from ..project_uninstall import render_project_uninstall_markdown, uninstall_project
 from ..registry_writability import probe_registry_write_path
@@ -32,6 +32,16 @@ from ..state_migration import (
     render_state_migration_markdown,
 )
 from ..upgrade import build_upgrade_plan
+from .registry_authority import (
+    REGISTRY_AUTHORITY_COMMANDS,
+    handle_registry_authority_command,
+    register_registry_authority_commands,
+)
+from .registry_admin_peer import (
+    register_peer_runtime_arguments,
+    register_peer_supervisor_arguments,
+    render_register_agent_markdown,
+)
 
 
 PrintPayload = Callable[
@@ -43,12 +53,11 @@ REGISTRY_ADMIN_COMMANDS = {
     "configure-goal",
     "register-agent",
     "archive-runtime",
+    "retire-global-goal",
     "uninstall-project",
     "sync-global",
     "migrate-state",
-    "register-authority-source",
-    "import-doc-registry-authority",
-}
+} | REGISTRY_AUTHORITY_COMMANDS
 
 
 def explicit_global_registry(runtime_root_arg: str | None) -> Path:
@@ -61,7 +70,6 @@ def register_agent_via_source_registry(
     runtime_root_arg: str | None,
     goal_id: str,
     agent_ids: list[str],
-    primary_agent: str | None,
     execute: bool,
 ) -> dict[str, object]:
     global_path = explicit_global_registry(runtime_root_arg)
@@ -89,7 +97,6 @@ def register_agent_via_source_registry(
     for agent_id in requested_agents:
         if agent_id not in merged_agents:
             merged_agents.append(agent_id)
-    effective_primary = primary_agent or primary_agent_id_from_registry(source_registry_path, goal_id)
     global_writability: dict[str, object] | None = None
     if execute:
         global_writability = probe_registry_write_path(global_path, create_parent=True)
@@ -104,7 +111,6 @@ def register_agent_via_source_registry(
                 "existing_agents": existing_agents,
                 "requested_agents": requested_agents,
                 "registered_agents": merged_agents,
-                "primary_agent": effective_primary,
                 "changed": merged_agents != existing_agents,
                 "written": False,
                 "host_loop_activation": loop_activation_for_goal(
@@ -130,14 +136,16 @@ def register_agent_via_source_registry(
         registry_path=source_registry_path,
         goal_id=goal_id,
         registered_agents=merged_agents,
-        primary_agent=effective_primary,
+        agent_model="peer_v1",
         execute=execute,
     )
     sync_payload: dict[str, object] | None = None
     if execute and configure_payload.get("written"):
         sync_payload = sync_project_registry_to_global(
             registry_path=source_registry_path,
-            runtime_root_override=runtime_root_arg,
+            # Sync back to the same shared registry that supplied source_registry.
+            # A project-local common_runtime_root must not redirect this write.
+            runtime_root_override=str(global_path.parent),
             goal_id=goal_id,
             dry_run=False,
         )
@@ -151,7 +159,6 @@ def register_agent_via_source_registry(
         "existing_agents": existing_agents,
         "requested_agents": requested_agents,
         "registered_agents": merged_agents,
-        "primary_agent": effective_primary,
         "changed": configure_payload.get("changed"),
         "written": configure_payload.get("written"),
         "configure_goal": configure_payload,
@@ -227,45 +234,18 @@ def loop_activation_for_goal(
     }
 
 
-def render_register_agent_markdown(payload: dict[str, object]) -> str:
-    lines = [
-        "# LoopX Agent Registration",
-        "",
-        f"- ok: `{payload.get('ok')}`",
-        f"- dry_run: `{payload.get('dry_run')}`",
-        f"- goal_id: `{payload.get('goal_id')}`",
-        f"- global_registry: `{payload.get('global_registry')}`",
-        f"- source_registry: `{payload.get('source_registry')}`",
-        f"- primary_agent: `{payload.get('primary_agent')}`",
-        f"- changed: `{payload.get('changed')}`",
-        f"- written: `{payload.get('written')}`",
-    ]
-    if payload.get("error"):
-        lines.append(f"- error: {payload.get('error')}")
-    lines.append(f"- existing_agents: `{', '.join(payload.get('existing_agents') or [])}`")
-    lines.append(f"- registered_agents: `{', '.join(payload.get('registered_agents') or [])}`")
-    sync_payload = payload.get("global_sync")
-    if isinstance(sync_payload, dict):
-        lines.append(f"- global_sync_wrote: `{sync_payload.get('wrote')}`")
-        if sync_payload.get("write_denied"):
-            lines.append(f"- global_sync_error_kind: `{sync_payload.get('error_kind')}`")
-    if payload.get("recommended_action"):
-        lines.append(f"- recommended_action: {payload.get('recommended_action')}")
-    activation = payload.get("host_loop_activation")
-    if isinstance(activation, dict):
-        lines.append(
-            f"- host_loop_activation: `{activation.get('host_surface')}` "
-            f"status=`{activation.get('status')}` activated=`{activation.get('activated')}`"
-        )
-        if activation.get("activated") is not True:
-            lines.append(f"- host_loop_action: {activation.get('recommended_action')}")
-    return "\n".join(lines)
-
-
 def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> None:
     configure_goal_parser = subparsers.add_parser(
         "configure-goal",
-        help="Preview or apply per-goal registry settings for quota, self-repair, and orchestration.",
+        help=(
+            "Inspect current goal settings and optional features, or preview/apply an "
+            "incremental configuration change."
+        ),
+        description=(
+            "Inspect current per-goal settings, or preview/apply an incremental change. "
+            "With no setting flags this is read-only and includes the on-demand optional "
+            "feature catalog; first-run setup requires no optional configuration."
+        ),
     )
     configure_goal_parser.add_argument("--goal-id", required=True, help="Goal id to configure.")
     configure_goal_parser.add_argument("--quota-compute", type=float, help="Per-goal quota compute multiplier.")
@@ -287,6 +267,32 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         action=argparse.BooleanOptionalAction,
         default=None,
         help="Enable or disable waiting-projection repair for this goal.",
+    )
+    configure_goal_parser.add_argument(
+        "--change-quality-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable exact-scope change-quality qualification for this goal.",
+    )
+    configure_goal_parser.add_argument(
+        "--change-quality-safe-fix",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Allow or forbid one bounded safe-fix pass during change qualification.",
+    )
+    configure_goal_parser.add_argument(
+        "--change-quality-strict-receipt",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Require a valid exact-scope quality receipt at premerge.",
+    )
+    configure_goal_parser.add_argument(
+        "--multi-subagent-feature",
+        choices=["off", "enabled"],
+        help=(
+            "Default-off product switch for bounded child-agent orchestration. "
+            "`enabled` maps to multi_subagent with spawn allowed; `off` maps to single-agent mode."
+        ),
     )
     configure_goal_parser.add_argument(
         "--orchestration-mode",
@@ -321,6 +327,43 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Clear spawn_policy.model_routes.",
     )
     configure_goal_parser.add_argument(
+        "--explore-graph-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable or disable automatic Explore Graph projection at material "
+            "refresh boundaries. This is independent from Explore Harness planning."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--lark-kanban-heartbeat-sync",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable or disable best-effort generic Lark Kanban sync from goal "
+            "heartbeats. Default is off; a local board binding alone never enables it."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--explore-harness-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable or disable analysis-only explore planning for this goal. "
+            "This does not grant child-agent spawn permission."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--explore-harness-profile",
+        choices=EXPLORE_HARNESS_PROFILES,
+        help="Pin the explore planner profile on this goal's orchestration boundary.",
+    )
+    configure_goal_parser.add_argument(
+        "--clear-explore-harness-profile",
+        action="store_true",
+        help="Remove the goal-pinned explore profile while preserving the opt-in bit.",
+    )
+    configure_goal_parser.add_argument(
         "--registered-agent",
         dest="registered_agents",
         action="append",
@@ -336,16 +379,80 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Clear coordination.registered_agents.",
     )
     configure_goal_parser.add_argument(
-        "--primary-agent",
+        "--agent-profile-json",
+        dest="agent_profile_jsons",
+        action="append",
+        default=None,
         help=(
-            "The single registered agent id that owns main-control review, "
-            "verification, merge, and final project coordination."
+            "Validated agent_profile_v1 JSON object for a registered peer. "
+            "Repeatable; writes advisory task routing hints plus the peer lane's "
+            "vision requirement."
         ),
     )
     configure_goal_parser.add_argument(
-        "--clear-primary-agent",
+        "--clear-agent-profile",
+        dest="clear_agent_profiles",
+        action="append",
+        default=None,
+        help="Registered agent id whose advisory profile should be removed. Repeatable.",
+    )
+    configure_goal_parser.add_argument(
+        "--agent-work-mode",
+        dest="agent_work_modes",
+        action="append",
+        default=None,
+        metavar="AGENT_ID=MODE",
+        help=(
+            "Set one registered peer's runtime work mode to active or monitor_only. "
+            "Repeatable."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-agent-work-mode",
+        dest="clear_agent_work_modes",
+        action="append",
+        default=None,
+        help="Registered agent id whose explicit runtime work mode should be removed.",
+    )
+    configure_goal_parser.add_argument(
+        "--todo-lifecycle-authority-json",
+        dest="todo_lifecycle_authority_jsons",
+        action="append",
+        default=None,
+        help=(
+            "JSON grant with agent_id, actions, and requires_reason for explicit "
+            "cross-owner todo lifecycle overrides. Repeatable."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-todo-lifecycle-authority",
+        action="append",
+        default=None,
+        help=(
+            "Registered agent id whose todo lifecycle authority grant should be "
+            "removed. Repeatable."
+        ),
+    )
+    register_peer_runtime_arguments(configure_goal_parser)
+    register_peer_supervisor_arguments(configure_goal_parser)
+    configure_goal_parser.add_argument(
+        "--write-scope",
+        action="append",
+        default=None,
+        help=(
+            "Allowed repository/local-state write scope to add to coordination.write_scope. "
+            "Repeatable; comma-separated values are also accepted."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--replace-write-scope",
         action="store_true",
-        help="Clear coordination.primary_agent.",
+        help="Replace coordination.write_scope with the supplied --write-scope values instead of merging.",
+    )
+    configure_goal_parser.add_argument(
+        "--clear-write-scope",
+        action="store_true",
+        help="Clear coordination.write_scope.",
     )
     configure_goal_parser.add_argument(
         "--waiting-on",
@@ -388,6 +495,52 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Clear coordination.checkpointed_boundary_authority.",
     )
     configure_goal_parser.add_argument(
+        "--issue-fix-reviewer-notification-config",
+        help=(
+            "Register a repo-relative local-private JSON config pointer under "
+            ".loopx/config/ for automatic issue-fix reviewer notifications."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-issue-fix-reviewer-notification-config",
+        action="store_true",
+        help="Remove the goal's automatic reviewer-notification config pointer.",
+    )
+    configure_goal_parser.add_argument(
+        "--lark-event-inbox-config",
+        help=(
+            "Register a repo-relative local-private generic Lark event inbox "
+            "config pointer under .loopx/config/."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-lark-event-inbox-config",
+        action="store_true",
+        help="Remove the goal's generic Lark event inbox config pointer.",
+    )
+    configure_goal_parser.add_argument(
+        "--reward-memory-config",
+        help=(
+            "Register a repo-relative ignored provider-neutral Reward Memory "
+            "experiment config under .loopx/config/."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--reward-memory-agent",
+        dest="reward_memory_agents",
+        action="append",
+        default=None,
+        help=(
+            "Registered agent id allowed to use the Reward Memory experiment. "
+            "Repeatable; comma-separated values are also accepted."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-reward-memory-config",
+        action="store_true",
+        help="Disable the Reward Memory experiment and clear its agent allowlist.",
+    )
+    configure_goal_parser.add_argument(
         "--execute",
         action="store_true",
         help="Write the registry. Without this flag, configure-goal is a dry-run preview.",
@@ -403,10 +556,6 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         action="append",
         required=True,
         help="Public-safe agent id to add. Repeatable; comma-separated values are also accepted.",
-    )
-    register_agent_parser.add_argument(
-        "--primary-agent",
-        help="Optional primary agent id to set; defaults to the existing primary agent.",
     )
     register_agent_parser.add_argument(
         "--execute",
@@ -432,6 +581,25 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         "--execute",
         action="store_true",
         help="Actually move the runtime directory. Without this flag the command is a dry-run.",
+    )
+
+    retire_global_goal_parser = subparsers.add_parser(
+        "retire-global-goal",
+        help=(
+            "Remove explicitly named obsolete goals from the global registry only when "
+            "both source_registry and state_file are missing. Defaults to dry-run."
+        ),
+    )
+    retire_global_goal_parser.add_argument(
+        "--goal-id",
+        action="append",
+        required=True,
+        help="Obsolete global goal id to retire. Repeat for multiple explicit goals.",
+    )
+    retire_global_goal_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Write a full registry backup, then remove the eligible goals.",
     )
 
     uninstall_project_parser = subparsers.add_parser(
@@ -536,97 +704,7 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Write migrated state. Without this flag the command is a dry-run preview.",
     )
 
-    authority_parser = subparsers.add_parser(
-        "register-authority-source",
-        help="Register a redacted local authority/material source for a goal.",
-    )
-    authority_parser.add_argument("--goal-id", required=True, help="Goal id whose local registry should be updated.")
-    authority_parser.add_argument("--source-id", required=True, help="Stable local source id.")
-    authority_parser.add_argument(
-        "--source-ref",
-        help="Raw local source reference to hash and redact. The raw value is never stored.",
-    )
-    authority_parser.add_argument("--source-kind", required=True, help="Public-safe source kind, such as doc or repository.")
-    authority_parser.add_argument("--role", required=True, help="Public-safe material role.")
-    authority_parser.add_argument("--freshness", required=True, help="Public-safe freshness state.")
-    authority_parser.add_argument("--owner-status", help="Optional public-safe owner/review status.")
-    authority_parser.add_argument("--gate-status", help="Optional public-safe gate status.")
-    authority_parser.add_argument(
-        "--boundary",
-        choices=sorted(AUTHORITY_SOURCE_BOUNDARIES),
-        default="private_redacted",
-        help="Public/private boundary for this source. Defaults to private_redacted.",
-    )
-    authority_parser.add_argument("--revision", help="Optional public-safe revision label.")
-    authority_parser.add_argument("--conflict-rule", help="Optional public-safe conflict rule.")
-    authority_parser.add_argument("--topic", help="Optional topic_authority key to map to this source id.")
-    authority_parser.add_argument("--dry-run", action="store_true", help="Preview the registry update without writing.")
-    authority_parser.add_argument(
-        "--no-global-sync",
-        action="store_true",
-        help="Do not refresh the shared global registry after writing the local source registry.",
-    )
-
-    doc_registry_authority_parser = subparsers.add_parser(
-        "import-doc-registry-authority",
-        help="Import a redacted DOC_REGISTRY summary as a local authority/material source.",
-    )
-    doc_registry_authority_parser.add_argument(
-        "--goal-id", required=True, help="Goal id whose local registry should be updated."
-    )
-    doc_registry_authority_parser.add_argument("--source-id", required=True, help="Stable local source id.")
-    doc_registry_authority_parser.add_argument(
-        "--doc-registry-path",
-        required=True,
-        help="Local DOC_REGISTRY.yaml path to read. The raw path is hashed and not stored.",
-    )
-    doc_registry_authority_parser.add_argument(
-        "--source-kind",
-        default="doc_registry",
-        help="Public-safe source kind. Defaults to doc_registry.",
-    )
-    doc_registry_authority_parser.add_argument(
-        "--role",
-        default="external_doc_authority_registry",
-        help="Public-safe material role. Defaults to external_doc_authority_registry.",
-    )
-    doc_registry_authority_parser.add_argument(
-        "--freshness",
-        default="current",
-        help="Public-safe freshness state. Defaults to current.",
-    )
-    doc_registry_authority_parser.add_argument("--owner-status", help="Optional public-safe owner/review status.")
-    doc_registry_authority_parser.add_argument("--gate-status", help="Optional public-safe gate status.")
-    doc_registry_authority_parser.add_argument(
-        "--boundary",
-        choices=sorted(AUTHORITY_SOURCE_BOUNDARIES),
-        default="private_redacted",
-        help="Public/private boundary for this source. Defaults to private_redacted.",
-    )
-    doc_registry_authority_parser.add_argument("--revision", help="Optional public-safe revision label.")
-    doc_registry_authority_parser.add_argument("--conflict-rule", help="Optional public-safe conflict rule.")
-    doc_registry_authority_parser.add_argument(
-        "--topic",
-        action="append",
-        default=[],
-        help="Additional local topic_authority key to map to this source id. Repeatable.",
-    )
-    doc_registry_authority_parser.add_argument(
-        "--import-topic-prefix",
-        help="Prefix imported DOC_REGISTRY topic keys with this value before mapping them to the source id.",
-    )
-    doc_registry_authority_parser.add_argument(
-        "--max-imported-topics",
-        type=int,
-        default=50,
-        help="Maximum DOC_REGISTRY topics to map when --import-topic-prefix is set. Defaults to 50.",
-    )
-    doc_registry_authority_parser.add_argument("--dry-run", action="store_true", help="Preview without writing.")
-    doc_registry_authority_parser.add_argument(
-        "--no-global-sync",
-        action="store_true",
-        help="Do not refresh the shared global registry after writing the local source registry.",
-    )
+    register_registry_authority_commands(subparsers)
 
 
 def handle_registry_admin_command(
@@ -640,14 +718,39 @@ def handle_registry_admin_command(
 
     if args.command == "configure-goal":
         try:
-            payload = configure_goal(
+            agent_work_modes: dict[str, str] = {}
+            for raw_work_mode in args.agent_work_modes or []:
+                agent_id, separator, mode = str(raw_work_mode).partition("=")
+                if not separator or not agent_id.strip() or not mode.strip():
+                    raise ValueError(
+                        "--agent-work-mode must use AGENT_ID=active|monitor_only"
+                    )
+                if agent_id.strip() in agent_work_modes:
+                    raise ValueError(
+                        f"duplicate --agent-work-mode for {agent_id.strip()}"
+                    )
+                agent_work_modes[agent_id.strip()] = mode.strip()
+            agent_profiles = [
+                json.loads(raw_profile)
+                for raw_profile in (args.agent_profile_jsons or [])
+            ]
+            todo_lifecycle_authority = [
+                json.loads(raw_grant)
+                for raw_grant in (args.todo_lifecycle_authority_jsons or [])
+            ]
+            payload = configure_goal_with_global_sync(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
+                runtime_root_override=args.runtime_root,
                 quota_compute=args.quota_compute,
                 quota_window_hours=args.quota_window_hours,
                 self_repair_enabled=args.self_repair_enabled,
                 self_repair_health=args.self_repair_health,
                 self_repair_waiting_projection=args.self_repair_waiting_projection,
+                change_quality_enabled=args.change_quality_enabled,
+                change_quality_safe_fix=args.change_quality_safe_fix,
+                change_quality_strict_receipt=args.change_quality_strict_receipt,
+                multi_subagent_feature=args.multi_subagent_feature,
                 orchestration_mode=args.orchestration_mode,
                 spawn_allowed=args.spawn_allowed,
                 max_children=args.max_children,
@@ -658,10 +761,29 @@ def handle_registry_admin_command(
                 planner_effort=args.planner_effort,
                 worker_effort=args.worker_effort,
                 clear_model_routes=bool(args.clear_model_routes),
+                explore_harness_enabled=args.explore_harness_enabled,
+                explore_harness_profile=args.explore_harness_profile,
+                clear_explore_harness_profile=bool(args.clear_explore_harness_profile),
+                explore_graph_enabled=args.explore_graph_enabled,
+                lark_kanban_heartbeat_sync=args.lark_kanban_heartbeat_sync,
                 registered_agents=args.registered_agents,
                 clear_registered_agents=bool(args.clear_registered_agents),
-                primary_agent=args.primary_agent,
-                clear_primary_agent=bool(args.clear_primary_agent),
+                agent_profiles=agent_profiles,
+                clear_agent_profiles=args.clear_agent_profiles,
+                agent_work_modes=agent_work_modes or None,
+                clear_agent_work_modes=args.clear_agent_work_modes,
+                todo_lifecycle_authority=todo_lifecycle_authority,
+                clear_todo_lifecycle_authority=(
+                    args.clear_todo_lifecycle_authority
+                ),
+                agent_model=args.agent_model,
+                automation_prompt_migration_ack=args.ack_automation_prompt_migration,
+                supervisor_agent=args.supervisor_agent,
+                supervised_agents=args.supervised_agents,
+                clear_supervisor=bool(args.clear_supervisor),
+                write_scope=args.write_scope,
+                replace_write_scope=bool(args.replace_write_scope),
+                clear_write_scope=bool(args.clear_write_scope),
                 waiting_on=args.waiting_on,
                 clear_waiting_on=bool(args.clear_waiting_on),
                 boundary_authority_scopes=args.boundary_authority_scope,
@@ -670,6 +792,21 @@ def handle_registry_admin_command(
                 boundary_authority_recorded_at=args.boundary_authority_recorded_at,
                 boundary_authority_expires_at=args.boundary_authority_expires_at,
                 clear_boundary_authority=bool(args.clear_boundary_authority),
+                issue_fix_reviewer_notification_config=(
+                    args.issue_fix_reviewer_notification_config
+                ),
+                clear_issue_fix_reviewer_notification_config=bool(
+                    args.clear_issue_fix_reviewer_notification_config
+                ),
+                lark_event_inbox_config=args.lark_event_inbox_config,
+                clear_lark_event_inbox_config=bool(
+                    args.clear_lark_event_inbox_config
+                ),
+                reward_memory_config=args.reward_memory_config,
+                reward_memory_agents=args.reward_memory_agents,
+                clear_reward_memory_config=bool(
+                    args.clear_reward_memory_config
+                ),
                 execute=bool(args.execute),
             )
             if payload.get("ok"):
@@ -698,7 +835,6 @@ def handle_registry_admin_command(
                 runtime_root_arg=args.runtime_root,
                 goal_id=args.goal_id,
                 agent_ids=args.agent_id,
-                primary_agent=args.primary_agent,
                 execute=bool(args.execute),
             )
         except Exception as exc:
@@ -735,6 +871,28 @@ def handle_registry_admin_command(
                 "error": str(exc),
             }
         print_payload(payload, args.format, render_archive_runtime_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "retire-global-goal":
+        try:
+            payload = retire_global_registry_goals(
+                runtime_root_override=args.runtime_root,
+                goal_ids=args.goal_id,
+                execute=bool(args.execute),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "schema_version": "loopx_global_goal_retirement_v0",
+                "dry_run": not bool(args.execute),
+                "execute": bool(args.execute),
+                "requested_goal_ids": args.goal_id or [],
+                "retired_goal_ids": [],
+                "wrote": False,
+                "backup_written": False,
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, render_global_goal_retirement_markdown)
         return 0 if payload.get("ok") else 1
 
     if args.command == "uninstall-project":
@@ -847,91 +1005,8 @@ def handle_registry_admin_command(
         print_payload(payload, args.format, render_state_migration_markdown)
         return 0 if payload.get("ok") else 1
 
-    if args.command == "register-authority-source":
-        try:
-            payload = register_authority_source(
-                registry_path=registry_path,
-                goal_id=args.goal_id,
-                source_id=args.source_id,
-                source_ref=args.source_ref,
-                source_kind=args.source_kind,
-                role=args.role,
-                freshness=args.freshness,
-                owner_status=args.owner_status,
-                gate_status=args.gate_status,
-                boundary=args.boundary,
-                revision=args.revision,
-                conflict_rule=args.conflict_rule,
-                topic=args.topic,
-                dry_run=bool(args.dry_run),
-            )
-            if not bool(args.no_global_sync):
-                if args.dry_run:
-                    payload["global_sync"] = {"enabled": True, "dry_run": True, "wrote": False}
-                else:
-                    payload["global_sync"] = sync_project_registry_to_global(
-                        registry_path=registry_path,
-                        runtime_root_override=args.runtime_root,
-                        goal_id=args.goal_id,
-                        dry_run=False,
-                    )
-            else:
-                payload["global_sync"] = {"enabled": False}
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "registry": str(registry_path),
-                "runtime_root": args.runtime_root,
-                "goal_id": args.goal_id,
-                "source_id": getattr(args, "source_id", None),
-                "written": False,
-                "dry_run": bool(getattr(args, "dry_run", False)),
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_authority_source_markdown)
-        return 0 if payload.get("ok") else 1
-
-    try:
-        payload = import_doc_registry_authority(
-            registry_path=registry_path,
-            goal_id=args.goal_id,
-            source_id=args.source_id,
-            doc_registry_path=Path(args.doc_registry_path),
-            source_kind=args.source_kind,
-            role=args.role,
-            freshness=args.freshness,
-            owner_status=args.owner_status,
-            gate_status=args.gate_status,
-            boundary=args.boundary,
-            revision=args.revision,
-            conflict_rule=args.conflict_rule,
-            topics=list(args.topic or []),
-            import_topic_prefix=args.import_topic_prefix,
-            max_imported_topics=int(args.max_imported_topics),
-            dry_run=bool(args.dry_run),
-        )
-        if not bool(args.no_global_sync):
-            if args.dry_run:
-                payload["global_sync"] = {"enabled": True, "dry_run": True, "wrote": False}
-            else:
-                payload["global_sync"] = sync_project_registry_to_global(
-                    registry_path=registry_path,
-                    runtime_root_override=args.runtime_root,
-                    goal_id=args.goal_id,
-                    dry_run=False,
-                )
-        else:
-            payload["global_sync"] = {"enabled": False}
-    except Exception as exc:
-        payload = {
-            "ok": False,
-            "registry": str(registry_path),
-            "runtime_root": args.runtime_root,
-            "goal_id": args.goal_id,
-            "source_id": getattr(args, "source_id", None),
-            "written": False,
-            "dry_run": bool(getattr(args, "dry_run", False)),
-            "error": str(exc),
-        }
-    print_payload(payload, args.format, render_doc_registry_authority_import_markdown)
-    return 0 if payload.get("ok") else 1
+    return handle_registry_authority_command(
+        args,
+        registry_path=registry_path,
+        print_payload=print_payload,
+    )

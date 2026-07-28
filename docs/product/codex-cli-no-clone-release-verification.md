@@ -14,7 +14,8 @@ The release verifier exercises the path as a fresh user would see it:
 2. run `scripts/install-from-github.sh` with the same archive-installer
    mechanism used by the public no-clone command;
 3. confirm the installed `loopx` wrapper can run `doctor`;
-4. confirm the installed help surface exposes the first-run commands:
+4. confirm the installed top-level help points at `loopx commands`, and the
+   installed command reference exposes the first-run commands:
    `codex-cli-bootstrap-message`, `codex-cli-tui-bootstrap-smoke-bundle`, and
    `codex-cli-visible-attach-acceptance`;
 5. generate the one-message TUI bootstrap text from the fresh project;
@@ -27,7 +28,7 @@ credentials, mutate a Codex session, or spend LoopX quota.
 Run it with:
 
 ```bash
-python3 examples/codex-cli-no-clone-release-verification-smoke.py
+python3 examples/release/codex-cli-no-clone-release-verification-smoke.py
 ```
 
 ## Current Result
@@ -61,7 +62,7 @@ while contributor clone-plus-canary remains the development path.
 Before promoting a new release snapshot, run:
 
 ```bash
-python3 examples/codex-cli-no-clone-release-verification-smoke.py
+python3 examples/release/codex-cli-no-clone-release-verification-smoke.py
 python3 examples/codex-cli-first-run-rehearsal-smoke.py
 python3 examples/codex-cli-tui-bootstrap-smoke-bundle-smoke.py
 python3 examples/codex-cli-proof-capture-demo-fixtures-smoke.py

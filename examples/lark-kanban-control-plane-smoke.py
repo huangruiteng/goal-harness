@@ -14,7 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.capabilities.lark.kanban import (  # noqa: E402
+from loopx.extensions.lark.presentation import issue_fix_surface  # noqa: E402
+from loopx.extensions.lark.presentation.kanban import (  # noqa: E402
     CLAIM_UNCLAIMED,
     STATUS_CLAIMED,
     STATUS_DONE,
@@ -22,6 +23,7 @@ from loopx.capabilities.lark.kanban import (  # noqa: E402
     STATUS_REVIEW,
     STATUS_TODO,
     LarkKanbanConfig,
+    _run_command,
     _lark_record_from_todo_block,
     build_create_board_plan,
     default_lark_kanban_config_path,
@@ -31,12 +33,64 @@ from loopx.capabilities.lark.kanban import (  # noqa: E402
     lark_kanban_schema_payload,
     lark_kanban_ux_task,
     read_lark_kanban_local_config,
+    render_lark_kanban_markdown,
     seed_lark_kanban_records,
     setup_lark_kanban_board,
     sync_loopx_projection_to_lark_kanban,
     sync_loopx_todos_to_lark_kanban,
     use_lark_kanban_board,
 )
+from examples.lark_extension_test_support import (  # noqa: E402
+    install_bundled_lark_extension,
+)
+
+
+existing_setup_calls: list[list[str]] = []
+existing_setup_view_list_count = 0
+_CLI_TEMP = tempfile.TemporaryDirectory(prefix="loopx-lark-kanban-cli-")
+_CLI_RUNTIME = Path(_CLI_TEMP.name) / "runtime"
+_CLI_REGISTRY = Path(_CLI_TEMP.name) / "registry.json"
+_CLI_REGISTRY.write_text('{"goals": []}\n', encoding="utf-8")
+_CLI_EXTENSION_READY = False
+
+
+def credential_boundary_smoke() -> None:
+    runner_called = False
+
+    def forbidden_runner(
+        args: list[str], cwd: Path | None, timeout: float | None
+    ) -> dict[str, object]:
+        nonlocal runner_called
+        runner_called = True
+        raise AssertionError("credential-bearing command reached the runner")
+
+    for argument in ("--ak", "--sk", "--app-secret", "--access-token"):
+        try:
+            _run_command(
+                ["lark-cli", "base", "+record-list", argument, "fixture-secret"],
+                execute=True,
+                runner=forbidden_runner,
+            )
+        except ValueError as error:
+            assert "must remain in lark-cli auth" in str(error), error
+        else:
+            raise AssertionError(f"credential argument was accepted: {argument}")
+    assert runner_called is False
+
+    dry_run = _run_command(
+        [
+            "lark-cli",
+            "base",
+            "+record-list",
+            "--base-token",
+            "base_public_fixture",
+            "--table-id",
+            "tbl_public_fixture",
+        ],
+        execute=False,
+    )
+    assert "base_public_fixture" in dry_run["command"], dry_run
+    assert "tbl_public_fixture" in dry_run["command"], dry_run
 
 
 def fixture_payload() -> dict[str, object]:
@@ -158,9 +212,85 @@ def partial_setup_runner(args: list[str], cwd: Path | None, timeout: float | Non
     return {"returncode": 0, "stdout": json.dumps({"ok": True}), "stderr": "", "timed_out": False}
 
 
+def existing_setup_runner(args: list[str], cwd: Path | None, timeout: float | None) -> dict[str, object]:
+    global existing_setup_view_list_count
+    existing_setup_calls.append(args)
+    if args == ["lark-cli", "--version"]:
+        return {"returncode": 0, "stdout": "lark-cli 1.0.56\n", "stderr": "", "timed_out": False}
+    if args == ["lark-cli", "auth", "status"]:
+        return {"returncode": 0, "stdout": json.dumps({"ok": True, "identities": {"user": {"available": True}}}), "stderr": "", "timed_out": False}
+    if args[-1:] == ["--help"]:
+        return {"returncode": 0, "stdout": "help\n", "stderr": "", "timed_out": False}
+    if "+field-list" in args:
+        return {
+            "returncode": 0,
+            "stdout": json.dumps(
+                {
+                    "ok": True,
+                    "data": {
+                        "fields": [
+                            {"name": "Task"},
+                            {"name": "Status"},
+                            {"name": "Claim"},
+                            {"name": "Priority"},
+                            {
+                                "id": "fld_issue_existing",
+                                "name": "Issue",
+                                "type": "text",
+                                "style": {"type": "plain"},
+                            },
+                            {
+                                "id": "fld_pr_existing",
+                                "name": "Pull Request",
+                                "type": "text",
+                                "style": {"type": "plain"},
+                            },
+                            {
+                                "id": "fld_stage_existing",
+                                "name": "Stage",
+                                "type": "select",
+                                "multiple": False,
+                                "options": [
+                                    {"name": "reproduction_planned"},
+                                    {"name": "reproduction_blocked"},
+                                ],
+                            },
+                        ]
+                    },
+                }
+            ),
+            "stderr": "",
+            "timed_out": False,
+        }
+    if "+view-list" in args:
+        existing_setup_view_list_count += 1
+        views = [{"name": "Worker Queue", "view_id": "vew_worker_existing"}, {"name": "User Gates", "view_id": "vew_user_existing"}, {"name": "Kanban", "view_id": "vew_kanban_existing"}]
+        if existing_setup_view_list_count > 1:
+            views += [{"name": issue_fix_surface.DEFAULT_ISSUE_FIX_GRID_VIEW, "view_id": "vew_issue_grid"}, {"name": issue_fix_surface.DEFAULT_ISSUE_FIX_KANBAN_VIEW, "view_id": "vew_issue_kanban"}]
+        return {"returncode": 0, "stdout": json.dumps({"ok": True, "data": views}), "stderr": "", "timed_out": False}
+    return {"returncode": 0, "stdout": json.dumps({"ok": True}), "stderr": "", "timed_out": False}
+
+
 def run_cli(*extra_args: str) -> dict[str, object]:
+    global _CLI_EXTENSION_READY
+    if not _CLI_EXTENSION_READY:
+        install_bundled_lark_extension(
+            repo_root=REPO_ROOT,
+            registry=_CLI_REGISTRY,
+            runtime_root=_CLI_RUNTIME,
+        )
+        _CLI_EXTENSION_READY = True
     result = subprocess.run(
-        [sys.executable, "-m", "loopx.cli", "--format", "json", *extra_args],
+        [
+            sys.executable,
+            "-m",
+            "loopx.cli",
+            "--format",
+            "json",
+            "--runtime-root",
+            str(_CLI_RUNTIME),
+            *extra_args,
+        ],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
@@ -169,7 +299,20 @@ def run_cli(*extra_args: str) -> dict[str, object]:
     return json.loads(result.stdout)
 
 
+def ready_field_list_result() -> dict[str, object]:
+    return {
+        "returncode": 0,
+        "stdout": json.dumps(
+            {"ok": True, "data": {"fields": lark_kanban_schema_payload()["fields"]}}
+        ),
+        "stderr": "",
+        "timed_out": False,
+    }
+
+
 def main() -> int:
+    credential_boundary_smoke()
+    global existing_setup_view_list_count
     schema = lark_kanban_schema_payload()
     assert schema["ok"] is True, schema
     assert schema["schema_version"] == "loopx_lark_kanban_control_plane_v0", schema
@@ -178,7 +321,7 @@ def main() -> int:
     assert schema["task_spawning_model"]["board_creates_tasks"] is False, schema
     assert "LoopX todo lifecycle" in schema["task_spawning_model"]["rule"], schema
     field_names = [field["name"] for field in schema["fields"]]
-    for expected in ["Task", "Status", "Claim", "Handoff", "Evidence", "Run History", "Worker Command"]:
+    for expected in ["Task", "Status", "Claim", "Handoff", "Evidence", "Run History", "Worker Command", "Work Item Type", "Repository", "Issue", "Pull Request", "Route", "Stage", "Validation", "Outcome", "Context Tags", "Metric Group", "Metric", "Baseline", "Current", "Delta", "Numerator", "Denominator", "Metric Source", "Metric Updated At", "Missing Data"]:
         assert expected in field_names, field_names
     assert schema["heartbeat_model"]["fallback"].startswith("agent heartbeat"), schema
     assert schema["operator_view"]["kanban_card_fields"] == lark_kanban_operator_card_fields(), schema
@@ -190,6 +333,33 @@ def main() -> int:
         "Evidence",
         "Status",
     ]
+    assert schema["operator_view"]["issue_fix_card_fields"] == issue_fix_surface.ISSUE_FIX_CARD_FIELDS
+    issue_fields = {field["name"]: field for field in schema["fields"]}
+    assert issue_fields["Issue"]["style"]["type"] == "url", issue_fields["Issue"]
+    assert issue_fields["Pull Request"]["style"]["type"] == "url", issue_fields["Pull Request"]
+    assert issue_fields["Context Tags"]["type"] == "select", issue_fields["Context Tags"]
+    assert issue_fields["Context Tags"]["multiple"] is True, issue_fields["Context Tags"]
+    assert {
+        "fix_pr",
+        "ci_pending",
+        "reproduction_confirmed",
+        "validation_passed",
+        "tests_changed",
+    } <= {
+        option["name"] for option in issue_fields["Context Tags"]["options"]
+    }, issue_fields["Context Tags"]
+    assert issue_fix_surface.ISSUE_FIX_STAGE_OPTIONS[:6] == [
+        "reproduction_planned",
+        "fix_in_progress",
+        "fix_review_ready",
+        "ci_pending",
+        "ci_failed",
+        "review_wait",
+    ], issue_fix_surface.ISSUE_FIX_STAGE_OPTIONS
+    assert issue_fix_surface.field_definition_migrations(
+        {"data": {"fields": schema["fields"]}}, schema["fields"]
+    ) == []
+    assert {issue_fix_surface.DEFAULT_ISSUE_FIX_GRID_VIEW, issue_fix_surface.DEFAULT_ISSUE_FIX_KANBAN_VIEW, issue_fix_surface.DEFAULT_ISSUE_FIX_METRICS_VIEW} <= {view["name"] for view in schema["views"]}
 
     plan = build_create_board_plan(
         base_name="LoopX Lark Kanban Control Plane POC",
@@ -203,6 +373,10 @@ def main() -> int:
     assert any("+view-set-group" in command and "Kanban" in command for command in joined), joined
     assert any("group_config" in command for command in joined), joined
     assert any("+view-set-visible-fields" in command for command in joined), joined
+    assert sum("+view-set-filter" in command and "Work Item Type" in command for command in joined) == 3, joined
+    assert any("+view-set-visible-fields" in command and "Monthly Impact" in command and "Metric Source" in command for command in joined), joined
+    assert any("+view-set-group" in command and "Issue Fix Kanban" in command and "Stage" in command for command in joined), joined
+    assert not any("+field-update" in command for command in joined), joined
 
     heartbeat = lark_kanban_heartbeat(
         LarkKanbanConfig(
@@ -306,6 +480,35 @@ def main() -> int:
         assert stored["board"]["view_ids"]["Kanban"] == "vew_kanban_fixture", stored
         assert setup_payload["config"]["board"]["table_id"] == "tbl_live_fixture", setup_payload
 
+    with tempfile.TemporaryDirectory(prefix="loopx-lark-kanban-existing-") as tmp:
+        existing_setup_calls.clear()
+        existing_setup_view_list_count = 0
+        config_path = Path(tmp) / ".loopx" / "lark-kanban.json"
+        use_lark_kanban_board(config_path=config_path, base_url="https://example.invalid/base/base_existing?table=tbl_existing", cli_bin="lark-cli", identity="user")
+        migrated = setup_lark_kanban_board(config_path=config_path, base_name="LoopX Existing Board Fixture", cli_bin="lark-cli", identity="user", execute=True, runner=existing_setup_runner)
+        assert migrated["ok"] is True, migrated
+        assert {"Work Item Type", "Repository", "Route", "Validation", "Outcome", "Context Tags"} <= set(migrated["created_fields"]), migrated
+        assert set(migrated["updated_fields"]) == {"Issue", "Pull Request", "Stage"}, migrated
+        field_updates = [args for args in existing_setup_calls if "+field-update" in args]
+        assert len(field_updates) == 3, field_updates
+        assert [args[args.index("--field-id") + 1] for args in field_updates] == [
+            "fld_issue_existing",
+            "fld_pr_existing",
+            "fld_stage_existing",
+        ], field_updates
+        assert all("--yes" in args for args in field_updates), field_updates
+        assert "ci_pending" in field_updates[-1][field_updates[-1].index("--json") + 1], field_updates[-1]
+        first_view_write = next(index for index, args in enumerate(existing_setup_calls) if "+view-set-filter" in args)
+        last_field_update = max(index for index, args in enumerate(existing_setup_calls) if "+field-update" in args)
+        assert last_field_update < first_view_write, existing_setup_calls
+        assert migrated["view_ids"][issue_fix_surface.DEFAULT_ISSUE_FIX_GRID_VIEW] == "vew_issue_grid", migrated
+        assert migrated["view_ids"][issue_fix_surface.DEFAULT_ISSUE_FIX_KANBAN_VIEW] == "vew_issue_kanban", migrated
+        created_views = next(args for args in existing_setup_calls if "+view-create" in args)
+        assert {item["name"] for item in json.loads(created_views[created_views.index("--json") + 1])} >= {issue_fix_surface.DEFAULT_ISSUE_FIX_GRID_VIEW, issue_fix_surface.DEFAULT_ISSUE_FIX_KANBAN_VIEW}
+        issue_group = next(args for args in existing_setup_calls if "+view-set-group" in args and "vew_issue_kanban" in args)
+        assert "Stage" in issue_group[issue_group.index("--json") + 1], issue_group
+        assert len([args for args in existing_setup_calls if "+view-set-visible-fields" in args and any(view in args for view in ("vew_issue_grid", "vew_issue_kanban"))]) == 2
+
     with tempfile.TemporaryDirectory(prefix="loopx-lark-kanban-sync-") as tmp:
         root = Path(tmp)
         registry = root / ".loopx" / "registry.json"
@@ -329,6 +532,8 @@ def main() -> int:
                     "  <!-- loopx: todo_id=todo_agent_sync status=open task_class=advancement_task action_kind=sync_board required_write_scopes=loopx claimed_by=codex-main-control -->",
                     "- [ ] [P1] Product capability scoped board sync",
                     "  <!-- loopx: todo_id=todo_product_scope status=open task_class=advancement_task action_kind=sync_board claimed_by=codex-product-capability -->",
+                    "- [ ] [P1][Reward Memory] Preserve adjacent qualifier priority",
+                    "  <!-- loopx: todo_id=todo_adjacent_priority status=open task_class=advancement_task action_kind=sync_board claimed_by=codex-main-control -->",
                     "",
                     "- [ ] [P1] Keep malformed metadata executable",
                     "  <!-- loopx: todo_id=todo_agent_malformed status=blocked_typo task_class=user_gate_typo action_kind=sync_board claimed_by=codex-main-control -->",
@@ -362,8 +567,12 @@ def main() -> int:
             execute=False,
         )
         assert sync_payload["ok"] is True, sync_payload
-        assert sync_payload["todo_count"] == 4, sync_payload
+        assert sync_payload["todo_count"] == 5, sync_payload
         assert any(item["values"]["Status"] == "User Gate" for item in sync_payload["records"]), sync_payload
+        adjacent_priority = next(
+            item for item in sync_payload["records"] if item["todo_id"] == "todo_adjacent_priority"
+        )
+        assert adjacent_priority["values"]["Priority"] == "P1", adjacent_priority
         malformed = next(
             item for item in sync_payload["records"] if item["todo_id"] == "todo_agent_malformed"
         )
@@ -373,6 +582,53 @@ def main() -> int:
         assert all(item["values"]["Workdir"] == "" for item in sync_payload["records"]), sync_payload
         assert str(root) not in json.dumps(sync_payload["records"], ensure_ascii=False), sync_payload
         assert all(item["command"]["executed"] is False for item in sync_payload["records"]), sync_payload
+        compact_cli = run_cli(
+            "--registry",
+            str(registry),
+            "lark-kanban",
+            "sync-loopx-todos",
+            "--base-token",
+            "base_public_fixture",
+            "--table-id",
+            "tbl_public_fixture",
+            "--goal-id",
+            "goal_lark_sync_fixture",
+        )
+        assert compact_cli["detail_level"] == "compact", compact_cli
+        assert compact_cli["record_count"] == 5, compact_cli
+        assert compact_cli["record_success_count"] == 5, compact_cli
+        assert compact_cli["record_failure_count"] == 0, compact_cli
+        assert compact_cli["base_token"] == "base_public_fixture", compact_cli
+        assert compact_cli["table_id"] == "tbl_public_fixture", compact_cli
+        assert "commands" not in compact_cli, compact_cli
+        assert all("command" not in item for item in compact_cli["records"]), compact_cli
+        assert all("values" not in item for item in compact_cli["records"]), compact_cli
+        compact_markdown = render_lark_kanban_markdown(compact_cli)
+        assert "- detail_level: `compact`" in compact_markdown, compact_markdown
+        assert "- record_success_count: `5`" in compact_markdown, compact_markdown
+        assert "## Records" in compact_markdown, compact_markdown
+        assert "## Commands" not in compact_markdown, compact_markdown
+
+        detailed_cli = run_cli(
+            "--registry",
+            str(registry),
+            "lark-kanban",
+            "sync-loopx-todos",
+            "--base-token",
+            "base_public_fixture",
+            "--table-id",
+            "tbl_public_fixture",
+            "--goal-id",
+            "goal_lark_sync_fixture",
+            "--include-command-details",
+        )
+        assert detailed_cli["detail_level"] == "full", detailed_cli
+        assert len(detailed_cli["commands"]) == 5, detailed_cli
+        assert all("command" in item for item in detailed_cli["records"]), detailed_cli
+        assert all("values" in item for item in detailed_cli["records"]), detailed_cli
+        compact_size = len(json.dumps(compact_cli, ensure_ascii=False))
+        detailed_size = len(json.dumps(detailed_cli, ensure_ascii=False))
+        assert compact_size * 3 < detailed_size, (compact_size, detailed_size)
         scoped_payload = sync_loopx_todos_to_lark_kanban(
             LarkKanbanConfig(
                 **{"base_" + "token": "base_public_fixture"},
@@ -385,12 +641,77 @@ def main() -> int:
             execute=False,
         )
         scoped_todo_ids = {item["todo_id"] for item in scoped_payload["records"]}
-        assert scoped_payload["todo_count"] == 3, scoped_payload
+        assert scoped_payload["todo_count"] == 4, scoped_payload
         assert scoped_todo_ids == {
             "todo_user_share",
             "todo_agent_sync",
+            "todo_adjacent_priority",
             "todo_agent_malformed",
         }, scoped_payload
+
+        todo_sync_calls: list[list[str]] = []
+
+        def todo_upsert_runner(args: list[str], cwd: Path | None, timeout: float | None) -> dict[str, object]:
+            todo_sync_calls.append(args)
+            if "+field-list" in args:
+                return ready_field_list_result()
+            if "+record-list" in args:
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps(
+                        {
+                            "ok": True,
+                            "data": {
+                                "fields": ["LoopX Goal ID", "LoopX Todo ID"],
+                                "data": [["goal_lark_sync_fixture", "todo_agent_sync"]],
+                                "record_id_list": ["recTodoSyncExisting"],
+                            },
+                        }
+                    ),
+                    "stderr": "",
+                    "timed_out": False,
+                }
+            if "+record-upsert" in args:
+                values = json.loads(args[args.index("--json") + 1])
+                record_id = (
+                    args[args.index("--record-id") + 1]
+                    if "--record-id" in args
+                    else "recTodo" + str(values["LoopX Todo ID"]).replace("_", "")[:24]
+                )
+                return {
+                    "returncode": 0,
+                    "stdout": json.dumps({"ok": True, "data": {"record_id": record_id}}),
+                    "stderr": "",
+                    "timed_out": False,
+                }
+            raise AssertionError(args)
+
+        todo_idempotent_config_path = Path(tmp) / ".loopx" / "todo-idempotent.json"
+        execute_todo_sync = sync_loopx_todos_to_lark_kanban(
+            LarkKanbanConfig(
+                **{"base_" + "token": "base_public_fixture"},
+                table_id="tbl_public_fixture",
+            ),
+            registry_path=registry,
+            goal_id="goal_lark_sync_fixture",
+            config_path=todo_idempotent_config_path,
+            execute=True,
+            runner=todo_upsert_runner,
+        )
+        assert execute_todo_sync["ok"] is True, execute_todo_sync
+        assert execute_todo_sync["todo_count"] == 5, execute_todo_sync
+        todo_upserts = [args for args in todo_sync_calls if "+record-upsert" in args]
+        assert len(todo_upserts) == 5, todo_sync_calls
+        reused_todo_upsert = [args for args in todo_upserts if "recTodoSyncExisting" in args]
+        assert len(reused_todo_upsert) == 1, todo_upserts
+        reused_values = json.loads(reused_todo_upsert[0][reused_todo_upsert[0].index("--json") + 1])
+        assert reused_values["LoopX Todo ID"] == "todo_agent_sync", reused_values
+        stored_todo_config = read_lark_kanban_local_config(todo_idempotent_config_path)
+        assert stored_todo_config["board"]["table_id"] == "tbl_public_fixture", stored_todo_config
+        assert (
+            stored_todo_config["todo_records"]["goal_lark_sync_fixture:todo_agent_sync"]
+            == "recTodoSyncExisting"
+        ), stored_todo_config
 
         projection_payload = {
             "schema_version": "goal_channel_projection_v0",
@@ -425,6 +746,15 @@ def main() -> int:
                     "claimed_by": "codex-product-capability",
                 },
                 {
+                    "todo_id": "todo_projection_excluded",
+                    "title": "[P1] Independent handoff for another peer",
+                    "status": "open",
+                    "task_class": "advancement_task",
+                    "action_kind": "review",
+                    "continuation_policy": "independent_handoff",
+                    "excluded_agents": ["codex-main-control"],
+                },
+                {
                     "todo_id": "todo_projection_done",
                     "title": "[P2] Completed projection item",
                     "status": "done",
@@ -457,6 +787,7 @@ def main() -> int:
         assert projection_sync["row_count"] == 3, projection_sync
         assert "projection:frontstage-smoke:user_todo:todo_projection_gate" in projection_todo_ids, projection_sync
         assert "projection:frontstage-smoke:agent_todo:todo_projection_sync" in projection_todo_ids, projection_sync
+        assert "projection:frontstage-smoke:agent_todo:todo_projection_excluded" not in projection_todo_ids
         assert "projection:frontstage-smoke:agent_todo:todo_projection_done" not in projection_todo_ids
         assert all(item["command"]["executed"] is False for item in projection_sync["records"]), projection_sync
         next_action_record = next(
@@ -620,6 +951,8 @@ def main() -> int:
 
         def projection_upsert_runner(args: list[str], cwd: Path | None, timeout: float | None) -> dict[str, object]:
             projection_calls.append(args)
+            if "+field-list" in args:
+                return ready_field_list_result()
             if "+record-list" in args:
                 return {
                     "returncode": 0,

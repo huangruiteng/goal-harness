@@ -2,8 +2,10 @@
 """Smoke-test the Claude Code adapter install boundary.
 
 Proves the install-side review requirements:
-  1. the normal loopx install (`scripts/install-local.sh`) does NOT write
-     `~/.claude` unless the Claude adapter is explicitly opted in;
+  1. the normal loopx install (`scripts/install-local.sh`) may install
+     lightweight Claude Code slash-command skills, but does NOT install the
+     Claude adapter command/settings/hooks unless the adapter is explicitly
+     opted in;
   2. `install.py` requires a deliberate `--scope user|project` and confines
      project-scope writes to that project (no global side effect); hooks are
      opt-in via `--harden`, not the default;
@@ -35,7 +37,7 @@ def _install_py(args, **kw):
 
 
 def main() -> int:
-    # --- 1) the normal install never writes ~/.claude (opt-in) ----------------
+    # --- 1) default install only writes lightweight slash skills --------------
     with tempfile.TemporaryDirectory(prefix="loopx-claude-optin-smoke-") as tmp:
         home = Path(tmp) / "home"
         bin_dir = home / ".local" / "bin"
@@ -47,13 +49,23 @@ def main() -> int:
             "LOOPX_SHELL_PROFILE": str(home / ".zshrc"),
             "LOOPX_INSTALL_CANARY": "0",
             "LOOPX_INSTALL_SKILL": "0",
+            "LOOPX_PROMOTE_DEFAULT": "1",
+            "LOOPX_PYTHON": sys.executable,
             "PATH": os.environ.get("PATH", ""),
             "SHELL": "/bin/zsh",
         }
         env.pop("LOOPX_INSTALL_CLAUDE", None)  # default = off
         r = _run(["bash", str(INSTALL_SH)], env=env, cwd=str(REPO_ROOT), timeout=240)
         assert r.returncode == 0, f"install-local.sh failed:\n{r.stdout}\n{r.stderr}"
-        assert not (home / ".claude").exists(), "default install wrote ~/.claude — must be opt-in!"
+        assert (home / ".claude" / "skills" / "loopx" / "SKILL.md").is_file(), (
+            "default install should register the lightweight /loopx slash skill"
+        )
+        assert not (home / ".claude" / "commands" / "loopx.md").exists(), (
+            "default install must not install the Claude adapter command"
+        )
+        assert not (home / ".claude" / "settings.json").exists(), (
+            "default install must not write Claude adapter hooks/settings"
+        )
         assert "skipped (opt-in" in r.stdout, f"summary should mark the adapter opt-in:\n{r.stdout}"
 
     # --- 2) install.py requires an explicit scope; project scope is isolated ---
@@ -62,7 +74,8 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="loopx-proj-") as d:
         proj, other_home = Path(d) / "proj", Path(d) / "home"
-        proj.mkdir(); other_home.mkdir()
+        proj.mkdir()
+        other_home.mkdir()
         env = {**os.environ, "HOME": str(other_home)}  # prove it doesn't touch ~/.claude
         # dry-run writes nothing
         r = _install_py(["--scope", "project", "--project", str(proj), "--skip-mcp", "--dry-run"], env=env)

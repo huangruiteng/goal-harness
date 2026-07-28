@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test a minimal role-compatible auto-research worker loop."""
+"""Smoke-test that auto-research worker-loop is not a fake metric generator."""
 
 from __future__ import annotations
 
@@ -17,23 +17,24 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.capabilities.auto_research.demo_e2e import _seed_visible_demo_control_plane  # noqa: E402
-from loopx.capabilities.auto_research.legacy_core import (  # noqa: E402
+from loopx.capabilities.auto_research.demo_supervisor import (  # noqa: E402
     build_auto_research_demo_supervisor_plan,
 )
+from loopx.state_projection import state_projection_gap_warning  # noqa: E402
 
 
-GOAL_ID = "loopx-auto-research-knn"
+GOAL_ID = "loopx-auto-research-demo"
 AGENT_IDS = [
-    "codex-product-capability",
-    "codex-side-bypass",
-    "codex-main-control",
-    "codex-value-explorer",
+    "research-curator",
+    "hypothesis-proposer",
+    "research-executor",
+    "evaluator-promoter",
 ]
 LANES = [
-    "codex-product-capability:research-curator:research_curator",
-    "codex-side-bypass:hypothesis-mapper:hypothesis_mapper",
-    "codex-main-control:evidence-runner:evidence_runner",
-    "codex-value-explorer:evidence-verifier:evidence_verifier",
+    "research-curator:research-curator:research_curator",
+    "hypothesis-proposer:hypothesis-proposer:hypothesis_proposer",
+    "research-executor:research-executor:research_executor",
+    "evaluator-promoter:evaluator-promoter:evaluator_promoter",
 ]
 
 
@@ -68,9 +69,31 @@ def main() -> int:
         _visible_control, registry, runtime_root = _seed_visible_demo_control_plane(
             demo_root=temp,
             goal_id=GOAL_ID,
-            objective="Run a role-compatible live worker loop from LoopX queue to public-safe evidence.",
+            objective="Verify worker-loop cannot manufacture auto-research evidence.",
             supervisor=supervisor,
         )
+        state_file = (
+            temp
+            / "visible-control-plane"
+            / ".codex"
+            / "goals"
+            / GOAL_ID
+            / "ACTIVE_GOAL_STATE.md"
+        )
+        state_text = state_file.read_text(encoding="utf-8")
+        assert "Run `loopx check` against the project registry" not in state_text
+        assert (
+            "Goal-level route delegates to role frontier; panes own execution."
+            in state_text
+        )
+        route_only_state = (
+            "## Agent Todo\n\n"
+            "- [x] Complete role-frontier auto-research work.\n\n"
+            "## Next Action\n\n"
+            "- Goal-level route delegates to role frontier; panes own execution.\n"
+        )
+        assert state_projection_gap_warning(route_only_state) is None
+
         workspace = temp / "shared-research-workspace"
         workspace.mkdir()
         env = os.environ.copy()
@@ -93,7 +116,7 @@ def main() -> int:
             "--lane-count",
             str(len(AGENT_IDS)),
             "--max-rounds",
-            "2",
+            "1",
             "--visible-lanes-accepted",
             "--complete-selected-todo",
             "--execute",
@@ -116,28 +139,32 @@ def main() -> int:
         assert payload["ok"] is True, payload
         assert payload["schema_version"] == "auto_research_worker_loop_v0", payload
         assert payload["mode"] == "execute", payload
-        assert payload["executed_turn_count"] == 4, payload
-        assert payload["completed_turn_count"] == 4, payload
-        assert payload["stop_reason"] == "no_runnable_frontier", payload
-        assert payload["selected_actions"] == [
-            "write_research_contract",
-            "propose_hypothesis",
-            "run_dev_eval",
-            "run_holdout_eval",
+        assert payload["max_rounds"] == 1, payload
+        assert payload["turn_count"] == 4, payload
+        assert payload["stop_reason"] == "no_executed_turns", payload
+        assert payload["selected_actions"] == ["write_research_contract"], payload
+
+        manual_turns = [
+            turn for turn in payload["turns"] if turn.get("mode") == "manual_research_required"
+        ]
+        assert [turn["agent_id"] for turn in manual_turns] == ["research-curator"], payload
+        assert [turn["selected_action"] for turn in manual_turns] == [
+            "write_research_contract"
         ], payload
-        evidence_turn = next(
-            turn for turn in payload["turns"] if turn.get("selected_action") == "run_dev_eval"
-        )
-        assert evidence_turn["dev_metric"] == 4.0, evidence_turn
-        assert evidence_turn["appended_count"] == 2, evidence_turn
-        assert evidence_turn["live_evidence_written"] is True, evidence_turn
-        verifier_turn = next(
-            turn for turn in payload["turns"] if turn.get("selected_action") == "run_holdout_eval"
-        )
-        assert verifier_turn["holdout_metric"] == 4.5, verifier_turn
-        assert verifier_turn["best_holdout_metric"] == 4.5, verifier_turn
-        assert verifier_turn["claim_allowed"] is True, verifier_turn
-        assert verifier_turn["appended_count"] == 1, verifier_turn
+        no_action_turns = [turn for turn in payload["turns"] if turn.get("mode") == "no_action"]
+        assert [turn["agent_id"] for turn in no_action_turns] == [
+            "hypothesis-proposer",
+            "research-executor",
+            "evaluator-promoter",
+        ], payload
+        assert no_action_turns[0]["selected_action"] is None, payload
+        assert all(turn["executed"] is False for turn in manual_turns), payload
+        assert all(turn.get("completion_status") is None for turn in manual_turns), payload
+        assert all(turn.get("dev_metric") is None for turn in payload["turns"]), payload
+        assert all(turn.get("holdout_metric") is None for turn in payload["turns"]), payload
+        assert all("demo_iteration" not in turn for turn in payload["turns"]), payload
+        assert payload["executed_turn_count"] == 0, payload
+        assert payload["completed_turn_count"] == 0, payload
         assert_public_safe(payload)
     return 0
 

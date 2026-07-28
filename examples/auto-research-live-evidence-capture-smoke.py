@@ -13,8 +13,8 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-GOAL_ID = "loopx-auto-research-knn"
-AGENT_ID = "codex-side-bypass"
+GOAL_ID = "loopx-auto-research-demo"
+AGENT_ID = "research-executor"
 
 
 def assert_public_safe(payload: Any) -> None:
@@ -65,26 +65,61 @@ def run_cli(
     )
 
 
-def run_eval(pack_dir: Path, split: str) -> dict[str, Any]:
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(pack_dir / "protected_eval.py"),
-            "--solution",
-            str(pack_dir / "solution_candidate.py"),
-            "--split",
-            split,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    payload = json.loads(result.stdout)
-    (pack_dir / f"{split}-result.public.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+def write_demo_contract_and_eval(workspace: Path) -> tuple[Path, Path, Path]:
+    contract_path = workspace / "research-contract.public.json"
+    dev_path = workspace / "dev-result.public.json"
+    holdout_path = workspace / "holdout-result.public.json"
+    contract_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "research_contract_v0",
+                "goal_id": GOAL_ID,
+                "research_objective": "Validate compact visible-lane evidence capture.",
+                "editable_scope": ["candidate_strategy", "todo_handoff"],
+                "protected_scope": ["metric_definition", "holdout_split"],
+                "metric": {
+                    "name": "fixture_quality_score",
+                    "direction": "maximize",
+                    "baseline": 1.0,
+                },
+                "dev_eval": "public fixture evaluator on dev split",
+                "holdout_eval": "public fixture evaluator on holdout split",
+                "promotion_policy": "dev_and_holdout_improved",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
-    return payload
+    for path, split, value in (
+        (dev_path, "dev", 4.0),
+        (holdout_path, "holdout", 4.5),
+    ):
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "auto_research_lightweight_eval_result_v0",
+                    "split": split,
+                    "metric": {
+                        "name": "fixture_quality_score",
+                        "value": value,
+                        "direction": "maximize",
+                        "baseline": 1.0,
+                    },
+                    "eval_status": "scored",
+                    "primary_metric_status": "improved",
+                    "artifact_refs": [f"public_metric:{split}:state_a2a_round"],
+                    "protected_scope_clean": True,
+                    "no_upload": True,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    return contract_path, dev_path, holdout_path
 
 
 def main() -> int:
@@ -99,52 +134,32 @@ def main() -> int:
             encoding="utf-8",
         )
 
-        quickstart = run_cli(
-            [
-                "auto-research",
-                "quickstart",
-                "--goal-id",
-                GOAL_ID,
-                "--agent-id",
-                AGENT_ID,
-                "--output-dir",
-                "auto_research_knn_pack",
-                "--execute",
-            ],
-            registry=registry,
-            runtime_root=runtime_root,
-            cwd=workspace,
-        )
-        pack_dir = workspace / json.loads(quickstart.stdout)["pack_dir"]
-        dev = run_eval(pack_dir, "dev")
-        holdout = run_eval(pack_dir, "holdout")
-        assert dev["metric"]["value"] == 4.0, dev
-        assert holdout["metric"]["value"] == 4.5, holdout
+        contract_path, dev_path, holdout_path = write_demo_contract_and_eval(workspace)
 
         evidence = run_cli(
             [
                 "auto-research",
                 "evidence",
                 "--contract",
-                str(pack_dir / "research_contract.json"),
+                str(contract_path),
                 "--eval-result",
-                str(pack_dir / "dev-result.public.json"),
+                str(dev_path),
                 "--eval-result",
-                str(pack_dir / "holdout-result.public.json"),
+                str(holdout_path),
                 "--hypothesis-id",
-                "hyp_live_lane_partial_selection",
+                "hyp_live_lane_state_a2a_round",
                 "--todo-id",
-                "todo_live_lane_partial_selection",
+                "todo_live_lane_state_a2a_round",
                 "--agent-id",
                 AGENT_ID,
                 "--claimed-by",
                 AGENT_ID,
                 "--mechanism-family",
-                "partial_selection",
+                "state_a2a_iteration",
                 "--hypothesis",
-                "Use exact partial selection to avoid full distance sorting.",
+                "Use a small state-mediated handoff loop to improve the shared candidate.",
                 "--grounding-ref",
-                "visible-lane:public-demo",
+                "fixture:lane_authored_metric",
             ],
             registry=registry,
             runtime_root=runtime_root,
@@ -233,6 +248,68 @@ def main() -> int:
         assert live_payload["lane_evidence"]["holdout_metric"] == 4.5, live_payload
         assert_public_safe(live_payload)
 
+        handoff_packet = json.loads(evidence_path.read_text(encoding="utf-8"))
+        handoff_packet["hypothesis"]["claimed_by"] = "research-curator"
+        handoff_path = workspace / "handoff-evidence.public.json"
+        handoff_path.write_text(
+            json.dumps(handoff_packet, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        wrong_handoff_agent = run_cli(
+            [
+                "auto-research",
+                "capture-live-evidence",
+                "--packet",
+                str(handoff_path),
+                "--append-result",
+                str(append_path),
+                "--agent-id",
+                "research-curator",
+                "--lane-count",
+                "3",
+                "--visible-lanes-accepted",
+                "--execute",
+            ],
+            registry=registry,
+            runtime_root=runtime_root,
+            cwd=workspace,
+            check=False,
+        )
+        assert wrong_handoff_agent.returncode == 1, wrong_handoff_agent.stdout
+        wrong_payload = json.loads(wrong_handoff_agent.stdout)
+        assert "evidence event agent_id" in wrong_payload["error"], wrong_payload
+        assert_public_safe(wrong_payload)
+
+        handoff_live_path = workspace / "handoff-live-codex-e2e-evidence.public.json"
+        handoff_capture = run_cli(
+            [
+                "auto-research",
+                "capture-live-evidence",
+                "--packet",
+                str(handoff_path),
+                "--append-result",
+                str(append_path),
+                "--agent-id",
+                AGENT_ID,
+                "--lane-count",
+                "3",
+                "--visible-lanes-accepted",
+                "--output",
+                str(handoff_live_path),
+                "--execute",
+            ],
+            registry=registry,
+            runtime_root=runtime_root,
+            cwd=workspace,
+        )
+        handoff_live_payload = json.loads(handoff_capture.stdout)
+        assert handoff_live_path.is_file(), handoff_live_payload
+        assert handoff_live_payload["agent_id"] == AGENT_ID, handoff_live_payload
+        assert handoff_live_payload["lane_evidence"]["dev_metric"] == 4.0, handoff_live_payload
+        assert handoff_live_payload["lane_evidence"]["holdout_metric"] == 4.5, handoff_live_payload
+        assert_public_safe(handoff_live_payload)
+
         claimed = run_cli(
             [
                 "auto-research",
@@ -242,6 +319,7 @@ def main() -> int:
                 "--agent-id",
                 AGENT_ID,
                 "--execute",
+                "--headless",
                 "--live-evidence",
                 str(live_path),
             ],
@@ -250,31 +328,19 @@ def main() -> int:
             cwd=workspace,
         )
         claimed_payload = json.loads(claimed.stdout)
-        live = claimed_payload["live_codex_e2e"]
-        claim_summary = claimed_payload["claim_summary"]
-        assert live["executed"] is True, claimed_payload
-        assert live["claim_allowed"] is True, claimed_payload
-        assert live["evidence_source"] == "live_codex_lane_output", claimed_payload
+        proof = claimed_payload["visible_worker_proof"]
+        live = claimed_payload["live_worker_evidence"]
+        assert proof["lane_authored_evidence_loaded"] is True, claimed_payload
+        assert proof["visible_lanes_launched"] is True, claimed_payload
+        assert proof["visible_lanes_accepted"] is True, claimed_payload
+        assert proof["evidence_source"] == "live_worker_evidence", claimed_payload
+        assert live["loaded"] is True, claimed_payload
+        assert live["source"] == "live_codex_lane_output", claimed_payload
         assert live["evidence_event_count"] == 2, claimed_payload
         assert live["dev_metric"] == 4.0, claimed_payload
-        assert live["claim_scope"] == "dev_only", claimed_payload
-        assert live["dev_claim_allowed"] is True, claimed_payload
-        assert live["holdout_claim_allowed"] is False, claimed_payload
-        assert live["promotion_claim_allowed"] is False, claimed_payload
-        assert live["holdout_metric"] is None, claimed_payload
-        assert live["holdout_metric_present"] is True, claimed_payload
-        assert live["holdout_metric_redacted"] is True, claimed_payload
-        assert claim_summary["status"] == "live_worker_dev_evidence_ready", claimed_payload
-        assert claim_summary["claim_basis"] == "live_codex_lane_output", claimed_payload
-        assert claim_summary["live_worker_claim_allowed"] is True, claimed_payload
-        assert claim_summary["live_worker_authored"] is True, claimed_payload
-        assert claim_summary["kernel_precheck_passed"] is True, claimed_payload
-        assert claim_summary["can_claim"] == ["visible_worker_live_dev_evidence_supported"], claimed_payload
-        assert "live_holdout_metric_or_claim" in claim_summary["cannot_claim"], claimed_payload
-        assert "automatic_promotion_success" in claim_summary["cannot_claim"], claimed_payload
-        assert claim_summary["dev_metric"] == 4.0, claimed_payload
-        assert claim_summary["holdout_metric"] is None, claimed_payload
-        assert claim_summary["holdout_metric_redacted"] is True, claimed_payload
+        assert live["holdout_metric"] == 4.5, claimed_payload
+        assert "live_codex_e2e" not in claimed_payload, claimed_payload
+        assert "claim_summary" not in claimed_payload, claimed_payload
         assert_public_safe(claimed_payload)
 
     print("auto-research-live-evidence-capture-smoke ok")

@@ -9,8 +9,13 @@ LoopX learns a new long-running agent behavior:
   derived runtime state names the situation?
 - [State machine](state-machine.md): which transition is legal next, and who
   owns it?
+- [Bounded context layout](bounded-context-layout.md): where control-plane
+  kernel code belongs as it moves out of flat status/projection modules.
 - [Rule seam map](rule-seam-map.md): which runtime rule families should be
   characterized and extracted before moving code?
+- [Smoke failure classification ledger](smoke-failure-classification-ledger.md):
+  which red public smokes are product bugs, stale fixtures, release packaging
+  gaps, or runner ergonomics issues?
 
 The older detailed documents remain the canonical reference for full protocol
 detail:
@@ -25,6 +30,23 @@ runtime code, smokes, and agent instructions share one picture instead of
 rediscovering state from chat history or private planning notes. The rule seam
 map is intentionally behavior-preserving: it names extraction seams and parity
 checks before the refactor branch moves control-plane code.
+
+## Execution Ownership
+
+These graphs describe Kernel state and legal transitions. The surrounding turn
+uses four runtime responsibilities:
+
+| Role | Responsibility |
+| --- | --- |
+| Agent | Plans and performs one bounded action through a host/runtime. |
+| Provider | Returns external observations, effect results, and readback. |
+| Capability | Normalizes provider output, validates it, and proposes a typed transition. |
+| Kernel | Owns durable todo, gate, monitor, accepted writeback, quota, recovery, and scheduling. |
+
+Domain state, evidence, receipts, and projections are exchanged or derived
+artifacts, not additional owners. An extension may deliver a provider, but its
+installation lifecycle does not grant Kernel authority. See the full
+[runtime responsibility model](../../architecture.md#runtime-responsibility-model).
 
 ## Three-Lens Contract
 

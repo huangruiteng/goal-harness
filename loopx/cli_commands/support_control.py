@@ -2,30 +2,33 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+import json
 from pathlib import Path
 
 from ..agent_registry import (
     agent_profile_from_registry,
-    primary_agent_id_from_registry,
     registered_agent_ids_from_registry,
     require_registered_agent_id,
-    side_agent_handoff_agent_id_from_registry,
 )
 from ..heartbeat_prompt import (
     build_heartbeat_prompt,
     build_heartbeat_prompt_error_payload,
     render_heartbeat_prompt_markdown,
 )
+from ..heartbeat_prequota import (
+    render_heartbeat_pre_quota_markdown,
+    run_heartbeat_pre_quota,
+)
+from ..control_plane.scheduler.execution_context import SchedulerRuntimeProfile
 from ..history import load_registry
-from ..paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
+from ..paths import resolve_runtime_root
+from ..presentation.renderers.status_markdown import render_status_markdown
 from ..promotion_gate import build_promotion_gate, render_promotion_gate_markdown
 from ..registry import (
     inspect_registry,
     inspect_registry_boundary,
-    registry_goals,
     render_registry_boundary_markdown,
     render_registry_markdown,
-    resolve_state_file,
 )
 from ..self_update import (
     build_rollback_plan,
@@ -39,7 +42,6 @@ from ..state_backup import (
     execute_state_backup_plan,
     render_state_backup_markdown,
 )
-from ..status import render_status_markdown
 from ..status_server import (
     DEFAULT_STATUS_HOST,
     DEFAULT_STATUS_PATH,
@@ -47,6 +49,16 @@ from ..status_server import (
     serve_status,
 )
 from ..upgrade import build_upgrade_plan, render_upgrade_plan_markdown
+from .support_control_registry import (
+    default_public_scan_root,
+    explicit_global_registry,
+    resolve_heartbeat_active_state,
+)
+from .support_control_supervisor import (
+    SUPERVISOR_CONTROL_COMMANDS,
+    handle_supervisor_control_command,
+    register_supervisor_control_commands,
+)
 
 
 PrintPayload = Callable[
@@ -58,6 +70,7 @@ AddFormat = Callable[[argparse.ArgumentParser], None]
 
 SUPPORT_CONTROL_COMMANDS = {
     "backup-state",
+    "heartbeat-prequota",
     "heartbeat-prompt",
     "promotion-gate",
     "upgrade-plan",
@@ -65,61 +78,7 @@ SUPPORT_CONTROL_COMMANDS = {
     "registry",
     "registry-boundary",
     "serve-status",
-}
-
-
-def default_public_scan_root() -> str:
-    return str(Path(__file__).resolve().parents[2])
-
-
-def fallback_global_registry(registry_path: Path, runtime_root_arg: str | None) -> Path:
-    if registry_path.exists():
-        return registry_path
-    runtime_root = Path(runtime_root_arg).expanduser() if runtime_root_arg else DEFAULT_RUNTIME_ROOT
-    fallback_registry = global_registry_path(runtime_root)
-    return fallback_registry if fallback_registry.exists() else registry_path
-
-
-def explicit_global_registry(runtime_root_arg: str | None) -> Path:
-    runtime_root = Path(runtime_root_arg).expanduser() if runtime_root_arg else DEFAULT_RUNTIME_ROOT
-    return global_registry_path(runtime_root)
-
-
-def resolve_heartbeat_active_state(
-    *,
-    goal_id: str,
-    active_state_arg: str | None,
-    registry_path: Path,
-    runtime_root_arg: str | None,
-    allow_global_goal_lookup_fallback: bool = True,
-) -> tuple[Path | None, Path | None, str]:
-    if active_state_arg:
-        active_state = Path(active_state_arg).expanduser()
-        return active_state, active_state, "explicit"
-
-    resolved_registry = fallback_global_registry(registry_path, runtime_root_arg)
-    registry = load_registry(resolved_registry)
-    goal = next((item for item in registry_goals(registry) if item.get("id") == goal_id), None)
-    if goal is None and allow_global_goal_lookup_fallback:
-        global_registry = explicit_global_registry(runtime_root_arg)
-        if global_registry != resolved_registry and global_registry.exists():
-            global_payload = load_registry(global_registry)
-            global_goal = next((item for item in registry_goals(global_payload) if item.get("id") == goal_id), None)
-            if global_goal is not None:
-                resolved_registry = global_registry
-                registry = global_payload
-                goal = global_goal
-    if goal is None:
-        raise ValueError(f"goal_id not found in registry for heartbeat active-state lookup: {goal_id}")
-    repo_text = str(goal.get("repo") or "")
-    if not repo_text:
-        raise ValueError(f"{goal_id}: registry goal has no repo for active-state lookup")
-    state_file = resolve_state_file(Path(repo_text).expanduser(), goal.get("state_file"))
-    if state_file is None:
-        raise ValueError(f"{goal_id}: registry goal has no state_file for active-state lookup")
-    if not state_file.exists():
-        raise FileNotFoundError(f"{goal_id}: registry-declared active state file does not exist: {state_file}")
-    return None, state_file, f"registry:{resolved_registry}"
+} | SUPERVISOR_CONTROL_COMMANDS
 
 
 def register_support_control_commands(
@@ -134,7 +93,11 @@ def register_support_control_commands(
     backup_state_parser.add_argument(
         "--project",
         default=".",
-        help="Project root whose .loopx, .codex/goals, and .local/goals state should be included.",
+        help=(
+            "Current project root whose .loopx, .codex/goals, .claude/goals, and "
+            ".local/goals state is included alongside every project discovered from "
+            "the global registry."
+        ),
     )
     backup_state_parser.add_argument(
         "--output-dir",
@@ -155,6 +118,11 @@ def register_support_control_commands(
         help="Exclude $CODEX_HOME/skills/loopx-* skill directories from the backup.",
     )
     backup_state_parser.add_argument(
+        "--current-project-only",
+        action="store_true",
+        help="Do not discover additional project state from the global registry.",
+    )
+    backup_state_parser.add_argument(
         "--execute",
         action="store_true",
         help="Write the backup archive and manifest. Omit for a dry-run plan.",
@@ -162,7 +130,7 @@ def register_support_control_commands(
 
     heartbeat_prompt_parser = subparsers.add_parser(
         "heartbeat-prompt",
-        help="Generate a guarded Codex App heartbeat automation task body.",
+        help="Generate a guarded heartbeat or visible-goal host-loop task body.",
     )
     add_subcommand_format(heartbeat_prompt_parser)
     heartbeat_prompt_parser.add_argument("--goal-id", required=True, help="Stable LoopX goal id.")
@@ -193,7 +161,56 @@ def register_support_control_commands(
         action="append",
         help="Optional natural-language scope for this automation agent. Repeat for multiple scope lines.",
     )
+    heartbeat_prompt_parser.add_argument(
+        "--available-capability",
+        dest="available_capabilities",
+        action="append",
+        help=(
+            "Declare a capability available in this host loop, such as network or "
+            "external_evidence_poll. Repeat for multiple capabilities; generated "
+            "quota guard and spend commands preserve the declaration."
+        ),
+    )
+    heartbeat_prompt_parser.add_argument(
+        "--runtime-profile",
+        choices=[profile.value for profile in SchedulerRuntimeProfile],
+        help=(
+            "Embed one explicit scheduler runtime profile in the generated quota "
+            "guard. Cannot be combined with the explicit scheduler context fields."
+        ),
+    )
+    heartbeat_prompt_parser.add_argument(
+        "--codex-app",
+        action="store_true",
+        help=(
+            "Compact explicit alias for --runtime-profile "
+            "codex_app_heartbeat in generated heartbeat commands."
+        ),
+    )
+    heartbeat_prompt_parser.add_argument(
+        "-H",
+        "--host-surface",
+        choices=["codex_app", "codex_app_ssh", "codex_cli", "generic_cli", "claude_code", "local_scheduler"],
+        help="Host surface embedded in the generated quota guard.",
+    )
+    heartbeat_prompt_parser.add_argument(
+        "-O",
+        "--scheduler-owner",
+        choices=["host_automation", "agent_cli_loop", "outer_controller", "none"],
+        help="Cadence owner embedded in the generated quota guard.",
+    )
+    heartbeat_prompt_parser.add_argument(
+        "-M",
+        "--execution-mode",
+        choices=["interactive", "isolated_headless", "hosted_automation"],
+        help="Execution mode embedded in the generated quota guard.",
+    )
     heartbeat_style_group = heartbeat_prompt_parser.add_mutually_exclusive_group()
+    heartbeat_style_group.add_argument(
+        "--full",
+        action="store_true",
+        help="Generate the expanded audit body. The default installed heartbeat body is thin.",
+    )
     heartbeat_style_group.add_argument(
         "--compact",
         action="store_true",
@@ -209,6 +226,35 @@ def register_support_control_commands(
         action="store_true",
         help="Generate the thinnest generic dispatcher body for trusted agents that inspect LoopX state themselves.",
     )
+
+    heartbeat_prequota_parser = subparsers.add_parser(
+        "heartbeat-prequota",
+        help=(
+            "Run best-effort kernel reconciliation hooks before heartbeat quota "
+            "selection without spending quota."
+        ),
+    )
+    add_subcommand_format(heartbeat_prequota_parser)
+    heartbeat_prequota_parser.add_argument(
+        "-g",
+        "--goal-id",
+        required=True,
+        help="Stable LoopX goal id.",
+    )
+    heartbeat_prequota_parser.add_argument(
+        "-a",
+        "--agent-id",
+        required=True,
+        help="Registered heartbeat lifecycle actor.",
+    )
+    heartbeat_prequota_parser.add_argument(
+        "--fetch-timeout-seconds",
+        type=int,
+        default=10,
+        help="Timeout for each bounded compact external metadata fetch.",
+    )
+
+    register_supervisor_control_commands(subparsers, add_subcommand_format)
 
     promotion_gate_parser = subparsers.add_parser(
         "promotion-gate",
@@ -268,6 +314,13 @@ def register_support_control_commands(
     update_parser.add_argument(
         "--archive-url",
         help="Explicit tarball URL passed to the installer as LOOPX_ARCHIVE_URL.",
+    )
+    update_parser.add_argument(
+        "--installed-doctor-json",
+        help=(
+            "Local JSON output from the installed `loopx --format json doctor`; "
+            "valid only with --check for source-versus-installed qualification."
+        ),
     )
     update_parser.add_argument(
         "--timeout-seconds",
@@ -353,6 +406,7 @@ def handle_support_control_command(
                 backup_id=args.backup_id,
                 include_automations=not bool(args.no_automations),
                 include_skills=not bool(args.no_skills),
+                include_registry_projects=not bool(args.current_project_only),
             )
             if args.execute:
                 payload = execute_state_backup_plan(payload)
@@ -369,27 +423,46 @@ def handle_support_control_command(
         print_payload(payload, output_format(args), render_state_backup_markdown)
         return 0 if payload.get("ok") else 1
 
+    if args.command == "heartbeat-prequota":
+        prequota_registry = (
+            registry_path
+            if registry_was_supplied
+            else explicit_global_registry(args.runtime_root)
+        )
+        payload = run_heartbeat_pre_quota(
+            registry_path=prequota_registry,
+            runtime_root_arg=args.runtime_root,
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+            fetch_timeout_seconds=args.fetch_timeout_seconds,
+        )
+        print_payload(
+            payload,
+            output_format(args),
+            render_heartbeat_pre_quota_markdown,
+        )
+        return 0
+
     if args.command == "heartbeat-prompt":
         active_state = None
         resolved_active_state = None
         active_state_source = None
         registered_agents = None
-        primary_agent = None
-        side_agent_handoff_agent = None
         effective_agent_id = args.agent_id
         try:
-            active_state, resolved_active_state, active_state_source = resolve_heartbeat_active_state(
-                goal_id=args.goal_id,
-                active_state_arg=args.active_state,
-                registry_path=registry_path,
-                runtime_root_arg=args.runtime_root,
-                allow_global_goal_lookup_fallback=not registry_was_supplied,
+            active_state, resolved_active_state, active_state_source = (
+                resolve_heartbeat_active_state(
+                    goal_id=args.goal_id,
+                    active_state_arg=args.active_state,
+                    registry_path=registry_path,
+                    runtime_root_arg=args.runtime_root,
+                    allow_global_goal_lookup_fallback=not registry_was_supplied,
+                )
             )
             agent_registry_path = registry_path
             if active_state_source.startswith("registry:"):
                 agent_registry_path = Path(active_state_source.removeprefix("registry:"))
             registered_agents = registered_agent_ids_from_registry(agent_registry_path, args.goal_id)
-            primary_agent = primary_agent_id_from_registry(agent_registry_path, args.goal_id)
             agent_profile = None
             if args.agent_id:
                 effective_agent_id = require_registered_agent_id(
@@ -399,10 +472,27 @@ def handle_support_control_command(
                     field="agent_id",
                 )
                 agent_profile = agent_profile_from_registry(agent_registry_path, args.goal_id, effective_agent_id)
-            side_agent_handoff_agent = side_agent_handoff_agent_id_from_registry(
-                agent_registry_path,
-                args.goal_id,
-                agent_id=effective_agent_id,
+            explicit_scheduler_fields = (
+                args.host_surface,
+                args.scheduler_owner,
+                args.execution_mode,
+            )
+            if args.codex_app and (
+                args.runtime_profile or any(explicit_scheduler_fields)
+            ):
+                raise ValueError(
+                    "--codex-app cannot be combined with --runtime-profile, "
+                    "--host-surface, --scheduler-owner, or --execution-mode"
+                )
+            if args.runtime_profile and any(explicit_scheduler_fields):
+                raise ValueError(
+                    "--runtime-profile cannot be combined with --host-surface, "
+                    "--scheduler-owner, or --execution-mode"
+                )
+            runtime_profile = (
+                SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT.value
+                if args.codex_app
+                else args.runtime_profile
             )
             payload = build_heartbeat_prompt(
                 goal_id=args.goal_id,
@@ -411,6 +501,7 @@ def handle_support_control_command(
                 resolved_active_state=resolved_active_state,
                 material_queue_rule=args.material_rule,
                 permission_rule=args.permission_rule,
+                full=bool(args.full),
                 compact=bool(args.compact),
                 brief=bool(args.brief),
                 thin=bool(args.thin),
@@ -419,8 +510,17 @@ def handle_support_control_command(
                 agent_scopes=args.agent_scopes,
                 agent_profile=agent_profile,
                 registered_agents=registered_agents,
-                primary_agent=primary_agent,
-                side_agent_handoff_agent=side_agent_handoff_agent,
+                available_capabilities=args.available_capabilities,
+                runtime_profile=runtime_profile,
+                scheduler_execution_context=(
+                    {
+                        "host_surface": args.host_surface,
+                        "scheduler_owner": args.scheduler_owner,
+                        "execution_mode": args.execution_mode,
+                    }
+                    if any(explicit_scheduler_fields)
+                    else None
+                ),
             )
         except Exception as exc:
             fallback_active_state = active_state
@@ -440,6 +540,7 @@ def handle_support_control_command(
                 resolved_active_state=fallback_resolved_active_state,
                 material_queue_rule=args.material_rule,
                 permission_rule=args.permission_rule,
+                full=bool(args.full),
                 compact=bool(args.compact),
                 brief=bool(args.brief),
                 thin=bool(args.thin),
@@ -447,11 +548,20 @@ def handle_support_control_command(
                 agent_id=effective_agent_id or args.agent_id,
                 agent_scopes=args.agent_scopes,
                 registered_agents=registered_agents,
-                primary_agent=primary_agent,
-                side_agent_handoff_agent=side_agent_handoff_agent,
+                available_capabilities=args.available_capabilities,
             )
         print_payload(payload, output_format(args), render_heartbeat_prompt_markdown)
         return 0 if payload.get("ok") else 1
+
+    supervisor_result = handle_supervisor_control_command(
+        args,
+        registry_path=registry_path,
+        registry_was_supplied=registry_was_supplied,
+        print_payload=print_payload,
+        output_format=output_format,
+    )
+    if supervisor_result is not None:
+        return supervisor_result
 
     if args.command == "promotion-gate":
         try:
@@ -513,16 +623,29 @@ def handle_support_control_command(
 
     if args.command == "update":
         try:
+            if args.installed_doctor_json and not args.check:
+                raise ValueError("--installed-doctor-json requires update --check")
             if args.rollback:
                 payload = build_rollback_plan(release_id=args.rollback)
                 payload = execute_rollback_plan(payload, timeout_seconds=args.timeout_seconds)
             else:
+                doctor_payload = None
+                if args.installed_doctor_json:
+                    doctor_path = Path(args.installed_doctor_json).expanduser()
+                    loaded_doctor = json.loads(doctor_path.read_text(encoding="utf-8"))
+                    if not isinstance(loaded_doctor, dict):
+                        raise ValueError("--installed-doctor-json must contain a JSON object")
+                    doctor_payload = loaded_doctor
                 payload = build_update_plan(
                     repo=args.repo,
                     ref=args.ref,
                     archive_url=args.archive_url,
                     check_only=args.check,
                     execute=args.execute,
+                    doctor_payload=doctor_payload,
+                )
+                payload["installed_doctor_source"] = (
+                    "explicit_json" if doctor_payload is not None else "current_runtime"
                 )
                 if args.execute:
                     payload = execute_update_plan(payload, timeout_seconds=args.timeout_seconds)

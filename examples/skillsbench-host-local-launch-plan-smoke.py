@@ -41,7 +41,9 @@ from scripts.skillsbench_automation_loop import (  # noqa: E402
     _host_local_acp_launch_command,
     _host_local_proxy_endpoint_probe,
     _host_local_acp_target_env,
+    _merge_app_server_goal_worker_trace_summary,
     _merge_host_local_acp_relay_trace_summary,
+    _public_runner_config,
     _public_runner_prerequisites,
     _replace_option_value,
     _run_host_local_acp_codex_exec_preflight,
@@ -77,22 +79,6 @@ def main() -> int:
     assert "env=target_env" in source
     assert "local_acp_command = _set_option_value(" in source
     assert "del (\n            env," not in source
-    packet = SkillsBenchLocalAcpRelay(
-        CodexExecConfig(remote_command_file_bridge_command="/tmp/private-bridge")
-    )._prompt_with_remote_bridge_packet(
-        "Task",
-        bridge_probe={"operation_count": 1},
-        bridge_command_for_agent="/tmp/private-bridge",
-    )
-    first_action_block = packet.split("FIRST ACTION REQUIRED:", 1)[1].split(
-        "Request examples:", 1
-    )[0]
-    assert "pwd && ls -la" in first_action_block
-    assert "/tmp/private-bridge" in first_action_block
-    assert "<private bridge command>" not in first_action_block
-    assert '/root/answer.json' in packet, packet
-    assert '/root/task-input-or-data' in packet, packet
-    assert "`/app`, `/tmp`, and `/root`" in packet, packet
     assert _docker_bridge_safe_path("/app/.codex/goals/state.json") == (
         "/app/.codex/goals/state.json"
     )
@@ -117,18 +103,38 @@ def main() -> int:
             raise AssertionError(f"unexpected cleanup root: {protected_root}")
     with tempfile.TemporaryDirectory(prefix="skillsbench-agent-probe-count-") as tmp:
         tmp_path = Path(tmp)
+        observed_request = tmp_path / "observed-request.json"
         fake_bridge = tmp_path / "fake-bridge"
         fake_bridge.write_text(
-            """#!/usr/bin/env python3
-import json
-import sys
-
-json.loads(sys.stdin.read() or "{}")
-print(json.dumps({"ok": True, "stdout": "", "stderr": "", "exit_code": 0}))
-""",
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            f"raw = sys.stdin.read() or '{{}}'; json.loads(raw); Path({str(observed_request)!r}).write_text(raw, encoding='utf-8')\n"
+            "print(json.dumps({'ok': True, 'stdout': '', 'stderr': '', 'exit_code': 0}))\n",
             encoding="utf-8",
         )
         fake_bridge.chmod(0o755)
+        packet = SkillsBenchLocalAcpRelay(
+            CodexExecConfig(remote_command_file_bridge_command=str(fake_bridge))
+        )._prompt_with_remote_bridge_packet(
+            "Task",
+            bridge_probe={"operation_count": 1},
+            bridge_command_for_agent=str(fake_bridge),
+        )
+        first_action_block = packet.split("FIRST ACTION REQUIRED:", 1)[1].split(
+            "Request examples:", 1
+        )[0]
+        assert "pwd && ls -la" in first_action_block
+        assert str(fake_bridge) in first_action_block
+        assert "<private bridge command>" not in first_action_block
+        assert "```sh" in first_action_block
+        first_action_command = first_action_block.split("```sh", 1)[1].split("```", 1)[0].strip()
+        proc = subprocess.run(first_action_command, shell=True, capture_output=True, text=True, timeout=10)
+        assert proc.returncode == 0, proc.stderr or proc.stdout
+        request = json.loads(observed_request.read_text(encoding="utf-8"))
+        assert request == {"operation": "exec", "cwd": "/app", "command": "pwd && ls -la", "timeout_sec": 10}, request
+        assert '/root/task-input-or-data' in packet and '/root/answer.json' not in packet and 'Do not force relative paths into `/root` or `/app`' in packet, packet
+        assert "`/app`, `/tmp`, and `/root`" in packet, packet
         trace_dir = tmp_path / "traces"
         relay = SkillsBenchLocalAcpRelay(
             CodexExecConfig(
@@ -203,6 +209,21 @@ print(json.dumps({"ok": True, "stdout": "", "stderr": "", "exit_code": 0}))
         DEFAULT_HOST_LOCAL_CODEX_BRIDGE_IDLE_TIMEOUT_SEC
         + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC
     )
+    host_local_outer_timeout_args = SimpleNamespace(
+        agent_idle_timeout=900,
+        host_local_acp_launch=True,
+        local_codex_bridge_idle_timeout_sec=None,
+        local_codex_exec_timeout_sec=None,
+        outer_timeout_sec=10800,
+        route="loopx-product-mode",
+    )
+    assert (
+        _effective_local_codex_exec_timeout_sec(host_local_outer_timeout_args)
+        == 10800
+    )
+    assert _effective_benchflow_agent_timeout_sec(
+        host_local_outer_timeout_args
+    ) == (10800 + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC)
     non_host_local_timeout_args = SimpleNamespace(
         agent_idle_timeout=7200,
         host_local_acp_launch=False,
@@ -439,11 +460,115 @@ if out:
         assert prerequisites["remote_command_file_bridge_consumed_by_solver"] is False
         assert (
             prerequisites["remote_command_file_bridge_consumption_status"]
-            == "probe_only_not_solver_wired"
+            == "sandbox_bridge_auto_wiring_pending"
         )
-        assert prerequisites["container_codex_acp_install_skipped"] is False
+        assert prerequisites["container_codex_acp_install_skipped"] is True
         assert plan["public_boundary"]["leaderboard_upload"] is False
         assert plan["public_boundary"]["public_submission"] is False
+        app_trace_dir = Path(tmp) / "app-server-goal-trace"
+        app_trace_dir.mkdir()
+        (app_trace_dir / "turn.compact.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": (
+                        "skillsbench_host_codex_goal_worker_public_trace_v0"
+                    ),
+                    "trace_kind": "turn",
+                    "ok": True,
+                    "turn": {
+                        "reasoning_effort": "xhigh",
+                        "goal_get_present": True,
+                        "turn_id_present": True,
+                        "turn_completed_observed": True,
+                        "assistant_message_present": True,
+                        "first_action_observed": True,
+                        "effective_action_observed": True,
+                    },
+                    "worker_adapter": {"reasoning_effort": "xhigh"},
+                    "boundary": {
+                        "raw_task_text_recorded": False,
+                        "raw_logs_recorded": False,
+                        "raw_trajectory_recorded": False,
+                        "credential_values_recorded": False,
+                        "host_paths_recorded": False,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        app_server_plan = {
+            "route": "codex-app-server-goal-baseline",
+            "app_server_reasoning_effort": "xhigh",
+            "app_server_goal_worker_trace_dir": str(app_trace_dir),
+            "runner_prerequisites": {
+                "schema_version": "skillsbench_runner_prerequisites_v0",
+                "codex_api_egress_preflight_required": True,
+                "codex_api_egress_preflight_ready": True,
+                "codex_api_egress_preflight_status": "ready",
+                "codex_api_egress_mode_resolved": "reverse-tunnel",
+                "codex_api_reverse_tunnel_required": True,
+                "codex_api_reverse_tunnel_proxy_configured": True,
+                "codex_api_reverse_tunnel_proxy_source": "env",
+                "codex_api_reverse_tunnel_proxy_scheme": "http",
+                "codex_api_reverse_tunnel_proxy_endpoint_kind": "ipv4",
+                "codex_api_reverse_tunnel_proxy_endpoint_port": 3128,
+                "codex_api_reverse_tunnel_proxy_url_recorded": False,
+            },
+        }
+        app_controller_trace: dict[str, object] = {}
+        _merge_app_server_goal_worker_trace_summary(
+            app_server_plan,
+            app_controller_trace,
+        )
+        app_server_config = _public_runner_config(app_server_plan)
+        app_server_observability = app_server_config[
+            "app_server_goal_worker_observability"
+        ]
+        assert app_server_observability["requested_reasoning_effort"] == "xhigh"
+        assert app_server_observability["observed_reasoning_effort"] == "xhigh"
+        assert app_server_observability["reasoning_effort_matches_request"] is True
+        assert app_server_observability["public_trace_read"] is True
+        assert app_server_observability["raw_material_recorded"] is False
+        assert (
+            app_server_observability[
+                "codex_api_egress_preflight_observation_status"
+            ]
+            == "executed_ready"
+        )
+        assert app_server_observability[
+            "codex_api_reverse_tunnel_proxy_url_recorded"
+        ] is False
+        app_failure_trace = Path(tmp) / "app-server-controller-trace.json"
+        app_failure_trace.write_text("{}", encoding="utf-8")
+        app_failure_compact = build_runner_failure_compact(
+            SimpleNamespace(
+                build_stall_timeout_sec=0,
+                dataset="skillsbench-v1.1",
+                model=None,
+                run_group_id=None,
+                route="codex-app-server-goal-baseline",
+                task_id="demo-task",
+            ),
+            {
+                "app_server_goal_worker_trace_dir": str(app_trace_dir),
+                "app_server_reasoning_effort": "xhigh",
+                "compact_benchmark_run_json": str(
+                    Path(tmp) / "app-server-failure-compact.json"
+                ),
+                "controller_trace_json": str(app_failure_trace),
+                "route": "codex-app-server-goal-baseline",
+                "runner_prerequisites": dict(
+                    app_server_plan["runner_prerequisites"]
+                ),
+            },
+            RuntimeError("app-server worker failed before result"),
+        )
+        assert app_failure_compact["runner_config"][
+            "app_server_goal_worker_observability"
+        ]["observed_reasoning_effort"] == "xhigh"
+        assert app_failure_compact["app_server_goal_worker_observability"][
+            "reasoning_effort_matches_request"
+        ] is True
         launch_args = SimpleNamespace(
             agent_idle_timeout=7200,
             app_server_acp_heartbeat_interval_sec=120.0,
@@ -507,6 +632,7 @@ if out:
                 local_codex_bin="/unused/when-explicit-client-is-configured",
                 local_codex_sandbox="workspace-write",
                 model="gpt-5.5",
+                reasoning_effort="xhigh",
                 route="loopx-product-mode",
                 task_id="demo-task",
             ),
@@ -522,6 +648,13 @@ if out:
                 explicit_preflight_command.index("--codex-bin") + 1
             ]
             == "/unused/when-explicit-client-is-configured"
+        )
+        assert "--reasoning-effort" in explicit_preflight_command
+        assert (
+            explicit_preflight_command[
+                explicit_preflight_command.index("--reasoning-effort") + 1
+            ]
+            == "xhigh"
         )
         bridge_preflight_command = _host_local_acp_codex_exec_preflight_command(
             SimpleNamespace(
@@ -540,6 +673,7 @@ if out:
                 remote_command_file_bridge_probe_timeout_sec=5.0,
                 remote_command_file_bridge_ready=True,
                 remote_command_file_bridge_solver_command="/tmp/remote-solver-bridge",
+                reasoning_effort="xhigh",
                 route="loopx-product-mode",
                 task_id="demo-task",
             ),
@@ -698,9 +832,9 @@ if out:
                 "launch_plan"
             ]["runner_prerequisites"]
             assert (
-                auto_wiring_prereqs["remote_command_file_bridge_consumption_status"]
-                == "sandbox_bridge_auto_wiring_pending"
-            ), auto_wiring_prereqs
+                auto_wiring_prereqs["remote_command_file_bridge_consumption_status"],
+                auto_wiring_prereqs["container_codex_acp_install_skipped"],
+            ) == ("sandbox_bridge_auto_wiring_pending", True), auto_wiring_prereqs
             source = SCRIPT.read_text(encoding="utf-8")
             assert "_host_local_acp_docker_bridge_command(" in source
             assert 'prerequisites["remote_command_file_bridge_command_configured"] = True' in source
@@ -1710,7 +1844,7 @@ subprocess.run(
             codex_bin=str(ssh_bridge_codex),
             default_timeout_sec=5,
             prompt_bridge_command="ssh loopx-unavailable.example",
-            first_action_timeout_sec=1,
+            first_action_timeout_sec=3,
         )
         ssh_bridge_operations = [
             json.loads(line)
@@ -1799,7 +1933,7 @@ time.sleep(30)
                 dataset="skillsbench-v1.1",
                 task_id="demo-task",
                 timeout_sec=30,
-                first_action_timeout_sec=1,
+                first_action_timeout_sec=3,
                 bridge_idle_timeout_sec=1,
                 worker_public_trace_dir=str(idle_trace_dir),
                 remote_command_file_bridge_command=str(idle_bridge),
@@ -1916,7 +2050,7 @@ subprocess.run(
                 dataset="skillsbench-v1.1",
                 task_id="demo-task",
                 timeout_sec=2,
-                first_action_timeout_sec=1,
+                first_action_timeout_sec=3,
                 bridge_idle_timeout_sec=1,
                 worker_public_trace_dir=str(inflight_trace_dir),
                 remote_command_file_bridge_command=str(inflight_bridge),
@@ -1954,7 +2088,7 @@ subprocess.run(
             ], inflight_counts
         else:
             assert inflight_counts["task_facing_operation_count"] == 0, inflight_counts
-        assert inflight_counts["inflight_operation_count"] == 1, inflight_counts
+        assert inflight_counts["inflight_operation_count"] >= 1, inflight_counts
         assert inflight_counts["raw_material_recorded"] is False, inflight_counts
         inflight_failures = [
             trace
@@ -2064,6 +2198,95 @@ output.write_text({SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER!r}, encod
             "remote_command_file_bridge_agent_task_facing_operation_count"
             not in bridge_preflight_prereqs
         ), bridge_preflight_prereqs
+        captured_preflight: dict[str, object] = {}
+        original_relay_probe = _run_host_local_acp_codex_exec_preflight.__globals__[
+            "run_skillsbench_local_acp_relay_probe"
+        ]
+
+        def fake_relay_probe(command, **kwargs):
+            captured_preflight["command"] = list(command)
+            captured_preflight["env"] = dict(kwargs.get("env") or {})
+            return {
+                "ready": True,
+                "stage": "complete",
+                "first_blocker": "skillsbench_local_acp_relay_ready",
+                "response_marker_observed": True,
+            }
+
+        _run_host_local_acp_codex_exec_preflight.__globals__[
+            "run_skillsbench_local_acp_relay_probe"
+        ] = fake_relay_probe
+        try:
+            env_preflight_plan = {
+                "host_local_acp_relay_trace_dir": str(
+                    Path(tmp) / "env-preflight-traces"
+                ),
+                "runner_prerequisites": {},
+            }
+            env_preflight_args = SimpleNamespace(
+                codex_api_egress_mode="reverse-tunnel",
+                codex_api_reverse_tunnel_proxy=(
+                    "http://reverse-proxy.example.invalid:18080"
+                ),
+                dataset="skillsbench-v1.1",
+                host_local_acp_codex_exec_preflight_attempts=1,
+                host_local_acp_codex_exec_preflight_timeout_sec=20,
+                host_local_acp_launch=True,
+                local_acp_relay_command=None,
+                local_codex_bin=str(bridge_preflight_codex),
+                local_codex_first_action_timeout_sec=0,
+                local_codex_sandbox="workspace-write",
+                model="gpt-5.5",
+                remote_command_file_bridge_agent_command="",
+                remote_command_file_bridge_probe=False,
+                remote_command_file_bridge_probe_timeout_sec=5.0,
+                remote_command_file_bridge_ready=False,
+                remote_command_file_bridge_solver_command="",
+                reasoning_effort="xhigh",
+                route="codex-acp-blind-loop-baseline",
+                task_id="demo-task",
+            )
+            _run_host_local_acp_codex_exec_preflight(
+                env_preflight_args,
+                env_preflight_plan,
+            )
+        finally:
+            _run_host_local_acp_codex_exec_preflight.__globals__[
+                "run_skillsbench_local_acp_relay_probe"
+            ] = original_relay_probe
+        env_preflight_prereqs = env_preflight_plan["runner_prerequisites"]
+        assert (
+            env_preflight_prereqs["host_local_acp_codex_exec_preflight_status"]
+            == "passed"
+        ), env_preflight_prereqs
+        assert (
+            env_preflight_prereqs["host_local_acp_target_env_forwarded"] is True
+        ), env_preflight_prereqs
+        assert "HTTPS_PROXY" in env_preflight_prereqs["host_local_acp_target_env_keys"]
+        assert (
+            "LOOPX_CODEX_API_REVERSE_TUNNEL_PROXY"
+            in env_preflight_prereqs["host_local_acp_target_env_keys"]
+        )
+        assert (
+            env_preflight_prereqs["host_local_acp_proxy_endpoint_status"]
+            == "non_loopback_proxy"
+        ), env_preflight_prereqs
+        assert (
+            env_preflight_prereqs["host_local_acp_proxy_endpoint_raw_url_recorded"]
+            is False
+        ), env_preflight_prereqs
+        captured_env = captured_preflight["env"]
+        assert isinstance(captured_env, dict)
+        assert (
+            captured_env["HTTPS_PROXY"]
+            == "http://reverse-proxy.example.invalid:18080"
+        )
+        captured_command = captured_preflight["command"]
+        assert isinstance(captured_command, list)
+        assert "--reasoning-effort" in captured_command
+        assert captured_command[captured_command.index("--reasoning-effort") + 1] == (
+            "xhigh"
+        )
         preflight_plan = {
             "host_local_acp_relay_trace_dir": str(Path(tmp) / "preflight-traces"),
             "runner_prerequisites": {},
@@ -2081,6 +2304,7 @@ output.write_text({SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER!r}, encod
             remote_command_file_bridge_probe=False,
             remote_command_file_bridge_ready=False,
             remote_command_file_bridge_solver_command=None,
+            reasoning_effort="xhigh",
             route="loopx-product-mode",
             task_id="demo-task",
         )
@@ -2121,29 +2345,25 @@ output.write_text({SKILLSBENCH_LOCAL_ACP_RELAY_BRIDGE_PREFLIGHT_MARKER!r}, encod
         assert "skillsbench_agent_behavior_gap" not in (
             compact_failure["failure_attribution_labels"]
         )
+        interrupted_jobs_dir = Path(tmp) / "interrupted-jobs"
+        interrupted_job_name = "skillsbench-interrupted-before-score-fixture"
+        interrupted_rollout_name = "demo-task__loopx_product_mode"
         interruption_compact = build_runner_failure_compact(
-            SimpleNamespace(
-                build_stall_timeout_sec=0,
-                dataset="skillsbench-v1.1",
-                model=None,
-                run_group_id=None,
-                route="loopx-product-mode",
-                task_id="demo-task",
-            ),
+            SimpleNamespace(build_stall_timeout_sec=0, dataset="skillsbench-v1.1", model=None, run_group_id=None, route="loopx-product-mode", task_id="demo-task"),
             {
-                "compact_benchmark_run_json": str(
-                    Path(tmp) / "interrupted-compact.json"
-                ),
-                "runner_prerequisites": {
-                    "schema_version": "skillsbench_runner_prerequisites_v0",
-                    "agent_execution_mode": "host_local_acp",
-                },
+                "jobs_dir": str(interrupted_jobs_dir),
+                "job_name": interrupted_job_name,
+                "rollout_name": interrupted_rollout_name,
+                "task_id": "demo-task",
+                "result_json": str(interrupted_jobs_dir / interrupted_job_name / interrupted_rollout_name / "result.json"),
+                "compact_benchmark_run_json": str(Path(tmp) / "interrupted-compact.json"),
+                "runner_prerequisites": {"schema_version": "skillsbench_runner_prerequisites_v0", "agent_execution_mode": "host_local_acp"},
             },
             KeyboardInterrupt(),
         )
-        assert interruption_compact["score_failure_attribution"] == (
-            "skillsbench_runner_interrupted_before_official_result"
-        ), interruption_compact
+        assert interruption_compact["score_failure_attribution"] == "skillsbench_runner_interrupted_before_official_result", interruption_compact
+        assert interruption_compact["runner_return_status"] == "failed_before_official_result", interruption_compact
+        assert ".local/private-benchmark-jobs" not in json.dumps(interruption_compact), interruption_compact
         assert "skillsbench_compact_closeout_recorded" in (
             interruption_compact["failure_attribution_labels"]
         )

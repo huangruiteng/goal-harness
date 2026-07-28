@@ -25,18 +25,76 @@ private evidence migration, production actions, or public first-screen copy.
 | File | Current responsibility | Refactor risk |
 | --- | --- | --- |
 | `loopx/quota.py` | Quota eligibility, work-lane routing, agent-lane selection, monitor-poll writeback, scheduler hints, interaction contracts, spend events, and quota markdown. | Policy, projection, writeback, and rendering rules can start depending on each other by accident. |
-| `loopx/status.py` | Active-state parsing, todo projections, event projection fallback, attention queue, task graph, project assets, status contract, and status markdown. | Read-model construction and display shaping can blur; Markdown parsing remains flexible but weakly typed. |
+| `loopx/status.py` | Compatibility entry points for active-state parsing, todo projections, event projection fallback, attention queue, task graph, project assets, status collection, and status markdown. | Read-model construction now has bounded homes, but Markdown parsing remains flexible and weakly typed. |
+
+## Status/Quota Boundary Checkpoint
+
+The current safe extraction frontier is the shared todo read model. The
+following pure helpers now belong in `loopx/control_plane/todos/projection.py`
+or call through that module:
+
+- todo priority labels, ranks, index values, and sort keys;
+- task text/class, actionable-open checks, deferred checks, and claimed
+  visibility checks;
+- due monitor, schedule-gap, and monitor-expiration checks;
+- claimed-by/unclaimed agent visibility;
+- claim-scope agent ids and monitor writeback support flags;
+- monitor summary item collection;
+- first executable advancement item selection.
+
+This checkpoint should stop the micro-helper loop unless the next candidate is
+also a pure read-model helper and already has cheap parity coverage. The next
+valuable slice is not another one-line wrapper in `quota.py`; it is
+characterization-first extraction of the agent-scoped frontier and user-gate
+read model.
+
+One subtle case is monitor item aggregation across summary lanes. The current
+projection de-duplicates repeated references to the same dict object while
+still allowing the same `todo_id` to appear through different lane projections.
+That behavior should not be justified as legacy compatibility or treated as a
+long-term API. Before changing it, characterize the intended lane-projection
+identity and then migrate to a stable key such as `todo_id` plus projection
+lane/source.
+
+Keep these areas in `quota.py` until the characterization fixture exists:
+
+- agent-scoped user-gate filtering and fallback selection;
+- handoff gate, cleared-successor, deferred-resume, and
+  monitor-blocked-resume selection;
+- work-lane contract assembly and effective-action choice;
+- protocol action packet, scheduler hint, quota spend, monitor-poll, and
+  scheduler-ack write paths.
+
+Those areas mix projection with policy. Moving them without a parity fixture
+can silently change which todo a peer sees, whether a monitor item is due,
+or whether automation reports quiet wait versus required progress.
+
+The next module-boundary PR should therefore:
+
+1. add agent-scope/user-gate/frontier characterization fixtures first,
+   starting with
+   `examples/control_plane/agent-scope-projection-characterization-smoke.py`;
+2. extract the first read-only agent-scope module under
+   `loopx/control_plane/agents/agent_scope.py` only after parity is pinned;
+3. keep `quota.py` as the policy/orchestration layer until the new module is
+   covered by the focused smoke profile;
+4. split `agent_scope.py` further by user-gate, frontier, and hint projections
+   only after the current seam stays green through the focused profile;
+5. validate with the shared todo-projection helper smoke, the status/quota
+   review-packet parity smoke, and the `core-control-plane` smoke profile.
 
 ## Quota Rule Families
 
 | Family | Current anchors | Target seam | Extraction guard |
 | --- | --- | --- | --- |
 | Work-lane policy | `_work_lane_contract` | Pure policy module that chooses lane, obligation, monitor policy, and reason codes from compact status inputs. | Parity snapshot for advancement, due monitor, external evidence, and quiet skip cases. |
-| Capability and boundary gates | `_capability_gate`, `_side_agent_workspace_guard`, `_automation_prompt_upgrade` | Gate evaluators that return typed decisions without mutating payloads. | Existing quota contract fields and workspace guard failure mode remain stable. |
+| Capability and boundary gates | `_capability_gate`, `build_agent_workspace_guard`, `_automation_prompt_upgrade` | Gate evaluators that return typed decisions without mutating payloads. | Existing quota contract fields and workspace guard failure mode remain stable. |
 | Agent-lane selection | `_agent_lane_next_action`, `_agent_lane_frontier_hint` | Agent-scoped selector over normalized todo projections. | Current-agent claimed todos outrank unrelated agents; frontier hints stay diagnostic when no runnable candidate exists. |
+| Goal frontier and replan decision | `loopx.control_plane.goals.goal_frontier`, `build_quota_should_run` adapter | Goal-frontier policy owns completion/replan projection; quota only selects the resulting interaction mode. | Required autonomous replan is decided before monitor quiet or agent-scope wait classification, without growing per-agent vision logic inside quota. |
+| Agent vision and goal routing contract | Future goal-route policy/CLI adapter plus `goal_vision_replan_contract_v0` | CLI-enforced bounded vision fields, per-agent vision checkpoints, and the vision/replan state machine. | Over-budget vision fails or compacts before status/quota; material closeouts emit `vision_checkpoint_v0`; quota consumes projection only and does not own per-agent vision storage. |
 | Quota plan and should-run assembly | `build_quota_plan`, `build_quota_should_run` | Thin orchestration layer that merges status, quota accounting, gates, and policy outputs. | `quota should-run` JSON field names and interaction contract stay compatible. |
 | User/agent/CLI split | `_protocol_action_packet`, `_interaction_contract` | Protocol packet builder with no scheduler or writeback side effects. | Operator gate vs bounded delivery payloads keep the same action_required and must_attempt meanings. |
-| Scheduler policy | `_scheduler_hint` wrapper plus `loopx/policies/scheduler_hint.py` | Pure scheduler-hint builder fed by final decision state. | RRULE, reset token, and no-spend cadence fields stay stable for Codex App and local loops. |
+| Scheduler policy | `_scheduler_hint` wrapper plus `loopx.control_plane.scheduler.scheduler_hint` | Pure scheduler-hint builder fed by final decision state. | RRULE, reset token, and no-spend cadence fields stay stable for Codex App and local loops. |
 | Monitor writeback | `_quota_decision_due_monitor_item`, `build_quota_monitor_poll_event`, `record_quota_monitor_poll` | Monitor event/writeback module with idempotent todo lookup and next-due projection. | Due-monitor and external-evidence monitor-poll paths remain no-spend and reject non-monitor todos. |
 | Spend accounting | `build_quota_slot_spend_event`, `spend_quota_slot` | Quota accounting module with explicit accountable-run lookup. | Spend only after validated writeback; source enum and slot accounting remain unchanged. |
 | Markdown rendering | `render_quota_should_run_markdown` and related renderers | Render-only module over already-built payloads. | JSON decisions do not depend on markdown strings. |
@@ -50,15 +108,15 @@ private evidence migration, production actions, or public first-screen copy.
 | Todo summary/read models | `compact_todo_group`, `todo_item_is_due_monitor`, `apply_resume_conditions` | Todo projection module with explicit runnable, blocked, deferred, due-monitor, and visibility lanes. | Due monitor means `task_class=continuous_monitor` plus `next_due_at<=now`; external evidence watch stays separate. |
 | Hygiene and repair signals | `backlog_hygiene_warning`, `build_autonomous_replan_obligation` | Health-signal module consumed by status and quota. | Repair obligations remain machine-readable and cannot be cleared by empty acknowledgements. |
 | Project assets | `build_project_asset` | Public-safe asset packer over status and run-history inputs. | Project-asset-backed queue items remain the only authority for owner/gate/stop-condition semantics. |
-| Attention queue | `build_attention_queue` | Queue builder over normalized goal status, todos, gates, and project assets. | Queue ordering and truncation limits remain explicit and stable. |
-| Task graph projection | `loopx.projections.task_graph.build_task_graph_projection` with `loopx.status.build_task_graph_projection` as the compatibility wrapper | Read-only graph projection module. | Node caps include truncation metadata; full cold-path detail remains outside the hot graph. |
-| Status contract assembly | `build_status_contract`, `collect_status` | Thin collector/orchestrator that wires registry, runtime, state, and read models. | CLI status JSON shape remains compatible. |
-| Markdown rendering | `render_status_markdown` plus `loopx/renderers/status_markdown.py` | Render-only module/helpers over the status payload. | Rendering cannot become the source of scheduler or quota truth. |
+| Attention queue | `loopx.control_plane.work_items.attention_queue.build_attention_queue` with `loopx.status.build_attention_queue` as the compatibility entry | Queue builder over normalized goal status, todos, gates, and project assets. | Queue ordering, project-asset enrichment, quota guards, and candidate lanes remain explicit and stable. |
+| Task graph projection | `loopx.control_plane.work_items.task_graph.build_task_graph_projection` with `loopx.status.build_task_graph_projection` as the status-facing wrapper | Read-only graph projection module. | Node caps include truncation metadata; full cold-path detail remains outside the hot graph. |
+| Status collection assembly | `loopx.control_plane.status_collection.collect_status` with `loopx.status.collect_status` as the compatibility entry | Thin collector/orchestrator that wires registry, runtime, state, and read models. | CLI status JSON shape remains compatible; wrapper/direct parity stays covered by `examples/control_plane/status-collection-readmodel-smoke.py`. |
+| Markdown rendering | `loopx/presentation/renderers/status_markdown.py` | Render-only module/helpers over the status payload. | Rendering cannot become the source of scheduler or quota truth. |
 
 ## Proposed Extraction Order
 
 1. Characterize the current behavior.
-   Keep `examples/control-plane-risk-characterization-smoke.py` green and add
+   Keep `examples/control_plane/control-plane-risk-characterization-smoke.py` green and add
    focused parity fixtures before moving rules.
 2. Extract active-state and todo read models.
    This reduces Markdown parsing risk while preserving Markdown as the work
@@ -79,6 +137,16 @@ private evidence migration, production actions, or public first-screen copy.
   responsibilities.
 - `agent_lane_next_action` is per-agent runnable routing; `## Next Action` is
   durable goal-level guidance.
+- `goal_route_hint` may summarize current, other-agent, and unclaimed lane
+  signals for hosts, but it is read-only advisory projection and must preserve
+  shared `## Next Action`.
+- `goal_frontier_projection` is the small per-goal completion/replan view used
+  before lane-local quiet/wait decisions; keep its policy in
+  `loopx.control_plane.goals.goal_frontier` rather than expanding `quota.py`.
+- Per-agent vision is a bounded goal-routing contract, not free-form planning
+  memory. Enforce its character budget at the CLI/write boundary; store verbose
+  rationale as evidence/docs; let replan patch vision only through the bounded
+  contract.
 - Monitor routing is attribute based, not name based:
   `task_class=continuous_monitor` plus due metadata defines due monitor work,
   while `waiting_on=external_evidence` or

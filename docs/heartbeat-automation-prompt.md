@@ -43,6 +43,11 @@ Do not paste the full lifecycle protocol into the visible goal text, and do not
 use a short goal text such as "advance TODO" as the recurring automation body.
 The short text names the goal; the generated task body enforces quota, gates,
 steering audit, writeback, refresh, and spend accounting.
+For Codex App, the generated quota command carries the compact explicit runtime
+profile `--runtime-profile codex_app_heartbeat` (generated commands use the
+equivalent compact alias `--codex-app`). The prompt does not restate the
+three scheduler ownership fields as prose. Other hosts generate their real typed
+execution context instead of inheriting App cadence by omission.
 Do not hand-edit per-project lifecycle branches into one automation prompt.
 Project-specific behavior belongs in the LoopX registry, active-state
 sections, adapter output, or narrow boundary rules. If a lifecycle rule is
@@ -55,6 +60,10 @@ prompt text.
 When the generated prompt and the installed skill disagree, the worker should
 trust the current CLI `interaction_contract` first, then use the skill as the
 operation manual and the prompt only as a bootstrap.
+Within that contract, the worker should execute
+`agent_channel.primary_action`. An optional `agent_channel.resolution_trace`
+is for debugging route selection and drift; it should not be treated as another
+action to run or as permission to rewrite active-state `Next Action`.
 
 You can generate the task body from the CLI. Prefer the registry-backed form
 for connected goals, so the installed automation does not hard-code a state-file
@@ -73,8 +82,9 @@ loopx heartbeat-prompt \
   --active-state <ACTIVE_GOAL_STATE_PATH>
 ```
 
-For recurring App heartbeats, prefer the compact body after the full lifecycle
-has been reviewed:
+For recurring App heartbeats, the default body is the thin local dispatcher.
+Use the compact body after the full lifecycle has been reviewed when the
+installed prompt should carry more lifecycle detail inline:
 
 ```bash
 loopx heartbeat-prompt \
@@ -82,9 +92,17 @@ loopx heartbeat-prompt \
   --compact
 ```
 
-The expanded prompt remains the audit source and compatibility default. The
-compact prompt is the daily driver: it reduces per-tick context while preserving
-the same commands and decision points.
+The expanded prompt remains available as the explicit audit source:
+
+```bash
+loopx heartbeat-prompt \
+  --goal-id <GOAL_ID> \
+  --full
+```
+
+The thin prompt is the installed default. It keeps per-tick context small and
+expects trusted agents to pull the current LoopX state before acting. The
+compact prompt is the heavier inline lifecycle body.
 
 When multiple agents share the same project control plane, first register the
 public-safe agent ids on the goal, then give each automation an explicit
@@ -95,7 +113,7 @@ loopx configure-goal \
   --goal-id <GOAL_ID> \
   --registered-agent codex-main-control \
   --registered-agent codex-side-bypass \
-  --primary-agent codex-main-control \
+  --agent-model peer_v1 \
   --execute
 ```
 
@@ -107,7 +125,7 @@ loopx heartbeat-prompt \
   --agent-scope "benchmark readiness, benchmark execution, and benchmark writeback"
 ```
 
-For a side/bypass agent, use a different id and a disjoint scope:
+For another peer, use a different id and a disjoint scope:
 
 ```bash
 loopx heartbeat-prompt \
@@ -122,22 +140,56 @@ The generated body tells the agent to claim only in-scope todos with
 `loopx todo claim --claimed-by <agent-id>`. `--agent-scope` requires
 `--agent-id`, and the CLI accepts that agent id only when it is registered for
 the goal. Scope stays in the automation prompt or handoff; todo metadata records
-only the soft `claimed_by` owner. The prompt also classifies the agent as
-`primary-agent` or `side-agent` from `coordination.primary_agent`. Side-agent
-prompts require repository edits to happen in an independent git worktree/branch
-and instruct the worker to use one of two finish paths. Generated scoped
-heartbeat commands pass the same `--agent-id` to both `quota should-run` and
-`quota spend-slot`, so workspace guards and quota accounting evaluate the same
-agent identity.
+only the soft `claimed_by` owner. Registered identities are peers. Functional
+profile roles are advisory, while workspace isolation and continuation behavior
+come from the selected task, goal policy, and typed continuation policy.
+Generated scoped heartbeat commands pass the same `--agent-id` to both
+`quota should-run` and `quota spend-slot`, so workspace guards and quota
+accounting evaluate the same identity.
+
+Host capabilities are declarations, not permission grants. When the selected
+Codex App, CLI, or external launcher already has a capability required by its
+todos, declare it while generating the heartbeat:
+
+```bash
+loopx heartbeat-prompt \
+  --goal-id <GOAL_ID> \
+  --thin \
+  --agent-id <AGENT_ID> \
+  --available-capability network \
+  --available-capability external_evidence_poll
+```
+
+The generated quota guard and spend command preserve the same declarations.
+Do not declare credentials, production access, or another capability merely to
+bypass a gate; the launcher must actually provide it.
+
+When a thin prompt is generated without explicit declarations, it still tells
+the runtime worker to project non-basic capabilities that are actually present
+with `--available-capability`. This prevents an observed network or polling
+capability from becoming a false user gate without guessing capabilities the
+host does not have. Explicit generator arguments remain preferred for hosts
+whose capabilities are known when the automation is installed.
 
 - for small AGENTS-eligible validated changes, self-merge and complete the todo
-  with `--side-agent-self-merged --evidence "<commit and validation summary>"`;
-- for runtime, benchmark, permission, production, destructive git, publication,
-  unclear, or broad changes, create a successor handoff todo with
-  `--next-agent-todo`. By default it is claimed by `<primary-agent>`; if the
-  goal registry declares `coordination.side_agent_handoff_agent`, LoopX routes
-  the successor there instead. Same-agent broad handoff is rejected; use
-  `--side-agent-self-merged --evidence` for same-agent delivery.
+  with `--self-merged --evidence "<commit and validation summary>"`;
+- for an independent continuation, create `--next-agent-todo` and optionally
+  select a registered peer with `--next-claimed-by`;
+- when independent review is required, use `--next-action-kind review` with an
+  ordinary `independent_handoff`; add `--next-excluded-agent <author>` only when
+  the author must not reclaim the unclaimed successor;
+- when a validated pull request merely needs human review, keep the reminder
+  non-blocking with `--next-user-todo "<review action>"` and
+  `--next-user-task-class user_action`, then create the next runnable agent todo
+  in the same completion. Add a separate `continuous_monitor` for the PR
+  lifecycle when merge/readback must be observed. Do not turn review latency
+  into a gate;
+- use `user_gate` only for an exact authority boundary such as approval to merge
+  an aggregate branch into `main`, release, launch a benchmark, or perform a
+  protected action;
+- when work is blocked without a valid successor, keep the todo with the current
+  peer and write a concrete blocker rather than inventing a hierarchy route.
+
 Once a goal has `coordination.registered_agents`, prompt generation without
 `--agent-id` fails closed. That is the lightweight migration signal for stale
 Codex App automations: the next refresh attempt surfaces a concrete
@@ -145,10 +197,12 @@ identity/scope upgrade command instead of returning a legacy unscoped prompt.
 `quota should-run` follows the same rule for executor safety: an unscoped call
 returns `automation_prompt_upgrade.required=true`,
 `blocks_should_run=true`, and `should_run=false` instead of allowing delivery.
-For an old goal registry that does not yet define
-`coordination.registered_agents`, or a scoped registry that has agents but no
-`coordination.primary_agent`, scoped prompt generation fails closed and prints
-the configuration command needed to register the agent identity and primary.
+For a hierarchy-era registry, `quota should-run` and `upgrade-plan` return one
+stable migration id, one heartbeat command per registered peer, and a completion
+command. The host update may be retried with that idempotency key; the completion
+command atomically records the migration once, and later quota checks do not
+project it again. A registry without `coordination.registered_agents` must first
+register the peer identity before a scoped prompt can be generated.
 
 If even the compact body is too heavy for an installed automation, generate the
 brief body:
@@ -239,7 +293,7 @@ if ! command -v loopx >/dev/null 2>&1; then
   fi
 fi
 loopx doctor >/dev/null
-loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <GOAL_ID>
+loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <GOAL_ID> --runtime-profile codex_app_heartbeat --turn-instance-id "${LOOPX_TURN:?}"
 
 If that preflight still fails, do not do implementation work, adapter work,
 file edits, research, project exploration, or quota spend in this turn. Return
@@ -254,24 +308,27 @@ If the result says should_run=false:
   unresolved gate has not already been asked in the recent visible thread,
   return heartbeat NOTIFY with
   one concise Chinese question that lists the gate and the expected reply
-  format. Only when `interaction_contract.user_channel.action_required=true` or
-  `user_todo_summary.open_count > 0`, the notification must name concrete payload
-  todo(s)/questions, never only "owner gate"; if those required user-facing
-  items are not projected, say "具体 user todo 未投影，需修复 LoopX 状态投影";
-  never say "no new user action" for this case. When
-  `interaction_contract.user_channel.action_required=false` and
-  `user_todo_summary.open_count=0`, allow "无用户待办/无需通知" or a quiet
-  no-notification result; do not imply a state projection bug. Do not execute
-  agent_command, adapter work, write-control, production actions, or the gated
-  path while asking.
+  format. Treat `interaction_contract.user_channel.notify` as the final
+  notification signal. When it is `NOTIFY`, name concrete projected
+  `actions`, todos, or questions even when `action_required=false`,
+  `user_todo_summary.open_count=0`, and `non_blocking=true`; non-blocking means
+  the agent may continue independent work, not that the user action is silent.
+  Never say only "owner gate". If required user-facing items are not projected,
+  say "具体 user todo 未投影，需修复 LoopX 状态投影"; never say "no new user
+  action" for this case. Only when `notify=DONT_NOTIFY`,
+  `action_required=false`, and `open_count=0` may the heartbeat say
+  "无用户待办/无需通知" or stay quiet. Do not execute agent_command, adapter
+  work, write-control, production actions, or the gated path while asking.
 - If the payload says notify_user_on_open_todo=true, treat the existing open
   user_todo_summary as a blocker-push opportunity, not as a silent skip. This
   is especially important for state=focus_wait, state=waiting, and
   waiting_on=external_evidence, where a short user/owner answer can unlock a
   quiet project or stop meaningless repeated polling. If the payload explicitly
   includes open_todo_notification_policy=repeat_until_resolved, return
-  heartbeat NOTIFY on every such poll until the user todo is done, deferred, or
-  replaced. Otherwise, if the same blocker ask has not already been surfaced in
+  heartbeat NOTIFY until the user todo is done, deferred, or replaced. When
+  user_gate_notification_cooldown.notification_suppressed=true, preserve the
+  pending gate but return quiet DONT_NOTIFY until its bounded reminder window
+  or a material gate/host change. Otherwise, if the same blocker ask has not already been surfaced in
   the recent visible thread, return heartbeat NOTIFY with one concise Chinese
   ask listing at most three first_open_items, the open_todo_notify_reason, and
   the expected reply format: done, defer/not now, or a new evidence
@@ -286,23 +343,23 @@ If the result says should_run=false:
   another P0/P1 item that does not depend on that gate. If you do a safe-bypass
   step, validate it, write back progress/critic/next action, optionally refresh
   state, append exactly one spend event, and report compactly. If
-  user_todo_summary.open_count > 0, include those todos as concrete todos and do not say
-  there is "no new user action". If
+  `interaction_contract.user_channel.notify=NOTIFY` or
+  `user_todo_summary.open_count > 0`, include the projected user actions or
+  todos concretely and do not say there is "no new user action". If
   agent_todo_summary.open_count > 0, the report should also name the first safe
   agent todo it can execute next. If no useful
   safe-bypass step exists, report the pending gate compactly instead of doing
   work.
-- If effective_action=monitor_quiet_skip, append at most one no-spend monitor
-  evidence event for this heartbeat:
-
-  loopx --registry "$HOME/.codex/loopx/registry.global.json" quota monitor-poll --goal-id <GOAL_ID> --source heartbeat --execute
-
-  Then rerun quota should-run. If it remains monitor-only, return quiet
+- Give each heartbeat a stable turn id by copying its `<current_time_iso>` into
+  `LOOPX_TURN`; reuse that id for guard retries in the same
+  heartbeat. `quota should-run` commits one idempotent receipt for every turn.
+  If effective_action=monitor_quiet_skip, that same guard idempotently appends
+  the no-spend stall observation and returns the follow-up decision. Do not
+  append a second manual monitor poll. If it remains monitor-only, return quiet
   DONT_NOTIFY: no delivery edits and no spend. Keep the automation active:
-  unchanged monitor-only polls are not self-stop signals. If the next guard
-  reports autonomous_replan_required or another hard
-  replan contract, follow that contract. Do not append more than one monitor
-  poll event for a single heartbeat turn.
+  unchanged monitor-only receipts are not self-stop signals. If the guard
+  reports autonomous_replan_required or another hard replan contract, follow
+  that contract.
 - If waiting_on=external_evidence or state=waiting, and this automation is
   explicitly a monitor, run at most one bounded read-only observation poll using
   project-approved status/log/metric/marker surfaces named in active state,
@@ -396,11 +453,9 @@ If the result says should_run=true:
    production actions, or repository rules that explicitly require review.
 6. Run the smallest useful validation.
 7. Write back changed files, validation, critic, and next action to the active
-   state. If the step discovers a concrete user/owner action, do not hide it in
-   `Next Action`, a review doc, or chat. Add it to the active-state user todo
-   queue with:
-
-   loopx todo add --goal-id <GOAL_ID> --role user --text "<public-safe user/owner action>"
+   state. If a user/owner todo appears, do not hide it in prose:
+   `loopx todo add --goal-id <GOAL_ID> --role user --task-class user_gate --blocks-agent <agent-id>`
+   or `loopx todo add --goal-id <GOAL_ID> --role user --task-class user_action`.
 
    Use `--role agent` for project-agent follow-up work.
    For non-trivial feature slices, complete the current todo only after adding
@@ -450,23 +505,43 @@ put the lifecycle in the automation task body. The default onboarding cadence
 starts at 3 minutes; after the first guard, follow
 `quota should-run.scheduler_hint` to back off long waits and stop external loops
 after a final quota/replan check confirms repeated unchanged polls. Codex App
-heartbeats should search/use `automation_update` when available and apply
-`scheduler_hint.codex_app.recommended_rrule`. When
-`scheduler_hint.reset_policy.reset_token` changes because of user feedback,
-new/reassigned work, a resolved gate, material evidence, or active work, restore
-the automation RRULE to `scheduler_hint.reset_policy.codex_app_initial_rrule`
-before starting a new backoff progression:
+heartbeats should search/use `automation_update` when available. If
+`scheduler_hint.action=stop_until_explicit_resume` and
+`scheduler_hint.codex_app.host_action=pause_or_delete_current_heartbeat`: in
+that terminal case, call `automation_update` once to pause the current
+heartbeat (delete only if pause is unavailable), verify the host result, spend
+no quota, and end the turn without a scheduler ACK. Otherwise call it only when
+`scheduler_hint.codex_app.stateful_backoff.apply_needed=true` and
+`scheduler_hint.codex_app.recommended_rrule` is present. After a successful
+RRULE update, run `loopx` with
+`scheduler_hint.codex_app.ack_hint.cli_args`; current payloads use
+`quota scheduler-ack-current` so LoopX re-reads the latest hint and owns the
+progression/reset state. The ACK settles that RRULE; an immediate final guard
+may verify the same target but must not be treated as another elapsed poll.
+Attempt the host update at most once per hint and
+turn. If it fails or times out, do not retry or ACK; run
+`scheduler_hint.codex_app.failure_hint.cli_args` once to persist the failed
+target and observed host RRULE without spending quota. Exact repeats are then
+suppressed until either value changes. Continue any allowed delivery under the
+observed host cadence. When the desired RRULE is already applied, skip
+`automation_update`; if `stateful_backoff.ack_needed=true`, run the bound ack
+hint directly, otherwise do nothing. For the uniquely matched current heartbeat,
+`quota should-run` reconciles the installed RRULE with the ACK ledger; a
+`host_observation.status=drift_detected` result reopens `apply_needed`:
 
 ```text
 Create a heartbeat automation starting at 3 minutes for the current thread;
-then apply `quota should-run.scheduler_hint` for backoff and reset-to-initial
-cadence when its reset token changes.
+then apply `quota should-run.scheduler_hint`: update RRULE only when
+`apply_needed=true`, trying once per hint and turn; ack with the provided
+`ack_hint.cli_args` only after the host update succeeds, or run the provided
+`failure_hint.cli_args` once if that update fails or times out.
 
 Task:
 Advance <GOAL_ID> using <ACTIVE_GOAL_STATE_PATH>. Before any delivery work,
 export `$HOME/.local/bin` onto PATH and run `loopx doctor`; if the CLI is
 still unavailable, quietly report that preflight failure and do no work. Then
-run `loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <GOAL_ID>`. If it
+copy this trigger's `<current_time_iso>` into `LOOPX_TURN` and run
+`loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id <GOAL_ID> --runtime-profile codex_app_heartbeat --turn-instance-id "${LOOPX_TURN:?}"`. If it
 returns `should_run=false`, ask about operator gates with NOTIFY using
 `gate_prompt` unless the same unresolved gate was already surfaced recently. If
 the payload says `notify_user_on_open_todo=true`, ask up to three open
@@ -522,22 +597,26 @@ turn.
 
 For every automatic heartbeat turn, the agent-facing checklist is:
 
-1. Guard first: `quota should-run`.
+1. Guard first: `quota should-run --turn-instance-id <HEARTBEAT_TURN_ID>` using
+   this trigger's `<current_time_iso>` and reusing it for same-heartbeat retries.
    If `loopx` is not initially on PATH, export `$HOME/.local/bin:$PATH`
    and run the local installer fallback before declaring preflight failure.
 2. If `should_run=false` with `state=operator_gate`, ask the user/controller the
    current gate unless the same unresolved gate was already surfaced recently.
-   If `effective_action=monitor_quiet_skip`, append at most one no-spend
-   `quota monitor-poll --execute` event, rerun the guard, then return quiet
-   `DONT_NOTIFY` if it remains monitor-only. Keep monitor todos visible but do
-   no delivery edits and no spend until material evidence changes or the next
-   guard exposes `autonomous_replan_required` /
+   Every heartbeat guard commits one idempotent receipt. If
+   `effective_action=monitor_quiet_skip`, it also commits the no-spend stall
+   observation and returns the follow-up decision; do not append another manual
+   poll. Return quiet `DONT_NOTIFY` if it remains monitor-only. Keep monitor
+   todos visible but do no delivery edits and no spend until material evidence
+   changes or the guard exposes `autonomous_replan_required` /
    `execution_obligation.must_attempt_work=true`.
 3. If `notify_user_on_open_todo=true`, ask up to three open user todos as a
    blocker-push notification and do not spend quota for that blocker-push turn.
-   If `open_todo_notification_policy=repeat_until_resolved`,
-   repeat the notification every poll until the todo is done, deferred, or
-   replaced; do not suppress it as a recently surfaced blocker. Otherwise,
+   If `open_todo_notification_policy=repeat_until_resolved`, repeat the
+   notification until the todo is done, deferred, or replaced. If
+   `user_gate_notification_cooldown.notification_suppressed=true`, keep the gate
+   pending but return quiet `DONT_NOTIFY` until its bounded reminder window or
+   a material gate/host change. Otherwise,
    ordinary blocker-push asks may be de-duplicated when the same blocker was
    surfaced recently.
 4. If `effective_action=outcome_floor_recovery` or
@@ -588,8 +667,12 @@ This prompt is intentionally a lifecycle template. Scheduling policy lives in
 `quota should-run.scheduler_hint`, so per-project heartbeats, a shared
 controller loop, Codex CLI TUI, Claude Code loop, or future Codex goal-mode
 automations can all share the same LoopX quota guard without hard-coding
-different wait loops. Host implementations should keep only a compact
-`reset_policy.reset_token` per automation when possible; if it changes, use
-`automation_update` to update the Codex App heartbeat RRULE to
-`reset_policy.codex_app_initial_rrule` and clear unchanged-poll state without
-spending quota.
+different wait loops. Host implementations should first honor a terminal
+`codex_app.host_action=pause_or_delete_current_heartbeat` by stopping the
+current heartbeat once, verifying the result, and ending without scheduler ACK
+or quota spend. Otherwise they should read the compact
+`codex_app.stateful_backoff` packet, call `automation_update` only when
+`apply_needed=true`, and then let `quota scheduler-ack-current` persist the
+applied RRULE state from the latest scheduler hint without spending quota. A
+matching reset readback may instead set `ack_needed=true`; in that case skip the
+host write and execute the bound ack directly.

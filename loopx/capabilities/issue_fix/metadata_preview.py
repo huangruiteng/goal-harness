@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -23,6 +24,20 @@ GITHUB_BODY_OR_COMMENT_KEYS = {
 }
 
 ALLOWED_ISSUE_FIX_INTAKE_STATES = {"open", "closed", "unknown"}
+GITHUB_ISSUE_LINK_REFERENCE_PATTERN = re.compile(
+    r"^(?:#|issues?\s*(?:#|[_:/-])?\s*)?([1-9][0-9]*)$",
+    re.IGNORECASE,
+)
+
+
+def normalise_github_issue_link_reference(issue_ref: Any) -> str:
+    """Canonicalise explicit numeric GitHub issue aliases without guessing."""
+
+    label = _normalise_exploration_label(issue_ref, "issue_ref")
+    match = GITHUB_ISSUE_LINK_REFERENCE_PATTERN.fullmatch(label.strip())
+    if match:
+        return f"issues_{int(match.group(1))}"
+    return label
 
 
 def normalise_github_issue_reference(
@@ -59,7 +74,7 @@ def normalise_github_issue_reference(
         }
 
     repo_label = _normalise_exploration_label(repo, "repo")
-    issue_label = _normalise_exploration_label(issue_ref, "issue_ref")
+    issue_label = normalise_github_issue_link_reference(issue_ref)
     number = None
     digits = "".join(ch for ch in issue_label if ch.isdigit())
     if digits:

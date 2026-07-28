@@ -38,8 +38,8 @@ Recognized repo-review commands:
 - `/loopx-pr-review <time window or filter text>`
 
 If there is any non-whitespace text after `/loopx`, it is goal text. Preserve
-that exact trailing text, pass it to the command pack, and do not downgrade the
-request into a status or inspection turn.
+that exact trailing text, pass it to the guided start preview, and do not
+downgrade the request into a status or inspection turn.
 
 When the target is a linked git worktree, trust the command pack's
 `canonical_project_alias` / `source_registry` route. Do not manually run
@@ -51,13 +51,30 @@ From the target project root, pass the text after `/loopx` as the explicit
 goal-start objective before planning or writing project state:
 
 ```bash
-loopx bootstrap-command-pack --project . --goal-text "<GOAL_TEXT>"
+loopx start-goal --guided --project . --goal-text "<GOAL_TEXT>"
 ```
 
 Include `--goal-id <STABLE_GOAL_ID>` and `--agent-id <REGISTERED_AGENT_ID>` when
-they are known. If `--goal-text` is not available, refresh the local LoopX CLI
-or use the checked-out LoopX repository CLI for validation; do not silently
-downgrade `/loopx <goal text>` into a bare `/loopx` read-only command.
+they are known. If `start-goal --guided` is not available, refresh the local
+LoopX CLI or use the checked-out LoopX repository CLI for validation; do not
+silently downgrade `/loopx <goal text>` into a bare `/loopx` read-only command.
+Use `loopx bootstrap-command-pack --project . --goal-text "<GOAL_TEXT>"` only
+when implementing or debugging the lower-level host handoff packet.
+
+If the connected goal later needs a wider or corrected write boundary, do not
+rerun `loopx bootstrap --force` just to change scope. Use the incremental
+configuration path instead:
+
+```bash
+loopx configure-goal \
+  --goal-id <STABLE_GOAL_ID> \
+  --write-scope "<SAFE_WRITE_SCOPE>" \
+  --execute
+```
+
+If a destructive reconnect is explicitly required, pass `--preserve-todos` with
+`--force` unless the user intends to rebuild the active state file and discard
+existing todo projection.
 
 `/loopx <goal text>` is an explicit goal-start intent: first produce a concise
 ordered plan, then write todos in priority order, using planner order plus
@@ -81,9 +98,9 @@ contract. Do not handle `/loopx-pr-review` from this broader project skill, and
 do not route it to `loopx-pr-merge` unless the user later asks to approve,
 comment on, merge, self-merge, or admin-bypass a specific PR.
 
-When a user has just connected a project or receives a bootstrap command pack
-for the first time, briefly tell them the usable commands instead of assuming
-they will inspect CLI help:
+When a user has just connected a project, receives a guided start packet, or
+receives a bootstrap command pack for the first time, briefly tell them the
+usable commands instead of assuming they will inspect CLI help:
 
 - `/loopx <goal text>`: start a concrete goal with a plan-before-todo-write
   flow.
@@ -129,6 +146,44 @@ and heartbeat workers can find the new authority without relying on chat
 memory. Stop and write a project-local todo or blocker when the target project
 is ambiguous, the source cannot be represented as public-safe metadata, or the
 next step would require reading a gated source body.
+
+## Owner-Facing Explore Views
+
+Treat the canonical Explore topology and an owner-facing decision graph as two
+different read models over one evidence source:
+
+- canonical JSON, Mermaid, and Nodes/Edges/Findings tables preserve complete
+  public-safe node identity, evidence, and lineage;
+- focused status/tag exports are bounded evidence subsets, not executive views
+  by default;
+- an executive graph applies semantic compression for operator decisions. It
+  should show the decision contract, baseline/incumbent, decisive negative
+  evidence, active work or capacity, material risk, terminal gate, and next
+  decision. Semantic compression may tighten labels and remove true
+  duplication, but it must preserve material decision and evidence nodes plus
+  their lineage.
+
+Never overwrite an executive whiteboard directly from a full or focused
+canonical export unless a declared presentation contract proves that the
+export already carries those semantic roles. For a recurring sync, keep a
+project-local display contract with required roles, stable canonical ids,
+semantic sections or linked subgraphs, and a non-identity guard. The default
+cardinality policy is graph growth: do not omit or merge away a material node
+because the graph crossed a generic count such as 20 nodes. A hard
+`max_nodes` or `max_edges` limit is valid only as an explicit opt-in
+presentation policy with declared scope and overflow behavior; absent that
+policy, treat those limits as unbounded.
+
+Render with the target renderer, run overlap and text-overflow checks, inspect
+the actual preview, then sync and verify the remote source or digest. Repair a
+failed readability check by relayout, shorter labels, larger frames, or more
+semantic subgraphs, not by deleting material evidence. If any check still
+fails, keep the previous owner view; do not publish a structurally valid but
+unreadable graph.
+
+This separation does not transfer quota, todo, launch, stop, or promotion
+authority into the presentation layer. Record material experiment transitions
+in canonical Explore state first, then refresh the executive projection.
 
 ## Preflight
 
@@ -213,15 +268,38 @@ If the default `loopx` payload contradicts the just-merged source checkout or a
 `PYTHONPATH=<checkout> python3 -m loopx.cli ...` cross-check, pause delivery and
 run `loopx doctor` before trusting quota. The installed command is normally a
 release snapshot wrapper, so a self-merged fix may require refreshing the local
-install from the latest trusted checkout with `scripts/install-local.sh`; rerun
-the default `loopx` command after the refresh and only spend quota after the
-runtime payload matches the repaired source behavior.
+install from latest trusted `origin/main` with `loopx update --execute --ref main`
+or a clean main checkout's `scripts/install-local.sh`; rerun the default `loopx`
+command after the refresh and only spend quota after the runtime payload matches
+the repaired source behavior. A dirty or non-main checkout is canary-only by
+default. Use `LOOPX_PROMOTE_DEFAULT=1 scripts/install-local.sh` only after the
+checkout has passed its promotion validation and the default replacement is an
+intentional write.
 
 If the response has `state=operator_gate`, treat it as a user/controller
 interaction, not a silent skip. Read `gate_prompt`, `operator_question`,
 `recommended_action`, `next_handoff_condition`, `missing_gates`, and
 `user_todo_summary` and `agent_todo_summary` when present, then ask the concrete gate in Chinese unless
 the same unresolved question was already surfaced in the recent visible thread.
+Before repeating a public PR merge-approval gate, reconcile it against current
+compact PR lifecycle state. When the todo has a merge-scoped decision such as
+`direction:action:merge_pr_<number>` and the public PR URL is unambiguous, run:
+
+```bash
+loopx issue-fix pr-gate-reconcile \
+  --goal-id <STABLE_GOAL_ID> \
+  --todo-id <USER_GATE_TODO_ID> \
+  --url <PUBLIC_GITHUB_PR_URL> \
+  --fetch-metadata \
+  --execute
+```
+
+Then rerun `quota should-run`. The command may complete only the matching
+`user_gate`, and only after compact public metadata reports `MERGED` or
+`CLOSED`; it records no body, comments, logs, provider payload, or external
+write. If the URL is ambiguous or the public read fails, preserve the gate and
+surface that exact resolution failure instead of claiming the owner still needs
+to approve an already-terminal PR.
 Only when `interaction_contract.user_channel.action_required=true` or
 `user_todo_summary.open_count > 0`, the notification must name concrete payload
 todo(s)/questions, never only "owner gate"; if those required user-facing items
@@ -244,12 +322,16 @@ under that contract, not as competing sources of truth.
 
 If the response has `should_run=false` and not `safe_bypass_allowed=true`, do
 not run implementation or adapter work for that goal in this turn. When
-`effective_action=monitor_quiet_skip`, append at most one no-spend
-`quota monitor-poll --goal-id <STABLE_GOAL_ID> --source heartbeat --execute`
-event, rerun `quota should-run`, and follow
+running from a heartbeat, pass its `<current_time_iso>` as
+`quota should-run --turn-instance-id <HEARTBEAT_TURN_ID>` and reuse that id for
+same-heartbeat retries. This commits one idempotent receipt on every heartbeat;
+when `effective_action=monitor_quiet_skip`, the same guard also commits the
+no-spend stall observation and returns the follow-up decision. Follow
 `autonomous_replan_required` / `execution_obligation.must_attempt_work=true` if
-the next guard exposes it; otherwise quietly report or record the public-safe
-`reason` only when there is no operator gate to ask. Keep the heartbeat
+the guard exposes it. If `heartbeat_receipt.status=write_failed`, retry with the
+same turn id rather than manually appending another poll. Otherwise quietly
+report or record the public-safe `reason` only when there is no operator gate to
+ask. Keep the heartbeat
 automation active: unchanged monitor-only polls are liveness-preserving no-ops,
 not self-stop signals. If the command exits non-zero, fail closed: run
 `loopx doctor` / `loopx status` and fix status collection before
@@ -334,6 +416,29 @@ owner, gate, or stop-condition authority from raw queue fields.
 
 ## Set Up Recurring Heartbeats
 
+When the exact host is Codex App connected to a remote workspace over SSH and
+`automation_update` is unavailable because of that host boundary, use the
+visible Goal integration instead of reporting a missing-automation blocker:
+
+```bash
+loopx --format json agent-onboard \
+  --agent-type codex-app-ssh \
+  --project . \
+  --goal-id <STABLE_GOAL_ID> \
+  --agent-id <REGISTERED_AGENT_ID>
+```
+
+Run the returned `activation_input_command`, read `task_body`, and set the
+current visible task to `/goal <task_body>`. In Codex App, use the available
+Goal control directly; do not ask the user to run `heartbeat-prompt` or paste
+the body manually when the host exposes Goal control. Surface the exact
+pasteable gate only when Goal control is also unavailable.
+
+The generated `codex_app_ssh_goal` body is bounded by the `/goal` 4000-character
+limit. It uses an interactive `agent_cli_loop` scheduler context, omits
+heartbeat turn receipts, and must not create/update automations, apply RRULE
+cadence, or invent `LOOPX_TURN`.
+
 When a user or controller wants a recurring Codex App heartbeat for a connected
 goal, prefer the generator instead of hand-copying the quota lifecycle:
 
@@ -341,9 +446,9 @@ goal, prefer the generator instead of hand-copying the quota lifecycle:
 loopx heartbeat-prompt --goal-id <STABLE_GOAL_ID>
 ```
 
-For live Codex App automations, prefer the thin body as the local machine
-default when the target Codex agent can inspect LoopX state and CLI
-output itself:
+The default generated body is thin when the target Codex agent can inspect
+LoopX state and CLI output itself. Passing `--thin` remains accepted and
+explicit:
 
 ```bash
 loopx heartbeat-prompt --thin --goal-id <STABLE_GOAL_ID>
@@ -379,16 +484,16 @@ from the registry goal `state_file`, which keeps installed automations from
 pinning a stale path. Pass `--active-state <ACTIVE_GOAL_STATE_PATH>` only for
 detached state files, migration checks, or compatibility tests.
 
-Copy the generated task body into the Codex App heartbeat automation. The full
-body is the audit source and compatibility default. The thin body is the daily
-driver for trusted local workers: it keeps the automation prompt project-agnostic
-and tells Codex to re-read registry/global quota truth, active state,
-status/run history, repo state, and project signals on each wakeup. The compact
-body is useful when context pressure matters but the installed prompt should
-still carry the quota, gate, blocker-push, recommendation, steering-audit,
-writeback, refresh, and spend lifecycle inline. The brief body keeps only
-preflight/guard, core invariants, and spend accounting in the installed prompt
-while delegating detailed branches back to the generated compact/full contracts.
+Copy the generated task body into the Codex App heartbeat automation. The thin
+body is the installed default for trusted local workers: it keeps the automation
+prompt project-agnostic and tells Codex to re-read registry/global quota truth,
+active state, status/run history, repo state, and project signals on each
+wakeup. Use `--full` for the expanded audit source. The compact body is useful
+when context pressure matters but the installed prompt should still carry the
+quota, gate, blocker-push, recommendation, steering-audit, writeback, refresh,
+and spend lifecycle inline. The brief body keeps only preflight/guard, core
+invariants, and spend accounting in the installed prompt while delegating
+detailed branches back to the generated compact/full contracts.
 The generated guard and spend commands explicitly use the shared global
 registry so project heartbeats read the same operator gates and user todos as
 the dashboard, regardless of their current repo. Completed heartbeat delivery
@@ -408,8 +513,8 @@ obey that payload and stop when useful work falls outside it.
 
 When a LoopX client/prompt contract changes, update the matching smoke
 coverage in the same patch. Interface-budget and regression constraints belong
-in lightweight smoke scripts such as `examples/heartbeat-prompt-smoke.py`,
-`examples/quota-plan-smoke.py`, or `examples/quota-contract-smoke.py`; heavier
+in lightweight smoke scripts such as `examples/control_plane/heartbeat-prompt-smoke.py`,
+`examples/control_plane/quota-plan-smoke.py`, or `examples/control_plane/quota-contract-smoke.py`; heavier
 Codex CLI plus LoopX end-to-end checks should stay explicit or
 low-frequency instead of becoming the default heartbeat path.
 
@@ -420,13 +525,41 @@ scheduling policy, not delivery permission. Codex CLI TUI and Claude Code loops
 should run the final quota/replan check from `scheduler_hint` before applying
 their `after_limit`; if the guard changes or returns `run_now`, follow the new
 quota contract instead of stopping. Codex App heartbeat workers should
-search/use `automation_update` when available: update the current heartbeat
-RRULE from `scheduler_hint.codex_app.recommended_rrule`, and when
-`scheduler_hint.reset_policy.reset_token` changes because of user feedback,
-new/reassigned work, a resolved gate, material evidence, or active work, restore
-the heartbeat RRULE to `scheduler_hint.reset_policy.codex_app_initial_rrule`
-before starting a new backoff progression. Cadence changes, reset-to-initial
-updates, final checks, and self-stop changes do not spend quota. Read
+search/use `automation_update` when available. If
+`scheduler_hint.action=stop_until_explicit_resume` and
+`scheduler_hint.codex_app.host_action=pause_or_delete_current_heartbeat`, call
+`automation_update` once to pause the current heartbeat (delete only when the
+host cannot pause), verify the host result, spend no quota, and end the turn.
+This terminal host action takes precedence over RRULE handling and requires no
+scheduler ACK. Otherwise use `automation_update` only when
+`scheduler_hint.codex_app.stateful_backoff.apply_needed=true` and
+`scheduler_hint.codex_app.recommended_rrule` is present. After a successful
+RRULE update, run `loopx` with
+`scheduler_hint.codex_app.ack_hint.cli_args` (normally `quota scheduler-ack-current`,
+which re-reads the latest scheduler hint instead of hand-copying short-lived
+reset tokens). Attempt the host update at most once per hint and turn. If it
+fails or times out, do not retry or ACK; run
+`scheduler_hint.codex_app.failure_hint.cli_args` once. That no-spend writeback
+records the failed target/observed-host pair so later heartbeats suppress the
+exact repeat until either value changes. Continue allowed delivery under the
+observed host cadence. If
+`apply_needed=false` but `ack_needed=true`, a matching host
+readback already proves the RRULE; skip `automation_update` and run the bound
+ack hint directly. LoopX owns reset/progression state
+and omits `recommended_rrule` when the desired RRULE is already applied.
+Cadence changes, reset-to-initial updates, final checks, and self-stop changes
+do not spend quota.
+For a uniquely matched active Codex App heartbeat, `quota should-run`
+automatically reconciles the installed RRULE with LoopX's ACK ledger. Treat
+`stateful_backoff.host_observation.status=drift_detected` as authoritative for
+cadence repair; a stale or premature ACK must not suppress `apply_needed`.
+When readback matches a reset RRULE that is not yet bound in scheduler state,
+the ack hint carries the exact reset token, identity signature, and CLI route;
+missing readback must not use this shortcut.
+This readback is cadence-only and never exposes the automation prompt or grants
+LoopX permission to edit Codex App files directly.
+
+Read
 `execution_obligation` before
 deciding on a quiet no-op:
 `heartbeat_recommendation.notify` is only the user-notification policy, not an
@@ -462,9 +595,15 @@ It also respects `notify_user_on_open_todo=true`: open user todos in
 focus-wait, waiting, or external-evidence lanes should become a compact
 blocker-push `NOTIFY` with at most three items, while skipping delivery work
 and quota spend for that blocker-push turn. If the payload includes
-`open_todo_notification_policy=repeat_until_resolved`, repeat
-that `NOTIFY` on every such poll until the todo is done, deferred, or replaced;
-do not suppress it as a recently surfaced blocker. Other blocker-push cases may
+`open_todo_notification_policy=repeat_until_resolved`, repeat that `NOTIFY`
+until the todo is done, deferred, or replaced. When
+the user confirms that an existing review or action already happened, write
+back that exact todo immediately: complete only with an explicit typed decision,
+otherwise supersede the stale gate without granting authority; then refresh
+state and rerun quota so a successor or autonomous replan can surface. When
+`user_gate_notification_cooldown.notification_suppressed=true`, preserve the
+pending gate but return quiet `DONT_NOTIFY`; the bounded reminder window or a
+material gate/host change reopens the notification. Other blocker-push cases may
 still be de-duplicated when the same blocker was already surfaced recently.
 Eligible monitor-only no-transition polls keep user todos visible in the
 payload but should stay quiet unless a material transition appears.
@@ -542,19 +681,19 @@ loopx connect \
 `connect` should create or update the local registry/state and auto-sync the
 public-safe entry into `~/.codex/loopx/registry.global.json`.
 
-One repository can host multiple goals, such as a main controller and a
-low-conflict bypass lane. Run `connect` once per stable `goal_id`; keep one
+One repository can host multiple peer-owned goals, such as delivery and a
+low-conflict validation lane. Run `connect` once per stable `goal_id`; keep one
 shared `.loopx/registry.json`, but use one active state per goal:
 
 ```text
-.codex/goals/<main-goal-id>/ACTIVE_GOAL_STATE.md
-.codex/goals/<bypass-goal-id>/ACTIVE_GOAL_STATE.md
+.codex/goals/<delivery-goal-id>/ACTIVE_GOAL_STATE.md
+.codex/goals/<validation-goal-id>/ACTIVE_GOAL_STATE.md
 ```
 
 Do not reuse one `state_file` for two goal ids. `loopx registry` treats
 that as a health error, and `read-only-map` checks the selected goal's own
-`.codex/goals/<goal-id>/` directory so a healthy main lane does not hide a
-missing bypass state.
+`.codex/goals/<goal-id>/` directory so one healthy lane does not hide another
+lane's missing state.
 
 If the goal state or registry contains private evidence, add `.loopx/`
 and `.codex/goals/` to that project's `.gitignore`.
@@ -599,6 +738,28 @@ creates an `operator_gate_*` compact run so `loopx status` and the
 dashboard can tell whether the project agent may run the approved command. This
 is not a human reward signal and does not grant write-control.
 
+## Qualify Non-Trivial Final Diffs
+
+Before a non-trivial delivery or merge, inspect the current goal configuration.
+When `change_quality_qualification.enabled` is true, load
+`loopx-change-quality` and follow its exact-scope workflow:
+
+```bash
+loopx --format json change-quality prepare \
+  --goal-id <STABLE_GOAL_ID> \
+  --repo-path .
+```
+
+The policy keeps two decisions separate: `safe_fix` permits at most one bounded
+repair pass, while `strict_receipt` requires a passing receipt for the exact
+final diff. Any edit invalidates the old fingerprint. Record and verify the
+final receipt, then pass `--goal-id <STABLE_GOAL_ID>` to `canary premerge`.
+
+If the host cannot load skills, use the self-contained prepare packet as the
+review contract. Turn may carry the packet or receipt reference, but it does
+not own policy or enforcement. Do not invent a receipt, reuse one from an older
+diff, or turn subjective style advice into a blocker.
+
 ## Refresh State After Non-Adapter Work
 
 If the agent updated `ACTIVE_GOAL_STATE.md`, a progress ledger, a planning doc,
@@ -611,7 +772,7 @@ loopx refresh-state --goal-id <STABLE_GOAL_ID> --agent-id <REGISTERED_AGENT_ID>
 
 For multi-agent goals, keep the same `--agent-id` envelope that passed
 `quota should-run`. This default is an agent-lane refresh. To update the
-goal-level route or durable `## Next Action`, the primary agent must add
+goal-level route or durable `## Next Action`, any registered peer may add
 `--progress-scope goal`.
 
 If that refresh records a validated progress artifact rather than a pure
@@ -625,9 +786,16 @@ loopx refresh-state \
   --classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION> \
   --delivery-batch-scale multi_surface \
   --delivery-outcome outcome_progress \
-  --agent-id <PRIMARY_AGENT_ID> \
+  --agent-id <REGISTERED_AGENT_ID> \
   --progress-scope goal
 ```
+
+If the current run may write local LoopX state but its runtime boundary forbids
+configured external sink writes, keep `explore_graph.enabled` unchanged and add
+`--suppress-external-sinks`. This preserves canonical local graph projection,
+records the run-scoped authorization boundary, and leaves sink digests pending
+for a later authorized refresh. Do not toggle the goal-level Graph setting as a
+one-off workaround for an external-write boundary.
 
 Use `delivery_outcome` as a machine enum, not as prose:
 
@@ -694,6 +862,28 @@ states. When a slice merges or validates, complete the current todo only after
 creating the next concrete agent/user todo for rollout, product-path audit,
 docs, telemetry, benchmark proof, or operator decision; if there is truly no
 follow-up, write a compact no-follow-up rationale in the completion note.
+An open feature PR that is waiting for ordinary human review does not by itself
+block further project work. Complete the feature slice with its validated PR
+evidence, derive the review reminder with `--next-user-todo ...` and
+`--next-user-task-class user_action`, and keep a runnable agent successor. Add
+a separate `continuous_monitor` for PR lifecycle readback. Use `user_gate` only
+for an exact authority boundary such as merging an aggregate experiment branch
+into `main`, release, benchmark launch, credentials, or protected production
+action. A stable experiment integration branch may collect feature PRs from
+isolated worktrees; keep the aggregate PR to `main` as the final review gate.
+When the next agent slice is not yet known, keep the bound `user_action`
+visible without converting it into a gate. If bounded no-progress evidence
+accumulates while the agent frontier is empty, follow
+`autonomous_replan_required`: create and claim a concrete runnable agent todo,
+then record `runnable_todo_set`. Only authoritative terminal-closure evidence
+may replace that todo writeback with explicit no-follow-up.
+`successor_todo_ids` records lineage only: linking successors does not suspend
+an open parent. When splitting a parent into explicit successors, decide whether
+the parent still has an independent immediate action. If it does not, explicitly
+defer it with a supported `resume_when` or complete it; do not infer aggregate
+semantics from successor links alone. Treat `parent_successor_advisory` in the
+`todo update` response as the machine-readable authoring reminder for this
+decision, not as a new persisted lifecycle state.
 
 ## Record Human Reward
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .presentation.markdown import markdown_code, markdown_table_row, markdown_table_separator
+
 
 SCHEMA_VERSION = "loopx_slash_command_catalog_v0"
 
@@ -52,9 +54,32 @@ def build_slash_command_catalog(
         _command(
             command="/loopx <goal text>",
             scope="project",
-            intent="Start a concrete project goal: plan ordered todos, write them in priority order, then enter the quota-gated loop.",
-            mutation_policy="explicit goal-start intent may write project-local LoopX state after planning",
-            cli_reference=f"{cli_bin} bootstrap-command-pack --project . --goal-text '<goal text>'",
+            intent="Start a concrete project goal: plan ordered todos, write them in priority order, activate the host loop when needed, then enter the quota-gated loop.",
+            mutation_policy="explicit goal-start intent may write project-local LoopX state after planning and must activate/report the host loop",
+            cli_reference=f"{cli_bin} start-goal --guided --project . --goal-text '<goal text>'",
+            agent_contract={
+                "schema_version": "loopx_goal_start_agent_contract_v0",
+                "planner_required_before_todo_write": True,
+                "todo_write_order_defines_same_priority_rank": True,
+                "host_loop_activation_required_after_todo_writeback": True,
+                "host_loop_activation_catalog": f"{cli_bin} agent-onboard --list-agent-types",
+                "host_loop_activation_by_agent_type": {
+                    "codex-app": "create/update Codex App heartbeat automation from heartbeat-prompt task_body",
+                    "codex-cli": "set visible Codex CLI TUI `/goal <task_body>`",
+                    "claude-code": "arm LoopX with `/loopx <task>`, then run native `/loop`",
+                    "opencode": "call `loopx_goal_activate`",
+                    "manual": "wire an external scheduler or run quota/status manually",
+                    "other-agent": "use the custom host loop driver declared by `loopx agent-onboard`",
+                },
+                "setup_complete_requires": (
+                    "registry/state plus ordered todos plus host_loop_activation current, "
+                    "or a concrete host-tool gate; registry/quota identity alone is insufficient"
+                ),
+                "low_cost_recheck_policy": (
+                    "Run `agent-onboard` only when activation is missing, unknown, stale, "
+                    "or the agent type changed; normal ticks read quota/status/state directly."
+                ),
+            },
         ),
         _command(
             command="/loopx-global-summary",
@@ -109,6 +134,7 @@ def build_slash_command_catalog(
                 "stats_only_requires_explicit_opt_out": True,
                 "authoritative_fields": [
                     "agent_response_contract",
+                    "agent_response_contract.explanation_depth_contract",
                     "review_groups.unmerged",
                     "review_groups.merged",
                     "pull_requests[].review_template",
@@ -139,6 +165,9 @@ def build_slash_command_catalog(
                         "我的整体评价",
                     ],
                     "evidence_before_filling": "Read each selected PR body/files/diff/checks before filling the sections.",
+                    "section_length_hint": "Use the per-section ranges in pull_requests[].review_template as depth signals; explain context, architecture, implementation, validation, necessity, and risk without filler.",
+                    "reader_profile": "A technically curious reader who may not know the PR or subsystem.",
+                    "freshness_policy": "Record the remote head before review, recheck it before the verdict, and restart if it changed.",
                 },
                 "manual_gh_policy": (
                     "Use gh only after the CLI packet selects a PR; do not reconstruct "
@@ -178,16 +207,13 @@ def render_onboarding_slash_command_note(commands: list[dict[str, Any]], *, cli_
             "LoopX command surface is available. Useful commands:",
             f"- `/loopx`: {project.get('intent', 'inspect this project')}",
             f"- `/loopx <goal text>`: {goal.get('intent', 'start a concrete project goal')}",
+            f"  New hosts should choose an exact agent type with `{cli_bin} agent-onboard --list-agent-types`; do not pass ambiguous values such as `codex`.",
             "- `/loopx-global-summary`: read the global progress digest.",
             "- `/loopx-global-gates`, `/loopx-global-todos`, `/loopx-global-risks`: inspect manager-level gates, work, and risks.",
             "- `/loopx-pr-review`: run `loopx pr-review` first, then review its unmerged and merged PR groups one by one.",
             f"CLI help: `{cli_bin} slash-commands`.",
         ]
     )
-
-
-def _markdown_table_cell(value: Any) -> str:
-    return str(value or "").replace("\n", " ").replace("|", "\\|")
 
 
 def render_slash_command_catalog_markdown(payload: dict[str, Any]) -> str:
@@ -198,8 +224,8 @@ def render_slash_command_catalog_markdown(payload: dict[str, Any]) -> str:
         "",
         str(payload.get("onboarding", {}).get("suggested_user_note") or ""),
         "",
-        "| Command | Scope | Intent | Mutation policy | CLI reference |",
-        "| --- | --- | --- | --- | --- |",
+        markdown_table_row(["Command", "Scope", "Intent", "Mutation policy", "CLI reference"]),
+        markdown_table_separator(5),
     ]
     for item in payload.get("commands") or []:
         if not isinstance(item, dict):
@@ -211,13 +237,18 @@ def render_slash_command_catalog_markdown(payload: dict[str, Any]) -> str:
         agent_contract = item.get("agent_contract") if isinstance(item.get("agent_contract"), dict) else {}
         if agent_contract.get("must_run_cli_first"):
             intent += " Agent contract: run the CLI reference first; do not rebuild the queue manually."
+        if agent_contract.get("host_loop_activation_required_after_todo_writeback"):
+            intent += " Agent contract: after todo writeback, activate the host loop or report the concrete host-tool gate."
         lines.append(
-            "| "
-            f"`{_markdown_table_cell(item.get('command'))}` | "
-            f"{_markdown_table_cell(item.get('scope'))} | "
-            f"{_markdown_table_cell(intent)} | "
-            f"{_markdown_table_cell(item.get('mutation_policy'))} | "
-            f"`{_markdown_table_cell(item.get('cli_reference'))}` |"
+            markdown_table_row(
+                [
+                    markdown_code(item.get("command")),
+                    item.get("scope"),
+                    intent,
+                    item.get("mutation_policy"),
+                    markdown_code(item.get("cli_reference")),
+                ]
+            )
         )
     lines.extend(
         [

@@ -3,30 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .control_plane.runtime.time import parse_timestamp
+
 
 DEFAULT_INTERFACE_BUDGET_FRESHNESS_HOURS = 24
 INTERFACE_BUDGET_CADENCE_SOURCE = "interface_budget_drift_check"
-
-
-def parse_timestamp(value: Any) -> datetime | None:
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    text = str(value).strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
 def _number(value: Any) -> float | None:
@@ -112,9 +93,11 @@ def build_interface_budget_cadence(
     )
     overdue = bool(next_due_dt and now_dt and now_dt >= next_due_dt)
     within_budget = bool(headrooms) and all(item.get("within_budget") is True for item in headrooms)
+    headroom_remaining = _number(tightest.get("headroom_remaining")) if tightest else None
+    headroom_exhausted = headroom_remaining is not None and headroom_remaining <= 0
     recommendation = (
         "quiet_skip_until_next_check_due"
-        if within_budget and not overdue
+        if within_budget and not overdue and not headroom_exhausted
         else "rerun_hot_path_interface_budget_smoke"
     )
     return {
@@ -147,8 +130,10 @@ def compact_interface_budget_cadence(
     now_dt = parse_timestamp(now) if now is not None else datetime.now(timezone.utc)
     overdue = bool(next_due_dt and now_dt and now_dt >= next_due_dt)
     within_budget = value.get("within_budget") is True
+    headroom_remaining = _number(value.get("headroom_remaining"))
+    headroom_exhausted = headroom_remaining is not None and headroom_remaining <= 0
     recommendation = str(value.get("recommendation") or "").strip()
-    if within_budget and not overdue:
+    if within_budget and not overdue and not headroom_exhausted:
         recommendation = recommendation or "quiet_skip_until_next_check_due"
     else:
         recommendation = recommendation or "rerun_hot_path_interface_budget_smoke"

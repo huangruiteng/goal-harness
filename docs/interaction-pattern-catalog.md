@@ -308,7 +308,7 @@ Hot-path execution decisions: deliver, fallback, recover, or stay quiet.
 | P0 | IP-029 | Handoff Todo Gate State | Status/quota | no interruption unless the handoff itself is user-held | map `blocks_agent` todo lifecycle into wait, successor replan, or concrete successor routing |
 | P0 | IP-021 | Per-Todo Capability Gate | CLI projects, agent decides | ask only when missing capability is owner-held | expose runnable executable candidates; agent chooses one, otherwise repair bridge or skip |
 | P0 | IP-007 | Outcome Floor Recovery | Agent | usually no interruption | produce missing outcome-scale evidence or blocker only |
-| P1 | IP-008 | Monitor Quiet Skip | CLI/controller | no notification | append at most one no-spend poll, then stay quiet |
+| P1 | IP-008 | Monitor Quiet Skip | CLI/controller | no notification | commit one turn receipt and stall observation, then stay quiet |
 
 ### Human Decision
 
@@ -333,7 +333,7 @@ Projection, authority, write scope, and lease integrity.
 | P0 | IP-026 | Agent-Scoped No-Candidate Gap | Status/quota | no interruption | project scope exhaustion or agent-scope wait instead of forcing delivery |
 | P1 | IP-011 | Authority Material Intake | Agent plus registry | notify only on gate/conflict | register redacted source contract before relying on material |
 | P1 | IP-016 | Task Lease Claim | Controller/agent | no interruption unless conflict requires decision | claim bounded work with TTL, write scope, and conflict policy |
-| P1 | IP-019 | Side-Agent Scoped Continuation | Primary plus side agent | no interruption unless scope/review is ambiguous | side agent claims scoped todo, uses independent worktree, then self-merges small validated work or hands review to primary |
+| P1 | IP-019 | Peer Scoped Continuation | Registered peer | no interruption unless scope/review is ambiguous | peer claims scoped work, obeys task workspace policy, then completes directly or uses a typed successor |
 | P1 | IP-020 | Todo Claim / Supersede / Successor Lifecycle | Agent plus controller | no interruption unless successor is a user todo or conflict needs decision | claim before delivery; supersede stale work; complete slices with successor or no-follow-up rationale |
 | P1 | IP-022 | Claimed Todo Visibility And Agent-Lane Next Action | Status/quota/frontstage | no interruption | keep scheduler candidates separate from claimed-work visibility lanes and expose the current agent's slice |
 | P1 | IP-023 | Status Neutral Run Window | Status/quota/history | no interruption | ignore neutral run noise for state authority while retaining it as stall evidence |
@@ -474,8 +474,8 @@ without a validated artifact or blocker.
 
 **Validation**
 
-- `examples/work-lane-contract-smoke.py`
-- `examples/heartbeat-quota-flow-smoke.py`
+- `examples/control_plane/work-lane-contract-smoke.py`
+- `examples/control_plane/heartbeat-quota-flow-smoke.py`
 - `loopx check`
 
 #### IP-002 Blocked Priority With Safe Fallback
@@ -523,7 +523,7 @@ of the P0 blocker.
 
 **Validation**
 
-- `examples/todo-first-open-summary-smoke.py`
+- `examples/control_plane/todo-first-open-summary-smoke.py`
 - `docs/heartbeat-automation-prompt.md`
 
 #### IP-003 Scoped Gate With Safe Fallback
@@ -595,7 +595,7 @@ without naming the blocked user decision, so the fallback becomes the main
 story and the human loses the critical gate.
 
 A third bad smell is an agent-scoped user gate overreach. A user todo says it
-blocks one registered product or side agent, but quota treats it as a global
+blocks one registered peer, but quota treats it as a global
 operator gate for every `--agent-id` call. The non-target agent then stops even
 though it has its own runnable todo. This is not IP-026 scope exhaustion; it is
 IP-003 scope metadata being ignored by the user-todo blocking summary.
@@ -603,9 +603,9 @@ IP-003 scope metadata being ignored by the user-todo blocking summary.
 **Validation**
 
 - `regression/scoped-user-gate-fallback-contract.py`
-- `examples/protocol-action-packet-smoke.py`
-- `examples/work-lane-contract-smoke.py`
-- `examples/quota-agent-scoped-user-gate-smoke.py` for `blocks_agent` scoped
+- `examples/protocol/protocol-action-packet-smoke.py`
+- `examples/control_plane/work-lane-contract-smoke.py`
+- `examples/control_plane/quota-agent-scoped-user-gate-smoke.py` for `blocks_agent` scoped
   user gates that block only the target agent while preserving other-agent
   delivery.
 - `docs/archive/incidents/agent-scoped-user-gate-overreach-incident-20260624.md`
@@ -653,7 +653,7 @@ When `capability_gate.action=run`, the decision contract is:
 - `decision_owner=agent`;
 - `selection_policy=agent_steering_audit_over_runnable_candidates`;
 - `runnable_candidates` is the allowed candidate set for this turn;
-- for a primary agent, same-priority candidates that unblock another agent via
+- for the current peer, same-priority candidates that unblock another peer via
   `blocks_agent` plus `unblocks_todo_id` are ordered before ordinary backlog,
   so the candidate list and `agent_lane_next_action` expose the same handoff
   priority;
@@ -668,11 +668,34 @@ When `capability_gate.action=run`, the decision contract is:
 If no visible executable todo can run, the gate chooses:
 
 - `repair_bridge` for local bridge gaps such as `benchmark_runner`,
-  `external_evidence_poll`, `worker_bridge`, or `cli_bridge`;
-- `ask_owner` for owner-held capabilities such as `network`, `credentials`, or
+  `external_evidence_poll`, `worker_bridge`, or `cli_bridge`, and for observed
+  runtime provisioning gaps such as `network`;
+- `ask_owner` for owner-held capabilities such as `credentials` or
   `production_access`;
 - `skip` when the missing capability is unsupported and no safe repair or owner
   action is known.
+
+For a mixed missing set, the gate projects `owner_missing`, `repair_missing`,
+and `resolution_steps` separately. An unresolved owner-held capability takes
+precedence for the interaction decision, so a local bridge repair cannot hide
+the concrete user action. Runtime capability gaps do not enter
+`owner_missing`: the agent observes or repairs the launcher bridge and then
+truthfully declares the capability available. Once an owner-held capability is
+provided and its concrete gate is resolved, any remaining bridge repair returns
+to the agent lane.
+
+The same resolution information must survive when a non-dependent fallback is
+runnable. `resolution_bindings` groups each missing capability with its owner
+and exact `blocked_todo_ids`. The interaction CLI channel projects idempotent
+todo writes: owner-held gaps become scoped `user_gate` todos linked with
+`unblocks_todo_id`; repairable gaps become agent advancement todos whose
+`target_capabilities` name the bridge being materialized. The user channel is
+notified for the owner-held gap while the agent channel continues an unrelated
+runnable todo. Unsupported gaps remain explicit but do not invent user work.
+
+These todos record responsibility and lineage, not capability truth. A launcher
+must verify the real callsite and declare `--available-capability` again for the
+current preflight and spend; todo completion alone never grants a capability.
 
 Launchers that really have an extra capability should pass it to both
 `quota should-run` and `quota spend-slot` with `--available-capability`, so the
@@ -709,7 +732,7 @@ runnable set for the agent to choose from.
 - `docs/project-agent-todo-contract.md`
 - `docs/quota-allocation.md`
 - `examples/capability-gate-smoke.py`
-- `examples/todo-cli-smoke.py`
+- `examples/control_plane/todo-cli-smoke.py`
 
 #### IP-007 Outcome Floor Recovery
 
@@ -746,7 +769,7 @@ the evidence needed to decide whether the goal is working.
 **Validation**
 
 - `docs/archive/incidents/outcome-floor-safe-bypass-incident-20260606.md`
-- `examples/quota-plan-smoke.py`
+- `examples/control_plane/quota-plan-smoke.py`
 - `examples/upgrade-plan-smoke.py`
 
 #### IP-008 Monitor Quiet Skip
@@ -760,11 +783,12 @@ the evidence needed to decide whether the goal is working.
 
 **Expected behavior**
 
-The agent may append at most one no-spend monitor poll, rerun the guard, and
-then stay quiet. The automation remains alive; monitor-only quiet skips are not
-completion or deletion signals. The poll records `quota_monitor_target_v0` so
-the next guard can distinguish a harmless unchanged watch from the same target
-repeating.
+The heartbeat passes a stable turn id to `quota should-run`. The guard commits
+one idempotent receipt, idempotently appends the no-spend stall observation,
+and returns the follow-up decision. The automation remains alive; monitor-only
+quiet skips are not completion or deletion signals. The observation records
+`quota_monitor_target_v0` so the next guard can distinguish a harmless
+unchanged watch from the same target repeating.
 
 Status and diagnose should display unchanged monitor-only work as
 `waiting_on=monitor_signal` with `severity=watch`, while retaining the quota
@@ -781,9 +805,8 @@ before another quiet poll.
 flowchart TD
   N["should_run=false"] --> M{"monitor_quiet_skip and no gate?"}
   M -->|"no"| C["follow concrete contract"]
-  M -->|"yes"| P["append no-spend poll"]
-  P --> R["rerun quota guard"]
-  R --> D{"same target repeated?"}
+  M -->|"yes"| P["turn-scoped guard writes receipt + stall"]
+  P --> D{"same target repeated?"}
   D -->|"no"| Q["quiet; keep automation active"]
   D -->|"yes"| A["dead-monitor repair required"]
 ```
@@ -795,10 +818,31 @@ no-op status repetition. Another failure mode is presenting monitor-only work
 as an immediate Codex action; the agent then keeps trying to deliver from a
 watch lane instead of staying quiet or writing a concrete blocker.
 
+**Public-safe bad case**
+
+The 2026-06-21 monitor-only replan stall is the canonical public-safe bad case
+for this pattern. Its reusable shape is not tied to any private project:
+
+```text
+effective_action=monitor_quiet_skip
+user_channel.action_required=false
+user_todo_summary.open_count=0
+agent todo lane contains only monitor-style work
+recent history repeats monitor-poll / replan-adjacent rows
+no runnable todo, blocker, successor, supersede, or watch-lane expiry changed
+```
+
+Catalog and dashboard copy should name that as a watch state. A watch lane may
+remain visible, and it may append one no-spend liveness poll, but it must not
+render as immediate Codex delivery or as a user/controller approval gate. If
+the same watch target repeats past the stale threshold, IP-024 owns the repair
+delta: write a blocker, successor, supersede, or explicit watch-lane
+continuation rather than spending another delivery turn on prose.
+
 **Validation**
 
-- `examples/heartbeat-quota-flow-smoke.py`
-- `examples/quota-plan-smoke.py`
+- `examples/control_plane/heartbeat-quota-flow-smoke.py`
+- `examples/control_plane/quota-plan-smoke.py`
 - `docs/heartbeat-automation-prompt.md`
 - `docs/archive/incidents/monitor-only-replan-stall-incident-20260621.md`
 
@@ -844,8 +888,8 @@ needed.
 **Validation**
 
 - `docs/heartbeat-automation-prompt.md`
-- `examples/quota-plan-smoke.py`
-- `examples/heartbeat-quota-flow-smoke.py`
+- `examples/control_plane/quota-plan-smoke.py`
+- `examples/control_plane/heartbeat-quota-flow-smoke.py`
 
 #### IP-027 Deferred Gate Resume
 
@@ -864,7 +908,7 @@ needed.
 **Expected behavior**
 
 Deferred todos represent parked work behind a resume gate. The gate may be a
-user todo, primary-review handoff, prerequisite implementation todo, resource
+user todo, ordinary peer handoff for review, prerequisite implementation todo, resource
 decision, or another bounded control-plane condition. That makes this a
 Human Decision / gate-resume pattern, not a no-todo pattern.
 
@@ -914,16 +958,16 @@ flowchart TD
 **Bad smell**
 
 A ready deferred successor is rendered only inside an agent-scoped
-no-candidate payload. The side agent reports "nothing runnable" even though the
+no-candidate payload. The current peer reports "nothing runnable" even though the
 system knows a previous gate is now satisfied. The opposite failure is also
 bad: deferred items are mixed into ordinary open backlog before the lifecycle
 step, so stale or future work outranks live open tasks.
 
 **Validation**
 
-- `examples/work-lane-contract-smoke.py` covers a ready deferred successor
+- `examples/control_plane/work-lane-contract-smoke.py` covers a ready deferred successor
   returning `successor_replan_required` instead of a quiet no-op.
-- `examples/todo-durability-fixture-smoke.py` covers parsing
+- `examples/control_plane/todo-durability-fixture-smoke.py` covers parsing
   `resume_when=todo_done:<todo_id>` and projecting ready deferred candidates
   after open items.
 - `docs/project-agent-todo-contract.md`
@@ -979,6 +1023,8 @@ flowchart TD
   S -->|"done + no successor"| R["handoff gate: cleared_without_successor"]
   R --> L["successor_replan_required"]
   L --> F["reopen / supersede / no-follow-up rationale"]
+  S -->|"open + stale closeout"| X["route continuation replan required"]
+  X --> L
   S -->|"superseded_by"| H["handoff gate: superseded"]
   H --> I["historical only"]
   S -->|"deferred"| D["handoff gate: deferred"]
@@ -993,10 +1039,16 @@ is also harmful: a stale done handoff outranks a live open review blocker, so
 the agent replans while a real reviewer-owned gate is still open. Both are
 state-machine bugs, not prompt wording bugs.
 
+A third bad smell is an open handoff gate whose action is already a stale
+handoff closeout. That gate is no longer a live reviewer decision. It should
+project `route_continuation_replan_required` so quota wakes successor replan to
+reopen, supersede, or close the stale route with a no-follow-up rationale.
+
 **Validation**
 
-- `loopx/todo_handoff_gate.py` owns the `todo_handoff_gate_v0` projection.
-- `examples/quota-cleared-blocker-successor-gate-smoke.py` covers
+- `loopx/control_plane/todos/handoff_gate.py` owns the
+  `todo_handoff_gate_v0` projection.
+- `examples/control_plane/quota-cleared-blocker-successor-gate-smoke.py` covers
   `blocking`, `cleared_without_successor`, `cleared_with_successor`, and
   `superseded` gate states.
 - `docs/quota-allocation.md`
@@ -1056,7 +1108,7 @@ decision-point re-read.
 - `examples/reward-gate-direct-write-contract-smoke.py`
 - `examples/reward-append-api-smoke.py`
 - `examples/dashboard-reward-append-browser-smoke.mjs`
-- `examples/operator-gate-resume-contract-smoke.py`
+- `examples/project/operator-gate-resume-contract-smoke.py`
 
 #### IP-017 User Reward Lesson Promotion
 
@@ -1204,6 +1256,7 @@ todo and the automation drifts into monitor-only no-ops.
 **Validation**
 
 - `examples/state-projection-gap-smoke.py`
+- `examples/project/onboarding-no-scan-projection-smoke.py`
 - `docs/project-agent-todo-contract.md`
 
 #### IP-006 Checkpointed Scope Mismatch
@@ -1260,8 +1313,8 @@ the checkpointed decision.
 
 **Validation**
 
-- `examples/quota-action-scope-guard-smoke.py`;
-- `examples/configure-goal-smoke.py`;
+- `examples/control_plane/quota-action-scope-guard-smoke.py`;
+- `examples/project/configure-goal-smoke.py`;
 - `docs/state-interaction-model.md` checkpointed decision sections.
 
 #### IP-011 Authority Material Intake
@@ -1334,14 +1387,17 @@ material belongs to another connected project.
 
 **Expected behavior**
 
-A task claim should become `task_lease_v0`: an explicit, expiring claim over
-one bounded todo. The pending key is `(goal_id, todo_id)`: `goal_id` names the
-control-plane lane, while `todo_id` names the work item inside it. Different
+`claimed_by` remains the default soft routing signal. When a host has a concrete
+exclusive-write need, it may explicitly acquire `task_lease_v0`: an expiring
+hard lease over one bounded todo. The pending key is `(goal_id, todo_id)`:
+`goal_id` names the control-plane lane, while `todo_id` names the work item
+inside it. Different
 todos inside the same goal do not conflict merely because they share a goal;
 only competing pending leases for the same `todo_id` or overlapping write
-scopes should conflict. Status and future channel projections may render the
-claim, but the lease remains a projection over the LoopX ledger and does
-not override `goal_boundary`, user gates, quota, or write-scope checks.
+scopes should conflict. Status exposes whether the optional lease capability is
+available, and channel projections may render supplied lease rows. The lease is
+not enforced by `quota should-run` and does not override `goal_boundary`, user
+gates, capabilities, or write-scope checks.
 
 When a lease is active and the selected action is inside its scope, the owner
 may proceed. When a competing worker sees an active overlapping lease, it must
@@ -1372,75 +1428,73 @@ files because the only ownership signal was a chat message or dashboard label.
 
 - `docs/frontstage-channel-lease-roadmap.md`
 - `docs/architecture.md` local server / daemon roadmap
-- future `task_lease_v0` status and conflict smoke.
+- `examples/control_plane/task-lease-runtime-smoke.py`.
 
-#### IP-019 Side-Agent Scoped Continuation
+#### IP-019 Peer Scoped Continuation
 
 **Trigger**
 
-- a shared-control-plane goal declares `coordination.registered_agents` and one
-  `coordination.primary_agent`;
-- a side agent has an automation prompt or handoff scope, such as product docs,
-  showcase work, validation, or another low-conflict side lane;
-- an in-scope agent todo can be claimed with `claimed_by`, while the primary
-  agent remains responsible for high-risk review, publication, reassignment,
-  and merge decisions outside self-merge policy.
+- a shared-control-plane goal declares `coordination.agent_model=peer_v1` and
+  `coordination.registered_agents`;
+- a peer has an advisory profile/scope and a current-agent or unclaimed todo;
+- task, goal, capability, and repository policy permit the selected action.
 
 **Expected behavior**
 
-The control plane should keep identity and ownership visible without turning
-scope into todo metadata. The side agent learns its scope from the automation
-prompt or handoff, then claims only a concrete in-scope todo:
+The control plane keeps identity and ownership visible without turning scope
+into rank or copying broad scope into todo metadata. The peer claims one
+concrete eligible todo:
 
 ```bash
 loopx todo claim \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
-  --claimed-by <side-agent-id>
+  --claimed-by <peer-agent-id>
 ```
 
-Repository edits happen in an independent worktree/branch. When the slice is
-small, validated, public-safe, and allowed by repository policy, the side agent
-may self-merge and complete the todo with evidence:
+When the selected task writes repository state, `agent_workspace_guard_v1`
+enforces the task/repository isolation policy. A cross-repository task declares
+the first-class `task_repository=git:<host>/<path>` todo field; quota matches the
+current origin to that identity and still requires a linked worktree. The field
+does not carry agent scope or grant writes, and the goal repo remains the
+fallback when it is absent. Read-only and monitor-only work does not require an
+isolated checkout merely because of agent identity. When a
+slice is small, validated, and allowed by repository policy, the peer may
+self-merge and complete with evidence:
 
 ```bash
 loopx todo complete \
   --goal-id <goal-id> \
   --todo-id <todo_id> \
-  --claimed-by <side-agent-id> \
-  --side-agent-self-merged \
+  --claimed-by <peer-agent-id> \
+  --self-merged \
   --evidence "<commit, validation, and self-merge summary>"
 ```
 
-If the self-merged lane has an obvious same-scope continuation, the completion
-may atomically add a successor and claim it back to the same side agent. If the
-work is broad, risky, unclear, or outside the side scope, completion must create
-a successor handoff todo claimed by the configured
-`coordination.side_agent_handoff_agent` when set, otherwise by the primary
-agent. LoopX does not need a separate kernel-level "review" object here: the
-machine-readable contract is the successor todo plus `claimed_by`,
-`blocks_agent`, and `unblocks_todo_id`. Same-agent broad handoff is rejected;
-use `--side-agent-self-merged --evidence` for same-agent delivery. `claimed_by`
-remains a soft owner and not a permission grant: quota, user gates,
-public/private boundary checks, write scopes, and repository rules still apply.
+Completion uses typed task policy. `independent_handoff` creates a non-blocking
+successor, `same_agent_non_delivery` keeps a continuation with the same peer,
+and review remains an ordinary action kind. `excluded_agents` expresses the
+rare executor-separation constraint; `unblocks_todo_id` expresses dependency
+lineage. No profile or goal field supplies an implicit reviewer. `claimed_by`
+remains a soft owner and not a permission grant: quota, user gates, boundaries,
+capabilities, write scopes, and repository rules still apply.
 
 Because prompt text alone is not a reliable guard, `quota should-run --agent-id
-<side-agent-id>` should also project `workspace_guard` when the side agent is
-running from the registered primary checkout, a non-git directory, or an
-unrelated git worktree. In that state `normal_delivery_allowed=false` and
-`interaction_contract.mode=side_agent_workspace_repair`: the only allowed action
-is to create or switch to an independent worktree/branch and rerun the guard
-before editing repository files. Moving workspaces is a preflight repair and
-does not get quota spend.
+<peer-agent-id>` projects `workspace_guard` when a repository-writing task is
+running from a non-git, unrelated, or non-isolated checkout. In that state
+`normal_delivery_allowed=false` and
+`interaction_contract.mode=agent_workspace_repair`: the only allowed action is
+to move to a compliant worktree/branch and rerun the guard before editing.
+Workspace repair is preflight and does not spend quota.
 
 The same scoped identity must be carried through the whole successful turn.
-If `quota should-run` was evaluated with `--agent-id <side-agent-id>`, follow-up
+If `quota should-run` was evaluated with `--agent-id <peer-agent-id>`, follow-up
 commands that interpret the same turn's control-plane state, especially
 `refresh-state` and `quota spend-slot`, should use that same registered
 `--agent-id` when the subcommand supports it. Otherwise the spend/accounting
 preview can be evaluated as an unscoped automation and report
 `automation_prompt_upgrade_required` even though the delivery decision was
-made under a valid side-agent scope. The fix is not to ignore that warning; the
+made under a valid peer scope. The fix is not to ignore that warning; the
 fix is to preserve the identity envelope across guard, writeback, accounting,
 and rollout evidence.
 
@@ -1448,29 +1502,32 @@ and rollout evidence.
 
 ```mermaid
 flowchart TD
-  S["registered side agent wakes with scope"] --> T{"in-scope open todo?"}
-  T -->|"no"| Q["quiet no-op or add public-safe candidate todo"]
-  T -->|"yes"| C["claim todo with claimed_by side-agent"]
-  C --> W["work in independent worktree / branch"]
-  W --> V{"validated and AGENTS self-merge eligible?"}
+  S["registered peer wakes with scope"] --> T{"current-agent or unclaimed todo?"}
+  T -->|"no"| Q["reassignment required or quiet wait"]
+  T -->|"yes"| C["claim todo with claimed_by peer"]
+  C --> W{"repository-writing task needs isolation?"}
+  W -->|"yes"| B["satisfy workspace guard"]
+  W -->|"no"| V
+  B --> V{"validated and AGENTS self-merge eligible?"}
   V -->|"yes"| M["self-merge small change with evidence"]
   M --> I["refresh/spend with same --agent-id"]
   I --> K{"same-scope continuation?"}
-  K -->|"yes"| N["complete + add successor claimed_by same side agent"]
+  K -->|"yes"| N["same_agent_non_delivery successor"]
   K -->|"no"| X["complete with no successor or no-follow-up rationale"]
-  V -->|"no"| R["complete with successor handoff todo"]
-  R --> P["successor claimed_by handoff owner, else primary_agent"]
+  V -->|"no"| R{"independent review needed?"}
+  R -->|"yes"| P["independent_handoff with action_kind=review"]
+  R -->|"no"| H["independent_handoff successor"]
 ```
 
 **Bad smell**
 
-A side agent edits the primary checkout, chooses work from chat memory instead
-of the shared todo list, encodes scope into todo metadata, self-merges broad or
-runtime-sensitive work, or creates a review successor and claims it back to
-itself without the explicit self-merge path. A related bad smell is treating
+An agent edits from a workspace forbidden by the selected task, chooses work
+from chat memory instead of the shared todo list, encodes scope into todo
+metadata, self-merges broad or runtime-sensitive work, or invents an implicit
+review owner. A related bad smell is treating
 "the prompt said use a worktree" as sufficient product protection; the guard
 must be machine-visible before the first file edit. Another bad smell is a
-scoped side-agent run that passes `quota should-run --agent-id ...` but later
+scoped peer run that passes `quota should-run --agent-id ...` but later
 spends without `--agent-id`, producing an unscoped accounting snapshot that
 looks like a stale automation prompt instead of the completed scoped turn.
 
@@ -1479,11 +1536,11 @@ looks like a stale automation prompt instead of the completed scoped turn.
 - `docs/project-agent-todo-contract.md`
 - `docs/codex-subagent-orchestration.md`
 - `docs/heartbeat-automation-prompt.md`
-- `examples/todo-lifecycle-cli-smoke.py`
-- `examples/todo-cli-smoke.py`
-- `examples/todo-concurrent-write-lock-smoke.py`
-- `examples/heartbeat-prompt-smoke.py`
-- `examples/side-agent-workspace-guard-smoke.py`
+- `examples/control_plane/todo-lifecycle-cli-smoke.py`
+- `examples/control_plane/todo-cli-smoke.py`
+- `examples/control_plane/todo-concurrent-write-lock-smoke.py`
+- `examples/control_plane/heartbeat-prompt-smoke.py`
+- `examples/control_plane/peer-agent-workspace-guard-smoke.py`
 
 #### IP-020 Todo Claim / Supersede / Successor Lifecycle
 
@@ -1576,9 +1633,9 @@ permission to ignore gates and boundaries.
 **Validation**
 
 - `docs/project-agent-todo-contract.md`
-- `examples/todo-lifecycle-cli-smoke.py`
-- `examples/todo-cli-smoke.py`
-- `examples/todo-concurrent-write-lock-smoke.py`
+- `examples/control_plane/todo-lifecycle-cli-smoke.py`
+- `examples/control_plane/todo-cli-smoke.py`
+- `examples/control_plane/todo-concurrent-write-lock-smoke.py`
 - future status/quota smoke that verifies first executable successor projection
   after `todo supersede` and `todo complete --next-agent-todo`.
 
@@ -1588,8 +1645,8 @@ permission to ignore gates and boundaries.
 
 - status or quota summarizes a todo set with more open work than the small
   scheduler top-N can show;
-- registered agents use `claimed_by`, especially side agents whose scoped work
-  may sit behind higher-priority primary or benchmark todos;
+- registered peers use `claimed_by`, especially when one peer's scoped work may
+  sit behind higher-priority work claimed by another peer;
 - a dashboard, review packet, or heartbeat prompt needs to show ownership,
   current-agent work, and monitor responsibilities without changing which
   executable todo the scheduler selects.
@@ -1671,7 +1728,7 @@ flowchart TD
 
 **Bad smell**
 
-A side agent claims a productization todo, but status/quota only expose the
+A peer claims a productization todo, but status/quota only expose the
 first few priority-ranked benchmark todos. The agent then appears idle or
 unowned work appears available even though the control plane already knows its
 owner. The opposite bad smell is also harmful: a large claimed-work list is fed
@@ -1690,11 +1747,11 @@ monitor through status/quota/todo projection.
 **Validation**
 
 - `docs/status-data-contract.md`
-- `examples/todo-first-open-summary-smoke.py`
-- `examples/work-lane-contract-smoke.py` for `agent_lane_next_action_v0`
-  preserving the primary/global `Next Action` while surfacing the side-agent
-  TUI slice.
-- `examples/status-markdown-smoke.py` for `status --agent-id` rendering the same
+- `examples/control_plane/todo-first-open-summary-smoke.py`
+- `examples/control_plane/work-lane-contract-smoke.py` for `agent_lane_next_action_v0`
+  preserving the goal-wide `Next Action` while surfacing the current peer's TUI
+  slice.
+- `examples/control_plane/status-markdown-smoke.py` for `status --agent-id` rendering the same
   agent-lane pointer without replacing the project route.
 - PR #262 / commit `292a2c8`: additive status/quota visibility lanes with a
   16-item agent-facing cap.
@@ -1729,10 +1786,8 @@ machine states:
 
 - `scope_exhausted`: no current-agent or unclaimed candidate matches the
   registered agent profile and boundary;
-- `agent_scope_wait`: the remaining useful step is progress, merge,
-  reassignment, or decision by the agent/controller that owns the blocking
-  work; this may be the primary agent, another side agent, or an explicitly
-  claimed reviewer that blocks the current agent's handoff;
+- `agent_scope_wait`: an explicit blocking review/handoff dependency is owned
+  by another peer and must clear before the current peer can continue;
 - `reassignment_required`: useful work exists, but ownership must be changed
   before this agent may treat it as its lane.
 
@@ -1746,7 +1801,7 @@ agent_channel.quiet_noop_allowed=true
 
 The user channel remains quiet unless a concrete user todo exists. The
 recommended action should name the scoped condition, not borrow the global
-goal-level route. A side agent should be allowed to no-op without spend, or
+goal-level route. A peer should be allowed to no-op without spend, or
 claim a newly exposed in-scope todo before delivery becomes allowed again.
 
 This pattern is the runtime counterpart of IP-022. IP-022 makes claimed,
@@ -1780,7 +1835,7 @@ flowchart TD
 
 **Bad smell**
 
-A side-agent heartbeat receives `should_run=true`,
+A peer heartbeat receives `should_run=true`,
 `delivery_allowed=true`, and `quiet_noop_allowed=false` even though
 `agent_lane_next_action=None`, `current_agent_claimed_advancement_items=[]`,
 and the only recommendation is another agent's benchmark or runtime lane. The
@@ -1794,18 +1849,18 @@ or future work outranks live open tasks.
 
 **Validation**
 
-- future quota/status regression with two registered agents where all runnable
-  work is claimed by the primary and the side-agent `--agent-id` call returns
-  `scope_exhausted` or `agent_scope_wait`;
-- `examples/work-lane-contract-smoke.py` should cover that an empty
+- future quota/status regression with two registered peers where all runnable
+  work is claimed by the other peer and the current `--agent-id` call returns
+  `reassignment_required` unless an explicit blocking review dependency exists;
+- `examples/control_plane/work-lane-contract-smoke.py` should cover that an empty
   current-agent frontier cannot produce `delivery_allowed=true`;
 - `docs/project-agent-todo-contract.md`
 - `docs/quota-allocation.md`
 - `docs/status-data-contract.md`
-- `examples/quota-agent-scoped-user-gate-smoke.py` for the nearby case where
+- `examples/control_plane/quota-agent-scoped-user-gate-smoke.py` for the nearby case where
   a user gate is real but scoped to a different agent and therefore must not
   create current-agent scope exhaustion.
-- `examples/quota-cleared-blocker-successor-gate-smoke.py` for the nearby
+- `examples/control_plane/quota-cleared-blocker-successor-gate-smoke.py` for the nearby
   case where a `blocks_agent` handoff todo directly controls the scoped gate.
 - `skills/loopx-self-repair/references/repair-patterns.md` records
   `agent_scoped_no_candidate_gap` and `handoff_gate_state_projection_gap` for
@@ -2183,6 +2238,7 @@ recommendation as the next machine-visible route.
 - `examples/autonomous-replan-obligation-smoke.py`
 - `regression/autonomous-replan-vs-dreaming-contract.py`
 - `docs/archive/incidents/monitor-only-replan-stall-incident-20260621.md`
+- `docs/archive/incidents/agent-scoped-replan-precedence-incident-20260703.md`
 
 #### IP-024 Repair Delta Contract
 
@@ -2240,7 +2296,7 @@ resolved repair; it is an unclosed control-plane loop with better narration.
 
 - `docs/archive/incidents/monitor-only-replan-stall-incident-20260621.md`
 - `skills/loopx-self-repair/references/repair-patterns.md`
-- `examples/heartbeat-quota-flow-smoke.py`
+- `examples/control_plane/heartbeat-quota-flow-smoke.py`
 - future regression that compares before/after frontier fields for repair and
   replan closeout runs.
 
@@ -2336,7 +2392,7 @@ successor work. The next automation then behaves as if the plan never existed.
 
 - `skills/loopx-project/SKILL.md`
 - `skills/loopx-self-repair/references/repair-patterns.md`
-- `examples/heartbeat-prompt-smoke.py`
+- `examples/control_plane/heartbeat-prompt-smoke.py`
 - future status/quota smoke that flags user-facing plans without todo or
   refresh-state writeback.
 

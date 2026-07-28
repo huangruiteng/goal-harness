@@ -9,44 +9,43 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-CONTENT_OPS_SURFACE_SCHEMA_VERSION = "content_ops_surface_v0"
-CONTENT_OPS_SURFACE_PROJECTION_SCHEMA_VERSION = "content_ops_surface_projection_v0"
-CONTENT_OPS_PREVIEW_PACKET_SCHEMA_VERSION = "content_ops_preview_packet_v0"
-CONTENT_OPS_PUBLIC_HANDLE_OBSERVATION_PACKET_SCHEMA_VERSION = (
-    "content_ops_public_handle_observation_packet_v0"
+from .connector_packets import (
+    source_item_and_trial_from_private_gate_packet,
+    source_item_and_trial_from_public_packet,
 )
-CONTENT_OPS_PUBLIC_HANDLE_OBSERVATION_SCHEMA_VERSION = (
-    "content_ops_public_handle_observation_v0"
+from .social_browser_x import build_social_browser_x_provider_packet
+from .markdown import (
+    render_content_ops_chatview_report_markdown as render_content_ops_chatview_report_markdown,
+    render_content_ops_exploration_plan_markdown as render_content_ops_exploration_plan_markdown,
+    render_content_ops_packet_aggregation_markdown as render_content_ops_packet_aggregation_markdown,
+    render_content_ops_preview_markdown as render_content_ops_preview_markdown,
+    render_content_ops_private_connector_gate_markdown as render_content_ops_private_connector_gate_markdown,
+    render_content_ops_public_handle_observation_markdown as render_content_ops_public_handle_observation_markdown,
+    render_content_ops_walkthrough_artifact_markdown as render_content_ops_walkthrough_artifact_markdown,
 )
-CONTENT_OPS_PRIVATE_CONNECTOR_GATE_PACKET_SCHEMA_VERSION = (
-    "content_ops_private_connector_gate_packet_v0"
+from .schemas import (
+    ANGLE_CANDIDATE_SCHEMA_VERSION,
+    CONNECTOR_TRIAL_SCHEMA_VERSION,
+    CONTENT_OPS_CHATVIEW_CONNECTOR_REPORT_SCHEMA_VERSION,
+    CONTENT_OPS_CONNECTOR_RUNTIME_POLICY_SCHEMA_VERSION,
+    CONTENT_OPS_EXPLORATION_PLAN_PACKET_SCHEMA_VERSION,
+    CONTENT_OPS_PACKET_AGGREGATION_SCHEMA_VERSION,
+    CONTENT_OPS_PREVIEW_PACKET_SCHEMA_VERSION,
+    CONTENT_OPS_PRIVATE_CONNECTOR_GATE_PACKET_SCHEMA_VERSION,
+    CONTENT_OPS_PRIVATE_CONNECTOR_OWNER_GATE_SCHEMA_VERSION,
+    CONTENT_OPS_PUBLIC_HANDLE_OBSERVATION_PACKET_SCHEMA_VERSION,
+    CONTENT_OPS_PUBLIC_HANDLE_OBSERVATION_SCHEMA_VERSION,
+    CONTENT_OPS_SURFACE_PROJECTION_SCHEMA_VERSION,
+    CONTENT_OPS_SURFACE_SCHEMA_VERSION,
+    CONTENT_OPS_VALIDATION_SCHEMA_VERSION,
+    CONTENT_OPS_WALKTHROUGH_ARTIFACT_SCHEMA_VERSION,
+    DRAFT_ITEM_SCHEMA_VERSION,
+    EXPLORATION_PLAN_SCHEMA_VERSION,
+    FEEDBACK_SIGNAL_SCHEMA_VERSION,
+    MATERIAL_MEMORY_SCHEMA_VERSION,
+    PUBLISH_GATE_SCHEMA_VERSION,
+    SOURCE_ITEM_SCHEMA_VERSION,
 )
-CONTENT_OPS_PRIVATE_CONNECTOR_OWNER_GATE_SCHEMA_VERSION = (
-    "content_ops_private_connector_owner_gate_v0"
-)
-CONTENT_OPS_CONNECTOR_RUNTIME_POLICY_SCHEMA_VERSION = (
-    "content_ops_connector_runtime_policy_v0"
-)
-CONTENT_OPS_PACKET_AGGREGATION_SCHEMA_VERSION = "content_ops_packet_aggregation_v0"
-CONTENT_OPS_CHATVIEW_CONNECTOR_REPORT_SCHEMA_VERSION = (
-    "content_ops_chatview_connector_report_v0"
-)
-CONTENT_OPS_WALKTHROUGH_ARTIFACT_SCHEMA_VERSION = (
-    "content_ops_walkthrough_artifact_v0"
-)
-CONTENT_OPS_EXPLORATION_PLAN_PACKET_SCHEMA_VERSION = (
-    "content_ops_exploration_plan_packet_v0"
-)
-EXPLORATION_PLAN_SCHEMA_VERSION = "exploration_plan_v0"
-
-SOURCE_ITEM_SCHEMA_VERSION = "source_item_v0"
-ANGLE_CANDIDATE_SCHEMA_VERSION = "angle_candidate_v0"
-DRAFT_ITEM_SCHEMA_VERSION = "draft_item_v0"
-FEEDBACK_SIGNAL_SCHEMA_VERSION = "feedback_signal_v0"
-PUBLISH_GATE_SCHEMA_VERSION = "publish_gate_v0"
-MATERIAL_MEMORY_SCHEMA_VERSION = "material_memory_v0"
-CONNECTOR_TRIAL_SCHEMA_VERSION = "connector_trial_v0"
-CONTENT_OPS_VALIDATION_SCHEMA_VERSION = "content_ops_surface_validation_v0"
 
 RAW_MATERIAL_KEY_HINTS = (
     "body",
@@ -498,22 +497,7 @@ def build_content_ops_surface_fixture(
         }
     ]
     connector_trials = [
-        {
-            "schema_version": CONNECTOR_TRIAL_SCHEMA_VERSION,
-            "trial_id": "trial_x_ego_lite_browser",
-            "surface": "x_public_feed",
-            "tool_hint": "ego-lite browser",
-            "access_mode": "public_metadata_only",
-            "source_status": "public",
-            "freshness": "unknown",
-            "allowed_use": "metadata_only",
-            "trial_state": "ready_for_metadata_trial",
-            "proposed_source_item_id": "source_x_public_signal_001",
-            "terms_note": "public/terms-aware signal intake; no login, posting, or raw timeline capture in LoopX state",
-            "promotion_target": "source_item_v0",
-            "requires_user_gate": False,
-            "external_write_allowed": False,
-        },
+        build_social_browser_x_provider_packet()["connector_trial"],
         {
             "schema_version": CONNECTOR_TRIAL_SCHEMA_VERSION,
             "trial_id": "trial_wechat_chatlog_alpha",
@@ -1201,63 +1185,6 @@ def validate_content_ops_exploration_plan_lanes(
     }
 
 
-def render_content_ops_exploration_plan_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "# LoopX Content-Ops Exploration Plan",
-        "",
-        f"- ok: `{payload.get('ok')}`",
-        f"- schema_version: `{payload.get('schema_version')}`",
-        f"- external_reads_performed: `{payload.get('external_reads_performed')}`",
-        f"- external_writes_performed: `{payload.get('external_writes_performed')}`",
-        f"- private_source_bodies_read: `{payload.get('private_source_bodies_read')}`",
-        f"- local_paths_captured: `{payload.get('local_paths_captured')}`",
-        f"- autopublish_allowed: `{payload.get('autopublish_allowed')}`",
-    ]
-    plan = payload.get("exploration_plan")
-    if isinstance(plan, Mapping):
-        first_screen = plan.get("first_screen")
-        if isinstance(first_screen, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## First Screen",
-                    "",
-                    f"- waiting_on: `{first_screen.get('waiting_on')}`",
-                    f"- user_action_required: `{first_screen.get('user_action_required')}`",
-                    f"- agent_can_continue: `{first_screen.get('agent_can_continue')}`",
-                    f"- top_agent_action: {first_screen.get('top_agent_action')}",
-                ]
-            )
-        lanes = plan.get("selected_source_lanes")
-        if isinstance(lanes, Sequence) and not isinstance(lanes, (str, bytes)):
-            lines.extend(["", "## Source Lanes", ""])
-            for lane in lanes:
-                if not isinstance(lane, Mapping):
-                    continue
-                lines.extend(
-                    [
-                        f"- `{lane.get('lane_id')}`: status=`{lane.get('source_status')}`, "
-                        f"read=`{lane.get('read_status')}`, "
-                        f"promotion=`{lane.get('promotion_target')}`, "
-                        f"user_gate=`{lane.get('requires_user_gate')}`",
-                    ]
-                )
-    validation = payload.get("validation")
-    if isinstance(validation, Mapping):
-        errors = validation.get("errors") if isinstance(validation.get("errors"), list) else []
-        lines.extend(
-            [
-                "",
-                "## Validation",
-                "",
-                f"- validation_ok: `{validation.get('ok')}`",
-                f"- lane_count: `{validation.get('lane_count')}`",
-                f"- error_count: `{len(errors)}`",
-            ]
-        )
-    return "\n".join(lines) + "\n"
-
-
 def build_content_ops_public_handle_observation_packet(
     *,
     url: str,
@@ -1373,52 +1300,6 @@ def build_content_ops_public_handle_observation_packet(
             "only after attribution and allowed_use remain metadata_only"
         ),
     }
-
-
-def render_content_ops_public_handle_observation_markdown(
-    payload: dict[str, Any],
-) -> str:
-    lines = [
-        "# LoopX Content-Ops Public Handle Observation",
-        "",
-        f"- ok: `{payload.get('ok')}`",
-        f"- schema_version: `{payload.get('schema_version')}`",
-        f"- external_reads_performed: `{payload.get('external_reads_performed')}`",
-        f"- external_writes_performed: `{payload.get('external_writes_performed')}`",
-        f"- private_source_bodies_read: `{payload.get('private_source_bodies_read')}`",
-        f"- autopublish_allowed: `{payload.get('autopublish_allowed')}`",
-    ]
-    source_item = payload.get("source_item")
-    if isinstance(source_item, Mapping):
-        lines.extend(
-            [
-                "",
-                "## Source Item",
-                "",
-                f"- source_item_id: `{source_item.get('source_item_id')}`",
-                f"- source_kind: `{source_item.get('source_kind')}`",
-                f"- source_status: `{source_item.get('source_status')}`",
-                f"- allowed_use: `{source_item.get('allowed_use')}`",
-                f"- attribution: `{source_item.get('attribution')}`",
-            ]
-        )
-    observation = payload.get("observation")
-    if isinstance(observation, Mapping):
-        lines.extend(
-            [
-                "",
-                "## Observation",
-                "",
-                f"- http_method: `{observation.get('http_method')}`",
-                f"- http_status: `{observation.get('http_status')}`",
-                f"- url_effective: `{observation.get('url_effective')}`",
-                f"- content_bytes_read: `{observation.get('content_bytes_read')}`",
-                f"- external_write_performed: `{observation.get('external_write_performed')}`",
-            ]
-        )
-    if payload.get("error"):
-        lines.extend(["", "## Error", "", str(payload.get("error"))])
-    return "\n".join(lines) + "\n"
 
 
 def build_content_ops_private_connector_gate_packet(
@@ -1672,95 +1553,6 @@ def build_content_ops_chatview_report_packet(
     return packet
 
 
-def _require_packet_flag(payload: Mapping[str, Any], key: str, expected: Any) -> None:
-    if payload.get(key) != expected:
-        raise ValueError(f"packet {key} must be {expected!r}")
-
-
-def _connector_trial_from_public_packet(
-    packet: Mapping[str, Any],
-    index: int,
-) -> dict[str, Any]:
-    source_item = packet.get("source_item")
-    if not isinstance(source_item, Mapping):
-        raise ValueError("public handle packet must include source_item")
-    observation = (
-        packet.get("observation")
-        if isinstance(packet.get("observation"), Mapping)
-        else {}
-    )
-    runtime_policy = (
-        packet.get("runtime_policy")
-        if isinstance(packet.get("runtime_policy"), Mapping)
-        else {}
-    )
-    surface = str(packet.get("surface") or observation.get("surface") or "public_feed")
-    source_item_id = str(source_item.get("source_item_id") or "").strip()
-    if not source_item_id:
-        raise ValueError("public handle packet source_item_id is required")
-    return {
-        "schema_version": CONNECTOR_TRIAL_SCHEMA_VERSION,
-        "trial_id": f"trial_public_packet_{index + 1}",
-        "surface": surface,
-        "tool_hint": str(
-            runtime_policy.get("connector_name") or "public metadata connector"
-        ),
-        "access_mode": "public_metadata_only",
-        "source_status": str(source_item.get("source_status") or "public"),
-        "freshness": str(source_item.get("freshness") or "unknown"),
-        "allowed_use": str(source_item.get("allowed_use") or "metadata_only"),
-        "trial_state": "metadata_packet_collected",
-        "proposed_source_item_id": source_item_id,
-        "terms_note": str(
-            source_item.get("terms_note")
-            or "metadata-only public source packet already collected"
-        ),
-        "promotion_target": "source_item_v0",
-        "requires_user_gate": False,
-        "external_write_allowed": False,
-    }
-
-
-def _connector_trial_from_private_gate_packet(
-    packet: Mapping[str, Any],
-    index: int,
-) -> dict[str, Any]:
-    connector = (
-        packet.get("connector")
-        if isinstance(packet.get("connector"), Mapping)
-        else {}
-    )
-    source_item = packet.get("source_item")
-    if not isinstance(source_item, Mapping):
-        raise ValueError("private connector gate packet must include source_item")
-    source_item_id = str(source_item.get("source_item_id") or "").strip()
-    if not source_item_id:
-        raise ValueError("private connector gate source_item_id is required")
-    return {
-        "schema_version": CONNECTOR_TRIAL_SCHEMA_VERSION,
-        "trial_id": f"trial_private_gate_packet_{index + 1}",
-        "surface": str(
-            packet.get("surface") or connector.get("surface") or "private_archive"
-        ),
-        "tool_hint": str(
-            connector.get("connector_name") or "private metadata connector"
-        ),
-        "access_mode": "private_metadata_only",
-        "source_status": "private_needs_review",
-        "freshness": str(source_item.get("freshness") or "unknown"),
-        "allowed_use": "metadata_only",
-        "trial_state": "needs_owner_gate",
-        "proposed_source_item_id": source_item_id,
-        "terms_note": str(
-            source_item.get("terms_note")
-            or "private connector metadata remains gated before source use"
-        ),
-        "promotion_target": "source_item_v0_after_owner_gate",
-        "requires_user_gate": True,
-        "external_write_allowed": False,
-    }
-
-
 def build_content_ops_surface_from_connector_packets(
     *,
     public_handle_packets: Sequence[Mapping[str, Any]],
@@ -1781,62 +1573,20 @@ def build_content_ops_surface_from_connector_packets(
     connector_trials: list[dict[str, Any]] = []
 
     for index, packet in enumerate(public_packets):
-        if (
-            packet.get("schema_version")
-            != CONTENT_OPS_PUBLIC_HANDLE_OBSERVATION_PACKET_SCHEMA_VERSION
-        ):
-            raise ValueError(
-                "public packet schema_version must be "
-                "content_ops_public_handle_observation_packet_v0"
-            )
-        _require_packet_flag(packet, "ok", True)
-        _require_packet_flag(packet, "external_writes_performed", False)
-        _require_packet_flag(packet, "private_source_content_read", False)
-        _require_packet_flag(packet, "autopublish_allowed", False)
-        runtime_policy = (
-            packet.get("runtime_policy")
-            if isinstance(packet.get("runtime_policy"), Mapping)
-            else {}
+        source_item, connector_trial = source_item_and_trial_from_public_packet(
+            packet,
+            index,
         )
-        if runtime_policy.get("safe_default") != "head_only_metadata_probe":
-            raise ValueError("public packet runtime policy must be HEAD-only")
-        if runtime_policy.get("browser_open_allowed_before_gate") is not False:
-            raise ValueError("public packet must not allow browser open before gate")
-        source_item = packet.get("source_item")
-        if not isinstance(source_item, Mapping):
-            raise ValueError("public packet must include source_item")
-        source_items.append(dict(source_item))
-        connector_trials.append(_connector_trial_from_public_packet(packet, index))
+        source_items.append(source_item)
+        connector_trials.append(connector_trial)
 
     for index, packet in enumerate(private_packets):
-        if (
-            packet.get("schema_version")
-            != CONTENT_OPS_PRIVATE_CONNECTOR_GATE_PACKET_SCHEMA_VERSION
-        ):
-            raise ValueError(
-                "private gate packet schema_version must be "
-                "content_ops_private_connector_gate_packet_v0"
-            )
-        _require_packet_flag(packet, "ok", True)
-        _require_packet_flag(packet, "owner_gate_required", True)
-        _require_packet_flag(packet, "external_reads_performed", False)
-        _require_packet_flag(packet, "external_writes_performed", False)
-        _require_packet_flag(packet, "private_source_content_read", False)
-        _require_packet_flag(packet, "autopublish_allowed", False)
-        runtime_policy = (
-            packet.get("runtime_policy")
-            if isinstance(packet.get("runtime_policy"), Mapping)
-            else {}
+        source_item, connector_trial = source_item_and_trial_from_private_gate_packet(
+            packet,
+            index,
         )
-        if runtime_policy.get("safe_default") != "gate_projection_only":
-            raise ValueError("private packet runtime policy must be gate-only")
-        if runtime_policy.get("browser_open_allowed_before_gate") is not False:
-            raise ValueError("private packet must not allow browser open before gate")
-        source_item = packet.get("source_item")
-        if not isinstance(source_item, Mapping):
-            raise ValueError("private gate packet must include source_item")
-        source_items.append(dict(source_item))
-        connector_trials.append(_connector_trial_from_private_gate_packet(packet, index))
+        source_items.append(source_item)
+        connector_trials.append(connector_trial)
 
     public_source_ids = [
         str(item.get("source_item_id"))
@@ -2204,346 +1954,3 @@ def build_content_ops_walkthrough_artifact_packet(
             "private source use or publication"
         ),
     }
-
-
-def render_content_ops_packet_aggregation_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "# LoopX Content-Ops Packet Aggregation",
-        "",
-        f"- ok: `{payload.get('ok')}`",
-        f"- schema_version: `{payload.get('schema_version')}`",
-        f"- external_reads_performed: `{payload.get('external_reads_performed')}`",
-        f"- external_writes_performed: `{payload.get('external_writes_performed')}`",
-        f"- private_source_bodies_read: `{payload.get('private_source_bodies_read')}`",
-        f"- private_source_content_read: `{payload.get('private_source_content_read')}`",
-        f"- autopublish_allowed: `{payload.get('autopublish_allowed')}`",
-    ]
-    input_summary = payload.get("input_summary")
-    if isinstance(input_summary, Mapping):
-        lines.extend(
-            [
-                "",
-                "## Inputs",
-                "",
-                f"- public_handle_packet_count: `{input_summary.get('public_handle_packet_count')}`",
-                f"- private_connector_gate_packet_count: `{input_summary.get('private_connector_gate_packet_count')}`",
-                f"- source_item_count: `{input_summary.get('source_item_count')}`",
-                f"- owner_gate_required_count: `{input_summary.get('owner_gate_required_count')}`",
-            ]
-        )
-    projection = payload.get("projection")
-    if isinstance(projection, Mapping):
-        first_screen = projection.get("first_screen")
-        if isinstance(first_screen, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## First Screen",
-                    "",
-                    f"- waiting_on: `{first_screen.get('waiting_on')}`",
-                    f"- user_action_required: `{first_screen.get('user_action_required')}`",
-                    f"- agent_can_continue: `{first_screen.get('agent_can_continue')}`",
-                    f"- next_safe_action: {first_screen.get('next_safe_action')}",
-                ]
-            )
-        connector_trials = projection.get("connector_trials")
-        if isinstance(connector_trials, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## Connector Trials",
-                    "",
-                    f"- states: `{connector_trials.get('states')}`",
-                    f"- owner_gate_required_count: `{connector_trials.get('owner_gate_required_count')}`",
-                ]
-            )
-    validation = payload.get("validation")
-    if isinstance(validation, Mapping):
-        errors = (
-            validation.get("errors")
-            if isinstance(validation.get("errors"), list)
-            else []
-        )
-        lines.extend(
-            [
-                "",
-                "## Validation",
-                "",
-                f"- validation_ok: `{validation.get('ok')}`",
-                f"- error_count: `{len(errors)}`",
-            ]
-        )
-    if payload.get("error"):
-        lines.extend(["", "## Error", "", str(payload.get("error"))])
-    return "\n".join(lines) + "\n"
-
-
-def render_content_ops_walkthrough_artifact_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "# LoopX Content-Ops Walkthrough Artifact",
-        "",
-        f"- ok: `{payload.get('ok')}`",
-        f"- schema_version: `{payload.get('schema_version')}`",
-        f"- public_repo_safe: `{payload.get('public_repo_safe')}`",
-        f"- external_reads_performed: `{payload.get('external_reads_performed')}`",
-        f"- external_writes_performed: `{payload.get('external_writes_performed')}`",
-        f"- private_source_bodies_read: `{payload.get('private_source_bodies_read')}`",
-        f"- private_source_content_read: `{payload.get('private_source_content_read')}`",
-        f"- autopublish_allowed: `{payload.get('autopublish_allowed')}`",
-    ]
-    artifact = payload.get("operator_artifact")
-    if isinstance(artifact, Mapping):
-        lines.extend(["", "## Operator Artifact", "", str(artifact.get("headline") or "")])
-        preview = artifact.get("private_operator_preview")
-        if isinstance(preview, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## Private Operator Preview",
-                    "",
-                    (
-                        "- available_in_current_operator_session: "
-                        f"`{preview.get('available_in_current_operator_session')}`"
-                    ),
-                    f"- sample_record_count: `{preview.get('sample_record_count')}`",
-                    f"- theme_signals: `{preview.get('theme_signals')}`",
-                    f"- stored_in_repo: `{preview.get('stored_in_repo')}`",
-                    (
-                        "- source_content_recorded: "
-                        f"`{preview.get('source_content_recorded')}`"
-                    ),
-                    (
-                        "- response_payload_recorded: "
-                        f"`{preview.get('response_payload_recorded')}`"
-                    ),
-                ]
-            )
-        draft_gate = artifact.get("draft_gate")
-        if isinstance(draft_gate, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## Draft Gate",
-                    "",
-                    f"- draft_id: `{draft_gate.get('draft_id')}`",
-                    f"- state: `{draft_gate.get('state')}`",
-                    f"- publish_status: `{draft_gate.get('publish_status')}`",
-                    f"- approval_required: `{draft_gate.get('approval_required')}`",
-                    f"- autopublish_allowed: `{draft_gate.get('autopublish_allowed')}`",
-                ]
-            )
-    chain_steps = payload.get("chain_steps")
-    if isinstance(chain_steps, Sequence) and not isinstance(chain_steps, (str, bytes)):
-        lines.extend(["", "## Chain Steps", ""])
-        for step in chain_steps:
-            if not isinstance(step, Mapping):
-                continue
-            lines.append(f"- `{step.get('step')}`: {step.get('result')}")
-    projection = payload.get("aggregation_projection")
-    if isinstance(projection, Mapping):
-        first_screen = projection.get("first_screen")
-        if isinstance(first_screen, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## First Screen",
-                    "",
-                    f"- waiting_on: `{first_screen.get('waiting_on')}`",
-                    f"- user_action_required: `{first_screen.get('user_action_required')}`",
-                    f"- next_safe_action: {first_screen.get('next_safe_action')}",
-                ]
-            )
-    validation = payload.get("validation")
-    if isinstance(validation, Mapping):
-        errors = (
-            validation.get("errors")
-            if isinstance(validation.get("errors"), list)
-            else []
-        )
-        lines.extend(
-            [
-                "",
-                "## Validation",
-                "",
-                f"- validation_ok: `{validation.get('ok')}`",
-                f"- error_count: `{len(errors)}`",
-            ]
-        )
-    if payload.get("error"):
-        lines.extend(["", "## Error", "", str(payload.get("error"))])
-    return "\n".join(lines) + "\n"
-
-
-def render_content_ops_chatview_report_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "# LoopX Content-Ops ChatView Report",
-        "",
-        f"- ok: `{payload.get('ok')}`",
-        f"- schema_version: `{payload.get('schema_version')}`",
-        f"- aggregation_ready: `{payload.get('aggregation_ready')}`",
-        f"- external_reads_performed: `{payload.get('external_reads_performed')}`",
-        f"- external_writes_performed: `{payload.get('external_writes_performed')}`",
-        f"- private_source_bodies_read: `{payload.get('private_source_bodies_read')}`",
-        f"- private_source_content_read: `{payload.get('private_source_content_read')}`",
-        f"- autopublish_allowed: `{payload.get('autopublish_allowed')}`",
-    ]
-    report = payload.get("chatview_report")
-    if isinstance(report, Mapping):
-        lines.extend(
-            [
-                "",
-                "## Operator Card",
-                "",
-                str(report.get("operator_card") or payload.get("operator_card") or ""),
-            ]
-        )
-        observed_shape = report.get("observed_shape")
-        if isinstance(observed_shape, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## Observed Shape",
-                    "",
-                    f"- channel_count: `{observed_shape.get('channel_count')}`",
-                    f"- recent_record_count: `{observed_shape.get('recent_record_count')}`",
-                    f"- report_count: `{observed_shape.get('report_count')}`",
-                    f"- api_request_count: `{observed_shape.get('api_request_count')}`",
-                    f"- api_path_counts: `{observed_shape.get('api_path_counts')}`",
-                ]
-            )
-        boundary = report.get("boundary")
-        if isinstance(boundary, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## Boundary",
-                    "",
-                    f"- source_bodies_saved: `{boundary.get('source_bodies_saved')}`",
-                    f"- response_payloads_saved: `{boundary.get('response_payloads_saved')}`",
-                    f"- external_write_performed: `{boundary.get('external_write_performed')}`",
-                    f"- autopublish_allowed: `{boundary.get('autopublish_allowed')}`",
-                ]
-            )
-    todo = payload.get("user_todo_projection")
-    if isinstance(todo, Mapping):
-        lines.extend(
-            [
-                "",
-                "## User Todo Projection",
-                "",
-                f"- action_kind: `{todo.get('action_kind')}`",
-                f"- title: {todo.get('title')}",
-            ]
-        )
-    if payload.get("error"):
-        lines.extend(["", "## Error", "", str(payload.get("error"))])
-    return "\n".join(lines) + "\n"
-
-
-def render_content_ops_private_connector_gate_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "# LoopX Content-Ops Private Connector Gate",
-        "",
-        f"- ok: `{payload.get('ok')}`",
-        f"- schema_version: `{payload.get('schema_version')}`",
-        f"- owner_gate_required: `{payload.get('owner_gate_required')}`",
-        f"- external_reads_performed: `{payload.get('external_reads_performed')}`",
-        f"- external_writes_performed: `{payload.get('external_writes_performed')}`",
-        f"- private_source_bodies_read: `{payload.get('private_source_bodies_read')}`",
-        f"- autopublish_allowed: `{payload.get('autopublish_allowed')}`",
-    ]
-    connector = payload.get("connector")
-    if isinstance(connector, Mapping):
-        lines.extend(
-            [
-                "",
-                "## Connector",
-                "",
-                f"- connector_id: `{connector.get('connector_id')}`",
-                f"- connector_name: `{connector.get('connector_name')}`",
-                f"- access_mode: `{connector.get('access_mode')}`",
-                f"- allowed_use: `{connector.get('allowed_use')}`",
-            ]
-        )
-    gate = payload.get("owner_gate")
-    if isinstance(gate, Mapping):
-        lines.extend(
-            [
-                "",
-                "## Owner Gate",
-                "",
-                f"- gate_id: `{gate.get('gate_id')}`",
-                f"- status: `{gate.get('status')}`",
-                f"- approval_required: `{gate.get('approval_required')}`",
-                f"- requested_decision: `{gate.get('requested_decision')}`",
-            ]
-        )
-    todo = payload.get("user_todo_projection")
-    if isinstance(todo, Mapping):
-        lines.extend(
-            [
-                "",
-                "## User Todo Projection",
-                "",
-                f"- action_kind: `{todo.get('action_kind')}`",
-                f"- title: {todo.get('title')}",
-            ]
-        )
-    if payload.get("error"):
-        lines.extend(["", "## Error", "", str(payload.get("error"))])
-    return "\n".join(lines) + "\n"
-
-
-def render_content_ops_preview_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "# LoopX Content-Ops Preview",
-        "",
-        f"- ok: `{payload.get('ok')}`",
-        f"- schema_version: `{payload.get('schema_version')}`",
-        f"- external_reads_performed: `{payload.get('external_reads_performed')}`",
-        f"- external_writes_performed: `{payload.get('external_writes_performed')}`",
-        f"- private_source_bodies_read: `{payload.get('private_source_bodies_read')}`",
-        f"- autopublish_allowed: `{payload.get('autopublish_allowed')}`",
-    ]
-    projection = payload.get("projection")
-    if isinstance(projection, Mapping):
-        first_screen = projection.get("first_screen")
-        if isinstance(first_screen, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## First Screen",
-                    "",
-                    f"- waiting_on: `{first_screen.get('waiting_on')}`",
-                    f"- user_action_required: `{first_screen.get('user_action_required')}`",
-                    f"- agent_can_continue: `{first_screen.get('agent_can_continue')}`",
-                    f"- next_safe_action: {first_screen.get('next_safe_action')}",
-                ]
-            )
-        connector_trials = projection.get("connector_trials")
-        if isinstance(connector_trials, Mapping):
-            lines.extend(
-                [
-                    "",
-                    "## Connector Trials",
-                    "",
-                    f"- count: `{connector_trials.get('count')}`",
-                    f"- ready_for_metadata_trial_count: `{connector_trials.get('ready_for_metadata_trial_count')}`",
-                    f"- owner_gate_required_count: `{connector_trials.get('owner_gate_required_count')}`",
-                    f"- surfaces: `{connector_trials.get('surfaces')}`",
-                    f"- access_modes: `{connector_trials.get('access_modes')}`",
-                ]
-            )
-    validation = payload.get("validation")
-    if isinstance(validation, Mapping):
-        errors = validation.get("errors") if isinstance(validation.get("errors"), list) else []
-        lines.extend(
-            [
-                "",
-                "## Validation",
-                "",
-                f"- validation_ok: `{validation.get('ok')}`",
-                f"- error_count: `{len(errors)}`",
-            ]
-        )
-    return "\n".join(lines) + "\n"

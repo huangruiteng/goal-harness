@@ -128,6 +128,51 @@ repair proposals. It may suggest a structured decision scope, but it must not
 decide delivery gates, spend policy, write permission, or safe fallback at
 runtime.
 
+## Approval Consumption Lifecycle
+
+`loopx todo complete` resolves authority only for an explicitly linked
+`user_gate`:
+
+1. the completed todo has `task_class=user_gate`, a normalized
+   `decision_scope`, and `unblocks_todo_id=<target>`;
+2. the target is an agent todo whose `required_decision_scopes` contain scopes
+   covered by that gate;
+3. completion removes only the covered requirements and preserves every
+   uncovered scope;
+4. the transition returns a public-safe `todo_decision_scope_resolution_v0`
+   receipt with resolved and remaining scopes.
+
+This consumption also applies when the target todo is already `open`, such as
+publication performed immediately after approval. A completed `user_action`
+may still use the exact unblock relation for compatibility, but it does not
+consume decision authority. `todo supersede` records replacement or rejection;
+it never implies approval and therefore never consumes a required scope.
+
+## Standing Approval Receipts
+
+Some owner decisions are operating policies rather than one-action gates.
+LoopX projects such a decision as `standing_decision_authority_v0` only when
+all of these conditions hold:
+
+- the source item is a completed `user_gate`, not a `user_action`;
+- it carries a normalized `decision_scope` and an explicit
+  `decision_outcome=approve|reject|cancel`;
+- its granularity is `goal`, `project`, or `global`;
+- it has explicit `blocks_agent` or `global_gate=true` ownership; and
+- it has no `unblocks_todo_id`, which remains the one-action consumption path.
+
+The latest receipt for the exact scope and owner identity wins. `approve`
+activates it; a later `reject` or `cancel` revokes it. Archive compaction keeps
+standing receipts in the active User Todo section so status and quota do not
+lose authority when ordinary completed work is archived.
+
+A standing receipt does not make work implicitly privileged. The selected
+agent todo must still declare a covered `required_decision_scope`; quota
+filters receipts to the current agent lane before required-scope consistency
+is evaluated. A newer open gate may still block the exact work through normal
+gate routing. Chat prose, completed `user_action` items, inferred intent, and
+unscoped multi-agent decisions never grant standing authority.
+
 ## Migration Phases
 
 1. **Contract only:** document this schema and keep current behavior unchanged.
@@ -161,5 +206,10 @@ A decision-scope implementation is acceptable when:
 3. explicit fields outrank title/body regex inference;
 4. ambiguous scope fails closed instead of guessing;
 5. safe fallback continues only when its required scopes are independent; and
-6. legacy regex/LLM assistance remains a cold-path repair signal, not runtime
+6. completing an exactly linked user gate consumes only its covered required
+   scopes while superseding it consumes none;
+7. a broad completed user gate becomes reusable only through an explicit,
+   agent-compatible standing receipt, and later reject/cancel revokes it;
+8. compacting completed todos does not erase active standing authority; and
+9. legacy regex/LLM assistance remains a cold-path repair signal, not runtime
    gate truth.

@@ -18,7 +18,9 @@ INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-local.sh"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from loopx import __version__  # noqa: E402
 from loopx.doctor import add_promotion_readiness_freshness, build_install_freshness  # noqa: E402
+from loopx.release_manifest import release_version_tag  # noqa: E402
 from loopx.release_manifest import build_release_manifest, load_release_manifest  # noqa: E402
 
 
@@ -101,7 +103,12 @@ def assert_release_snapshot_source_fallback(root: Path) -> None:
             "archive_url": "https://example.com/loopx.tar.gz",
             "archive_sha256": "f" * 64,
         },
-        "package": {"name": "loopx", "version": "0.1.2"},
+        "package": {
+            "name": "loopx",
+            "version": __version__,
+            "version_tag": release_version_tag(),
+            "version_source": "loopx.__version__",
+        },
         "skills": {"digest": "fixture", "items": {}},
     }
     (source_root / "release.json").write_text(
@@ -150,16 +157,37 @@ def main() -> int:
         legacy_canary.chmod(0o755)
         (bin_dir / "goal-harness").symlink_to(legacy_goal_harness)
         (bin_dir / "goal-harness-canary").symlink_to(legacy_canary)
+        stale_loopx = bin_dir / "loopx"
+        stale_loopx.write_text("#!/usr/bin/env bash\nexit 99\n", encoding="utf-8")
+        stale_loopx.chmod(0o755)
+        stale_canary_target = root / "stale-canary-target"
+        stale_canary_target.mkdir()
+        (bin_dir / "loopx-canary").symlink_to(stale_canary_target)
         codex_home = home / ".codex"
+        stale_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
+        stale_command_skill.parent.mkdir(parents=True)
+        stale_command_skill.write_text(
+            "<!-- loopx-managed-slash-command:v1 command=/loopx surface=codex-skills -->\n",
+            encoding="utf-8",
+        )
+        stale_command_metadata = stale_command_skill.parent / "agents" / "openai.yaml"
+        stale_command_metadata.parent.mkdir(parents=True)
+        stale_command_metadata.write_text(
+            "# <!-- loopx-managed-slash-command:v1 command=/loopx surface=codex-skill-metadata -->\n",
+            encoding="utf-8",
+        )
         profile = home / ".zshrc"
         assert_release_snapshot_source_fallback(root)
         env = {
             **os.environ,
             "HOME": str(home),
             "CODEX_HOME": str(codex_home),
+            "OPENCODE_CONFIG_DIR": str(home / ".config" / "opencode"),
             "LOOPX_BIN_DIR": str(bin_dir),
             "LOOPX_SHELL_PROFILE": str(profile),
             "LOOPX_INSTALL_SKILL": "1",
+            "LOOPX_PROMOTE_DEFAULT": "1",
+            "LOOPX_PYTHON": sys.executable,
             "PATH": os.environ.get("PATH", ""),
             "SHELL": "/bin/zsh",
         }
@@ -169,7 +197,7 @@ def main() -> int:
         assert "loopx installed locally" in install.stdout, install.stdout
         assert "promotion-readiness evidence is missing" in install.stderr, install.stderr
         assert "non-blocking" in install.stderr, install.stderr
-        assert "examples/canary-promotion-readiness-smoke.py" in install.stderr, install.stderr
+        assert "examples/canary/canary-promotion-readiness-smoke.py" in install.stderr, install.stderr
         assert f"- executable: {bin_dir / 'loopx'}" in install.stdout, install.stdout
         assert "- release: " in install.stdout, install.stdout
         assert f"- canary executable: {bin_dir / 'loopx-canary'}" in install.stdout, install.stdout
@@ -186,6 +214,16 @@ def main() -> int:
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-self-repair'}" in install.stdout, install.stdout
+        assert "project skill source:" in install.stdout, install.stdout
+        assert "install explicitly per project" in install.stdout, install.stdout
+        assert f"codex skills: {codex_home / 'skills'}" in install.stdout, install.stdout
+        assert f"claude skills: {home / '.claude' / 'skills'}" in install.stdout, install.stdout
+        assert "loopx OpenCode bridge: skipped (opt-in" in install.stdout, install.stdout
+        opencode_root = home / ".config" / "opencode"
+        assert (opencode_root / "commands" / "loopx.md").is_file()
+        assert not (opencode_root / "plugins" / "loopx-goal.js").exists()
+        assert not (opencode_root / "loopx" / "goal-bridge-runtime.mjs").exists()
+        assert not (opencode_root / "package.json").exists()
 
         wrapper = bin_dir / "loopx"
         assert wrapper.is_symlink(), wrapper
@@ -194,14 +232,20 @@ def main() -> int:
         assert wrapper.resolve() != REPO_ROOT / "scripts" / "loopx", wrapper.resolve()
         assert wrapper.resolve().name == "loopx", wrapper.resolve()
         release_root = wrapper.resolve().parents[1]
+        release_python = release_root / ".loopx-python"
+        assert release_python.read_text(encoding="utf-8").strip() == sys.executable
         assert (release_root / "loopx" / "cli.py").is_file(), release_root
-        dashboard_page = release_root / "apps" / "dashboard" / "src" / "views" / "dashboard-page.tsx"
-        action_packet = release_root / "apps" / "dashboard" / "src" / "data" / "action-packet.ts"
-        dashboard_node_modules = release_root / "apps" / "dashboard" / "node_modules"
+        runtime_package = release_root / "loopx" / "control_plane" / "runtime"
+        assert (runtime_package / "run_compaction.py").is_file(), release_root
+        assert (runtime_package / "session_runtime.py").is_file(), release_root
+        dashboard_page = release_root / "apps" / "presentation" / "dashboard" / "src" / "views" / "dashboard-page.tsx"
+        action_packet = release_root / "apps" / "presentation" / "dashboard" / "src" / "data" / "action-packet.ts"
+        dashboard_node_modules = release_root / "apps" / "presentation" / "dashboard" / "node_modules"
         assert dashboard_page.is_file(), dashboard_page
         assert action_packet.is_file(), action_packet
         assert not dashboard_node_modules.exists(), dashboard_node_modules
         assert (release_root / ".github" / "workflows" / "update-notes.yml").is_file(), release_root
+        assert (release_root / "CONTRIBUTOR_TASKS.md").is_file(), release_root
         assert (release_root / "LICENSE").is_file(), release_root
         release_manifest_path = release_root / "release.json"
         assert release_manifest_path.is_file(), release_manifest_path
@@ -209,18 +253,51 @@ def main() -> int:
         assert release_manifest["schema_version"] == "loopx_release_manifest_v0", release_manifest
         assert release_manifest["release_id"] == "install-smoke-initial", release_manifest
         assert release_manifest["package"]["name"] == "loopx", release_manifest
-        assert release_manifest["package"]["version"], release_manifest
+        assert release_manifest["package"]["version"] == __version__, release_manifest
+        assert release_manifest["package"]["version_tag"] == release_version_tag(), release_manifest
+        assert release_manifest["package"]["version_source"] == "loopx.__version__", release_manifest
         assert release_manifest["source"]["kind"] == "local_checkout", release_manifest
+        assert release_manifest["source"]["promotion_mode"] == "explicit_override", release_manifest
         assert release_manifest["source"]["git_commit"] == source_commit, release_manifest
         assert isinstance(release_manifest["source"]["git_dirty"], bool), release_manifest
         assert release_manifest["skills"]["digest"], release_manifest
         assert release_manifest["skills"]["items"]["loopx-project"]["sha256"], release_manifest
         canary_wrapper = bin_dir / "loopx-canary"
         assert canary_wrapper.is_symlink(), canary_wrapper
+        assert not (stale_canary_target / "loopx-canary").exists(), stale_canary_target
         assert not (bin_dir / "goal-harness-canary").exists()
         assert (bin_dir / "goal-harness-canary.legacy-disabled").is_symlink()
         assert canary_wrapper.resolve() == REPO_ROOT / "scripts" / "loopx", canary_wrapper.resolve()
         assert profile.read_text(encoding="utf-8").count("LoopX local CLI") == 1, profile.read_text()
+
+        unsupported_host_bin = root / "unsupported-host-bin"
+        unsupported_host_bin.mkdir()
+        unsupported_python = unsupported_host_bin / "python3"
+        unsupported_python.write_text("#!/usr/bin/env bash\nexit 86\n", encoding="utf-8")
+        unsupported_python.chmod(0o755)
+        promoted_env = {
+            key: value
+            for key, value in env.items()
+            if key != "LOOPX_PYTHON"
+        }
+        promoted_env["PATH"] = f"{unsupported_host_bin}:{bin_dir}:{promoted_env['PATH']}"
+        promoted_doctor = subprocess.run(
+            ["loopx", "--format", "json", "doctor"],
+            cwd=root,
+            env=promoted_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert json.loads(promoted_doctor.stdout)["ok"] is True, promoted_doctor.stdout
+        subprocess.run(
+            [str(wrapper), "canary", "premerge", "--help"],
+            cwd=REPO_ROOT,
+            env=promoted_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
         skill = codex_home / "skills" / "loopx-project" / "SKILL.md"
         assert not skill.parent.is_symlink(), skill.parent
@@ -269,10 +346,48 @@ def main() -> int:
             "Do not use this skill to approve",
         ):
             assert phrase in pr_review_text, phrase
+        pr_review_metadata = pr_review_skill.parent / "agents" / "openai.yaml"
+        pr_review_metadata_text = pr_review_metadata.read_text(encoding="utf-8")
+        assert (
+            'short_description: "Guide AgentLoop through LoopX PR review queues"'
+            in pr_review_metadata_text
+        ), pr_review_metadata_text
+        assert "Guide agentloop" not in pr_review_metadata_text, pr_review_metadata_text
         auto_research_skill = codex_home / "skills" / "loopx-auto-research" / "SKILL.md"
         assert not auto_research_skill.exists(), auto_research_skill
+        material_skill = codex_home / "skills" / "loopx-material" / "SKILL.md"
+        assert not material_skill.exists(), material_skill
+        quality_skill = codex_home / "skills" / "loopx-change-quality" / "SKILL.md"
+        assert not quality_skill.exists(), quality_skill
+        loopx_prompt = codex_home / "prompts" / "loopx.md"
+        assert not loopx_prompt.exists(), loopx_prompt
+        loopx_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
+        loopx_command_skill_text = loopx_command_skill.read_text(encoding="utf-8")
+        assert "surface=codex-skills" in loopx_command_skill_text, loopx_command_skill_text
+        loopx_openai_metadata = loopx_command_skill.parent / "agents" / "openai.yaml"
+        loopx_openai_metadata_text = loopx_openai_metadata.read_text(encoding="utf-8")
+        assert 'display_name: "LoopX"' in loopx_openai_metadata_text, loopx_openai_metadata_text
+        assert 'display_name: "LoopX /loopx"' not in loopx_openai_metadata_text, loopx_openai_metadata_text
+        assert "allow_implicit_invocation: false" in loopx_openai_metadata_text, loopx_openai_metadata_text
+        loopx_project_metadata = codex_home / "skills" / "loopx-project" / "agents" / "openai.yaml"
+        loopx_project_metadata_text = loopx_project_metadata.read_text(encoding="utf-8")
+        assert 'display_name: "LoopX Project"' in loopx_project_metadata_text, loopx_project_metadata_text
+        assert 'display_name: "LoopX"' not in loopx_project_metadata_text, loopx_project_metadata_text
+        claude_loopx_skill = home / ".claude" / "skills" / "loopx" / "SKILL.md"
+        claude_loopx_skill_text = claude_loopx_skill.read_text(encoding="utf-8")
+        assert "surface=claude-skills" in claude_loopx_skill_text, claude_loopx_skill_text
+        assert not (home / ".claude" / "commands" / "loopx.md").exists(), (
+            "default installer must not install the opt-in Claude adapter command"
+        )
+        assert not (home / ".claude" / "settings.json").exists(), (
+            "default installer must not install Claude adapter hooks/settings"
+        )
         doc_registry_skill = codex_home / "skills" / "loopx-doc-registry" / "SKILL.md"
         doc_registry_text = " ".join(doc_registry_skill.read_text(encoding="utf-8").split())
+        doc_registry_metadata = doc_registry_skill.parent / "agents" / "openai.yaml"
+        doc_registry_metadata_text = doc_registry_metadata.read_text(encoding="utf-8")
+        assert 'display_name: "LoopX Doc Registry"' in doc_registry_metadata_text
+        assert 'display_name: "Loopx' not in doc_registry_metadata_text
         for phrase in (
             "Use even when the user does not mention LoopX or doc registry",
             "use `.loopx/registry.json` as the project-local doc registry",
@@ -304,9 +419,35 @@ def main() -> int:
         assert "`boundary_projection_gap`" in self_repair_patterns_text, self_repair_patterns_text
         assert "`skill_cli_contract_drift`" in self_repair_patterns_text, self_repair_patterns_text
         assert "`tiny_turn_under_delivery`" in self_repair_patterns_text, self_repair_patterns_text
+        self_repair_issue_escalation = (
+            codex_home
+            / "skills"
+            / "loopx-self-repair"
+            / "references"
+            / "upstream-issue-escalation.md"
+        )
+        self_repair_issue_escalation_text = self_repair_issue_escalation.read_text(
+            encoding="utf-8"
+        )
+        assert "LOOPX_SELF_REPAIR_AUTO_ISSUE=1" in self_repair_issue_escalation_text
+        assert "gh issue list" in self_repair_issue_escalation_text
+        assert "gh issue create" in self_repair_issue_escalation_text
         assert (
             codex_home / "skills" / "loopx-self-repair" / "agents" / "openai.yaml"
         ).is_file()
+        for implicit_skill_name in (
+            "loopx-project",
+            "loopx-pr-review",
+            "loopx-doc-registry",
+            "loopx-self-repair",
+        ):
+            implicit_metadata = codex_home / "skills" / implicit_skill_name / "agents" / "openai.yaml"
+            if implicit_metadata.exists():
+                implicit_metadata_text = implicit_metadata.read_text(encoding="utf-8")
+                assert "allow_implicit_invocation: false" not in implicit_metadata_text, (
+                    implicit_skill_name,
+                    implicit_metadata_text,
+                )
 
         cli_env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
         runtime_run_dir = home / ".codex" / "loopx" / "goals" / "loopx-meta" / "runs"
@@ -328,6 +469,10 @@ def main() -> int:
         assert freshness["status"] == "unknown", freshness
         assert freshness["requires_upgrade"] is False, freshness
         assert freshness["current_version"], freshness
+        assert freshness["current_version_tag"] == release_version_tag(), freshness
+        assert freshness["manifest_package_version"] == __version__, freshness
+        assert freshness["manifest_package_version_tag"] == release_version_tag(), freshness
+        assert freshness["manifest_package_version_matches_runtime"] is True, freshness
         assert freshness["release_manifest_available"] is True, freshness
         assert freshness["release_manifest_path"] == str(release_manifest_path), freshness
         assert freshness["manifest_source_kind"] == "local_checkout", freshness
@@ -355,6 +500,13 @@ def main() -> int:
         assert doctor_payload["skill"]["exists"] is True, doctor_payload
         assert doctor_payload["skill"]["delivery_hints"] is True, doctor_payload
         assert "loopx-auto-research" not in doctor_payload["skills"], doctor_payload
+        assert "loopx-material" not in doctor_payload["skills"], doctor_payload
+        assert "loopx-change-quality" not in doctor_payload["skills"], doctor_payload
+        assert {
+            "loopx-material",
+            "loopx-change-quality",
+        }.issubset(set(doctor_payload["project_scoped_skill_ids"])), doctor_payload
+        assert doctor_payload["globally_visible_project_skills"] == [], doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["exists"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["required_phrases"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-pr-review"]["exists"] is True, doctor_payload
@@ -369,6 +521,7 @@ def main() -> int:
         assert provenance["default_release"]["is_release_snapshot"] is True, provenance
         assert provenance["default_release"]["release_manifest_available"] is True, provenance
         assert provenance["default_release"]["release_manifest_path"] == str(release_manifest_path), provenance
+        assert provenance["default_release"]["promotion_mode"] == "explicit_override", provenance
         assert provenance["live_canary"]["root"] == str(REPO_ROOT), provenance
         assert provenance["live_canary"]["separate_from_default"] is True, provenance
         assert provenance["current_invocation"]["source"] == "release_snapshot", provenance
@@ -391,6 +544,7 @@ def main() -> int:
             "installed_skill_delivery_hints",
             "installed_required_skills",
             "installed_required_skill_routes",
+            "project_scoped_skills_absent_globally",
         ):
             assert doctor_checks[check_id]["ok"] is True, doctor_payload
 
@@ -414,7 +568,12 @@ def main() -> int:
         assert "## Install Freshness" in doctor_markdown, doctor_markdown
         assert "schema_version: `loopx_install_freshness_v0`" in doctor_markdown, doctor_markdown
         assert "status: `unknown`" in doctor_markdown, doctor_markdown
+        assert f"current_version_tag: `{release_version_tag()}`" in doctor_markdown, doctor_markdown
+        assert f"manifest_package_version: `{__version__}`" in doctor_markdown, doctor_markdown
+        assert f"manifest_package_version_tag: `{release_version_tag()}`" in doctor_markdown, doctor_markdown
+        assert "manifest_package_version_matches_runtime: `True`" in doctor_markdown, doctor_markdown
         assert "release_manifest_available: `True`" in doctor_markdown, doctor_markdown
+        assert "default_promotion_mode: `explicit_override`" in doctor_markdown, doctor_markdown
         assert f"manifest_source_git_commit: `{source_commit[:12]}`" in doctor_markdown, doctor_markdown
         assert "manifest_source: `local_checkout` @ `n/a`" not in doctor_markdown, doctor_markdown
         assert "manifest_skills_digest:" in doctor_markdown, doctor_markdown
@@ -468,7 +627,7 @@ def main() -> int:
         assert fresh_install["status"] == "fresh", fresh_install
         assert fresh_install["requires_upgrade"] is False, fresh_install
 
-        commit_mismatch_install = build_install_freshness(
+        canary_mismatch_install = build_install_freshness(
             command_path=wrapper,
             release_root=root / "releases" / "20260108T000000Z",
             repo_root=REPO_ROOT,
@@ -483,7 +642,7 @@ def main() -> int:
                 "path": str(root / "release.json"),
                 "reason": None,
                 "manifest": {
-                    "package": {"version": "0.1.2"},
+                    "package": {"version": __version__},
                     "source": {
                         "kind": "local_checkout",
                         "git_commit": "a" * 40,
@@ -499,15 +658,16 @@ def main() -> int:
                 "git_commit": "b" * 40,
                 "git_ref": "main",
                 "git_dirty": False,
+                "revision_relation": "unknown",
             },
             now=datetime(2026, 1, 8, 1, tzinfo=timezone.utc),
         )
-        assert commit_mismatch_install["status"] == "stale", commit_mismatch_install
-        assert commit_mismatch_install["requires_upgrade"] is True, commit_mismatch_install
-        assert commit_mismatch_install["release_age_hours"] == 1.0, commit_mismatch_install
-        assert commit_mismatch_install["manifest_source_matches_comparison"] is False, commit_mismatch_install
-        assert commit_mismatch_install["comparison_source_git_commit_short"] == "b" * 12, commit_mismatch_install
-        assert "differs from loopx-canary commit" in commit_mismatch_install["reason"], commit_mismatch_install
+        assert canary_mismatch_install["status"] == "fresh", canary_mismatch_install
+        assert canary_mismatch_install["requires_upgrade"] is False, canary_mismatch_install
+        assert canary_mismatch_install["release_age_hours"] == 1.0, canary_mismatch_install
+        assert canary_mismatch_install["manifest_source_matches_comparison"] is False, canary_mismatch_install
+        assert canary_mismatch_install["comparison_source_git_commit_short"] == "b" * 12, canary_mismatch_install
+        assert canary_mismatch_install["manifest_source_comparison_relation"] == "unknown", canary_mismatch_install
 
         cli = subprocess.run(
             [
@@ -530,16 +690,23 @@ def main() -> int:
         assert payload["ok"] is True, payload
         assert payload["quota_guard_command"] == (
             'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" '
-            "quota should-run --goal-id installer-smoke-goal"
+            'quota should-run --goal-id installer-smoke-goal '
+            '--turn-instance-id "${LOOPX_TURN:?}"'
         ), payload
         assert payload["quota_spend_command"] == (
             'loopx --registry "$HOME/.codex/loopx/registry.global.json" '
             "quota spend-slot --goal-id installer-smoke-goal --slots 1 --source heartbeat --execute"
         ), payload
-        assert "--delivery-batch-scale multi_surface" in payload["task_body"], payload
-        assert "--delivery-outcome outcome_progress" in payload["task_body"], payload
-        assert "<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in payload["task_body"], payload
-        assert "DONT_NOTIFY" in payload["task_body"], payload
+        assert payload["thin"] is True, payload
+        assert payload["interface_budget"]["mode"] == "thin", payload
+        assert payload["interface_budget"]["within_budget"] is True, payload
+        assert "--delivery-batch-scale multi_surface" in payload["progress_refresh_state_command"], payload
+        assert "--delivery-outcome outcome_progress" in payload["progress_refresh_state_command"], payload
+        assert "<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in payload["progress_refresh_state_command"], payload
+        assert "follow `interaction_contract`" in payload["task_body"], payload
+        assert "`LOOPX_TURN=<current_time_iso>`; reuse." in payload["task_body"], payload
+        assert "guard receipt; 2 stalls->replan" in payload["task_body"], payload
+        assert "spend post-writeback" in payload["task_body"], payload
         assert payload["cli_bin"] == "loopx", payload
 
         canary_cli = subprocess.run(
@@ -581,6 +748,39 @@ def main() -> int:
         assert "promotion-readiness evidence is stale" in stale_install.stderr, stale_install.stderr
         assert "age_hours=" in stale_install.stderr, stale_install.stderr
         assert "non-blocking" in stale_install.stderr, stale_install.stderr
+
+        blocked_opencode_root = home / ".config" / "opencode-blocked"
+        blocked_opencode_root.mkdir(parents=True)
+        (blocked_opencode_root / "opencode.jsonc").write_text(
+            "{ invalid\n",
+            encoding="utf-8",
+        )
+        blocked_opencode_install = run_install(
+            {
+                **env,
+                "LOOPX_INSTALL_OPENCODE": "1",
+                "OPENCODE_CONFIG_DIR": str(blocked_opencode_root),
+            },
+            "install-smoke-opencode-blocked",
+        )
+        assert (
+            "loopx OpenCode bridge: install attempted; run manually:"
+            in blocked_opencode_install.stdout
+        ), blocked_opencode_install.stdout
+        assert (blocked_opencode_root / "commands" / "loopx.md").is_file()
+        assert not (blocked_opencode_root / "plugins" / "loopx-goal.js").exists()
+        assert not (blocked_opencode_root / "loopx" / "goal-bridge-runtime.mjs").exists()
+        assert not (blocked_opencode_root / "package.json").exists()
+
+        opencode_install = run_install(
+            {**env, "LOOPX_INSTALL_OPENCODE": "1"},
+            "install-smoke-opencode",
+        )
+        assert "loopx OpenCode bridge:" in opencode_install.stdout, opencode_install.stdout
+        assert (opencode_root / "commands" / "loopx.md").is_file()
+        assert (opencode_root / "plugins" / "loopx-goal.js").is_file()
+        assert (opencode_root / "loopx" / "goal-bridge-runtime.mjs").is_file()
+        assert (opencode_root / "package.json").is_file()
 
     print("install-local-smoke ok")
     return 0

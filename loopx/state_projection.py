@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .todo_contract import (
+from .control_plane.todos.contract import (
     TODO_TASK_PATTERN,
     build_todo_id,
     compact_todo_text,
@@ -13,13 +13,19 @@ from .todo_contract import (
     normalize_todo_decision_scope,
     normalize_todo_action_kind,
     normalize_todo_blocks_agent,
+    normalize_todo_bound_agent,
     normalize_todo_claimed_by,
+    normalize_todo_continuation_policy,
+    normalize_todo_excluded_agents,
     normalize_todo_global_gate,
+    normalize_todo_goal_bound,
     normalize_todo_id,
+    normalize_todo_id_list,
     normalize_todo_no_followup,
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
     normalize_todo_status,
+    normalize_todo_task_repository,
     normalize_todo_task_class,
     parse_todo_metadata_line,
     todo_done_for_status,
@@ -29,6 +35,7 @@ from .todo_contract import (
 
 STATE_PROJECTION_GAP_SCHEMA_VERSION = "state_projection_gap_v0"
 NEXT_ACTION_PROJECTION_WARNING_SCHEMA_VERSION = "next_action_projection_warning_v0"
+STATE_ACTION_PROJECTION_WARNING_SCHEMA_VERSION = "state_action_projection_warning_v0"
 ACTIVE_STATE_STRUCTURED_PROJECTION_SCHEMA_VERSION = "active_state_structured_projection_v0"
 ACTIVE_STATE_PROJECTION_DIAGNOSTICS_SCHEMA_VERSION = "active_state_projection_diagnostics_v0"
 TODO_ITEM_SCHEMA_VERSION = "todo_item_v0"
@@ -63,7 +70,7 @@ NEXT_ACTION_USER_WAIT_PATTERN = re.compile(
     r"(?i)\b(?:wait(?:ing)? for|await(?:ing)?|blocked by|gated by|"
     r"need(?:s|ed)?|requires?|request(?:s|ed)?|ask(?:ing)? for|pending)"
     r"\b.{0,120}\b(?:owner|user|operator|controller|human|approval|approve|"
-    r"decision|gate|permission|choice)\b|"
+    r"decision|permission|choice)\b|"
     r"\b(?:owner|user|operator|controller|human)\s+"
     r"(?:gate|todo|action|decision|approval|permission|choice)\b|"
     r"\b(?:approval|permission)\s+(?:required|needed|pending)\b|"
@@ -77,15 +84,21 @@ NEXT_ACTION_USER_WAIT_PATTERN = re.compile(
 )
 TODO_METADATA_KEYS = (
     "action_kind",
+    "task_repository",
+    "continuation_policy",
     "required_write_scopes",
     "required_capabilities",
     "target_capabilities",
     "decision_scope",
     "required_decision_scopes",
     "claimed_by",
+    "bound_agent",
+    "goal_bound",
     "blocks_agent",
+    "excluded_agents",
     "global_gate",
     "unblocks_todo_id",
+    "successor_todo_ids",
     "resume_when",
     "no_followup",
     "target_key",
@@ -117,12 +130,28 @@ def _action_projection_text(value: Any, *, limit: int = 320) -> str:
 
 
 def _action_projection_compare_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+    text = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    text = re.sub(r"^todo_[0-9a-z]+:\s*", "", text)
+    text = re.sub(r"^p[0-9]+:\s*", "", text)
+    text = re.sub(r"^\[(?:p[0-9]+|[^\]]+)\]\s*", "", text)
+    return re.sub(r"^(?:agent|user|owner|codex)\s*:\s*", "", text)
+
+
+def _action_projection_label(value: Any) -> str:
+    text = _action_projection_compare_text(value)
+    match = re.match(r"([^:]{8,120}):", text)
+    if match:
+        return match.group(1).strip()
+    return text[:120].strip()
 
 
 def _action_projection_prefix(value: Any) -> str:
     text = _action_projection_compare_text(value)
-    return text[:96]
+    text = re.split(r"[,.;:，。；：]", text, maxsplit=1)[0].strip()
+    words = text.split()
+    if len(words) >= 4:
+        return " ".join(words[:6])
+    return text
 
 
 def actions_are_projection_aligned(left: Any, right: Any) -> bool:
@@ -132,6 +161,11 @@ def actions_are_projection_aligned(left: Any, right: Any) -> bool:
         return False
     if left_text == right_text:
         return True
+    left_label = _action_projection_label(left_text)
+    right_label = _action_projection_label(right_text)
+    for label, text in ((left_label, right_text), (right_label, left_text)):
+        if label and len(label) >= 8 and label in text:
+            return True
     left_prefix = _action_projection_prefix(left_text)
     right_prefix = _action_projection_prefix(right_text)
     for prefix, text in ((left_prefix, right_text), (right_prefix, left_text)):
@@ -153,27 +187,161 @@ def next_action_projection_warning(
         return None
     if actions_are_projection_aligned(active_text, latest_text):
         return None
+    lane_preserves_goal_next_action = (
+        isinstance(agent_lane_next_action, dict)
+        and agent_lane_next_action.get("preserves_goal_next_action") is True
+    )
     warning: dict[str, Any] = {
         "schema_version": NEXT_ACTION_PROJECTION_WARNING_SCHEMA_VERSION,
         "kind": "next_action_projection_mismatch",
-        "severity": "warning",
-        "requires_state_writeback": True,
+        "severity": "info" if lane_preserves_goal_next_action else "warning",
+        "requires_state_writeback": not lane_preserves_goal_next_action,
         "active_state_next_action": active_text,
         "latest_run_recommended_action": latest_text,
-        "reason": (
+    }
+    if lane_preserves_goal_next_action:
+        warning["reason"] = (
+            "current agent lane action differs from the durable goal route while "
+            "explicitly preserving the active-state Next Action"
+        )
+        warning["recommended_action"] = (
+            "run the agent-lane action without mutating active-state Next Action; "
+            "only the primary/goal route should write a new durable Next Action"
+        )
+    else:
+        warning["reason"] = (
             "latest run recommended_action differs from the durable active-state "
             "Next Action"
-        ),
-        "recommended_action": (
+        )
+        warning["recommended_action"] = (
             "if the latest run action is the intended durable route, write it back "
             "explicitly with refresh-state --next-action; otherwise keep treating "
             "the run recommendation and active-state Next Action as separate signals"
-        ),
-    }
-    lane_text = _action_projection_text(agent_lane_next_action)
+        )
+    lane_value = (
+        agent_lane_next_action.get("text")
+        if isinstance(agent_lane_next_action, dict)
+        else agent_lane_next_action
+    )
+    lane_text = _action_projection_text(lane_value)
     if lane_text:
         warning["agent_lane_next_action"] = lane_text
     return warning
+
+
+def next_action_resolution_trace(
+    *,
+    primary_action: Any,
+    mode: Any = None,
+    active_state_next_action: Any,
+    latest_run_recommended_action: Any,
+    selected_recommended_action: Any,
+    agent_lane_next_action: Any = None,
+) -> dict[str, Any] | None:
+    primary_text = _action_projection_text(primary_action)
+    if not primary_text:
+        return None
+    selected_text = _action_projection_text(selected_recommended_action)
+    active_text = _action_projection_text(active_state_next_action)
+    latest_text = _action_projection_text(latest_run_recommended_action)
+    lane_value = (
+        agent_lane_next_action.get("text")
+        if isinstance(agent_lane_next_action, dict)
+        else agent_lane_next_action
+    )
+    lane_text = _action_projection_text(lane_value)
+
+    source = "interaction_contract"
+    source_candidates = (
+        ("agent_lane", lane_text),
+        ("selected", selected_text),
+        ("active_next", active_text),
+        ("latest_run", latest_text),
+    )
+    for candidate_source, candidate_text in source_candidates:
+        if candidate_text and actions_are_projection_aligned(primary_text, candidate_text):
+            source = candidate_source
+            break
+    if source == "interaction_contract" and mode:
+        source = f"mode:{mode}"
+
+    mismatches: list[str] = []
+    for label, left, right in (
+        ("active_vs_latest", active_text, latest_text),
+        ("active_vs_primary", active_text, primary_text),
+        ("latest_vs_primary", latest_text, primary_text),
+        ("selected_vs_primary", selected_text, primary_text),
+    ):
+        if left and right and not actions_are_projection_aligned(left, right):
+            mismatches.append(label)
+
+    return {
+        "summary": f"source={source} drift={'true' if mismatches else 'false'}",
+    }
+
+
+def state_action_projection_warning(
+    item: dict[str, Any],
+    *,
+    agent_todo_summary: dict[str, Any] | None,
+    selected_action: Any,
+    work_lane_contract: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not (
+        isinstance(work_lane_contract, dict)
+        and work_lane_contract.get("lane") == "advancement_task"
+        and "open_agent_todo"
+        in (
+            work_lane_contract.get("reason_codes")
+            if isinstance(work_lane_contract.get("reason_codes"), list)
+            else []
+        )
+    ):
+        return None
+    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
+    active_next_action = str(
+        item.get("active_state_next_action")
+        or project_asset.get("next_action")
+        or ""
+    ).strip()
+    selected_text = str(selected_action or "").strip()
+    if not active_next_action or not selected_text:
+        return None
+    if isinstance(agent_todo_summary, dict):
+        claim_scope = agent_todo_summary.get("claim_scope")
+        first_executable = (
+            agent_todo_summary.get("first_executable_items")
+            if isinstance(agent_todo_summary.get("first_executable_items"), list)
+            else []
+        )
+        selected_item = next((item for item in first_executable if isinstance(item, dict)), None)
+        selected_claimed_by = normalize_todo_claimed_by(
+            selected_item.get("claimed_by") if selected_item else None
+        )
+        claim_agent_id = normalize_todo_claimed_by(
+            claim_scope.get("agent_id") if isinstance(claim_scope, dict) else None
+        )
+        if (
+            selected_item
+            and selected_claimed_by
+            and claim_agent_id
+            and selected_claimed_by == claim_agent_id
+        ):
+            return None
+    if actions_are_projection_aligned(active_next_action, selected_text):
+        return None
+    return {
+        "schema_version": STATE_ACTION_PROJECTION_WARNING_SCHEMA_VERSION,
+        "kind": "state_action_projection_mismatch",
+        "severity": "warning",
+        "requires_state_writeback": True,
+        "active_state_next_action": _action_projection_text(active_next_action, limit=320),
+        "selected_recommended_action": _action_projection_text(selected_text, limit=320),
+        "reason": "quota selected executable backlog while active Next Action differs",
+        "recommended_action": (
+            "run primary_action; sync active route only on route change"
+        ),
+    }
 
 
 def is_user_wait_text(value: Any) -> bool:
@@ -344,6 +512,14 @@ def _normalize_structured_todo_item(
         normalized["title"] = title
     if action_kind:
         normalized["action_kind"] = action_kind
+    task_repository = normalize_todo_task_repository(item.get("task_repository"))
+    if task_repository:
+        normalized["task_repository"] = task_repository
+    continuation_policy = normalize_todo_continuation_policy(
+        item.get("continuation_policy")
+    )
+    if continuation_policy:
+        normalized["continuation_policy"] = continuation_policy
 
     write_scopes = normalize_required_write_scopes(item.get("required_write_scopes"))
     if write_scopes:
@@ -365,15 +541,27 @@ def _normalize_structured_todo_item(
     claimed_by = normalize_todo_claimed_by(item.get("claimed_by"))
     if claimed_by:
         normalized["claimed_by"] = claimed_by
+    bound_agent = normalize_todo_bound_agent(item.get("bound_agent"))
+    if bound_agent:
+        normalized["bound_agent"] = bound_agent
+    goal_bound = normalize_todo_goal_bound(item.get("goal_bound"))
+    if goal_bound is not None:
+        normalized["goal_bound"] = goal_bound
     blocks_agent = normalize_todo_blocks_agent(item.get("blocks_agent"))
     if blocks_agent:
         normalized["blocks_agent"] = blocks_agent
+    excluded_agents = normalize_todo_excluded_agents(item.get("excluded_agents"))
+    if excluded_agents:
+        normalized["excluded_agents"] = excluded_agents
     global_gate = normalize_todo_global_gate(item.get("global_gate"))
     if global_gate is not None:
         normalized["global_gate"] = global_gate
     unblocks_todo_id = normalize_todo_id(item.get("unblocks_todo_id"))
     if unblocks_todo_id:
         normalized["unblocks_todo_id"] = unblocks_todo_id
+    successor_todo_ids = normalize_todo_id_list(item.get("successor_todo_ids"))
+    if successor_todo_ids:
+        normalized["successor_todo_ids"] = successor_todo_ids
     resume_when = normalize_todo_resume_when(item.get("resume_when"))
     if resume_when:
         normalized["resume_when"] = resume_when

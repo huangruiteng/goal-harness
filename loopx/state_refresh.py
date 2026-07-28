@@ -3,22 +3,52 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES, require_delivery_batch_scale
-from .delivery_outcome import DELIVERY_OUTCOME_CHOICES, require_delivery_outcome
+from .control_plane.runtime.time import now_local_iso
+from .control_plane.work_items.delivery_batch_scale import (
+    DELIVERY_BATCH_SCALE_CHOICES as DELIVERY_BATCH_SCALE_CHOICES,
+    require_delivery_batch_scale,
+)
+from .control_plane.work_items.delivery_outcome import (
+    ACCOUNTABLE_DELIVERY_OUTCOMES,
+    DELIVERY_OUTCOME_CHOICES as DELIVERY_OUTCOME_CHOICES,
+    require_delivery_outcome,
+)
+from .control_plane.agents.workspace_guard import capture_delivery_workspace
+from .control_plane.work_items.repair_delta import (
+    REPAIR_DELTA_KIND_CHOICES as REPAIR_DELTA_KIND_CHOICES,
+    normalize_repair_delta_kinds,
+)
+from .control_plane.work_items.autonomous_replan_ack import (
+    latest_blocked_successor_frontier_identity,
+)
+from .control_plane.runtime.shared_runtime_refresh_projection import (
+    build_shared_runtime_projection,
+    write_shared_runtime_projection,
+)
+from .control_plane.runtime.runtime_projection_route import (
+    compact_runtime_projection_route,
+    resolve_runtime_projection_route,
+)
 from .feedback import validate_local_control_text, validate_public_safe_text
 from .file_lock import exclusive_file_lock
 from .global_registry import sync_project_registry_to_global
-from .history import load_registry, reserve_unique_run_paths, unique_run_paths
-from .local_state_write_correctness import build_local_state_write_correctness_dry_run_packet
+from .history import (
+    load_index,
+    load_registry,
+    reserve_unique_run_paths,
+    unique_run_paths,
+)
+from .control_plane.runtime.local_state_write_correctness import build_local_state_write_correctness_dry_run_packet
 from .paths import resolve_runtime_root
+from .control_plane.goals.goal_vision import normalize_goal_vision_update
+from .control_plane.goals.goal_frontier import latest_agent_vision_from_runs
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
 from .state_projection import state_projection_gap_warning
-from .todo_contract import (
+from .control_plane.todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
     TODO_TASK_CLASS_MONITOR,
@@ -42,23 +72,17 @@ CHECKBOX_PREFIX_RE = re.compile(r"^\[(?P<mark>[ xX])\]\s+")
 ACTIVE_STATE_NEXT_ACTION_UPDATE_SCHEMA_VERSION = "active_state_next_action_update_v0"
 REPAIR_DELTA_CONTRACT_SCHEMA_VERSION = "repair_delta_contract_v0"
 REPAIR_NOOP_SCHEMA_VERSION = "repair_noop_v0"
-REPAIR_DELTA_KIND_CHOICES = (
-    "effective_action",
-    "interaction_contract",
-    "runnable_todo_set",
-    "user_gate",
-    "blocker",
-    "successor_or_supersede",
-    "capability_gate",
-    "monitor_target",
-    "active_state_next_action",
-    "goal_boundary_projection",
-    "watch_lane_continuation",
-)
+VISION_CHECKPOINT_SCHEMA_VERSION = "vision_checkpoint_v0"
+VISION_CHECKPOINT_MATERIAL_OUTCOMES = {
+    "outcome_gap",
+    "outcome_progress",
+    "primary_goal_outcome",
+}
+VISION_UNCHANGED_REASON_LIMIT = 240
 
 
 def now_local() -> str:
-    return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
+    return now_local_iso()
 
 
 def run_file_stem(generated_at: str) -> str:
@@ -122,27 +146,8 @@ def normalize_next_action_text(value: str) -> str:
     text = " ".join(str(value or "").strip().split())
     if not text:
         raise ValueError("next_action must not be empty")
-    validate_public_safe_text("active_state_next_action", text)
+    validate_local_control_text("active_state_next_action", text)
     return text
-
-
-def normalize_repair_delta_kinds(values: list[str] | None) -> list[str]:
-    normalized: list[str] = []
-    seen: set[str] = set()
-    allowed = set(REPAIR_DELTA_KIND_CHOICES)
-    for value in values or []:
-        item = str(value or "").strip()
-        if not item:
-            continue
-        if item not in allowed:
-            raise ValueError(
-                "repair_delta_kind must be one of: " + ", ".join(REPAIR_DELTA_KIND_CHOICES)
-            )
-        if item in seen:
-            continue
-        seen.add(item)
-        normalized.append(item)
-    return normalized
 
 
 def registered_agents_for_goal(registry_goal: dict[str, Any] | None) -> list[str]:
@@ -160,15 +165,6 @@ def registered_agents_for_goal(registry_goal: dict[str, Any] | None) -> list[str
         if normalized:
             registered_agents.append(normalized)
     return registered_agents
-
-
-def primary_agent_for_goal(registry_goal: dict[str, Any] | None) -> str | None:
-    coordination = (
-        registry_goal.get("coordination")
-        if registry_goal and isinstance(registry_goal.get("coordination"), dict)
-        else {}
-    )
-    return normalize_todo_claimed_by(coordination.get("primary_agent") if coordination else None)
 
 
 def normalize_progress_scope(value: str | None) -> str:
@@ -194,6 +190,7 @@ def build_repair_delta_contract(
     *,
     requested_delta_kinds: list[str],
     active_state_next_action_update: dict[str, Any] | None,
+    agent_vision: dict[str, Any] | None,
     dry_run: bool,
 ) -> dict[str, Any]:
     delta_kinds = list(requested_delta_kinds)
@@ -218,6 +215,22 @@ def build_repair_delta_contract(
                 "dry_run": bool(dry_run),
             }
         )
+    if agent_vision:
+        if "goal_vision_patch" not in delta_kinds:
+            delta_kinds.append("goal_vision_patch")
+        evidence.append(
+            {
+                "kind": "goal_vision_patch",
+                "source": "refresh_state_agent_vision",
+                "state": agent_vision.get("state"),
+                "agent_id": agent_vision.get("agent_id"),
+                "budget_status": (
+                    agent_vision.get("vision_budget", {}).get("status")
+                    if isinstance(agent_vision.get("vision_budget"), dict)
+                    else None
+                ),
+            }
+        )
 
     return {
         "schema_version": REPAIR_DELTA_CONTRACT_SCHEMA_VERSION,
@@ -227,6 +240,98 @@ def build_repair_delta_contract(
         "auto_evidence": evidence,
         "accepted_without_delta": False,
     }
+
+
+def build_vision_checkpoint(
+    *,
+    agent_id: str | None,
+    agent_vision: dict[str, Any] | None,
+    existing_agent_vision: dict[str, Any] | None,
+    vision_unchanged_reason: str | None,
+    delivery_outcome: str | None,
+    autonomous_replan_recorded: bool,
+    active_state_next_action_update: dict[str, Any] | None,
+    repair_delta_kinds: list[str] | None,
+) -> dict[str, Any]:
+    """Return the explicit vision closeout decision for this refresh run."""
+
+    triggers: list[dict[str, Any]] = []
+    if autonomous_replan_recorded:
+        triggers.append({"kind": "autonomous_replan_recorded"})
+    if delivery_outcome in VISION_CHECKPOINT_MATERIAL_OUTCOMES:
+        triggers.append(
+            {
+                "kind": "material_delivery_outcome",
+                "delivery_outcome": delivery_outcome,
+            }
+        )
+    if active_state_next_action_update and active_state_next_action_update.get("would_update"):
+        triggers.append({"kind": "durable_next_action_update"})
+
+    delta_kinds = set(repair_delta_kinds or [])
+    unchanged = normalize_vision_unchanged_reason(vision_unchanged_reason)
+
+    required = bool(triggers or unchanged)
+    if agent_vision:
+        decision = "patched"
+        satisfied = True
+    elif unchanged and existing_agent_vision:
+        decision = "unchanged_with_reason"
+        satisfied = True
+    elif unchanged:
+        decision = "missing_required"
+        satisfied = False
+    elif delta_kinds & {"no_followup", "successor_or_supersede"}:
+        decision = "retired_or_superseded"
+        satisfied = True
+    elif required:
+        decision = "missing_required"
+        satisfied = False
+    else:
+        decision = "not_required"
+        satisfied = True
+
+    checkpoint: dict[str, Any] = {
+        "schema_version": VISION_CHECKPOINT_SCHEMA_VERSION,
+        "agent_id": agent_id,
+        "required": required,
+        "satisfied": satisfied,
+        "decision": decision,
+        "triggers": triggers,
+    }
+    if agent_vision:
+        checkpoint["agent_vision_state"] = agent_vision.get("state")
+    if unchanged and existing_agent_vision:
+        checkpoint["unchanged_reason"] = unchanged
+        checkpoint["agent_vision_state"] = existing_agent_vision.get("state")
+    elif unchanged:
+        checkpoint["missing_baseline"] = True
+        checkpoint["rejected_unchanged_reason"] = unchanged
+    if delta_kinds:
+        checkpoint["repair_delta_kinds"] = sorted(delta_kinds)
+    if not satisfied:
+        checkpoint["required_resolution"] = ["write_vision_patch"]
+        if not checkpoint.get("missing_baseline"):
+            checkpoint["required_resolution"].append("record_unchanged_reason")
+        checkpoint["required_resolution"].extend(
+            ["record_no_followup", "link_successor_or_supersede"]
+        )
+    return checkpoint
+
+
+def normalize_vision_unchanged_reason(value: str | None) -> str:
+    """Normalize and validate a vision closeout reason before state mutation."""
+
+    unchanged = " ".join(str(value or "").strip().split())
+    if not unchanged:
+        return ""
+    validate_public_safe_text("vision_unchanged_reason", unchanged)
+    if len(unchanged) > VISION_UNCHANGED_REASON_LIMIT:
+        raise ValueError(
+            "vision_unchanged_reason exceeds "
+            f"{VISION_UNCHANGED_REASON_LIMIT} chars"
+        )
+    return unchanged
 
 
 def next_action_section_bounds(lines: list[str]) -> tuple[int, int] | None:
@@ -447,6 +552,10 @@ def build_state_refresh_record(
     agent_lane: str | None = None,
     autonomous_replan_recorded: bool = False,
     repair_delta_contract: dict[str, Any] | None = None,
+    autonomous_replan_frontier_identity: str | None = None,
+    agent_vision: dict[str, Any] | None = None,
+    vision_checkpoint: dict[str, Any] | None = None,
+    delivery_workspace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     frontmatter = parse_frontmatter(state_text)
     next_action = extract_section_lines(state_text, "Next Action")
@@ -489,6 +598,8 @@ def build_state_refresh_record(
         record["delivery_batch_scale"] = delivery_batch_scale
     if delivery_outcome:
         record["delivery_outcome"] = delivery_outcome
+    if delivery_workspace:
+        record["delivery_workspace"] = delivery_workspace
     if autonomous_replan_recorded:
         record["autonomous_replan_ack"] = {
             "schema_version": "autonomous_replan_ack_v0",
@@ -497,6 +608,14 @@ def build_state_refresh_record(
         }
         if repair_delta_contract:
             record["autonomous_replan_ack"]["delta_contract"] = repair_delta_contract
+        if autonomous_replan_frontier_identity:
+            record["autonomous_replan_ack"]["frontier_identity"] = (
+                autonomous_replan_frontier_identity
+            )
+    if agent_vision:
+        record["agent_vision"] = agent_vision
+    if vision_checkpoint:
+        record["vision_checkpoint"] = vision_checkpoint
     if progress_scope:
         record["progress_scope"] = progress_scope
     if agent_id:
@@ -529,6 +648,22 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
         f"- state_updated_at: `{frontmatter.get('updated_at')}`",
         f"- health_check: `{payload.get('health_check')}`",
     ]
+    if "external_sink_delivery_authorized" in payload:
+        lines.append(
+            "- external_sink_delivery_authorized: "
+            f"`{payload.get('external_sink_delivery_authorized')}`"
+        )
+    delivery_workspace = (
+        payload.get("delivery_workspace")
+        if isinstance(payload.get("delivery_workspace"), dict)
+        else {}
+    )
+    if delivery_workspace:
+        lines.append(
+            "- delivery_workspace: "
+            f"repository={delivery_workspace.get('task_repository')} "
+            f"kind={delivery_workspace.get('workspace_kind')}"
+        )
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
         return "\n".join(lines)
@@ -544,6 +679,46 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
             f"delta_present={repair_delta.get('delta_present')} "
             f"kinds={','.join(repair_delta.get('delta_kinds') or [])}"
         )
+    agent_vision = (
+        payload.get("agent_vision")
+        if isinstance(payload.get("agent_vision"), dict)
+        else {}
+    )
+    if agent_vision:
+        budget = (
+            agent_vision.get("vision_budget")
+            if isinstance(agent_vision.get("vision_budget"), dict)
+            else {}
+        )
+        lines.append(
+            "- agent_vision: "
+            f"state={agent_vision.get('state')} "
+            f"agent_id={agent_vision.get('agent_id')} "
+            f"budget={budget.get('total_usage')}/{budget.get('total_limit')}"
+        )
+    vision_checkpoint = (
+        payload.get("vision_checkpoint")
+        if isinstance(payload.get("vision_checkpoint"), dict)
+        else {}
+    )
+    if vision_checkpoint:
+        lines.append(
+            "- vision_checkpoint: "
+            f"agent_id={vision_checkpoint.get('agent_id')} "
+            f"required={vision_checkpoint.get('required')} "
+            f"satisfied={vision_checkpoint.get('satisfied')} "
+            f"decision={vision_checkpoint.get('decision')}"
+        )
+        if vision_checkpoint.get("unchanged_reason"):
+            lines.append(
+                f"- vision_unchanged_reason: {vision_checkpoint.get('unchanged_reason')}"
+            )
+        required_resolution = vision_checkpoint.get("required_resolution")
+        if required_resolution:
+            lines.append(
+                "- vision_checkpoint_required_resolution: "
+                f"{','.join(str(item) for item in required_resolution)}"
+            )
 
     projection_gap = (
         payload.get("state_projection_gap")
@@ -640,11 +815,15 @@ def refresh_state_run(
     next_action: str | None = None,
     delivery_batch_scale: str | None = None,
     delivery_outcome: str | None = None,
+    delivery_workspace_path: Path | None = None,
     agent_id: str | None = None,
     agent_lane: str | None = None,
     progress_scope: str | None = None,
     autonomous_replan_recorded: bool = False,
     repair_delta_kinds: list[str] | None = None,
+    agent_vision_packet: dict[str, Any] | None = None,
+    merge_agent_vision_patch: bool = False,
+    vision_unchanged_reason: str | None = None,
     dry_run: bool,
     sync_global: bool = True,
 ) -> dict[str, Any]:
@@ -665,9 +844,33 @@ def refresh_state_run(
     normalized_delivery_outcome = (
         require_delivery_outcome(delivery_outcome).value if delivery_outcome else None
     )
+    if delivery_workspace_path is not None and (
+        normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
+    ):
+        raise ValueError(
+            "--delivery-workspace-path requires an accountable --delivery-outcome"
+        )
     normalized_repair_delta_kinds = normalize_repair_delta_kinds(repair_delta_kinds)
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    runtime_projection_route = resolve_runtime_projection_route(
+        registry_path=registry_path,
+        goal_id=safe_goal_id,
+        source_runtime_root=runtime_root,
+    )
+    route_status = str(runtime_projection_route.get("status") or "missing")
+    route_target_text = str(
+        runtime_projection_route.get("target_runtime_root") or ""
+    ).strip()
+    route_target_root = Path(route_target_text) if route_target_text else None
+    shared_runtime_root = (
+        route_target_root if sync_global and route_status == "resolved" else None
+    )
+    global_sync_runtime_root = (
+        route_target_root
+        if sync_global and route_status in {"resolved", "single_runtime"}
+        else None
+    )
     registry_goal, resolved_project, resolved_state_file = resolve_goal_state(
         registry=registry,
         goal_id=safe_goal_id,
@@ -680,11 +883,20 @@ def refresh_state_run(
     expected_write_state_text = state_text
     normalized_next_action = normalize_next_action_text(next_action) if next_action else None
     registered_agents = registered_agents_for_goal(registry_goal)
-    primary_agent = primary_agent_for_goal(registry_goal)
     known_agents = {agent for agent in registered_agents if agent}
-    if primary_agent:
-        known_agents.add(primary_agent)
     multi_agent_goal = len(known_agents) > 1
+    workspace_guard_policy = (
+        registry_goal.get("workspace_guard_policy")
+        if isinstance(registry_goal.get("workspace_guard_policy"), dict)
+        else {}
+    )
+    explicit_peer_worktree_requirement = workspace_guard_policy.get(
+        "peer_independent_worktree_required"
+    )
+    peer_independent_worktree_required = multi_agent_goal and (
+        explicit_peer_worktree_requirement is None
+        or explicit_peer_worktree_requirement is True
+    )
     if normalized_agent_id and known_agents and normalized_agent_id not in known_agents:
         raise ValueError(
             f"agent_id {normalized_agent_id!r} is not registered for goal {safe_goal_id!r}"
@@ -703,16 +915,65 @@ def refresh_state_run(
         if normalized_next_action:
             raise ValueError(
                 "agent-lane refresh-state cannot update the durable active-state Next Action; "
-                "rerun without --next-action or use --progress-scope goal with the primary agent"
+                "rerun without --next-action or use --progress-scope goal from a registered peer"
             )
     if normalized_progress_scope == GOAL_PROGRESS_SCOPE:
         if normalized_agent_lane:
             raise ValueError("--agent-lane requires --progress-scope agent_lane")
-        if primary_agent and normalized_agent_id and normalized_agent_id != primary_agent:
-            raise ValueError(
-                "goal-scope refresh-state requires the primary agent "
-                f"{primary_agent!r}; got {normalized_agent_id!r}"
+    if (agent_vision_packet is not None or vision_unchanged_reason) and not normalized_agent_id:
+        raise ValueError("vision writeback requires --agent-id")
+    normalized_vision_unchanged_reason = normalize_vision_unchanged_reason(
+        vision_unchanged_reason
+    )
+    agent_vision: dict[str, Any] | None = None
+    existing_agent_vision: dict[str, Any] | None = None
+    autonomous_replan_frontier_identity: str | None = None
+    existing_runs: list[dict[str, Any]] = []
+    if normalized_agent_id and (
+        agent_vision_packet is not None
+        or normalized_vision_unchanged_reason
+        or autonomous_replan_recorded
+    ):
+        existing_runs, _ = load_index(
+            runtime_root / "goals" / safe_goal_id / "runs" / "index.jsonl"
+        )
+        newest_first_runs = [
+            run
+            for _, run in sorted(
+                enumerate(existing_runs),
+                key=lambda item: (str(item[1].get("generated_at") or ""), item[0]),
+                reverse=True,
             )
+        ]
+        existing_agent_vision = latest_agent_vision_from_runs(
+            newest_first_runs,
+            goal_id=safe_goal_id,
+            agent_id=normalized_agent_id,
+        )
+    if agent_vision_packet is not None:
+        agent_vision = normalize_goal_vision_update(
+            agent_vision_packet,
+            goal_id=safe_goal_id,
+            agent_id=normalized_agent_id or None,
+            existing_agent_vision=existing_agent_vision,
+            merge_patch=merge_agent_vision_patch,
+            require_path_delta_for_durable_change=autonomous_replan_recorded,
+        )
+    if autonomous_replan_recorded:
+        newest_first_runs = [
+            run
+            for _, run in sorted(
+                enumerate(existing_runs),
+                key=lambda item: (str(item[1].get("generated_at") or ""), item[0]),
+                reverse=True,
+            )
+        ]
+        autonomous_replan_frontier_identity = (
+            latest_blocked_successor_frontier_identity(
+                newest_first_runs,
+                agent_id=normalized_agent_id or None,
+            )
+        )
     generated_at = now_local()
     active_state_next_action_update: dict[str, Any] | None = None
     if normalized_next_action:
@@ -750,6 +1011,7 @@ def refresh_state_run(
         repair_delta_contract = build_repair_delta_contract(
             requested_delta_kinds=normalized_repair_delta_kinds,
             active_state_next_action_update=active_state_next_action_update,
+            agent_vision=agent_vision,
             dry_run=dry_run,
         )
         if not repair_delta_contract["delta_present"]:
@@ -757,6 +1019,40 @@ def refresh_state_run(
             effective_autonomous_replan_recorded = False
             if normalized_delivery_outcome in {"outcome_progress", "primary_goal_outcome"}:
                 normalized_delivery_outcome = "outcome_gap"
+    vision_checkpoint = build_vision_checkpoint(
+        agent_id=normalized_agent_id or None,
+        agent_vision=agent_vision,
+        existing_agent_vision=existing_agent_vision,
+        vision_unchanged_reason=normalized_vision_unchanged_reason,
+        delivery_outcome=normalized_delivery_outcome,
+        autonomous_replan_recorded=bool(autonomous_replan_recorded),
+        active_state_next_action_update=active_state_next_action_update,
+        repair_delta_kinds=normalized_repair_delta_kinds,
+    )
+    delivery_workspace = None
+    if normalized_delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:
+        delivery_workspace = capture_delivery_workspace(
+            current_path=delivery_workspace_path,
+            peer_independent_worktree_required=peer_independent_worktree_required,
+        )
+        if delivery_workspace_path is not None:
+            if delivery_workspace is None:
+                raise ValueError(
+                    "--delivery-workspace-path must identify a git checkout with "
+                    "a credential-free origin repository"
+                )
+            if (
+                peer_independent_worktree_required
+                and delivery_workspace.get("workspace_kind")
+                != "independent_git_worktree"
+            ):
+                raise ValueError(
+                    "--delivery-workspace-path must identify the independent git "
+                    "worktree that produced this peer delivery"
+                )
+            delivery_workspace["repository_source"] = (
+                "refresh_state.delivery_workspace_path"
+            )
     record = build_state_refresh_record(
         goal_id=safe_goal_id,
         state_file=resolved_state_file,
@@ -773,6 +1069,10 @@ def refresh_state_run(
         agent_lane=normalized_agent_lane or None,
         autonomous_replan_recorded=effective_autonomous_replan_recorded,
         repair_delta_contract=repair_delta_contract,
+        autonomous_replan_frontier_identity=autonomous_replan_frontier_identity,
+        agent_vision=agent_vision,
+        vision_checkpoint=vision_checkpoint,
+        delivery_workspace=delivery_workspace,
     )
     if autonomous_replan_recorded:
         if "autonomous_replan_ack" not in record:
@@ -783,6 +1083,10 @@ def refresh_state_run(
                 "delta_contract": repair_delta_contract,
             }
         record["autonomous_replan_ack"]["requested"] = True
+        if autonomous_replan_frontier_identity:
+            record["autonomous_replan_ack"]["frontier_identity"] = (
+                autonomous_replan_frontier_identity
+            )
         if requested_classification != classification:
             record["autonomous_replan_ack"]["requested_classification"] = requested_classification
             record["autonomous_replan_noop"] = {
@@ -793,6 +1097,14 @@ def refresh_state_run(
             }
     if active_state_next_action_update:
         record["active_state_next_action_update"] = active_state_next_action_update
+    if agent_vision:
+        record["agent_vision"] = agent_vision
+    if vision_checkpoint:
+        record["vision_checkpoint"] = vision_checkpoint
+    compact_route = compact_runtime_projection_route(runtime_projection_route)
+    compact_route["projection_enabled"] = bool(sync_global)
+    compact_route["projection_marker_field"] = "shared_runtime_projection"
+    record["runtime_projection_route"] = compact_route
 
     runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
     json_path, markdown_path = unique_run_paths(runs_dir, generated_at)
@@ -819,14 +1131,35 @@ def refresh_state_run(
             "updated_at": record_frontmatter.get("updated_at"),
         },
     }
+    index_record["runtime_projection_route"] = compact_route
     if normalized_delivery_batch_scale:
         index_record["delivery_batch_scale"] = normalized_delivery_batch_scale
     if normalized_delivery_outcome:
         index_record["delivery_outcome"] = normalized_delivery_outcome
+    if delivery_workspace:
+        index_record["delivery_workspace"] = delivery_workspace
     if autonomous_replan_recorded:
         index_record["autonomous_replan_ack"] = record["autonomous_replan_ack"]
         if requested_classification != classification:
             index_record["requested_classification"] = requested_classification
+    if agent_vision:
+        indexed_agent_vision = {
+            "schema_version": agent_vision.get("schema_version"),
+            "agent_id": agent_vision.get("agent_id"),
+            "state": agent_vision.get("state"),
+            "vision_patch": agent_vision.get("vision_patch")
+            if isinstance(agent_vision.get("vision_patch"), dict)
+            else {},
+            "todo_delta": agent_vision.get("todo_delta")
+            if isinstance(agent_vision.get("todo_delta"), list)
+            else [],
+            "vision_budget": agent_vision.get("vision_budget"),
+        }
+        if isinstance(agent_vision.get("path_delta"), dict):
+            indexed_agent_vision["path_delta"] = agent_vision["path_delta"]
+        index_record["agent_vision"] = indexed_agent_vision
+    if vision_checkpoint:
+        index_record["vision_checkpoint"] = vision_checkpoint
     if normalized_progress_scope:
         index_record["progress_scope"] = normalized_progress_scope
     if normalized_agent_id:
@@ -848,6 +1181,8 @@ def refresh_state_run(
         "autonomous_replan_recorded": effective_autonomous_replan_recorded,
         "autonomous_replan_recorded_requested": bool(autonomous_replan_recorded),
         "repair_delta_contract": repair_delta_contract,
+        "agent_vision": agent_vision,
+        "vision_checkpoint": vision_checkpoint,
         "recommended_action": action,
         "recommended_action_source": recommended_action_source,
         "active_state_next_action_update": active_state_next_action_update,
@@ -862,16 +1197,22 @@ def refresh_state_run(
         expected_write_scopes = ["runtime_history"]
         if active_state_next_action_update and active_state_next_action_update.get("would_update"):
             expected_write_scopes.insert(0, "active_state")
-        if sync_global:
+        if sync_global and route_status in {"resolved", "single_runtime"}:
             expected_write_scopes.append("global_registry")
+        if shared_runtime_root:
+            expected_write_scopes.append("shared_runtime_projection")
         patch_parts = [f"append refresh-state run classification={classification}"]
         if active_state_next_action_update:
             if active_state_next_action_update.get("would_update"):
                 patch_parts.append("preview active-state Next Action update")
             else:
                 patch_parts.append("preserve active-state Next Action")
-        if sync_global:
+        if sync_global and route_status in {"resolved", "single_runtime"}:
             patch_parts.append("sync public-safe registry projection")
+        elif sync_global:
+            patch_parts.append(f"block global sync on {route_status} runtime projection route")
+        if shared_runtime_root:
+            patch_parts.append("project compact refresh to registered shared runtime")
         payload["local_state_write_correctness"] = build_local_state_write_correctness_dry_run_packet(
             goal_id=safe_goal_id,
             writer_id=normalized_agent_id or "loopx.refresh-state",
@@ -881,7 +1222,14 @@ def refresh_state_run(
                 "state_file_ref": "registry.goal.state_file",
                 "run_history_ref": "runtime.goal.runs",
                 "index_ref": "runtime.goal.runs.index",
-                "global_registry_ref": "runtime.registry.global" if sync_global else None,
+                "global_registry_ref": (
+                    "runtime.registry.global"
+                    if sync_global and route_status in {"resolved", "single_runtime"}
+                    else None
+                ),
+                "shared_runtime_projection_ref": (
+                    "shared_runtime.goal.runs.index" if shared_runtime_root else None
+                ),
             },
             patch_summary="; ".join(patch_parts),
             expected_write_scopes=expected_write_scopes,
@@ -902,18 +1250,86 @@ def refresh_state_run(
         markdown_path.write_text(render_state_refresh_markdown(payload) + "\n", encoding="utf-8")
         with index_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(index_record, ensure_ascii=False) + "\n")
-    if sync_global:
+    if sync_global and route_status in {"missing", "ambiguous"}:
+        payload["ok"] = False
+        payload["partial_write"] = not dry_run
+        payload["global_sync"] = {
+            "ok": False,
+            "enabled": False,
+            "wrote": False,
+            "reason": f"runtime projection route is {route_status}",
+            "route_status": route_status,
+        }
+        payload["shared_runtime_projection"] = {
+            "ok": False,
+            "status": f"route_{route_status}",
+            "dry_run": dry_run,
+            "raw_artifacts_copied": False,
+            "recommended_action_copied": False,
+            "runtime_projection_route_id": compact_route.get("route_id"),
+        }
+    elif sync_global:
         payload["global_sync"] = sync_project_registry_to_global(
             registry_path=registry_path,
-            runtime_root_override=str(runtime_root),
+            runtime_root_override=str(global_sync_runtime_root or runtime_root),
             goal_id=safe_goal_id,
             dry_run=dry_run,
         )
+        if shared_runtime_root and payload["global_sync"].get("ok"):
+            projection_record, projection_index = build_shared_runtime_projection(
+                record=record,
+            )
+            try:
+                payload["shared_runtime_projection"] = write_shared_runtime_projection(
+                    shared_runtime_root=shared_runtime_root,
+                    goal_id=safe_goal_id,
+                    record=projection_record,
+                    index_record=projection_index,
+                    dry_run=dry_run,
+                )
+            except OSError as exc:
+                payload["ok"] = False
+                payload["partial_write"] = not dry_run
+                payload["shared_runtime_projection"] = {
+                    "ok": False,
+                    "status": "write_failed",
+                    "dry_run": dry_run,
+                    "shared_runtime_root": str(shared_runtime_root),
+                    "raw_artifacts_copied": False,
+                    "recommended_action_copied": False,
+                    "error": str(exc),
+                }
+        elif shared_runtime_root:
+            payload["ok"] = False
+            payload["partial_write"] = not dry_run
+            payload["shared_runtime_projection"] = {
+                "ok": False,
+                "status": "blocked_by_global_sync",
+                "dry_run": dry_run,
+                "shared_runtime_root": str(shared_runtime_root),
+                "raw_artifacts_copied": False,
+                "recommended_action_copied": False,
+            }
+        else:
+            payload["shared_runtime_projection"] = {
+                "ok": True,
+                "status": "not_required",
+                "dry_run": dry_run,
+                "raw_artifacts_copied": False,
+                "recommended_action_copied": False,
+            }
     else:
         payload["global_sync"] = {
             "enabled": False,
             "global_registry": str(runtime_root / "registry.global.json"),
             "synced_goal_ids": [],
             "wrote": False,
+        }
+        payload["shared_runtime_projection"] = {
+            "ok": True,
+            "status": "disabled",
+            "dry_run": dry_run,
+            "raw_artifacts_copied": False,
+            "recommended_action_copied": False,
         }
     return payload

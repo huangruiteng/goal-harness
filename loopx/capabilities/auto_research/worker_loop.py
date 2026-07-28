@@ -18,9 +18,18 @@ def _compact_turn(turn: dict[str, object], *, round_index: int) -> dict[str, obj
     evaluation_summary = (
         turn.get("evaluation_summary") if isinstance(turn.get("evaluation_summary"), dict) else {}
     )
+    successor_todos = (
+        turn.get("successor_todos") if isinstance(turn.get("successor_todos"), dict) else {}
+    )
+    successors = (
+        successor_todos.get("successors")
+        if isinstance(successor_todos.get("successors"), list)
+        else []
+    )
     return {
         "round": round_index,
         "agent_id": turn.get("agent_id"),
+        "role_id": turn.get("role_id"),
         "mode": turn.get("mode"),
         "executed": bool(turn.get("executed")),
         "selected_todo_id": turn.get("selected_todo_id"),
@@ -31,7 +40,22 @@ def _compact_turn(turn: dict[str, object], *, round_index: int) -> dict[str, obj
         "holdout_metric": turn.get("holdout_metric"),
         "claim_allowed": evaluation_summary.get("claim_allowed"),
         "best_holdout_metric": evaluation_summary.get("best_holdout_metric"),
+        "holdout_metric_sequence": evaluation_summary.get("holdout_metric_sequence"),
+        "holdout_improvement_count": evaluation_summary.get("holdout_improvement_count"),
         "live_evidence_written": bool(live_evidence.get("written")),
+        "successor_todo_count": len(successors),
+        "successor_todos": [
+            {
+                "todo_id": successor.get("todo_id"),
+                "target_agent_id": successor.get("target_agent_id")
+                or successor.get("claimed_by"),
+                "target_role_id": successor.get("target_role_id"),
+                "source_todo_id": successor.get("unblocks_todo_id"),
+                "action_kind": successor.get("action_kind"),
+            }
+            for successor in successors
+            if isinstance(successor, dict)
+        ],
     }
 
 
@@ -43,7 +67,7 @@ def run_auto_research_worker_loop(
     agent_ids: Sequence[str],
     objective: str,
     workspace: Path,
-    output_dir: str = "auto_research_knn_pack",
+    output_dir: str = "auto_research_lightweight_kernel",
     evidence_dir: str = ".local/auto-research-worker",
     execute: bool = False,
     append_evidence: AppendEvidence | None = None,
@@ -51,7 +75,7 @@ def run_auto_research_worker_loop(
     visible_lanes_accepted: bool = False,
     live_evidence_output: str = "live-codex-e2e-evidence.public.json",
     complete_selected_todo: bool = False,
-    max_rounds: int = 3,
+    max_rounds: int = 4,
 ) -> dict[str, object]:
     """Run repeated LoopX-selected worker turns for a fixed visible lane set.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -18,7 +19,11 @@ def add_tree(tar: tarfile.TarFile, root: Path, name: str) -> None:
         for child in sorted(path.rglob("*")):
             if ".git" in child.parts or "__pycache__" in child.parts:
                 continue
-            tar.add(child, arcname=str(Path("loopx-main") / child.relative_to(root)))
+            tar.add(
+                child,
+                arcname=str(Path("loopx-main") / child.relative_to(root)),
+                recursive=False,
+            )
     else:
         tar.add(path, arcname=str(Path("loopx-main") / name))
 
@@ -31,7 +36,18 @@ def main() -> None:
         tmp = Path(td)
         archive = tmp / "loopx.tar.gz"
         home = tmp / "home"
+        fake_bin = tmp / "fake-bin"
+        unexpected_python_marker = tmp / "unexpected-python3"
         home.mkdir()
+        fake_bin.mkdir()
+        fake_python = fake_bin / "python3"
+        fake_python.write_text(
+            "#!/usr/bin/env bash\n"
+            f"touch {unexpected_python_marker!s}\n"
+            "exit 86\n",
+            encoding="utf-8",
+        )
+        fake_python.chmod(0o755)
 
         with tarfile.open(archive, "w:gz") as tar:
             for name in (
@@ -39,6 +55,7 @@ def main() -> None:
                 "scripts",
                 "skills",
                 "docs",
+                "man",
                 "examples",
                 "README.md",
                 "pyproject.toml",
@@ -56,12 +73,16 @@ def main() -> None:
                 "LOOPX_SHELL_PROFILE": str(home / ".profile"),
                 "LOOPX_ARCHIVE_URL": f"file://{archive}",
                 "LOOPX_INSTALL_CANARY": "0",
+                "LOOPX_PYTHON": sys.executable,
+                "PATH": f"{fake_bin}:{env.get('PATH', '')}",
             }
         )
         subprocess.run(["bash", str(script)], check=True, env=env, cwd=tmp)
+        assert not unexpected_python_marker.exists(), unexpected_python_marker
 
         installed = home / ".local" / "bin" / "loopx"
         assert installed.exists(), installed
+        assert (home / ".local" / "share" / "man" / "man1" / "loopx.1.gz").is_file()
         assert not (home / ".local" / "bin" / "goal-harness").exists()
         doctor = subprocess.run(
             [str(installed), "doctor"],
@@ -86,6 +107,7 @@ def main() -> None:
         manifest_path = release_root / "release.json"
         assert manifest_path.is_file(), manifest_path
         manifest = doctor_payload["release_manifest"]["manifest"]
+        assert manifest["source"]["promotion_mode"] == "trusted_github_archive", manifest
         assert manifest["schema_version"] == "loopx_release_manifest_v0", manifest
         assert manifest["source"]["kind"] == "github_archive", manifest
         assert manifest["source"]["repo"] == "huangruiteng/loopx", manifest
@@ -101,6 +123,9 @@ def main() -> None:
             "loopx-self-repair",
         ):
             assert (home / ".codex" / "skills" / skill / "SKILL.md").exists(), skill
+        assert not (
+            home / ".codex" / "skills" / "loopx-change-quality"
+        ).exists()
 
         assert not (home / ".local" / "bin" / "loopx-canary").exists()
         assert not (home / ".local" / "bin" / "goal-harness-canary").exists()

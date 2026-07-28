@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from .bootstrap import default_goal_id
-
+from .control_plane.scheduler.execution_context import (
+    GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
+    render_scheduler_execution_args,
+)
+from .control_plane.todos.contract import normalize_required_capabilities
 
 DEFAULT_HANDOFF_OBJECTIVE = "<OBJECTIVE_FROM_GOAL_DOC>"
 DEFAULT_HANDOFF_DOMAIN = "<DOMAIN>"
@@ -14,6 +18,11 @@ DEFAULT_HANDOFF_ADAPTER_STATUS = "connected-read-only"
 DEFAULT_HANDOFF_NEXT_PROBE = "(omit --next-probe until a read-only pre-tick command exists)"
 SHARED_GLOBAL_REGISTRY = '"$HOME/.codex/loopx/registry.global.json"'
 NO_CLONE_INSTALL_URL = "https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh"
+CODEX_CLI_VISIBLE_SCHEDULER_CONTEXT = {
+    "host_surface": "codex_cli",
+    "scheduler_owner": "agent_cli_loop",
+    "execution_mode": "interactive",
+}
 
 
 def shell_arg(value: str) -> str:
@@ -25,6 +34,13 @@ def shell_arg_or_placeholder(value: str) -> str:
     if text.startswith("<") and text.endswith(">"):
         return text
     return shell_arg(text)
+
+
+def render_available_capability_args(values: Any) -> str:
+    return "".join(
+        f" --available-capability {shell_arg(capability)}"
+        for capability in normalize_required_capabilities(values)
+    )
 
 
 def render_cli_preflight(*, cli_bin: str = "loopx") -> str:
@@ -43,8 +59,17 @@ fi
 {cli_bin_arg} doctor >/dev/null"""
 
 
-def render_codex_cli_no_clone_preflight(*, cli_bin: str = "loopx") -> str:
+def render_codex_cli_no_clone_preflight(
+    *,
+    cli_bin: str = "loopx",
+    doctor_agent_type: str | None = None,
+) -> str:
     cli_bin_arg = shell_arg(cli_bin)
+    doctor_agent_arg = (
+        f" --agent-type {shell_arg(doctor_agent_type)}"
+        if doctor_agent_type
+        else ""
+    )
     return f"""export PATH="$HOME/.local/bin:$PATH"
 if ! command -v {cli_bin_arg} >/dev/null 2>&1; then
   if command -v curl >/dev/null 2>&1; then
@@ -55,15 +80,35 @@ if ! command -v {cli_bin_arg} >/dev/null 2>&1; then
     exit 1
   fi
 fi
-{cli_bin_arg} doctor >/dev/null"""
+{cli_bin_arg} doctor{doctor_agent_arg} >/dev/null"""
 
 
-def render_quota_guard_command(goal_id: str, *, cli_bin: str = "loopx", agent_id: str | None = None) -> str:
+def render_quota_guard_command(
+    goal_id: str,
+    *,
+    cli_bin: str = "loopx",
+    agent_id: str | None = None,
+    available_capabilities: Any = None,
+    runtime_profile: str | None = None,
+    scheduler_execution_context: dict[str, Any] | None = None,
+    heartbeat_turn_receipt: bool = False,
+) -> str:
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
+    capability_args = render_available_capability_args(available_capabilities)
+    scheduler_args = render_scheduler_execution_args(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
+    turn_arg = (
+        ' --turn-instance-id "${LOOPX_TURN:?}"'
+        if heartbeat_turn_receipt
+        else ""
+    )
     return (
         f"{shell_arg(cli_bin)} --format json "
         f"--registry {SHARED_GLOBAL_REGISTRY} "
         f"quota should-run --goal-id {shell_arg(goal_id)}{agent_arg}"
+        f"{capability_args}{scheduler_args}{turn_arg}"
     )
 
 
@@ -73,14 +118,16 @@ def render_quota_spend_command(
     source: str = "adapter",
     cli_bin: str = "loopx",
     agent_id: str | None = None,
+    available_capabilities: Any = None,
 ) -> str:
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
+    capability_args = render_available_capability_args(available_capabilities)
     return (
         f"{shell_arg(cli_bin)} "
         f"--registry {SHARED_GLOBAL_REGISTRY} "
         "quota spend-slot "
         f"--goal-id {shell_arg(goal_id)} "
-        f"--slots 1 --source {shell_arg(source)} --execute{agent_arg}"
+        f"--slots 1 --source {shell_arg(source)} --execute{agent_arg}{capability_args}"
     )
 
 
@@ -124,12 +171,21 @@ def render_heartbeat_prompt_command(
     agent_id: str | None = None,
     agent_scope: str = "Codex CLI /goal visible TUI loop",
     body: str = "thin",
+    available_capabilities: Any = None,
+    runtime_profile: str | None = None,
+    scheduler_execution_context: dict[str, Any] | None = None,
 ) -> str:
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
     scope_arg = f" --agent-scope {shell_arg(agent_scope)}" if agent_id else ""
+    capability_args = render_available_capability_args(available_capabilities)
+    scheduler_args = render_scheduler_execution_args(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
     return (
         f"{shell_arg(cli_bin)} heartbeat-prompt --{shell_arg(body)} "
-        f"--goal-id {shell_arg(goal_id)}{agent_arg}{scope_arg}"
+        f"--goal-id {shell_arg(goal_id)}{agent_arg}{scope_arg}{capability_args}"
+        f"{scheduler_args}"
     )
 
 
@@ -140,12 +196,21 @@ def render_heartbeat_prompt_json_command(
     agent_id: str | None = None,
     agent_scope: str = "Codex CLI /goal visible TUI loop",
     body: str = "thin",
+    available_capabilities: Any = None,
+    runtime_profile: str | None = None,
+    scheduler_execution_context: dict[str, Any] | None = None,
 ) -> str:
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
     scope_arg = f" --agent-scope {shell_arg(agent_scope)}" if agent_id else ""
+    capability_args = render_available_capability_args(available_capabilities)
+    scheduler_args = render_scheduler_execution_args(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
     return (
         f"{shell_arg(cli_bin)} --format json heartbeat-prompt --{shell_arg(body)} "
-        f"--goal-id {shell_arg(goal_id)}{agent_arg}{scope_arg}"
+        f"--goal-id {shell_arg(goal_id)}{agent_arg}{scope_arg}{capability_args}"
+        f"{scheduler_args}"
     )
 
 
@@ -225,7 +290,12 @@ def build_new_project_prompt(
         write_scope=write_scope,
         cli_bin="loopx",
     )
-    quota_guard_command = render_quota_guard_command(resolved_goal_id)
+    quota_guard_command = render_quota_guard_command(
+        resolved_goal_id,
+        scheduler_execution_context=(
+            GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT
+        ),
+    )
     quota_spend_command = render_quota_spend_command(resolved_goal_id)
     refresh_command = render_refresh_state_command(resolved_goal_id)
     prompt = render_prompt_text(
@@ -305,6 +375,7 @@ def build_codex_cli_bootstrap_message(
         resolved_goal_id,
         cli_bin=cli_bin,
         agent_id=agent_id,
+        scheduler_execution_context=CODEX_CLI_VISIBLE_SCHEDULER_CONTEXT,
     )
     quota_spend_command = render_quota_spend_command(
         resolved_goal_id,
@@ -316,17 +387,20 @@ def build_codex_cli_bootstrap_message(
         resolved_goal_id,
         cli_bin=cli_bin,
         agent_id=agent_id,
+        scheduler_execution_context=CODEX_CLI_VISIBLE_SCHEDULER_CONTEXT,
     )
     heartbeat_prompt_json_command = render_heartbeat_prompt_json_command(
         resolved_goal_id,
         cli_bin=cli_bin,
         agent_id=agent_id,
+        scheduler_execution_context=CODEX_CLI_VISIBLE_SCHEDULER_CONTEXT,
     )
     install_repair_command = render_codex_cli_no_clone_preflight(cli_bin=cli_bin)
     refresh_command = render_refresh_state_command(
         resolved_goal_id,
         cli_bin=cli_bin,
         agent_id=agent_id,
+        progress_scope="agent_lane" if agent_id else None,
     )
     first_run_validation_checklist = [
         f"{cli_bin} doctor passed after no-clone install repair or existing install",
@@ -568,7 +642,7 @@ run:
 
 If this command returns a known goal, even with a normal delivery gate or
 workspace guard, treat the goal as already connected and reuse the existing
-global route/source_registry. In an independent side-agent worktree, do not
+global route/source_registry. In an independent peer-agent worktree, do not
 run `loopx bootstrap` for the same `goal_id`; that can create a route collision
 between the primary checkout and the worktree. Only run bootstrap when the
 probe clearly says the goal is absent from the registered quota plan.
@@ -775,7 +849,8 @@ def render_prompt_text(
    的 user todo 权威区：
 
 ```bash
-{cli_bin} todo add --goal-id {goal_id} --role user --text "<public-safe user/owner action>"
+{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate --blocks-agent <agent-id> --text "<public-safe blocking user/owner decision>"
+{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_action --text "<public-safe non-blocking user/owner todo>"
 ```
 
    agent 自己的后续动作写成 `--role agent`。写入后如果 dashboard 需要看到最新状态，运行
@@ -823,6 +898,9 @@ def render_prompt_text(
 
    不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账；如果
    `should_run=false` 但实际完成了 `safe_bypass_allowed=true` 的 bounded safe-bypass 工作，要记一次账。
+   accountable `refresh-state` 应从实际交付 worktree 运行；若 registry/state 投影只能从另一个
+   checkout 执行，显式加 `--delivery-workspace-path <delivery-worktree>`，不要让 canonical checkout
+   覆盖交付归因。
    不要重复执行。
 12. 最后用中文汇报：
    - changed files；

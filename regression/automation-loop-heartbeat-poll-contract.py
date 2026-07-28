@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression wrapper for automation-loop heartbeat poll contracts.
 
-The durable behavior lives in `examples/heartbeat-quota-flow-smoke.py`.
+The durable behavior lives in `examples/control_plane/heartbeat-quota-flow-smoke.py`.
 This wrapper makes the default regression suite cover it without duplicating
 fixtures or pulling in real Codex/Docker/model execution.
 """
@@ -13,7 +13,9 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SMOKE_PATH = REPO_ROOT / "examples" / "heartbeat-quota-flow-smoke.py"
+SMOKE_PATH = (
+    REPO_ROOT / "examples" / "control_plane" / "heartbeat-quota-flow-smoke.py"
+)
 
 
 def main() -> int:

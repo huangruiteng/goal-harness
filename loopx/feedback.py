@@ -35,6 +35,18 @@ LOCAL_CONTROL_TEXT_PATTERNS = (
     re.compile(r"\b" + "Bear" + r"er\s+[A-Za-z0-9._~+/=-]+\b", re.I),
     re.compile(r"\b" + "Author" + r"ization\s*:", re.I),
     re.compile(r"\b(?:tok" + r"en|pass" + r"word|sec" + r"ret)\s*[:=]", re.I),
+    re.compile(
+        r"\b(?:access[_-]?key(?:[_-]?id)?|accessKeyId|ak)\s*[:=]\s*"
+        r"[A-Za-z0-9._~+/=-]{8,}\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:secret[_-]?access[_-]?key|secretAccessKey|secret[_-]?key|sk)"
+        r"\s*[:=]\s*[A-Za-z0-9._~+/=-]{8,}\b",
+        re.I,
+    ),
+    re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
 )
 HUMAN_REWARD_FIELDS = (
     "recorded_at",
@@ -59,6 +71,29 @@ RUN_OVERLAY_FIELDS = (
 )
 
 
+def public_safe_text_guidance(label: str) -> str:
+    normalized = label.lower().replace("-", "_")
+    if "next_action" in normalized or "recommended_action" in normalized:
+        return (
+            "this field is usually local-control state; use validate_local_control_text "
+            "for private project routing, or a public-safe alias only on exported surfaces"
+        )
+    if "todo" in normalized:
+        return (
+            "use a compact public-safe todo alias or summary here; keep raw local "
+            "paths, private URLs, task bodies, and logs in evidence/private payloads"
+        )
+    if "evidence" in normalized:
+        return (
+            "use a compact public-safe evidence pointer here; keep raw logs, local "
+            "paths, and private URLs in private payloads"
+        )
+    return (
+        "use a public-safe summary or alias here; keep raw local paths, private "
+        "URLs, and raw evidence in private payloads"
+    )
+
+
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -72,7 +107,10 @@ def validate_public_safe_text(label: str, value: str | None) -> None:
         return
     for pattern in PRIVATE_TEXT_PATTERNS:
         if pattern.search(value):
-            raise ValueError(f"{label} contains a private-looking value; keep raw evidence in private payloads")
+            raise ValueError(
+                f"{label} contains a private-looking value; "
+                + public_safe_text_guidance(label)
+            )
 
 
 def validate_local_control_text(label: str, value: str | None) -> None:
@@ -88,7 +126,8 @@ def validate_local_control_text(label: str, value: str | None) -> None:
     for pattern in LOCAL_CONTROL_TEXT_PATTERNS:
         if pattern.search(value):
             raise ValueError(
-                f"{label} contains a secret-looking value; keep credentials out of control-plane text"
+                f"{label} contains a secret-looking value; keep AK/SK, tokens, auth headers, "
+                "passwords, and inline credentials out of local control-plane text"
             )
 
 

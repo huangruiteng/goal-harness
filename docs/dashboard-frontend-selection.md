@@ -48,12 +48,12 @@ needs an action-oriented queue and trustworthy drill-downs:
 - filterable goal and run tables,
 - URL-addressable status filters,
 - run detail pages with compact JSON/Markdown links,
-- event or timeline views for controller/sub-agent work,
+- event or timeline views for peer task coordination and child-worker evidence,
 - later graph views for goal dependencies and handoffs.
 
 ## Decision
 
-Build the official dashboard as `apps/dashboard` with a static-build-first
+Build the official dashboard as `apps/presentation/dashboard` with a static-build-first
 frontend:
 
 - **Vite + React + TypeScript** for a local-first single-page app that can read
@@ -125,7 +125,7 @@ not marketing pages.
 
 Recharts is enough for the first dashboard because the immediate visualizations
 are counts, history trends, and small comparisons. Custom graph work should be
-added only when controller/sub-agent relationships need a dedicated graph view.
+added only when task-scoped peer relationships need a dedicated graph view.
 
 ## Rejected Options
 
@@ -163,7 +163,7 @@ The dashboard should be dense, calm, and operational:
 
 ## Current Implementation Segment
 
-The first dashboard scaffold lives in `apps/dashboard`. It uses the selected
+The first dashboard scaffold lives in `apps/presentation/dashboard`. It uses the selected
 stack and renders a real screen from `examples/status.example.json`:
 
 - contract health summary,
@@ -177,7 +177,7 @@ stack and renders a real screen from `examples/status.example.json`:
 Keep `examples/render-status-dashboard.py` as a low-friction fallback for
 environments that cannot build the React app.
 
-The first product-path `/frontstage` slice now exists in `apps/dashboard`: it
+The first product-path `/frontstage` slice now exists in `apps/presentation/dashboard`: it
 renders `attention_queue.items[].goal_channel_projection` as a read-only
 channel board that makes a single goal feel like a managed workspace lane. It
 shows the decision frame, quota guard, user todo lane, agent todo lane, active

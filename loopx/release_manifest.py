@@ -13,6 +13,26 @@ from . import __version__
 
 RELEASE_MANIFEST_SCHEMA_VERSION = "loopx_release_manifest_v0"
 RELEASE_MANIFEST_FILENAME = "release.json"
+PACKAGE_VERSION_SOURCE = "loopx.__version__"
+
+
+def release_version_tag(version: str | None = None) -> str | None:
+    selected = __version__ if version is None else version
+    if not isinstance(selected, str):
+        return None
+    text = selected.strip()
+    if not text:
+        return None
+    return text if text.startswith("v") else f"v{text}"
+
+
+def package_release_metadata() -> dict[str, str | None]:
+    return {
+        "name": "loopx",
+        "version": __version__,
+        "version_tag": release_version_tag(__version__),
+        "version_source": PACKAGE_VERSION_SOURCE,
+    }
 
 
 def _sha256_file(path: Path) -> str:
@@ -105,6 +125,7 @@ def _manifest_source_metadata(source_root: Path | None) -> dict[str, Any]:
             "ref": None,
             "archive_url": None,
             "archive_sha256": None,
+            "promotion_mode": None,
         }
     manifest_path = source_root.expanduser() / RELEASE_MANIFEST_FILENAME
     try:
@@ -119,6 +140,7 @@ def _manifest_source_metadata(source_root: Path | None) -> dict[str, Any]:
             "ref": None,
             "archive_url": None,
             "archive_sha256": None,
+            "promotion_mode": None,
         }
     source = manifest.get("source") if isinstance(manifest, dict) else None
     if not isinstance(source, dict):
@@ -131,6 +153,7 @@ def _manifest_source_metadata(source_root: Path | None) -> dict[str, Any]:
             "ref": None,
             "archive_url": None,
             "archive_sha256": None,
+            "promotion_mode": None,
         }
     return {
         "git_commit": source.get("git_commit"),
@@ -141,6 +164,7 @@ def _manifest_source_metadata(source_root: Path | None) -> dict[str, Any]:
         "ref": source.get("ref"),
         "archive_url": source.get("archive_url"),
         "archive_sha256": source.get("archive_sha256"),
+        "promotion_mode": source.get("promotion_mode"),
     }
 
 
@@ -154,6 +178,7 @@ def _source_metadata(source_root: Path | None) -> dict[str, Any]:
             "ref": None,
             "archive_url": None,
             "archive_sha256": None,
+            "promotion_mode": None,
         }
     return _manifest_source_metadata(source_root)
 
@@ -168,11 +193,13 @@ def build_release_manifest(
 ) -> dict[str, Any]:
     source_env = env or os.environ
     source_metadata = _source_metadata(source_root)
+    resolved_source_git_commit = source_env.get("LOOPX_RESOLVED_SOURCE_GIT_COMMIT")
     archive_url = source_env.get("LOOPX_ARCHIVE_URL") or source_metadata.get("archive_url")
     archive_sha256 = source_env.get("LOOPX_ARCHIVE_SHA256") or source_metadata.get("archive_sha256")
     repo = source_env.get("LOOPX_REPO") or source_metadata.get("repo")
     ref = source_env.get("LOOPX_REF") or source_metadata.get("ref")
     source_kind = "github_archive" if archive_url else (source_metadata.get("kind") or "local_checkout")
+    promotion_mode = source_env.get("LOOPX_PROMOTION_MODE") or source_metadata.get("promotion_mode")
     skills_root = release_root / "skills"
     skills: dict[str, Any] = {}
     if skills_root.exists():
@@ -185,15 +212,13 @@ def build_release_manifest(
         "schema_version": RELEASE_MANIFEST_SCHEMA_VERSION,
         "release_id": release_id,
         "installed_at": installed_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "package": {
-            "name": "loopx",
-            "version": __version__,
-        },
+        "package": package_release_metadata(),
         "source": {
             "kind": source_kind,
+            "promotion_mode": promotion_mode,
             "repo": repo,
             "ref": ref,
-            "git_commit": source_metadata["git_commit"],
+            "git_commit": resolved_source_git_commit or source_metadata["git_commit"],
             "git_ref": source_metadata["git_ref"],
             "git_dirty": source_metadata["git_dirty"],
             "archive_url": archive_url,

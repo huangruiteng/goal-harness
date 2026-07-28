@@ -6,53 +6,111 @@ from typing import Any
 
 from .agent_registry import normalize_registered_agents
 from .project_prompt import (
+    render_available_capability_args,
     render_cli_preflight,
     render_quota_guard_command,
     render_quota_spend_command,
     render_refresh_state_command,
+    render_scheduler_execution_args,
 )
-from .todo_contract import normalize_todo_claimed_by
+from .control_plane.scheduler.execution_context import (
+    ExecutionMode,
+    HostSurface,
+    SchedulerOwner,
+    SchedulerRuntimeProfile,
+    resolve_scheduler_execution_context,
+)
+from .control_plane.quota.spend_sources import (
+    DEFAULT_SLOT_SPEND_SOURCE,
+    VISIBLE_GOAL_SLOT_SPEND_SOURCE,
+)
+from .control_plane.todos.contract import (
+    normalize_required_capabilities,
+    normalize_todo_claimed_by,
+)
+from .control_plane.agents.runtime_model import (
+    AgentRuntimeModel,
+    PEER_AGENT_PROFILE_SCHEMA_VERSION,
+)
 
 
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
 DEFAULT_PERMISSION_RULE = "Do not ask for permissions when the current Codex session is already trusted."
 USER_TODO_FINAL_MESSAGE_RULE = (
-    "Only if action_required=true/open_count>0: name concrete payload todo(s)/questions, "
-    'never only "owner gate"; missing -> '
+    "notify=NOTIFY: concrete actions/todos, including non_blocking at false/0; "
+    "never only \"owner gate\"; required missing -> "
     '"具体 user todo 未投影，需修复 LoopX 状态投影". '
-    "If false/0, allow quiet/no-user-todo."
+    "Only notify=DONT_NOTIFY + false/0: quiet."
 )
 SCHEDULER_HINT_APPLICATION_RULE = (
-    "Apply `scheduler_hint` for wait backoff and CLI/Claude final-check/self-stop; no spend. "
-    "Codex App: search/use `automation_update` to update the current heartbeat RRULE from "
-    "`scheduler_hint.codex_app.recommended_rrule`; if "
-    "`scheduler_hint.reset_policy.reset_token` changes, restore "
-    "`scheduler_hint.reset_policy.codex_app_initial_rrule`."
+    "`scheduler_hint` no-spend. host_action=pause_or_delete_current_heartbeat -> "
+    "automation_update stop once, verify, end; else apply_needed -> RRULE then "
+    "ack/failure_hint; ack_needed -> ack."
 )
 SCHEDULER_HINT_COMPACT_RULE = (
-    "Apply `scheduler_hint` for backoff/reset/self-stop; no spend. "
-    "Codex App: `automation_update` RRULE; reset-token restores initial RRULE."
+    "host_action=pause_or_delete_current_heartbeat: automation_update stop; "
+    "else RRULE apply/ack/fail. No spend."
 )
 SCHEDULER_HINT_THIN_RULE = (
-    "Apply `scheduler_hint`: use `automation_update` for Codex App RRULE/reset; "
-    "CLI/Claude final-check/self-stop; no spend."
+    "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend); "
+    "else RRULE/ack/fail."
+)
+RUNTIME_CAPABILITY_PROJECTION_THIN_RULE = (
+    "Observed capabilities -> `--available-capability`; never user gates."
 )
 INTERFACE_BUDGET_CHARS = {
     "full": 12_000,
-    "compact": 6_000,
+    "compact": 6_200,
     "brief": 3_500,
-    "thin": 1_500,
+    "thin": 1_570,
+    "visible_goal": 4_000,
 }
+CODEX_VISIBLE_GOAL_MAX_CHARS = INTERFACE_BUDGET_CHARS["visible_goal"]
 
 
-def heartbeat_prompt_mode(*, compact: bool = False, brief: bool = False, thin: bool = False) -> str:
+def uses_visible_goal_host_loop(
+    *,
+    runtime_profile: str | None,
+    scheduler_execution_context: dict[str, Any] | None,
+) -> bool:
+    if runtime_profile:
+        try:
+            profile = SchedulerRuntimeProfile(runtime_profile)
+        except ValueError:
+            return False
+        return profile in {
+            SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
+            SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
+        }
+    if scheduler_execution_context is None:
+        return False
+    resolution = resolve_scheduler_execution_context(scheduler_execution_context)
+    if not resolution.ok or resolution.context is None:
+        return False
+    context = resolution.context
+    return (
+        context.host_surface in {HostSurface.CODEX_APP_SSH, HostSurface.CODEX_CLI}
+        and context.scheduler_owner is SchedulerOwner.AGENT_CLI_LOOP
+        and context.execution_mode is ExecutionMode.INTERACTIVE
+    )
+
+
+def heartbeat_prompt_mode(
+    *,
+    full: bool = False,
+    compact: bool = False,
+    brief: bool = False,
+    thin: bool = False,
+) -> str:
+    if full:
+        return "full"
     if thin:
         return "thin"
     if brief:
         return "brief"
     if compact:
         return "compact"
-    return "full"
+    return "thin"
 
 
 def prompt_budget_text(text: str, *, goal_id: str, active_state: str) -> str:
@@ -100,8 +158,7 @@ def agent_profile_prompt_projection(profile: dict[str, Any] | None) -> dict[str,
     public_keys = {
         "schema_version",
         "agent_id",
-        "role",
-        "primary_agent",
+        "profile_role",
         "scope_summary",
         "default_scope",
         "scope",
@@ -109,12 +166,12 @@ def agent_profile_prompt_projection(profile: dict[str, Any] | None) -> dict[str,
         "default_scopes",
         "scopes",
         "default_task_classes",
+        "vision_requirement",
         "preferred_action_kinds",
         "avoid_action_kinds",
-        "worktree_policy",
-        "review_policy",
     }
     projection = {key: value for key, value in profile.items() if key in public_keys}
+    projection["schema_version"] = PEER_AGENT_PROFILE_SCHEMA_VERSION
     return projection or None
 
 
@@ -127,163 +184,100 @@ def agent_prompt_command_args(*, agent_id: str | None, agent_scopes: list[str]) 
     return "".join(f" {shlex.quote(part)}" for part in parts)
 
 
-def build_identity_required_error(
+def build_peer_identity_required_error(
     *,
     goal_id: str,
     cli_bin: str,
     active_state_arg: str,
+    full: bool,
     compact: bool,
     brief: bool,
     thin: bool,
     registered_agents: list[str],
-    primary_agent: str | None,
 ) -> str:
-    mode_arg = " --thin" if thin else " --brief" if brief else " --compact" if compact else ""
-    primary_hint = primary_agent if primary_agent in registered_agents else registered_agents[0]
-    side_hint = next((agent for agent in registered_agents if agent != primary_hint), registered_agents[0])
-    base = f"{cli_bin} heartbeat-prompt{mode_arg} --goal-id {shlex.quote(goal_id)}{active_state_arg}"
-    primary_command = (
-        f"{base} --agent-id {shlex.quote(primary_hint)} "
-        "--agent-scope 'primary review, verification, merge, and coordination'"
+    mode_arg = (
+        " --thin"
+        if thin
+        else " --brief"
+        if brief
+        else " --compact"
+        if compact
+        else " --full"
+        if full
+        else ""
     )
-    side_command = (
-        f"{base} --agent-id {shlex.quote(side_hint)} "
-        "--agent-scope 'bounded side-agent work in an independent worktree'"
+    base = (
+        f"{cli_bin} heartbeat-prompt{mode_arg} "
+        f"--goal-id {shlex.quote(goal_id)}{active_state_arg}"
     )
-    primary_text = primary_agent or "missing coordination.primary_agent"
+    examples = "; ".join(
+        f"`{base} --agent-id {shlex.quote(agent)} "
+        "--agent-scope 'peer task claims and leases'`"
+        for agent in registered_agents[:2]
+    )
     return (
-        "identity-aware heartbeat prompt required: coordination.registered_agents "
-        f"is configured for goal_id={goal_id!r}, so old automation prompts without "
-        "--agent-id are no longer accepted. Regenerate the installed automation "
-        f"with a registered --agent-id and at least one --agent-scope. "
-        f"registered_agents={', '.join(registered_agents)}; primary_agent={primary_text}. "
-        f"Primary example: `{primary_command}`. "
-        f"Side-agent example: `{side_command}`."
+        "identity-aware peer heartbeat prompt required: "
+        f"coordination.registered_agents is configured for goal_id={goal_id!r}, "
+        "so automation prompts without --agent-id are not accepted. Regenerate each "
+        f"installed automation with its registered identity. Examples: {examples}."
     )
 
 
-def render_agent_scope_instruction(
+def render_peer_agent_scope_instruction(
     *,
     goal_id: str,
     agent_id: str | None,
     agent_scopes: list[str],
-    primary_agent: str | None,
     cli_bin: str,
-    side_agent_handoff_agent: str | None = None,
     compact: bool = False,
     thin: bool = False,
 ) -> str:
     if not agent_id and not agent_scopes:
         return ""
-    identity = agent_id or "unclaimed-agent"
-    agent_role = "primary-agent" if agent_id and primary_agent and agent_id == primary_agent else "side-agent"
-    scope_text = "; ".join(agent_scopes) if agent_scopes else "read goal state and choose only clearly in-scope work"
+    identity = agent_id or "<registered-agent-id>"
+    scope_text = "; ".join(agent_scopes) if agent_scopes else "registered peer lane"
+    scope_text = scope_text.rstrip(".!?")
     claim_command = (
-        f"{cli_bin} todo claim --goal-id {goal_id} --todo-id <todo_id> --claimed-by {agent_id}"
+        f"{cli_bin} todo claim --goal-id {goal_id} --todo-id <todo_id> "
+        f"--claimed-by {agent_id} --agent-id {agent_id}"
         if agent_id
-        else f"{cli_bin} todo claim --goal-id {goal_id} --todo-id <todo_id> --claimed-by <agent_id>"
+        else f"{cli_bin} todo claim --goal-id {goal_id} --todo-id <todo_id> "
+        "--claimed-by <agent_id> --agent-id <agent_id>"
     )
-    handoff_agent = side_agent_handoff_agent or primary_agent
-    handoff_owner_label = (
-        f"handoff todo claimed_by `{side_agent_handoff_agent}`"
-        if side_agent_handoff_agent
-        else f"handoff todo claimed_by primary_agent `{primary_agent or '<primary_agent>'}`"
-    )
-    handoff_todo_text = (
-        "Review, verify, and continue this side-agent handoff."
-        if side_agent_handoff_agent
-        else "Review, verify, and merge this side-agent work."
-    )
-    completion_command = (
-        f"{cli_bin} todo complete --goal-id {goal_id} --todo-id <todo_id> "
-        f"--claimed-by {agent_id or '<agent_id>'} --next-agent-todo "
-        f"{shlex.quote(handoff_todo_text)} --next-claimed-by {handoff_agent or '<handoff_agent>'}"
-    )
-    self_merge_command = (
-        f"{cli_bin} todo complete --goal-id {goal_id} --todo-id <todo_id> "
-        f"--claimed-by {agent_id or '<agent_id>'} --side-agent-self-merged "
-        "--evidence '<public-safe self-merge commit and validation summary>'"
+    peer_rule = (
+        "You are an equal peer agent: claim or lease in-scope work; use an independent worktree "
+        "for repository writes; follow todo continuation policy. PR review is "
+        "user_action with a runnable successor; gate only exact merge/release/launch "
+        "authority. Task-scoped coordination grants no authority over other agents."
     )
     if thin:
-        if agent_role == "primary-agent":
-            role_rule = "Primary: own review, verification, merge/publication, and reassignment."
-        else:
-            role_rule = (
-                "Side-agent: independent git worktree/branch; self-merge only small "
-                "validated changes with evidence; otherwise finish with a "
-                f"{handoff_owner_label}."
-            )
         return (
-            f"Agent: `{identity}`; role: {agent_role}; primary: `{primary_agent}`; "
-            f"scope: {scope_text}. {role_rule} Claim: `{claim_command}`. "
+            f"Equal peer `{identity}` (peer_v1); scope: {scope_text}. Claim/lease first; "
+            "independent repo worktree; todo continuation; no cross-agent authority; "
+            "no scope in todo metadata."
+        )
+    if compact:
+        return (
+            f"Agent identity and scope: agent_id `{identity}`; model: peer_v1; "
+            f"scope: {scope_text}. {peer_rule} Claim: `{claim_command}`. "
             "Do not write scope into todo metadata."
-        )
-    if compact or thin:
-        if agent_role == "primary-agent":
-            primary_handoff_tail = (
-                "side-agent handoff todos claimed_by you."
-                if not side_agent_handoff_agent or side_agent_handoff_agent == primary_agent
-                else f"final review and reassignment; handoff todos may route to `{side_agent_handoff_agent}`."
-            )
-            role_rule = (
-                "You are the single primary agent: own review, verification, "
-                f"merge/publication, {primary_handoff_tail}"
-            )
-        else:
-            role_rule = (
-                "You are a side-agent. Use an independent git worktree/branch. "
-                "Self-merge only small AGENTS-eligible validated changes with "
-                "`--side-agent-self-merged --evidence`; otherwise create a handoff "
-                f"todo with `--next-agent-todo` and `--next-claimed-by {handoff_agent}`."
-            )
-        return (
-            f"Agent identity and scope: agent_id `{identity}`; role: {agent_role}; "
-            f"primary_agent `{primary_agent}`; scope: {scope_text}. {role_rule} "
-            f"Before delivery, claim an in-scope todo with "
-            f"`{claim_command}`; if claimed/outside scope, choose another or "
-            "report none. Do not write scope into todo metadata."
-        )
-    if agent_role == "primary-agent":
-        primary_handoff_tail = (
-            "Side-agent handoff todos claimed_by you are your responsibility."
-            if not side_agent_handoff_agent or side_agent_handoff_agent == primary_agent
-            else f"Side-agent handoff todos may route to `{side_agent_handoff_agent}`; you still own final review and reassignment."
-        )
-        role_rule = (
-            "You are the single primary agent for this goal: own final review, "
-            "verification, merge/publication decisions, and reassignment. "
-            f"{primary_handoff_tail}"
-        )
-    else:
-        role_rule = (
-            f"You are a side-agent for this goal; primary_agent is `{primary_agent}`. "
-            "Do development only in an independent git worktree/branch, never in the "
-            "main checkout. Self-merge only small AGENTS-eligible validated changes; "
-            "never self-merge runtime, benchmark, permission, production, destructive "
-            "git, or public evidence-policy changes that need review. For a "
-            f"self-merge, complete with `{self_merge_command}`. Otherwise complete "
-            f"with a handoff todo, for example `{completion_command}`."
         )
     return f"""Agent identity and scope:
 
 - agent_id: `{identity}`
-- role: `{agent_role}`
-- primary_agent: `{primary_agent}`
-- side_agent_handoff_agent: `{side_agent_handoff_agent}`
+- agent_model: `peer_v1`
 - scope: {scope_text}
 
-{role_rule}
+{peer_rule}
 
-Before delivery, choose an unclaimed open agent todo that matches this scope and
-soft-claim it:
+Before delivery, claim an in-scope open todo:
 
 ```bash
 {claim_command}
 ```
 
-If the first executable todo is claimed by another agent or outside this scope,
-choose another in-scope unclaimed todo or report no in-scope work. Do not write
-agent scope into todo metadata; scope belongs in this automation/handoff prompt.
+If a todo is claimed or leased by another peer, choose another in-scope item or
+report no in-scope work. Scope belongs in the heartbeat prompt, not todo metadata.
 """
 
 
@@ -292,11 +286,17 @@ def build_interface_budget(
     task_body: str,
     goal_id: str,
     active_state: str,
+    full: bool = False,
     compact: bool = False,
     brief: bool = False,
     thin: bool = False,
+    visible_goal: bool = False,
 ) -> dict[str, Any]:
-    mode = heartbeat_prompt_mode(compact=compact, brief=brief, thin=thin)
+    mode = (
+        "visible_goal"
+        if visible_goal
+        else heartbeat_prompt_mode(full=full, compact=compact, brief=brief, thin=thin)
+    )
     budget_text = prompt_budget_text(task_body, goal_id=goal_id, active_state=active_state)
     budget_chars = len(budget_text)
     max_chars = INTERFACE_BUDGET_CHARS[mode]
@@ -318,6 +318,7 @@ def build_heartbeat_prompt(
     resolved_active_state: Path | None = None,
     material_queue_rule: str | None = None,
     permission_rule: str | None = None,
+    full: bool = False,
     compact: bool = False,
     brief: bool = False,
     thin: bool = False,
@@ -326,9 +327,16 @@ def build_heartbeat_prompt(
     agent_scopes: list[str] | tuple[str, ...] | None = None,
     agent_profile: dict[str, Any] | None = None,
     registered_agents: list[str] | tuple[str, ...] | None = None,
-    primary_agent: str | None = None,
-    side_agent_handoff_agent: str | None = None,
+    available_capabilities: list[str] | tuple[str, ...] | None = None,
+    runtime_profile: str | None = None,
+    scheduler_execution_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if not (full or compact or brief or thin):
+        thin = True
+    visible_goal = uses_visible_goal_host_loop(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
     effective_resolved_active_state = resolved_active_state or active_state
     active_state_text = str(active_state.expanduser()) if active_state else "the registry-declared active state"
     if active_state:
@@ -344,29 +352,21 @@ def build_heartbeat_prompt(
     explicit_agent_scopes = normalize_agent_scopes(agent_scopes)
     profile_agent_scopes = agent_profile_scopes(agent_profile)
     normalized_agent_scopes = explicit_agent_scopes or profile_agent_scopes
-    agent_scope_source = "argument" if explicit_agent_scopes else "agent_profile_v0" if profile_agent_scopes else None
+    agent_scope_source = "argument" if explicit_agent_scopes else "agent_profile_v1" if profile_agent_scopes else None
     if normalized_agent_scopes and not normalized_agent_id:
         raise ValueError("--agent-scope requires --agent-id so claimed_by uses a registered agent")
     normalized_registered_agents = normalize_registered_agents(registered_agents)
-    normalized_primary_agent = normalize_todo_claimed_by(primary_agent) if primary_agent else None
-    if primary_agent and not normalized_primary_agent:
-        raise ValueError("primary_agent must be a public-safe registered agent id")
-    normalized_side_agent_handoff_agent = (
-        normalize_todo_claimed_by(side_agent_handoff_agent) if side_agent_handoff_agent else None
-    )
-    if side_agent_handoff_agent and not normalized_side_agent_handoff_agent:
-        raise ValueError("side_agent_handoff_agent must be a public-safe registered agent id")
     if normalized_registered_agents and not normalized_agent_id:
         raise ValueError(
-            build_identity_required_error(
+            build_peer_identity_required_error(
                 goal_id=goal_id,
                 cli_bin=cli_bin,
                 active_state_arg=active_state_arg,
+                full=full,
                 compact=compact,
                 brief=brief,
                 thin=thin,
                 registered_agents=normalized_registered_agents,
-                primary_agent=normalized_primary_agent,
             )
         )
     if normalized_agent_id:
@@ -377,56 +377,45 @@ def build_heartbeat_prompt(
                 f"agent_id={normalized_agent_id!r} is not registered; "
                 f"registered_agents={', '.join(normalized_registered_agents)}"
             )
-    if normalized_agent_id and normalized_registered_agents:
-        if not normalized_primary_agent:
-            raise ValueError("primary_agent must be configured when registered_agents are configured")
-        if normalized_primary_agent not in normalized_registered_agents:
-            raise ValueError(
-                f"primary_agent={normalized_primary_agent!r} is not registered; "
-                f"registered_agents={', '.join(normalized_registered_agents)}"
-            )
-    elif normalized_primary_agent and normalized_registered_agents and normalized_primary_agent not in normalized_registered_agents:
-        raise ValueError(
-            f"primary_agent={normalized_primary_agent!r} is not registered; "
-            f"registered_agents={', '.join(normalized_registered_agents)}"
-        )
-    if (
-        normalized_side_agent_handoff_agent
-        and normalized_registered_agents
-        and normalized_side_agent_handoff_agent not in normalized_registered_agents
-    ):
-        raise ValueError(
-            f"side_agent_handoff_agent={normalized_side_agent_handoff_agent!r} is not registered; "
-            f"registered_agents={', '.join(normalized_registered_agents)}"
-        )
-    agent_role = (
-        "primary-agent"
-        if normalized_agent_id and normalized_primary_agent and normalized_agent_id == normalized_primary_agent
-        else "side-agent"
-        if normalized_agent_id
-        else None
-    )
+    agent_role = "peer-agent" if normalized_agent_id else None
     command_agent_scopes = explicit_agent_scopes
     agent_args = agent_prompt_command_args(
         agent_id=normalized_agent_id,
         agent_scopes=command_agent_scopes,
     )
-    agent_scope_instruction = render_agent_scope_instruction(
+    normalized_available_capabilities = normalize_required_capabilities(
+        available_capabilities
+    )
+    capability_args = render_available_capability_args(
+        normalized_available_capabilities
+    )
+    agent_scope_instruction = render_peer_agent_scope_instruction(
         goal_id=goal_id,
         agent_id=normalized_agent_id,
         agent_scopes=normalized_agent_scopes,
-        primary_agent=normalized_primary_agent,
         cli_bin=cli_bin,
-        side_agent_handoff_agent=normalized_side_agent_handoff_agent,
         compact=compact or brief,
         thin=thin,
     )
-    quota_guard_command = render_quota_guard_command(goal_id, cli_bin=cli_bin, agent_id=normalized_agent_id)
-    quota_spend_command = render_quota_spend_command(
+    quota_guard_command = render_quota_guard_command(
         goal_id,
-        source="heartbeat",
         cli_bin=cli_bin,
         agent_id=normalized_agent_id,
+        available_capabilities=normalized_available_capabilities,
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+        heartbeat_turn_receipt=not visible_goal,
+    )
+    quota_spend_command = render_quota_spend_command(
+        goal_id,
+        source=(
+            VISIBLE_GOAL_SLOT_SPEND_SOURCE
+            if visible_goal
+            else DEFAULT_SLOT_SPEND_SOURCE
+        ),
+        cli_bin=cli_bin,
+        agent_id=normalized_agent_id,
+        available_capabilities=normalized_available_capabilities,
     )
     refresh_state_command = render_refresh_state_command(
         goal_id,
@@ -442,11 +431,24 @@ def build_heartbeat_prompt(
         delivery_outcome="outcome_progress",
     )
     cli_preflight = render_cli_preflight(cli_bin=cli_bin)
-    expanded_prompt_command = f"{cli_bin} heartbeat-prompt --goal-id {goal_id}{active_state_arg}{agent_args}"
-    compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}"
-    brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}"
-    thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}"
-    if thin:
+    pr_review_pre_quota_command = (
+        f"{cli_bin} heartbeat-prequota -g {shlex.quote(goal_id)} "
+        f"-a {shlex.quote(normalized_agent_id)}"
+        if normalized_agent_id
+        and "external_evidence_poll" in normalized_available_capabilities
+        else ""
+    )
+    scheduler_args = render_scheduler_execution_args(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
+    expanded_prompt_command = f"{cli_bin} heartbeat-prompt --full --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
+    compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
+    brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
+    thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
+    if visible_goal:
+        task_body_renderer = render_visible_goal_task_body
+    elif thin:
         task_body_renderer = render_thin_heartbeat_task_body
     elif brief:
         task_body_renderer = render_brief_heartbeat_task_body
@@ -458,6 +460,7 @@ def build_heartbeat_prompt(
         goal_id=goal_id,
         active_state=active_state_text,
         cli_preflight=cli_preflight,
+        pr_review_pre_quota_command=pr_review_pre_quota_command,
         quota_guard_command=quota_guard_command,
         quota_spend_command=quota_spend_command,
         refresh_state_command=refresh_state_command,
@@ -471,7 +474,12 @@ def build_heartbeat_prompt(
         brief_prompt_command=brief_prompt_command,
         thin_prompt_command=thin_prompt_command,
     )
-    return {
+    if visible_goal and len(task_body) > CODEX_VISIBLE_GOAL_MAX_CHARS:
+        raise ValueError(
+            "generated visible /goal task body exceeds the Codex 4000-character "
+            "limit; shorten agent scopes or project-specific prompt rules"
+        )
+    payload = {
         "ok": True,
         "goal_id": goal_id,
         "active_state": active_state_text,
@@ -489,29 +497,37 @@ def build_heartbeat_prompt(
         "agent_scope_source": agent_scope_source,
         "agent_profile": agent_profile_prompt_projection(agent_profile),
         "registered_agents": normalized_registered_agents,
-        "primary_agent": normalized_primary_agent,
-        "side_agent_handoff_agent": normalized_side_agent_handoff_agent,
+        "runtime_profile": runtime_profile,
+        "scheduler_execution_context": scheduler_execution_context,
         "expanded_prompt_command": expanded_prompt_command,
         "compact_prompt_command": compact_prompt_command,
         "brief_prompt_command": brief_prompt_command,
         "thin_prompt_command": thin_prompt_command,
-            "quota_guard_command": quota_guard_command,
-            "quota_spend_command": quota_spend_command,
-            "refresh_state_command": refresh_state_command,
-            "progress_refresh_state_command": progress_refresh_state_command,
-            "cli_preflight": cli_preflight,
+        "pr_review_pre_quota_command": pr_review_pre_quota_command or None,
+        "quota_guard_command": quota_guard_command,
+        "quota_spend_command": quota_spend_command,
+        "refresh_state_command": refresh_state_command,
+        "progress_refresh_state_command": progress_refresh_state_command,
+        "cli_preflight": cli_preflight,
         "material_queue_rule": resolved_material_rule,
         "permission_rule": resolved_permission_rule,
         "interface_budget": build_interface_budget(
             task_body=task_body,
             goal_id=goal_id,
             active_state=active_state_text,
+            full=full,
             compact=compact,
             brief=brief,
             thin=thin,
+            visible_goal=visible_goal,
         ),
         "task_body": task_body,
     }
+    payload["agent_model"] = AgentRuntimeModel.PEER_V1.value
+    if thin:
+        payload.pop("compact_prompt_command", None)
+        payload.pop("brief_prompt_command", None)
+    return payload
 
 
 def build_heartbeat_prompt_error_payload(
@@ -521,6 +537,7 @@ def build_heartbeat_prompt_error_payload(
     active_state: Path | None = None,
     active_state_source: str | None = None,
     resolved_active_state: Path | None = None,
+    full: bool = False,
     compact: bool = False,
     brief: bool = False,
     thin: bool = False,
@@ -528,11 +545,12 @@ def build_heartbeat_prompt_error_payload(
     agent_id: str | None = None,
     agent_scopes: list[str] | tuple[str, ...] | None = None,
     registered_agents: list[str] | tuple[str, ...] | None = None,
-    primary_agent: str | None = None,
-    side_agent_handoff_agent: str | None = None,
+    available_capabilities: list[str] | tuple[str, ...] | None = None,
     material_queue_rule: str | None = None,
     permission_rule: str | None = None,
 ) -> dict[str, Any]:
+    if not (full or compact or brief or thin):
+        thin = True
     active_state_text = str(active_state.expanduser()) if active_state else "the registry-declared active state"
     source = active_state_source or ("explicit" if active_state else "registry")
     active_state_arg = f" --active-state {active_state_text}" if active_state else ""
@@ -545,12 +563,18 @@ def build_heartbeat_prompt_error_payload(
         agent_id=str(agent_id).strip() if agent_id else None,
         agent_scopes=projected_agent_scopes,
     )
-    expanded_prompt_command = f"{cli_bin} heartbeat-prompt --goal-id {goal_id}{active_state_arg}{agent_args}"
-    compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}"
-    brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}"
-    thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}"
+    projected_available_capabilities = normalize_required_capabilities(
+        available_capabilities
+    )
+    capability_args = render_available_capability_args(
+        projected_available_capabilities
+    )
+    expanded_prompt_command = f"{cli_bin} heartbeat-prompt --full --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
+    compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
+    brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
+    thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}"
     normalized_registered_agents = normalize_registered_agents(registered_agents)
-    return {
+    payload = {
         "ok": False,
         "goal_id": goal_id,
         "error": error,
@@ -567,8 +591,6 @@ def build_heartbeat_prompt_error_payload(
         "agent_scope_source": "argument" if projected_agent_scopes else None,
         "agent_profile": None,
         "registered_agents": normalized_registered_agents,
-        "primary_agent": str(primary_agent).strip() if primary_agent else None,
-        "side_agent_handoff_agent": str(side_agent_handoff_agent).strip() if side_agent_handoff_agent else None,
         "expanded_prompt_command": expanded_prompt_command,
         "compact_prompt_command": compact_prompt_command,
         "brief_prompt_command": brief_prompt_command,
@@ -581,6 +603,8 @@ def build_heartbeat_prompt_error_payload(
         "interface_budget": None,
         "task_body": None,
     }
+    payload["agent_model"] = AgentRuntimeModel.PEER_V1.value
+    return payload
 
 
 def render_heartbeat_task_body(
@@ -588,6 +612,7 @@ def render_heartbeat_task_body(
     goal_id: str,
     active_state: str,
     cli_preflight: str,
+    pr_review_pre_quota_command: str,
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_state_command: str,
@@ -602,6 +627,9 @@ def render_heartbeat_task_body(
     thin_prompt_command: str,
 ) -> str:
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
+    pr_review_pre_quota_block = (
+        f"{pr_review_pre_quota_command}\n" if pr_review_pre_quota_command else ""
+    )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
 Generic LoopX lifecycle. Keep project-specific branching out of the
@@ -610,16 +638,19 @@ output, `quota should-run.goal_boundary`, or boundary rules; if a lifecycle
 rule is needed, update `{cli_bin} heartbeat-prompt` so all projects inherit it.
 {scope_block}
 
-Before spending delivery compute, first make the LoopX CLI reachable and
-run the quota guard:
+Before spending delivery compute, make the CLI reachable; set
+`LOOPX_TURN=<current_time_iso>` per trigger, reuse it on retries, and run guard:
 
 ```bash
 {cli_preflight}
-{quota_guard_command}
+{pr_review_pre_quota_block}{quota_guard_command}
 ```
 
-If that preflight still fails, do no implementation, adapter, file edit,
-research, exploration, or spend; return quiet `DONT_NOTIFY` with exact failure.
+If that preflight still fails: no work/spend; quiet `DONT_NOTIFY`.
+
+`lark_event_inbox`: `reply_due`: drain -> effect/reply/readback/ACK.
+
+{USER_TODO_FINAL_MESSAGE_RULE}
 
 If the result says `should_run=false`:
 
@@ -630,14 +661,15 @@ If the result says `should_run=false`:
   with one concise Chinese question listing the gate and expected reply format.
   If `user_todo_summary.open_count > 0`, list existing open user todos even
   when nothing new was found; never say "no new user action".
-  {USER_TODO_FINAL_MESSAGE_RULE} Do not execute `agent_command`, adapter work,
-  write-control, production actions, or the gated path while asking.
+  Do not execute `agent_command`, adapter work, write-control, production
+  actions, or the gated path while asking.
 - If `notify_user_on_open_todo=true`, existing open `user_todo_summary` is a
   blocker-push opportunity, not a silent skip. For focus/wait/evidence lanes,
   a user/owner answer can unlock progress. If the payload explicitly includes
-  `open_todo_notification_policy=repeat_until_resolved`, `NOTIFY` every poll
-  until done/deferred/replaced. Other blockers may de-dupe if surfaced
-  recently; otherwise `NOTIFY` in Chinese with up to three
+  `open_todo_notification_policy=repeat_until_resolved`, repeat until resolved,
+  except `user_gate_notification_cooldown.notification_suppressed=true`: keep
+  the gate pending and `DONT_NOTIFY` until its reminder window/change.
+  Else `NOTIFY` in Chinese with up to three
   `first_open_items`, `open_todo_notify_reason`, and reply format: `done`,
   `defer/not now`, or evidence link/date/conclusion. No delivery/spend.
 - If the payload also says `safe_bypass_allowed=true` and the same gate has
@@ -646,10 +678,9 @@ If the result says `should_run=false`:
   depend on that gate; validate, write back, optionally refresh, spend once, and
   report compactly. If `user_todo_summary.open_count > 0`, include those todos
   and do not say "no new user action". If none exists, report the gate.
-- If `effective_action=monitor_quiet_skip`, run one no-spend
-  `quota monitor-poll --goal-id {goal_id} --source heartbeat --execute`, rerun
-  guard; quiet unless autonomous replan. No delivery edits/spend; unchanged
-  monitor-only polls are not self-stop signals.
+- If `effective_action=monitor_quiet_skip`, receipt/stall is written; quiet
+  unless replan. On receipt write failure, retry same id. No edits/spend;
+  receipts do not self-stop.
 - If `waiting_on=external_evidence` or `state=waiting`, and this automation is
   explicitly a monitor, run at most one bounded read-only observation poll using
   project-approved status/log/metric/marker surfaces named in active state,
@@ -691,12 +722,14 @@ If the result says `should_run=true`:
    `must_attempt_work=true` means one bounded segment even with
    `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
    `notify_user_on_open_todo=true` blocker-push notification. Use
-   `scheduler_hint` for next-wakeup cadence and external-loop unchanged limits;
-   for Codex App heartbeats, search/use `automation_update` to restore or
-   update the RRULE from
-   `scheduler_hint.codex_app.recommended_rrule` /
-   `scheduler_hint.reset_policy.codex_app_initial_rrule` when the reset token
-   changes. It is scheduling only, not delivery permission. Then use
+   `scheduler_hint` for wakeup and unchanged-loop limits. For Codex App:
+   `apply_needed=true` -> update `recommended_rrule` once; on success run
+   `ack_hint.cli_args`; on failure/timeout do not retry or ack, run
+   `failure_hint.cli_args` once. LoopX suppresses that target/host pair until
+   either changes; continue under the observed host cadence. Else
+   `ack_needed=true` -> run that bound ack directly; else skip.
+   LoopX owns reset/progression state. It is scheduling only, not delivery
+   permission. Then use
    `heartbeat_recommendation`: `recommended_mode=run_first_read_only_map` means
    run its `command` as a real read-only map, then
    validate/save the `read_only_project_map` result, append exactly one
@@ -741,14 +774,9 @@ If the result says `should_run=true`:
    review.
 6. Run the smallest useful validation.
 7. Write back changed files, validation, critic, and next action to the active
-   state. If the step discovers a concrete user/owner action, do not hide it in
-   `Next Action`, a review doc, or chat. Add it to the active-state user todo
-   queue with:
-
-   ```bash
-   {cli_bin} todo add --goal-id {goal_id} --role user --text "<public-safe user/owner action>"
-   ```
-
+   state. If a user/owner todo appears, do not hide it in prose: use
+   `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate --blocks-agent <agent-id>`
+   or `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_action`.
    Use `--role agent` for project-agent follow-up work.
    For non-trivial feature slices, complete the current todo only after adding
    a successor todo, or include a compact no-follow-up rationale.
@@ -781,9 +809,8 @@ If the result says `should_run=true`:
    {progress_refresh_state_command}
    ```
 
-10. Return a compact final report. Use heartbeat `NOTIFY` only for meaningful
-    user visibility, such as a committed artifact, a user gate, a real blocker,
-    or the automation self-stop. Otherwise use `DONT_NOTIFY`.
+10. Return compactly. `NOTIFY` only for an artifact, gate, blocker, or self-stop;
+    otherwise use `DONT_NOTIFY`.
 
 {material_queue_rule}
 {permission_rule}"""
@@ -794,6 +821,7 @@ def render_brief_heartbeat_task_body(
     goal_id: str,
     active_state: str,
     cli_preflight: str,
+    pr_review_pre_quota_command: str,
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_state_command: str,
@@ -808,29 +836,33 @@ def render_brief_heartbeat_task_body(
     thin_prompt_command: str,
 ) -> str:
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
+    pr_review_pre_quota_block = (
+        f"{pr_review_pre_quota_command}\n" if pr_review_pre_quota_command else ""
+    )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-Brief installed LoopX heartbeat. Thin dispatcher: keep context small;
-pull details on demand: `{compact_prompt_command}`.
+Brief installed LoopX heartbeat. Thin dispatcher; detail:
+`{compact_prompt_command}`.
 {scope_block}
 
-Preflight and quota guard:
+Guard/retry; `LOOPX_TURN=<current_time_iso>`:
 
 ```bash
 {cli_preflight}
-{quota_guard_command}
+{pr_review_pre_quota_block}{quota_guard_command}
 ```
 
-Preflight fail: quiet.
+Fail: quiet.
 
-If `should_run=false`: no work/spend except explicit
-`safe_bypass_allowed=true` branches. Gate/open todo -> Chinese `NOTIFY`.
-external/wait monitor -> one read-only status/log/metric/marker poll; new
-evidence -> writeback/spend once.
-Else quiet.
-Apply `scheduler_hint` for backoff/self-stop; no spend.
-Action/open todo: list todos/questions; never only "owner gate";
-missing -> "具体 user todo 未投影，需修复 LoopX 状态投影"; false/0: 无用户待办/无需通知 or quiet.
+User NOTIFY: Chinese actions incl. non_blocking at false/0; never only "owner
+gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
+Only DONT_NOTIFY+false/0: quiet.
+
+If `should_run=false`: follow user channel. `monitor_quiet_skip`: receipt/stall
+done; quiet unless replan; write failure: retry same id. External/wait monitor:
+one read-only poll; new evidence -> writeback/spend. Safe bypass if allowed.
+{SCHEDULER_HINT_THIN_RULE}
+`lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
 
 If `should_run=true`: fetch compact; read needed state priority slice + guard
 payload. Use `status --limit 3`; `review-packet --handoff-only`.
@@ -845,13 +877,11 @@ validate/writeback/todos; successor todo or no-follow-up rationale for
 non-trivial feature slices; spend once; refresh with explicit delivery
 scale/outcome for progress artifacts. Stop on private, credentials, destructive
 git, prod, or review rules.
-
 Spend exactly once only after completed delivery or safe-bypass work:
 `{quota_spend_command}`
 
-No spend for quiet skips, preflight failures, blocker-push asks, dry-runs,
-self-cancel, or duplicate accounting. Return compactly; `NOTIFY` only for a
-committed artifact, user gate, real blocker, or self-stop.
+No spend for quiet skips, preflight failures, blocker-push asks, dry-runs, or
+duplicate accounting. Compact return; `NOTIFY` only for artifact/gate/blocker/self-stop.
 
 {material_queue_rule}
 {permission_rule}"""
@@ -862,6 +892,7 @@ def render_compact_heartbeat_task_body(
     goal_id: str,
     active_state: str,
     cli_preflight: str,
+    pr_review_pre_quota_command: str,
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_state_command: str,
@@ -876,30 +907,36 @@ def render_compact_heartbeat_task_body(
     thin_prompt_command: str,
 ) -> str:
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
+    pr_review_pre_quota_block = (
+        f"{pr_review_pre_quota_command}\n" if pr_review_pre_quota_command else ""
+    )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-This compact LoopX heartbeat body keeps project-specific branches out.
-Put local policy in registry/state/adapter/`goal_boundary`.
+This compact LoopX heartbeat body stays generic; local policy:
+registry/state/adapter/`goal_boundary`.
 Expanded lifecycle contract: `{expanded_prompt_command}`.
 {scope_block}
 
-Before delivery, make CLI reachable; run guard:
+Preflight/guard; `LOOPX_TURN=<current_time_iso>`; reuse:
 
 ```bash
 {cli_preflight}
-{quota_guard_command}
+{pr_review_pre_quota_block}{quota_guard_command}
 ```
 
-Preflight fail: quiet `DONT_NOTIFY`; no work/spend.
+Preflight fail: quiet; no work/spend.
 
-If `should_run=false`: `monitor_quiet_skip` appends at most one no-spend
-`quota monitor-poll --execute`, reruns guard, then stays quiet unless
-`autonomous_replan_required` / `must_attempt_work=true`; no edits/spend;
-unchanged monitor-only polls are not self-stop signals.
-`state=operator_gate` or `notify_user_on_open_todo=true`: blocker-push;
-`open_todo_notification_policy=repeat_until_resolved`: repeat `NOTIFY`;
-if action/open todo exists, list payload todo(s)/questions, never only
-"owner gate"; no delivery/spend. `safe_bypass_allowed=true`: one
+{SCHEDULER_HINT_COMPACT_RULE}
+
+`lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
+
+If `should_run=false`: `monitor_quiet_skip` -> receipt/stall done; quiet unless
+replan; write failure -> retry same id; no edits/spend; receipts do not self-stop.
+`state=operator_gate` / `notify_user_on_open_todo=true` /
+`user_channel.notify=NOTIFY`: blocker-push including
+non_blocking; `open_todo_notification_policy=repeat_until_resolved`: repeat;
+cooldown:quiet;
+never only "owner gate"; no delivery/spend. `safe_bypass_allowed=true`: one
 gate-independent safe-bypass, validate/writeback/spend. External/wait monitor:
 one read-only status/log/metric/marker poll; unchanged quiet, new evidence
 writeback/spend. Otherwise quiet `DONT_NOTIFY`.
@@ -920,28 +957,28 @@ If `should_run=true`:
    `must_attempt_work=true` means one bounded segment even with
    `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
    `notify_user_on_open_todo=true` blocker-push notification.
-   {SCHEDULER_HINT_COMPACT_RULE}
    Then follow `heartbeat_recommendation`:
    `run_first_read_only_map` means run exact real-map command, then
    validate/save/spend/refresh/`NOTIFY`; `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if no new instruction/evidence/
    todo/stale source/safe handoff.
+   `task_orchestration_contract`: activate/resume eligible peer lanes; the
+   task-scoped coordinator reviews accepted evidence and writes this bundle.
    Check `delivery_batch_scale`, `delivery_outcome`,
    `post_handoff_outcome_gap_streak`, `handoff_delivery_contract`; obey
    repeated-small/surface-loop contracts.
 5. Run steering audit: compare P0/P1/P2, continuation checks,
    compute/focus quota, bottleneck lens.
-6. Run no-progress self-repair: obey `autonomous_replan_obligation` or
-   `execution_obligation.must_attempt_work=true`; monitor poll events are
-   no-spend stall evidence, so if 2 eligible heartbeats only repeat status/brief
-   checks with no artifact/progress/gate/validation, replan before quiet no-op.
-   Pause/delete only if repair is stuck for 2 more turns.
+6. no-progress self-repair: obey `autonomous_replan_obligation` or
+   `execution_obligation.must_attempt_work=true`; after 2 eligible stall
+   heartbeats with only status/brief checks, replan before quiet no-op.
+   Pause/delete only if repair stays stuck 2 more turns.
 7. Choose one bounded segment; coherent batch is OK with clear validation.
    Public-safe commit/push/PR may proceed after validation/clean scan. Stop for
    private/company material, credentials, destructive git, production, or review rules.
 8. Validate; write files/validation/critic/next action to active state;
-   use `{cli_bin} todo add --goal-id {goal_id} --role user|agent` for
-   blockers/plans, not prose. Nontrivial done ->
+   use `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate|user_action`
+   for owner todos and `--role agent` for agent todos, not prose. Nontrivial done ->
    successor todo or no-follow-up rationale.
 9. After delivery/safe-bypass, spend once before refresh:
 
@@ -961,11 +998,75 @@ real blocker, or self-stop; otherwise use `DONT_NOTIFY`.
 {permission_rule}"""
 
 
+def render_visible_goal_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    cli_preflight: str,
+    pr_review_pre_quota_command: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    refresh_state_command: str,
+    progress_refresh_state_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+    cli_bin: str,
+    agent_scope_instruction: str,
+    expanded_prompt_command: str,
+    compact_prompt_command: str,
+    brief_prompt_command: str,
+    thin_prompt_command: str,
+) -> str:
+    del (
+        cli_preflight,
+        expanded_prompt_command,
+        compact_prompt_command,
+        brief_prompt_command,
+        thin_prompt_command,
+    )
+    scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
+    prequota_block = (
+        f"Run `{pr_review_pre_quota_command}` first.\n"
+        if pr_review_pre_quota_command
+        else ""
+    )
+    return f"""Advance LoopX goal `{goal_id}` from `{active_state}` in this visible
+Codex `/goal` task. This is an interactive goal loop, not a heartbeat automation:
+do not create/update an automation, apply RRULE cadence, or invent `LOOPX_TURN`.
+{scope_block}
+
+At every continuation, inspect LoopX state/status and the repository. {prequota_block}Run
+`{quota_guard_command}` and follow its `interaction_contract`.
+
+If `should_run=false`, do no delivery work and do not spend quota. Surface only a
+concrete user action/gate in Chinese when the contract requires `NOTIFY`; otherwise
+wait quietly. Scheduler hints are diagnostic here and must not mutate host
+automation.
+
+If `should_run=true`, choose the highest-priority in-scope unblocked agent todo.
+Honor claims/leases, blocker-push and recovery obligations. Complete one bounded,
+coherent delivery segment; validate it; write public-safe evidence, critic, and
+next action back to LoopX. A non-trivial completion needs a successor todo or an
+explicit no-follow-up rationale. Spend exactly once after validated writeback:
+`{quota_spend_command}`. Then refresh progress with
+`{progress_refresh_state_command}`.
+
+Do not spend for gates, waits, dry runs, failed preflight, no-op inspection, or
+duplicate accounting. Stop for private/company material, credentials, destructive
+git, unauthorized production, or repository review rules. Complete this visible
+Goal only when LoopX reports terminal success with no follow-up; otherwise keep the
+current gate or next safe action explicit.
+
+{material_queue_rule}
+{permission_rule}"""
+
+
 def render_thin_heartbeat_task_body(
     *,
     goal_id: str,
     active_state: str,
     cli_preflight: str,
+    pr_review_pre_quota_command: str,
     quota_guard_command: str,
     quota_spend_command: str,
     refresh_state_command: str,
@@ -981,58 +1082,92 @@ def render_thin_heartbeat_task_body(
 ) -> str:
     permission_tail = "" if permission_rule == DEFAULT_PERMISSION_RULE else f" {permission_rule}"
     material_sentence = (
-        "Do not consume the learning material queue unless explicitly asked."
+        "Do not consume learning queue unless asked."
         if material_queue_rule == DEFAULT_MATERIAL_QUEUE_RULE
         else material_queue_rule
     )
-    scope_sentence = f"\n\n{agent_scope_instruction}" if agent_scope_instruction else ""
+    scope_sentence = f"\n{agent_scope_instruction}" if agent_scope_instruction else ""
+    quota_guard_instruction = (
+        f"`{quota_guard_command}`"
+        if any(
+            marker in quota_guard_command
+            for marker in (
+                "--available-capability",
+                "--runtime-profile",
+                "--codex-app",
+                "--host-surface",
+                " -H ",
+            )
+        )
+        else "`quota should-run`"
+    )
+    pr_review_pre_quota_instruction = (
+        f"Pre: `{pr_review_pre_quota_command}`\n"
+        if pr_review_pre_quota_command
+        else ""
+    )
     return f"""Advance `{goal_id}` from {active_state}.
 
-Use skills: `loopx-project`; if surprising/tiny/contradictory,
-`loopx-self-repair`. LoopX CLI is source of truth.
+No runtime `loopx-project`; repair: `loopx-self-repair`.
+LoopX CLI = truth.
 {scope_sentence}
 
-Inspect registry/global quota, active state, status/history, repo; run
-`quota should-run`; follow `interaction_contract`. If action_required/open_count:
-Chinese concrete todos/questions; never only "owner gate"; missing ->
-"具体 user todo 未投影，需修复 LoopX 状态投影". If false/0: quiet/no-user-todo.
+Inspect state/status/repo; run
+{pr_review_pre_quota_instruction}{quota_guard_instruction}; follow `interaction_contract`.
+`LOOPX_TURN=<current_time_iso>`; reuse.
+NOTIFY Chinese actions incl. non_blocking false/0; not only "owner gate";
+missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
+DONT_NOTIFY+false/0 only: quiet.
+{RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-Bounded batch/quiet no-op; spend after writeback.
-Plans/done -> LoopX todo/rationale; 2 no-progress -> self-repair.
+Batch/no-op; spend post-writeback.
+Done->todo/rationale; guard receipt; 2 stalls->replan.
+`lark_event_inbox`: reply_due; drain_command/reply-readback/ACK.
 
-If P0 is blocked but CLI contract permits safe work, continue verifiable
-P1/P2; monitor-only quiet skips stay active/no-spend.
+P0 blocked: safe P1/P2; monitor quiet/no-spend.
 
-No project-specific branches here. {material_sentence} Stop for private material,
-credentials, destructive git, or unauthorized production actions{permission_tail}"""
+No project branches; {material_sentence} Stop: private material, credentials,
+destructive git, unauthorized prod{permission_tail}"""
 
 
 def render_heartbeat_generator_inputs_markdown(payload: dict[str, Any]) -> str:
     interface_budget = payload.get("interface_budget") if isinstance(payload.get("interface_budget"), dict) else {}
-    return f"""## Generator Inputs
-
-- goal_id: `{payload.get("goal_id")}`
-- active_state: `{payload.get("active_state")}`
-- active_state_source: `{payload.get("active_state_source")}`
-- resolved_active_state: `{payload.get("resolved_active_state")}`
-- compact: `{payload.get("compact")}`
-- brief: `{payload.get("brief")}`
-- thin: `{payload.get("thin")}`
-- cli_bin: `{payload.get("cli_bin")}`
-- agent_id: `{payload.get("agent_id")}`
-- agent_role: `{payload.get("agent_role")}`
-- primary_agent: `{payload.get("primary_agent")}`
-- side_agent_handoff_agent: `{payload.get("side_agent_handoff_agent")}`
-- agent_scopes: `{payload.get("agent_scopes")}`
-- expanded_prompt_command: `{payload.get("expanded_prompt_command")}`
-- compact_prompt_command: `{payload.get("compact_prompt_command")}`
-- brief_prompt_command: `{payload.get("brief_prompt_command")}`
-- thin_prompt_command: `{payload.get("thin_prompt_command")}`
-- quota_guard_command: `{payload.get("quota_guard_command")}`
-- quota_spend_command: `{payload.get("quota_spend_command")}`
-- cli_preflight: `{payload.get("cli_preflight")}`
-- interface_budget: mode=`{interface_budget.get("mode")}` budget_chars=`{interface_budget.get("budget_char_count")}` max_chars=`{interface_budget.get("max_chars")}` within_budget=`{interface_budget.get("within_budget")}`
-"""
+    lines = [
+        "## Generator Inputs",
+        "",
+        f"- goal_id: `{payload.get('goal_id')}`",
+        f"- active_state: `{payload.get('active_state')}`",
+        f"- active_state_source: `{payload.get('active_state_source')}`",
+        f"- resolved_active_state: `{payload.get('resolved_active_state')}`",
+        f"- compact: `{payload.get('compact')}`",
+        f"- brief: `{payload.get('brief')}`",
+        f"- thin: `{payload.get('thin')}`",
+        f"- cli_bin: `{payload.get('cli_bin')}`",
+        f"- agent_id: `{payload.get('agent_id')}`",
+        f"- agent_model: `{payload.get('agent_model')}`",
+        f"- agent_role: `{payload.get('agent_role')}`",
+    ]
+    lines.extend(
+        [
+            f"- agent_scopes: `{payload.get('agent_scopes')}`",
+            f"- expanded_prompt_command: `{payload.get('expanded_prompt_command')}`",
+            f"- compact_prompt_command: `{payload.get('compact_prompt_command')}`",
+            f"- brief_prompt_command: `{payload.get('brief_prompt_command')}`",
+            f"- thin_prompt_command: `{payload.get('thin_prompt_command')}`",
+            "- pr_review_pre_quota_command: "
+            f"`{payload.get('pr_review_pre_quota_command')}`",
+            f"- quota_guard_command: `{payload.get('quota_guard_command')}`",
+            f"- quota_spend_command: `{payload.get('quota_spend_command')}`",
+            f"- cli_preflight: `{payload.get('cli_preflight')}`",
+            "- interface_budget: "
+            f"mode=`{interface_budget.get('mode')}` "
+            f"budget_chars=`{interface_budget.get('budget_char_count')}` "
+            f"max_chars=`{interface_budget.get('max_chars')}` "
+            f"within_budget=`{interface_budget.get('within_budget')}`",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def render_heartbeat_prompt_error_markdown(payload: dict[str, Any]) -> str:

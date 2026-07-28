@@ -74,13 +74,13 @@ is defined in
 consumers should ignore the field when absent.
 
 Rows may also include an optional `local_agent_launch_plan` object with
-`schema_version=local_agent_launch_plan_v0`. This is a dry-run preview over
+`schema_version=local_agent_launch_plan_v1`. This is a dry-run preview over
 configured agents, role assignments, non-executable launch preview rows,
 status projection, evidence projection, and future gates. It is read-only and
 must not start local workers, call external agent services, expose shell
 commands, write LoopX state, or grant host authority. The protocol is defined
 in
-[`docs/reference/protocols/local-agent-launch-plan-v0.md`](reference/protocols/local-agent-launch-plan-v0.md);
+[`docs/reference/protocols/local-agent-launch-plan-v1.md`](reference/protocols/local-agent-launch-plan-v1.md);
 consumers should ignore the field when absent.
 
 Loopback status exports include `status_contract.schema_version`. The dashboard
@@ -142,6 +142,12 @@ only when `local_dashboard_api.control_plane_write_enabled=true` and the apply
 URL is present. Apply requests must reuse the fresh `preview_id` from the
 dry-run response.
 
+Control-plane setting drafts may use `multi_subagent_feature="enabled"` to opt
+into bounded child-agent orchestration, or `"off"` to keep the default
+single-agent mode. This is a product wrapper over the registry `spawn_policy`;
+dashboard surfaces should prefer it over exposing raw `orchestration_mode` plus
+`spawn_allowed` toggles.
+
 ## Command
 
 ```bash
@@ -182,11 +188,19 @@ also carries compact `handoff_readiness` with `handoff_status` and
 `post_handoff_run_seen`. Heartbeat jobs can therefore tell whether the selected
 goal is still waiting for a target run or has already seen post-handoff work
 without parsing the full status payload.
+For replan and handoff, the guard and review packet may also carry
+`required_reads` / `project_agent_required_reads` entries that point to
+`loopx evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin`. Treat
+that command as the cold-path chronology for the selected agent lane: it expands
+the current agent's public-safe events, keeps other agents compressed to
+frontier context, and does not replace status, quota, review packets, or the
+append-only event sources.
 The same guard may include `work_lane_contract`. Schema
-`work_lane_contract_v1` is the single machine contract for monitor versus
-advancement routing. It distinguishes `lane=continuous_monitor` from
-`lane=advancement_task`, carries the next lane, and exposes one `obligation`
-string such as `advance_unless_material_monitor_transition`. Agent todo items
+`work_lane_contract_v1` is the compatibility drill-down for monitor versus
+advancement routing under the guard's first-class `interaction_contract`. It
+distinguishes `lane=continuous_monitor` from `lane=advancement_task`, carries
+the next lane, and exposes one `obligation` string such as
+`advance_unless_material_monitor_transition`. Agent todo items
 may include `task_class=advancement_task` or
 `task_class=continuous_monitor`, plus optional `action_kind` such as
 `run_eval`, `validate`, `rebuild`, `writeback`, `monitor`, or `poll`. Explicit
@@ -218,6 +232,12 @@ should not restate the lane semantics; unchanged monitor polls remain quiet
 no-spend checks with `should_run=false` and
 `effective_action=monitor_quiet_skip`, while a material dependency-state
 transition may be written back once when it changes the selected goal decision.
+When final agent-scope projection selects a non-execution wait such as
+`effective_action=agent_scope_wait`, the exposed `work_lane_contract` must also
+be non-executing (`must_attempt_work=false`) even if a goal-level next action
+would otherwise derive an advancement obligation. The original goal-level lane
+may remain as compact deferred diagnostic context, but executors must not treat
+it as a competing obligation.
 `handoff_readiness.handoff_interface_budget` declares the machine-readable
 budget for the minimal project-agent handoff: `mode=project_agent_handoff`,
 `max_lines=16`, and `max_chars=1800`. `loopx review-packet
@@ -442,10 +462,12 @@ goals must stay out of the eligible lane even when they have a high
 
 By default `loopx status` is the multi-goal dashboard/control-plane view.
 `loopx status --goal-id <goal-id>` keeps global health fields such as
-`contract` and `global_registry`, but focuses goal-scoped sections such as
-`attention_queue`, `run_history`, `event_ledger_summary`, `usage_summary`, and
-`todo_index` on the requested goal. Use `loopx diagnose --goal-id <goal-id>`
-when an agent needs the richer reasoning packet for one goal.
+`global_registry`, while its `contract` projection contains only global errors
+plus errors owned by the selected goal. It also focuses goal-scoped sections
+such as `attention_queue`, `run_history`, `event_ledger_summary`,
+`usage_summary`, and `todo_index` on the requested goal. Use
+`loopx diagnose --goal-id <goal-id>` when an agent needs the richer reasoning
+packet for one goal.
 
 Consumers should treat unknown fields as additive. Required fields for a
 first-screen UI are `ok`, `contract`, and `attention_queue`.
@@ -468,9 +490,10 @@ selected goal, `quota should-run` also mirrors the same object at top level as
 This field is a restraint signal for heartbeat workers, not a dashboard feature
 request. It records the latest clean hot-path budget check, the tightest
 headroom observed, and when the next check is due. Fresh clean checks can
-support a quiet skip for the ongoing interface-budget guard; overdue or
-out-of-budget checks should prompt `python3
-examples/hot-path-interface-budget-smoke.py` or an equivalent explicit
+support a quiet skip for the ongoing interface-budget guard only while the
+tightest metric still has positive headroom; overdue, out-of-budget, or
+zero-headroom checks should prompt `python3
+examples/control_plane/hot-path-interface-budget-smoke.py` or an equivalent explicit
 drift-check run.
 
 Stable fields:
@@ -540,7 +563,7 @@ Missing or stale shape:
   "can_promote": false,
   "should_warn": true,
   "non_blocking": true,
-  "recommended_action": "python3 examples/canary-promotion-readiness-smoke.py",
+  "recommended_action": "python3 examples/canary/canary-promotion-readiness-smoke.py",
   "warning_message": "promotion-readiness evidence is stale; ...",
   "readiness": {
     "freshness_status": "stale",
@@ -624,10 +647,20 @@ The summary counters are intentionally small:
 - `warnings`: non-blocking issues worth showing in a secondary health panel.
 - `checks`: successful observations, useful for audit trails.
 
-`errors`, `warnings`, and `checks` are short strings. Checks should be concrete
-enough to support an operator decision without exposing local paths or private
-evidence. They must be public-safe before a project exposes this export outside
-the local machine.
+`error_diagnostics` is the source of truth for error ownership. Each row has a
+stable `code`, a human-readable `message`, and either `scope=global` or
+`scope=goal` with a `goal_id`; a finding shared by a known subset may use
+`scope=goals` with `goal_ids`. Registry parse failures, ambiguous goal identity,
+registry boundary violations, and public-boundary violations are global.
+Goal-entry, active-state, and todo contract failures are owned by the goal or
+known goal set that produced them.
+
+`errors`, `global_errors`, and `goal_errors` are compatibility projections
+derived from those structured diagnostics; consumers must not infer ownership
+from message prefixes. `warnings` and `checks` remain short strings. Checks
+should be concrete enough to support an operator decision without exposing
+local paths or private evidence. They must be public-safe before a project
+exposes this export outside the local machine.
 
 ## Attention Queue
 
@@ -940,7 +973,7 @@ Item fields:
   into `current_agent_deferred_resume_candidates`,
   `unclaimed_deferred_resume_candidates`, and
   `other_agent_deferred_resume_candidates`, where only the first two can wake
-  the current side agent before an agent-scoped no-candidate wait is allowed.
+  the current peer before an agent-scoped no-candidate wait is allowed.
   Open todos may also carry `resume_when`; status should attach
   `resume_condition` / `resume_ready` but keep the item out of executable
   backlog until `resume_ready=true`. This lets agents see not-yet-unlocked
@@ -950,16 +983,27 @@ Item fields:
   todo surface.
 - Agent-scoped quota payloads may include
   `agent_todo_summary.claim_scope` with
-  `schema_version=side_agent_claim_scope_v0`. For a side agent, the quota guard
-  should select current-agent claimed todos before unclaimed todos, then expose
-  primary/other-agent claimed todos as lower-weight candidates. Compatibility
-  payloads may still include `blocked_claimed_items`, but new consumers should
-  prefer `other_agent_claimed_items` and `other_agent_claimed_open_count`. This
-  is claim-aware routing, not a hard lease: the primary agent still sees the
-  whole backlog, and a side agent still uses its automation/handoff scope to
-  decide whether an unclaimed or other-agent claimed todo is appropriate. A
-  current-agent claimed todo may be selected even when the active state's global
-  `Next Action` names the primary lane; that is not a state projection mismatch.
+  `schema_version=agent_claim_scope_v0`. The quota guard should select
+  current-agent claimed todos before unclaimed todos, then expose other-agent
+  claimed todos as lower-weight candidates. Compatibility payloads may still
+  include `blocked_claimed_items`, but new consumers should prefer
+  `other_agent_claimed_items` and `other_agent_claimed_open_count`. This is
+  claim-aware routing, not a hard lease: every peer can inspect the goal-wide
+  backlog, while claims, task policy, capabilities, and boundaries determine
+  what it may execute. A current-agent claimed todo may be selected even when
+  the active state's global `Next Action` names another peer's lane; that is not
+  a state projection mismatch.
+- Agent-scoped quota payloads also expose the versioned `task_scope` enum
+  `goal_all_read_claimed_run_global_read_v0`. It means the peer may
+  read all ordinary todos in the current goal, may consider its own claimed or
+  an eligible unclaimed candidate, must claim before execution, and may execute
+  only its claimed eligible todo. Other-agent claims are diagnostic only.
+  Cross-goal reads stay outside goal-local routing and require an explicit
+  read-only global-manager inventory such as `loopx global-summary`; they never
+  grant cross-goal execution. Existing goal, agent, and cold-path command
+  fields supply the binding parameters without duplicating them. TurnEnvelope
+  retains this compact enum so the model sees the same boundary as the full
+  quota decision.
 - `dependency_blockers`: optional compact summary of unfinished user todos from
   other current attention-queue goals. This lets dashboards and heartbeat
   dispatchers show sibling/project dependency gates separately from the current
@@ -1003,8 +1047,8 @@ run guidance from durable-state projection and last-resort compatibility
 fallback.
 `--recommended-action` describes the appended run record; it does not rewrite
 the active state's durable `## Next Action`. To intentionally change that
-durable route in a multi-agent goal, the primary agent must run
-`refresh-state --agent-id <primary-agent> --progress-scope goal --next-action
+durable route in a multi-agent goal, a registered peer must run
+`refresh-state --agent-id <registered-peer> --progress-scope goal --next-action
 <local control-plane action>`. Status projections may expose both
 `active_state_next_action` and
 `latest_run_recommended_action`; when they differ, `next_action_projection_warning`
@@ -1019,17 +1063,17 @@ scoped with `--agent-id` and no `--progress-scope`, the run records
 transition: status/quota keep selecting the latest non-agent-lane run for the
 goal-level `status` and `recommended_action`, while exposing the lane note as
 `agent_lane_recommendation` on the attention item and project asset. A
-goal-level refresh in a multi-agent goal must use the primary agent with
+goal-level refresh in a multi-agent goal must use a registered peer with
 `--progress-scope goal`.
-Use this for side agents that want to record their own lane recommendation
-without replacing the primary controller's next action.
+Use agent-lane scope for a peer-local recommendation that should not replace the
+durable goal route.
 
-If a side-agent self-merged slice materially advanced the public product or
-case path, the controller or side agent should also write a project-level
+If a peer self-merged slice materially advanced the public product or case
+path, that peer or another registered peer should also write a project-level
 refresh with the matching `delivery_outcome=outcome_progress` (or skip the
 extra project-level sync entirely). A later `surface_only` project-level sync
 will become the latest non-agent-lane run, so quota may correctly ask for
-follow-through even though the side-lane note recorded real progress.
+follow-through even though the peer-lane note recorded real progress.
 
 For registered `connected`, `connected-read-only`, and `pre-tick-runnable`
 adapters, custom compact progress classifications that are not blocker, gate,
@@ -1079,7 +1123,9 @@ operator lane because the registry says `waiting_on=user_or_controller`, while
 the active state exposes a more concrete user checklist. This is the preferred
 shape for complex project review: keep `recommended_action` short enough to
 route the queue, and put ordered user work in checkbox sections the dashboard
-can summarize.
+can summarize. This routing text belongs to the user's local control plane: it
+may include private project refs, but it must not include AK/SK values, tokens,
+auth headers, passwords, or inline credentials.
 
 For registered planned high-complexity goals with a compatible
 `*_read_only_map_v0` adapter and no run yet, status keeps the queue item in
@@ -1117,55 +1163,92 @@ should treat this as a prompt-upgrade action, not as delivery permission, a
 quiet no-op, or a new operator gate. `should_run`, `normal_delivery_allowed`,
 and `interaction_contract.agent_channel.delivery_allowed` must stay `false`
 until the automation reruns `quota should-run` with a registered `--agent-id`.
+When v0.1 hierarchy fields are still present, the same object also carries a
+stable `migration_id`, `host_update_idempotency_key`, and `completion_command`.
+The host may retry regeneration and automation update with that same id; the
+registry cutover happens only after the host update succeeds and the completion
+command acknowledges that exact id. Completion removes the hierarchy fields,
+records `coordination.completed_migrations.peer_agent_runtime_v1`, and is an
+idempotent no-op when repeated with the completed id. Once that marker exists,
+`quota should-run` must never project this registry migration again. This is a
+stable, retryable migration until acknowledgment, not a recurring notification
+and not permission to update an automation more than once under different keys.
 The selected identity is part of the turn envelope. Follow-up lifecycle
 commands that interpret or account for the same turn, including scoped
 `refresh-state` and `quota spend-slot`, should preserve the same `--agent-id`
 when the subcommand supports it. A spend preview that drops the identity may
 correctly show `automation_prompt_upgrade_required` for an unscoped automation,
 but that is an accounting/projection mismatch for the scoped turn, not evidence
-that the earlier side-agent guard was invalid.
+that the earlier peer guard was invalid.
+An accountable `refresh-state` normally records the current checkout as
+`delivery_workspace`. When implementation and validation happened in an
+independent worktree but registry/state projection must run from another
+checkout, pass `--delivery-workspace-path <delivery-worktree>`. LoopX validates
+the referenced checkout against the peer-isolation policy and persists only its
+credential-free repository identity and workspace class, never the local path.
+An explicit canonical checkout is rejected for peer delivery, so this causal
+override cannot turn non-isolated work into an accountable delivery.
 For registered agent-scoped turns, `quota should-run --agent-id` may include
 `agent_lane_next_action.schema_version=agent_lane_next_action_v0`. This is a
 read-only derived pointer to the current agent's selected advancement slice,
 chosen from runnable capability candidates first and then the agent-scoped
 executable todo summary. It may point to a current-agent claimed todo even when
-the active state's global `Next Action` is still owned by the primary route; the
+the active state's global `Next Action` is still owned by another route; the
 field must therefore carry `preserves_goal_next_action=true` and must not be
 treated as a project-level status overwrite. `status --agent-id` may reuse the
 same quota-derived object as item/project-asset observation data; consumers must
 render it as an agent-lane pointer, not as `recommended_action` replacement.
 Human markdown should label this pointer as the current agent's todo and mark
 co-displayed global agent todo rows as goal-wide, so `--agent-id` is not
-mistaken for a filter that replaces the primary/global queue.
+mistaken for a filter that replaces the goal-wide queue.
+The same scoped guard may include
+`goal_route_hint.schema_version=goal_route_hint_v0`. This is a goal-level
+read-path synthesis over the current `agent_lane_next_action`,
+`agent_scope_frontier`, and compact per-agent todo lanes. It carries
+`preserves_goal_next_action=true` and `goal_next_action_mutation=none` so hosts
+can explain the lane decision without mutating shared `## Next Action` or
+collapsing other agents' queues into the current agent's route.
 Within a candidate source, selection is ordered by current-agent claim first,
 then `capability_repair_mode=true`, then priority/index. A repair-mode item
 therefore stays visible as the suggested agent-lane slice even when an older
 ordinary runnable P0 todo appears earlier in the active state; otherwise a todo
 that exists to build the missing capability can be starved by work that depends
 on that capability becoming reliable.
-When the resolved `agent_identity.role` is `side-agent`, `quota should-run`
-also enforces the workspace boundary. If the guard is being run from the
-registered primary checkout, from a non-git directory, or from an unrelated git
-worktree, the payload should include
-`workspace_guard.schema_version=side_agent_workspace_guard_v0`,
+For any registered peer, `quota should-run` also enforces the workspace
+boundary when the selected task writes repository state. If the guard is being
+run from a non-git directory, from an unrelated git worktree, or from a checkout
+that does not satisfy the task/repository isolation policy, the payload should include
+`workspace_guard.schema_version=agent_workspace_guard_v1`,
 `workspace_guard.action=move_to_independent_worktree`,
 `workspace_repair_allowed=true`, `normal_delivery_allowed=false`, and
-`effective_action=side_agent_workspace_repair`. The interaction contract should
-use `mode=side_agent_workspace_repair`, require the agent to create or switch to
+`effective_action=agent_workspace_repair`. The interaction contract should
+use `mode=agent_workspace_repair`, require the peer to create or switch to
 an independent worktree/branch, and require rerunning `quota should-run` with
 the same `--agent-id` before repository edits. This preflight does not spend
 quota; `quota spend-slot` should fail closed until the guard is rerun from the
 independent worktree.
+Workspace and boundary guards must bind to the final work-lane `selected_todo`
+after due-monitor, capability-fallback, and scoped-gate routing. They must not
+inherit repository or write-scope semantics from an unrelated first executable
+backlog item; in particular, a selected read-only continuous monitor stays
+monitor work even when a separate repository repair is also runnable.
+If the selected todo declares `task_repository`, the guard should also project
+that credential-free identity with
+`workspace_guard.repository_source=selected_todo.task_repository`; otherwise
+`repository_source=goal.repo`. A matching repository identity is necessary but
+not sufficient: the current checkout must still be a linked worktree rather
+than that repository's canonical checkout. `task_repository` is not a write
+scope or permission grant.
 Dashboard and Review Packet consumers should project `workspace_guard` as an
 agent-channel workspace repair, not as an operator or user gate. The first
 screen can render the current workspace class, required workspace class, repair
 action, and whether normal delivery is allowed. It should not ask the user to
-approve the move, mark the primary todo as blocked by the user, or hide open
-same-scope work. If a side agent is also looking at a `claimed_by` primary-agent
-todo, the packet should explain both boundaries separately: the workspace guard
+approve the move, mark the selected todo as blocked by the user, or hide open
+same-scope work. If a peer is also looking at a todo claimed by another peer,
+the packet should explain both boundaries separately: the workspace guard
 requires moving to an independent worktree, while the claim boundary requires
-choosing an in-scope unclaimed/side-agent todo or creating a successor handoff
-todo.
+choosing an in-scope current-agent or unclaimed todo, transferring the claim, or
+creating an explicit successor.
 When the payload includes `notify_user_on_open_todo=true`, the open
 `user_todo_summary` is the current blocker-push surface even if there is no
 operator gate. This is intended for `focus_wait`, `waiting`,
@@ -1176,7 +1259,11 @@ three open todos, include
 that blocker-push turn. When the payload also includes
 `open_todo_notification_policy=repeat_until_resolved`, the
 executor should repeat the notification until the todo is done, deferred, or
-replaced; do not suppress it as a recently surfaced blocker. Other blocker-push
+replaced. A `user_gate_notification_cooldown_v0` packet with
+`notification_suppressed=true` is the narrow exception: the gate and open-count
+remain visible, while `interaction_contract.user_channel` becomes
+`action_required=false`, `notify=DONT_NOTIFY` until the bounded reminder window
+or a material gate/host change. Other blocker-push
 cases may still be de-duplicated when the same blocker was surfaced recently.
 Eligible monitor-only no-transition polls keep open user todos in
 `user_todo_summary`, but do not force repeated notification or set
@@ -1215,7 +1302,10 @@ When the payload includes `completed_todo_archive_warning`, the active
 dashboard/status surface to keep current open work visible. Executors should
 move older completed entries into a dedicated `Completed Work Archive` section
 and keep only current open work plus a small recent-done tail under active
-`Agent Todo`. Archive sections are intentionally ignored by active todo parsing.
+`Agent Todo`. The warning's `archive_command_template` includes the projected
+`default_archive_keep_count` as `--max-active-done`, so the copyable command and
+the warning's recent-done tail contract stay aligned. Archive sections are
+intentionally ignored by active todo parsing.
 This warning is a checklist hygiene signal only: it does not change quota
 eligibility, grant write or production permission, or supersede open user/agent
 todo blockers. It also does not mark an open todo complete; executors should
@@ -1230,8 +1320,10 @@ monitor/no-progress run records. Historical progress entries and completed
 todos are intentionally not active-state trigger sources. Executors should
 treat the object as a machine-readable planning contract, not prompt advice:
 inspect `triggers`, apply the compact `todo_actions` as split/add/retire
-guidance, run `next_validation_command` after the selected slice, and stop at
-`stop_condition`. The default stall threshold is 2 consecutive stalled turns or
+guidance, write the selected todo/vision/blocker delta, and stop at
+`stop_condition`. Validation remains part of the normal delivery evidence or
+PR review path, not a command projected to the runtime agent. The default stall
+threshold is 2 consecutive stalled turns or
 public run records. A `quota_monitor_poll` record is status-neutral for latest
 dashboard state, but it is still public stalled-run evidence for this specific
 replan detector. For eligible goals,
@@ -1240,8 +1332,23 @@ replan detector. For eligible goals,
 `autonomous_replan_required` with `must_attempt_work=true`, even when open user
 todos remain visible, as long as the selected slice stays outside private,
 destructive, production, or owner-only authority and honors `stop_condition`.
+An open typed `user_action` remains a non-blocking notice even when no agent
+todo is currently runnable; it must not force `waiting_on=controller`. When two
+bounded stalls leave that agent frontier empty, the obligation sets
+`agent_todo_writeback_required=true`. The interaction contract then projects a
+concrete claimed `todo add` action and requires a `runnable_todo_set` repair
+delta. Explicit terminal no-follow-up may replace the new todo only when
+closure evidence is authoritative. The user reminder stays visible throughout
+this replan path.
 This is intended to keep monitor-only work from consuming the primary
 executable backlog, not to bypass real gates.
+`quota should-run` and `status --agent-id` may also expose
+`goal_frontier_projection.schema_version=goal_frontier_projection_v0`. This
+projection is owned by `loopx.control_plane.goals.goal_frontier`: it is a
+compact per-goal progress/frontier view, not another quota sub-state. When it contains
+`autonomous_replan_decision`, that decision is made before lane-local
+`monitor_quiet_skip`, `agent_scope_wait`, or `agent_scope_exhausted` projection,
+so those local no-candidate states cannot mask a required bounded replan.
 The payload includes `interaction_contract.schema_version =
 loopx_interaction_contract_v0`, which is the primary user/agent/CLI
 protocol for a selected goal. It groups the current turn into a stable
@@ -1252,7 +1359,15 @@ Its `user_channel` says whether to interrupt the user and why;
 `agent_channel` says whether Codex must attempt work, whether delivery is
 allowed, whether quiet no-op is allowed, and the primary action; `cli_channel`
 says which CLI transitions and spend policy apply. Executors should read
-`interaction_contract` first. `execution_obligation`,
+`interaction_contract` first, with
+`interaction_contract.agent_channel.primary_action` as the only executable
+action entrypoint for the current turn. Optional
+`agent_channel.resolution_trace.summary` is diagnostic: it compactly records
+the source signal matched by `primary_action` and whether drift was detected. Existing
+`state_action_projection_warning` / `next_action_projection_warning` fields
+carry any writeback review guidance. The trace is not an independent
+next-action authority and does not imply automatic active-state writeback.
+`execution_obligation`,
 `heartbeat_recommendation`, `work_lane_contract`,
 `external_evidence_observation`, `goal_boundary`, and
 `protocol_action_packet` remain compatibility and drill-down fields under that
@@ -1266,24 +1381,39 @@ changes, final checks, and loop self-stop never spend quota. Host schedulers
 apply `recommended_interval_minutes` as the next target interval and multiply
 subsequent unchanged intervals by `unchanged_poll_backoff_multiplier` until
 `max_interval_minutes`; `example_progression_minutes` exposes the compact
-human-readable sequence. The hint also includes
-`reset_policy.schema_version=scheduler_reset_policy_v0`: hosts compare its
-`reset_token` between polls and clear the unchanged/backoff streak when that
-token changes, or when a user reply, new/reassigned todo, resolved gate, or
-material transition makes the goal actionable again. The token is derived from
-scheduler action plus identity/profile inputs, while the hot path carries only
-short identity/profile signatures instead of full snapshots. The reset moves
-Codex App/local cadence back to the current profile's initial interval before
+human-readable sequence. The hint also includes a compact `reset_policy`:
+hosts compare `reset_token` between polls and clear the unchanged/backoff
+streak when that token changes, or when a user reply, new/reassigned todo,
+resolved gate, or material transition makes the goal actionable again. The
+token is derived from scheduler action plus identity/profile inputs, while the
+hot path carries only action fields plus a short `identity_signature`; the
+profile signature, reset-condition summary, and full stateful-backoff policy are
+available from `scheduler_hint.cold_path_detail` when callers request
+`loopx quota should-run --include-detail scheduler`. The reset moves Codex
+App/local cadence back to the current profile's initial interval before
 unchanged backoff resumes, and does not spend quota.
-Codex App heartbeats should use `automation_update` to apply
-`codex_app.recommended_rrule` for ordinary cadence updates. They should cache only
-`reset_policy.reset_token` plus the automation id when possible; when that token
-changes, or when user feedback/new work/reassignment/material evidence makes the
-goal active again, update the heartbeat RRULE through `automation_update` to
-`reset_policy.codex_app_initial_rrule` and clear unchanged-poll state before
-starting a new backoff progression. The token is generated from scheduler
-action plus identity/profile inputs, so hosts do not need to diff the whole
-payload to notice an initial-RRULE/profile generation change.
+Codex App heartbeats should use `automation_update` only when
+`codex_app.stateful_backoff.apply_needed=true` and
+`codex_app.recommended_rrule` is present. If that update succeeds, the agent
+must run `codex_app.ack_hint.cli_args`;
+current payloads use `quota scheduler-ack-current` so LoopX re-reads the latest
+hint, then persists `reset_token`, `identity_signature`, `progression_index`,
+and `last_applied_rrule` under the runtime root. When the same identity repeats,
+LoopX advances the progression after the applied interval has elapsed, until
+the max interval. An immediate post-ACK readback remains on the acknowledged
+RRULE so repeated reconciliation converges rather than oscillates. When the reset token
+changes, the next projected RRULE returns to
+`reset_policy.codex_app_initial_rrule`. If the current desired RRULE is already
+applied, `recommended_rrule` is omitted and the host update should be skipped.
+When that matching readback still needs a reset-token/identity binding,
+`ack_needed=true`; run the bound ack directly. Otherwise no scheduler action
+is needed.
+For CLI payloads, `ack_hint.cli_args` begins with the registry and effective
+runtime-root binding used by the originating `should-run` call. Consumers must
+preserve that prefix so the ACK cannot split scheduler state between project
+and shared registries.
+`scheduler-ack` only records the applied host cadence; the next RRULE, if any,
+is projected by a future `quota should-run`, not by the ack response.
 The payload also includes `execution_obligation`, which is the compatibility
 entry point for older workers deciding whether a quiet no-op is allowed.
 `heartbeat_recommendation.notify` is only a user-facing notification policy. It
@@ -1495,6 +1625,12 @@ under `<runtime-root>/archived-goals/`.
 It mirrors the compact run index, but strips local artifact paths. UIs should
 show artifact availability with `json_exists` and `markdown_exists` instead of
 linking directly to local files.
+
+On the `status`, `quota should-run`, and `history` read paths, relative
+`common_runtime_root` values, relative `--runtime-root` overrides, and relative
+run-index artifact paths are resolved against the project root that owns the
+selected registry, not the caller's current working directory. This keeps
+those read surfaces stable when they are invoked from an independent worktree.
 
 Goal shape:
 

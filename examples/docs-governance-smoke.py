@@ -43,6 +43,9 @@ MOVED_PATHS = {
         "docs/research/long-horizon-agent-benchmarks/"
         "codex-cli-long-run-regression.md"
     ),
+    "docs/project-skill-delivery.md": (
+        "docs/reference/project-skill-delivery.md"
+    ),
 }
 
 
@@ -73,10 +76,13 @@ def main() -> int:
         "docs/archive/",
         "docs/outreach/",
         "docs/product/",
+        "docs/development/",
         "docs/reference/",
         "docs/showcases/",
         "product/codex-cli-tui-loop.md",
         "guides/auto-research-command-path.md",
+        "guides/multi-agent-product-recipe.md",
+        "development/testing-and-quality.md",
     ]:
         assert required in docs_index, required
 
@@ -86,7 +92,10 @@ def main() -> int:
         "docs/archive/release-readiness/README.md",
         "docs/outreach/README.md",
         "docs/product/README.md",
+        "docs/development/README.md",
+        "docs/development/testing-and-quality.md",
         "docs/guides/auto-research-command-path.md",
+        "docs/guides/multi-agent-product-recipe.md",
         "docs/reference/README.md",
         "docs/reference/protocols/README.md",
         "docs/research/long-horizon-agent-benchmarks/README.md",
@@ -94,6 +103,23 @@ def main() -> int:
         "docs/product/codex-cli-tui-loop.md",
     ]:
         assert (REPO_ROOT / path).is_file(), path
+
+    developer_index = read("docs/development/README.md")
+    quality_guide = read("docs/development/testing-and-quality.md")
+    for required in [
+        "testing-and-quality.md",
+        "Model behavior qualification v0",
+        "Release outcome baseline v0",
+    ]:
+        assert required in developer_index, required
+    for required in [
+        "Quality Layers",
+        "Agent-Facing Output Budgets",
+        "Decision Replay And Issue #2191",
+        "Doubao Model-Behavior Gate",
+        "Release Outcome Baseline",
+    ]:
+        assert required in quality_guide, required
 
     root_markdown = sorted(DOCS.glob("*.md"))
     assert len(root_markdown) <= 30, [path.name for path in root_markdown]
@@ -147,18 +173,34 @@ def main() -> int:
     for required in [
         "Start From A Clean Workspace",
         "loopx-auto-research-demo",
-        "auto-research quickstart",
+        "auto-research demo-e2e",
         "auto-research demo-supervisor",
         "auto-research worker-loop",
         "research-curator",
-        "hypothesis-mapper",
-        "evidence-runner",
-        "evidence-verifier",
+        "hypothesis-proposer",
+        "research-executor",
+        "evaluator-promoter",
         "tmux attach -t loopx-auto-research",
         "tmux kill-session -t loopx-auto-research",
         "not a leader agent",
     ]:
         assert required in compact_auto_research_command_path, required
+
+    multi_agent_product_recipe = read("docs/guides/multi-agent-product-recipe.md")
+    compact_multi_agent_product_recipe = compact(multi_agent_product_recipe)
+    for required in [
+        "Multi-Agent Product Recipe",
+        "Product preset",
+        "Multi-agent kernel",
+        "role list",
+        "agent scope",
+        "worker-local skill snippet",
+        "handoff/todo hints",
+        "One-Command Launch",
+        "Attach, Stop, Retry",
+        "Auto-research should stay a reference preset, not the kernel",
+    ]:
+        assert required in compact_multi_agent_product_recipe, required
 
     print("docs-governance-smoke ok")
     return 0

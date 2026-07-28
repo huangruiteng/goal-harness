@@ -4,12 +4,13 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .control_plane.runtime.time import now_utc_iso as runtime_now_utc_iso
 from .file_lock import exclusive_file_lock
-from .todo_contract import (
+from .control_plane.todos.contract import (
+    TODO_MONITOR_METADATA_FIELDS,
     TODO_STATUS_DONE,
     TODO_STATUS_BLOCKED,
     TODO_STATUS_DEFERRED,
@@ -18,10 +19,21 @@ from .todo_contract import (
     build_todo_id,
     format_todo_metadata_line,
     normalize_explicit_todo_task_class,
+    normalize_required_capabilities,
+    normalize_required_write_scopes,
+    normalize_removed_todo_continuation_policy,
     normalize_todo_action_kind,
+    normalize_todo_blocks_agent,
+    normalize_todo_bound_agent,
     normalize_todo_claimed_by,
+    normalize_todo_continuation_policy,
+    normalize_todo_excluded_agents,
+    normalize_todo_global_gate,
+    normalize_todo_goal_bound,
     normalize_todo_id,
+    normalize_todo_id_list,
     normalize_todo_status,
+    normalize_todo_task_repository,
     parse_todo_metadata_line,
     todo_done_for_status,
     todo_marker_for_status,
@@ -48,6 +60,8 @@ REFRESH_RECORDED = "refresh_recorded"
 RUN_RECORDED = "run_recorded"
 QUOTA_SPENT = "quota_spent"
 EVIDENCE_ATTACHED = "evidence_attached"
+SUPERVISOR_PROPOSED = "supervisor_proposed"
+SUPERVISOR_RECEIPT_RECORDED = "supervisor_receipt_recorded"
 
 MARKDOWN_BACKFILL_PRODUCER = "loopx.backfill"
 MARKDOWN_HEADING_PATTERN = re.compile(r"^##\s+(.+?)\s*$")
@@ -70,6 +84,8 @@ SUPPORTED_EVENT_TYPES = {
     RUN_RECORDED,
     QUOTA_SPENT,
     EVIDENCE_ATTACHED,
+    SUPERVISOR_PROPOSED,
+    SUPERVISOR_RECEIPT_RECORDED,
 }
 
 TODO_EVENT_TYPES = {
@@ -91,7 +107,7 @@ class StateEventConflictError(StateEventError):
 
 
 def now_utc_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return runtime_now_utc_iso()
 
 
 def compact_text(value: Any) -> str:
@@ -256,10 +272,50 @@ def backfill_todo_events_from_markdown(
         }
         task_class = normalize_explicit_todo_task_class(record.get("task_class"))
         action_kind = normalize_todo_action_kind(record.get("action_kind"))
+        task_repository = normalize_todo_task_repository(
+            record.get("task_repository")
+        )
+        continuation_policy = normalize_todo_continuation_policy(
+            record.get("continuation_policy")
+        )
+        removed_continuation_policy = normalize_removed_todo_continuation_policy(
+            record.get("removed_continuation_policy")
+        )
+        required_write_scopes = normalize_required_write_scopes(
+            record.get("required_write_scopes")
+        )
+        required_capabilities = normalize_required_capabilities(
+            record.get("required_capabilities")
+        )
+        blocks_agent = normalize_todo_blocks_agent(record.get("blocks_agent"))
+        bound_agent = normalize_todo_bound_agent(record.get("bound_agent"))
+        goal_bound = normalize_todo_goal_bound(record.get("goal_bound"))
+        global_gate = normalize_todo_global_gate(record.get("global_gate"))
+        excluded_agents = normalize_todo_excluded_agents(record.get("excluded_agents"))
         if task_class:
             payload["task_class"] = task_class
         if action_kind:
             payload["action_kind"] = action_kind
+        if task_repository:
+            payload["task_repository"] = task_repository
+        if continuation_policy:
+            payload["continuation_policy"] = continuation_policy
+        if removed_continuation_policy:
+            payload["removed_continuation_policy"] = removed_continuation_policy
+        if required_write_scopes:
+            payload["required_write_scopes"] = required_write_scopes
+        if required_capabilities:
+            payload["required_capabilities"] = required_capabilities
+        if blocks_agent:
+            payload["blocks_agent"] = blocks_agent
+        if bound_agent:
+            payload["bound_agent"] = bound_agent
+        if goal_bound is not None:
+            payload["goal_bound"] = goal_bound
+        if global_gate is not None:
+            payload["global_gate"] = global_gate
+        if excluded_agents:
+            payload["excluded_agents"] = excluded_agents
         events.append(
             make_state_event(
                 event_id=_backfill_event_id(goal_id=normalized_goal_id, todo_id=todo_id, suffix="add"),
@@ -536,6 +592,25 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
     )
     task_class = normalize_explicit_todo_task_class(payload.get("task_class"))
     action_kind = normalize_todo_action_kind(payload.get("action_kind"))
+    task_repository = normalize_todo_task_repository(payload.get("task_repository"))
+    continuation_policy = normalize_todo_continuation_policy(
+        payload.get("continuation_policy")
+    )
+    removed_continuation_policy = normalize_removed_todo_continuation_policy(
+        payload.get("removed_continuation_policy")
+        or payload.get("continuation_policy")
+    )
+    required_write_scopes = normalize_required_write_scopes(
+        payload.get("required_write_scopes")
+    )
+    required_capabilities = normalize_required_capabilities(
+        payload.get("required_capabilities")
+    )
+    blocks_agent = normalize_todo_blocks_agent(payload.get("blocks_agent"))
+    bound_agent = normalize_todo_bound_agent(payload.get("bound_agent"))
+    goal_bound = normalize_todo_goal_bound(payload.get("goal_bound"))
+    global_gate = normalize_todo_global_gate(payload.get("global_gate"))
+    excluded_agents = normalize_todo_excluded_agents(payload.get("excluded_agents"))
     claimed_by = normalize_todo_claimed_by(payload.get("claimed_by"))
     todo: dict[str, Any] = {
         "schema_version": "todo_item_v0",
@@ -555,6 +630,32 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
         todo["task_class"] = task_class
     if action_kind:
         todo["action_kind"] = action_kind
+    if task_repository:
+        todo["task_repository"] = task_repository
+    if removed_continuation_policy:
+        todo["removed_continuation_policy"] = removed_continuation_policy
+    elif continuation_policy:
+        todo["continuation_policy"] = continuation_policy
+    if required_write_scopes:
+        todo["required_write_scopes"] = required_write_scopes
+    if required_capabilities:
+        todo["required_capabilities"] = required_capabilities
+    if blocks_agent:
+        todo["blocks_agent"] = blocks_agent
+    if bound_agent:
+        todo["bound_agent"] = bound_agent
+    if goal_bound is not None:
+        todo["goal_bound"] = goal_bound
+    if global_gate is not None:
+        todo["global_gate"] = global_gate
+    if excluded_agents:
+        todo["excluded_agents"] = excluded_agents
+    unblocks_todo_id = normalize_todo_id(payload.get("unblocks_todo_id"))
+    if unblocks_todo_id:
+        todo["unblocks_todo_id"] = unblocks_todo_id
+    for key in TODO_MONITOR_METADATA_FIELDS:
+        if payload.get(key):
+            todo[key] = compact_text(payload[key])
     if claimed_by:
         todo["claimed_by"] = claimed_by
     return todo
@@ -569,6 +670,64 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
             todo["claimed_by"] = claimed_by
     elif event_type == TODO_UPDATED:
         for key in ("priority", "role", "title", "task_class", "action_kind"):
+            if payload.get(key):
+                todo[key] = compact_text(payload[key])
+        continuation_policy = normalize_todo_continuation_policy(
+            payload.get("continuation_policy")
+        )
+        removed_continuation_policy = normalize_removed_todo_continuation_policy(
+            payload.get("removed_continuation_policy")
+            or payload.get("continuation_policy")
+        )
+        update_excluded_agents = normalize_todo_excluded_agents(
+            payload.get("excluded_agents")
+        )
+        if removed_continuation_policy:
+            todo.pop("continuation_policy", None)
+            todo["removed_continuation_policy"] = removed_continuation_policy
+        elif continuation_policy:
+            explicit_repair = (
+                todo.get("removed_continuation_policy")
+                and continuation_policy == "independent_handoff"
+                and bool(update_excluded_agents)
+            )
+            if not todo.get("removed_continuation_policy") or explicit_repair:
+                todo["continuation_policy"] = continuation_policy
+            if explicit_repair:
+                todo.pop("removed_continuation_policy", None)
+        required_write_scopes = normalize_required_write_scopes(
+            payload.get("required_write_scopes")
+        )
+        if required_write_scopes:
+            todo["required_write_scopes"] = required_write_scopes
+        task_repository = normalize_todo_task_repository(
+            payload.get("task_repository")
+        )
+        if task_repository:
+            todo["task_repository"] = task_repository
+        required_capabilities = normalize_required_capabilities(
+            payload.get("required_capabilities")
+        )
+        if required_capabilities:
+            todo["required_capabilities"] = required_capabilities
+        blocks_agent = normalize_todo_blocks_agent(payload.get("blocks_agent"))
+        if blocks_agent:
+            todo["blocks_agent"] = blocks_agent
+        bound_agent = normalize_todo_bound_agent(payload.get("bound_agent"))
+        if bound_agent:
+            todo["bound_agent"] = bound_agent
+            todo.pop("goal_bound", None)
+        goal_bound = normalize_todo_goal_bound(payload.get("goal_bound"))
+        if goal_bound is not None:
+            todo["goal_bound"] = goal_bound
+            if goal_bound:
+                todo.pop("bound_agent", None)
+        global_gate = normalize_todo_global_gate(payload.get("global_gate"))
+        if global_gate is not None:
+            todo["global_gate"] = global_gate
+        if update_excluded_agents:
+            todo["excluded_agents"] = update_excluded_agents
+        for key in TODO_MONITOR_METADATA_FIELDS:
             if payload.get(key):
                 todo[key] = compact_text(payload[key])
         if payload.get("text") or payload.get("title"):
@@ -591,10 +750,19 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
     elif event_type == TODO_COMPLETED:
         todo["status"] = TODO_STATUS_DONE
         todo["done"] = True
-        if payload.get("evidence"):
-            todo["evidence"] = compact_text(payload["evidence"])
-        if payload.get("reason"):
-            todo["reason"] = compact_text(payload["reason"])
+        for key in (
+            "evidence",
+            "reason",
+            "note",
+            "completed_at",
+            "updated_at",
+            "no_followup",
+        ):
+            if payload.get(key) is not None:
+                todo[key] = compact_text(payload[key])
+        successor_todo_ids = normalize_todo_id_list(payload.get("successor_todo_ids"))
+        if successor_todo_ids:
+            todo["successor_todo_ids"] = successor_todo_ids
     todo["last_event_id"] = event.get("event_id")
     todo["last_append_sequence"] = event.get("append_sequence")
 
@@ -684,15 +852,34 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
     if not text.startswith("[") and item.get("priority"):
         text = f"[{compact_text(item.get('priority'))}] {text}"
     lines = [f"- [{marker}] {text}"]
+    monitor_metadata = {
+        key: item.get(key)
+        for key in TODO_MONITOR_METADATA_FIELDS
+    }
     metadata = format_todo_metadata_line(
         todo_id=item.get("todo_id"),
         status=status,
         task_class=item.get("task_class"),
         action_kind=item.get("action_kind"),
+        task_repository=item.get("task_repository"),
+        continuation_policy=item.get("continuation_policy"),
+        removed_continuation_policy=item.get("removed_continuation_policy"),
+        required_write_scopes=item.get("required_write_scopes"),
+        required_capabilities=item.get("required_capabilities"),
         claimed_by=item.get("claimed_by"),
+        bound_agent=item.get("bound_agent"),
+        goal_bound=item.get("goal_bound"),
+        blocks_agent=item.get("blocks_agent"),
+        excluded_agents=item.get("excluded_agents"),
+        global_gate=item.get("global_gate"),
+        unblocks_todo_id=item.get("unblocks_todo_id"),
+        successor_todo_ids=item.get("successor_todo_ids"),
+        no_followup=True if item.get("no_followup") == "true" else None,
+        **monitor_metadata,
         note=item.get("note"),
         evidence=item.get("evidence"),
         reason=item.get("reason"),
+        completed_at=item.get("completed_at"),
         updated_at=item.get("updated_at"),
     )
     if metadata:

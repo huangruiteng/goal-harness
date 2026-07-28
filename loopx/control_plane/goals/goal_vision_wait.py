@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+
+from ..todos.contract import (
+    TODO_TASK_CLASS_BLOCKER,
+    normalize_todo_claimed_by,
+    normalize_todo_id,
+    normalize_todo_status,
+)
+from ..todos.deferred_resume import todo_summary_blocked_successor_items
+
+
+GOAL_VISION_WAIT_STATE_SCHEMA_VERSION = "goal_vision_wait_state_v0"
+VISION_ACCEPTANCE_GAP_KIND = "vision_acceptance_gap"
+
+
+def exact_blocked_successor_wait_state(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    candidate = value
+    if value.get("schema_version") != GOAL_VISION_WAIT_STATE_SCHEMA_VERSION:
+        candidate = (
+            value.get("vision_wait_state")
+            if isinstance(value.get("vision_wait_state"), dict)
+            else {}
+        )
+        if not candidate:
+            projection = (
+                value.get("goal_frontier_projection")
+                if isinstance(value.get("goal_frontier_projection"), dict)
+                else {}
+            )
+            candidate = (
+                projection.get("vision_wait_state")
+                if isinstance(projection.get("vision_wait_state"), dict)
+                else {}
+            )
+    if (
+        candidate.get("schema_version") != GOAL_VISION_WAIT_STATE_SCHEMA_VERSION
+        or candidate.get("state") != "waiting"
+        or candidate.get("reason_code") != "exact_blocked_successor"
+        or candidate.get("automatic_resume") is not True
+        or not normalize_todo_id(candidate.get("selected_todo_id"))
+        or not str(candidate.get("resume_when") or "").strip()
+    ):
+        return {}
+    return candidate
+
+
+def exact_blocked_successor_frontier_identity(value: Any) -> str | None:
+    wait = exact_blocked_successor_wait_state(value)
+    if not wait:
+        return None
+    parts = {
+        "agent_id": str(wait.get("agent_id") or "").strip(),
+        "reason_code": "exact_blocked_successor",
+        "selected_todo_id": normalize_todo_id(wait.get("selected_todo_id")),
+        "resume_when": str(wait.get("resume_when") or "").strip(),
+    }
+    return hashlib.sha256(
+        json.dumps(parts, ensure_ascii=True, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def _compact_resume_condition(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    compact = {
+        key: value.get(key)
+        for key in (
+            "schema_version",
+            "resume_when",
+            "satisfied",
+            "kind",
+            "target",
+            "target_todo_id",
+            "target_status",
+            "target_archive_state",
+            "target_source_section",
+            "target_task_class",
+            "target_claimed_by",
+            "capability",
+            "provider",
+        )
+        if value.get(key) is not None
+    }
+    compact["satisfied"] = False
+    return compact
+
+
+def build_goal_vision_wait_state(
+    *,
+    agent_todo_summary: dict[str, Any] | None,
+    agent_id: str | None,
+    acceptance_gaps: list[dict[str, Any]] | None,
+    selectable_advancement_count: int,
+) -> dict[str, Any] | None:
+    """Project a temporary vision wait over an authoritative blocked frontier.
+
+    This is deliberately a read model, not a new todo or vision lifecycle
+    state. It may defer only ordinary open-vision acceptance gaps. Missing
+    checkpoints and closed-stage successor requirements remain strict.
+    """
+
+    gaps = [gap for gap in (acceptance_gaps or []) if isinstance(gap, dict)]
+    if not gaps or any(gap.get("kind") != VISION_ACCEPTANCE_GAP_KIND for gap in gaps):
+        return None
+    if selectable_advancement_count > 0:
+        return None
+
+    blocker_items = (
+        agent_todo_summary.get("current_agent_blocker_items")
+        if isinstance(agent_todo_summary, dict)
+        and isinstance(agent_todo_summary.get("current_agent_blocker_items"), list)
+        else []
+    )
+    safe_agent_id = normalize_todo_claimed_by(agent_id)
+    blocker_items = [
+        item
+        for item in blocker_items
+        if isinstance(item, dict)
+        and safe_agent_id is not None
+        and item.get("task_class") == TODO_TASK_CLASS_BLOCKER
+        and normalize_todo_status(item.get("status")) == "blocked"
+        and str(item.get("reason") or "").strip()
+        and normalize_todo_claimed_by(item.get("claimed_by"))
+        == safe_agent_id
+    ]
+    candidates = (
+        todo_summary_blocked_successor_items(
+            agent_todo_summary or {},
+            agent_id=agent_id,
+        )
+        if not blocker_items
+        else []
+    )
+    if candidates:
+        selected = candidates[0]
+        waiting_todo_ids = [
+            todo_id
+            for todo_id in (
+                normalize_todo_id(item.get("todo_id")) for item in candidates[:5]
+            )
+            if todo_id
+        ]
+        payload: dict[str, Any] = {
+            "schema_version": GOAL_VISION_WAIT_STATE_SCHEMA_VERSION,
+            "state": "waiting",
+            "reason_code": "exact_blocked_successor",
+            "agent_id": agent_id,
+            "waiting_todo_count": len(candidates),
+            "waiting_todo_ids": waiting_todo_ids,
+            "selected_todo_id": normalize_todo_id(selected.get("todo_id")),
+            "selected_todo_status": selected.get("status"),
+            "selected_todo_priority": selected.get("priority"),
+            "selected_todo_claimed_by": selected.get("claimed_by"),
+            "resume_when": selected.get("resume_when"),
+            "resume_condition": _compact_resume_condition(
+                selected.get("resume_condition")
+            ),
+            "deferred_acceptance_gap_count": len(gaps),
+            "deferred_acceptance_gap_kinds": [VISION_ACCEPTANCE_GAP_KIND],
+            "automatic_resume": True,
+            "resume_behavior": (
+                "when resume_ready becomes true, restore ordinary open-todo or "
+                "deferred-successor routing without closing the active vision"
+            ),
+        }
+        return {key: value for key, value in payload.items() if value is not None}
+
+    if not blocker_items:
+        return None
+    selected = blocker_items[0]
+    waiting_todo_ids = [
+        todo_id
+        for todo_id in (
+            normalize_todo_id(item.get("todo_id")) for item in blocker_items[:5]
+        )
+        if todo_id
+    ]
+    payload = {
+        "schema_version": GOAL_VISION_WAIT_STATE_SCHEMA_VERSION,
+        "state": "waiting",
+        "reason_code": "current_agent_blocker",
+        "agent_id": agent_id,
+        "waiting_todo_count": len(blocker_items),
+        "waiting_todo_ids": waiting_todo_ids,
+        "selected_todo_id": normalize_todo_id(selected.get("todo_id")),
+        "selected_todo_status": selected.get("status"),
+        "selected_todo_priority": selected.get("priority"),
+        "selected_todo_claimed_by": selected.get("claimed_by"),
+        "blocker_reason": str(selected.get("reason") or "").strip(),
+        "deferred_acceptance_gap_count": len(gaps),
+        "deferred_acceptance_gap_kinds": [VISION_ACCEPTANCE_GAP_KIND],
+        "automatic_resume": False,
+        "resume_behavior": (
+            "re-evaluate the active vision when the blocker is resolved or "
+            "superseded, or when runnable scoped advancement appears"
+        ),
+    }
+    return {key: value for key, value in payload.items() if value is not None}

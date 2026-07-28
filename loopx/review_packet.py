@@ -4,31 +4,26 @@ import re
 import shlex
 from typing import Any
 
-from .execution_profile import (
-    compact_execution_profile,
-    execution_profile_outcome_floor,
-    execution_profile_threshold,
-    outcome_floor_threshold,
+from .control_plane.runtime.decision_freshness import (
+    decision_freshness_warning as runtime_decision_freshness_warning,
+)
+from .control_plane.handoff.review_packet_context import (
+    agent_member_from_item,
+    agent_member_summary,
+    agent_todo_texts_for_handoff,
+    project_agent_required_reads,
+    project_asset_source,
+    project_asset_source_line,
+    todo_text_from_project_asset,
+)
+from .control_plane.handoff.delivery_contract import (
+    handoff_delivery_contract,
+    handoff_delivery_contract_summary,
 )
 from .handoff_budget import build_handoff_interface_budget
 
 
 BENCHMARK_REPORT_CHAIN_MAP_DOC = "benchmark-report-chain-map-v0.md"
-HANDOFF_TODO_PRIORITY_PATTERN = re.compile(r"^\s*\[(P[0-4])", re.IGNORECASE)
-HANDOFF_MONITOR_TASK_CLASSES = {"blocker", "continuous_monitor", "monitor", "user_gate"}
-HANDOFF_ADVANCEMENT_TASK_CLASSES = {"advancement_task", "execution_task", "delivery_task"}
-HANDOFF_MONITOR_MARKERS = (
-    "monitor",
-    "observation",
-    "readiness",
-    "watch",
-    "poll",
-    "dependency monitor",
-    "观察",
-    "监控",
-    "等待",
-)
-
 LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
 )
@@ -144,15 +139,15 @@ def build_read_only_map_command(status_payload: dict[str, Any], goal_id: str) ->
 
 
 def build_quota_should_run_command(status_payload: dict[str, Any], goal_id: str) -> str:
-    return "\n".join(
-        [
-            "loopx \\",
-            f"  --registry {shlex.quote(str(status_payload.get('registry') or '<registry>'))} \\",
-            f"  --runtime-root {shlex.quote(str(status_payload.get('runtime_root') or '<runtime-root>'))} \\",
-            "  --format json \\",
-            "  quota should-run \\",
-            f"  --goal-id {shlex.quote(goal_id)}",
-        ]
+    return " ".join(
+        (
+            "loopx",
+            f"--registry {shlex.quote(str(status_payload.get('registry') or '<registry>'))}",
+            "--format json",
+            "quota should-run",
+            f"--goal-id {shlex.quote(goal_id)}",
+            "--runtime-profile generic_cli",
+        )
     )
 
 
@@ -216,41 +211,6 @@ def find_queue_item(status_payload: dict[str, Any], goal_id: str) -> dict[str, A
     return None
 
 
-def decision_freshness_warning(status_payload: dict[str, Any], goal_id: str) -> dict[str, Any] | None:
-    freshness = (
-        status_payload.get("decision_freshness_summary")
-        if isinstance(status_payload.get("decision_freshness_summary"), dict)
-        else {}
-    )
-    raw_items = freshness.get("items") if isinstance(freshness.get("items"), list) else []
-    items: list[dict[str, Any]] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("goal_id") or "") != goal_id:
-            continue
-        if item.get("requires_decision_point_rebase") is not True:
-            continue
-        items.append(
-            {
-                "decision_kind": item.get("decision_kind"),
-                "freshness_state": item.get("freshness_state"),
-                "decision_at": item.get("decision_at"),
-                "classification": item.get("classification"),
-                "age_days": item.get("age_days"),
-                "newer_event_count_7d": item.get("newer_event_count_7d"),
-            }
-        )
-    if not items:
-        return None
-    return {
-        "source": freshness.get("source") or "run_history",
-        "window_days": freshness.get("window_days"),
-        "message": "旧 reward/gate 决策复用前需在当前 registry/state/quota/policy/run status 上重新对齐。",
-        "items": items[:3],
-    }
-
-
 def decision_freshness_packet_lines(warning: dict[str, Any] | None) -> list[str]:
     if not isinstance(warning, dict) or not warning:
         return []
@@ -287,135 +247,6 @@ def stale_latest_run_packet_lines(warning: dict[str, Any] | None) -> list[str]:
         f"reason={compact_packet_text(str(warning.get('reason') or ''), limit=120)}",
     ]
     return [redact_local_absolute_paths(line) for line in lines]
-
-
-def handoff_todo_priority_rank(text: str) -> int:
-    match = HANDOFF_TODO_PRIORITY_PATTERN.match(text)
-    if not match:
-        return 50
-    return int(match.group(1)[1])
-
-
-def handoff_todo_task_rank(item: dict[str, Any], text: str) -> int:
-    task_class = str(item.get("task_class") or "").strip().lower()
-    if task_class in HANDOFF_ADVANCEMENT_TASK_CLASSES:
-        return 0
-    if task_class in HANDOFF_MONITOR_TASK_CLASSES:
-        return 1
-    lowered = text.lower()
-    if any(marker in lowered for marker in HANDOFF_MONITOR_MARKERS):
-        return 1
-    return 0
-
-
-def handoff_todo_rank(item: dict[str, Any], text: str, ordinal: int) -> tuple[int, int, int]:
-    index = item.get("index")
-    stable_index = index if isinstance(index, int) else ordinal
-    return (
-        handoff_todo_task_rank(item, text),
-        handoff_todo_priority_rank(text),
-        stable_index,
-    )
-
-
-def open_todo_texts(todos: Any, *, limit: int = 3, rank_for_handoff: bool = False) -> list[str]:
-    if not isinstance(todos, dict):
-        return []
-    items = todos.get("items") if isinstance(todos.get("items"), list) else []
-    if not items and isinstance(todos.get("first_open_items"), list):
-        items = todos.get("first_open_items") or []
-    result: list[str] = []
-    ranked_result: list[tuple[tuple[int, int, int], str]] = []
-    for ordinal, item in enumerate(items):
-        if not isinstance(item, dict) or item.get("done"):
-            continue
-        text = str(item.get("text") or "").strip()
-        if text:
-            claimed_by = str(item.get("claimed_by") or "").strip()
-            display_text = text
-            if claimed_by:
-                display_text = f"{display_text} claimed_by={claimed_by}"
-            if rank_for_handoff:
-                ranked_result.append((handoff_todo_rank(item, text, ordinal), compact_packet_text(display_text)))
-                continue
-            result.append(compact_packet_text(display_text))
-            if len(result) >= limit:
-                return result
-    if rank_for_handoff:
-        return [text for _, text in sorted(ranked_result, key=lambda ranked: ranked[0])[:limit]]
-    return result
-
-
-def first_open_todo_text(todos: Any) -> str | None:
-    items = open_todo_texts(todos, limit=1)
-    return items[0] if items else None
-
-
-def todo_text_from_project_asset(item: dict[str, Any] | None, key: str) -> str | None:
-    items = todo_texts_from_project_asset(item, key, limit=1)
-    return items[0] if items else None
-
-
-def todo_texts_from_project_asset(item: dict[str, Any] | None, key: str, *, limit: int = 3) -> list[str]:
-    if not isinstance(item, dict):
-        return []
-    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
-    summary = project_asset.get(key) if isinstance(project_asset.get(key), dict) else {}
-    rank_for_handoff = key == "agent_todos"
-    summary_items = open_todo_texts(summary, limit=limit, rank_for_handoff=rank_for_handoff)
-    if summary_items:
-        return summary_items
-    next_text = str(summary.get("next") or "").strip()
-    if next_text:
-        return [compact_packet_text(next_text)]
-    return open_todo_texts(item.get(key), limit=limit, rank_for_handoff=rank_for_handoff)
-
-
-def agent_member_from_item(item: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(item, dict):
-        return None
-    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
-    member = project_asset.get("agent_member") if isinstance(project_asset.get("agent_member"), dict) else None
-    if member is None and isinstance(item.get("agent_member"), dict):
-        member = item["agent_member"]
-    return member if isinstance(member, dict) else None
-
-
-def agent_member_summary(item: dict[str, Any] | None) -> str | None:
-    member = agent_member_from_item(item)
-    if not member:
-        return None
-    claims = [
-        str(claim).strip()
-        for claim in (member.get("current_claims") or [])
-        if str(claim).strip()
-    ]
-    parts = [
-        f"agent={member.get('agent_id')}",
-        f"role={member.get('role')}",
-        "authority=advisory_projection",
-    ]
-    if member.get("scope_summary"):
-        parts.append(f"scope={member.get('scope_summary')}")
-    if member.get("worktree_policy"):
-        parts.append(f"worktree_policy={member.get('worktree_policy')}")
-    if claims:
-        parts.append(f"claims={','.join(claims[:5])}")
-    if member.get("handoff_agent"):
-        parts.append(f"handoff_agent={member.get('handoff_agent')}")
-    return compact_packet_text(" ".join(str(part) for part in parts if part))
-
-
-def project_asset_source(item: dict[str, Any] | None) -> str:
-    if isinstance(item, dict) and isinstance(item.get("project_asset"), dict):
-        return "project_asset"
-    return "legacy_raw_fallback"
-
-
-def project_asset_source_line(source: str) -> str:
-    if source == "project_asset":
-        return "project_asset（owner/gate/next/stop 来自 attention_queue.project_asset）"
-    return "legacy/raw fallback（未收到 project_asset；summary/action/todos 来自 raw queue/status 降级判断，不能当 owner/gate/stop authority）"
 
 
 def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
@@ -674,136 +505,6 @@ def benchmark_report_chain_handoff(item: dict[str, Any] | None) -> dict[str, Any
     }
 
 
-def _contract_minimum_text(value: str) -> str:
-    return value.replace("_or_", "/")
-
-
-def _contract_must_include_text(values: list[str]) -> str:
-    display = {
-        "coherent_artifact": "artifact",
-        "targeted_validation": "targeted validation",
-        "state_writeback": "state writeback",
-    }
-    return "、".join(display.get(value, value.replace("_", " ")) for value in values)
-
-
-def _contract_label_text(values: list[str]) -> str:
-    return "、".join(value.replace("_", " ") for value in values if value)
-
-
-def handoff_delivery_contract(item: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(item, dict):
-        return None
-    project_asset = item.get("project_asset") if isinstance(item.get("project_asset"), dict) else {}
-    profile = compact_execution_profile(
-        project_asset.get("execution_profile")
-        if isinstance(project_asset.get("execution_profile"), dict)
-        else None
-    )
-    threshold = execution_profile_threshold(profile)
-    readiness = item.get("handoff_readiness") if isinstance(item.get("handoff_readiness"), dict) else {}
-    streak = readiness.get("post_handoff_small_scale_streak")
-    outcome_floor = execution_profile_outcome_floor(profile)
-    outcome_threshold = outcome_floor_threshold(profile)
-    outcome_gap_streak = readiness.get("post_handoff_outcome_gap_streak")
-    small_degraded = isinstance(streak, int) and streak >= threshold
-    outcome_degraded = isinstance(outcome_gap_streak, int) and outcome_gap_streak >= outcome_threshold
-    if not small_degraded and not outcome_degraded:
-        return None
-    recent_runs = readiness.get("post_handoff_recent_runs")
-    recent_scales = [
-        str(run.get("delivery_batch_scale") or "unknown").strip() or "unknown"
-        for run in recent_runs or []
-        if isinstance(run, dict)
-    ][:3]
-    minimum_scale = str(profile.get("minimum_scale") or "multi_surface_or_implementation")
-    must_include = [
-        str(value)
-        for value in (profile.get("must_include") if isinstance(profile.get("must_include"), list) else [])
-        if str(value).strip()
-    ] or ["coherent_artifact", "targeted_validation", "state_writeback"]
-    spend_rule = str(profile.get("spend_rule") or "spend_only_after_artifact_validation_writeback")
-    must_advance = [
-        str(value)
-        for value in (
-            outcome_floor.get("must_advance")
-            if isinstance(outcome_floor.get("must_advance"), list)
-            else []
-        )
-        if str(value).strip()
-    ]
-    avoid = [
-        str(value)
-        for value in (
-            outcome_floor.get("avoid")
-            if isinstance(outcome_floor.get("avoid"), list)
-            else []
-        )
-        if str(value).strip()
-    ]
-    mode = (
-        "expand_after_surface_progress_loop"
-        if outcome_degraded and not small_degraded
-        else "expand_after_repeated_small_delivery"
-    )
-    outcome_summary = (
-        f"outcome_gap_streak={outcome_gap_streak}; outcome_threshold={outcome_threshold}; "
-        if outcome_degraded
-        else ""
-    )
-    summary = compact_packet_text(
-        f"{mode}; "
-        f"minimum_scale={minimum_scale}; "
-        f"include={'+'.join(must_include)}; "
-        f"spend_rule={spend_rule}; "
-        f"{outcome_summary}"
-        f"small_threshold={threshold}; "
-        "if_blocked=report_blocker_without_spend",
-        limit=220,
-    )
-    floor_sentence = ""
-    if outcome_degraded and (must_advance or avoid):
-        floor_sentence = (
-            f"推进 floor={_contract_label_text(must_advance)}；"
-            f"避免 {_contract_label_text(avoid)}；"
-        )
-    instruction = compact_packet_text(
-        "下一轮回到 active state P0/P1 outcome 做 audit，"
-        f"选连贯段，至少 {_contract_minimum_text(minimum_scale)}；"
-        f"{floor_sentence}"
-        f"含真实 {_contract_must_include_text(must_include)}；"
-        "禁止 isolated test/surface-only propagation；"
-        "若只能小步/表面，blocker，不 spend。",
-        limit=260,
-    )
-    return {
-        "mode": mode,
-        "minimum_scale": minimum_scale,
-        "must_include": must_include,
-        "outcome_floor": outcome_floor,
-        "spend_rule": spend_rule,
-        "small_scale_streak_threshold": threshold,
-        "outcome_gap_streak_threshold": outcome_threshold,
-        "if_blocked": "report_blocker_without_spend",
-        "post_handoff_small_scale_streak": streak,
-        "post_handoff_outcome_gap_streak": outcome_gap_streak,
-        "recent_scales": recent_scales,
-        "execution_profile": profile,
-        "summary": summary,
-        "instruction": instruction,
-    }
-
-
-def handoff_delivery_contract_summary(contract: dict[str, Any] | None) -> str | None:
-    if not isinstance(contract, dict):
-        return None
-    instruction = str(contract.get("instruction") or "").strip()
-    if instruction:
-        return instruction
-    summary = str(contract.get("summary") or "").strip()
-    return summary or None
-
-
 def authority_material_summary(goal: dict[str, Any] | None) -> str | None:
     if not isinstance(goal, dict):
         return None
@@ -1003,6 +704,7 @@ def project_agent_section(
     agent_member_text: str | None = None,
     handoff_followthrough_text: str | None = None,
     handoff_delivery_contract_text: str | None = None,
+    required_reads: list[dict[str, Any]] | None = None,
     approved_operator_gate: bool = False,
     connected_delivery: bool = False,
 ) -> str:
@@ -1019,12 +721,28 @@ def project_agent_section(
     member_line = f"Agent 成员：{agent_member_text}" if agent_member_text else None
     followthrough_line = f"交付观测：{handoff_followthrough_text}" if handoff_followthrough_text else None
     delivery_contract_line = f"交付合同：{handoff_delivery_contract_text}" if handoff_delivery_contract_text else None
+    first_required_read = next(
+        (
+            item
+            for item in (required_reads or [])
+            if isinstance(item, dict) and item.get("command")
+        ),
+        None,
+    )
+    required_read_line = (
+        "必读流水账：replan/接力前运行 "
+        f"`{compact_shell_command(str(first_required_read.get('command') or ''))}`；"
+        "只展开本 agent，其他 agent 只看 frontier。"
+        if first_required_read
+        else None
+    )
     if approved_operator_gate:
         lines = [
             goal_guard,
             context_rule,
             source_line,
             member_line,
+            required_read_line,
             todo_line,
             *extra_todo_lines,
             authority_line,
@@ -1042,6 +760,7 @@ def project_agent_section(
             context_rule,
             source_line,
             member_line,
+            required_read_line,
             todo_line,
             *extra_todo_lines,
             authority_line,
@@ -1059,6 +778,7 @@ def project_agent_section(
             context_rule,
             source_line,
             member_line,
+            required_read_line,
             todo_line,
             *extra_todo_lines,
             authority_line,
@@ -1076,6 +796,7 @@ def project_agent_section(
             context_rule,
             source_line,
             member_line,
+            required_read_line,
             todo_line,
             *extra_todo_lines,
             authority_line,
@@ -1093,6 +814,7 @@ def project_agent_section(
             context_rule,
             source_line,
             member_line,
+            required_read_line,
             todo_line,
             *extra_todo_lines,
             authority_line,
@@ -1110,6 +832,7 @@ def project_agent_section(
             context_rule,
             source_line,
             member_line,
+            required_read_line,
             todo_line,
             *extra_todo_lines,
             authority_line,
@@ -1145,7 +868,7 @@ def build_review_packet(
     question = str(item.get("operator_question") or prompt["question"]) if isinstance(item, dict) else prompt["question"]
     summary = str(item.get("recommended_action") or "当前状态源没有对应的 action card。") if isinstance(item, dict) else "当前状态源没有对应的 action card。"
     user_todo_text = todo_text_from_project_asset(item, "user_todos")
-    agent_todo_items = todo_texts_from_project_asset(item, "agent_todos")
+    agent_todo_items = agent_todo_texts_for_handoff(item)
     agent_todo_text = agent_todo_items[0] if agent_todo_items else None
     asset_source = project_asset_source(item)
     asset_source_line = project_asset_source_line(asset_source)
@@ -1155,7 +878,12 @@ def build_review_packet(
     chain_handoff = benchmark_report_chain_handoff(item)
     delivery_contract = handoff_delivery_contract(item)
     delivery_contract_text = handoff_delivery_contract_summary(delivery_contract)
-    freshness_warning = decision_freshness_warning(status_payload, goal_id)
+    required_reads = project_agent_required_reads(goal_id, item)
+    freshness_warning = runtime_decision_freshness_warning(
+        status_payload,
+        goal_id=goal_id,
+        message="旧 reward/gate 决策复用前需在当前 registry/state/quota/policy/run status 上重新对齐。",
+    )
     freshness_warning_lines = decision_freshness_packet_lines(freshness_warning)
     stale_latest_run_warning = (
         item.get("stale_latest_run_warning")
@@ -1196,6 +924,7 @@ def build_review_packet(
         agent_member_text=member_summary,
         handoff_followthrough_text=followthrough_summary,
         handoff_delivery_contract_text=delivery_contract_text,
+        required_reads=required_reads,
         approved_operator_gate=approved_handoff,
         connected_delivery=delivery_handoff,
     )
@@ -1271,6 +1000,7 @@ def build_review_packet(
         "handoff_followthrough_summary": followthrough_summary,
         "benchmark_report_chain_handoff": chain_handoff,
         "handoff_delivery_contract": delivery_contract,
+        "project_agent_required_reads": required_reads,
         "handoff_interface_budget": handoff_interface_budget,
         "decision_freshness_warning": freshness_warning,
         "stale_latest_run_warning": stale_latest_run_warning,

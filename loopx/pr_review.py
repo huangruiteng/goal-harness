@@ -5,20 +5,18 @@ import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+
+from .control_plane.runtime.time import now_utc_iso
+from .presentation.markdown import as_dict as _as_dict
+from .presentation.markdown import as_list as _as_list
+from .presentation.public_safety import public_safe_boundary, redact_public_text
 
 
 COMMAND = "/loopx-pr-review"
 SCHEMA_VERSION = "loopx_pr_review_command_response_v0"
 
-BOUNDARY = {
-    "raw_logs_recorded": False,
-    "raw_transcripts_recorded": False,
-    "raw_connector_payloads_recorded": False,
-    "credential_values_recorded": False,
-    "absolute_paths_recorded": False,
-    "private_source_bodies_recorded": False,
-}
+BOUNDARY = public_safe_boundary()
 
 SOURCE_SURFACES = [
     "GitHub pull request metadata",
@@ -26,11 +24,6 @@ SOURCE_SURFACES = [
     "GitHub pull request changed-file list",
     "GitHub pull request status check rollup",
 ]
-
-LOCAL_PATH_PATTERNS = (
-    re.compile(r"/(?:Users|home|private|tmp|var)/[^\s`|,)]+"),
-    re.compile(r"[A-Za-z]:\\\\Users\\\\[^\s`|,)]+"),
-)
 
 RUNTIME_OR_CLI_PREFIXES = (
     "src/",
@@ -73,7 +66,7 @@ CODE_EXTENSIONS = (
 )
 
 UI_PREFIXES = (
-    "apps/dashboard/",
+    "apps/presentation/dashboard/",
     "apps/web/",
     "apps/frontend/",
     "apps/site/",
@@ -88,17 +81,11 @@ UI_PREFIXES = (
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return now_utc_iso()
 
 
 def _redact_text(value: object, *, limit: int = 320) -> str:
-    text = str(value or "").strip()
-    for pattern in LOCAL_PATH_PATTERNS:
-        text = pattern.sub("<local-path-redacted>", text)
-    text = re.sub(r"\s+", " ", text)
-    if len(text) > limit:
-        return text[: max(0, limit - 1)].rstrip() + "..."
-    return text
+    return redact_public_text(value, limit=limit)
 
 
 def _join_short(items: list[str], *, limit: int = 3, fallback: str = "未提供") -> str:
@@ -106,14 +93,6 @@ def _join_short(items: list[str], *, limit: int = 3, fallback: str = "未提供"
     if not compact:
         return fallback
     return "、".join(compact[:limit])
-
-
-def _as_dict(value: object) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _as_list(value: object) -> list[Any]:
-    return value if isinstance(value, list) else []
 
 
 def _run_gh_json(args: list[str], *, cwd: Path | None = None) -> Any:
@@ -190,6 +169,24 @@ def fetch_github_pull_requests(
     state_filter: str = "all",
     since: str | None = None,
 ) -> list[dict[str, Any]]:
+    scan = scan_github_pull_requests(
+        repo=repo,
+        limit=limit,
+        cwd=cwd,
+        state_filter=state_filter,
+        since=since,
+    )
+    return list(scan["pull_requests"])
+
+
+def scan_github_pull_requests(
+    *,
+    repo: str | None,
+    limit: int,
+    cwd: Path | None = None,
+    state_filter: str = "all",
+    since: str | None = None,
+) -> dict[str, Any]:
     repo_args = ["--repo", repo] if repo else []
     normalized_state = normalize_pr_state_filter(state_filter)
     search_args: list[str] = []
@@ -205,6 +202,7 @@ def fetch_github_pull_requests(
         "reviewDecision",
         "mergeStateStatus",
         "headRefName",
+        "headRefOid",
         "baseRefName",
         "author",
         "updatedAt",
@@ -224,6 +222,7 @@ def fetch_github_pull_requests(
 
     detailed: list[dict[str, Any]] = []
     seen_numbers: set[str] = set()
+    state_scans: list[dict[str, Any]] = []
 
     def append_state(state: str) -> None:
         rows = _run_gh_json(
@@ -242,7 +241,18 @@ def fetch_github_pull_requests(
             cwd=cwd,
         )
         if not isinstance(rows, list):
+            state_scans.append(
+                {
+                    "state": state,
+                    "fetch_limit": fetch_limit,
+                    "fetched_count": 0,
+                    "included_after_window": 0,
+                    "source_saturated": False,
+                    "source_read_valid": False,
+                }
+            )
             return
+        included_before = len(detailed)
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -254,13 +264,32 @@ def fetch_github_pull_requests(
             if number:
                 seen_numbers.add(number)
             detailed.append(row)
+        state_scans.append(
+            {
+                "state": state,
+                "fetch_limit": fetch_limit,
+                "fetched_count": len(rows),
+                "included_after_window": len(detailed) - included_before,
+                "source_saturated": len(rows) >= fetch_limit,
+                "source_read_valid": True,
+            }
+        )
 
     if normalized_state == "all":
         append_state("open")
         append_state("closed")
     else:
         append_state(normalized_state)
-    return detailed
+    return {
+        "schema_version": "pr_review_source_scan_v0",
+        "complete": all(
+            item["source_read_valid"] is True
+            and item["source_saturated"] is False
+            for item in state_scans
+        ),
+        "pull_requests": detailed,
+        "states": state_scans,
+    }
 
 
 def load_pr_fixture(path: Path) -> tuple[str | None, list[dict[str, Any]]]:
@@ -573,28 +602,28 @@ def _review_template(item: dict[str, Any]) -> dict[str, Any]:
     sections = [
         _section(
             "动机",
-            "40-80字",
-            "读 PR title/body/diff 后填写：这个 PR 为什么存在，想解决哪个用户或维护者问题。",
+            "200-350字",
+            "解释旧行为、具体痛点、受影响的用户或调用方、目标结果与必要性；说明不合并会继续付出什么代价，以及需求来自活跃调用方还是未来设想。",
         ),
         _section(
             "改动思路",
-            "40-100字",
-            "读关键 diff 后填写：作者采用什么路线解决问题，不要只复述文件名。",
+            "250-450字",
+            "解释所选架构、改动前后的控制流或数据流、所有权边界、关键不变量和替代方案取舍；为不熟悉子系统的读者给出一条正向运行链路。",
         ),
         _section(
             "具体改动",
-            "60-140字",
-            "读 diff 后填写：具体改了哪些模块、协议、命令、文档或测试，只保留决策相关细节。",
+            "300-600字",
+            "把关键文件和符号映射到行为，覆盖接口、配置或状态、兼容路径、测试与文档；说明各部分如何协作，并给出一个具体输入到输出的例子。",
         ),
         _section(
             "对主干的风险",
-            "40-100字",
-            "读 diff 和 checks 后填写：合入 main 可能破坏什么，哪些验证能覆盖。",
+            "250-500字",
+            "按严重度列出有文件或符号证据的发现，评估爆炸半径、兼容性、权限、默认副作用、失败与回滚、可观测性和缺失覆盖；策略或生命周期改动必须解释一条负向链路。",
         ),
         _section(
             "我的整体评价",
-            "30-80字",
-            "读完整 PR 后填写：approve / request changes / defer / merge after checks，并给一句理由。",
+            "150-300字",
+            "权衡价值与复杂度，列出实际检查或运行的验证，注明审阅的 head SHA，并给出精确结论；若阻塞，说明最小修复和复审所需证据。",
         ),
     ]
     return {
@@ -602,7 +631,7 @@ def _review_template(item: dict[str, Any]) -> dict[str, Any]:
         "purpose": "Empty scaffold only; agentloop fills it after reading PR body and diff.",
         "sections": sections,
         "review_order": _review_order(key_files),
-        "output_hint": "Keep each PR concise; the filled five-block review is usually 100-200 Chinese characters total for small PRs and longer only when risk demands it.",
+        "output_hint": "Write for a reader unfamiliar with the PR: explain context, architecture, implementation, validation, necessity, and risk with concrete evidence. Follow each section's range as a depth signal, not filler.",
     }
 
 
@@ -616,6 +645,7 @@ def _agent_response_contract() -> dict[str, Any]:
         "default_review_scope": "Review PRs in review_groups.unmerged first, then review_groups.merged, bounded by the requested limit.",
         "required_packet_fields_to_preserve": [
             "agent_response_contract",
+            "result_completeness",
             "review_groups",
             "pull_requests[].review_template",
             "pull_requests[].evidence_commands",
@@ -635,12 +665,46 @@ def _agent_response_contract() -> dict[str, Any]:
             "对主干的风险",
             "我的整体评价",
         ],
+        "explanation_depth_contract": {
+            "schema_version": "pr_review_explanation_depth_v0",
+            "reader_profile": "A technically curious reader who may not know this PR or subsystem.",
+            "verdict_preface": "Lead with one evidence-based merge verdict and the highest-severity reason before the five sections.",
+            "evidence_layers": [
+                "problem: old behavior, concrete pain, affected caller, and before/after scenario",
+                "architecture: entry point, control/data flow, ownership, state, authority, and failure boundary",
+                "implementation: important files and symbols, behavior changes, compatibility plumbing, tests, and docs",
+                "validation: checks and focused reproductions tied to invariants, including untested or environment-blocked cases",
+            ],
+            "necessity_questions": [
+                "What remains broken or expensive without this PR?",
+                "Why is a smaller call-site fix insufficient, or why would it be sufficient?",
+                "Which plausible alternative was rejected and what trade-off was chosen?",
+            ],
+            "runtime_walkthroughs": {
+                "positive": "Trace one user or host action through calls/state to the observable result.",
+                "negative_when": "For selectors, policy, authority, lifecycle, or bridge changes, trace one rejection or failure case.",
+            },
+            "risk_scan": [
+                "false-ready or false-success state",
+                "authority, permission, or scope bypass",
+                "unexpected default-on installation or side effect",
+                "compatibility or persisted-state migration gap",
+                "host-specific assumption presented as host-neutral",
+                "duplicated truth, stale projection, or lifecycle leak",
+                "missing negative test, rollback behavior, or error observability",
+                "scope inflation or speculative abstraction without an active caller",
+            ],
+            "freshness": "Record the remote head SHA before review and query it again before the verdict; restart if it changed.",
+        },
         "instructions": [
             "Run loopx pr-review first and use review_groups as the queue.",
+            "Before treating the queue as exhaustive, require result_completeness.complete=true. If it is false and the user asked for all/every PR, rerun with result_completeness.recommended_limit and preserve the new full packet.",
             "When the visible message starts with /loopx-pr-review, treat words such as open, closed, merged, today, or time windows as filters, not as permission to return stats only.",
             "Do not stop at the queue/table summary when the user invokes /loopx-pr-review.",
-            "Do not pipe the JSON packet through jq or another projection that drops agent_response_contract, review_groups, pull_requests[].review_template, or pull_requests[].evidence_commands before planning the final answer.",
+            "Do not pipe the JSON packet through jq or another projection that drops agent_response_contract, result_completeness, review_groups, pull_requests[].review_template, or pull_requests[].evidence_commands before planning the final answer.",
             "For each selected PR, run the evidence_commands or equivalent PR body/diff reads before filling the five sections.",
+            "Follow explanation_depth_contract and the per-section instructions; the packet, rather than host-specific skill prose, is the canonical explanation-depth contract.",
+            "Lead with actionable findings, explain repository-specific terms on first use, and distinguish intended behavior from implementation and validation evidence.",
             "Do not fill the five sections from metadata_risk_hint alone; metadata_risk_hint is only queue-ordering context.",
             "Use the installed loopx command or the intended checked-out LoopX worktree; if using python -m loopx.cli from a checkout, first confirm that checkout includes this response contract.",
             "Only treat the request as stats/list-only when the user explicitly opts out of review with wording such as 只统计, 只列出, stats only, list only, 不要 review, or 不用分析; then say that no detailed PR review was performed.",
@@ -805,6 +869,7 @@ def _normalize_pr(pr: dict[str, Any]) -> dict[str, Any]:
         "merge_commit": _redact_text(merge_commit_oid, limit=80) if merge_commit_oid else None,
         "base_ref": _redact_text(pr.get("baseRefName"), limit=80),
         "head_ref": _redact_text(pr.get("headRefName"), limit=120),
+        "head_oid": _redact_text(pr.get("headRefOid"), limit=80),
         "is_draft": bool(pr.get("isDraft")),
         "review_decision": str(pr.get("reviewDecision") or "UNKNOWN"),
         "merge_state": str(pr.get("mergeStateStatus") or pr.get("mergeable") or "UNKNOWN"),
@@ -824,9 +889,10 @@ def _normalize_pr(pr: dict[str, Any]) -> dict[str, Any]:
         "main_regression_analysis": _main_regression_analysis(pr, files),
         "review_goal": "Fill the five-block review template after reading the PR body and diff.",
         "evidence_commands": [
-            f"gh pr view {number} --json title,body,files,commits,statusCheckRollup",
+            f"gh pr view {number} --json title,body,files,commits,statusCheckRollup,headRefOid,updatedAt",
             f"gh pr diff {number} --name-only",
             f"gh pr diff {number} --patch",
+            f"gh pr view {number} --json headRefOid,updatedAt",
         ]
         if number
         else [],
@@ -843,6 +909,7 @@ def build_pr_review_packet(
     source: str,
     state_filter: str = "all",
     since: str | None = None,
+    source_scan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_state_filter = normalize_pr_state_filter(state_filter)
     normalized_all = [_normalize_pr(item) for item in pull_requests]
@@ -864,6 +931,63 @@ def build_pr_review_packet(
         normalized = normalized_all[:packet_limit]
         unmerged_items = [item for item in normalized if str(item.get("state") or "").upper() != "MERGED"]
         merged_items = [item for item in normalized if str(item.get("state") or "").upper() == "MERGED"]
+    source_scan_complete = (
+        source_scan.get("complete") is True
+        if isinstance(source_scan, Mapping)
+        else True
+    )
+    group_observed_counts = {
+        "unmerged": len(unmerged_all),
+        "merged": len(merged_all),
+    }
+    group_included_counts = {
+        "unmerged": len(unmerged_items),
+        "merged": len(merged_items),
+    }
+    group_completeness = {
+        key: source_scan_complete
+        and group_included_counts[key] == group_observed_counts[key]
+        for key in group_observed_counts
+    }
+    complete = all(group_completeness.values())
+    recommended_limit = None
+    if not complete:
+        recommended_limit = max(
+            packet_limit * 2,
+            max(group_observed_counts.values(), default=0) + 1,
+        )
+    source_scan_summary = None
+    if isinstance(source_scan, Mapping):
+        source_scan_summary = {
+            key: value
+            for key, value in source_scan.items()
+            if key != "pull_requests"
+        }
+    result_completeness = {
+        "schema_version": "pr_review_result_completeness_v0",
+        "complete": complete,
+        "truncated": not complete,
+        "limit": packet_limit,
+        "limit_scope": "per_group" if normalized_state_filter == "all" else "filtered_queue",
+        "source_scan_complete": source_scan_complete,
+        "observed_count_is_lower_bound": not source_scan_complete,
+        "observed_pr_count": len(normalized_all),
+        "included_pr_count": len(normalized),
+        "groups": {
+            key: {
+                "complete": group_completeness[key],
+                "observed_count": group_observed_counts[key],
+                "included_count": group_included_counts[key],
+                "truncated": not group_completeness[key],
+            }
+            for key in ("unmerged", "merged")
+        },
+        "recommended_limit": recommended_limit,
+        "rerun_cli_args": (
+            ["--limit", str(recommended_limit)] if recommended_limit else []
+        ),
+        "source_scan": source_scan_summary,
+    }
     review_sequence = [_review_sequence_entry(item, rank=index) for index, item in enumerate(normalized, start=1)]
     open_review_required = [
         item
@@ -883,6 +1007,9 @@ def build_pr_review_packet(
             "title": "Unmerged PRs",
             "intent": "Review before merge: decide approve, request changes, defer, or wait for checks.",
             "count": len(unmerged_items),
+            "complete": group_completeness["unmerged"],
+            "observed_count": group_observed_counts["unmerged"],
+            "truncated": not group_completeness["unmerged"],
             "pr_numbers": [item.get("number") for item in unmerged_items],
             "review_sequence": [
                 _review_sequence_entry(item, rank=index)
@@ -895,6 +1022,9 @@ def build_pr_review_packet(
             "title": "Merged PRs",
             "intent": "Post-merge audit: check outcome, regression risk, and follow-up quality without blocking already-merged work.",
             "count": len(merged_items),
+            "complete": group_completeness["merged"],
+            "observed_count": group_observed_counts["merged"],
+            "truncated": not group_completeness["merged"],
             "pr_numbers": [item.get("number") for item in merged_items],
             "review_sequence": [
                 _review_sequence_entry(item, rank=index)
@@ -928,8 +1058,9 @@ def build_pr_review_packet(
             },
             "source": source,
             "include": [
-                "pull_request_list",
-                "review_groups",
+            "pull_request_list",
+            "result_completeness",
+            "review_groups",
                 "review_template",
                 "agent_response_contract",
                 "change_scope",
@@ -956,6 +1087,7 @@ def build_pr_review_packet(
             "source_surfaces": SOURCE_SURFACES,
             "recommended_first_pr": first,
         },
+        "result_completeness": result_completeness,
         "review_sequence": review_sequence,
         "review_groups": review_groups,
         "pull_requests": normalized,
@@ -965,14 +1097,14 @@ def build_pr_review_packet(
                 "action_id": "act_review_next_pr",
                 "kind": "review",
                 "requires_user_approval": False,
-                "requires_primary_agent": False,
+                "requires_maintainer_authority": False,
                 "preview": "Start with the first PR in review_sequence, read its motivation, inspect key files, then decide approve/request changes/defer.",
             },
             {
                 "action_id": "act_merge_after_review",
                 "kind": "merge_or_publish",
                 "requires_user_approval": False,
-                "requires_primary_agent": True,
+                "requires_maintainer_authority": True,
                 "preview": "Merge only after repository policy, validation, and public/private boundary checks pass.",
             },
         ],
@@ -1008,6 +1140,7 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
 
     summary = _as_dict(payload.get("summary"))
     request = _as_dict(payload.get("request"))
+    completeness = _as_dict(payload.get("result_completeness"))
     lines = [
         "# Project PR Review Queue",
         "",
@@ -1016,6 +1149,7 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
         f"- state_filter: `{request.get('state_filter') or 'all'}`",
         f"- since: `{request.get('since') or 'not set'}`",
         f"- headline: {summary.get('headline')}",
+        f"- complete: `{completeness.get('complete')}`; truncated=`{completeness.get('truncated')}`; recommended_limit=`{completeness.get('recommended_limit')}`",
         f"- counts: total=`{summary.get('total_pr_count')}`, open=`{summary.get('open_pr_count')}`, merged=`{summary.get('merged_pr_count')}`, review_attention=`{summary.get('review_attention_count')}`, draft=`{summary.get('draft_count')}`",
         "- tool contract: run `loopx pr-review` first and use its `review_groups`; use ad hoc `gh` commands only after selecting a PR from this packet.",
         "- final answer contract: queue/table is only a preface; `/loopx-pr-review` must return filled five-block review cards after reading PR evidence.",
@@ -1026,6 +1160,8 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
         "- Do not stop at the queue/table summary.",
         "- Do not collapse this packet to `.summary` and `.review_sequence` only; preserve `agent_response_contract`, `review_groups`, `pull_requests[].review_template`, and `pull_requests[].evidence_commands`.",
         "- For each selected PR, read PR body/files/diff/checks first, then return one review card.",
+        "- Follow `agent_response_contract.explanation_depth_contract`; explain the PR for a technically curious reader who may not know the subsystem.",
+        "- Bind the verdict to the remote head SHA and recheck it before answering.",
         "- Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`.",
         "- `metadata_risk_hint` is only queue-ordering metadata; do not copy it as the final risk judgment.",
         "",

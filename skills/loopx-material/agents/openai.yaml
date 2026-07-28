@@ -1,0 +1,4 @@
+interface:
+  display_name: "LoopX Material"
+  short_description: "Operate an opt-in, lossless material lifecycle"
+  default_prompt: "Use the official LoopX Material workflow for inventory, exact-read evidence, lossless rebuild, bounded rerank, owner-gated apply, and rollback."

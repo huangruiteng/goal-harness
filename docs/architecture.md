@@ -34,6 +34,108 @@ The core repository intentionally avoids domain logic. A data experiment goal,
 a note-maintenance goal, and a harness self-improvement goal should share the
 same runtime and contract, but use different adapters.
 
+## Runtime Responsibility Model
+
+The seven layers above describe durable control-plane surfaces. They do not
+describe who performs each step of a turn. For runtime ownership, use four
+responsibilities:
+
+| Responsibility | Owns | Must not own |
+| --- | --- | --- |
+| **Agent** | Planning, analysis, tool use, and one bounded execution through a host/runtime | Durable goal lifecycle or unscoped effect authority |
+| **Provider** | External calls and bounded observations, effect results, and readback | Domain transition policy or LoopX todo state |
+| **Capability** | The caller-facing outcome contract, domain policy, observation normalization, validation, and typed transition proposals | Durable scheduling, claims, gates, or direct lifecycle writes |
+| **LoopX Kernel** | Goal, todo, claim, gate, monitor, quota, accepted writeback, recovery, and scheduling | Domain-specific reasoning or provider implementation details |
+
+The request and result paths therefore run in opposite directions:
+
+```text
+Agent -> Capability -> Provider -> external system
+external observation / effect readback -> Provider -> Capability
+typed transition proposal -> LoopX Kernel -> next todo / gate / monitor / turn
+```
+
+An observation is not a transition, and a provider receipt is not accepted
+progress until the capability validates it and the Kernel commits the resulting
+state change. Domain state, evidence, and receipts are artifacts exchanged
+between these responsibilities, not additional runtime owners.
+
+The host/runtime carries the Agent's session, tools, and invocation. It is a
+replaceable execution boundary, not a fifth domain decision owner.
+
+An **extension** is a separate delivery and lifecycle axis. It may install an
+optional provider, while a built-in capability may use a core provider. The
+extension does not become a fifth runtime responsibility and does not acquire
+Kernel authority. This boundary is represented directly by
+`CapabilityRegistry`, which registers providers, capability contracts, and
+their implementations separately.
+
+### Agent-Native Kanban Is A Projection
+
+LoopX state can be rendered as an agent-native Kanban: todos are cards, logical
+lanes are derived views, and card moves are validated transitions. The metaphor
+does not introduce another state owner. Canonical todo/event/state contracts
+remain authoritative; dashboards and collaboration boards consume public-safe
+projections.
+
+Capabilities may project domain lanes such as Issue Fix
+`feasibility -> patch -> checks -> review -> merge` without adding those labels
+to the Kernel lifecycle. Providers supply the external facts behind the lane,
+capabilities validate them and propose typed transitions, and the Kernel owns
+claim, gate, monitor, quota, writeback, recovery, and terminal closure. See the
+[concept primer](development/control-plane-course/00-concept-primer.md) and
+[state substrate lecture](development/control-plane-course/02-state-substrate.md).
+
+## Current Dependency Budget
+
+Dependency direction is enforced incrementally while large compatibility
+facades are split. `loopx.control_plane` may not gain dependencies on
+presentation, CLI, capability, or benchmark-adapter layers; the architecture
+test keeps one explicit quota-Markdown migration edge as debt.
+
+The legacy `loopx.status` facade currently has one additional outward edge, the
+SkillsBench verifier-bootstrap attribution helper. This is migration debt, not
+an extension point. The architecture test records its exact module target so a
+new outward edge fails, and removing the edge requires deleting its stale
+allowlist entry in the same change.
+
+Each edge should move only after characterization parity exists. Adapter-specific
+enrichment belongs behind application/plugin composition rather than in the
+status core. Status Markdown callers now use the presentation renderer directly;
+the former `loopx.status.render_status_markdown` wrapper was retired after parity
+fixtures and repository callers migrated. The formerly SkillsBench-named solution
+quality helper moved inward after characterization showed that it projects only
+generic compact benchmark fields; its shipped schema remains compatible. Hiding
+an adapter dependency inside a function or dynamic import does not count as
+architectural separation.
+
+### Status And Quota Facades
+
+`loopx.status` and `loopx.quota` remain compatibility entry points for their
+facade-owned behavior. Imported implementations belong to their canonical
+bounded modules; the only compatibility-only re-exports are the keys in each
+facade's `_PUBLIC_COMPAT_REEXPORTS` map, whose values name the canonical owner.
+
+New repository code must import the canonical owner. A compatibility-only
+entry may remain while a public example, regression, or documented import
+contract consumes it. Zero-consumer, undocumented entries are removed instead
+of becoming permanent accidental API. Removing a retained entry requires an
+explicit migration or deprecation step, and status/quota CLI JSON parity must
+stay characterized independently of the compatibility binding.
+
+Capabilities and extensions are also orthogonal: a capability is a product
+contract, while an extension is an independently managed delivery unit that
+may install providers for one or more capabilities. The provider-aware
+registration and manifest boundary is documented in
+[extensions.md](reference/extensions.md).
+
+Operator-inbox urgency is one such inward contract. Quota consumes the
+content-free `operator_inbox_urgency_v0` read model from the control plane; it
+does not import the Lark provider. The existing Lark config, event files,
+capability key, lane names, and CLI remain compatibility surfaces while the
+provider delegates urgency projection to that contract. Provider files should
+move only after this read-model and work-lane parity remains characterized.
+
 LoopX should still absorb field-tested project-control mechanisms such
 as authority registries, current-belief TODOs, managed external-source
 manifests, experiment boards, validation surface maps, and gated handoff
@@ -125,14 +227,17 @@ The server path should land in layers:
    concurrency with per-goal locks, idempotency keys, and optimistic revision
    checks. `todo`, `refresh-state`, reward writeback, quota spend, and history
    append paths should fail closed on stale revision or overlapping write scope.
-2. **Lease projection**: add `task_lease_v0` records for claimed todos,
-   including owner, TTL, write scope, idempotency key, and conflict policy.
+2. **Lease adoption**: the optional local `task_lease_v0` CLI already provides
+   owner, TTL, write scope, idempotency, conflict, transfer, and release
+   semantics. Keep `claimed_by` as the default soft route and adopt hard leases
+   only for hosts with a demonstrated concurrent-write problem.
    The pending/lease key should be per todo: `(goal_id, todo_id)` is the
    contention unit, not the whole goal or project. Different todos under the
    same goal may proceed in parallel when their write scopes and gates allow
    it; competing claims on the same todo fail closed or renew.
-   Status and quota should expose active leases so Codex/App/CLI loops can
-   avoid duplicate work without reading chat history.
+   Status currently exposes capability availability; quota does not enforce or
+   consume hard leases. A later host integration may project active lease rows
+   after its adoption contract and fallback behavior are validated.
 3. **Loopback coordinator**: extend the existing local status server into a
    loopback-only coordinator that can centralize per-goal locks, leases, quota
    decisions, compact status projection, and heartbeat scheduling. It must bind
@@ -165,20 +270,17 @@ Acceptance criteria for the first server-backed milestone:
 - all compact server responses pass the public/private boundary scan;
 - tests cover one concurrent writer conflict and one daemon-down fallback.
 
-Before the server-backed lease exists, v0.1 keeps a lighter shared-control-plane
+Before the server-backed lease exists, LoopX keeps a lighter shared-control-plane
 contract: todo metadata may include `claimed_by`, written by the todo CLI under
 the active-state file lock. That field is a soft owner for visibility only, and
 the CLI accepts it only when the id is registered in
-`coordination.registered_agents`. Each shared goal should also declare one
-`coordination.primary_agent`: the primary owns final review, verification,
-merge, publication, and reassignment. Side agents keep repository edits in
-independent git worktrees/branches. They may self-merge small AGENTS-eligible
-validated changes with explicit evidence, and otherwise create successor
-handoff todos claimed by the primary agent by default or by
-`coordination.side_agent_handoff_agent` when configured. Agent scope remains in
-heartbeat automation prompts or sub-agent handoffs; a future server lease should
-be per todo and add TTL, idempotency key, stale-claim detection, overlap
-warnings, and compare-and-swap style conflict responses.
+`coordination.registered_agents`. Registered identities are peers. Work authority
+comes from explicit claims, task leases, goal/write boundaries, and typed
+continuation policy rather than a durable leader role. Any peer doing repository
+work follows the same workspace-isolation rule when the selected task writes;
+repository maintainer policy determines whether it may self-merge. A future
+server lease should stay per todo and add TTL, idempotency keys, stale-claim
+detection, overlap warnings, and compare-and-swap conflict responses.
 
 ## State Interaction Model
 
@@ -199,23 +301,22 @@ of that write, and how the dashboard proves the transition happened.
 
 See [state-interaction-model.md](state-interaction-model.md).
 
-## Controller / Sub-Agent Model
+## Peer Task Coordination
 
-For Codex-style parallel work, LoopX treats the main goal run as a
-controller run. The controller owns:
+For parallel work, every registered LoopX agent has equal identity authority.
+Each peer owns only the work it has claimed or leased, within the current goal
+boundary. A peer may:
 
-- the objective and active goal state,
-- the decision to spawn sub-agents,
-- write-scope assignment,
-- merge or rejection of child results,
-- final validation, public/private scan, and state writeback.
+- inspect or claim an eligible todo;
+- advance one bounded implementation, validation, monitor, or repair slice;
+- create an ordinary independent successor, optionally with executor exclusions;
+- write back evidence for its own accepted task outcome.
 
-Sub-agents own bounded child work:
-
-- read-only repo exploration,
-- one implementation slice with a disjoint write scope,
-- one validation or benchmark surface,
-- one risk or boundary check.
+When bounded orchestration is enabled, LoopX deterministically selects a
+temporary coordinator for one task bundle. That coordinator may activate or
+resume eligible peer lanes and aggregate accepted bundle evidence. It does not
+become a durable leader and gains no implicit review, merge, publication, or
+replan authority over other identities.
 
 LoopX does not replace the operating-system scheduler or Codex App
 executor. It should, however, own the simple compute quota that those executors
@@ -224,7 +325,7 @@ product source of truth for project priority.
 
 See [quota-allocation.md](quota-allocation.md).
 
-See [codex-subagent-orchestration.md](codex-subagent-orchestration.md).
+See [peer-agent-runtime-v1.md](reference/protocols/peer-agent-runtime-v1.md).
 
 ## Status / Attention Queue
 

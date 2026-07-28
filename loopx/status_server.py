@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .configure_goal import configure_goal
+from .control_plane.goals.configure_goal_service import (
+    configure_goal_with_global_sync,
+)
 from .feedback import append_human_reward, compact_reward
 from .history import load_registry
 from .materials import read_review_material
@@ -48,6 +50,7 @@ CONFIGURE_GOAL_REQUEST_FIELDS = {
     "self_repair_enabled",
     "self_repair_health",
     "self_repair_waiting_projection",
+    "multi_subagent_feature",
     "orchestration_mode",
     "spawn_allowed",
     "max_children",
@@ -55,8 +58,19 @@ CONFIGURE_GOAL_REQUEST_FIELDS = {
     "clear_allowed_domains",
     "registered_agents",
     "clear_registered_agents",
-    "primary_agent",
-    "clear_primary_agent",
+    "agent_profiles",
+    "clear_agent_profiles",
+    "agent_work_modes",
+    "clear_agent_work_modes",
+    "todo_lifecycle_authority",
+    "clear_todo_lifecycle_authority",
+    "agent_model",
+    "supervisor_agent",
+    "supervised_agents",
+    "clear_supervisor",
+    "write_scope",
+    "replace_write_scope",
+    "clear_write_scope",
     "boundary_authority_scopes",
     "boundary_authority_source",
     "boundary_authority_decision_id",
@@ -192,12 +206,23 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
         )
         return goal_id, str(run_generated_at).strip() if run_generated_at else None, reward
 
-    def _compact_reward_response(self, payload: dict[str, Any], *, dry_run: bool, appended: bool) -> dict[str, Any]:
+    def _compact_reward_response(
+        self,
+        payload: dict[str, Any],
+        *,
+        dry_run: bool,
+        appended: bool,
+        request_body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        human_reward = payload.get("human_reward")
+        reward_for_preview = dict(human_reward) if isinstance(human_reward, dict) else human_reward
+        if isinstance(reward_for_preview, dict) and not (request_body or {}).get("recorded_at"):
+            reward_for_preview.pop("recorded_at", None)
         preview_payload = {
             "goal_id": payload.get("goal_id"),
             "raw_index_records_before": payload.get("raw_index_records_before"),
             "selected_run": payload.get("selected_run"),
-            "human_reward": payload.get("human_reward"),
+            "human_reward": reward_for_preview,
         }
         return {
             "ok": True,
@@ -207,7 +232,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             "raw_index_records_before": payload.get("raw_index_records_before"),
             "preview_id": reward_preview_id(preview_payload),
             "selected_run": payload.get("selected_run"),
-            "human_reward": payload.get("human_reward"),
+            "human_reward": human_reward,
             "active_state_summary": payload.get("active_state_summary"),
             "project_agent_visibility": payload.get("project_agent_visibility"),
         }
@@ -226,7 +251,8 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
 
     def _handle_reward_dry_run(self) -> None:
         try:
-            payload = self._reward_dry_run_payload(self._read_json_body())
+            body = self._read_json_body()
+            payload = self._reward_dry_run_payload(body)
         except Exception as exc:  # noqa: BLE001 - preserve validation diagnostics for the local UI.
             self._send_json(
                 {
@@ -239,7 +265,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        self._send_json(self._compact_reward_response(payload, dry_run=True, appended=False))
+        self._send_json(self._compact_reward_response(payload, dry_run=True, appended=False, request_body=body))
 
     def _handle_reward_append(self) -> None:
         if not self.server.reward_write_enabled:
@@ -271,7 +297,12 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             if not preview_id:
                 raise ValueError("preview_id is required")
             dry_run_payload = self._reward_dry_run_payload(body, append=True)
-            expected_preview = self._compact_reward_response(dry_run_payload, dry_run=True, appended=False).get("preview_id")
+            expected_preview = self._compact_reward_response(
+                dry_run_payload,
+                dry_run=True,
+                appended=False,
+                request_body=body,
+            ).get("preview_id")
             if preview_id != expected_preview:
                 self._send_json(
                     {
@@ -305,7 +336,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        self._send_json(self._compact_reward_response(payload, dry_run=False, appended=True))
+        self._send_json(self._compact_reward_response(payload, dry_run=False, appended=True, request_body=body))
 
     def _parse_configure_goal_body(self, body: dict[str, Any], *, apply: bool) -> dict[str, Any]:
         allowed = CONFIGURE_GOAL_APPLY_FIELDS if apply else CONFIGURE_GOAL_REQUEST_FIELDS
@@ -321,9 +352,45 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
         registered_agents = body.get("registered_agents")
         if registered_agents is not None and not isinstance(registered_agents, list):
             raise ValueError("registered_agents must be a list of strings")
+        agent_profiles = body.get("agent_profiles")
+        if agent_profiles is not None and not isinstance(agent_profiles, list):
+            raise ValueError("agent_profiles must be a list of objects")
+        clear_agent_profiles = body.get("clear_agent_profiles")
+        if clear_agent_profiles is not None and not isinstance(clear_agent_profiles, list):
+            raise ValueError("clear_agent_profiles must be a list of strings")
+        agent_work_modes = body.get("agent_work_modes")
+        if agent_work_modes is not None and not isinstance(agent_work_modes, dict):
+            raise ValueError("agent_work_modes must be an object")
+        clear_agent_work_modes = body.get("clear_agent_work_modes")
+        if clear_agent_work_modes is not None and not isinstance(
+            clear_agent_work_modes, list
+        ):
+            raise ValueError("clear_agent_work_modes must be a list of strings")
+        todo_lifecycle_authority = body.get("todo_lifecycle_authority")
+        if (
+            todo_lifecycle_authority is not None
+            and not isinstance(todo_lifecycle_authority, list)
+        ):
+            raise ValueError("todo_lifecycle_authority must be a list of objects")
+        clear_todo_lifecycle_authority = body.get(
+            "clear_todo_lifecycle_authority"
+        )
+        if (
+            clear_todo_lifecycle_authority is not None
+            and not isinstance(clear_todo_lifecycle_authority, list)
+        ):
+            raise ValueError(
+                "clear_todo_lifecycle_authority must be a list of strings"
+            )
+        supervised_agents = body.get("supervised_agents")
+        if supervised_agents is not None and not isinstance(supervised_agents, list):
+            raise ValueError("supervised_agents must be a list of strings")
         boundary_authority_scopes = body.get("boundary_authority_scopes")
         if boundary_authority_scopes is not None and not isinstance(boundary_authority_scopes, list):
             raise ValueError("boundary_authority_scopes must be a list of strings")
+        write_scope = body.get("write_scope")
+        if write_scope is not None and not isinstance(write_scope, list):
+            raise ValueError("write_scope must be a list of strings")
         return {
             "goal_id": goal_id,
             "quota_compute": body.get("quota_compute"),
@@ -331,6 +398,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             "self_repair_enabled": body.get("self_repair_enabled"),
             "self_repair_health": body.get("self_repair_health"),
             "self_repair_waiting_projection": body.get("self_repair_waiting_projection"),
+            "multi_subagent_feature": body.get("multi_subagent_feature"),
             "orchestration_mode": body.get("orchestration_mode"),
             "spawn_allowed": body.get("spawn_allowed"),
             "max_children": body.get("max_children"),
@@ -338,8 +406,35 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             "clear_allowed_domains": bool(body.get("clear_allowed_domains", False)),
             "registered_agents": [str(item) for item in registered_agents] if registered_agents is not None else None,
             "clear_registered_agents": bool(body.get("clear_registered_agents", False)),
-            "primary_agent": body.get("primary_agent"),
-            "clear_primary_agent": bool(body.get("clear_primary_agent", False)),
+            "agent_profiles": agent_profiles,
+            "clear_agent_profiles": (
+                [str(item) for item in clear_agent_profiles]
+                if clear_agent_profiles is not None
+                else None
+            ),
+            "agent_work_modes": agent_work_modes,
+            "clear_agent_work_modes": (
+                [str(item) for item in clear_agent_work_modes]
+                if clear_agent_work_modes is not None
+                else None
+            ),
+            "todo_lifecycle_authority": todo_lifecycle_authority,
+            "clear_todo_lifecycle_authority": (
+                [str(item) for item in clear_todo_lifecycle_authority]
+                if clear_todo_lifecycle_authority is not None
+                else None
+            ),
+            "agent_model": body.get("agent_model"),
+            "supervisor_agent": body.get("supervisor_agent"),
+            "supervised_agents": (
+                [str(item) for item in supervised_agents]
+                if supervised_agents is not None
+                else None
+            ),
+            "clear_supervisor": bool(body.get("clear_supervisor", False)),
+            "write_scope": [str(item) for item in write_scope] if write_scope is not None else None,
+            "replace_write_scope": bool(body.get("replace_write_scope", False)),
+            "clear_write_scope": bool(body.get("clear_write_scope", False)),
             "boundary_authority_scopes": (
                 [str(item) for item in boundary_authority_scopes]
                 if boundary_authority_scopes is not None
@@ -354,14 +449,16 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
 
     def _configure_goal_payload(self, body: dict[str, Any], *, apply: bool, execute: bool) -> dict[str, Any]:
         values = self._parse_configure_goal_body(body, apply=apply)
-        return configure_goal(
+        return configure_goal_with_global_sync(
             registry_path=self.server.registry_path,
             goal_id=values["goal_id"],
+            runtime_root_override=self.server.runtime_root_override,
             quota_compute=values["quota_compute"],
             quota_window_hours=values["quota_window_hours"],
             self_repair_enabled=values["self_repair_enabled"],
             self_repair_health=values["self_repair_health"],
             self_repair_waiting_projection=values["self_repair_waiting_projection"],
+            multi_subagent_feature=values["multi_subagent_feature"],
             orchestration_mode=values["orchestration_mode"],
             spawn_allowed=values["spawn_allowed"],
             max_children=values["max_children"],
@@ -369,8 +466,21 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             clear_allowed_domains=values["clear_allowed_domains"],
             registered_agents=values["registered_agents"],
             clear_registered_agents=values["clear_registered_agents"],
-            primary_agent=values["primary_agent"],
-            clear_primary_agent=values["clear_primary_agent"],
+            agent_profiles=values["agent_profiles"],
+            clear_agent_profiles=values["clear_agent_profiles"],
+            agent_work_modes=values["agent_work_modes"],
+            clear_agent_work_modes=values["clear_agent_work_modes"],
+            todo_lifecycle_authority=values["todo_lifecycle_authority"],
+            clear_todo_lifecycle_authority=values[
+                "clear_todo_lifecycle_authority"
+            ],
+            agent_model=values["agent_model"],
+            supervisor_agent=values["supervisor_agent"],
+            supervised_agents=values["supervised_agents"],
+            clear_supervisor=values["clear_supervisor"],
+            write_scope=values["write_scope"],
+            replace_write_scope=values["replace_write_scope"],
+            clear_write_scope=values["clear_write_scope"],
             boundary_authority_scopes=values["boundary_authority_scopes"],
             boundary_authority_source=values["boundary_authority_source"],
             boundary_authority_decision_id=values["boundary_authority_decision_id"],
@@ -394,6 +504,10 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             "preview_id": configure_goal_preview_id(payload),
             "control_plane_summary": payload.get("control_plane_summary"),
             "orchestration_summary": payload.get("orchestration_summary"),
+            "feature_summary": payload.get("feature_summary"),
+            "heartbeat_prompt_migration": payload.get("heartbeat_prompt_migration"),
+            "supervisor_prompt": payload.get("supervisor_prompt"),
+            "global_sync": payload.get("global_sync"),
         }
 
     def _handle_configure_goal_dry_run(self) -> None:
