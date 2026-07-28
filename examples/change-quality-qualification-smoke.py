@@ -15,6 +15,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.capabilities.change_quality.receipt import (  # noqa: E402
     CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
+    REVIEW_LENS_IDS,
     build_change_quality_prepare_packet,
     record_change_quality_receipt,
     verify_change_quality_receipt,
@@ -93,9 +94,31 @@ def main() -> int:
                     "reviewed_final_scope": True,
                     "summary": "Exact final scope reviewed.",
                     "findings": [],
+                    "lens_reviews": [
+                        {
+                            "lens_id": lens_id,
+                            "status": "checked",
+                            "summary": "Reviewed with no finding.",
+                            "finding_codes": [],
+                        }
+                        for lens_id in REVIEW_LENS_IDS
+                    ],
+                    "simplification_decisions": [
+                        {
+                            "subject": "final fixture diff",
+                            "outcome": "retained",
+                            "reason": "The direct assignment is already minimal.",
+                        }
+                    ],
                     "safe_fix_applied": False,
                     "safe_fix_passes": 0,
-                    "validations": ["smoke contract passed"],
+                    "validation_evidence": [
+                        {
+                            "validator": "fixture-smoke",
+                            "status": "passed",
+                            "scope": "exact receipt lifecycle",
+                        }
+                    ],
                 }
             ),
             encoding="utf-8",

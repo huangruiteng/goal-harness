@@ -82,22 +82,22 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "doc": "docs/capabilities/change-quality/README.md",
             },
             {
-                "schema_version": "change_quality_prepare_packet_v0",
+                "schema_version": "change_quality_prepare_packet_v1",
                 "module": "loopx.capabilities.change_quality.receipt",
                 "doc": "docs/capabilities/change-quality/README.md",
             },
             {
-                "schema_version": "change_quality_agent_result_v0",
+                "schema_version": "change_quality_agent_result_v1",
+                "module": "loopx.capabilities.change_quality.result",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_receipt_v1",
                 "module": "loopx.capabilities.change_quality.receipt",
                 "doc": "docs/capabilities/change-quality/README.md",
             },
             {
-                "schema_version": "change_quality_receipt_v0",
-                "module": "loopx.capabilities.change_quality.receipt",
-                "doc": "docs/capabilities/change-quality/README.md",
-            },
-            {
-                "schema_version": "change_quality_receipt_verification_v0",
+                "schema_version": "change_quality_receipt_verification_v1",
                 "module": "loopx.capabilities.change_quality.receipt",
                 "doc": "docs/capabilities/change-quality/README.md",
             },

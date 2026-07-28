@@ -22,7 +22,9 @@ AddFormat = Callable[[argparse.ArgumentParser], None]
 
 
 def _add_scope_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--goal-id", required=True, help="Goal whose managed policy applies.")
+    parser.add_argument(
+        "--goal-id", required=True, help="Goal whose managed policy applies."
+    )
     parser.add_argument(
         "--repo-path",
         type=Path,
@@ -61,7 +63,7 @@ def register_change_quality_commands(
         "--result-json",
         type=Path,
         required=True,
-        help="Agent result conforming to change_quality_agent_result_v0.",
+        help="Agent result conforming to change_quality_agent_result_v1.",
     )
     record.add_argument(
         "--execute",
