@@ -27,6 +27,52 @@ from .scope import build_change_quality_scope, resolve_git_root
 CHANGE_QUALITY_PREPARE_SCHEMA_VERSION = "change_quality_prepare_packet_v1"
 CHANGE_QUALITY_RECEIPT_SCHEMA_VERSION = "change_quality_receipt_v1"
 CHANGE_QUALITY_VERIFY_SCHEMA_VERSION = "change_quality_receipt_verification_v1"
+CHANGE_QUALITY_PR_EVIDENCE_SCHEMA_VERSION = "change_quality_pr_evidence_v0"
+
+_PR_EVIDENCE_BY_STATUS = {
+    "disabled": (
+        "disabled",
+        "Change-quality qualification is disabled for this goal.",
+        None,
+    ),
+    "no_changes": (
+        "not_required",
+        "No changed files require a change-quality receipt.",
+        None,
+    ),
+    "valid": (
+        "valid",
+        "The receipt matches the exact current base and diff.",
+        None,
+    ),
+    "stale_receipt": (
+        "stale",
+        (
+            "A prior receipt exists, but the exact base or diff changed; "
+            "requalification is required."
+        ),
+        (
+            "rerun change-quality prepare against the current base and diff, "
+            "review that exact scope, and record a new passing receipt"
+        ),
+    ),
+    "receipt_missing": (
+        "missing",
+        "No receipt is recorded for the exact current base and diff.",
+        (
+            "run change-quality prepare, review the exact current scope, "
+            "and record a passing receipt"
+        ),
+    ),
+    "invalid_receipt": (
+        "invalid",
+        "The receipt for the exact current base and diff is invalid.",
+        (
+            "repair the recorded result, review the exact current scope, "
+            "and record a new passing receipt"
+        ),
+    ),
+}
 
 
 def _goal_from_registry(registry_path: Path, goal_id: str) -> dict[str, Any]:
@@ -284,6 +330,59 @@ def _stored_receipt_is_valid(
     return decision == "pass" and receipt.get("unresolved_blockers") == unresolved
 
 
+def _read_first_receipt(paths: list[Path]) -> dict[str, Any] | None:
+    for path in paths:
+        try:
+            receipt = read_json(path)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(receipt, dict):
+            return receipt
+    return None
+
+
+def _build_pr_evidence(
+    *,
+    status: str,
+    policy: dict[str, Any],
+    scope: dict[str, Any],
+    receipt: dict[str, Any] | None = None,
+    previous_receipt: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    state, summary, required_action = _PR_EVIDENCE_BY_STATUS.get(
+        status,
+        _PR_EVIDENCE_BY_STATUS["invalid_receipt"],
+    )
+    previous_scope = (
+        previous_receipt.get("scope")
+        if isinstance(previous_receipt, dict)
+        and isinstance(previous_receipt.get("scope"), dict)
+        else {}
+    )
+    return {
+        "schema_version": CHANGE_QUALITY_PR_EVIDENCE_SCHEMA_VERSION,
+        "state": state,
+        "summary": summary,
+        "blocking": bool(
+            policy.get("strict_receipt") and state in {"stale", "missing", "invalid"}
+        ),
+        "requalification_required": state == "stale",
+        "scope_fingerprint": scope.get("scope_fingerprint"),
+        "base_ref": scope.get("base_ref"),
+        "base_commit": scope.get("base_commit"),
+        "head_commit": scope.get("head_commit"),
+        "receipt_id": receipt.get("receipt_id") if isinstance(receipt, dict) else None,
+        "previous_receipt_id": (
+            previous_receipt.get("receipt_id")
+            if isinstance(previous_receipt, dict)
+            else None
+        ),
+        "previous_scope_fingerprint": previous_scope.get("scope_fingerprint"),
+        "previous_base_commit": previous_scope.get("base_commit"),
+        "required_action": required_action,
+    }
+
+
 def verify_change_quality_receipt(
     *,
     registry_path: Path,
@@ -296,24 +395,36 @@ def verify_change_quality_receipt(
     policy = change_quality_goal_policy(goal)
     scope = build_change_quality_scope(repo_path=repo_path, base_ref=base_ref)
     if not policy["enabled"]:
+        status = "disabled"
         return {
             "ok": True,
             "schema_version": CHANGE_QUALITY_VERIFY_SCHEMA_VERSION,
             "goal_id": goal_id,
-            "status": "disabled",
+            "status": status,
             "enforcement_applied": False,
             "policy": policy,
             "scope": scope,
+            "pr_evidence": _build_pr_evidence(
+                status=status,
+                policy=policy,
+                scope=scope,
+            ),
         }
     if not scope["changed_files"]:
+        status = "no_changes"
         return {
             "ok": True,
             "schema_version": CHANGE_QUALITY_VERIFY_SCHEMA_VERSION,
             "goal_id": goal_id,
-            "status": "no_changes",
+            "status": status,
             "enforcement_applied": bool(policy["strict_receipt"]),
             "policy": policy,
             "scope": scope,
+            "pr_evidence": _build_pr_evidence(
+                status=status,
+                policy=policy,
+                scope=scope,
+            ),
         }
     path = _receipt_path(
         runtime_root=runtime_root,
@@ -327,10 +438,7 @@ def verify_change_quality_receipt(
         changed_files=list(scope["changed_files"]),
     )
     if path.exists():
-        try:
-            receipt = read_json(path)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            receipt = None
+        receipt = _read_first_receipt([path])
     receipt_valid = _stored_receipt_is_valid(
         receipt,
         scope_fingerprint=str(scope["scope_fingerprint"]),
@@ -338,6 +446,7 @@ def verify_change_quality_receipt(
         changed_files=list(scope["changed_files"]),
         instruction_refs=list(repository_context["instruction_refs"]),
     )
+    previous_receipt = None
     if receipt_valid:
         status = "valid"
     elif path.exists():
@@ -349,7 +458,15 @@ def verify_change_quality_receipt(
             reverse=True,
         )
         status = "stale_receipt" if repo_receipts else "receipt_missing"
+        previous_receipt = _read_first_receipt(repo_receipts)
     strict = bool(policy["strict_receipt"])
+    pr_evidence = _build_pr_evidence(
+        status=status,
+        policy=policy,
+        scope=scope,
+        receipt=receipt,
+        previous_receipt=previous_receipt,
+    )
     return {
         "ok": receipt_valid or not strict,
         "schema_version": CHANGE_QUALITY_VERIFY_SCHEMA_VERSION,
@@ -361,9 +478,6 @@ def verify_change_quality_receipt(
         "receipt_id": receipt.get("receipt_id") if receipt else None,
         "receipt_path": str(path),
         "receipt_valid": receipt_valid,
-        "required_action": (
-            "run change-quality prepare, review the exact scope, and record a passing receipt"
-            if strict and not receipt_valid
-            else None
-        ),
+        "required_action": pr_evidence["required_action"],
+        "pr_evidence": pr_evidence,
     }

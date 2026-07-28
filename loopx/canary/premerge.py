@@ -646,7 +646,9 @@ def apply_change_quality_verification(
 ) -> dict[str, Any]:
     """Attach goal policy evidence and fail the merge gate when strict receipt fails."""
 
-    payload["change_quality_qualification"] = verification
+    payload["change_quality_qualification"] = {
+        key: value for key, value in verification.items() if key != "receipt_path"
+    }
     enforced_failure = bool(
         verification.get("enforcement_applied")
         and verification.get("ok") is False
@@ -1089,18 +1091,35 @@ def render_premerge_validation_gate_markdown(payload: dict[str, Any]) -> str:
         else None
     )
     if quality is not None:
+        evidence = (
+            quality.get("pr_evidence")
+            if isinstance(quality.get("pr_evidence"), dict)
+            else {}
+        )
         lines.extend(
             [
                 "",
                 "## Change Quality Receipt",
                 f"- status: `{quality.get('status')}`",
+                f"- state: `{evidence.get('state')}`",
                 f"- ok: `{str(quality.get('ok')).lower()}`",
                 f"- enforcement_applied: `{str(quality.get('enforcement_applied')).lower()}`",
-                f"- receipt_id: `{quality.get('receipt_id')}`",
+                f"- blocking: `{str(evidence.get('blocking')).lower()}`",
+                (
+                    "- requalification_required: "
+                    f"`{str(evidence.get('requalification_required')).lower()}`"
+                ),
+                f"- summary: {evidence.get('summary')}",
             ]
         )
-        if quality.get("required_action"):
-            lines.append(f"- required_action: {quality.get('required_action')}")
+        if evidence.get("receipt_id"):
+            lines.append(f"- receipt_id: `{evidence.get('receipt_id')}`")
+        if evidence.get("previous_receipt_id"):
+            lines.append(
+                f"- previous_receipt_id: `{evidence.get('previous_receipt_id')}`"
+            )
+        if evidence.get("required_action"):
+            lines.append(f"- required_action: {evidence.get('required_action')}")
 
     manual_holds = classification.get("manual_holds") or []
     if manual_holds:

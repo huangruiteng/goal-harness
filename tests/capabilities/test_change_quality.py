@@ -11,6 +11,7 @@ from loopx.agent_onboarding import _skill_delivery_contract
 from loopx.canary.premerge import (
     apply_change_quality_verification,
     build_premerge_validation_gate,
+    render_premerge_validation_gate_markdown,
 )
 from loopx.capabilities.change_quality.policy import change_quality_goal_policy
 from loopx.capabilities.change_quality.receipt import (
@@ -660,6 +661,9 @@ def test_exact_scope_receipt_becomes_stale_after_any_diff_change(
     assert recorded["decision"] == "pass"
     assert verified["status"] == "valid"
     assert verified["ok"] is True
+    assert verified["pr_evidence"]["state"] == "valid"
+    assert verified["pr_evidence"]["receipt_id"] == recorded["receipt_id"]
+    assert verified["pr_evidence"]["requalification_required"] is False
 
     (repo / "app.py").write_text("value = 3\n", encoding="utf-8")
     stale = verify_change_quality_receipt(
@@ -671,6 +675,81 @@ def test_exact_scope_receipt_becomes_stale_after_any_diff_change(
     )
     assert stale["status"] == "stale_receipt"
     assert stale["ok"] is False
+    assert stale["pr_evidence"] == {
+        "schema_version": "change_quality_pr_evidence_v0",
+        "state": "stale",
+        "summary": (
+            "A prior receipt exists, but the exact base or diff changed; "
+            "requalification is required."
+        ),
+        "blocking": True,
+        "requalification_required": True,
+        "scope_fingerprint": stale["scope"]["scope_fingerprint"],
+        "base_ref": "HEAD",
+        "base_commit": stale["scope"]["base_commit"],
+        "head_commit": stale["scope"]["head_commit"],
+        "receipt_id": None,
+        "previous_receipt_id": recorded["receipt_id"],
+        "previous_scope_fingerprint": prepared["scope"]["scope_fingerprint"],
+        "previous_base_commit": prepared["scope"]["base_commit"],
+        "required_action": (
+            "rerun change-quality prepare against the current base and diff, "
+            "review that exact scope, and record a new passing receipt"
+        ),
+    }
+
+
+def test_base_advance_projects_visible_requalification_prompt(tmp_path: Path) -> None:
+    repo, registry, runtime_root = _fixture(tmp_path)
+    _enable(registry)
+    base_branch = _git(repo, "branch", "--show-current")
+    _git(repo, "switch", "--detach", "HEAD")
+    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
+    prepared = build_change_quality_prepare_packet(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        base_ref=base_branch,
+    )
+    result_path = _result(
+        tmp_path / "result.json",
+        prepared["scope"]["scope_fingerprint"],
+    )
+    recorded = record_change_quality_receipt(
+        registry_path=registry,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        result_path=result_path,
+        base_ref=base_branch,
+        execute=True,
+    )
+
+    new_base = _git(
+        repo,
+        "commit-tree",
+        "HEAD^{tree}",
+        "-p",
+        "HEAD",
+        "-m",
+        "advance base",
+    )
+    _git(repo, "update-ref", f"refs/heads/{base_branch}", new_base)
+    stale = verify_change_quality_receipt(
+        registry_path=registry,
+        runtime_root=runtime_root,
+        goal_id=GOAL_ID,
+        repo_path=repo,
+        base_ref=base_branch,
+    )
+
+    assert stale["status"] == "stale_receipt"
+    assert stale["ok"] is False
+    assert stale["pr_evidence"]["state"] == "stale"
+    assert stale["pr_evidence"]["requalification_required"] is True
+    assert stale["pr_evidence"]["previous_receipt_id"] == recorded["receipt_id"]
+    assert stale["pr_evidence"]["previous_base_commit"] != new_base
+    assert "current base and diff" in stale["pr_evidence"]["required_action"]
 
 
 def test_receipt_identity_is_stable_from_repository_subdirectories(
@@ -810,6 +889,12 @@ def test_strict_verification_failure_overrides_premerge_gate(
     assert gate["gate"]["status"] == "quality_receipt_missing"
     assert gate["gate"]["merge_gate_passed"] is False
     assert gate["validation_summary"]["policy_failure_count"] == 1
+    assert "receipt_path" not in gate["change_quality_qualification"]
+    assert gate["change_quality_qualification"]["pr_evidence"]["state"] == "missing"
+    markdown = render_premerge_validation_gate_markdown(gate)
+    assert "- state: `missing`" in markdown
+    assert "- requalification_required: `false`" in markdown
+    assert str(runtime_root) not in markdown
 
 
 def test_premerge_cli_enforces_goal_receipt_policy(
