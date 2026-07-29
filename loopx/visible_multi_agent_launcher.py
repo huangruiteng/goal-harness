@@ -185,7 +185,6 @@ def build_visible_lane_command(
     cli_bin: str,
     codex_bin: str,
     reasoning_effort: str,
-    model_name: str = "",
     goal_id: str | None = None,
     agent_id: str | None = None,
     worker_turn_command: str | None = None,
@@ -198,7 +197,6 @@ def build_visible_lane_command(
         f"export LOOPX_CODEX_BIN={_q(codex_bin)}; "
         "fi; "
         f"export LOOPX_CODEX_REASONING_EFFORT={_q(reasoning_effort)}; "
-        f"export LOOPX_CODEX_MODEL={_q(str(model_name or '').strip())}; "
     )
     scoped_loopx_wrapper = (
         f"LOOPX_REAL_CLI=\"$(command -v {_q(cli_bin)})\"; "

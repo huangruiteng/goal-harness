@@ -11,16 +11,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .planner_worker import (
-    DEFAULT_PLANNER_EFFORT,
-    DEFAULT_PLANNER_MODEL,
-    DEFAULT_WORKER_EFFORT,
-    DEFAULT_WORKER_MODEL,
-    build_planner_prompt,
-    build_worker_step_prompt,
-    normalize_planner_worker_plan,
-)
-
 
 CODEX_APP_SERVER_GOAL_BASELINE_SCHEMA_VERSION = (
     "codex_app_server_goal_baseline_v0"
@@ -31,9 +21,6 @@ CODEX_APP_SERVER_GOAL_BASELINE_PROOF_SCHEMA_VERSION = (
 CODEX_APP_SERVER_GOAL_WORKER_SCHEMA_VERSION = "codex_app_server_goal_worker_v0"
 CODEX_APP_SERVER_GOAL_WORKER_PROOF_SCHEMA_VERSION = (
     "codex_app_server_goal_worker_proof_v0"
-)
-CODEX_APP_SERVER_GOAL_PLANNER_WORKER_SCHEMA_VERSION = (
-    "codex_app_server_goal_planner_worker_v0"
 )
 DEFAULT_CODEX_GOAL_BASELINE_CLIENT_NAME = "loopx_benchmark_goal_baseline"
 DEFAULT_CODEX_GOAL_BASELINE_CLIENT_TITLE = "LoopX Benchmark Goal Baseline"
@@ -221,116 +208,6 @@ def build_codex_app_server_goal_worker_plan(
             **plan["claim_boundary"],
             "requires_turn_start_evidence": True,
             "turn_start_input_must_match_task": True,
-        },
-    }
-
-
-def build_codex_app_server_goal_planner_worker_plan(
-    *,
-    objective: str,
-    task_instruction: str,
-    planner_output_plan: dict[str, Any] | None = None,
-    cwd: str = "<benchmark-workspace>",
-    sandbox: str = "workspace-write",
-    approval_policy: str = "never",
-    status: str = "active",
-    token_budget: int | None = None,
-    planner_model: str = DEFAULT_PLANNER_MODEL,
-    worker_model: str = DEFAULT_WORKER_MODEL,
-    planner_effort: str = DEFAULT_PLANNER_EFFORT,
-    worker_effort: str = DEFAULT_WORKER_EFFORT,
-    client_name: str = DEFAULT_CODEX_GOAL_BASELINE_CLIENT_NAME,
-    client_title: str = DEFAULT_CODEX_GOAL_BASELINE_CLIENT_TITLE,
-    client_version: str = DEFAULT_CODEX_GOAL_BASELINE_CLIENT_VERSION,
-) -> dict[str, Any]:
-    """Describe a planner-worker Goal path using separate model routes."""
-
-    objective_text = str(objective or "").strip()
-    task_text = str(task_instruction or "").strip()
-    if not task_text:
-        raise ValueError("task_instruction must be non-empty")
-    plan = build_codex_app_server_goal_baseline_plan(
-        objective=objective_text,
-        cwd=cwd,
-        sandbox=sandbox,
-        approval_policy=approval_policy,
-        status=status,
-        token_budget=token_budget,
-        client_name=client_name,
-        client_title=client_title,
-        client_version=client_version,
-    )
-    planner_prompt = build_planner_prompt(
-        objective=objective_text,
-        task_instruction=task_text,
-    )
-    planner_turn_start_params: dict[str, Any] = {
-        "threadId": "<thread-id>",
-        "input": [{"type": "text", "text": planner_prompt}],
-        "cwd": cwd,
-        "approvalPolicy": approval_policy,
-        "model": str(planner_model),
-        "effort": str(planner_effort),
-    }
-    worker_turn_start_template: dict[str, Any] = {
-        "id": 6,
-        "method": "turn/start",
-        "params": {
-            "threadId": "<thread-id>",
-            "input": [
-                {
-                    "type": "text",
-                    "text": "<worker-step-prompt-from-planner_worker_plan>",
-                }
-            ],
-            "cwd": cwd,
-            "approvalPolicy": approval_policy,
-            "model": str(worker_model),
-            "effort": str(worker_effort),
-        },
-    }
-    planner_messages = dict(plan["messages"])
-    planner_messages["planner_turn_start"] = {
-        "id": 5,
-        "method": "turn/start",
-        "params": planner_turn_start_params,
-    }
-    planner_messages["worker_turn_start_template"] = worker_turn_start_template
-    planner_plan = None
-    worker_step_prompt_sha256 = None
-    if planner_output_plan is not None:
-        planner_plan = normalize_planner_worker_plan(planner_output_plan)
-        first_step = planner_plan["steps"][0]
-        worker_step_prompt = build_worker_step_prompt(
-            plan=planner_plan,
-            step=first_step,
-        )
-        worker_step_prompt_sha256 = stable_text_digest(worker_step_prompt)
-
-    return {
-        **plan,
-        "schema_version": CODEX_APP_SERVER_GOAL_PLANNER_WORKER_SCHEMA_VERSION,
-        "worker_mode": "codex_app_server_goal_planner_worker_turns",
-        "methods": list(CODEX_APP_SERVER_GOAL_WORKER_METHODS),
-        "task_instruction_sha256": stable_text_digest(task_text),
-        "task_instruction_chars": len(task_text),
-        "planner_model": str(planner_model),
-        "worker_model": str(worker_model),
-        "planner_effort": str(planner_effort),
-        "worker_effort": str(worker_effort),
-        "planner_output_plan": planner_plan,
-        "worker_step_prompt_sha256": worker_step_prompt_sha256,
-        "messages": planner_messages,
-        "claim_boundary": {
-            **plan["claim_boundary"],
-            "requires_planner_turn_evidence": True,
-            "planner_output_must_be_structured_plan": True,
-            "planner_must_choose_step_executor": True,
-            "cheap_worker_requires_planner_compressed_context": True,
-            "planner_must_define_validation_commands": True,
-            "planner_must_define_worker_escalation_policy": True,
-            "requires_worker_turn_evidence": True,
-            "worker_input_must_reference_plan_step": True,
         },
     }
 

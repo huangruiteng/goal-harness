@@ -30,7 +30,6 @@ from .orchestration import (
     compact_orchestration_policy,
     orchestration_policy_summary,
 )
-from .planner_worker import compact_planner_worker_model_routes
 from .quota import goal_quota_config
 from .registry import read_json, registry_goals
 from .control_plane.reward_memory import (
@@ -209,7 +208,6 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
     quota = goal_quota_config(goal)
     control_plane = compact_control_plane_policy(goal.get("control_plane"))
     orchestration = compact_orchestration_policy(goal.get("spawn_policy"))
-    spawn_policy = goal.get("spawn_policy") if isinstance(goal.get("spawn_policy"), dict) else {}
     coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
     agent_model = agent_runtime_model_for_goal(goal)
     registered_agents = normalize_registered_agents(
@@ -230,10 +228,6 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         "change_quality_qualification": change_quality_goal_policy_summary(goal),
         "explore_graph": compact_explore_graph_policy(goal.get("explore_graph")),
         "orchestration": orchestration,
-        "model_routes": compact_planner_worker_model_routes(
-            spawn_policy.get("model_routes")
-        ),
-        "model_routes_configured": isinstance(spawn_policy.get("model_routes"), dict),
         "waiting_on": goal.get("waiting_on"),
         "write_scope": _clean_write_scope(coordination.get("write_scope") or []) or [],
         "checkpointed_boundary_authority": checkpointed_boundary_authority_summary(coordination),
@@ -428,11 +422,6 @@ def configure_goal(
     max_children: int | None = None,
     allowed_domains: list[str] | None = None,
     clear_allowed_domains: bool = False,
-    planner_model: str | None = None,
-    worker_model: str | None = None,
-    planner_effort: str | None = None,
-    worker_effort: str | None = None,
-    clear_model_routes: bool = False,
     explore_harness_enabled: bool | None = None,
     explore_harness_profile: str | None = None,
     clear_explore_harness_profile: bool = False,
@@ -475,8 +464,6 @@ def configure_goal(
         raise FileNotFoundError(f"registry file does not exist: {registry_path}")
     if clear_allowed_domains and allowed_domains:
         raise ValueError("--clear-allowed-domains cannot be combined with --allowed-domain")
-    if clear_model_routes and any([planner_model, worker_model, planner_effort, worker_effort]):
-        raise ValueError("--clear-model-routes cannot be combined with model route fields")
     if clear_explore_harness_profile and explore_harness_profile:
         raise ValueError(
             "--clear-explore-harness-profile cannot be combined with --explore-harness-profile"
@@ -877,11 +864,6 @@ def configure_goal(
         or max_children is not None
         or allowed_domains is not None
         or clear_allowed_domains
-        or planner_model is not None
-        or worker_model is not None
-        or planner_effort is not None
-        or worker_effort is not None
-        or clear_model_routes
         or explore_harness_enabled is not None
         or explore_harness_profile is not None
         or clear_explore_harness_profile
@@ -912,23 +894,6 @@ def configure_goal(
             spawn_policy["allowed_domains"] = []
         elif allowed_domains is not None:
             spawn_policy["allowed_domains"] = allowed_domains
-        if clear_model_routes:
-            spawn_policy.pop("model_routes", None)
-        elif any([planner_model, worker_model, planner_effort, worker_effort]):
-            model_routes = spawn_policy.get("model_routes") if isinstance(spawn_policy.get("model_routes"), dict) else {}
-            planner_route = model_routes.get("planner") if isinstance(model_routes.get("planner"), dict) else {}
-            worker_route = model_routes.get("worker") if isinstance(model_routes.get("worker"), dict) else {}
-            if planner_model is not None:
-                planner_route["model"] = planner_model
-            if planner_effort is not None:
-                planner_route["effort"] = planner_effort
-            if worker_model is not None:
-                worker_route["model"] = worker_model
-            if worker_effort is not None:
-                worker_route["effort"] = worker_effort
-            model_routes["planner"] = planner_route
-            model_routes["worker"] = worker_route
-            spawn_policy["model_routes"] = model_routes
         if (
             explore_harness_enabled is not None
             or explore_harness_profile is not None

@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any
 
 from .control_plane.todos.contract import normalize_todo_claimed_by
-from .planner_worker import compact_planner_worker_model_routes
 
 
 def normalize_registered_agents(values: Any) -> list[str]:
@@ -65,33 +64,6 @@ def agent_profile_for_goal(goal: dict[str, Any] | None, agent_id: str | None) ->
     profile = dict(raw_profile)
     profile["agent_id"] = normalized_agent_id
     return profile
-
-
-def model_routes_for_goal(goal: dict[str, Any] | None) -> dict[str, dict[str, str]]:
-    if not isinstance(goal, dict):
-        return compact_planner_worker_model_routes(None)
-    spawn_policy = goal.get("spawn_policy") if isinstance(goal.get("spawn_policy"), dict) else {}
-    return compact_planner_worker_model_routes(spawn_policy.get("model_routes"))
-
-
-def model_route_for_role(
-    goal: dict[str, Any] | None,
-    role: str,
-    *,
-    agent_id: str | None = None,
-) -> dict[str, str]:
-    role_name = str(role or "").strip() or "worker"
-    routes = model_routes_for_goal(goal)
-    route = dict(routes.get(role_name) or routes.get("worker") or {})
-    profile = agent_profile_for_goal(goal, agent_id)
-    if isinstance(profile, dict):
-        model = str(profile.get("model") or "").strip()
-        effort = str(profile.get("effort") or profile.get("reasoning_effort") or "").strip()
-        if model:
-            route["model"] = model
-        if effort:
-            route["effort"] = effort
-    return route
 
 
 def load_goal_from_registry(registry_path: Path, goal_id: str) -> dict[str, Any] | None:

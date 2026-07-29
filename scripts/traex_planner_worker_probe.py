@@ -9,7 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.traex_planner_worker import (  # noqa: E402
+from loopx.extensions.traex_planner_worker import (  # noqa: E402
     DEFAULT_TRAEX_PLANNER_MODEL,
     DEFAULT_TRAEX_WORKER_MODEL,
     run_traex_planner_worker_probe,
@@ -17,12 +17,13 @@ from loopx.traex_planner_worker import (  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run a read-only TraeX planner-worker probe.")
+    parser = argparse.ArgumentParser(
+        description="Run the experimental TraeX planner-worker vertical slice."
+    )
     parser.add_argument("--traex-bin", default="traex")
     parser.add_argument("--planner-model", default=DEFAULT_TRAEX_PLANNER_MODEL)
     parser.add_argument("--worker-model", default=DEFAULT_TRAEX_WORKER_MODEL)
     parser.add_argument("--cwd", default=".")
-    parser.add_argument("--worker-cwd")
     parser.add_argument(
         "--full-worker-context",
         action="store_true",
@@ -45,7 +46,6 @@ def main(argv: list[str] | None = None) -> int:
         planner_model=args.planner_model,
         worker_model=args.worker_model,
         cwd=Path(args.cwd),
-        worker_cwd=Path(args.worker_cwd) if args.worker_cwd else None,
         worker_minimal_context=not args.full_worker_context,
         timeout_seconds=args.timeout_seconds,
     )

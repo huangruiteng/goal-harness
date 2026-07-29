@@ -317,15 +317,6 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         action="store_true",
         help="Clear allowed child-agent domains.",
     )
-    configure_goal_parser.add_argument("--planner-model", help="Model route for planner-worker planning turns.")
-    configure_goal_parser.add_argument("--worker-model", help="Model route for planner-worker execution turns.")
-    configure_goal_parser.add_argument("--planner-effort", help="Reasoning effort for planner-worker planning turns.")
-    configure_goal_parser.add_argument("--worker-effort", help="Reasoning effort for planner-worker execution turns.")
-    configure_goal_parser.add_argument(
-        "--clear-model-routes",
-        action="store_true",
-        help="Clear spawn_policy.model_routes.",
-    )
     configure_goal_parser.add_argument(
         "--explore-graph-enabled",
         action=argparse.BooleanOptionalAction,
@@ -756,11 +747,6 @@ def handle_registry_admin_command(
                 max_children=args.max_children,
                 allowed_domains=args.allowed_domain,
                 clear_allowed_domains=bool(args.clear_allowed_domains),
-                planner_model=args.planner_model,
-                worker_model=args.worker_model,
-                planner_effort=args.planner_effort,
-                worker_effort=args.worker_effort,
-                clear_model_routes=bool(args.clear_model_routes),
                 explore_harness_enabled=args.explore_harness_enabled,
                 explore_harness_profile=args.explore_harness_profile,
                 clear_explore_harness_profile=bool(args.clear_explore_harness_profile),

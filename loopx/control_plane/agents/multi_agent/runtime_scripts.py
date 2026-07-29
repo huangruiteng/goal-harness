@@ -394,11 +394,8 @@ from pathlib import Path
 codex = os.environ["LOOPX_CODEX_BIN"]
 project = os.environ["LOOPX_PROJECT"]
 reasoning_effort = os.environ["LOOPX_CODEX_REASONING_EFFORT"]
-model = os.environ.get("LOOPX_CODEX_MODEL", "").strip()
 
 args = [codex]
-if model:
-    args.extend(["--model", model])
 if os.environ.get("LOOPX_CODEX_TRUST_WORKSPACE") == "1":
     candidates = [project, os.path.realpath(project)]
     git_root = subprocess.run(
