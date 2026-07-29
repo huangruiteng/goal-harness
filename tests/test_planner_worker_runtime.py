@@ -485,3 +485,34 @@ def test_git_workspace_observer_reports_new_directory_by_leaf_file(
     assert observer.changed_files(tmp_path) == {
         "new/result.txt": len("created\n")
     }
+
+
+def test_git_workspace_observer_detects_worktree_mode_change(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    observer = GitWorkspaceObserver()
+    observer.assert_clean(tmp_path)
+
+    current_mode = tmp_path.stat().st_mode & 0o777
+    tmp_path.chmod(0o755 if current_mode != 0o755 else 0o700)
+
+    assert observer.changed_files(tmp_path) == {".": 0}

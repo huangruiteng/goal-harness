@@ -231,7 +231,9 @@ class GitWorkspaceObserver:
         self._before: dict[str, tuple[int, str, int]] | None = None
 
     def _snapshot(self, cwd: Path) -> dict[str, tuple[int, str, int]]:
-        snapshot: dict[str, tuple[int, str, int]] = {}
+        snapshot: dict[str, tuple[int, str, int]] = {
+            ".": (0, "", cwd.lstat().st_mode)
+        }
         for root, directories, filenames in os.walk(cwd, followlinks=False):
             root_path = Path(root)
             traversable_directories: list[str] = []
