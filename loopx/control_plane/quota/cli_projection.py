@@ -66,6 +66,14 @@ _RETAINED_AGENT_ITEM_FIELDS = (
     "reason",
 )
 _RETAINED_SUCCESSION_WARNING_TODO_IDS = 3
+_RUNTIME_CAPABILITY_PREFIX_FIELDS = (
+    "ok",
+    "status_health_ok",
+    "mode",
+    "goal_id",
+    "decision",
+    "should_run",
+)
 
 
 def _compact_agent_item(item: Any) -> Any:
@@ -193,6 +201,29 @@ def _compact_goal_boundary(boundary: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _promote_runtime_capability_reentry(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    interaction = payload.get("interaction_contract")
+    if not isinstance(interaction, dict):
+        return payload
+    cli_channel = interaction.get("cli_channel")
+    if not isinstance(cli_channel, dict):
+        return payload
+    packet = cli_channel.get("runtime_capability_reentry")
+    if not isinstance(packet, dict):
+        return payload
+
+    promoted = {
+        key: payload[key] for key in _RUNTIME_CAPABILITY_PREFIX_FIELDS if key in payload
+    }
+    promoted["runtime_capability_reentry"] = packet
+    promoted.update(
+        (key, value) for key, value in payload.items() if key not in promoted
+    )
+    return promoted
+
+
 def compact_quota_should_run_cli_payload(
     payload: dict[str, Any],
     *,
@@ -233,4 +264,4 @@ def compact_quota_should_run_cli_payload(
         if compact_goal_boundary is not goal_boundary:
             compact = dict(compact)
             compact["goal_boundary"] = compact_goal_boundary
-    return compact
+    return _promote_runtime_capability_reentry(compact)

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from loopx.quota import FOCUS_WAIT_REASON, build_quota_plan
+import pytest
+
+from loopx.quota import FOCUS_WAIT_REASON, build_quota_plan, build_quota_should_run
 
 
 def _goal(goal_id: str, *, quota: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -97,6 +99,35 @@ def test_attention_quota_receives_focus_wait_override() -> None:
     assert item["quota"]["reason"] == FOCUS_WAIT_REASON
     assert item["quota"]["blocked_action_scope"] == "delivery_focus"
     assert item["quota"]["focus_wait"] is True
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "long_task_cadence_hint",
+        "stale_latest_run_warning",
+        "backlog_hygiene_warning",
+        "completed_todo_archive_warning",
+        "dreaming_proposal",
+        "dreaming_lane_badge",
+    ],
+)
+def test_quota_plan_keeps_attention_read_models_at_the_top_level(field: str) -> None:
+    goal_id = f"attention-{field}"
+    value = {"source": field}
+    attention = {
+        "goal_id": goal_id,
+        "waiting_on": "codex",
+        "quota": {"state": "eligible"},
+        field: value,
+        "project_asset": {field: {"source": "duplicate"}},
+    }
+
+    payload = _status_payload(goal=_goal(goal_id), attention=attention)
+    _, item = _only_plan_item(payload)
+
+    assert item[field] == value
+    assert build_quota_should_run(payload, goal_id=goal_id)[field] == value
 
 
 def test_goal_quota_projection_is_reused_without_recomputing_state() -> None:

@@ -15,7 +15,8 @@ Common environment variables:
   LOOPX_PYTHON=/path/to/python3.11  Use this supported Python for the release.
   LOOPX_PROMOTE_DEFAULT=1          Promote this checkout as the default loopx.
   LOOPX_INSTALL_CANARY=0           Skip the loopx-canary executable.
-  LOOPX_INSTALL_SKILL=0            Skip packaged Codex workflow skills.
+  LOOPX_INSTALL_SKILL=0            Skip packaged workflow skills.
+  LOOPX_SKILLS_DIR=/path           Install workflow skills into this host-native root.
   LOOPX_INSTALL_SLASH_COMMANDS=0   Skip Codex and Claude command skills.
   LOOPX_INSTALL_OPENCODE=0         Install the OpenCode goal bridge surface.
   CODEX_HOME=/path                 Override the Codex home directory.
@@ -47,6 +48,14 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 bin_dir="${LOOPX_BIN_DIR:-$HOME/.local/bin}"
 shell_profile="${LOOPX_SHELL_PROFILE:-}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
+skills_dir_explicit=0
+if [[ "${LOOPX_SKILLS_DIR+x}" == "x" ]]; then
+  if [[ -z "$LOOPX_SKILLS_DIR" ]]; then
+    echo "loopx installer error: LOOPX_SKILLS_DIR cannot be empty" >&2
+    exit 2
+  fi
+  skills_dir_explicit=1
+fi
 skills_dir="${LOOPX_SKILLS_DIR:-$codex_home/skills}"
 man_root="${LOOPX_MAN_ROOT:-$HOME/.local/share/man}"
 man_dir="${LOOPX_MAN_DIR:-$man_root/man1}"
@@ -60,6 +69,8 @@ release_dir=""
 release_tmp=""
 install_lock=""
 install_lock_owned=0
+skill_install_lock=""
+skill_install_lock_owned=0
 legacy_line=""
 installed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -96,6 +107,9 @@ cleanup_install_lock() {
   fi
   if [[ "$install_lock_owned" == "1" && -n "$install_lock" && -d "$install_lock" ]]; then
     rm -rf "$install_lock"
+  fi
+  if [[ "$skill_install_lock_owned" == "1" && -n "$skill_install_lock" && -d "$skill_install_lock" ]]; then
+    rm -rf "$skill_install_lock"
   fi
 }
 
@@ -269,6 +283,88 @@ os.replace(os.environ["LOOPX_LINK_TMP"], os.environ["LOOPX_LINK_TARGET"])
 PY
 }
 
+install_workflow_skills() {
+  local skills_source="$1"
+  local source_root="$2"
+  local skill_source skill_name skill_scope_file skill_target skill_tmp
+  local -a installed_skill_ids=()
+  skill_line="- skill: skipped"
+  if [[ "$install_skill" == "0" || ! -d "$skills_source" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$skills_dir"
+  skill_install_lock="$skills_dir/.loopx-install-lock"
+  local lock_attempt=0
+  until mkdir "$skill_install_lock" 2>/dev/null; do
+    local owner_pid=""
+    if [[ -f "$skill_install_lock/pid" ]]; then
+      owner_pid="$(cat "$skill_install_lock/pid" 2>/dev/null || true)"
+    fi
+    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+      local stale_lock="$skill_install_lock.stale.$$"
+      if mv "$skill_install_lock" "$stale_lock" 2>/dev/null; then
+        rm -rf "$stale_lock"
+        continue
+      fi
+    fi
+    lock_attempt=$((lock_attempt + 1))
+    if [[ "$lock_attempt" -ge 600 ]]; then
+      echo "loopx installer error: timed out waiting for workflow skill installation" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  skill_install_lock_owned=1
+  printf '%s\n' "$$" >"$skill_install_lock/pid"
+
+  skill_line=""
+  while IFS= read -r skill_source; do
+    skill_name="$(basename "$skill_source")"
+    skill_scope_file="$skill_source/.loopx-skill-scope"
+    if [[ -f "$skill_scope_file" ]] && [[ "$(tr -d '[:space:]' <"$skill_scope_file")" == "project" ]]; then
+      skill_line="${skill_line}- project skill source: $skill_source (install explicitly per project)"$'\n'
+      continue
+    fi
+    skill_target="$skills_dir/$skill_name"
+    skill_tmp="$(mktemp -d "$skills_dir/.${skill_name}.tmp.XXXXXX")"
+    if ! cp -R "$skill_source"/. "$skill_tmp"/; then
+      rm -rf "$skill_tmp"
+      return 1
+    fi
+    rm -rf "$skill_target"
+    mv "$skill_tmp" "$skill_target"
+    installed_skill_ids+=("$skill_name")
+    skill_line="${skill_line}- skill: $skill_target"$'\n'
+  done < <(find "$skills_source" -mindepth 1 -maxdepth 1 -type d -print | sort)
+
+  if [[ "${#installed_skill_ids[@]}" -gt 0 ]]; then
+    LOOPX_SKILL_INSTALL_DIR="$skills_dir" \
+      LOOPX_SKILL_INSTALL_SOURCE_ROOT="$source_root" \
+      LOOPX_SKILL_INSTALL_IDS="$(printf '%s\n' "${installed_skill_ids[@]}")" \
+      LOOPX_SKILL_INSTALLED_AT="$installed_at" \
+      PYTHONPATH="$source_root${PYTHONPATH:+:$PYTHONPATH}" \
+      "${LOOPX_PYTHON:-python3}" - <<'PY'
+import os
+from pathlib import Path
+
+from loopx.skill_install_readback import write_skill_install_readback
+
+write_skill_install_readback(
+    skills_dir=Path(os.environ["LOOPX_SKILL_INSTALL_DIR"]),
+    skill_ids=os.environ["LOOPX_SKILL_INSTALL_IDS"].splitlines(),
+    source_root=Path(os.environ["LOOPX_SKILL_INSTALL_SOURCE_ROOT"]),
+    installed_at=os.environ["LOOPX_SKILL_INSTALLED_AT"],
+)
+PY
+    skill_line="${skill_line}- skill readback: $skills_dir/.loopx-skill-install.json"$'\n'
+  fi
+  skill_line="${skill_line%$'\n'}"
+  rm -rf "$skill_install_lock"
+  skill_install_lock_owned=0
+  skill_install_lock=""
+}
+
 verify_default_promotion() {
   LOOPX_VERIFY_LINK="$bin_dir/loopx" \
     LOOPX_VERIFY_RELEASE_DIR="$release_dir" \
@@ -429,11 +525,16 @@ if [[ "$promote_default" == "0" ]]; then
   install_symlink "$repo_root/scripts/loopx" "$bin_dir/loopx-canary"
   export PATH="$bin_dir:$PATH"
   "$bin_dir/loopx-canary" doctor >/dev/null
+  skill_line="- skill: unchanged (set LOOPX_SKILLS_DIR to install canary workflow skills)"
+  if [[ "$skills_dir_explicit" == "1" ]]; then
+    install_workflow_skills "$repo_root/skills" "$repo_root"
+  fi
   cat <<EOF
 loopx checkout installed as canary only
 - default executable: unchanged
 - canary executable: $bin_dir/loopx-canary
 - promotion mode: $promotion_mode
+$skill_line
 - promote explicitly: LOOPX_PROMOTE_DEFAULT=1 $repo_root/scripts/install-local.sh
 
 Current shell can use the canary with:
@@ -557,26 +658,7 @@ if [[ "$install_canary" != "0" ]]; then
   "$bin_dir/loopx-canary" doctor >/dev/null
 fi
 
-skill_line="- skill: skipped"
-skills_source="$release_dir/skills"
-if [[ "$install_skill" != "0" && -d "$skills_source" ]]; then
-  mkdir -p "$skills_dir"
-  skill_line=""
-  while IFS= read -r skill_source; do
-    skill_name="$(basename "$skill_source")"
-    skill_scope_file="$skill_source/.loopx-skill-scope"
-    if [[ -f "$skill_scope_file" ]] && [[ "$(tr -d '[:space:]' <"$skill_scope_file")" == "project" ]]; then
-      skill_line="${skill_line}- project skill source: $skill_source (install explicitly per project)"$'\n'
-      continue
-    fi
-    skill_target="$skills_dir/$skill_name"
-    rm -rf "$skill_target"
-    mkdir -p "$skill_target"
-    cp -R "$skill_source"/. "$skill_target"/
-    skill_line="${skill_line}- skill: $skill_target"$'\n'
-  done < <(find "$skills_source" -mindepth 1 -maxdepth 1 -type d -print | sort)
-  skill_line="${skill_line%$'\n'}"
-fi
+install_workflow_skills "$release_dir/skills" "$release_dir"
 
 slash_line="- slash commands: skipped"
 install_slash_commands="${LOOPX_INSTALL_SLASH_COMMANDS:-1}"

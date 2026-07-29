@@ -17,6 +17,12 @@ from .project_prompt import (
 SCHEMA_VERSION = "loopx_host_loop_activation_v1"
 AGENT_TYPE_CATALOG_SCHEMA_VERSION = "loopx_agent_type_catalog_v0"
 IDENTITY_SELECTION_SCHEMA_VERSION = "loopx_host_loop_identity_selection_v0"
+HOST_MANAGED_SKILL_AGENT_TYPES = frozenset(
+    {
+        "ark-managed-agent",
+        "other-agent",
+    }
+)
 
 
 def scheduler_command_binding_for_agent_type(
@@ -24,6 +30,7 @@ def scheduler_command_binding_for_agent_type(
 ) -> dict[str, Any]:
     canonical = normalize_agent_type(agent_type)
     runtime_profile = {
+        "ark-managed-agent": SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL,
         "codex-app": SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
         "codex-app-ssh": SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
         "codex-cli": SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
@@ -36,7 +43,12 @@ def scheduler_command_binding_for_agent_type(
     return {}
 
 
+def agent_type_uses_host_managed_skills(agent_type: str) -> bool:
+    return normalize_agent_type(agent_type) in HOST_MANAGED_SKILL_AGENT_TYPES
+
+
 SUPPORTED_AGENT_TYPES = [
+    "ark-managed-agent",
     "codex-app",
     "codex-app-ssh",
     "codex-ide-plugin",
@@ -48,6 +60,19 @@ SUPPORTED_AGENT_TYPES = [
 ]
 
 AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
+    "ark-managed-agent": {
+        "display_name": "Ark Managed Agent",
+        "host_loop": "one-shot Goal activation owned by the Goal runtime",
+        "entry": "submit the generated task_body as one Goal",
+        "accepted_inputs": [
+            "ark-managed-agent",
+            "ark_managed_agent",
+            "ark managed agent",
+            "managed-agent",
+            "managed_agent",
+            "managed agent",
+        ],
+    },
     "codex-app": {
         "display_name": "Codex App",
         "host_loop": "Codex App heartbeat automation",
@@ -165,6 +190,8 @@ class AgentTypeError(ValueError):
 
 
 HOST_SURFACE_TO_AGENT_TYPE = {
+    "ark-managed-agent": "ark-managed-agent",
+    "ark_managed_agent": "ark-managed-agent",
     "codex-app": "codex-app",
     "codex-app-ssh": "codex-app-ssh",
     "chat-box": "codex-app",
@@ -291,6 +318,7 @@ def _heartbeat_commands(
     available_capabilities: list[str] | None = None,
 ) -> dict[str, str]:
     scope_by_type = {
+        "ark-managed-agent": "Ark Managed Agent one-shot Goal activation",
         "codex-app": "Codex App heartbeat automation",
         "codex-app-ssh": "Codex App SSH /goal visible task loop",
         "codex-ide-plugin": "Codex IDE plugin /goal visible task loop",
@@ -410,6 +438,37 @@ def _codex_app_activation(commands: dict[str, str]) -> dict[str, Any]:
         "success_criteria": [
             "A Codex App heartbeat automation exists for this goal and uses the generated task_body.",
             "The next wakeup starts from LoopX quota/status/state, not stale chat memory.",
+        ],
+    }
+
+
+def _ark_managed_agent_activation(commands: dict[str, str]) -> dict[str, Any]:
+    return {
+        "host_surface": "ark_managed_agent_goal_mode",
+        "entry_command_hint": "submit the generated task_body as one Goal",
+        "activation_method": "submit_goal_once",
+        "activation_input_command": commands["heartbeat_prompt_json"],
+        "host_mutation": {
+            "owner": "Ark Managed Agent Goal host",
+            "transport_contract": "goal_prompt_v0",
+            "prompt_field": "task_body",
+            "cli_can_mutate_directly": False,
+            "missing_host_tool_gate": (
+                "No Goal transport is available; surface the generated task_body "
+                "without claiming host activation."
+            ),
+        },
+        "activation_steps": [
+            "Run the heartbeat-prompt JSON command after project state and todos are written.",
+            "Read task_body from the JSON payload.",
+            "Submit that exact task_body once through either the local-development or cloud Goal transport.",
+            "Let the Goal runtime own inner iterations; do not wrap them in LoopX Turn.",
+            "Read runtime_capability_reentry_v0 from quota tool results; do not rewrite task_body.",
+        ],
+        "success_criteria": [
+            "The selected transport submitted the generated task_body exactly once.",
+            "The Goal runtime owns continuation while LoopX state remains authoritative.",
+            "Runtime capability repair remains outside the Goal prompt.",
         ],
     }
 
@@ -594,7 +653,9 @@ def build_host_loop_activation_packet(
         if activation_allowed
         else {"heartbeat_prompt_json": None, "heartbeat_prompt": None}
     )
-    if canonical == "codex-app":
+    if canonical == "ark-managed-agent":
+        surface = _ark_managed_agent_activation(commands)
+    elif canonical == "codex-app":
         surface = _codex_app_activation(commands)
     elif canonical == "codex-app-ssh":
         surface = _codex_app_ssh_activation(commands)

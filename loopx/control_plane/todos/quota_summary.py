@@ -161,10 +161,22 @@ def _terminal_closure_proof_is_valid(
 ) -> bool:
     proof = value.get("terminal_closure_proof")
     items = value.get("items")
+    total_count = counts["total_count"]
+    displayed_items_cover_source = bool(
+        isinstance(total_count, int)
+        and (
+            (total_count == 0 and items == [])
+            or (
+                total_count > 0
+                and isinstance(items, list)
+                and 0 < len(items) <= total_count
+            )
+        )
+    )
     return bool(
         value.get("schema_version") == "todo_summary_v0"
         and isinstance(items, list)
-        and 0 < len(items) <= counts["total_count"]
+        and displayed_items_cover_source
         and all(
             isinstance(item, dict)
             and item.get("status") == "done"
@@ -183,7 +195,7 @@ def _terminal_closure_proof_is_valid(
         and proof.get("schema_version") == "todo_terminal_closure_proof_v0"
         and proof.get("role") == source_proof.get("role")
         and proof.get("source_section") == value.get("source_section")
-        and proof.get("item_count") == counts["total_count"]
+        and proof.get("item_count") == total_count
         and proof.get("all_todos_done") is True
         and _strict_non_negative_int(proof.get("monitor_open_count")) == 0
         and _strict_non_negative_int(proof.get("successor_gap_count")) == 0
@@ -203,7 +215,6 @@ def _validated_todo_source_contract(
     }
     valid_counts = (
         all(count is not None for count in counts.values())
-        and bool(counts["total_count"])
         and counts["total_count"]
         == counts["open_count"] + counts["done_count"] + counts["deferred_count"]
     )

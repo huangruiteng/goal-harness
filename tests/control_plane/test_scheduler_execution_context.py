@@ -22,6 +22,7 @@ from loopx.control_plane.work_items.interaction_contract import (
 
 
 VALID_COMBINATIONS = {
+    ("ark_managed_agent", "goal_runtime", "interactive"),
     ("codex_app", "host_automation", "hosted_automation"),
     ("codex_app_ssh", "agent_cli_loop", "interactive"),
     ("local_scheduler", "host_automation", "hosted_automation"),
@@ -38,6 +39,11 @@ VALID_COMBINATIONS = {
 }
 
 FIRST_CLASS_RUNTIME_PROFILES = (
+    (
+        SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL,
+        ("ark_managed_agent", "goal_runtime", "interactive"),
+        " --runtime-profile ark_managed_agent_goal",
+    ),
     (
         SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT,
         ("codex_app", "host_automation", "hosted_automation"),

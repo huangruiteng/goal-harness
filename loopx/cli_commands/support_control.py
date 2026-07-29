@@ -190,13 +190,27 @@ def register_support_control_commands(
     heartbeat_prompt_parser.add_argument(
         "-H",
         "--host-surface",
-        choices=["codex_app", "codex_app_ssh", "codex_cli", "generic_cli", "claude_code", "local_scheduler"],
+        choices=[
+            "ark_managed_agent",
+            "codex_app",
+            "codex_app_ssh",
+            "codex_cli",
+            "generic_cli",
+            "claude_code",
+            "local_scheduler",
+        ],
         help="Host surface embedded in the generated quota guard.",
     )
     heartbeat_prompt_parser.add_argument(
         "-O",
         "--scheduler-owner",
-        choices=["host_automation", "agent_cli_loop", "outer_controller", "none"],
+        choices=[
+            "host_automation",
+            "agent_cli_loop",
+            "goal_runtime",
+            "outer_controller",
+            "none",
+        ],
         help="Cadence owner embedded in the generated quota guard.",
     )
     heartbeat_prompt_parser.add_argument(

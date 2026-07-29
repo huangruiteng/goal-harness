@@ -272,13 +272,27 @@ def register_quota_command(subparsers: argparse._SubParsersAction) -> None:
     quota_parser.add_argument(
         "-H",
         "--host-surface",
-        choices=["codex_app", "codex_app_ssh", "codex_cli", "generic_cli", "claude_code", "local_scheduler"],
+        choices=[
+            "ark_managed_agent",
+            "codex_app",
+            "codex_app_ssh",
+            "codex_cli",
+            "generic_cli",
+            "claude_code",
+            "local_scheduler",
+        ],
         help="Host surface that will consume this scheduler projection.",
     )
     quota_parser.add_argument(
         "-O",
         "--scheduler-owner",
-        choices=["host_automation", "agent_cli_loop", "outer_controller", "none"],
+        choices=[
+            "host_automation",
+            "agent_cli_loop",
+            "goal_runtime",
+            "outer_controller",
+            "none",
+        ],
         help="Runtime that owns the next cadence decision.",
     )
     quota_parser.add_argument(
@@ -467,6 +481,7 @@ def handle_quota_command(
                 include_task_graph=False,
                 goal_id=status_goal_id,
                 max_age_seconds=projection_cache_ttl_seconds,
+                available_capabilities=args.available_capabilities,
             )
         if status_payload is None:
             status_payload = collect_status(
@@ -475,6 +490,7 @@ def handle_quota_command(
                 scan_roots=scan_roots,
                 limit=status_limit,
                 goal_id=status_goal_id,
+                available_capabilities=args.available_capabilities,
             )
             if write_projection_cache_enabled:
                 cache_metadata = write_status_projection_cache(
@@ -486,6 +502,7 @@ def handle_quota_command(
                     goal_id=status_goal_id,
                     payload=status_payload,
                     max_age_seconds=projection_cache_ttl_seconds,
+                    available_capabilities=args.available_capabilities,
                 )
         elif isinstance(status_payload.get("projection_cache"), dict):
             cache_metadata = dict(status_payload["projection_cache"])
@@ -565,6 +582,7 @@ def handle_quota_command(
                             scan_roots=scan_roots,
                             limit=status_limit,
                             goal_id=status_goal_id,
+                            available_capabilities=args.available_capabilities,
                         )
                         payload = build_live_quota_should_run_decision(
                             status_payload,
@@ -623,6 +641,7 @@ def handle_quota_command(
                     scan_roots=scan_roots,
                     limit=status_limit,
                     goal_id=status_goal_id,
+                    available_capabilities=args.available_capabilities,
                 ),
             )
         elif args.quota_command in {"scheduler-ack", "scheduler-ack-current"}:

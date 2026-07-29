@@ -301,6 +301,19 @@ def main() -> int:
 
         skill = codex_home / "skills" / "loopx-project" / "SKILL.md"
         assert not skill.parent.is_symlink(), skill.parent
+        skill_readback = json.loads(
+            (codex_home / "skills" / ".loopx-skill-install.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert skill_readback["integration_mode"] == "fixed_install_script"
+        assert skill_readback["source"]["revision"] == source_commit
+        assert set(skill_readback["materialized_skill_ids"]) == {
+            "loopx-doc-registry",
+            "loopx-pr-review",
+            "loopx-project",
+            "loopx-self-repair",
+        }
         skill_text = skill.read_text(encoding="utf-8")
         compact_skill_text = " ".join(skill_text.split())
         for phrase in (

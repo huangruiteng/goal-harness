@@ -82,22 +82,22 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "doc": "docs/capabilities/change-quality/README.md",
             },
             {
-                "schema_version": "change_quality_prepare_packet_v1",
+                "schema_version": "change_quality_prepare_packet_v2",
                 "module": "loopx.capabilities.change_quality.receipt",
                 "doc": "docs/capabilities/change-quality/README.md",
             },
             {
-                "schema_version": "change_quality_agent_result_v1",
+                "schema_version": "change_quality_agent_result_v2",
                 "module": "loopx.capabilities.change_quality.result",
                 "doc": "docs/capabilities/change-quality/README.md",
             },
             {
-                "schema_version": "change_quality_receipt_v1",
+                "schema_version": "change_quality_receipt_v2",
                 "module": "loopx.capabilities.change_quality.receipt",
                 "doc": "docs/capabilities/change-quality/README.md",
             },
             {
-                "schema_version": "change_quality_receipt_verification_v1",
+                "schema_version": "change_quality_receipt_verification_v2",
                 "module": "loopx.capabilities.change_quality.receipt",
                 "doc": "docs/capabilities/change-quality/README.md",
             },
@@ -112,6 +112,8 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
             "Turn may transport a packet or receipt reference, but premerge remains the enforcement authority.",
             "The canonical workflow skill is release-owned and project-delivered; the global installer does not publish it into every agent configuration.",
             "Receipts stay in local runtime state; raw model transcripts, private context, and credentials are not persisted.",
+            "Agents write only grounded reuse and simplification conclusions, sparse triggered risks, and validation evidence; LoopX derives guardrail states.",
+            "Existing v1 receipts remain verifiable read-only for their exact scope; new receipts use v2.",
             "The first version is single-level: it qualifies one final diff and does not recursively review reviews.",
         ],
         "next_real_step": (

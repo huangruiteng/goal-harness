@@ -15,7 +15,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.capabilities.change_quality.receipt import (  # noqa: E402
     CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
-    REVIEW_LENS_IDS,
     build_change_quality_prepare_packet,
     record_change_quality_receipt,
     verify_change_quality_receipt,
@@ -92,44 +91,24 @@ def main() -> int:
                     "schema_version": CHANGE_QUALITY_RESULT_SCHEMA_VERSION,
                     "scope_fingerprint": prepared["scope"]["scope_fingerprint"],
                     "reviewed_final_scope": True,
-                    "summary": "Exact final scope reviewed.",
-                    "repository_principles": [],
-                    "findings": [],
-                    "lens_reviews": [
-                        {
-                            "lens_id": lens_id,
-                            "status": "checked",
-                            "summary": (
-                                f"{lens_id} was checked against the fixture diff."
-                            ),
-                            "finding_codes": [],
-                            "evidence_refs": (
-                                ["decision:fixture-simplification", "path:app.py"]
-                                if lens_id == "quality_simplification"
-                                else (
-                                    ["validator:fixture-smoke"]
-                                    if lens_id == "test_validation"
-                                    else ["path:app.py"]
-                                )
-                            ),
-                        }
-                        for lens_id in REVIEW_LENS_IDS
-                    ],
-                    "simplification_decisions": [
-                        {
-                            "decision_id": "fixture-simplification",
-                            "subject": "final fixture diff",
-                            "outcome": "retained",
-                            "reason": "The direct assignment is already minimal.",
-                        }
-                    ],
-                    "safe_fix_applied": False,
-                    "safe_fix_passes": 0,
-                    "validation_evidence": [
+                    "reuse": {
+                        "outcome": "retained",
+                        "summary": "The fixture already uses its direct owner.",
+                        "evidence_refs": ["path:app.py"],
+                    },
+                    "simplification": {
+                        "outcome": "retained",
+                        "summary": "The direct assignment is already minimal.",
+                        "evidence_refs": ["path:app.py"],
+                        "safe_fix_applied": False,
+                    },
+                    "risks": [],
+                    "validation": [
                         {
                             "validator": "fixture-smoke",
                             "status": "passed",
                             "scope": "exact receipt lifecycle",
+                            "required": True,
                         }
                     ],
                 }

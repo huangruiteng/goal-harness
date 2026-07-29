@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from .control_plane.runtime.time import now_local_iso
+from .control_plane.todos.active_state_editing import (
+    TODO_SECTION_HEADINGS,
+    insertion_anchor,
+    section_bounds,
+)
 from .execution_profile import (
     build_execution_profile,
     compact_execution_profile,
@@ -98,6 +103,26 @@ def render_authority_sources(project: Path, goal_doc: Path | None) -> str:
     if not goal_doc:
         return "- No explicit goal document was provided during bootstrap."
     return f"- Primary goal document: `{rel_or_abs(goal_doc, project)}`"
+
+
+def repair_missing_todo_source_sections(state_text: str) -> tuple[str, list[str]]:
+    """Add missing durable todo sources without replacing existing state content."""
+
+    lines = state_text.splitlines()
+    added_roles: list[str] = []
+    for role in ("user", "agent"):
+        if section_bounds(lines, role) is not None:
+            continue
+        anchor = insertion_anchor(lines, role)
+        section = [f"## {TODO_SECTION_HEADINGS[role]}", ""]
+        if anchor > 0 and lines[anchor - 1].strip():
+            section.insert(0, "")
+        lines[anchor:anchor] = section
+        added_roles.append(role)
+    if not added_roles:
+        return state_text, []
+    trailing_newline = "\n" if state_text.endswith("\n") else ""
+    return "\n".join(lines) + trailing_newline, added_roles
 
 
 def onboarding_candidates(onboarding_scan: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -466,6 +491,10 @@ adapter_id: {goal_id}
 - Do not optimize for activity if no useful artifact or decision can be produced.
 {onboarding_block}
 
+## User Todo / Owner Review Reading Queue
+
+## Agent Todo
+
 ## Next Action
 
 - {next_action}
@@ -710,6 +739,25 @@ def bootstrap_project(
     elif state_exists and force:
         state_action = "replaced"
 
+    repaired_state_text: str | None = None
+    repaired_todo_source_roles: list[str] = []
+    if state_exists and state_action in {
+        "kept-existing",
+        "kept-existing-preserve-todos",
+    }:
+        repaired_state_text, repaired_todo_source_roles = repair_missing_todo_source_sections(
+            state_file.read_text(encoding="utf-8")
+        )
+    todo_source_migration = (
+        {
+            "schema_version": "todo_source_section_migration_v0",
+            "added_roles": repaired_todo_source_roles,
+            "applied": False,
+        }
+        if repaired_todo_source_roles
+        else None
+    )
+
     dry_state_actions = {
         "created": "would-create",
         "kept-existing": "would-keep-existing",
@@ -732,7 +780,11 @@ def bootstrap_project(
         }
     actions = [
         {"path": str(registry_path), "action": "would-write" if dry_run else "wrote", "goal": registry_goal_action},
-        {"path": str(state_file), "action": dry_state_actions.get(state_action, "would-write") if dry_run else state_action},
+        {
+            "path": str(state_file),
+            "action": dry_state_actions.get(state_action, "would-write") if dry_run else state_action,
+            **({"todo_source_migration": todo_source_migration} if todo_source_migration else {}),
+        },
     ]
     if sync_global:
         actions.append(
@@ -796,6 +848,7 @@ def bootstrap_project(
                 "runtime_root": str(runtime_root),
                 "registry_goal_action": registry_goal_action,
                 "state_action": state_action,
+                "todo_source_migration": todo_source_migration,
                 "force_bootstrap_warning": force_bootstrap_warning,
                 "execution_profile": execution_profile,
                 "onboarding_scan": onboarding_scan,
@@ -846,6 +899,10 @@ def bootstrap_project(
                 ),
                 encoding="utf-8",
             )
+        elif repaired_state_text is not None and repaired_todo_source_roles:
+            state_file.write_text(repaired_state_text, encoding="utf-8")
+            if todo_source_migration is not None:
+                todo_source_migration["applied"] = True
         if sync_global:
             global_sync = sync_project_registry_to_global(
                 registry_path=registry_path,
@@ -867,6 +924,7 @@ def bootstrap_project(
         "runtime_root": str(runtime_root),
         "registry_goal_action": registry_goal_action,
         "state_action": state_action,
+        "todo_source_migration": todo_source_migration,
         "force_bootstrap_warning": force_bootstrap_warning,
         "execution_profile": execution_profile,
         "onboarding_scan": onboarding_scan,

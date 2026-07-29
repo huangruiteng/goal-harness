@@ -237,6 +237,13 @@ ignores `agent_material_frontiers` and omits `material_frontier`,
 absence is an observed runtime condition, not a user gate: it does not create
 a todo, notification, or authority request.
 
+Status-backed CLI entry points preserve that same execution envelope:
+`status`, `quota`, and `review-packet` accept repeatable
+`--available-capability` values and pass them through status collection.
+Projection-cache identity includes the normalized capability set, so a
+default-off snapshot cannot satisfy an enabled request and an enabled snapshot
+cannot leak material fields into a default request.
+
 The cold-path join is scoped by `(goal_id, agent_id)`, not agent identity alone.
 An explicit status goal filter takes precedence, followed by the current todo's
 goal and then a single unambiguous row goal. When a multi-goal agent row has no

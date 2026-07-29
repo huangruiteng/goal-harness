@@ -91,37 +91,6 @@ def apply_task_orchestration_contract(
     return contract, _task_orchestration_work_lane_contract(contract)
 
 
-def task_orchestration_effective_action(
-    contract: dict[str, Any] | None,
-    *,
-    should_run: bool,
-    normal_delivery_allowed: bool,
-    effective_action: str,
-    reason: str,
-) -> tuple[str, str]:
-    if (
-        contract
-        and should_run
-        and normal_delivery_allowed
-        and effective_action == "normal_run"
-    ):
-        return (
-            "coordinate_task_bundle",
-            "the deterministic task coordinator must activate or resume eligible "
-            "peer lanes before doing its own worker-lane delivery",
-        )
-    return effective_action, reason
-
-
-def task_selected_recommended_action(
-    contract: dict[str, Any] | None,
-    fallback: str | None,
-) -> str | None:
-    if not contract:
-        return fallback
-    return str(contract.get("coordinator_obligation") or fallback or "")
-
-
 def task_goal_route_hint(
     goal_route_hint: dict[str, Any] | None,
     contract: dict[str, Any] | None,
@@ -280,9 +249,9 @@ def _task_orchestration_contract(
     )
     if not coordinator or agent_id != coordinator:
         return None
-    peer_lanes = [
-        lane for lane in candidate_lanes if lane["agent_id"] != coordinator
-    ][:max_peers]
+    peer_lanes = [lane for lane in candidate_lanes if lane["agent_id"] != coordinator][
+        :max_peers
+    ]
     if not peer_lanes:
         return None
     return {

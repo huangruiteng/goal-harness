@@ -53,6 +53,22 @@ heartbeat. It must fit the Codex `/goal` text limit, call `quota should-run`
 without a heartbeat turn receipt, and must not instruct the host to invoke
 `automation_update`, apply an RRULE, or synthesize `LOOPX_TURN`.
 
+Visible Goal activation captures the capabilities observed when the task body
+is generated, but that initial list is not exhaustive for a long-running
+session. Dynamic capability guidance therefore belongs to the CLI decision
+packet, not the stable Goal prompt. When `quota should-run` finds a repairable
+runtime capability gap, `interaction_contract.cli_channel` returns a typed
+`runtime_capability_reentry_v0` packet. Each candidate requires a successful
+real-callsite observation before its exact re-entry command may declare
+`--available-capability`.
+
+The verified re-entry invocation becomes the capability envelope for that
+decision. LoopX then projects the same session-scoped capability flags into
+follow-up refresh, spend, monitor, and quota commands. It never persists those
+observations as durable grants, and owner-held capabilities such as credentials
+remain user gates. This contract is shared by local visible Goal hosts and Ark
+Managed Agent Goal mode without requiring prompt regeneration.
+
 Agent identity follows the same fail-closed rule. A goal with one registered
 agent may select that identity automatically. A goal with multiple registered
 agents and no `--agent-id` must project a concrete identity-selection gate with

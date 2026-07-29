@@ -4,6 +4,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from .ark_managed_agent_host import build_ark_managed_agent_host_contract
 from .agent_registry import normalize_registered_agents
 from .project_prompt import (
     render_available_capability_args,
@@ -66,6 +67,7 @@ INTERFACE_BUDGET_CHARS = {
     "visible_goal": 4_000,
 }
 CODEX_VISIBLE_GOAL_MAX_CHARS = INTERFACE_BUDGET_CHARS["visible_goal"]
+ARK_MANAGED_AGENT_GOAL_MAX_CHARS = CODEX_VISIBLE_GOAL_MAX_CHARS
 
 
 def uses_visible_goal_host_loop(
@@ -79,6 +81,7 @@ def uses_visible_goal_host_loop(
         except ValueError:
             return False
         return profile in {
+            SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL,
             SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE,
             SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
         }
@@ -88,10 +91,36 @@ def uses_visible_goal_host_loop(
     if not resolution.ok or resolution.context is None:
         return False
     context = resolution.context
+    if context.execution_mode is not ExecutionMode.INTERACTIVE:
+        return False
+    if context.host_surface is HostSurface.ARK_MANAGED_AGENT:
+        return context.scheduler_owner is SchedulerOwner.GOAL_RUNTIME
     return (
         context.host_surface in {HostSurface.CODEX_APP_SSH, HostSurface.CODEX_CLI}
         and context.scheduler_owner is SchedulerOwner.AGENT_CLI_LOOP
-        and context.execution_mode is ExecutionMode.INTERACTIVE
+    )
+
+
+def uses_ark_managed_agent_goal_host(
+    *,
+    runtime_profile: str | None,
+    scheduler_execution_context: dict[str, Any] | None,
+) -> bool:
+    if runtime_profile:
+        try:
+            return (
+                SchedulerRuntimeProfile(runtime_profile)
+                is SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL
+            )
+        except ValueError:
+            return False
+    if scheduler_execution_context is None:
+        return False
+    resolution = resolve_scheduler_execution_context(scheduler_execution_context)
+    return bool(
+        resolution.ok
+        and resolution.context is not None
+        and resolution.context.host_surface is HostSurface.ARK_MANAGED_AGENT
     )
 
 
@@ -337,6 +366,10 @@ def build_heartbeat_prompt(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
     )
+    ark_managed_agent_goal = uses_ark_managed_agent_goal_host(
+        runtime_profile=runtime_profile,
+        scheduler_execution_context=scheduler_execution_context,
+    )
     effective_resolved_active_state = resolved_active_state or active_state
     active_state_text = str(active_state.expanduser()) if active_state else "the registry-declared active state"
     if active_state:
@@ -446,7 +479,9 @@ def build_heartbeat_prompt(
     compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
-    if visible_goal:
+    if ark_managed_agent_goal:
+        task_body_renderer = render_ark_managed_agent_goal_task_body
+    elif visible_goal:
         task_body_renderer = render_visible_goal_task_body
     elif thin:
         task_body_renderer = render_thin_heartbeat_task_body
@@ -479,6 +514,14 @@ def build_heartbeat_prompt(
             "generated visible /goal task body exceeds the Codex 4000-character "
             "limit; shorten agent scopes or project-specific prompt rules"
         )
+    if (
+        ark_managed_agent_goal
+        and len(task_body) > ARK_MANAGED_AGENT_GOAL_MAX_CHARS
+    ):
+        raise ValueError(
+            "generated Ark Managed Agent goal prompt exceeds the 4000-character "
+            "host budget; shorten agent scopes or project-specific prompt rules"
+        )
     payload = {
         "ok": True,
         "goal_id": goal_id,
@@ -499,6 +542,11 @@ def build_heartbeat_prompt(
         "registered_agents": normalized_registered_agents,
         "runtime_profile": runtime_profile,
         "scheduler_execution_context": scheduler_execution_context,
+        **(
+            {"host_contract": build_ark_managed_agent_host_contract()}
+            if ark_managed_agent_goal
+            else {}
+        ),
         "expanded_prompt_command": expanded_prompt_command,
         "compact_prompt_command": compact_prompt_command,
         "brief_prompt_command": brief_prompt_command,
@@ -1024,15 +1072,46 @@ def render_visible_goal_task_body(
         brief_prompt_command,
         thin_prompt_command,
     )
+    return _render_goal_task_body(
+        goal_id=goal_id,
+        active_state=active_state,
+        host_preamble=(
+            "in this visible\nCodex `/goal` task. This is an interactive goal "
+            "loop, not a heartbeat automation:\ndo not create/update an "
+            "automation, apply RRULE cadence, or invent `LOOPX_TURN`."
+        ),
+        completion_subject="visible\nGoal",
+        pr_review_pre_quota_command=pr_review_pre_quota_command,
+        quota_guard_command=quota_guard_command,
+        quota_spend_command=quota_spend_command,
+        progress_refresh_state_command=progress_refresh_state_command,
+        material_queue_rule=material_queue_rule,
+        permission_rule=permission_rule,
+        agent_scope_instruction=agent_scope_instruction,
+    )
+
+
+def _render_goal_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    host_preamble: str,
+    completion_subject: str,
+    pr_review_pre_quota_command: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    progress_refresh_state_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+    agent_scope_instruction: str,
+) -> str:
     scope_block = f"\n{agent_scope_instruction}\n" if agent_scope_instruction else ""
     prequota_block = (
         f"Run `{pr_review_pre_quota_command}` first.\n"
         if pr_review_pre_quota_command
         else ""
     )
-    return f"""Advance LoopX goal `{goal_id}` from `{active_state}` in this visible
-Codex `/goal` task. This is an interactive goal loop, not a heartbeat automation:
-do not create/update an automation, apply RRULE cadence, or invent `LOOPX_TURN`.
+    return f"""Advance LoopX goal `{goal_id}` from `{active_state}` {host_preamble}
 {scope_block}
 
 At every continuation, inspect LoopX state/status and the repository. {prequota_block}Run
@@ -1047,18 +1126,65 @@ If `should_run=true`, choose the highest-priority in-scope unblocked agent todo.
 Honor claims/leases, blocker-push and recovery obligations. Complete one bounded,
 coherent delivery segment; validate it; write public-safe evidence, critic, and
 next action back to LoopX. A non-trivial completion needs a successor todo or an
-explicit no-follow-up rationale. Spend exactly once after validated writeback:
-`{quota_spend_command}`. Then refresh progress with
-`{progress_refresh_state_command}`.
+explicit no-follow-up rationale. After validated writeback, refresh the
+accountable progress record before spending:
+`{progress_refresh_state_command}`. Then spend exactly once against that refresh:
+`{quota_spend_command}`.
 
 Do not spend for gates, waits, dry runs, failed preflight, no-op inspection, or
 duplicate accounting. Stop for private/company material, credentials, destructive
-git, unauthorized production, or repository review rules. Complete this visible
-Goal only when LoopX reports terminal success with no follow-up; otherwise keep the
+git, unauthorized production, or repository review rules. Complete this {completion_subject} only when LoopX reports terminal success with no follow-up; otherwise keep the
 current gate or next safe action explicit.
 
 {material_queue_rule}
 {permission_rule}"""
+
+
+def render_ark_managed_agent_goal_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    cli_preflight: str,
+    pr_review_pre_quota_command: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    refresh_state_command: str,
+    progress_refresh_state_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+    cli_bin: str,
+    agent_scope_instruction: str,
+    expanded_prompt_command: str,
+    compact_prompt_command: str,
+    brief_prompt_command: str,
+    thin_prompt_command: str,
+) -> str:
+    del (
+        cli_preflight,
+        refresh_state_command,
+        cli_bin,
+        expanded_prompt_command,
+        compact_prompt_command,
+        brief_prompt_command,
+        thin_prompt_command,
+    )
+    return _render_goal_task_body(
+        goal_id=goal_id,
+        active_state=active_state,
+        host_preamble=(
+            "in one Goal\nactivation. The Goal runtime owns continuation and "
+            "inner iterations. This is a\ngoal loop, not automation; do not "
+            "invoke LoopX Turn."
+        ),
+        completion_subject="Goal",
+        pr_review_pre_quota_command=pr_review_pre_quota_command,
+        quota_guard_command=quota_guard_command,
+        quota_spend_command=quota_spend_command,
+        progress_refresh_state_command=progress_refresh_state_command,
+        material_queue_rule=material_queue_rule,
+        permission_rule=permission_rule,
+        agent_scope_instruction=agent_scope_instruction,
+    )
 
 
 def render_thin_heartbeat_task_body(

@@ -53,6 +53,12 @@ def base_env(root: Path) -> tuple[dict[str, str], Path, Path]:
 def assert_untrusted_checkout_is_canary_only() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-promotion-canary-only-") as tmp:
         env, bin_dir, releases_dir = base_env(Path(tmp))
+        skills_dir = Path(tmp) / "workspace" / ".agents" / "skills"
+        env["LOOPX_INSTALL_SKILL"] = "1"
+        env["LOOPX_SKILLS_DIR"] = str(skills_dir)
+        stale_lock = skills_dir / ".loopx-install-lock"
+        stale_lock.mkdir(parents=True)
+        (stale_lock / "pid").write_text("999999999\n", encoding="utf-8")
         default = bin_dir / "loopx"
         default.write_text("#!/usr/bin/env bash\nexit 41\n", encoding="utf-8")
         default.chmod(0o755)
@@ -67,6 +73,45 @@ def assert_untrusted_checkout_is_canary_only() -> None:
         assert canary.is_symlink(), canary
         assert canary.resolve() == REPO_ROOT / "scripts" / "loopx", canary.resolve()
         assert not releases_dir.exists(), releases_dir
+        expected_skill_ids = {
+            "loopx-doc-registry",
+            "loopx-pr-review",
+            "loopx-project",
+            "loopx-self-repair",
+        }
+        assert {
+            path.parent.name for path in skills_dir.glob("*/SKILL.md")
+        } == expected_skill_ids
+        assert not (skills_dir / "loopx-change-quality").exists()
+        assert not (skills_dir / "loopx-material").exists()
+        readback = json.loads(
+            (skills_dir / ".loopx-skill-install.json").read_text(encoding="utf-8")
+        )
+        assert readback["integration_mode"] == "fixed_install_script", readback
+        assert set(readback["materialized_skill_ids"]) == expected_skill_ids, readback
+        assert readback["source"]["revision"], readback
+        assert not stale_lock.exists()
+        assert (
+            f"- skill readback: {skills_dir}/.loopx-skill-install.json"
+            in install.stdout
+        )
+
+
+def assert_untrusted_checkout_preserves_implicit_default_skill_root() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-promotion-skill-root-") as tmp:
+        env, _bin_dir, _releases_dir = base_env(Path(tmp))
+        env["LOOPX_INSTALL_SKILL"] = "1"
+        implicit_skill = (
+            Path(env["CODEX_HOME"]) / "skills" / "loopx-project" / "SKILL.md"
+        )
+        implicit_skill.parent.mkdir(parents=True)
+        implicit_skill.write_text("existing default skill\n", encoding="utf-8")
+
+        install = run_install(env, release_id="guarded-implicit-skills")
+
+        assert "skill: unchanged (set LOOPX_SKILLS_DIR" in install.stdout
+        assert implicit_skill.read_text(encoding="utf-8") == "existing default skill\n"
+        assert not (implicit_skill.parents[1] / ".loopx-skill-install.json").exists()
 
 
 def assert_explicit_promotion_is_auditable() -> None:
@@ -98,6 +143,7 @@ def assert_explicit_promotion_is_auditable() -> None:
 
 def main() -> int:
     assert_untrusted_checkout_is_canary_only()
+    assert_untrusted_checkout_preserves_implicit_default_skill_root()
     assert_explicit_promotion_is_auditable()
     print("local-install-promotion-boundary-smoke ok")
     return 0

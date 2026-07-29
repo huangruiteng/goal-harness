@@ -43,6 +43,12 @@ Do not paste the full lifecycle protocol into the visible goal text, and do not
 use a short goal text such as "advance TODO" as the recurring automation body.
 The short text names the goal; the generated task body enforces quota, gates,
 steering audit, writeback, refresh, and spend accounting.
+
+Ark Managed Agent is not an automation profile. Its integration uses one
+transport-neutral goal prompt and lets the goal runtime own inner iteration;
+see the host integration protocol instead of adapting this recurring
+automation contract.
+
 For Codex App, the generated quota command carries the compact explicit runtime
 profile `--runtime-profile codex_app_heartbeat` (generated commands use the
 equivalent compact alias `--codex-app`). The prompt does not restate the

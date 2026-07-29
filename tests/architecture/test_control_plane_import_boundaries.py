@@ -48,12 +48,7 @@ STATUS_FORBIDDEN_DEPENDENCY_PREFIXES = (
     "loopx.benchmark_adapters",
     "loopx.presentation",
 )
-STATUS_OUTWARD_DEPENDENCY_DEBT = {
-    (
-        "loopx.status",
-        "loopx.benchmark_adapters.skillsbench_verifier_bootstrap",
-    ),
-}
+STATUS_OUTWARD_DEPENDENCY_DEBT: set[tuple[str, str]] = set()
 
 
 def _module_name(path: Path) -> str:

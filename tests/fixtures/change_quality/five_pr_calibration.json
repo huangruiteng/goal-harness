@@ -1,5 +1,5 @@
 {
-  "schema_version": "change_quality_five_pr_calibration_v0",
+  "schema_version": "change_quality_five_pr_calibration_v1",
   "cases": [
     {
       "case_id": "pr-2590-registry-boundary-owner",
@@ -12,103 +12,24 @@
         "loopx/control_plane/quota/goal_boundary.py",
         "tests/control_plane/test_goal_boundary_resolution.py"
       ],
-      "repository_principles": [
-        {
-          "source": "AGENTS.md",
-          "principle": "Keep durable state rules in their bounded-context owner and test semantics rather than incidental output."
-        }
-      ],
-      "lens_reviews": [
-        {
-          "lens_id": "reuse",
-          "status": "checked",
-          "summary": "The extracted registry projection reuses the existing capability and checkpoint normalization helpers.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/quota/goal_boundary.py"]
-        },
-        {
-          "lens_id": "type_api_boundary",
-          "status": "checked",
-          "summary": "The public goal_boundary signature and optional return contract remain unchanged.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/quota/goal_boundary.py"]
-        },
-        {
-          "lens_id": "configuration",
-          "status": "checked",
-          "summary": "Registry coordination remains the single source for scope, capabilities, approvals, and guards.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/control_plane/test_goal_boundary_resolution.py"]
-        },
-        {
-          "lens_id": "runtime_ownership",
-          "status": "checked",
-          "summary": "Registry-owned projection is separated from downstream runtime and integration augmentation.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/quota/goal_boundary.py"]
-        },
-        {
-          "lens_id": "quality_simplification",
-          "status": "checked",
-          "summary": "One owner-local helper removes branch density without introducing a generic projection framework.",
-          "finding_codes": [],
-          "evidence_refs": [
-            "path:loopx/control_plane/quota/goal_boundary.py",
-            "decision:extract-registry-owner"
-          ]
-        },
-        {
-          "lens_id": "efficiency",
-          "status": "checked",
-          "summary": "The extraction preserves the existing bounded list normalization and adds no repeated I/O.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/quota/goal_boundary.py"]
-        },
-        {
-          "lens_id": "error_supervision",
-          "status": "checked",
-          "summary": "Malformed optional registry fields continue to normalize to empty projections instead of broad fallback.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/control_plane/test_goal_boundary_resolution.py"]
-        },
-        {
-          "lens_id": "test_validation",
-          "status": "checked",
-          "summary": "Precedence, deduplication, checkpoint activity, and policy fields have direct semantic assertions.",
-          "finding_codes": [],
-          "evidence_refs": ["validator:pr-2590-focused"]
-        },
-        {
-          "lens_id": "documentation_comments",
-          "status": "not_applicable",
-          "summary": "No public documentation contract changes in this internal behavior-preserving extraction.",
-          "finding_codes": [],
-          "evidence_refs": []
-        },
-        {
-          "lens_id": "security_release",
-          "status": "checked",
-          "summary": "Item-local values cannot override registry authority for write scope or capability grants.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/control_plane/test_goal_boundary_resolution.py"]
-        }
-      ],
-      "simplification_decisions": [
-        {
-          "decision_id": "extract-registry-owner",
-          "subject": "registry-owned goal boundary fields",
-          "outcome": "retained",
-          "reason": "The helper is a cohesive bounded-context extraction with a shipped caller and direct parity tests.",
-          "path": "loopx/control_plane/quota/goal_boundary.py"
-        }
-      ],
-      "safe_fix_applied": false,
-      "safe_fix_passes": 0,
-      "validation_evidence": [
+      "reuse": {
+        "outcome": "reused",
+        "summary": "The extraction reuses existing capability and checkpoint normalization helpers.",
+        "evidence_refs": ["path:loopx/control_plane/quota/goal_boundary.py"]
+      },
+      "simplification": {
+        "outcome": "retained",
+        "summary": "One owner-local helper reduces branch density without creating a generic projection framework.",
+        "evidence_refs": ["path:loopx/control_plane/quota/goal_boundary.py"],
+        "safe_fix_applied": false
+      },
+      "risks": [],
+      "validation": [
         {
           "validator": "pr-2590-focused",
           "status": "passed",
-          "scope": "goal boundary precedence, checkpoint authority, and maintainability ratchet"
+          "scope": "goal boundary precedence, checkpoint authority, and maintainability ratchet",
+          "required": true
         }
       ],
       "manual_holds": []
@@ -125,103 +46,24 @@
         "loopx/status.py",
         "tests/benchmarks/read_models/test_benchmark_projection.py"
       ],
-      "repository_principles": [
-        {
-          "source": "AGENTS.md",
-          "principle": "Move benchmark projection rules into the benchmark read-model owner while preserving public-safe boundaries and parity."
-        }
-      ],
-      "lens_reviews": [
-        {
-          "lens_id": "reuse",
-          "status": "checked",
-          "summary": "The read model reuses public-safe text, list, numeric, and environment-failure compactors.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"]
-        },
-        {
-          "lens_id": "type_api_boundary",
-          "status": "checked",
-          "summary": "The status compact_benchmark_run facade remains the caller-facing API while helpers become directly testable.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/status.py"]
-        },
-        {
-          "lens_id": "configuration",
-          "status": "checked",
-          "summary": "Validation field classes and trial bounds are single-sourced in the benchmark projection module.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"]
-        },
-        {
-          "lens_id": "runtime_ownership",
-          "status": "checked",
-          "summary": "Benchmark validation and trial compaction now live with the benchmark read model rather than the global status facade.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"]
-        },
-        {
-          "lens_id": "quality_simplification",
-          "status": "checked",
-          "summary": "The move reduces status branch density while keeping the validation and trial rule groups cohesive.",
-          "finding_codes": [],
-          "evidence_refs": [
-            "path:loopx/status.py",
-            "decision:move-benchmark-projection"
-          ]
-        },
-        {
-          "lens_id": "efficiency",
-          "status": "checked",
-          "summary": "Trial projection remains bounded by max_trials and max_list_items and stops once the bound is reached.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"]
-        },
-        {
-          "lens_id": "error_supervision",
-          "status": "checked",
-          "summary": "Neutral false flags and missing worker trace or setup failures remain explicit rather than silently disappearing.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/benchmarks/read_models/test_benchmark_projection.py"]
-        },
-        {
-          "lens_id": "test_validation",
-          "status": "checked",
-          "summary": "Direct helper tests and facade integration assertions cover neutral, negative, bounded, and public-safe behavior.",
-          "finding_codes": [],
-          "evidence_refs": ["validator:pr-2593-focused"]
-        },
-        {
-          "lens_id": "documentation_comments",
-          "status": "checked",
-          "summary": "Named field groups document the projection contract next to the owning implementation.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"]
-        },
-        {
-          "lens_id": "security_release",
-          "status": "checked",
-          "summary": "Public-safe compaction and explicit trial bounds preserve the benchmark evidence boundary.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/benchmarks/read_models/test_benchmark_projection.py"]
-        }
-      ],
-      "simplification_decisions": [
-        {
-          "decision_id": "move-benchmark-projection",
-          "subject": "benchmark validation and trial compaction",
-          "outcome": "retained",
-          "reason": "The move collapses one durable rule owner without changing the public facade or creating a universal compactor.",
-          "path": "loopx/benchmarks/read_models/benchmark_projection.py"
-        }
-      ],
-      "safe_fix_applied": false,
-      "safe_fix_passes": 0,
-      "validation_evidence": [
+      "reuse": {
+        "outcome": "reused",
+        "summary": "The read model reuses existing public-safe compactors and the status facade.",
+        "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"]
+      },
+      "simplification": {
+        "outcome": "retained",
+        "summary": "The move gives benchmark projection one owner without introducing a universal compactor.",
+        "evidence_refs": ["path:loopx/benchmarks/read_models/benchmark_projection.py"],
+        "safe_fix_applied": false
+      },
+      "risks": [],
+      "validation": [
         {
           "validator": "pr-2593-focused",
           "status": "passed",
-          "scope": "benchmark projection helpers, status facade parity, and neighboring benchmark behavior"
+          "scope": "benchmark projection helpers, status facade parity, and neighboring behavior",
+          "required": true
         }
       ],
       "manual_holds": ["benchmark_sensitive"]
@@ -237,103 +79,24 @@
         "loopx/control_plane/turn_driver/executor.py",
         "tests/test_loopx_turn_executor.py"
       ],
-      "repository_principles": [
-        {
-          "source": "AGENTS.md",
-          "principle": "Make control-plane state transitions explicit, preserve recovery semantics, and validate ordered effects with focused tests."
-        }
-      ],
-      "lens_reviews": [
-        {
-          "lens_id": "reuse",
-          "status": "checked",
-          "summary": "The stage helpers retain existing journal, receipt, validation, callback, and execution-payload helpers.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"]
-        },
-        {
-          "lens_id": "type_api_boundary",
-          "status": "checked",
-          "summary": "run_loopx_turn_once keeps its external signature while internal stages return explicit typed tuples or payloads.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"]
-        },
-        {
-          "lens_id": "configuration",
-          "status": "not_applicable",
-          "summary": "This extraction changes no configuration source or execution mode selection.",
-          "finding_codes": [],
-          "evidence_refs": []
-        },
-        {
-          "lens_id": "runtime_ownership",
-          "status": "checked",
-          "summary": "Host result, task validation, and transaction closeout each own one ordered recoverable stage.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"]
-        },
-        {
-          "lens_id": "quality_simplification",
-          "status": "checked",
-          "summary": "Three cohesive stages replace one oversized orchestrator and the bounded repair preserves mutable callback results.",
-          "finding_codes": [],
-          "evidence_refs": [
-            "path:loopx/control_plane/turn_driver/executor.py",
-            "decision:preserve-callback-mutation"
-          ]
-        },
-        {
-          "lens_id": "efficiency",
-          "status": "checked",
-          "summary": "Recovery still skips completed phases and does not repeat host, writeback, or spend effects.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/test_loopx_turn_executor.py"]
-        },
-        {
-          "lens_id": "error_supervision",
-          "status": "checked",
-          "summary": "Each stage records its failed phase, reason, receipt, and durable journal before returning.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"]
-        },
-        {
-          "lens_id": "test_validation",
-          "status": "checked",
-          "summary": "Interrupted writeback and spend recovery assert exact completed-phase prefixes and effect replay behavior.",
-          "finding_codes": [],
-          "evidence_refs": ["validator:pr-2594-focused"]
-        },
-        {
-          "lens_id": "documentation_comments",
-          "status": "checked",
-          "summary": "Stage helper names expose transaction boundaries without adding parallel prose truth.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"]
-        },
-        {
-          "lens_id": "security_release",
-          "status": "checked",
-          "summary": "Writeback still precedes quota spend and scheduler apply or acknowledgement on every resumed path.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/test_loopx_turn_executor.py"]
-        }
-      ],
-      "simplification_decisions": [
-        {
-          "decision_id": "preserve-callback-mutation",
-          "subject": "transaction closeout callback payload handling",
-          "outcome": "fixed",
-          "reason": "The single safe-fix pass kept callback mutation semantics while retaining the three-stage extraction.",
-          "path": "loopx/control_plane/turn_driver/executor.py"
-        }
-      ],
-      "safe_fix_applied": true,
-      "safe_fix_passes": 1,
-      "validation_evidence": [
+      "reuse": {
+        "outcome": "retained",
+        "summary": "The executor keeps the existing callback contract instead of adding another adapter.",
+        "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"]
+      },
+      "simplification": {
+        "outcome": "fixed",
+        "summary": "One bounded fix preserved callback mutation semantics inside the three-stage extraction.",
+        "evidence_refs": ["path:loopx/control_plane/turn_driver/executor.py"],
+        "safe_fix_applied": true
+      },
+      "risks": [],
+      "validation": [
         {
           "validator": "pr-2594-focused",
           "status": "passed",
-          "scope": "Turn executor and driver recovery semantics plus maintainability ratchet"
+          "scope": "Turn executor and driver recovery semantics plus maintainability ratchet",
+          "required": true
         }
       ],
       "manual_holds": []
@@ -348,103 +111,24 @@
         "loopx/control_plane/goals/goal_frontier.py",
         "tests/control_plane/test_goal_vision_blocked_successor.py"
       ],
-      "repository_principles": [
-        {
-          "source": "AGENTS.md",
-          "principle": "Represent goal-frontier invariants once and test legal and illegal transitions instead of preserving contradictory guidance."
-        }
-      ],
-      "lens_reviews": [
-        {
-          "lens_id": "reuse",
-          "status": "checked",
-          "summary": "The same repeat-Vision predicate and satisfying delta-kind tuple drive ACK validation and guidance alignment.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"]
-        },
-        {
-          "lens_id": "type_api_boundary",
-          "status": "checked",
-          "summary": "The obligation projection adds explicit satisfying delta kinds without changing the existing ACK schema.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"]
-        },
-        {
-          "lens_id": "configuration",
-          "status": "not_applicable",
-          "summary": "The change is selected from persisted Vision advancement policy rather than a new configuration flag.",
-          "finding_codes": [],
-          "evidence_refs": []
-        },
-        {
-          "lens_id": "runtime_ownership",
-          "status": "checked",
-          "summary": "Goal-frontier projection owns both replan acceptance and the guidance exposed to agents.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"]
-        },
-        {
-          "lens_id": "quality_simplification",
-          "status": "checked",
-          "summary": "A shared predicate removes duplicated trigger interpretation while preserving as-needed Vision behavior.",
-          "finding_codes": [],
-          "evidence_refs": [
-            "path:loopx/control_plane/goals/goal_frontier.py",
-            "decision:align-guidance-policy"
-          ]
-        },
-        {
-          "lens_id": "efficiency",
-          "status": "checked",
-          "summary": "The alignment operates on the already-built bounded obligation and acceptance-gap lists.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"]
-        },
-        {
-          "lens_id": "error_supervision",
-          "status": "checked",
-          "summary": "Watch-only continuation is rejected explicitly instead of creating another silent no-progress cycle.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/control_plane/test_goal_vision_blocked_successor.py"]
-        },
-        {
-          "lens_id": "test_validation",
-          "status": "checked",
-          "summary": "Tests cover repeat-until-closed rejection and the as-needed wait-continuation counterexample.",
-          "finding_codes": [],
-          "evidence_refs": ["validator:pr-2597-focused"]
-        },
-        {
-          "lens_id": "documentation_comments",
-          "status": "checked",
-          "summary": "The helper docstring names the advancement policy boundary and keeps projected guidance current.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"]
-        },
-        {
-          "lens_id": "security_release",
-          "status": "checked",
-          "summary": "The repair changes no authority or write permission and only narrows what counts as a valid replan ACK.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/control_plane/test_goal_vision_blocked_successor.py"]
-        }
-      ],
-      "simplification_decisions": [
-        {
-          "decision_id": "align-guidance-policy",
-          "subject": "repeat-Vision replan guidance and ACK acceptance",
-          "outcome": "retained",
-          "reason": "One shared predicate and one ordered delta-kind contract remove the contradictory watch-only route.",
-          "path": "loopx/control_plane/goals/goal_frontier.py"
-        }
-      ],
-      "safe_fix_applied": false,
-      "safe_fix_passes": 0,
-      "validation_evidence": [
+      "reuse": {
+        "outcome": "reused",
+        "summary": "The fix reuses one shared readiness predicate and the existing ordered delta contract.",
+        "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"]
+      },
+      "simplification": {
+        "outcome": "retained",
+        "summary": "The shared predicate removes the contradictory watch-only route without extra state.",
+        "evidence_refs": ["path:loopx/control_plane/goals/goal_frontier.py"],
+        "safe_fix_applied": false
+      },
+      "risks": [],
+      "validation": [
         {
           "validator": "pr-2597-focused",
           "status": "passed",
-          "scope": "repeat and as-needed Vision goal-frontier and interaction-contract behavior"
+          "scope": "repeat and as-needed Vision replan behavior",
+          "required": true
         }
       ],
       "manual_holds": []
@@ -468,103 +152,24 @@
         "loopx/status.py",
         "tests/control_plane/test_status_collection_material_capability_wiring.py"
       ],
-      "repository_principles": [
-        {
-          "source": "AGENTS.md",
-          "principle": "Capability-gated projections stay default-off, propagate through real callers, and partition caches by semantic request identity."
-        }
-      ],
-      "lens_reviews": [
-        {
-          "lens_id": "reuse",
-          "status": "checked",
-          "summary": "Cache identity reuses canonical capability normalization from the todo contract.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/runtime/status_projection_cache.py"]
-        },
-        {
-          "lens_id": "type_api_boundary",
-          "status": "checked",
-          "summary": "Status-backed callers expose one repeatable available-capability envelope and preserve omitted defaults.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/cli_commands/status.py"]
-        },
-        {
-          "lens_id": "configuration",
-          "status": "checked",
-          "summary": "Material projection remains selected by the observed execution envelope rather than persisted user configuration.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/status_collection.py"]
-        },
-        {
-          "lens_id": "runtime_ownership",
-          "status": "checked",
-          "summary": "Status collection transports the envelope and the agent-management projection remains the field owner.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/status_collection.py"]
-        },
-        {
-          "lens_id": "quality_simplification",
-          "status": "checked",
-          "summary": "Explicit caller forwarding is retained because it preserves ownership without introducing a hidden ambient capability context.",
-          "finding_codes": [],
-          "evidence_refs": [
-            "path:loopx/control_plane/status_collection.py",
-            "decision:retain-explicit-envelope"
-          ]
-        },
-        {
-          "lens_id": "efficiency",
-          "status": "checked",
-          "summary": "Normalized capability sets participate in cache identity so gated and default projections cannot cross-hit.",
-          "finding_codes": [],
-          "evidence_refs": ["path:loopx/control_plane/runtime/status_projection_cache.py"]
-        },
-        {
-          "lens_id": "error_supervision",
-          "status": "checked",
-          "summary": "Absent capability declarations fail closed by omitting material fields rather than falling back to private material reads.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/control_plane/test_status_collection_material_capability_wiring.py"]
-        },
-        {
-          "lens_id": "test_validation",
-          "status": "checked",
-          "summary": "Real status collection, cache identity, and status or quota or review parity paths are covered.",
-          "finding_codes": [],
-          "evidence_refs": ["validator:pr-2602-focused"]
-        },
-        {
-          "lens_id": "documentation_comments",
-          "status": "checked",
-          "summary": "The protocol reference now states default-off projection and explicit capability observation.",
-          "finding_codes": [],
-          "evidence_refs": ["path:docs/reference/protocols/agent-management-projection-v0.md"]
-        },
-        {
-          "lens_id": "security_release",
-          "status": "checked",
-          "summary": "The capability only reveals a prebuilt public-safe frontier and never grants access to material bodies.",
-          "finding_codes": [],
-          "evidence_refs": ["path:tests/control_plane/test_status_collection_material_capability_wiring.py"]
-        }
-      ],
-      "simplification_decisions": [
-        {
-          "decision_id": "retain-explicit-envelope",
-          "subject": "capability propagation through status-backed callers",
-          "outcome": "retained",
-          "reason": "Explicit forwarding is repetitive but keeps request identity and capability ownership visible at each public caller.",
-          "path": "loopx/control_plane/status_collection.py"
-        }
-      ],
-      "safe_fix_applied": false,
-      "safe_fix_passes": 0,
-      "validation_evidence": [
+      "reuse": {
+        "outcome": "retained",
+        "summary": "Explicit forwarding preserves the existing public caller boundaries and request identity.",
+        "evidence_refs": ["path:loopx/control_plane/status_collection.py"]
+      },
+      "simplification": {
+        "outcome": "retained",
+        "summary": "The repeated forwarding is direct and cheaper than a hidden universal context carrier.",
+        "evidence_refs": ["path:loopx/control_plane/status_collection.py"],
+        "safe_fix_applied": false
+      },
+      "risks": [],
+      "validation": [
         {
           "validator": "pr-2602-focused",
           "status": "passed",
-          "scope": "material capability projection, cache partitioning, CLI parity, and output budgets"
+          "scope": "capability projection, cache partitioning, CLI parity, and budgets",
+          "required": true
         }
       ],
       "manual_holds": []

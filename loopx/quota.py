@@ -42,15 +42,13 @@ from .control_plane.work_items.primary_action import (
 )
 from .control_plane.goals.goal_frontier import (
     AUTONOMOUS_REPLAN_REQUIRED_MODE,
-    autonomous_replan_decision_allowed,
     build_goal_frontier_projection_context_from_status,
-    goal_frontier_is_terminal_no_followup,
 )
 from .control_plane.quota.heartbeat_recommendation import (
     HEARTBEAT_HANDOFF_READINESS_COMPACT_FIELDS as HANDOFF_READINESS_COMPACT_FIELDS,
     HEARTBEAT_POST_HANDOFF_RUN_COMPACT_FIELDS as POST_HANDOFF_RUN_COMPACT_FIELDS,
     build_heartbeat_recommendation,
-    open_todo_notify_reason,
+    refine_heartbeat_recommendation,
 )
 from .control_plane.quota.projection_repair import (
     build_boundary_projection_repair_hint,
@@ -68,6 +66,8 @@ from .control_plane.quota.stall_repair import (
 from .control_plane.quota.decision_summary import (
     goal_status_health_ok as _goal_status_health_ok,
     quota_decision_agent_id,
+    refine_quota_recommended_action,
+    resolve_quota_run_decision,
 )
 from .control_plane.quota.goal_boundary import effective_available_capabilities as _effective_available_capabilities, goal_boundary as _goal_boundary, quota_execution_profile_summary as _quota_execution_profile_summary
 from .control_plane.quota.monitor_poll import (
@@ -98,8 +98,6 @@ from .control_plane.quota.task_orchestration import (
     build_quota_work_lane_contract,
     payload_work_lane_contract as _payload_work_lane_contract,
     task_goal_route_hint,
-    task_orchestration_effective_action,
-    task_selected_recommended_action,
 )
 from .control_plane.quota.slot_accounting import (
     QUOTA_SLOT_SPENT_CLASSIFICATION,
@@ -142,7 +140,6 @@ from .control_plane.scheduler.state import (
     load_scheduler_state,
 )
 from .state_projection import (
-    actions_are_projection_aligned,
     next_action_projection_warning,
     state_action_projection_warning as build_state_action_projection_warning,
 )
@@ -177,10 +174,8 @@ from .control_plane.todos.quota_summary import (
 )
 from .control_plane.todos.user_gate import (
     build_gate_prompt as _build_gate_prompt,
-    has_open_user_gate_todo as _has_open_user_gate_todo,
+    build_user_todo_notification as _build_user_todo_notification,
     open_todo_count as _open_todo_count,
-    should_notify_user_on_open_todo as _should_notify_user_on_open_todo,
-    user_gate_todo_notify_reason as _user_gate_todo_notify_reason,
 )
 from .control_plane.todos.write_hint import build_todo_write_hint
 
@@ -628,38 +623,6 @@ def _blocked_priority_fallback(
     }
 
 
-def _selected_action_with_capability_gate(
-    selected_action: Any,
-    *,
-    capability_gate: dict[str, Any] | None,
-) -> Any:
-    if not isinstance(capability_gate, dict) or capability_gate.get("action") != "run":
-        return selected_action
-    blocked = (
-        capability_gate.get("blocked_candidates")
-        if isinstance(capability_gate.get("blocked_candidates"), list)
-        else []
-    )
-    if not any(
-        isinstance(item, dict)
-        and actions_are_projection_aligned(selected_action, item.get("text"))
-        for item in blocked
-    ):
-        return selected_action
-    runnable = (
-        capability_gate.get("runnable_candidates")
-        if isinstance(capability_gate.get("runnable_candidates"), list)
-        else []
-    )
-    for item in runnable:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text") or "").strip()
-        if text:
-            return text
-    return selected_action
-
-
 def _compact_handoff_readiness(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -1039,6 +1002,12 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             "active_state_next_action",
             "active_state_next_action_entries",
             "standing_decision_authority",
+            "long_task_cadence_hint",
+            "stale_latest_run_warning",
+            "backlog_hygiene_warning",
+            "completed_todo_archive_warning",
+            "dreaming_proposal",
+            "dreaming_lane_badge",
         ):
             if optional_field in attention:
                 if optional_field == "handoff_readiness":
@@ -1187,45 +1156,6 @@ def _recovery_delivery_allowed(quota: dict[str, Any], *, plan_ok: bool) -> bool:
         and quota.get("safe_bypass_allowed") is True
         and str(quota.get("safe_bypass_kind") or "") == "outcome_floor_recovery"
     )
-
-
-def _effective_action(
-    *,
-    normal_delivery_allowed: bool,
-    recovery_delivery_allowed: bool,
-    self_repair_allowed: bool,
-    capability_repair_allowed: bool = False,
-    workspace_repair_allowed: bool = False,
-    stall_self_repair: dict[str, Any] | None,
-    state: str,
-    quota: dict[str, Any],
-) -> str:
-    if normal_delivery_allowed:
-        return "normal_run"
-    if recovery_delivery_allowed:
-        return "outcome_floor_recovery"
-    if workspace_repair_allowed:
-        return "agent_workspace_repair"
-    if self_repair_allowed:
-        repair_action = (
-            stall_self_repair.get("effective_action")
-            if isinstance(stall_self_repair, dict)
-            else None
-        )
-        return str(repair_action or "control_plane_repair")
-    if capability_repair_allowed:
-        return "capability_bridge_repair"
-    if state == "operator_gate":
-        return "operator_gate_notify"
-    if state == "blocked_health":
-        return "blocked_health"
-    if state == "throttled":
-        return "throttled_skip"
-    if state in {"focus_wait", "waiting"}:
-        return "blocked_wait"
-    if quota.get("focus_wait"):
-        return "blocked_wait"
-    return "quota_skip"
 
 
 def _quota_agent_profile(agent_identity: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1691,8 +1621,6 @@ def build_quota_should_run(
             if isinstance(goal_frontier_context.get("goal_frontier_projection"), dict)
             else {}
         )
-        capability_repair_allowed = False
-        workspace_repair_allowed = False
         projection_gap = build_state_projection_gap(item, project_asset)
         projection_gap_repair = build_state_projection_gap_repair_hint(
             projection_gap,
@@ -1723,81 +1651,38 @@ def build_quota_should_run(
             normal_delivery_allowed = False
             recovery_allowed = False
             reason = str(boundary_projection_repair.get("reason") or reason)
-        if capability_gate and capability_gate.get("action") != "run" and not capability_monitor_fallback:
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            if capability_gate.get("action") == "repair_bridge":
-                capability_repair_allowed = True
-                reason = str(capability_gate.get("reason") or "capability bridge repair required")
-            else:
-                reason = str(capability_gate.get("reason") or "selected todo capability is unavailable")
-        if workspace_guard:
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            self_repair_allowed = False
-            capability_repair_allowed = False
-            workspace_repair_allowed = True
-            reason = str(workspace_guard.get("reason") or "agent workspace guard blocks delivery")
-        if automation_prompt_upgrade_required:
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            self_repair_allowed = False
-            capability_repair_allowed = False
-            workspace_repair_allowed = False
-            reason = str(
-                automation_prompt_upgrade.get("reason")
-                or "identity-aware automation prompt upgrade is required"
-            )
-        should_run = bool(normal_delivery_allowed or recovery_allowed or self_repair_allowed
-                          or capability_repair_allowed or workspace_repair_allowed)
-        effective_action = _effective_action(
-            normal_delivery_allowed=normal_delivery_allowed, recovery_delivery_allowed=recovery_allowed,
-            self_repair_allowed=self_repair_allowed, capability_repair_allowed=capability_repair_allowed,
-            workspace_repair_allowed=workspace_repair_allowed, stall_self_repair=stall_self_repair,
-            state=state, quota=quota,
-        )
-        replan_decision_allowed = not inbox_reply_due and autonomous_replan_decision_allowed(
-            replan_obligation=replan_obligation, plan_ok=goal_health_ok,
-            workspace_blocked=bool(workspace_guard),
-            automation_prompt_upgrade_required=automation_prompt_upgrade_required,
-            agent_id=agent_frontier_id, registered_agent_ids=registered_agent_ids,
-        )
-        if replan_decision_allowed:
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            should_run = True
-            effective_action = AUTONOMOUS_REPLAN_REQUIRED_MODE
-            reason = (
-                "autonomous replan obligation is selected before monitor quiet "
-                "or agent-scope wait classification"
-            )
-        terminal_no_followup = goal_frontier_is_terminal_no_followup(projection=goal_frontier_projection)
-        if terminal_no_followup and not inbox_reply_due:
-            quota = {**quota, "state": "terminal_no_followup", "reason": (
-                "derived terminal no-follow-up is confirmed by complete todo sources and an empty frontier")}
-            state = "terminal_no_followup"
-            normal_delivery_allowed = recovery_allowed = self_repair_allowed = False
-            capability_repair_allowed = workspace_repair_allowed = should_run = False
-            effective_action = "terminal_no_followup"
-            reason = ("validated closure evidence derives terminal no-follow-up from complete todo sources "
-                      "and an empty frontier; stop recurring automation until an explicit resume")
-        if automation_prompt_upgrade_required and not terminal_no_followup:
-            should_run = False
-            effective_action = "automation_prompt_upgrade_required"
-        elif inbox_reply_due:
-            should_run, normal_delivery_allowed = True, True
-            recovery_allowed = self_repair_allowed = capability_repair_allowed = workspace_repair_allowed = False
-            effective_action, reason = "lark_inbox_reply_due", (
-                "a direct Lark question, bot mention, or verified reply to the bot "
-                "is pending reply"
-            )
-        effective_action, reason = task_orchestration_effective_action(
-            task_orchestration_contract,
-            should_run=should_run,
+        run_decision = resolve_quota_run_decision(
             normal_delivery_allowed=normal_delivery_allowed,
-            effective_action=effective_action,
+            recovery_delivery_allowed=recovery_allowed,
+            self_repair_allowed=self_repair_allowed,
+            stall_self_repair=stall_self_repair,
+            state=state,
+            quota=quota,
             reason=reason,
+            capability_gate=capability_gate,
+            capability_monitor_fallback=capability_monitor_fallback,
+            workspace_guard=workspace_guard,
+            automation_prompt_upgrade=automation_prompt_upgrade,
+            automation_prompt_upgrade_required=automation_prompt_upgrade_required,
+            replan_obligation=replan_obligation,
+            goal_health_ok=goal_health_ok,
+            inbox_reply_due=inbox_reply_due,
+            agent_frontier_id=agent_frontier_id,
+            registered_agent_ids=registered_agent_ids,
+            goal_frontier_projection=goal_frontier_projection,
+            task_orchestration_contract=task_orchestration_contract,
         )
+        normal_delivery_allowed = run_decision.normal_delivery_allowed
+        recovery_allowed = run_decision.recovery_delivery_allowed
+        self_repair_allowed = run_decision.self_repair_allowed
+        capability_repair_allowed = run_decision.capability_repair_allowed
+        workspace_repair_allowed = run_decision.workspace_repair_allowed
+        should_run = run_decision.should_run
+        effective_action = run_decision.effective_action
+        reason = run_decision.reason
+        state = run_decision.state
+        quota = run_decision.quota
+        replan_decision_allowed = run_decision.replan_decision_allowed
         recommendation_item = {**item, "quota": quota}
         heartbeat_recommendation = build_heartbeat_recommendation(
             recommendation_item,
@@ -1812,68 +1697,16 @@ def build_quota_should_run(
             select_replan_obligation=False,
             monitor_due_item_limit=MONITOR_DUE_ITEM_LIMIT,
         )
-        if capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "repair_bridge":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "repair_capability_bridge",
-                "notify": "DONT_NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "append exactly one quota spend only after a validated bridge "
-                    "repair, todo rewrite, or compact blocker writeback"
-                ),
-            }
-        elif capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "ask_owner":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "ask_owner_for_capability",
-                "notify": "NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": "do not append quota spend while asking for missing capability",
-            }
-        elif capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "skip":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "capability_skip",
-                "notify": "DONT_NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": "do not append quota spend while all executable todos lack current capabilities",
-            }
-        if workspace_guard:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "repair_agent_workspace",
-                "notify": "DONT_NOTIFY",
-                "reason": workspace_guard.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "do not append quota spend for workspace relocation; rerun quota "
-                    "from the independent worktree before delivery"
-                ),
-            }
-        if automation_prompt_upgrade_required:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "automation_prompt_upgrade",
-                "notify": "DONT_NOTIFY",
-                "reason": automation_prompt_upgrade.get("reason")
-                or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "do not append quota spend for stale/unscoped automation; "
-                    "rerun quota should-run from an identity-scoped prompt"
-                ),
-            }
-        if blocked_priority_fallback and should_run:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "blocked_priority_fallback": blocked_priority_fallback,
-            }
-            if blocked_priority_fallback.get("notify_user") is True:
-                heartbeat_recommendation = {
-                    **heartbeat_recommendation,
-                    "notify": "NOTIFY",
-                    "reason": blocked_priority_fallback.get("reason")
-                    or heartbeat_recommendation.get("reason"),
-                }
+        heartbeat_recommendation = refine_heartbeat_recommendation(
+            heartbeat_recommendation,
+            should_run=should_run,
+            capability_gate=capability_gate,
+            capability_monitor_fallback=capability_monitor_fallback,
+            workspace_guard=workspace_guard,
+            automation_prompt_upgrade=automation_prompt_upgrade,
+            automation_prompt_upgrade_required=automation_prompt_upgrade_required,
+            blocked_priority_fallback=blocked_priority_fallback,
+        )
         external_evidence_observation = build_external_evidence_observation_obligation(
             item,
             state=state,
@@ -1945,43 +1778,19 @@ def build_quota_should_run(
             agent_lane_recommendation=agent_lane_recommendation,
             prefer_agent_lane_recommendation=monitor_quiet_skip,
         )
-        selected_recommended_action = task_selected_recommended_action(
-            task_orchestration_contract,
+        selected_recommended_action = refine_quota_recommended_action(
             selected_recommended_action,
+            task_orchestration_contract=task_orchestration_contract,
+            capability_gate=capability_gate,
+            capability_monitor_fallback=capability_monitor_fallback,
+            work_lane_contract=work_lane_contract,
+            workspace_guard=workspace_guard,
+            automation_prompt_upgrade=automation_prompt_upgrade,
+            automation_prompt_upgrade_required=automation_prompt_upgrade_required,
+            replan_obligation=replan_obligation,
+            replan_decision_allowed=replan_decision_allowed,
         )
-        if capability_monitor_fallback and isinstance(work_lane_contract, dict) and work_lane_contract.get("action"):
-            selected_recommended_action = work_lane_contract["action"]
         due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(work_lane_contract)
-        if capability_gate and not due_monitor_attempt and not capability_monitor_fallback:
-            if capability_gate.get("action") in {"repair_bridge", "ask_owner", "skip"}:
-                selected_recommended_action = (
-                    capability_gate.get("owner_action")
-                    or capability_gate.get("reason")
-                    or selected_recommended_action
-                )
-            else:
-                selected_recommended_action = _selected_action_with_capability_gate(
-                    selected_recommended_action,
-                    capability_gate=capability_gate,
-                )
-        if workspace_guard:
-            selected_recommended_action = (
-                workspace_guard.get("required_action")
-                or workspace_guard.get("reason")
-                or selected_recommended_action
-            )
-        if automation_prompt_upgrade_required:
-            selected_recommended_action = (
-                automation_prompt_upgrade.get("recommended_action")
-                or automation_prompt_upgrade.get("reason")
-                or selected_recommended_action
-            )
-        if replan_decision_allowed:
-            selected_recommended_action = (
-                str(replan_obligation.get("recommended_action") or "").strip()
-                or str(replan_obligation.get("stop_condition") or "").strip()
-                or "Run one bounded autonomous replan slice and write back the selected todo/frontier changes."
-            )
         agent_lane_next_action = None
         if not due_monitor_attempt and not inbox_reply_due and not task_orchestration_contract and not capability_monitor_fallback:
             agent_lane_next_action = build_agent_lane_next_action(
@@ -1998,13 +1807,13 @@ def build_quota_should_run(
                     )
                 ),
             )
-            if not replan_decision_allowed:
-                selected_recommended_action = selected_action_with_agent_lane(
-                    selected_recommended_action,
-                    agent_lane_next_action=agent_lane_next_action,
-                )
         agent_scope_frontier = None
+        agent_lane_frontier_hint = None
         if not replan_decision_allowed:
+            selected_recommended_action = selected_action_with_agent_lane(
+                selected_recommended_action,
+                agent_lane_next_action=agent_lane_next_action,
+            )
             agent_scope_frontier = _agent_scope_no_candidate_frontier(
                 agent_identity=agent_identity,
                 agent_todo_summary=agent_todo_summary,
@@ -2015,13 +1824,11 @@ def build_quota_should_run(
                     or ready_deferred_resume_candidates
                 ),
             )
-        if (
-            isinstance(agent_scope_frontier, dict)
-            and agent_scope_frontier.get("priority_preemption") is True
-        ):
-            agent_lane_next_action = None
-        agent_lane_frontier_hint = None
-        if not replan_decision_allowed:
+            if (
+                isinstance(agent_scope_frontier, dict)
+                and agent_scope_frontier.get("priority_preemption") is True
+            ):
+                agent_lane_next_action = None
             agent_lane_frontier_hint = _agent_lane_frontier_hint(
                 goal_id=safe_goal_id,
                 agent_identity=agent_identity,
@@ -2030,29 +1837,29 @@ def build_quota_should_run(
                 agent_scope_frontier=agent_scope_frontier,
                 work_lane_contract=work_lane_contract,
             )
-        if agent_scope_frontier and agent_lane_frontier_hint:
-            agent_scope_frontier["frontier_hint"] = agent_lane_frontier_hint
-        if agent_scope_frontier and not replan_decision_allowed:
-            frontier_action = str(agent_scope_frontier.get("effective_action") or "")
-            successor_replan_required = (
-                frontier_action == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value
-            )
-            normal_delivery_allowed = False
-            should_run = bool(successor_replan_required)
-            effective_action = frontier_action
-            reason = str(agent_scope_frontier.get("reason") or reason)
-            selected_recommended_action = (
-                agent_scope_frontier.get("recommended_action")
-                or selected_recommended_action
-            )
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": effective_action,
-                "notify": "DONT_NOTIFY",
-                "reason": reason,
-                "spend_policy": agent_scope_frontier.get("spend_policy")
-                or "do not append quota spend while the current agent has no in-scope runnable candidate",
-            }
+            if agent_scope_frontier and agent_lane_frontier_hint:
+                agent_scope_frontier["frontier_hint"] = agent_lane_frontier_hint
+            if agent_scope_frontier:
+                frontier_action = str(agent_scope_frontier.get("effective_action") or "")
+                successor_replan_required = (
+                    frontier_action == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value
+                )
+                normal_delivery_allowed = False
+                should_run = bool(successor_replan_required)
+                effective_action = frontier_action
+                reason = str(agent_scope_frontier.get("reason") or reason)
+                selected_recommended_action = (
+                    agent_scope_frontier.get("recommended_action")
+                    or selected_recommended_action
+                )
+                heartbeat_recommendation = {
+                    **heartbeat_recommendation,
+                    "recommended_mode": effective_action,
+                    "notify": "DONT_NOTIFY",
+                    "reason": reason,
+                    "spend_policy": agent_scope_frontier.get("spend_policy")
+                    or "do not append quota spend while the current agent has no in-scope runnable candidate",
+                }
         state_action_projection_warning = build_state_action_projection_warning(
             item,
             agent_todo_summary=agent_todo_summary,
@@ -2171,13 +1978,9 @@ def build_quota_should_run(
             if project_asset
             else None,
             "long_task_cadence_hint": (
-                project_asset.get("long_task_cadence_hint")
-                if project_asset and isinstance(project_asset.get("long_task_cadence_hint"), dict)
-                else (
-                    item.get("long_task_cadence_hint")
-                    if isinstance(item.get("long_task_cadence_hint"), dict)
-                    else None
-                )
+                item.get("long_task_cadence_hint")
+                if isinstance(item.get("long_task_cadence_hint"), dict)
+                else None
             ),
             "handoff_readiness": item.get("handoff_readiness"),
             "heartbeat_recommendation": heartbeat_recommendation,
@@ -2255,32 +2058,18 @@ def build_quota_should_run(
             payload["missing_gates"] = item.get("missing_gates")
         if user_todo_summary:
             payload["user_todo_summary"] = compact_quota_todo_summary_for_payload(user_todo_summary)
-            repeat_open_todo_notification = (
-                heartbeat_recommendation.get("repeat_notification_required") is True
-            )
-            user_gate_todo_open = _has_open_user_gate_todo(user_todo_summary)
-            if user_gate_todo_open:
-                payload["notify_user_on_gate"] = True
-                payload["open_todo_notify_reason"] = _user_gate_todo_notify_reason(
-                    user_todo_summary
-                )
-                payload["open_todo_notification_policy"] = "repeat_until_resolved"
-            elif _should_notify_user_on_open_todo(
-                state=state,
-                waiting_on=str(item.get("waiting_on") or ""),
-                user_todo_summary=user_todo_summary,
-            ) or repeat_open_todo_notification:
-                payload["notify_user_on_open_todo"] = True
-                payload["open_todo_notify_reason"] = open_todo_notify_reason(
+            payload.update(
+                _build_user_todo_notification(
+                    user_todo_summary,
                     state=state,
                     waiting_on=str(item.get("waiting_on") or ""),
+                    repeat_notification_required=(
+                        heartbeat_recommendation.get("repeat_notification_required")
+                        is True
+                    ),
+                    repeat_notification_reason=heartbeat_recommendation.get("reason"),
                 )
-                if repeat_open_todo_notification:
-                    payload["open_todo_notify_reason"] = (
-                        heartbeat_recommendation.get("reason")
-                        or "no-work polling should ask the current open user todo"
-                    )
-                    payload["open_todo_notification_policy"] = "repeat_until_resolved"
+            )
         if scoped_user_gate_fallback and not replan_decision_allowed:
             payload["scoped_user_gate_fallback"] = scoped_user_gate_fallback
             payload["should_run"] = True
@@ -2342,8 +2131,6 @@ def build_quota_should_run(
         projection_warning = (
             item.get("stale_latest_run_warning")
             if isinstance(item.get("stale_latest_run_warning"), dict)
-            else project_asset.get("stale_latest_run_warning")
-            if isinstance(project_asset.get("stale_latest_run_warning"), dict)
             else None
         )
         if projection_warning:
@@ -2355,8 +2142,6 @@ def build_quota_should_run(
         backlog_warning = (
             item.get("backlog_hygiene_warning")
             if isinstance(item.get("backlog_hygiene_warning"), dict)
-            else project_asset.get("backlog_hygiene_warning")
-            if isinstance(project_asset.get("backlog_hygiene_warning"), dict)
             else None
         )
         if backlog_warning:
@@ -2364,8 +2149,6 @@ def build_quota_should_run(
         archive_warning = (
             item.get("completed_todo_archive_warning")
             if isinstance(item.get("completed_todo_archive_warning"), dict)
-            else project_asset.get("completed_todo_archive_warning")
-            if isinstance(project_asset.get("completed_todo_archive_warning"), dict)
             else None
         )
         if archive_warning:
@@ -2375,8 +2158,6 @@ def build_quota_should_run(
         dreaming_proposal = (
             item.get("dreaming_proposal")
             if isinstance(item.get("dreaming_proposal"), dict)
-            else project_asset.get("dreaming_proposal")
-            if isinstance(project_asset.get("dreaming_proposal"), dict)
             else None
         )
         if dreaming_proposal:
@@ -2384,8 +2165,6 @@ def build_quota_should_run(
         dreaming_lane_badge = (
             item.get("dreaming_lane_badge")
             if isinstance(item.get("dreaming_lane_badge"), dict)
-            else project_asset.get("dreaming_lane_badge")
-            if isinstance(project_asset.get("dreaming_lane_badge"), dict)
             else None
         )
         if dreaming_lane_badge:

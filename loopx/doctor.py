@@ -630,7 +630,7 @@ def installed_skill_check(
         "detail": (
             detail
             if applicable
-            else "not applicable: other-agent skill delivery is owned by the custom host"
+            else "not applicable: skill delivery is owned by the selected host integration"
         ),
     }
 
@@ -706,10 +706,17 @@ def collect_doctor(
         collect_runtime_projection_route_diagnostics,
     )
 
-    from .host_loop_activation import normalize_agent_type
+    from .host_loop_activation import (
+        agent_type_uses_host_managed_skills,
+        normalize_agent_type,
+    )
 
     canonical_agent_type = normalize_agent_type(agent_type) if agent_type else None
-    installed_skills_required = canonical_agent_type != "other-agent"
+    host_managed_skill_delivery = bool(
+        canonical_agent_type
+        and agent_type_uses_host_managed_skills(canonical_agent_type)
+    )
+    installed_skills_required = not host_managed_skill_delivery
     loopx_path = resolve_command_path("loopx")
     invocation_path = current_script_invocation_path()
     loopx_canary_path = resolve_command_path("loopx-canary")
@@ -807,7 +814,15 @@ def collect_doctor(
     )
     skill_delivery = {
         "agent_type": canonical_agent_type,
-        "owner": "loopx_surface_installer" if installed_skills_required else "custom_agent_host",
+        "owner": (
+            "loopx_surface_installer"
+            if installed_skills_required
+            else (
+                "loopx_install_script"
+                if canonical_agent_type == "ark-managed-agent"
+                else "custom_agent_host"
+            )
+        ),
         "mode": "surface_managed" if installed_skills_required else "host_managed",
         "codex_skills_root_applicable": installed_skills_required,
         "installed_skills_required_for_freshness": installed_skills_required,
@@ -1026,7 +1041,8 @@ def collect_doctor(
         "fix": (
             "Do not infer custom-host skill delivery from `~/.codex/skills`; "
             "verify the host-managed loaded-skill readback from `loopx agent-onboard`."
-            if canonical_agent_type == "other-agent"
+            if canonical_agent_type
+            and agent_type_uses_host_managed_skills(canonical_agent_type)
             else (
                 f"Run `{repo_root / 'scripts' / 'install-local.sh'}` and start a new shell, "
                 f"or export PATH=\"{local_bin}:$PATH\". For no-clone repair, run "

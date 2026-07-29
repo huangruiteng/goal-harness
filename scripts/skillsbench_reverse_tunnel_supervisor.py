@@ -37,6 +37,7 @@ from loopx.benchmark_core.remote_closeout import (  # noqa: E402
     closeout_remote_benchmark_batch,
 )
 from loopx.benchmark_core.lifecycle import (  # noqa: E402
+    build_benchmark_live_worker_phase,
     compact_benchmark_live_worker_phase,
 )
 
@@ -1042,6 +1043,27 @@ def _write_public_checkpoint(
 ) -> None:
     now = time.time() if observed_at is None else observed_at
     payload["duration_sec"] = round(max(0.0, now - started_at), 3)
+    if terminal:
+        active_phase = payload.get("active_phase")
+        active_phase = active_phase if isinstance(active_phase, dict) else {}
+        live_worker_phase = compact_benchmark_live_worker_phase(
+            active_phase.get("benchmark_live_worker_phase")
+        )
+        phase_ready = live_worker_phase.get("phase_ready")
+        if live_worker_phase and isinstance(phase_ready, dict):
+            terminal_disposition = {
+                "succeeded": "completed",
+                "failed": "failed",
+            }.get(state, "ended_unresolved")
+            active_phase["benchmark_live_worker_phase"] = (
+                build_benchmark_live_worker_phase(
+                    runtime_preparing=phase_ready.get("runtime_preparing") is True,
+                    worker_prepared=phase_ready.get("worker_prepared") is True,
+                    worker_running=phase_ready.get("worker_running") is True,
+                    agent_active=phase_ready.get("agent_active") is True,
+                    terminal_disposition=terminal_disposition,
+                )
+            )
     payload["public_liveness"] = {
         "schema_version": PUBLIC_LIVENESS_SCHEMA_VERSION,
         "state": state,

@@ -21,6 +21,9 @@ from ..benchmarks.read_models.benchmark_learning_ledger import (
 from ..benchmarks.read_models.benchmark_result import compact_benchmark_result
 from ..control_plane.work_items.delivery_batch_scale import DELIVERY_BATCH_SCALE_CHOICES
 from ..control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES
+from ..control_plane.runtime.active_user_assisted_pilot import (
+    compact_active_user_assisted_pilot,
+)
 from ..control_plane.runtime.trajectory_hygiene import build_trajectory_hygiene_summary
 from ..global_registry import sync_project_registry_to_global
 from ..history import (
@@ -50,10 +53,7 @@ from ..paths import resolve_runtime_root
 from ..presentation.renderers.trajectory_hygiene_markdown import (
     render_trajectory_hygiene_markdown,
 )
-from ..status import (
-    compact_active_user_assisted_pilot,
-    compact_benchmark_run,
-)
+from ..status import compact_benchmark_run
 
 
 PrintPayload = Callable[

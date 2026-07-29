@@ -12,6 +12,7 @@ from .skillsbench_failure_signals import (
 
 SCHEMA_VERSION = "skillsbench_setup_only_public_preflight_v0"
 COMPOSE_TYPED_CAUSE_SCHEMA_VERSION = "skillsbench_compose_typed_cause_v0"
+APT_TRANSPORT_RECEIPT_SCHEMA_VERSION = "skillsbench_apt_transport_failure_receipt_v0"
 _PATCH_SUFFIX = "_patch_applied"
 _PUBLIC_TASK_STAGING_BOOL_FIELDS = (
     "staged",
@@ -178,6 +179,107 @@ def _public_task_staging(task_staging: Mapping[str, Any] | None) -> dict[str, An
         if isinstance(value, bool):
             public[field] = value
     return public
+
+
+def _apt_transport_failure_receipt(
+    result: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    dependency_classes = {
+        str(item)
+        for field in ("dependency_classes", "terminal_dependency_classes")
+        for item in result.get(field, [])
+        if isinstance(item, str)
+    }
+    reason_codes = [
+        str(item)
+        for item in result.get("failure_reason_codes", [])
+        if isinstance(item, str)
+    ]
+    subtype = str(result.get("apt_failure_subtype") or "none")
+    apt_failure_present = (
+        subtype != "none"
+        or "system_package" in dependency_classes
+        or any(reason.startswith("apt_") for reason in reason_codes)
+    )
+    if not apt_failure_present:
+        return None
+
+    classification_complete = subtype not in {
+        "none",
+        "unclassified",
+        "fetch_failed_unclassified",
+    }
+    retryability = str(result.get("retryability") or "unknown")
+    if retryability == "retryable" and classification_complete:
+        disposition = "bounded_retry_allowed"
+    elif retryability == "non_retryable":
+        disposition = "repair_before_retry"
+    else:
+        disposition = "do_not_blind_retry"
+
+    projected_staging = result.get("task_staging")
+    staging = projected_staging if isinstance(projected_staging, Mapping) else {}
+    transport_configuration = {
+        "source_mode": str(staging.get("dockerfile_apt_source_mode") or "unknown"),
+        "transport_mode": str(
+            staging.get("dockerfile_apt_transport_mode") or "unknown"
+        ),
+        "apt_retry_patch_applied": (staging.get("apt_retry_patch_applied") is True),
+        "proxy_env_patch_required": (
+            staging.get("benchmark_egress_proxy_dockerfile_env_patch_required") is True
+        ),
+        "proxy_env_patch_applied": (
+            staging.get("benchmark_egress_proxy_dockerfile_env_patch_applied") is True
+        ),
+        "ubuntu_mirror_patch_required": (
+            staging.get("dockerfile_ubuntu_apt_mirror_patch_required") is True
+        ),
+        "ubuntu_mirror_patch_applied": (
+            staging.get("dockerfile_ubuntu_apt_mirror_patch_applied") is True
+        ),
+        "debian_mirror_patch_required": (
+            staging.get("dockerfile_debian_apt_mirror_patch_required") is True
+        ),
+        "debian_mirror_patch_applied": (
+            staging.get("dockerfile_debian_apt_mirror_patch_applied") is True
+        ),
+    }
+    return {
+        "schema_version": APT_TRANSPORT_RECEIPT_SCHEMA_VERSION,
+        "classification_status": (
+            "classified_transport_failure"
+            if classification_complete
+            else "unclassified_transport_failure"
+        ),
+        "classification_complete": classification_complete,
+        "failure_subtype": subtype,
+        "retryability": retryability,
+        "failure_cause_source": str(result.get("failure_cause_source") or "none"),
+        "failure_reason_codes": reason_codes,
+        "terminal_failure_reason_codes": [
+            str(item)
+            for item in result.get("terminal_failure_reason_codes", [])
+            if isinstance(item, str)
+        ],
+        "dependency_endpoints": [
+            str(item)
+            for item in result.get("dependency_endpoints", [])
+            if isinstance(item, str)
+        ],
+        "terminal_dependency_endpoints": [
+            str(item)
+            for item in result.get("terminal_dependency_endpoints", [])
+            if isinstance(item, str)
+        ],
+        "transport_configuration": transport_configuration,
+        "disposition": disposition,
+        "raw_failure_text_recorded": False,
+        "raw_logs_recorded": False,
+        "raw_task_text_recorded": False,
+        "raw_verifier_output_recorded": False,
+        "host_paths_recorded": False,
+        "secret_values_recorded": False,
+    }
 
 
 def _exit_category(exc: Exception, matched_patterns: set[str]) -> str:
@@ -404,6 +506,9 @@ async def run_setup_only_public_preflight(
             fingerprint.get("fingerprint_confidence")
             or "coarse_public_safe_pattern_match"
         )
+        apt_transport_receipt = _apt_transport_failure_receipt(result)
+        if apt_transport_receipt is not None:
+            result["apt_transport_failure_receipt"] = apt_transport_receipt
     finally:
         if restore_compose_boundary is not None:
             restore_compose_boundary()

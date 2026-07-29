@@ -1119,12 +1119,13 @@ def compact_todo_group(
     *,
     source_section: str | None,
     role: str | None = None,
+    include_empty_source: bool = False,
     preferred_todo_ids: set[str] | None = None,
     resume_source_items: list[dict[str, Any]] | None = None,
     rollout_events: list[dict[str, Any]] | None = None,
     item_limit: int | None = MAX_STATUS_TODOS_PER_ROLE,
 ) -> dict[str, Any] | None:
-    if not items:
+    if not items and not include_empty_source:
         return None
     items = _structured_todo_group_items(
         items,

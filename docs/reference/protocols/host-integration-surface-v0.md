@@ -51,6 +51,84 @@ copyable bootstrap message, but it must not silently switch to hidden
 `codex exec`, read session transcripts, or claim same-TUI automation without
 the visible proof and idle-detection contracts.
 
+## Ark Managed Agent host
+
+`ark-managed-agent` is a one-shot goal host, not a LoopX Turn driver. LoopX
+generates one short, transport-neutral goal prompt; the Managed Agent goal
+runtime owns all inner iteration and continuation.
+
+The prompt uses the same 4,000-character interface budget and the same guarded
+goal policy as the Codex App/CLI visible-goal hosts; only the host ownership
+preamble differs.
+
+Generate the prompt with:
+
+```bash
+loopx heartbeat-prompt --thin --goal-id <GOAL_ID> --agent-id <AGENT_ID> \
+  --runtime-profile ark_managed_agent_goal
+```
+
+The same contract is available through first-class onboarding with
+`--agent-type ark-managed-agent`. Because this host does not use a
+Codex-specific skill directory, onboarding requires host-managed delivery and
+readback of the LoopX workflow skills from the same LoopX revision as the CLI.
+The fixed installer is shared with Codex; only its target root changes:
+
+```bash
+LOOPX_SKILLS_DIR=<PROJECT_WORKSPACE>/.agents/skills \
+  LOOPX_INSTALL_SLASH_COMMANDS=0 \
+  <LOOPX_CHECKOUT>/scripts/install-local.sh
+```
+
+This is also the supported canary path for an untrusted or dirty checkout.
+With an explicit `LOOPX_SKILLS_DIR`, the script materializes the release-owned
+workflow skills and writes `.loopx-skill-install.json` without promoting the
+checkout as the default `loopx` executable. Without that explicit target, a
+canary-only install leaves the existing default skill root unchanged.
+
+The installer is the sole owner of filesystem mutation. The manifest records
+the materialized skill ids, source revision, and per-skill content digests so
+read-only host checks can verify delivery without becoming a second installer.
+Filesystem materialization is distinct from the host's runtime loaded-skill
+readback; the latter is still required before claiming that the skills were
+injected into an active agent context.
+
+Local-development and cloud transports must send the exact same `task_body` as
+their goal prompt. They may differ in endpoint, authentication, session id, or
+wire envelope, but those fields do not change the prompt or become LoopX
+policy. The host has no automation mode, and it must not wrap every inner goal
+iteration in `loopx turn run-once`.
+
+The generated `host_contract` states that activation happens once, the goal
+runtime owns continuation, host session state is non-authoritative, and the
+LoopX Turn driver is not required. Durable policy remains in current
+`quota should-run.interaction_contract`, active state, todos, vision, and
+writeback.
+
+Runtime capabilities discovered after activation do not regenerate the Goal
+prompt. `quota should-run` returns the existing
+`runtime_capability_reentry_v0` packet in
+`interaction_contract.cli_channel.runtime_capability_reentry` and projects the
+same packet near the beginning of JSON output as
+`runtime_capability_reentry`. The early copy prevents bounded tool-result
+capture from hiding the canonical packet behind large diagnostics.
+
+Every candidate still requires a successful real-callsite observation before
+the generated re-entry command may declare the capability. Follow-up
+`next_cli_actions` inherit verified session capabilities; LoopX does not
+persist the observation as a durable permission grant.
+
+Issue-fix qualification on this host uses a staged evidence contract. A
+validated patch proves the worker path, while Goal satisfaction must be read
+from the host separately. See
+[`ark-managed-agent-issue-fix-qualification-v0`](ark-managed-agent-issue-fix-qualification-v0.md).
+
+Pause, replacement-session, and ambiguous-failure qualification is defined in
+[`ark-managed-agent-goal-continuity-qualification-v0`](ark-managed-agent-goal-continuity-qualification-v0.md).
+In particular, a surviving session id or a present Goal journal is not enough
+to claim recovery; the replacement host must reconstruct the LoopX frontier
+and the Goal runtime must prove journal rehydration without duplicate effects.
+
 ## Lifecycle Reads
 
 Host integrations should expose read methods that map directly to CLI reads:

@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.status import compact_benchmark_run  # noqa: E402
-from loopx.benchmark_adapters.skillsbench_verifier_bootstrap import (  # noqa: E402
+from loopx.benchmarks.read_models.skillsbench_verifier_attribution import (  # noqa: E402
     apply_skillsbench_verifier_bootstrap_missing_score_attribution,
 )
 

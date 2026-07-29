@@ -183,6 +183,9 @@ from loopx.benchmarks.read_models.goal_start_control_score import (
     goal_start_public_text_list as _goal_start_public_text_list,
     goal_start_public_todo_id_list as _goal_start_public_todo_id_list,
 )
+from loopx.benchmarks.read_models.skillsbench_verifier_attribution import (
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution,
+)
 from loopx.control_plane.turn_driver import (
     loopx_turn_execution_committed,
     loopx_turn_execution_has_durable_effects,
@@ -2049,9 +2052,19 @@ def install_benchflow_docker_exec_output_capture(
 
     prerequisites = plan.setdefault("runner_prerequisites", {})
     existing = getattr(env, "_loopx_output_capture_original_exec", None)
-    if existing is not None:
+    installed_exec = getattr(env, "_loopx_output_capture_exec", None)
+    current_exec = getattr(env, "exec", None)
+    if (
+        existing is not None
+        and installed_exec is not None
+        and current_exec is installed_exec
+    ):
+        prerequisites["host_local_acp_docker_exec_capture_status"] = (
+            "already_installed"
+        )
         return existing
-    original_exec = getattr(env, "exec", None)
+    reinstalling_after_rebind = existing is not None
+    original_exec = current_exec
     compose_fn = getattr(env, "_run_docker_compose_command", None)
     if not callable(original_exec) or not callable(compose_fn):
         prerequisites["host_local_acp_docker_exec_capture_status"] = "unsupported"
@@ -2093,8 +2106,16 @@ def install_benchflow_docker_exec_output_capture(
         )
 
     setattr(env, "_loopx_output_capture_original_exec", original_exec)
+    setattr(env, "_loopx_output_capture_exec", exec_with_output_capture)
     setattr(env, "exec", exec_with_output_capture)
-    prerequisites["host_local_acp_docker_exec_capture_status"] = "installed"
+    prerequisites["host_local_acp_docker_exec_capture_status"] = (
+        "reinstalled_after_exec_rebind"
+        if reinstalling_after_rebind
+        else "installed"
+    )
+    prerequisites["host_local_acp_docker_exec_capture_rebound"] = (
+        reinstalling_after_rebind
+    )
     prerequisites["host_local_acp_docker_exec_capture_required"] = True
     prerequisites["host_local_acp_docker_exec_capture_compose_copy"] = True
     prerequisites["host_local_acp_docker_exec_capture_raw_output_recorded"] = False
@@ -2802,6 +2823,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_sandbox_bridge_mode",
         "host_local_acp_session_adapter_status",
         "host_local_acp_docker_exec_capture_status",
+        "host_local_acp_docker_exec_capture_lifecycle_guard",
         "host_local_acp_pwd_probe_status",
         "host_local_acp_pwd_probe_exception_type",
         "host_local_acp_pwd_probe_stdout_type",
@@ -2852,6 +2874,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_docker_exec_capture_required",
         "host_local_acp_docker_exec_capture_compose_copy",
         "host_local_acp_docker_exec_capture_raw_output_recorded",
+        "host_local_acp_docker_exec_capture_rebound",
         "host_local_acp_docker_exec_capture_preflight",
         "host_local_acp_sandbox_bridge_configured",
         "host_local_acp_sandbox_bridge_path_recorded",
@@ -8126,6 +8149,12 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
     )
     block = (
         f"{DOCKER_CODEX_ACP_RUNTIME_TOOLS_BEGIN}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_UBUNTU_APT_MIRROR_BASE}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_APT_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_DEBIAN_APT_MIRROR_BASE}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_DEBIAN_SECURITY_MIRROR_BASE}\n"
         "RUN set -eux; \\\n"
         "    if command -v curl >/dev/null 2>&1 && \\\n"
         "       command -v tar >/dev/null 2>&1 && \\\n"
@@ -8144,7 +8173,19 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
         "        'Acquire::https::No-Cache \"true\";' \\\n"
         "        'Acquire::Check-Valid-Until \"false\";' \\\n"
         "        > /etc/apt/apt.conf.d/80-loopx-retry; \\\n"
-        "      apt-get update -qq; \\\n"
+        "      if ! apt-get update -qq; then \\\n"
+        "        find /etc/apt -type f \\\n"
+        "          \\( -name '*.list' -o -name '*.sources' \\) \\\n"
+        "          -exec sed -i \\\n"
+        '            -e "s#https\\?://archive.ubuntu.com/ubuntu#${LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://security.ubuntu.com/ubuntu#${LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://deb.debian.org/debian-security#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://security.debian.org/debian-security#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://deb.debian.org/debian#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_APT_MIRROR}#g" \\\n'
+        "            {} +; \\\n"
+        "        rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
+        "        apt-get update -qq; \\\n"
+        "      fi; \\\n"
         "      apt-get install -y -qq --no-install-recommends ca-certificates curl tar xz-utils; \\\n"
         "      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
         "    elif command -v apk >/dev/null 2>&1; then \\\n"
@@ -8651,10 +8692,6 @@ def stage_task_for_sandbox(
                 staged_path / "environment" / "Dockerfile"
             )
         )
-    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
-        staged_path / "environment" / "Dockerfile",
-        proxy_env=benchmark_egress_proxy_env,
-    )
     apt_retry_patched = patch_dockerfile_apt_retry(
         staged_path / "environment" / "Dockerfile",
         transport_mode=docker_apt_transport_mode,
@@ -8703,6 +8740,10 @@ def stage_task_for_sandbox(
     )
     runtime_tools_patched = patch_dockerfile_codex_acp_runtime_tools(
         staged_path / "environment" / "Dockerfile"
+    )
+    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
+        staged_path / "environment" / "Dockerfile",
+        proxy_env=benchmark_egress_proxy_env,
     )
     staged_verifier_script = proxy_runtime.skillsbench_verifier_script(staged_path)
     uv_mirror_metadata = verifier_bootstrap.patch_verifier_uv_bootstrap_mirror(
@@ -12017,15 +12058,27 @@ def _loopx_turn_terminal_failure_checkpoint(
         return None
     receipt = latest.get("receipt")
     receipt = receipt if isinstance(receipt, Mapping) else {}
+    validation = latest.get("validation")
+    validation = validation if isinstance(validation, Mapping) else {}
+    result_kind = receipt.get("result_kind") or latest.get("result_kind")
+    failed_phase = receipt.get("failed_phase")
     terminal_failure = bool(
         latest.get("status") in {"failed", "validation_failed"}
         or receipt.get("status") == "failed"
-        or receipt.get("failed_phase")
+        or failed_phase
+    )
+    validation_terminal_failure = bool(
+        failed_phase == "validation"
+        or result_kind == "validation_failed"
+        or validation.get("status") == "failed"
     )
     if (
         not terminal_failure
         or loopx_turn_execution_has_durable_effects(latest)
-        or trace.get("host_local_acp_codex_exec_failure_trace_present") is not True
+        or (
+            trace.get("host_local_acp_codex_exec_failure_trace_present") is not True
+            and not validation_terminal_failure
+        )
     ):
         return None
 
@@ -12039,15 +12092,20 @@ def _loopx_turn_terminal_failure_checkpoint(
         "schema_version": "skillsbench_loopx_turn_terminal_failure_checkpoint_v0",
         "status": safe_label(latest.get("status"), default="failed"),
         "result_kind": safe_label(
-            receipt.get("result_kind") or latest.get("result_kind"),
+            result_kind,
             default="unknown",
         ),
         "failed_phase": safe_label(
-            receipt.get("failed_phase"),
+            failed_phase,
             default="unknown",
         ),
         "failure_category": safe_label(
-            trace.get("host_local_acp_codex_exec_failure_category"),
+            trace.get("host_local_acp_codex_exec_failure_category")
+            or (
+                "loopx_turn_validation_failed"
+                if validation_terminal_failure
+                else None
+            ),
             default="unknown",
         ),
         "durable_effects_observed": False,
@@ -14867,6 +14925,10 @@ async def run_benchflow_case(
             host_local_acp_status="installing_sandbox",
         )
         try:
+            prerequisites["host_local_acp_docker_exec_capture_lifecycle_guard"] = (
+                "install_agent_boundary"
+            )
+            install_benchflow_docker_exec_output_capture(self._env, plan=plan)
             prerequisites["host_local_acp_install_stage"] = (
                 "docker_exec_capture_preflight"
             )
@@ -15520,7 +15582,7 @@ def reduce_result(
                         if item not in existing_labels:
                             existing_labels.append(item)
                     compact["failure_attribution_labels"] = existing_labels
-    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
         compact,
         task_staging=task_staging,
         setup_preflight=_public_task_setup_preflight(
@@ -16519,7 +16581,7 @@ def build_runner_failure_compact(
     if not recovered:
         _recover_runner_failure_score_from_verifier_artifact(reduced, plan)
     _apply_codex_cli_goal_countability_guard_attribution(reduced)
-    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
         reduced,
         task_staging=_effective_public_task_staging(plan),
         setup_preflight=_public_task_setup_preflight(

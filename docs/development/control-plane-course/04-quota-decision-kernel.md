@@ -613,13 +613,18 @@ if not (
     return "invalid", False
 
 if not (
-    total > 0
-    and done == total
+    done == total
     and open_count == deferred_count == monitor_due_count == 0
     and not monitor_open_items
 ):
     return "invalid", False
 ```
+
+这里的 `total == 0` 不是天然有效。只有 Active State 显式声明了对应的 todo
+section，且 summary 带有匹配 role/source 的 `source_proof`，零条来源才是合法的空集合；
+整个 section 缺失仍然 fail-closed。`items` 只是最多展示 12 条的有界投影，因此
+`total > 0` 时允许 `0 < len(items) <= total`，完整性由 counts 与
+`terminal_closure_proof.item_count` 证明，不能要求展示列表长度等于总数。
 
 第二次验证整个 frontier：
 

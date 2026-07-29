@@ -48,51 +48,19 @@ _EXISTING_DECISION_DEBT_REASON = (
     "Existing multi-branch control-plane decision owner predates the ratchet."
 )
 _OVERSIZED_DECISION_RETIREMENT_PLANS = {
-    "loopx.control_plane.quota.goal_boundary:goal_boundary": (
-        "Split registry boundary resolution from capability and write-scope projection."
-    ),
-    "loopx.control_plane.turn_driver.executor:run_loopx_turn_once": (
-        "Split host execution, receipt validation, and transaction closeout stages."
-    ),
-    "loopx.status:compact_benchmark_run": (
-        "Move benchmark run compaction into bounded runtime read-model modules."
-    ),
-    "loopx.status:compact_active_user_assisted_pilot": (
-        "Move assisted-pilot compaction into a bounded runtime read model."
-    ),
     "loopx.quota:build_quota_should_run": (
         "Continue decomposing the public quota facade into bounded decision stages."
     ),
 }
 
 _OVERSIZED_DECISION_METRIC_CEILINGS = {
-    "loopx.control_plane.quota.goal_boundary:goal_boundary": {
-        "statements": 96,
-        "decision_points": 66,
-    },
-    "loopx.control_plane.turn_driver.executor:run_loopx_turn_once": {
-        "statements": 114,
-        "decision_points": 51,
-    },
-    "loopx.status:compact_benchmark_run": {
-        "statements": 337,
-        "decision_points": 168,
-    },
-    "loopx.status:compact_active_user_assisted_pilot": {
-        "statements": 124,
-        "decision_points": 71,
-    },
     "loopx.quota:build_quota_should_run": {
-        "statements": 366,
-        "decision_points": 264,
+        "statements": 291,
+        "decision_points": 185,
     },
 }
 
 REVIEWED_MAINTAINABILITY_EXCEPTIONS: dict[str, dict[str, Any]] = {
-    "dependency_debt:loopx.status->loopx.benchmark_adapters.skillsbench_verifier_bootstrap": _exception(
-        "Status still applies one benchmark bootstrap compatibility projection.",
-        "Move the bootstrap attribution into the benchmark runtime projection and delete the edge.",
-    ),
     "compatibility_facade:loopx.quota": _exception(
         "The public loopx.quota import surface remains a supported compatibility contract, "
         "including presentation-owned quota event renderers.",

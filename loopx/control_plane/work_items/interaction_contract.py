@@ -31,6 +31,7 @@ from .primary_action import (
     protocol_first_candidate_action as _protocol_first_candidate_action,
     protocol_monitor_action as _protocol_monitor_action,
 )
+from .runtime_capability_reentry import build_runtime_capability_reentry_packet
 
 INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 INTERACTION_RESPONSE_PLAN_SCHEMA_VERSION = "interaction_response_plan_v0"
@@ -502,6 +503,7 @@ def interaction_next_cli_actions(
     scheduler_execution_context: (
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
+    capability_reentry: dict[str, Any] | None = None,
 ) -> list[str]:
     goal_id = str(payload.get("goal_id") or "<GOAL_ID>")
     agent_identity = (
@@ -560,6 +562,20 @@ def interaction_next_cli_actions(
             else None
         ),
     )
+    if capability_reentry is None:
+        capability_reentry = build_runtime_capability_reentry_packet(
+            payload,
+            available_capabilities=available_capabilities,
+            scheduler_execution_context=scheduler_execution_context,
+        )
+    if capability_reentry is not None:
+        capability_resolution_actions.extend(
+            (
+                "after real-callsite verification of "
+                f"{candidate['capability']}: {candidate['command']}"
+            )
+            for candidate in capability_reentry["candidates"]
+        )
     if mode == "terminal_no_followup":
         return ["no quota spend until explicit goal resume or newly projected work"]
     if mode == "agent_monitor_only":
@@ -1031,12 +1047,18 @@ def _build_interaction_cli_channel(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
 ) -> dict[str, Any]:
-    return {
+    capability_reentry = build_runtime_capability_reentry_packet(
+        payload,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=scheduler_execution_context,
+    )
+    channel = {
         "next_cli_actions": interaction_next_cli_actions(
             payload,
             mode=mode,
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
+            capability_reentry=capability_reentry,
         ),
         "spend_allowed_now": False,
         "spend_after_validation": spend_after_validation,
@@ -1047,6 +1069,9 @@ def _build_interaction_cli_channel(
             spend_after_validation=spend_after_validation,
         ),
     }
+    if capability_reentry is not None:
+        channel["runtime_capability_reentry"] = capability_reentry
+    return channel
 
 
 def _attach_interaction_required_reads(

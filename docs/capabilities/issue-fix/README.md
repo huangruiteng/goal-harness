@@ -5,6 +5,7 @@
 [Workflow contract](protocols/issue-fix-workflow-contract-v0.md) ·
 [Discovered issue promotion](protocols/issue-fix-discovered-issue-promotion-v0.md) ·
 [Acceptance loop](protocols/issue-fix-acceptance-loop-v0.md) ·
+[Ark Managed Agent qualification](../../reference/protocols/ark-managed-agent-issue-fix-qualification-v0.md) ·
 [Reviewer recommendation](protocols/issue-fix-reviewer-recommendation-v0.md) ·
 [Reviewer request](protocols/issue-fix-reviewer-request-v0.md) ·
 [Reviewer notification sinks](protocols/issue-fix-reviewer-notification-sinks-v0.md) ·

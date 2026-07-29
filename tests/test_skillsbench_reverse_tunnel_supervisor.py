@@ -280,6 +280,53 @@ def test_supervisor_projects_existing_public_live_worker_phase(
     assert str(tmp_path) not in serialized
 
 
+def test_terminal_checkpoint_closes_projected_live_worker_phase(
+    tmp_path: Path,
+) -> None:
+    supervisor = _load_supervisor_module()
+    public_output = tmp_path / "public" / "supervisor.public.json"
+    payload = {
+        "active_phase": {
+            "schema_version": "skillsbench_supervisor_active_phase_v0",
+            "state": "observed",
+            "benchmark_live_worker_phase": {
+                "schema_version": "benchmark_live_worker_phase_v0",
+                "current_phase": "agent_active",
+                "next_required_phase": "",
+                "phase_ready": {
+                    "runtime_preparing": True,
+                    "worker_prepared": True,
+                    "worker_running": True,
+                    "agent_active": True,
+                },
+                "worker_live": True,
+                "agent_active_observed": True,
+                "terminal": False,
+                "terminal_disposition": "open",
+                "public_evidence_only": True,
+            },
+        }
+    }
+
+    supervisor._write_public_checkpoint(
+        str(public_output),
+        payload,
+        state="failed",
+        started_at=time.time() - 10,
+        heartbeat_count=3,
+        terminal=True,
+    )
+
+    persisted = json.loads(public_output.read_text(encoding="utf-8"))
+    phase = persisted["active_phase"]["benchmark_live_worker_phase"]
+    assert persisted["public_liveness"]["terminal"] is True
+    assert phase["current_phase"] == "agent_active"
+    assert phase["agent_active_observed"] is True
+    assert phase["worker_live"] is False
+    assert phase["terminal"] is True
+    assert phase["terminal_disposition"] == "failed"
+
+
 def test_supervisor_finalizes_public_liveness_on_early_launch_failure(
     tmp_path: Path,
 ) -> None:

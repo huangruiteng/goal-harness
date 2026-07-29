@@ -7,6 +7,7 @@ from .agent_registry import registered_agent_ids_from_registry
 from .bootstrap_command_pack import inspect_bootstrap_connection
 from .capabilities.change_quality.policy import change_quality_goal_policy
 from .host_loop_activation import (
+    agent_type_uses_host_managed_skills,
     build_host_loop_activation_packet,
     normalize_agent_type,
     render_agent_type_catalog_markdown,
@@ -125,7 +126,7 @@ def _skill_delivery_contract(
                     ),
                 }
             )
-    if agent_type != "other-agent":
+    if not agent_type_uses_host_managed_skills(agent_type):
         return {
             "schema_version": HOST_SKILL_DELIVERY_SCHEMA_VERSION,
             "mode": "surface_managed",
@@ -139,10 +140,11 @@ def _skill_delivery_contract(
         *REQUIRED_HOST_SKILL_IDS,
         *active_project_skills,
     ]
+    ark_managed_agent = agent_type == "ark-managed-agent"
     return {
         "schema_version": HOST_SKILL_DELIVERY_SCHEMA_VERSION,
         "mode": "host_managed",
-        "owner": "custom_agent_host",
+        "owner": "loopx_install_script" if ark_managed_agent else "custom_agent_host",
         "status": "pending_host_readback",
         "codex_skills_root_required": False,
         "required_for_cli_health": False,
@@ -150,9 +152,20 @@ def _skill_delivery_contract(
         "required_skill_ids": required_skill_ids,
         "active_project_skill_ids": active_project_skills,
         "delivery_options": [
+            *(["fixed_install_script"] if ark_managed_agent else []),
             "host_skill_manifest",
             "prompt_injection",
         ],
+        **(
+            {
+                "preferred_delivery": "fixed_install_script",
+                "install_script": "scripts/install-local.sh",
+                "skills_dir_env": "LOOPX_SKILLS_DIR",
+                "target_layout": f"{project}/.agents/skills",
+            }
+            if ark_managed_agent
+            else {}
+        ),
         "source_repository": "https://github.com/huangruiteng/loopx",
         "source_directories": [
             f"skills/{skill_id}" for skill_id in required_skill_ids
@@ -268,6 +281,12 @@ def build_agent_onboarding_packet(
         if change_quality_goal_policy(goal)["enabled"]
         else []
     )
+    skill_delivery = _skill_delivery_contract(
+        canonical_agent_type,
+        project=resolved_project,
+        cli_bin=cli_bin,
+        active_project_skill_ids=active_project_skill_ids,
+    )
     registered_agents = registered_agent_ids_from_registry(
         registry_path,
         resolved_goal_id,
@@ -351,12 +370,7 @@ def build_agent_onboarding_packet(
         "task_text": task_text,
         "project_connection": inspection,
         "host_loop_activation": host_loop_activation,
-        "skill_delivery": _skill_delivery_contract(
-            canonical_agent_type,
-            project=resolved_project,
-            cli_bin=cli_bin,
-            active_project_skill_ids=active_project_skill_ids,
-        ),
+        "skill_delivery": skill_delivery,
         "recommended_start": (
             "Select one registered agent lane from identity_selection_gate, then rerun onboarding."
             if not activation_allowed
@@ -382,9 +396,9 @@ def build_agent_onboarding_packet(
                 "ordered todos are written when task text was supplied",
                 *(
                     [
-                        "custom host loaded-skill readback satisfies skill_delivery.success_criteria"
+                        "host-managed loaded-skill readback satisfies skill_delivery.success_criteria"
                     ]
-                    if canonical_agent_type == "other-agent"
+                    if skill_delivery.get("host_readback_required") is True
                     else []
                 ),
                 "host_loop_activation success criteria are satisfied or a concrete gate is reported",
