@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -225,6 +226,31 @@ class SubprocessValidationRunner:
 class GitWorkspaceObserver:
     """Require a clean git fixture and report Worker changes as relative paths."""
 
+    def __init__(self) -> None:
+        self._before: dict[str, tuple[int, str]] | None = None
+
+    def _snapshot(self, cwd: Path) -> dict[str, tuple[int, str]]:
+        snapshot: dict[str, tuple[int, str]] = {}
+        for root, directories, filenames in os.walk(cwd, followlinks=False):
+            directories[:] = [
+                name
+                for name in directories
+                if name != ".git" and not (Path(root) / name).is_symlink()
+            ]
+            root_path = Path(root)
+            for filename in filenames:
+                path = root_path / filename
+                relative = path.relative_to(cwd).as_posix()
+                if path.is_symlink():
+                    payload = os.readlink(path).encode("utf-8", errors="surrogateescape")
+                else:
+                    payload = path.read_bytes()
+                snapshot[relative] = (
+                    len(payload),
+                    hashlib.sha256(payload).hexdigest(),
+                )
+        return snapshot
+
     def assert_clean(self, cwd: Path) -> None:
         probe = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
@@ -239,8 +265,20 @@ class GitWorkspaceObserver:
             raise TraexPlannerWorkerError(
                 "planner-worker workspace must be clean before Planner execution"
             )
+        self._before = self._snapshot(cwd)
 
     def changed_files(self, cwd: Path) -> dict[str, int]:
+        if self._before is not None:
+            after = self._snapshot(cwd)
+            changed_paths = {
+                path
+                for path in {*self._before, *after}
+                if self._before.get(path) != after.get(path)
+            }
+            return {
+                path: after.get(path, (0, ""))[0]
+                for path in sorted(changed_paths)
+            }
         result = subprocess.run(
             ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             cwd=cwd,

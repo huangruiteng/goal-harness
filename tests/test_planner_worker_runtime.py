@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from loopx.extensions.traex_planner_worker import SubprocessValidationRunner
+from loopx.extensions.traex_planner_worker import (
+    GitWorkspaceObserver,
+    SubprocessValidationRunner,
+)
 from loopx.planner_worker import (
     AdapterTurn,
     PLANNER_WORKER_PLAN_SCHEMA_VERSION,
@@ -355,3 +358,34 @@ def test_subprocess_validation_rejects_unbounded_command_shapes(
 
     assert result.passed is False
     assert result.exit_code is None
+
+
+def test_git_workspace_observer_detects_ignored_private_state_change(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("private.txt\n", encoding="utf-8")
+    (tmp_path / "private.txt").write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", ".gitignore"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    observer = GitWorkspaceObserver()
+    observer.assert_clean(tmp_path)
+
+    (tmp_path / "private.txt").write_text("after\n", encoding="utf-8")
+
+    assert observer.changed_files(tmp_path) == {"private.txt": len("after\n")}
