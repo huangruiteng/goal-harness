@@ -291,16 +291,22 @@ def assert_status_agent_lane_todo_summary_display_compaction() -> None:
     compact_user = item["user_todos"]
     assert compact_agent["open_count"] == 7, compact_agent
     assert compact_agent["done_count"] == 3, compact_agent
-    assert len(compact_agent["items"]) == 2, compact_agent
+    assert len(compact_agent["items"]) == 1, compact_agent
     assert compact_agent["payload_compaction"]["compacted_lanes"]["items"] == {
-        "shown": 2,
+        "shown": 1,
         "total": 7,
     }, compact_agent
     assert compact_user["open_count"] == 1, compact_user
-    assert len(compact_user["handoff_gates"]) == 2, compact_user
-    assert item["project_asset"]["agent_todos"] == project_asset_agent_summary, item
+    assert "handoff_gates" not in compact_user, compact_user
+    project_asset_reference = item["project_asset"]["agent_todos"]
+    assert project_asset_reference["open"] == 7, project_asset_reference
+    assert "items" not in project_asset_reference, project_asset_reference
+    assert project_asset_reference["payload_reference"]["canonical_path"] == (
+        "attention_queue.items[].agent_todos"
+    ), project_asset_reference
     marker = payload["agent_lane_todo_summary_compaction"]
-    assert marker["schema_version"] == "agent_lane_status_todo_summary_compaction_v0", marker
+    assert marker["schema_version"] == "agent_lane_status_todo_summary_compaction_v1", marker
+    assert marker["project_asset_reference_count"] == 1, marker
 
     markdown = render_status_markdown(payload)
     assert "agent_todos: open=7" in markdown, markdown

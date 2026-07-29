@@ -11,6 +11,9 @@ from ..control_plane.runtime.status_projection_cache import (
     resolve_status_projection_cache_runtime_root,
     write_status_projection_cache,
 )
+from ..control_plane.status_agent_lane_projection import (
+    compact_agent_lane_status_payload_for_display,
+)
 from ..control_plane.todos.contract import normalize_todo_claimed_by
 from ..control_plane.todos.quota_summary import (
     compact_agent_lane_todos_for_status_display,
@@ -402,6 +405,10 @@ def handle_status_command(
                 collection_limit=collection_limit,
             )
             compact_agent_lane_todos_for_status_display(payload)
+            compact_agent_lane_status_payload_for_display(
+                payload,
+                agent_id=args.agent_id,
+            )
             compact_agent_lane_todo_index_for_status_display(payload)
     except Exception as exc:
         payload = {
