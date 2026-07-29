@@ -1804,13 +1804,13 @@ def build_quota_should_run(
                     )
                 ),
             )
-            if not replan_decision_allowed:
-                selected_recommended_action = selected_action_with_agent_lane(
-                    selected_recommended_action,
-                    agent_lane_next_action=agent_lane_next_action,
-                )
         agent_scope_frontier = None
+        agent_lane_frontier_hint = None
         if not replan_decision_allowed:
+            selected_recommended_action = selected_action_with_agent_lane(
+                selected_recommended_action,
+                agent_lane_next_action=agent_lane_next_action,
+            )
             agent_scope_frontier = _agent_scope_no_candidate_frontier(
                 agent_identity=agent_identity,
                 agent_todo_summary=agent_todo_summary,
@@ -1821,13 +1821,11 @@ def build_quota_should_run(
                     or ready_deferred_resume_candidates
                 ),
             )
-        if (
-            isinstance(agent_scope_frontier, dict)
-            and agent_scope_frontier.get("priority_preemption") is True
-        ):
-            agent_lane_next_action = None
-        agent_lane_frontier_hint = None
-        if not replan_decision_allowed:
+            if (
+                isinstance(agent_scope_frontier, dict)
+                and agent_scope_frontier.get("priority_preemption") is True
+            ):
+                agent_lane_next_action = None
             agent_lane_frontier_hint = _agent_lane_frontier_hint(
                 goal_id=safe_goal_id,
                 agent_identity=agent_identity,
@@ -1836,29 +1834,29 @@ def build_quota_should_run(
                 agent_scope_frontier=agent_scope_frontier,
                 work_lane_contract=work_lane_contract,
             )
-        if agent_scope_frontier and agent_lane_frontier_hint:
-            agent_scope_frontier["frontier_hint"] = agent_lane_frontier_hint
-        if agent_scope_frontier and not replan_decision_allowed:
-            frontier_action = str(agent_scope_frontier.get("effective_action") or "")
-            successor_replan_required = (
-                frontier_action == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value
-            )
-            normal_delivery_allowed = False
-            should_run = bool(successor_replan_required)
-            effective_action = frontier_action
-            reason = str(agent_scope_frontier.get("reason") or reason)
-            selected_recommended_action = (
-                agent_scope_frontier.get("recommended_action")
-                or selected_recommended_action
-            )
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": effective_action,
-                "notify": "DONT_NOTIFY",
-                "reason": reason,
-                "spend_policy": agent_scope_frontier.get("spend_policy")
-                or "do not append quota spend while the current agent has no in-scope runnable candidate",
-            }
+            if agent_scope_frontier and agent_lane_frontier_hint:
+                agent_scope_frontier["frontier_hint"] = agent_lane_frontier_hint
+            if agent_scope_frontier:
+                frontier_action = str(agent_scope_frontier.get("effective_action") or "")
+                successor_replan_required = (
+                    frontier_action == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value
+                )
+                normal_delivery_allowed = False
+                should_run = bool(successor_replan_required)
+                effective_action = frontier_action
+                reason = str(agent_scope_frontier.get("reason") or reason)
+                selected_recommended_action = (
+                    agent_scope_frontier.get("recommended_action")
+                    or selected_recommended_action
+                )
+                heartbeat_recommendation = {
+                    **heartbeat_recommendation,
+                    "recommended_mode": effective_action,
+                    "notify": "DONT_NOTIFY",
+                    "reason": reason,
+                    "spend_policy": agent_scope_frontier.get("spend_policy")
+                    or "do not append quota spend while the current agent has no in-scope runnable candidate",
+                }
         state_action_projection_warning = build_state_action_projection_warning(
             item,
             agent_todo_summary=agent_todo_summary,
