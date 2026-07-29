@@ -62,22 +62,23 @@ def _result(
     }
 
 
-def _finding(*, finding_class: str, path: str) -> dict:
+def _finding(*, finding_class: str, path: str, code: str = "known-complexity") -> dict:
     return {
         "finding_class": finding_class,
         "severity": "warning",
-        "code": "known-complexity",
+        "code": code,
         "path": path,
         "line": 1,
         "message": "The changed implementation violates the fixture contract.",
     }
 
 
-def test_shadow_matrix_covers_five_real_prs_and_three_languages() -> None:
+def test_shadow_matrix_covers_clean_and_adversarial_prs_and_three_languages() -> None:
     matrix = _matrix()
 
-    assert len(matrix["cases"]) == 8
+    assert len(matrix["cases"]) == 9
     assert sum(case["kind"] == "real_pr_clean" for case in matrix["cases"]) == 5
+    assert sum(case["kind"] == "real_pr_adversarial" for case in matrix["cases"]) == 1
     synthetic = [
         case for case in matrix["cases"] if case["kind"] == "synthetic_simplification"
     ]
@@ -87,6 +88,39 @@ def test_shadow_matrix_covers_five_real_prs_and_three_languages() -> None:
         "typescript",
     }
     assert all(len(case["gold"]["findings"]) == 1 for case in synthetic)
+
+
+def test_pr_2578_replay_grades_sparse_simplify_and_boundary_findings() -> None:
+    case = _case("pr-2578-adversarial")
+    raw = _result(
+        case,
+        findings=[
+            _finding(
+                finding_class="complexity",
+                path="loopx/planner_worker.py",
+                code="duplicate-readiness-truth",
+            ),
+            _finding(
+                finding_class="security_privacy",
+                path="loopx/extensions/traex_planner_worker.py",
+                code="workspace-symlink-escape",
+            ),
+        ],
+    )
+
+    normalized = normalize_change_quality_shadow_result(
+        raw,
+        case=case,
+        contract_version="v1",
+    )
+    grade = grade_change_quality_shadow_result(normalized, case=case)
+
+    assert len(normalized["findings"]) == 2
+    assert grade["matched_finding_count"] == 2
+    assert grade["false_positive_count"] == 0
+    assert grade["false_negative_count"] == 0
+    assert grade["simplification_match"] is True
+    assert grade["safe_fix_match"] is True
 
 
 def test_v0_prompt_does_not_smuggle_in_v1_lens_ids() -> None:
@@ -238,13 +272,16 @@ def test_receipt_promotes_only_complete_accurate_bounded_v1() -> None:
     }
 
 
-def test_receipt_fails_promotion_on_one_false_positive() -> None:
+def test_receipt_fails_promotion_below_precision_floor() -> None:
     matrix = _matrix()
     runs = []
     for case in matrix["cases"]:
         expected_count = len(case["gold"]["findings"])
         for version in ("v0", "v1"):
-            false_positive = version == "v1" and case["case_id"] == "pr-2590-clean"
+            false_positive = version == "v1" and case["case_id"] in {
+                "pr-2590-clean",
+                "pr-2593-clean",
+            }
             runs.append(
                 {
                     "case_id": case["case_id"],
@@ -274,7 +311,7 @@ def test_receipt_fails_promotion_on_one_false_positive() -> None:
         source_commit="b" * 40,
     )
 
-    assert receipt["arms"]["v1"]["precision"] == 0.75
+    assert receipt["arms"]["v1"]["precision"] == 0.7143
     assert receipt["acceptance"]["v1_simplify_precision_at_least_0_8"] is False
     assert receipt["strict_receipt_promotion_recommended"] is False
 

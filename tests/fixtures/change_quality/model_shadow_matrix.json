@@ -110,6 +110,41 @@
       }
     },
     {
+      "case_id": "pr-2578-adversarial",
+      "kind": "real_pr_adversarial",
+      "language": "python",
+      "changed_files": [
+        "examples/planner-worker-contract-smoke.py",
+        "examples/planner-worker-runtime-smoke.py",
+        "examples/traex-planner-worker-probe-smoke.py",
+        "loopx/extensions/traex_planner_worker.py",
+        "loopx/planner_worker.py",
+        "loopx/planner_worker_runtime.py",
+        "scripts/traex_planner_worker_probe.py",
+        "tests/test_planner_worker.py",
+        "tests/test_planner_worker_runtime.py"
+      ],
+      "source": {
+        "pull_request": 2578,
+        "base_ref": "17842deaa029dbc787f6e2a5397cb4ffc685d1be",
+        "head_ref": "5d13709996e6a0b7f397908766b631f40071639b"
+      },
+      "gold": {
+        "findings": [
+          {
+            "finding_class": "complexity",
+            "path": "loopx/planner_worker.py"
+          },
+          {
+            "finding_class": "security_privacy",
+            "path": "loopx/extensions/traex_planner_worker.py"
+          }
+        ],
+        "safe_fix_action": "manual",
+        "simplification_outcome": "simplify"
+      }
+    },
+    {
       "case_id": "python-one-use-wrapper",
       "kind": "synthetic_simplification",
       "language": "python",

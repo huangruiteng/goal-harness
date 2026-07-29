@@ -20,6 +20,7 @@ CHANGE_QUALITY_SHADOW_RECEIPT_SCHEMA_VERSION = "change_quality_shadow_receipt_v0
 CHANGE_QUALITY_SHADOW_CONTRACT_VERSIONS = ("v0", "v1")
 CHANGE_QUALITY_SHADOW_CASE_KINDS = (
     "real_pr_clean",
+    "real_pr_adversarial",
     "synthetic_simplification",
 )
 CHANGE_QUALITY_SHADOW_FINDING_CLASSES = (
@@ -142,7 +143,7 @@ def load_change_quality_shadow_matrix(path: Path) -> dict[str, Any]:
         if not isinstance(source, Mapping):
             raise ValueError(f"cases[{index}].source must be an object")
         normalized_source: dict[str, Any]
-        if kind == "real_pr_clean":
+        if kind.startswith("real_pr_"):
             pull_request = source.get("pull_request")
             if not isinstance(pull_request, int) or pull_request < 1:
                 raise ValueError(f"cases[{index}].source.pull_request must be positive")
@@ -338,7 +339,7 @@ def build_change_quality_shadow_prompt(
     if contract_version not in CHANGE_QUALITY_SHADOW_CONTRACT_VERSIONS:
         raise ValueError("unknown change-quality shadow contract version")
     source = dict(case["source"])
-    if case["kind"] == "real_pr_clean":
+    if case["kind"].startswith("real_pr_"):
         scope = (
             f"Review commit range {source['base_ref']}..{source['head_ref']}. "
             "Use git diff and repository files to inspect the exact change."
