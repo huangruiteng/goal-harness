@@ -288,7 +288,7 @@ class GitWorkspaceObserver:
             )
         self._before = self._snapshot(cwd)
 
-    def changed_files(self, cwd: Path) -> dict[str, int]:
+    def changed_files(self, cwd: Path) -> dict[str, int | None]:
         if self._before is not None:
             after = self._snapshot(cwd)
             changed_paths = {
@@ -301,10 +301,17 @@ class GitWorkspaceObserver:
                     and stat.S_ISDIR(after[path][2])
                 )
             }
-            return {
-                path: after.get(path, (0, "", 0))[0]
-                for path in sorted(changed_paths)
-            }
+            changed: dict[str, int | None] = {}
+            for path in sorted(changed_paths):
+                entry = after.get(path) or self._before.get(path)
+                assert entry is not None
+                mode = entry[2]
+                changed[path] = (
+                    entry[0]
+                    if stat.S_ISREG(mode) or stat.S_ISLNK(mode)
+                    else None
+                )
+            return changed
         result = subprocess.run(
             ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             cwd=cwd,

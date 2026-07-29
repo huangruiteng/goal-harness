@@ -450,7 +450,7 @@ def test_git_workspace_observer_detects_directory_mode_change(
     current_mode = package.stat().st_mode & 0o777
     package.chmod(0o755 if current_mode != 0o755 else 0o700)
 
-    assert observer.changed_files(tmp_path) == {"pkg": 0}
+    assert observer.changed_files(tmp_path) == {"pkg": None}
 
 
 def test_git_workspace_observer_reports_new_directory_by_leaf_file(
@@ -515,7 +515,7 @@ def test_git_workspace_observer_detects_worktree_mode_change(
     current_mode = tmp_path.stat().st_mode & 0o777
     tmp_path.chmod(0o755 if current_mode != 0o755 else 0o700)
 
-    assert observer.changed_files(tmp_path) == {".": 0}
+    assert observer.changed_files(tmp_path) == {".": None}
 
 
 def test_git_workspace_observer_detects_fifo_without_blocking(
@@ -546,7 +546,7 @@ def test_git_workspace_observer_detects_fifo_without_blocking(
 
     os.mkfifo(tmp_path / "worker.fifo")
 
-    assert observer.changed_files(tmp_path) == {"worker.fifo": 0}
+    assert observer.changed_files(tmp_path) == {"worker.fifo": None}
 
 
 def test_git_workspace_observer_detects_unix_socket(tmp_path: Path) -> None:
@@ -579,6 +579,75 @@ def test_git_workspace_observer_detects_unix_socket(tmp_path: Path) -> None:
             worker_socket.bind(str(tmp_path / "worker.sock"))
         except PermissionError:
             pytest.skip("sandbox does not permit creating Unix sockets")
-        assert observer.changed_files(tmp_path) == {"worker.sock": 0}
+        assert observer.changed_files(tmp_path) == {"worker.sock": None}
     finally:
         worker_socket.close()
+
+
+def test_runtime_rejects_special_file_even_when_planner_targets_it(
+    tmp_path: Path,
+) -> None:
+    import os
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    plan = executable_plan()
+    plan["steps"][0]["target_files"] = ["worker.fifo"]
+    validation_calls: list[str] = []
+
+    class FifoWorker:
+        def execute(
+            self,
+            *,
+            prompt: str,
+            model_route: dict[str, str],
+            cwd: Path,
+        ) -> AdapterTurn:
+            os.mkfifo(cwd / "worker.fifo")
+            return AdapterTurn(
+                output_text="created fifo",
+                usage={},
+                usage_complete=False,
+            )
+
+    def validation(command: str, cwd: Path) -> ValidationResult:
+        validation_calls.append(command)
+        return ValidationResult(command=command, passed=True, exit_code=0)
+
+    receipt = run_planner_worker_once(
+        objective="Create one fixture.",
+        task_instruction="Use the Planner result.",
+        cwd=tmp_path,
+        planner=FakePlanner(plan),
+        worker=FifoWorker(),
+        validation_runner=validation,
+        workspace_observer=GitWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
+        model_routes={
+            "planner": {"model": "gpt-5.5", "effort": "high"},
+            "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
+            "strong_worker": {"model": "gpt-5.5", "effort": "high"},
+        },
+    )
+
+    assert receipt["status"] == "failed"
+    assert receipt["write_scope"]["passed"] is False
+    assert receipt["write_scope"]["unsupported_paths"] == ["worker.fifo"]
+    assert receipt["validation"] == []
+    assert validation_calls == []

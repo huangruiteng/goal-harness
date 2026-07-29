@@ -39,7 +39,7 @@ class WorkerAdapter(Protocol):
 class WorkspaceObserver(Protocol):
     def assert_clean(self, cwd: Path) -> None: ...
 
-    def changed_files(self, cwd: Path) -> dict[str, int]: ...
+    def changed_files(self, cwd: Path) -> dict[str, int | None]: ...
 
 
 ValidationRunner = Callable[[str, Path], ValidationResult]
@@ -213,22 +213,28 @@ def run_planner_worker_once(
     changed_files = workspace_observer.changed_files(workdir)
     target_files = set(step["target_files"])
     allow_extra_files = bool(step["context_budget"]["allow_extra_files"])
+    unsupported_paths = sorted(
+        path for path, size in changed_files.items() if size is None
+    )
     violations = (
         []
         if allow_extra_files
         else sorted(set(changed_files) - target_files)
     )
+    violations.extend(f"{path}:unsupported_file_type" for path in unsupported_paths)
     if len(changed_files) > int(step["context_budget"]["max_files"]):
         violations.append("context_budget.max_files")
     oversized = sorted(
         path
         for path, size in changed_files.items()
-        if size > int(step["context_budget"]["max_bytes_per_file"])
+        if size is not None
+        and size > int(step["context_budget"]["max_bytes_per_file"])
     )
     violations.extend(f"{path}:max_bytes_per_file" for path in oversized)
     write_scope = {
         "passed": not violations,
         "changed_files": changed_files,
+        "unsupported_paths": unsupported_paths,
         "violations": violations,
     }
     if violations:
