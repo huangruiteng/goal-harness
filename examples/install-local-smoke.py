@@ -36,6 +36,20 @@ def git_output(args: list[str]) -> str | None:
     return result.stdout.strip() or None
 
 
+def normal_turns_use_cli_interaction_contract(task_body: str) -> bool:
+    clauses = " ".join(task_body.split()).replace(";", ".").split(".")
+    for clause in clauses:
+        normalized = clause.lower()
+        if (
+            "`interaction_contract`" in normalized
+            and "cli" in normalized
+            and ("normal turn" in normalized or "normal-turn" in normalized)
+            and any(marker in normalized for marker in (" use ", " follow ", " authority"))
+        ):
+            return True
+    return False
+
+
 def source_git_commit(root: Path = REPO_ROOT) -> str:
     if root == REPO_ROOT:
         commit = git_output(["rev-parse", "HEAD"])
@@ -721,7 +735,13 @@ def main() -> int:
         assert "--delivery-batch-scale multi_surface" not in payload["progress_refresh_state_command"], payload
         assert "--delivery-outcome outcome_progress" not in payload["progress_refresh_state_command"], payload
         assert "<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in payload["progress_refresh_state_command"], payload
-        assert "follow `interaction_contract`" in payload["task_body"], payload
+        assert normal_turns_use_cli_interaction_contract(payload["task_body"]), payload
+        assert not normal_turns_use_cli_interaction_contract(
+            "Normal turns use the runtime skill; recovery may inspect CLI `interaction_contract`."
+        )
+        assert not normal_turns_use_cli_interaction_contract(
+            "Normal turns use the runtime skill and repair contract."
+        )
         assert "`LOOPX_TURN=<current_time_iso>`; reuse." in payload["task_body"], payload
         assert "guard receipt; 2 stalls->replan" in payload["task_body"], payload
         assert "actual class/scale/outcome accountable refresh->spend" in payload["task_body"], payload
