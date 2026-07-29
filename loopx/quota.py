@@ -1005,6 +1005,12 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             "active_state_next_action",
             "active_state_next_action_entries",
             "standing_decision_authority",
+            "long_task_cadence_hint",
+            "stale_latest_run_warning",
+            "backlog_hygiene_warning",
+            "completed_todo_archive_warning",
+            "dreaming_proposal",
+            "dreaming_lane_badge",
         ):
             if optional_field in attention:
                 if optional_field == "handoff_readiness":
@@ -1975,13 +1981,9 @@ def build_quota_should_run(
             if project_asset
             else None,
             "long_task_cadence_hint": (
-                project_asset.get("long_task_cadence_hint")
-                if project_asset and isinstance(project_asset.get("long_task_cadence_hint"), dict)
-                else (
-                    item.get("long_task_cadence_hint")
-                    if isinstance(item.get("long_task_cadence_hint"), dict)
-                    else None
-                )
+                item.get("long_task_cadence_hint")
+                if isinstance(item.get("long_task_cadence_hint"), dict)
+                else None
             ),
             "handoff_readiness": item.get("handoff_readiness"),
             "heartbeat_recommendation": heartbeat_recommendation,
@@ -2146,8 +2148,6 @@ def build_quota_should_run(
         projection_warning = (
             item.get("stale_latest_run_warning")
             if isinstance(item.get("stale_latest_run_warning"), dict)
-            else project_asset.get("stale_latest_run_warning")
-            if isinstance(project_asset.get("stale_latest_run_warning"), dict)
             else None
         )
         if projection_warning:
@@ -2159,8 +2159,6 @@ def build_quota_should_run(
         backlog_warning = (
             item.get("backlog_hygiene_warning")
             if isinstance(item.get("backlog_hygiene_warning"), dict)
-            else project_asset.get("backlog_hygiene_warning")
-            if isinstance(project_asset.get("backlog_hygiene_warning"), dict)
             else None
         )
         if backlog_warning:
@@ -2168,8 +2166,6 @@ def build_quota_should_run(
         archive_warning = (
             item.get("completed_todo_archive_warning")
             if isinstance(item.get("completed_todo_archive_warning"), dict)
-            else project_asset.get("completed_todo_archive_warning")
-            if isinstance(project_asset.get("completed_todo_archive_warning"), dict)
             else None
         )
         if archive_warning:
@@ -2179,8 +2175,6 @@ def build_quota_should_run(
         dreaming_proposal = (
             item.get("dreaming_proposal")
             if isinstance(item.get("dreaming_proposal"), dict)
-            else project_asset.get("dreaming_proposal")
-            if isinstance(project_asset.get("dreaming_proposal"), dict)
             else None
         )
         if dreaming_proposal:
@@ -2188,8 +2182,6 @@ def build_quota_should_run(
         dreaming_lane_badge = (
             item.get("dreaming_lane_badge")
             if isinstance(item.get("dreaming_lane_badge"), dict)
-            else project_asset.get("dreaming_lane_badge")
-            if isinstance(project_asset.get("dreaming_lane_badge"), dict)
             else None
         )
         if dreaming_lane_badge:
