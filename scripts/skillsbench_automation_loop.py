@@ -12058,15 +12058,27 @@ def _loopx_turn_terminal_failure_checkpoint(
         return None
     receipt = latest.get("receipt")
     receipt = receipt if isinstance(receipt, Mapping) else {}
+    validation = latest.get("validation")
+    validation = validation if isinstance(validation, Mapping) else {}
+    result_kind = receipt.get("result_kind") or latest.get("result_kind")
+    failed_phase = receipt.get("failed_phase")
     terminal_failure = bool(
         latest.get("status") in {"failed", "validation_failed"}
         or receipt.get("status") == "failed"
-        or receipt.get("failed_phase")
+        or failed_phase
+    )
+    validation_terminal_failure = bool(
+        failed_phase == "validation"
+        or result_kind == "validation_failed"
+        or validation.get("status") == "failed"
     )
     if (
         not terminal_failure
         or loopx_turn_execution_has_durable_effects(latest)
-        or trace.get("host_local_acp_codex_exec_failure_trace_present") is not True
+        or (
+            trace.get("host_local_acp_codex_exec_failure_trace_present") is not True
+            and not validation_terminal_failure
+        )
     ):
         return None
 
@@ -12080,15 +12092,20 @@ def _loopx_turn_terminal_failure_checkpoint(
         "schema_version": "skillsbench_loopx_turn_terminal_failure_checkpoint_v0",
         "status": safe_label(latest.get("status"), default="failed"),
         "result_kind": safe_label(
-            receipt.get("result_kind") or latest.get("result_kind"),
+            result_kind,
             default="unknown",
         ),
         "failed_phase": safe_label(
-            receipt.get("failed_phase"),
+            failed_phase,
             default="unknown",
         ),
         "failure_category": safe_label(
-            trace.get("host_local_acp_codex_exec_failure_category"),
+            trace.get("host_local_acp_codex_exec_failure_category")
+            or (
+                "loopx_turn_validation_failed"
+                if validation_terminal_failure
+                else None
+            ),
             default="unknown",
         ),
         "durable_effects_observed": False,

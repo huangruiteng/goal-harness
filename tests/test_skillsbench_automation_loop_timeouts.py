@@ -184,6 +184,7 @@ def _terminal_turn_plan(
     *,
     committed: bool = False,
     process_failure: bool = True,
+    failed_phase: str = "host_execute",
 ):
     boundary = {
         "raw_command_recorded": False,
@@ -225,17 +226,31 @@ def _terminal_turn_plan(
                     "schema_version": "loopx_turn_execution_v0",
                     "status": "committed" if committed else "failed",
                     "result_kind": (
-                        "validated_completion" if committed else "repair_required"
+                        "validated_completion"
+                        if committed
+                        else "validation_failed"
+                        if failed_phase == "validation"
+                        else "repair_required"
                     ),
                     "validation": {
-                        "status": "passed" if committed else "not_attempted"
+                        "status": (
+                            "passed"
+                            if committed
+                            else "failed"
+                            if failed_phase == "validation"
+                            else "not_attempted"
+                        )
                     },
                     "receipt": {
                         "status": "committed" if committed else "failed",
                         "result_kind": (
-                            "validated_completion" if committed else "repair_required"
+                            "validated_completion"
+                            if committed
+                            else "validation_failed"
+                            if failed_phase == "validation"
+                            else "repair_required"
                         ),
-                        "failed_phase": "" if committed else "host_execute",
+                        "failed_phase": "" if committed else failed_phase,
                     },
                     "effects": {
                         "host_invoked": True,
@@ -245,7 +260,13 @@ def _terminal_turn_plan(
                     },
                 },
                 "scored_workspace_validation": {
-                    "status": "passed" if committed else "not_attempted",
+                    "status": (
+                        "passed"
+                        if committed
+                        else "failed"
+                        if failed_phase == "validation"
+                        else "not_attempted"
+                    ),
                     "independent": True,
                 },
                 "boundary": boundary,
@@ -297,11 +318,37 @@ def test_loopx_turn_terminal_failure_checkpoint_waits_without_process_failure(
     assert _loopx_turn_terminal_failure_checkpoint(plan) is None
 
 
+def test_loopx_turn_terminal_failure_checkpoint_closes_validation_failure(
+    tmp_path,
+) -> None:
+    plan = _terminal_turn_plan(
+        tmp_path,
+        process_failure=False,
+        failed_phase="validation",
+    )
+
+    checkpoint = _loopx_turn_terminal_failure_checkpoint(plan)
+
+    assert checkpoint == {
+        "schema_version": "skillsbench_loopx_turn_terminal_failure_checkpoint_v0",
+        "status": "failed",
+        "result_kind": "validation_failed",
+        "failed_phase": "validation",
+        "failure_category": "loopx_turn_validation_failed",
+        "durable_effects_observed": False,
+        "raw_material_recorded": False,
+    }
+
+
 def test_loopx_turn_terminal_failure_watchdog_cancels_stranded_benchflow(
     tmp_path,
     monkeypatch,
 ) -> None:
-    plan = _terminal_turn_plan(tmp_path)
+    plan = _terminal_turn_plan(
+        tmp_path,
+        process_failure=False,
+        failed_phase="validation",
+    )
     cleanup_calls = []
 
     def fake_cleanup(plan_arg):
@@ -345,7 +392,7 @@ def test_loopx_turn_terminal_failure_watchdog_cancels_stranded_benchflow(
     assert public["benchflow_loopx_turn_terminal_failure_triggered"] is True
     assert public["benchflow_loopx_turn_terminal_failure_grace_sec"] == 0
     assert public["benchflow_loopx_turn_terminal_failure_category"] == (
-        "codex_exec_bridge_idle_timeout"
+        "loopx_turn_validation_failed"
     )
     assert cleanup_calls == [plan["job_name"]]
 
