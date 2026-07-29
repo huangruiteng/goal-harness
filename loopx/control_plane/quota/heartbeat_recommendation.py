@@ -150,6 +150,94 @@ _BASE_RECOMMENDATION: dict[str, Any] = {
     ),
 }
 
+_CAPABILITY_GATE_RECOMMENDATION_OVERRIDES: dict[str, dict[str, Any]] = {
+    "repair_bridge": {
+        "recommended_mode": "repair_capability_bridge",
+        "notify": "DONT_NOTIFY",
+        "spend_policy": (
+            "append exactly one quota spend only after a validated bridge "
+            "repair, todo rewrite, or compact blocker writeback"
+        ),
+    },
+    "ask_owner": {
+        "recommended_mode": "ask_owner_for_capability",
+        "notify": "NOTIFY",
+        "spend_policy": "do not append quota spend while asking for missing capability",
+    },
+    "skip": {
+        "recommended_mode": "capability_skip",
+        "notify": "DONT_NOTIFY",
+        "spend_policy": (
+            "do not append quota spend while all executable todos lack "
+            "current capabilities"
+        ),
+    },
+}
+
+
+def refine_heartbeat_recommendation(
+    recommendation: dict[str, Any],
+    *,
+    should_run: bool,
+    capability_gate: dict[str, Any] | None,
+    capability_monitor_fallback: dict[str, Any] | None,
+    workspace_guard: dict[str, Any] | None,
+    automation_prompt_upgrade: dict[str, Any] | None,
+    automation_prompt_upgrade_required: bool,
+    blocked_priority_fallback: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Apply the ordered execution-guard refinements to heartbeat guidance."""
+
+    refined = dict(recommendation)
+    capability_action = (
+        str(capability_gate.get("action") or "")
+        if capability_gate and not capability_monitor_fallback
+        else ""
+    )
+    capability_override = _CAPABILITY_GATE_RECOMMENDATION_OVERRIDES.get(
+        capability_action
+    )
+    if capability_override:
+        refined.update(capability_override)
+        refined["reason"] = capability_gate.get("reason") or refined.get("reason")
+
+    if workspace_guard:
+        refined.update(
+            {
+                "recommended_mode": "repair_agent_workspace",
+                "notify": "DONT_NOTIFY",
+                "reason": workspace_guard.get("reason") or refined.get("reason"),
+                "spend_policy": (
+                    "do not append quota spend for workspace relocation; rerun quota "
+                    "from the independent worktree before delivery"
+                ),
+            }
+        )
+
+    if automation_prompt_upgrade_required:
+        upgrade = automation_prompt_upgrade or {}
+        refined.update(
+            {
+                "recommended_mode": "automation_prompt_upgrade",
+                "notify": "DONT_NOTIFY",
+                "reason": upgrade.get("reason") or refined.get("reason"),
+                "spend_policy": (
+                    "do not append quota spend for stale/unscoped automation; "
+                    "rerun quota should-run from an identity-scoped prompt"
+                ),
+            }
+        )
+
+    if blocked_priority_fallback and should_run:
+        refined["blocked_priority_fallback"] = blocked_priority_fallback
+        if blocked_priority_fallback.get("notify_user") is True:
+            refined["notify"] = "NOTIFY"
+            refined["reason"] = (
+                blocked_priority_fallback.get("reason") or refined.get("reason")
+            )
+
+    return refined
+
 
 @dataclass(frozen=True)
 class _HeartbeatRecommendationFacts:

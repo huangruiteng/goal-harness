@@ -49,6 +49,7 @@ from .control_plane.quota.heartbeat_recommendation import (
     HEARTBEAT_POST_HANDOFF_RUN_COMPACT_FIELDS as POST_HANDOFF_RUN_COMPACT_FIELDS,
     build_heartbeat_recommendation,
     open_todo_notify_reason,
+    refine_heartbeat_recommendation,
 )
 from .control_plane.quota.projection_repair import (
     build_boundary_projection_repair_hint,
@@ -1726,68 +1727,16 @@ def build_quota_should_run(
             select_replan_obligation=False,
             monitor_due_item_limit=MONITOR_DUE_ITEM_LIMIT,
         )
-        if capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "repair_bridge":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "repair_capability_bridge",
-                "notify": "DONT_NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "append exactly one quota spend only after a validated bridge "
-                    "repair, todo rewrite, or compact blocker writeback"
-                ),
-            }
-        elif capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "ask_owner":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "ask_owner_for_capability",
-                "notify": "NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": "do not append quota spend while asking for missing capability",
-            }
-        elif capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "skip":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "capability_skip",
-                "notify": "DONT_NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": "do not append quota spend while all executable todos lack current capabilities",
-            }
-        if workspace_guard:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "repair_agent_workspace",
-                "notify": "DONT_NOTIFY",
-                "reason": workspace_guard.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "do not append quota spend for workspace relocation; rerun quota "
-                    "from the independent worktree before delivery"
-                ),
-            }
-        if automation_prompt_upgrade_required:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "automation_prompt_upgrade",
-                "notify": "DONT_NOTIFY",
-                "reason": automation_prompt_upgrade.get("reason")
-                or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "do not append quota spend for stale/unscoped automation; "
-                    "rerun quota should-run from an identity-scoped prompt"
-                ),
-            }
-        if blocked_priority_fallback and should_run:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "blocked_priority_fallback": blocked_priority_fallback,
-            }
-            if blocked_priority_fallback.get("notify_user") is True:
-                heartbeat_recommendation = {
-                    **heartbeat_recommendation,
-                    "notify": "NOTIFY",
-                    "reason": blocked_priority_fallback.get("reason")
-                    or heartbeat_recommendation.get("reason"),
-                }
+        heartbeat_recommendation = refine_heartbeat_recommendation(
+            heartbeat_recommendation,
+            should_run=should_run,
+            capability_gate=capability_gate,
+            capability_monitor_fallback=capability_monitor_fallback,
+            workspace_guard=workspace_guard,
+            automation_prompt_upgrade=automation_prompt_upgrade,
+            automation_prompt_upgrade_required=automation_prompt_upgrade_required,
+            blocked_priority_fallback=blocked_priority_fallback,
+        )
         external_evidence_observation = build_external_evidence_observation_obligation(
             item,
             state=state,
