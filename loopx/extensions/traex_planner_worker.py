@@ -227,17 +227,30 @@ class GitWorkspaceObserver:
     """Require a clean git fixture and report Worker changes as relative paths."""
 
     def __init__(self) -> None:
-        self._before: dict[str, tuple[int, str]] | None = None
+        self._before: dict[str, tuple[int, str, int]] | None = None
 
-    def _snapshot(self, cwd: Path) -> dict[str, tuple[int, str]]:
-        snapshot: dict[str, tuple[int, str]] = {}
+    def _snapshot(self, cwd: Path) -> dict[str, tuple[int, str, int]]:
+        snapshot: dict[str, tuple[int, str, int]] = {}
         for root, directories, filenames in os.walk(cwd, followlinks=False):
-            directories[:] = [
-                name
-                for name in directories
-                if name != ".git" and not (Path(root) / name).is_symlink()
-            ]
             root_path = Path(root)
+            traversable_directories: list[str] = []
+            for name in directories:
+                path = root_path / name
+                if name == ".git":
+                    continue
+                if path.is_symlink():
+                    relative = path.relative_to(cwd).as_posix()
+                    payload = os.readlink(path).encode(
+                        "utf-8", errors="surrogateescape"
+                    )
+                    snapshot[relative] = (
+                        len(payload),
+                        hashlib.sha256(payload).hexdigest(),
+                        path.lstat().st_mode,
+                    )
+                    continue
+                traversable_directories.append(name)
+            directories[:] = traversable_directories
             for filename in filenames:
                 path = root_path / filename
                 relative = path.relative_to(cwd).as_posix()
@@ -248,6 +261,7 @@ class GitWorkspaceObserver:
                 snapshot[relative] = (
                     len(payload),
                     hashlib.sha256(payload).hexdigest(),
+                    path.lstat().st_mode,
                 )
         return snapshot
 
@@ -276,7 +290,7 @@ class GitWorkspaceObserver:
                 if self._before.get(path) != after.get(path)
             }
             return {
-                path: after.get(path, (0, ""))[0]
+                path: after.get(path, (0, "", 0))[0]
                 for path in sorted(changed_paths)
             }
         result = subprocess.run(

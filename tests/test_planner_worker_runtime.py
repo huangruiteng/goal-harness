@@ -389,3 +389,32 @@ def test_git_workspace_observer_detects_ignored_private_state_change(
     (tmp_path / "private.txt").write_text("after\n", encoding="utf-8")
 
     assert observer.changed_files(tmp_path) == {"private.txt": len("after\n")}
+
+
+def test_git_workspace_observer_detects_file_mode_change(tmp_path: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    tracked = tmp_path / "tracked.txt"
+    tracked.write_text("unchanged\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    observer = GitWorkspaceObserver()
+    observer.assert_clean(tmp_path)
+
+    tracked.chmod(0o755)
+
+    assert observer.changed_files(tmp_path) == {"tracked.txt": len("unchanged\n")}
