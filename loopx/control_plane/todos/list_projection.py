@@ -35,6 +35,7 @@ _ITEM_FIELDS = (
     "priority",
     "text",
     "title",
+    "note",
     "task_class",
     "action_kind",
     "task_repository",
@@ -74,7 +75,9 @@ def _compact_item(value: Any) -> Any:
         child = value.get(key)
         if child is None:
             continue
-        compact[key] = _compact_text(child) if key in {"text", "title"} else child
+        compact[key] = (
+            _compact_text(child) if key in {"text", "title", "note"} else child
+        )
     return compact
 
 

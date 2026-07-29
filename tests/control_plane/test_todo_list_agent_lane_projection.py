@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from loopx.control_plane.todos.contract import encode_metadata_value
 from loopx.control_plane.todos.markdown import render_todo_markdown
 from loopx.todos import list_goal_todos
 
@@ -120,7 +121,13 @@ def _write_fixture(tmp_path: Path) -> tuple[Path, Path]:
             text="Execute the current agent advancement.",
             status="open",
             task_class="advancement_task",
-            metadata=f"claimed_by={AGENT_ID} action_kind=current_work",
+            metadata=(
+                f"claimed_by={AGENT_ID} action_kind=current_work "
+                "note="
+                + encode_metadata_value(
+                    "phase A validated; resume from durable state"
+                )
+            ),
         )
     )
     lines.extend(
@@ -226,6 +233,12 @@ def test_agent_lane_default_is_bounded_and_keeps_active_identity(
         "todo_agent_unclaimed",
         "todo_agent_deferred",
     }
+    current = next(
+        item
+        for item in payload["agent_todos"]["items"]
+        if item["todo_id"] == "todo_agent_current"
+    )
+    assert current["note"] == "phase A validated; resume from durable state"
     assert payload["user_todos"]["done_count"] == 50
     assert payload["agent_todos"]["done_count"] == 221
     assert all(item["status"] != "done" for item in payload["todos"])
