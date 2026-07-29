@@ -322,7 +322,7 @@ def main() -> int:
         "todo continuation",
         "no cross-agent authority",
         "no scope in todo metadata",
-        "No runtime `loopx-project`",
+        "Normal: CLI contract; lifecycle/registry: `loopx-project`; drift: `loopx-self-repair`",
         "heartbeat-prequota",
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run '
         "--goal-id loopx-meta --agent-id codex-product-capability --available-capability network "
@@ -421,9 +421,7 @@ def main() -> int:
     thin_task = normalized(str(thin_payload["task_body"]))
     for phrase in (
         "Advance `public-heartbeat-goal` from /tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md",
-        "No runtime `loopx-project`",
-        "`loopx-self-repair`",
-        "LoopX CLI = truth",
+        "Normal: CLI contract; lifecycle/registry: `loopx-project`; drift: `loopx-self-repair`",
         "state/status/repo",
         "`quota should-run`; follow `interaction_contract`",
         "NOTIFY Chinese actions incl. non_blocking false/0",

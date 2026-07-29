@@ -96,6 +96,27 @@ def test_goal_hosts_attribute_spend_to_current_progress_refresh(
     )
 
 
+@pytest.mark.parametrize(
+    "runtime_profile",
+    ("ark_managed_agent_goal", "codex_app_ssh_goal"),
+)
+def test_goal_hosts_share_narrow_runtime_skill_routing(
+    runtime_profile: str,
+) -> None:
+    payload = build_heartbeat_prompt(
+        goal_id="goal-runtime-routing-fixture",
+        thin=True,
+        runtime_profile=runtime_profile,
+    )
+    task_body = " ".join(payload["task_body"].split())
+
+    assert (
+        "Normal: CLI contract; lifecycle/registry: `loopx-project`; "
+        "drift: `loopx-self-repair`."
+        in task_body
+    )
+
+
 def test_accountable_refresh_preserves_explicit_validated_turn_semantics() -> None:
     command = render_accountable_progress_refresh_command(
         "validated-turn-fixture",

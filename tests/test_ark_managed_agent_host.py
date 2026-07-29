@@ -44,6 +44,11 @@ def test_goal_prompt_is_one_transport_independent_activation() -> None:
     assert "Goal runtime owns continuation and inner iterations" in normalized
     assert "goal loop, not automation" in normalized
     assert "invoke LoopX Turn" in normalized
+    assert (
+        "Normal: CLI contract; lifecycle/registry: `loopx-project`; "
+        "drift: `loopx-self-repair`."
+        in normalized
+    )
     assert "choose the highest-priority in-scope unblocked agent todo" in normalized
     assert "Honor claims/leases, blocker-push and recovery obligations" in normalized
     assert (

@@ -60,6 +60,10 @@ SCHEDULER_HINT_THIN_RULE = (
 RUNTIME_CAPABILITY_PROJECTION_THIN_RULE = (
     "Observed capabilities -> `--available-capability`; never user gates."
 )
+RUNTIME_EXECUTION_ROUTING_RULE = (
+    "Normal: CLI contract; lifecycle/registry: `loopx-project`; "
+    "drift: `loopx-self-repair`."
+)
 INTERFACE_BUDGET_CHARS = {
     "full": 12_000,
     "compact": 6_200,
@@ -1119,6 +1123,8 @@ def _render_goal_task_body(
     return f"""Advance LoopX goal `{goal_id}` from `{active_state}` {host_preamble}
 {scope_block}
 
+{RUNTIME_EXECUTION_ROUTING_RULE}
+
 At every continuation, inspect LoopX state/status and the repository. {prequota_block}Run
 `{quota_guard_command}` and follow its `interaction_contract`.
 
@@ -1243,8 +1249,7 @@ def render_thin_heartbeat_task_body(
     )
     return f"""Advance `{goal_id}` from {active_state}.
 
-No runtime `loopx-project`; repair: `loopx-self-repair`.
-LoopX CLI = truth.
+{RUNTIME_EXECUTION_ROUTING_RULE}
 {scope_sentence}
 
 Inspect state/status/repo; run
