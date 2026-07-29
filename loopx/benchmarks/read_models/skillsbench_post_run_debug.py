@@ -15,6 +15,7 @@ from ...control_plane.runtime.public_safety import (
 from ...control_plane.turn_driver.transaction import (
     loopx_turn_execution_committed,
     loopx_turn_execution_has_durable_effects,
+    loopx_turn_execution_recovery_required,
 )
 from ...benchmark_adapters.skillsbench_acp_failure_policy import (
     nonrecoverable_codex_turn_failure_category,
@@ -57,6 +58,7 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
 
     committed_count = 0
     validation_failed_count = 0
+    recovery_required_count = 0
     repair_required_count = 0
     replan_required_count = 0
     state_written_count = 0
@@ -92,17 +94,22 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
             and receipt.get("failed_phase") == "host_execute"
         )
         recovery_kind = public_safe_compact_text(
-            validation.get("recovery_kind"),
+            validation.get("recovery_kind")
+            or receipt.get("result_kind")
+            or execution.get("result_kind"),
             limit=80,
         )
+        recovery_required = loopx_turn_execution_recovery_required(execution)
         committed_count += int(committed)
         validation_failed_count += int(validation_failed)
+        recovery_required_count += int(recovery_required)
         repair_required_count += int(recovery_kind == "repair_required")
         replan_required_count += int(recovery_kind == "replan_required")
         state_written_count += int(state_written)
         quota_spent_count += int(quota_spent)
         failed_transaction_with_durable_effect_count += int(
-            validation_failed and loopx_turn_execution_has_durable_effects(execution)
+            (validation_failed or recovery_required)
+            and loopx_turn_execution_has_durable_effects(execution)
         )
         host_failure_count += int(host_failure)
 
@@ -120,7 +127,7 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
         limit=120,
     )
     typed_repair_exhausted = bool(
-        validation_failed_count > 0
+        recovery_required_count > 0
         and committed_count < execution_count
         and failed_transaction_with_durable_effect_count == 0
         # Committed prefixes own their effects; later uncommitted Turns must not.
@@ -163,9 +170,14 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
         causal_consistency = "committed_effects_observed"
         first_blocker = "none"
     elif typed_repair_exhausted:
-        status = "validation_failed_typed_repair_exhausted"
-        causal_consistency = "validation_failure_effects_not_committed"
-        first_blocker = "loopx_turn_validation_failed"
+        if validation_failed_count:
+            status = "validation_failed_typed_repair_exhausted"
+            causal_consistency = "validation_failure_effects_not_committed"
+            first_blocker = "loopx_turn_validation_failed"
+        else:
+            status = "recovery_required_typed_repair_exhausted"
+            causal_consistency = "recovery_required_effects_not_committed"
+            first_blocker = "loopx_turn_repair_required"
     elif validation_failed_count:
         status = "validation_failed"
         causal_consistency = "validation_failure_effects_not_committed"
@@ -213,6 +225,7 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
         "committed_count": committed_count,
         "uncommitted_count": execution_count - committed_count,
         "validation_failed_count": validation_failed_count,
+        "recovery_required_count": recovery_required_count,
         "repair_required_count": repair_required_count,
         "replan_required_count": replan_required_count,
         "state_written_count": state_written_count,

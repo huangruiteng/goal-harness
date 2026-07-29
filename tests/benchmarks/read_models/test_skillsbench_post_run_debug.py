@@ -94,6 +94,46 @@ def _typed_repair_exhausted_compact() -> dict[str, object]:
     }
 
 
+def _turn_plan_repair_exhausted_compact() -> dict[str, object]:
+    compact = _typed_repair_exhausted_compact()
+    executions = compact["loopx_turn_executions"]
+    assert isinstance(executions, list)
+    executions[:] = [
+        {
+            "schema_version": "loopx_turn_execution_v0",
+            "mode": "run_once",
+            "status": "committed",
+            "result_kind": "validated_progress",
+            "validation": {"status": "passed"},
+            "receipt": {"status": "committed"},
+            "effects": {
+                "host_invoked": True,
+                "state_written": True,
+                "quota_spent": True,
+                "scheduler_acknowledged": False,
+            },
+        },
+        {
+            "schema_version": "loopx_turn_execution_v0",
+            "mode": "run_once",
+            "status": "failed",
+            "result_kind": "repair_required",
+            "receipt": {
+                "status": "failed",
+                "result_kind": "repair_required",
+                "failed_phase": "turn_plan",
+            },
+            "effects": {
+                "host_invoked": False,
+                "state_written": False,
+                "quota_spent": False,
+                "scheduler_acknowledged": False,
+            },
+        },
+    ]
+    return compact
+
+
 def test_status_preserves_skillsbench_post_run_debug_import() -> None:
     assert (
         status.build_skillsbench_post_run_debug_gate
@@ -231,6 +271,47 @@ def test_committed_prefix_does_not_hide_effect_free_typed_repair_exhaustion() ->
     assert transaction["next_case_blocked"] is False
     assert gate["next_case_gate"] == "open_with_exclusion"
     assert gate["normal_progress_allowed"] is True
+
+
+def test_effect_free_turn_plan_repair_exhaustion_opens_rotation() -> None:
+    gate = build_skillsbench_post_run_debug_gate(
+        _turn_plan_repair_exhausted_compact()
+    )
+
+    transaction = gate["loopx_turn_transaction"]
+    assert transaction["status"] == "recovery_required_typed_repair_exhausted"
+    assert transaction["validation_failed_count"] == 0
+    assert transaction["recovery_required_count"] == 1
+    assert transaction["repair_required_count"] == 1
+    assert transaction["typed_repair_exhausted"] is True
+    assert transaction["case_exclusion_required"] is True
+    assert transaction["first_blocker"] == "loopx_turn_repair_required"
+    assert transaction["next_case_blocked"] is False
+    assert gate["next_case_gate"] == "open_with_exclusion"
+    assert gate["normal_progress_allowed"] is True
+
+
+def test_turn_plan_repair_with_durable_effects_keeps_rotation_blocked() -> None:
+    compact = _turn_plan_repair_exhausted_compact()
+    executions = compact["loopx_turn_executions"]
+    assert isinstance(executions, list)
+    failed_execution = executions[-1]
+    assert isinstance(failed_execution, dict)
+    effects = failed_execution["effects"]
+    assert isinstance(effects, dict)
+    effects["state_written"] = True
+
+    gate = build_skillsbench_post_run_debug_gate(compact)
+
+    transaction = gate["loopx_turn_transaction"]
+    assert transaction["status"] == (
+        "inconsistent_failed_transaction_has_durable_effects"
+    )
+    assert transaction["failed_transaction_with_durable_effect_count"] == 1
+    assert transaction["typed_repair_exhausted"] is False
+    assert transaction["next_case_blocked"] is True
+    assert gate["next_case_gate"] == "blocked_turn_transaction_repair"
+    assert gate["normal_progress_allowed"] is False
 
 
 def test_unrecognized_typed_repair_terminal_reason_keeps_rotation_blocked() -> None:
