@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import signal
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -179,23 +181,36 @@ class SubprocessValidationRunner:
             argv = shlex.split(command)
         except ValueError:
             return ValidationResult(command=command, passed=False, exit_code=None)
-        if not argv or Path(argv[0]).name not in self.allowed_executables:
+        if (
+            not argv
+            or argv[0] != Path(argv[0]).name
+            or argv[0] not in self.allowed_executables
+            or "-c" in argv[1:]
+        ):
             return ValidationResult(command=command, passed=False, exit_code=None)
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 argv,
                 cwd=cwd,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
-        except (OSError, subprocess.TimeoutExpired):
+            exit_code = process.wait(timeout=self.timeout_seconds)
+        except OSError:
+            return ValidationResult(command=command, passed=False, exit_code=None)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
             return ValidationResult(command=command, passed=False, exit_code=None)
         return ValidationResult(
             command=command,
-            passed=result.returncode == 0,
-            exit_code=result.returncode,
+            passed=exit_code == 0,
+            exit_code=exit_code,
         )
 
 
@@ -275,4 +290,3 @@ __all__ = [
     "TraexWorkerAdapter",
     "run_traex_planner_worker_probe",
 ]
-

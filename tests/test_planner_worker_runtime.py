@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from loopx.extensions.traex_planner_worker import SubprocessValidationRunner
 from loopx.planner_worker import (
     AdapterTurn,
     PLANNER_WORKER_PLAN_SCHEMA_VERSION,
@@ -240,3 +241,21 @@ def test_runtime_ineligible_step_does_not_call_worker(
     assert receipt["status"] == expected_status
     assert receipt["step_id"] == "edit-fixture"
     assert receipt["validation"] == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/tmp/python3 verify.py",
+        "python3 -c 'print(1)'",
+        "sh verify.sh",
+    ],
+)
+def test_subprocess_validation_rejects_unbounded_command_shapes(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    result = SubprocessValidationRunner(timeout_seconds=1)(command, tmp_path)
+
+    assert result.passed is False
+    assert result.exit_code is None
