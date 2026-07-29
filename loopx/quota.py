@@ -67,6 +67,7 @@ from .control_plane.quota.stall_repair import (
 from .control_plane.quota.decision_summary import (
     goal_status_health_ok as _goal_status_health_ok,
     quota_decision_agent_id,
+    refine_quota_recommended_action,
     resolve_quota_run_decision,
 )
 from .control_plane.quota.goal_boundary import effective_available_capabilities as _effective_available_capabilities, goal_boundary as _goal_boundary, quota_execution_profile_summary as _quota_execution_profile_summary
@@ -98,7 +99,6 @@ from .control_plane.quota.task_orchestration import (
     build_quota_work_lane_contract,
     payload_work_lane_contract as _payload_work_lane_contract,
     task_goal_route_hint,
-    task_selected_recommended_action,
 )
 from .control_plane.quota.slot_accounting import (
     QUOTA_SLOT_SPENT_CLASSIFICATION,
@@ -141,7 +141,6 @@ from .control_plane.scheduler.state import (
     load_scheduler_state,
 )
 from .state_projection import (
-    actions_are_projection_aligned,
     next_action_projection_warning,
     state_action_projection_warning as build_state_action_projection_warning,
 )
@@ -625,38 +624,6 @@ def _blocked_priority_fallback(
             "continue the fallback only if it still matches the latest user priority."
         ),
     }
-
-
-def _selected_action_with_capability_gate(
-    selected_action: Any,
-    *,
-    capability_gate: dict[str, Any] | None,
-) -> Any:
-    if not isinstance(capability_gate, dict) or capability_gate.get("action") != "run":
-        return selected_action
-    blocked = (
-        capability_gate.get("blocked_candidates")
-        if isinstance(capability_gate.get("blocked_candidates"), list)
-        else []
-    )
-    if not any(
-        isinstance(item, dict)
-        and actions_are_projection_aligned(selected_action, item.get("text"))
-        for item in blocked
-    ):
-        return selected_action
-    runnable = (
-        capability_gate.get("runnable_candidates")
-        if isinstance(capability_gate.get("runnable_candidates"), list)
-        else []
-    )
-    for item in runnable:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text") or "").strip()
-        if text:
-            return text
-    return selected_action
 
 
 def _compact_handoff_readiness(value: Any) -> dict[str, Any] | None:
@@ -1808,43 +1775,19 @@ def build_quota_should_run(
             agent_lane_recommendation=agent_lane_recommendation,
             prefer_agent_lane_recommendation=monitor_quiet_skip,
         )
-        selected_recommended_action = task_selected_recommended_action(
-            task_orchestration_contract,
+        selected_recommended_action = refine_quota_recommended_action(
             selected_recommended_action,
+            task_orchestration_contract=task_orchestration_contract,
+            capability_gate=capability_gate,
+            capability_monitor_fallback=capability_monitor_fallback,
+            work_lane_contract=work_lane_contract,
+            workspace_guard=workspace_guard,
+            automation_prompt_upgrade=automation_prompt_upgrade,
+            automation_prompt_upgrade_required=automation_prompt_upgrade_required,
+            replan_obligation=replan_obligation,
+            replan_decision_allowed=replan_decision_allowed,
         )
-        if capability_monitor_fallback and isinstance(work_lane_contract, dict) and work_lane_contract.get("action"):
-            selected_recommended_action = work_lane_contract["action"]
         due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(work_lane_contract)
-        if capability_gate and not due_monitor_attempt and not capability_monitor_fallback:
-            if capability_gate.get("action") in {"repair_bridge", "ask_owner", "skip"}:
-                selected_recommended_action = (
-                    capability_gate.get("owner_action")
-                    or capability_gate.get("reason")
-                    or selected_recommended_action
-                )
-            else:
-                selected_recommended_action = _selected_action_with_capability_gate(
-                    selected_recommended_action,
-                    capability_gate=capability_gate,
-                )
-        if workspace_guard:
-            selected_recommended_action = (
-                workspace_guard.get("required_action")
-                or workspace_guard.get("reason")
-                or selected_recommended_action
-            )
-        if automation_prompt_upgrade_required:
-            selected_recommended_action = (
-                automation_prompt_upgrade.get("recommended_action")
-                or automation_prompt_upgrade.get("reason")
-                or selected_recommended_action
-            )
-        if replan_decision_allowed:
-            selected_recommended_action = (
-                str(replan_obligation.get("recommended_action") or "").strip()
-                or str(replan_obligation.get("stop_condition") or "").strip()
-                or "Run one bounded autonomous replan slice and write back the selected todo/frontier changes."
-            )
         agent_lane_next_action = None
         if not due_monitor_attempt and not inbox_reply_due and not task_orchestration_contract and not capability_monitor_fallback:
             agent_lane_next_action = build_agent_lane_next_action(

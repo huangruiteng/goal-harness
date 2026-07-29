@@ -91,15 +91,6 @@ def apply_task_orchestration_contract(
     return contract, _task_orchestration_work_lane_contract(contract)
 
 
-def task_selected_recommended_action(
-    contract: dict[str, Any] | None,
-    fallback: str | None,
-) -> str | None:
-    if not contract:
-        return fallback
-    return str(contract.get("coordinator_obligation") or fallback or "")
-
-
 def task_goal_route_hint(
     goal_route_hint: dict[str, Any] | None,
     contract: dict[str, Any] | None,

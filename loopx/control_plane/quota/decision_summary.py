@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ...state_projection import actions_are_projection_aligned
 from ..goals.contract_health import project_contract_health_for_goal
 from ..goals.goal_frontier import (
     AUTONOMOUS_REPLAN_REQUIRED_MODE,
@@ -10,6 +11,7 @@ from ..goals.goal_frontier import (
     goal_frontier_is_terminal_no_followup,
 )
 from ..todos.contract import normalize_todo_claimed_by
+from ..work_items.work_lane import work_lane_contract_is_due_monitor_attempt
 
 
 def compact_quota_decision(decision: dict[str, Any]) -> dict[str, Any]:
@@ -78,6 +80,87 @@ class QuotaRunDecision:
     state: str
     quota: dict[str, Any]
     replan_decision_allowed: bool
+
+
+def refine_quota_recommended_action(
+    selected_action: Any,
+    *,
+    task_orchestration_contract: dict[str, Any] | None,
+    capability_gate: dict[str, Any] | None,
+    capability_monitor_fallback: dict[str, Any] | None,
+    work_lane_contract: dict[str, Any] | None,
+    workspace_guard: dict[str, Any] | None,
+    automation_prompt_upgrade: dict[str, Any] | None,
+    automation_prompt_upgrade_required: bool,
+    replan_obligation: dict[str, Any] | None,
+    replan_decision_allowed: bool,
+) -> Any:
+    """Apply ordered quota guards before agent-lane frontier refinement."""
+
+    refined = (
+        str(
+            task_orchestration_contract.get("coordinator_obligation")
+            or selected_action
+            or ""
+        )
+        if task_orchestration_contract
+        else selected_action
+    )
+    if (
+        capability_monitor_fallback
+        and isinstance(work_lane_contract, dict)
+        and work_lane_contract.get("action")
+    ):
+        refined = work_lane_contract["action"]
+
+    due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(work_lane_contract)
+    if capability_gate and not due_monitor_attempt and not capability_monitor_fallback:
+        if capability_gate.get("action") in {"repair_bridge", "ask_owner", "skip"}:
+            refined = (
+                capability_gate.get("owner_action")
+                or capability_gate.get("reason")
+                or refined
+            )
+        elif capability_gate.get("action") == "run":
+            blocked = capability_gate.get("blocked_candidates")
+            blocked = blocked if isinstance(blocked, list) else []
+            runnable = capability_gate.get("runnable_candidates")
+            runnable = runnable if isinstance(runnable, list) else []
+            if any(
+                isinstance(item, dict)
+                and actions_are_projection_aligned(refined, item.get("text"))
+                for item in blocked
+            ):
+                refined = next(
+                    (
+                        text
+                        for item in runnable
+                        if isinstance(item, dict)
+                        and (text := str(item.get("text") or "").strip())
+                    ),
+                    refined,
+                )
+
+    if workspace_guard:
+        refined = (
+            workspace_guard.get("required_action")
+            or workspace_guard.get("reason")
+            or refined
+        )
+    if automation_prompt_upgrade_required:
+        upgrade = automation_prompt_upgrade or {}
+        refined = upgrade.get("recommended_action") or upgrade.get("reason") or refined
+    if replan_decision_allowed:
+        obligation = replan_obligation or {}
+        refined = (
+            str(obligation.get("recommended_action") or "").strip()
+            or str(obligation.get("stop_condition") or "").strip()
+            or (
+                "Run one bounded autonomous replan slice and write back the "
+                "selected todo/frontier changes."
+            )
+        )
+    return refined
 
 
 def resolve_quota_run_decision(
