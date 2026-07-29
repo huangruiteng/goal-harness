@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import signal
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -238,8 +239,8 @@ class GitWorkspaceObserver:
                 path = root_path / name
                 if name == ".git":
                     continue
+                relative = path.relative_to(cwd).as_posix()
                 if path.is_symlink():
-                    relative = path.relative_to(cwd).as_posix()
                     payload = os.readlink(path).encode(
                         "utf-8", errors="surrogateescape"
                     )
@@ -249,6 +250,7 @@ class GitWorkspaceObserver:
                         path.lstat().st_mode,
                     )
                     continue
+                snapshot[relative] = (0, "", path.lstat().st_mode)
                 traversable_directories.append(name)
             directories[:] = traversable_directories
             for filename in filenames:
@@ -288,6 +290,11 @@ class GitWorkspaceObserver:
                 path
                 for path in {*self._before, *after}
                 if self._before.get(path) != after.get(path)
+                and not (
+                    path not in self._before
+                    and path in after
+                    and stat.S_ISDIR(after[path][2])
+                )
             }
             return {
                 path: after.get(path, (0, "", 0))[0]
