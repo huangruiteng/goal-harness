@@ -258,14 +258,17 @@ class GitWorkspaceObserver:
             for filename in filenames:
                 path = root_path / filename
                 relative = path.relative_to(cwd).as_posix()
-                if path.is_symlink():
+                mode = path.lstat().st_mode
+                if stat.S_ISLNK(mode):
                     payload = os.readlink(path).encode("utf-8", errors="surrogateescape")
-                else:
+                elif stat.S_ISREG(mode):
                     payload = path.read_bytes()
+                else:
+                    payload = b""
                 snapshot[relative] = (
                     len(payload),
                     hashlib.sha256(payload).hexdigest(),
-                    path.lstat().st_mode,
+                    mode,
                 )
         return snapshot
 

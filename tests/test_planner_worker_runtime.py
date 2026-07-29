@@ -516,3 +516,69 @@ def test_git_workspace_observer_detects_worktree_mode_change(
     tmp_path.chmod(0o755 if current_mode != 0o755 else 0o700)
 
     assert observer.changed_files(tmp_path) == {".": 0}
+
+
+def test_git_workspace_observer_detects_fifo_without_blocking(
+    tmp_path: Path,
+) -> None:
+    import os
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    observer = GitWorkspaceObserver()
+    observer.assert_clean(tmp_path)
+
+    os.mkfifo(tmp_path / "worker.fifo")
+
+    assert observer.changed_files(tmp_path) == {"worker.fifo": 0}
+
+
+def test_git_workspace_observer_detects_unix_socket(tmp_path: Path) -> None:
+    import socket
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    observer = GitWorkspaceObserver()
+    observer.assert_clean(tmp_path)
+
+    worker_socket = socket.socket(socket.AF_UNIX)
+    try:
+        try:
+            worker_socket.bind(str(tmp_path / "worker.sock"))
+        except PermissionError:
+            pytest.skip("sandbox does not permit creating Unix sockets")
+        assert observer.changed_files(tmp_path) == {"worker.sock": 0}
+    finally:
+        worker_socket.close()
