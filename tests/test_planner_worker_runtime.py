@@ -68,10 +68,16 @@ class FakePlanner:
 
 
 class FixtureWorker:
-    def __init__(self, *, expected_model: str = "deepseek-v4-flash") -> None:
+    def __init__(
+        self,
+        *,
+        expected_model: str = "deepseek-v4-flash",
+        extra_file: str | None = None,
+    ) -> None:
         self.calls = 0
         self.model_routes: list[dict[str, str]] = []
         self.expected_model = expected_model
+        self.extra_file = extra_file
 
     def execute(self, *, prompt: str, model_route: dict[str, str], cwd: Path) -> AdapterTurn:
         self.calls += 1
@@ -79,6 +85,8 @@ class FixtureWorker:
         assert model_route["model"] == self.expected_model
         assert "Do not re-plan the whole task" in prompt
         (cwd / "result.txt").write_text("expected\n", encoding="utf-8")
+        if self.extra_file:
+            (cwd / self.extra_file).write_text("outside scope\n", encoding="utf-8")
         return AdapterTurn(
             output_text="updated result.txt",
             usage={"input_tokens": 60, "output_tokens": 20},
@@ -93,6 +101,33 @@ def fixture_validation(command: str, cwd: Path) -> ValidationResult:
     return ValidationResult(command=command, passed=passed, exit_code=0 if passed else 1)
 
 
+class FixtureWorkspaceObserver:
+    def __init__(self) -> None:
+        self.before: dict[str, bytes] = {}
+
+    def _snapshot(self, cwd: Path) -> dict[str, bytes]:
+        return {
+            path.relative_to(cwd).as_posix(): path.read_bytes()
+            for path in cwd.rglob("*")
+            if path.is_file() and ".git" not in path.parts
+        }
+
+    def assert_clean(self, cwd: Path) -> None:
+        self.before = self._snapshot(cwd)
+
+    def changed_files(self, cwd: Path) -> dict[str, int]:
+        after = self._snapshot(cwd)
+        changed = {
+            path
+            for path in {*self.before, *after}
+            if self.before.get(path) != after.get(path)
+        }
+        return {
+            path: len(after.get(path, b""))
+            for path in sorted(changed)
+        }
+
+
 def test_runtime_executes_selected_step_validates_and_emits_receipt(tmp_path: Path) -> None:
     planner = FakePlanner(executable_plan())
     worker = FixtureWorker()
@@ -104,6 +139,8 @@ def test_runtime_executes_selected_step_validates_and_emits_receipt(tmp_path: Pa
         planner=planner,
         worker=worker,
         validation_runner=fixture_validation,
+        workspace_observer=FixtureWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
         model_routes={
             "planner": {"model": "gpt-5.5", "effort": "high"},
             "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
@@ -149,6 +186,8 @@ def test_runtime_validation_failure_cannot_report_delivery_success(tmp_path: Pat
             passed=False,
             exit_code=1,
         ),
+        workspace_observer=FixtureWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
         model_routes={
             "planner": {"model": "gpt-5.5", "effort": "high"},
             "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
@@ -173,6 +212,8 @@ def test_runtime_strong_step_uses_strong_model_route(tmp_path: Path) -> None:
         planner=FakePlanner(plan),
         worker=worker,
         validation_runner=fixture_validation,
+        workspace_observer=FixtureWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
         model_routes={
             "planner": {"model": "gpt-5.5", "effort": "high"},
             "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
@@ -230,6 +271,8 @@ def test_runtime_ineligible_step_does_not_call_worker(
         planner=FakePlanner(plan),
         worker=worker,
         validation_runner=fixture_validation,
+        workspace_observer=FixtureWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
         model_routes={
             "planner": {"model": "gpt-5.5", "effort": "high"},
             "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
@@ -241,6 +284,56 @@ def test_runtime_ineligible_step_does_not_call_worker(
     assert receipt["status"] == expected_status
     assert receipt["step_id"] == "edit-fixture"
     assert receipt["validation"] == []
+
+
+def test_runtime_rejects_worker_changes_outside_plan_scope(tmp_path: Path) -> None:
+    worker = FixtureWorker(extra_file="unplanned.txt")
+
+    receipt = run_planner_worker_once(
+        objective="Update one fixture.",
+        task_instruction="Use the Planner result.",
+        cwd=tmp_path,
+        planner=FakePlanner(executable_plan()),
+        worker=worker,
+        validation_runner=fixture_validation,
+        workspace_observer=FixtureWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
+        model_routes={
+            "planner": {"model": "gpt-5.5", "effort": "high"},
+            "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
+            "strong_worker": {"model": "gpt-5.5", "effort": "high"},
+        },
+    )
+
+    assert receipt["status"] == "failed"
+    assert receipt["validation"] == []
+    assert "unplanned.txt" in receipt["write_scope"]["violations"]
+
+
+def test_runtime_rejects_unapproved_planner_validation_before_worker(
+    tmp_path: Path,
+) -> None:
+    worker = FixtureWorker()
+
+    receipt = run_planner_worker_once(
+        objective="Update one fixture.",
+        task_instruction="Use the Planner result.",
+        cwd=tmp_path,
+        planner=FakePlanner(executable_plan()),
+        worker=worker,
+        validation_runner=fixture_validation,
+        workspace_observer=FixtureWorkspaceObserver(),
+        approved_validation_commands={"python3 approved.py"},
+        model_routes={
+            "planner": {"model": "gpt-5.5", "effort": "high"},
+            "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
+            "strong_worker": {"model": "gpt-5.5", "effort": "high"},
+        },
+    )
+
+    assert worker.calls == 0
+    assert receipt["status"] == "failed"
+    assert "did not approve" in receipt["reason"]
 
 
 @pytest.mark.parametrize(
@@ -255,7 +348,10 @@ def test_subprocess_validation_rejects_unbounded_command_shapes(
     tmp_path: Path,
     command: str,
 ) -> None:
-    result = SubprocessValidationRunner(timeout_seconds=1)(command, tmp_path)
+    result = SubprocessValidationRunner(
+        timeout_seconds=1,
+        approved_commands=frozenset({command}),
+    )(command, tmp_path)
 
     assert result.passed is False
     assert result.exit_code is None

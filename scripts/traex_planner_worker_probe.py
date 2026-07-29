@@ -30,6 +30,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Load normal TraeX user/project context for the worker instead of the minimal cheap-worker path.",
     )
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
+    parser.add_argument(
+        "--validation-command",
+        action="append",
+        required=True,
+        help="Exact validation command approved by the caller; repeat when needed.",
+    )
     parser.add_argument("--objective", default="Probe LoopX planner-worker mode with TraeX.")
     parser.add_argument(
         "--task-instruction",
@@ -47,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         worker_model=args.worker_model,
         cwd=Path(args.cwd),
         worker_minimal_context=not args.full_worker_context,
+        approved_validation_commands=tuple(args.validation_command),
         timeout_seconds=args.timeout_seconds,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))

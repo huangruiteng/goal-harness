@@ -12,7 +12,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.extensions.traex_planner_worker import SubprocessValidationRunner  # noqa: E402
+from loopx.extensions.traex_planner_worker import (  # noqa: E402
+    GitWorkspaceObserver,
+    SubprocessValidationRunner,
+)
 from loopx.planner_worker import (  # noqa: E402
     AdapterTurn,
     PLANNER_WORKER_PLAN_SCHEMA_VERSION,
@@ -97,13 +100,34 @@ def main() -> int:
             "raise SystemExit(0 if Path('result.txt').read_text() == 'expected\\n' else 1)\n",
             encoding="utf-8",
         )
+        subprocess.run(["git", "add", "--", "result.txt", "verify.py"], cwd=root, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=LoopX Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "fixture",
+            ],
+            cwd=root,
+            check=True,
+        )
+        approved_commands = frozenset({"python3 verify.py"})
         receipt = run_planner_worker_once(
             objective="Repair the fixture value.",
             task_instruction="Use a bounded file-level plan.",
             cwd=root,
             planner=FixturePlanner(),
             worker=FixtureWorker(),
-            validation_runner=SubprocessValidationRunner(timeout_seconds=5),
+            validation_runner=SubprocessValidationRunner(
+                timeout_seconds=5,
+                approved_commands=approved_commands,
+            ),
+            workspace_observer=GitWorkspaceObserver(),
+            approved_validation_commands=approved_commands,
             model_routes={
                 "planner": {"model": "gpt-5.5", "effort": "high"},
                 "cheap_worker": {

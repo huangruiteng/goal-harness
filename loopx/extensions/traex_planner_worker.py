@@ -171,12 +171,16 @@ class SubprocessValidationRunner:
         self,
         *,
         timeout_seconds: float,
+        approved_commands: frozenset[str],
         allowed_executables: frozenset[str] = DEFAULT_VALIDATION_EXECUTABLES,
     ) -> None:
         self.timeout_seconds = timeout_seconds
+        self.approved_commands = approved_commands
         self.allowed_executables = allowed_executables
 
     def __call__(self, command: str, cwd: Path) -> ValidationResult:
+        if command not in self.approved_commands:
+            return ValidationResult(command=command, passed=False, exit_code=None)
         try:
             argv = shlex.split(command)
         except ValueError:
@@ -195,6 +199,10 @@ class SubprocessValidationRunner:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
+                env={
+                    "PATH": os.environ.get("PATH", ""),
+                    "PYTHONPATH": str(cwd),
+                },
             )
             exit_code = process.wait(timeout=self.timeout_seconds)
         except OSError:
@@ -214,6 +222,48 @@ class SubprocessValidationRunner:
         )
 
 
+class GitWorkspaceObserver:
+    """Require a clean git fixture and report Worker changes as relative paths."""
+
+    def assert_clean(self, cwd: Path) -> None:
+        probe = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if probe.returncode != 0 or probe.stdout.strip() != "true":
+            raise TraexPlannerWorkerError("planner-worker workspace must be a git worktree")
+        if self.changed_files(cwd):
+            raise TraexPlannerWorkerError(
+                "planner-worker workspace must be clean before Planner execution"
+            )
+
+    def changed_files(self, cwd: Path) -> dict[str, int]:
+        result = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            raise TraexPlannerWorkerError("unable to inspect planner-worker git changes")
+        changed: dict[str, int] = {}
+        entries = [entry for entry in result.stdout.split(b"\0") if entry]
+        index = 0
+        while index < len(entries):
+            entry = entries[index].decode("utf-8", errors="replace")
+            status = entry[:2]
+            path = entry[3:]
+            if status[0] in {"R", "C"} and index + 1 < len(entries):
+                index += 1
+            file_path = cwd / path
+            changed[path] = file_path.stat().st_size if file_path.is_file() else 0
+            index += 1
+        return dict(sorted(changed.items()))
+
+
 def run_traex_planner_worker_probe(
     *,
     objective: str,
@@ -222,6 +272,7 @@ def run_traex_planner_worker_probe(
     planner_model: str = DEFAULT_TRAEX_PLANNER_MODEL,
     worker_model: str = DEFAULT_TRAEX_WORKER_MODEL,
     strong_worker_model: str | None = None,
+    approved_validation_commands: tuple[str, ...] | list[str] = (),
     cwd: Path | str = ".",
     worker_minimal_context: bool = True,
     timeout_seconds: float = 120.0,
@@ -238,6 +289,15 @@ def run_traex_planner_worker_probe(
         timeout_seconds=timeout_seconds,
         minimal_context=worker_minimal_context,
     )
+    approved_commands = frozenset(
+        command.strip()
+        for command in approved_validation_commands
+        if command.strip()
+    )
+    if not approved_commands:
+        raise TraexPlannerWorkerError(
+            "at least one caller-approved validation command is required"
+        )
     try:
         receipt = run_planner_worker_once(
             objective=objective,
@@ -247,7 +307,10 @@ def run_traex_planner_worker_probe(
             worker=worker,
             validation_runner=SubprocessValidationRunner(
                 timeout_seconds=timeout_seconds,
+                approved_commands=approved_commands,
             ),
+            workspace_observer=GitWorkspaceObserver(),
+            approved_validation_commands=approved_commands,
             model_routes={
                 "planner": {"model": planner_model, "effort": "high"},
                 "cheap_worker": {"model": worker_model, "effort": "medium"},
@@ -285,6 +348,7 @@ __all__ = [
     "DEFAULT_TRAEX_WORKER_MODEL",
     "TRAEX_PLANNER_WORKER_PROBE_SCHEMA_VERSION",
     "SubprocessValidationRunner",
+    "GitWorkspaceObserver",
     "TraexPlannerAdapter",
     "TraexPlannerWorkerError",
     "TraexWorkerAdapter",

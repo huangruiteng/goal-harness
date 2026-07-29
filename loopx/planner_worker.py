@@ -474,28 +474,41 @@ def select_next_executable_step(
     if not pending:
         return {"status": "completed", "step": None, "reason": "all steps completed"}
 
-    step = pending[0]
-    if step["recommended_executor"] == "planner_only":
-        return {
-            "status": "planner_required",
-            "step": step,
-            "reason": step["escalation_policy"],
-        }
-    if not step["worker_ready"] or step["worker_blockers"]:
-        reason = (
-            "; ".join(step["worker_blockers"])
-            if step["worker_blockers"]
-            else step["escalation_policy"]
-        )
-        return {"status": "blocked", "step": step, "reason": reason}
-    unmet = [dependency for dependency in step["depends_on"] if dependency not in completed]
-    if unmet:
-        return {
-            "status": "waiting_dependencies",
-            "step": step,
-            "reason": "unmet dependencies: " + ", ".join(unmet),
-        }
-    return {"status": "selected", "step": step, "reason": None}
+    ineligible: list[dict[str, Any]] = []
+    for step in pending:
+        if step["recommended_executor"] == "planner_only":
+            ineligible.append(
+                {
+                    "status": "planner_required",
+                    "step": step,
+                    "reason": step["escalation_policy"],
+                }
+            )
+            continue
+        if not step["worker_ready"] or step["worker_blockers"]:
+            reason = (
+                "; ".join(step["worker_blockers"])
+                if step["worker_blockers"]
+                else step["escalation_policy"]
+            )
+            ineligible.append({"status": "blocked", "step": step, "reason": reason})
+            continue
+        unmet = [
+            dependency
+            for dependency in step["depends_on"]
+            if dependency not in completed
+        ]
+        if unmet:
+            ineligible.append(
+                {
+                    "status": "waiting_dependencies",
+                    "step": step,
+                    "reason": "unmet dependencies: " + ", ".join(unmet),
+                }
+            )
+            continue
+        return {"status": "selected", "step": step, "reason": None}
+    return ineligible[0]
 
 
 def resolve_planner_worker_executor(

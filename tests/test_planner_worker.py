@@ -175,3 +175,19 @@ def test_selector_does_not_launch_an_ineligible_worker(change: dict, expected_st
 
     assert selection["status"] == expected_status
     assert selection["step"]["step_id"] in {"edit-fixture", "inspect"}
+
+
+def test_selector_skips_ineligible_step_for_later_independent_work() -> None:
+    plan = valid_plan()
+    plan["steps"][0]["worker_ready"] = False
+    later = {
+        **valid_plan(executor="strong_worker")["steps"][0],
+        "step_id": "independent-ready-step",
+        "planner_order": 2,
+    }
+    plan["steps"].append(later)
+
+    selection = select_next_executable_step(parse(plan), completed_step_ids=[])
+
+    assert selection["status"] == "selected"
+    assert selection["step"]["step_id"] == "independent-ready-step"

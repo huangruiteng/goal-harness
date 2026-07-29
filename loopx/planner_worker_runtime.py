@@ -36,6 +36,12 @@ class WorkerAdapter(Protocol):
     ) -> AdapterTurn: ...
 
 
+class WorkspaceObserver(Protocol):
+    def assert_clean(self, cwd: Path) -> None: ...
+
+    def changed_files(self, cwd: Path) -> dict[str, int]: ...
+
+
 ValidationRunner = Callable[[str, Path], ValidationResult]
 
 
@@ -74,6 +80,7 @@ def _receipt(
     executor: str | None,
     model_route: dict[str, str] | None,
     validation: list[ValidationResult],
+    write_scope: dict,
     planner_turn: AdapterTurn,
     worker_turn: AdapterTurn | None,
 ) -> dict:
@@ -93,6 +100,7 @@ def _receipt(
             }
             for result in validation
         ],
+        "write_scope": write_scope,
         "usage": _usage_receipt(planner_turn, worker_turn),
         "cost": _incomplete_cost_receipt(),
     }
@@ -106,12 +114,15 @@ def run_planner_worker_once(
     planner: PlannerAdapter,
     worker: WorkerAdapter,
     validation_runner: ValidationRunner,
+    workspace_observer: WorkspaceObserver,
+    approved_validation_commands: set[str] | frozenset[str],
     model_routes: dict[str, dict[str, str]],
     completed_step_ids: list[str] | tuple[str, ...] | set[str] = (),
 ) -> dict:
     """Run one strict experimental Planner -> Worker -> validation slice."""
 
     workdir = Path(cwd).resolve()
+    workspace_observer.assert_clean(workdir)
     planner_route = model_routes.get("planner")
     if not isinstance(planner_route, dict):
         raise ValueError("missing model route for planner")
@@ -125,6 +136,24 @@ def run_planner_worker_once(
         cwd=workdir,
     )
     plan = parse_planner_worker_plan_text(planner_turn.output_text)
+    planner_changes = workspace_observer.changed_files(workdir)
+    if planner_changes:
+        return _receipt(
+            status="failed",
+            plan_id=str(plan["plan_id"]),
+            step_id=None,
+            reason="Planner modified the workspace",
+            executor=None,
+            model_route=None,
+            validation=[],
+            write_scope={
+                "passed": False,
+                "changed_files": planner_changes,
+                "violations": sorted(planner_changes),
+            },
+            planner_turn=planner_turn,
+            worker_turn=None,
+        )
     selection = select_next_executable_step(
         plan,
         completed_step_ids=completed_step_ids,
@@ -139,11 +168,38 @@ def run_planner_worker_once(
             executor=None,
             model_route=None,
             validation=[],
+            write_scope={
+                "passed": True,
+                "changed_files": {},
+                "violations": [],
+            },
             planner_turn=planner_turn,
             worker_turn=None,
         )
 
     assert isinstance(step, dict)
+    unapproved_commands = [
+        command
+        for command in step["validation_commands"]
+        if command not in approved_validation_commands
+    ]
+    if unapproved_commands:
+        return _receipt(
+            status="failed",
+            plan_id=str(plan["plan_id"]),
+            step_id=str(step["step_id"]),
+            reason="Planner requested validation commands that the caller did not approve",
+            executor=None,
+            model_route=None,
+            validation=[],
+            write_scope={
+                "passed": True,
+                "changed_files": {},
+                "violations": [],
+            },
+            planner_turn=planner_turn,
+            worker_turn=None,
+        )
     resolved = resolve_planner_worker_executor(step, model_routes=model_routes)
     worker_route = {
         "model": resolved["model"],
@@ -154,6 +210,40 @@ def run_planner_worker_once(
         model_route=worker_route,
         cwd=workdir,
     )
+    changed_files = workspace_observer.changed_files(workdir)
+    target_files = set(step["target_files"])
+    allow_extra_files = bool(step["context_budget"]["allow_extra_files"])
+    violations = (
+        []
+        if allow_extra_files
+        else sorted(set(changed_files) - target_files)
+    )
+    if len(changed_files) > int(step["context_budget"]["max_files"]):
+        violations.append("context_budget.max_files")
+    oversized = sorted(
+        path
+        for path, size in changed_files.items()
+        if size > int(step["context_budget"]["max_bytes_per_file"])
+    )
+    violations.extend(f"{path}:max_bytes_per_file" for path in oversized)
+    write_scope = {
+        "passed": not violations,
+        "changed_files": changed_files,
+        "violations": violations,
+    }
+    if violations:
+        return _receipt(
+            status="failed",
+            plan_id=str(plan["plan_id"]),
+            step_id=str(step["step_id"]),
+            reason="Worker changed files outside the Planner contract",
+            executor=resolved["executor"],
+            model_route=worker_route,
+            validation=[],
+            write_scope=write_scope,
+            planner_turn=planner_turn,
+            worker_turn=worker_turn,
+        )
     validation = [
         validation_runner(command, workdir)
         for command in step["validation_commands"]
@@ -167,6 +257,7 @@ def run_planner_worker_once(
         executor=resolved["executor"],
         model_route=worker_route,
         validation=validation,
+        write_scope=write_scope,
         planner_turn=planner_turn,
         worker_turn=worker_turn,
     )

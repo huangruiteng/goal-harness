@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -92,6 +93,22 @@ def write_fake_traex(root: Path) -> Path:
         "raise SystemExit(0 if Path('result.txt').read_text() == 'expected\\n' else 1)\n",
         encoding="utf-8",
     )
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "add", "--", "traex", "verify.py"], cwd=root, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=root,
+        check=True,
+    )
     return fake
 
 
@@ -103,15 +120,22 @@ def run_probe(root: Path, fake: Path) -> dict:
         planner_model="GPT-5.5",
         worker_model="DeepSeek-V4-Flash",
         cwd=root,
+        approved_validation_commands=("python3 verify.py",),
         timeout_seconds=5,
     )
+
+
+def new_calls_path() -> Path:
+    descriptor, path = tempfile.mkstemp(prefix="loopx-traex-calls-")
+    os.close(descriptor)
+    return Path(path)
 
 
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-traex-probe-smoke-") as tmp:
         root = Path(tmp)
         fake = write_fake_traex(root)
-        calls = root / "calls.txt"
+        calls = new_calls_path()
         os.environ["FAKE_TRAEX_CALLS"] = str(calls)
         payload = run_probe(root, fake)
         receipt = payload["receipt"]
@@ -135,7 +159,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-traex-probe-blocked-") as tmp:
         root = Path(tmp)
         fake = write_fake_traex(root)
-        calls = root / "calls.txt"
+        calls = new_calls_path()
         os.environ["FAKE_TRAEX_CALLS"] = str(calls)
         blocked_plan = {
             "schema_version": "planner_worker_plan_v0",
@@ -177,7 +201,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-traex-probe-invalid-") as tmp:
         root = Path(tmp)
         fake = write_fake_traex(root)
-        calls = root / "calls.txt"
+        calls = new_calls_path()
         os.environ["FAKE_TRAEX_CALLS"] = str(calls)
         os.environ["FAKE_TRAEX_PLANNER_TEXT"] = "THIS IS NOT JSON"
         try:
