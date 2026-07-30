@@ -85,9 +85,7 @@ def _is_command_value(path: tuple[str, ...]) -> bool:
     return (
         (len(path) >= 2 and path[-2] == "commands")
         or leaf in {"command", "command_template", "prompt", "canonical_cli_command"}
-        or leaf.endswith("_command")
-        or leaf.endswith("_prompt")
-        or leaf.endswith("_command_if_needed")
+        or leaf.endswith(("_command", "_prompt", "_command_if_needed"))
     )
 
 
@@ -574,6 +572,7 @@ def _selected_goal_capability_route(goal_text: str | None) -> dict[str, Any] | N
         "selection_reason_code": reason_code,
         "entry_command_key": "issue_fix_workflow_plan_template",
         "admission_command_key": "issue_fix_feasibility_template",
+        "candidate_authority": "public_open_tracker_issue",
         "implementation_admission": {
             "status": "qualification_required",
             "state_owner": "issue_fix",
@@ -930,6 +929,7 @@ def build_loopx_bootstrap_command_pack(
             "goal_start_refresh_state": render_refresh_state_command(
                 resolved_goal_id,
                 cli_bin=cli_bin,
+                project=".",
                 agent_id=str(selected_agent_id) if selected_agent_id else None,
                 progress_scope="agent_lane" if selected_agent_id else None,
             ),
@@ -1299,6 +1299,18 @@ def build_start_goal_guided_packet(
         if isinstance(selected_capability_route, dict)
         else None
     )
+    scheduler_ack_steps = (
+        [
+            {
+                "id": "scheduler_ack_when_needed",
+                "kind": "scheduler_state",
+                "command_source": "quota.should-run.scheduler_hint.codex_app.ack_hint.cli_args",
+                "purpose": "ack an applied Codex App RRULE without spending quota",
+            }
+        ]
+        if host_surface == "codex-app"
+        else []
+    )
     guided_transaction = {
         "schema_version": GUIDED_START_SCHEMA_VERSION,
         "mode": "dry_run_preview",
@@ -1328,7 +1340,9 @@ def build_start_goal_guided_packet(
                 "kind": "operator_or_agent_actions",
                 "command_template": (
                     f"{shell_arg(cli_bin)} todo add --goal-id "
-                    f"{shell_arg(str(command_pack.get('goal_id') or ''))} --role agent "
+                    f"{shell_arg(str(command_pack.get('goal_id') or ''))} "
+                    "--project . "
+                    "--role agent "
                     "--task-class advancement_task --action-kind <action_kind> --text '<[P0/P1/P2] ...>'"
                 ),
                 "purpose": "write todos in planner order so same-priority ordering stays deterministic",
@@ -1351,12 +1365,7 @@ def build_start_goal_guided_packet(
                 "command": commands.get("goal_start_quota_should_run"),
                 "purpose": "let LoopX choose the first bounded segment and scheduler cadence",
             },
-            {
-                "id": "scheduler_ack_when_needed",
-                "kind": "scheduler_state",
-                "command_source": "quota.should-run.scheduler_hint.codex_app.ack_hint.cli_args",
-                "purpose": "ack an applied Codex App RRULE without spending quota",
-            },
+            *scheduler_ack_steps,
         ],
         "idempotency_policy": {
             "safe_to_rerun_preview": True,
@@ -1390,12 +1399,21 @@ def build_start_goal_guided_packet(
     if selected_capability_route is not None:
         entry_key = str(selected_capability_route["entry_command_key"])
         admission_key = str(selected_capability_route["admission_command_key"])
-        guided_transaction["ordered_steps"].append(
+        guided_transaction["ordered_steps"].insert(
+            2,
             {
                 "id": "qualify_selected_capability",
                 "kind": "capability_guard",
+                "candidate_discovery_command_template": (
+                    "gh issue list --repo "
+                    '"$(gh repo view --json nameWithOwner --jq .nameWithOwner)" '
+                    "--state open --limit 20 --json number,title,url,labels"
+                ),
                 "command_template": commands.get(entry_key),
                 "admission_command_template": commands.get(admission_key),
+                "candidate_authority": selected_capability_route[
+                    "candidate_authority"
+                ],
                 "command_source": f"#/command_pack/commands/{entry_key}",
                 "admission_command_source": (
                     f"#/command_pack/commands/{admission_key}"
@@ -1408,7 +1426,8 @@ def build_start_goal_guided_packet(
                     "then re-enter this guard after selecting a public candidate"
                 ),
                 "purpose": (
-                    "persist capability-owned qualification before implementation"
+                    "select public issue authority and persist capability-owned "
+                    "qualification before planning implementation"
                 ),
             }
         )
@@ -1485,11 +1504,26 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
         command = step.get("command") or step.get("command_template") or step.get("command_source") or step.get("prompt")
         admission_command = step.get("admission_command_template")
         if admission_command:
+            discovery_command = step.get("candidate_discovery_command_template")
+            authority = (
+                "open public issue; source clues are evidence only"
+                if step.get("candidate_authority") == "public_open_tracker_issue"
+                else step.get("candidate_authority")
+            )
             step_lines.extend(
                 [
-                    f"{index}. `{step.get('id')}`",
-                    f"   - `{str(command).splitlines()[0]}`",
-                    f"   - `{str(admission_command).splitlines()[0]}`",
+                    f"{index}. `{step.get('id')}` ({step.get('kind')})",
+                    f"   - authority: {authority}",
+                ]
+            )
+            if discovery_command:
+                step_lines.append(
+                    f"   - discover: `{str(discovery_command).splitlines()[0]}`"
+                )
+            step_lines.extend(
+                [
+                    f"   - qualify: `{str(command).splitlines()[0]}`",
+                    f"   - admit: `{str(admission_command).splitlines()[0]}`",
                 ]
             )
             continue

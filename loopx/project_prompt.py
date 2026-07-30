@@ -135,12 +135,14 @@ def render_refresh_state_command(
     goal_id: str,
     *,
     cli_bin: str = "loopx",
+    project: str | None = None,
     agent_id: str | None = None,
     progress_scope: str | None = None,
     classification: str | None = None,
     delivery_batch_scale: str | None = None,
     delivery_outcome: str | None = None,
 ) -> str:
+    project_arg = f" --project {shell_arg(project)}" if project else ""
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
     scope_arg = f" --progress-scope {shell_arg(progress_scope)}" if progress_scope else ""
     classification_arg = (
@@ -160,7 +162,7 @@ def render_refresh_state_command(
     )
     return (
         f"{shell_arg(cli_bin)} refresh-state --goal-id {shell_arg(goal_id)}"
-        f"{classification_arg}{scale_arg}{outcome_arg}{agent_arg}{scope_arg}"
+        f"{project_arg}{classification_arg}{scale_arg}{outcome_arg}{agent_arg}{scope_arg}"
     )
 
 

@@ -118,6 +118,9 @@ def test_default_projection_preserves_host_actions_and_json_anchors(
     assert _host_shadow_document(compact) == _host_shadow_document(detailed)
     assert compact["command_pack_detail_included"] is False
     assert detailed["command_pack_detail_included"] is True
+    assert compact["guided_transaction"]["ordered_steps"][-1]["id"] == (
+        "scheduler_ack_when_needed"
+    )
 
     projection = compact["command_pack"]
     assert projection["schema_version"] == "loopx_bootstrap_command_pack_v0"
@@ -177,6 +180,7 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
         "selection_reason_code": "issue_fix_intent",
         "entry_command_key": "issue_fix_workflow_plan_template",
         "admission_command_key": "issue_fix_feasibility_template",
+        "candidate_authority": "public_open_tracker_issue",
         "implementation_admission": {
             "status": "qualification_required",
             "state_owner": "issue_fix",
@@ -186,8 +190,11 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
             "implementation"
         ),
     }
-    guard = transaction["ordered_steps"][-1]
+    guard = transaction["ordered_steps"][2]
     assert guard["id"] == "qualify_selected_capability"
+    assert guard["candidate_discovery_command_template"].startswith(
+        "gh issue list "
+    )
     assert guard["command_source"].endswith(
         "/commands/issue_fix_workflow_plan_template"
     )
@@ -199,6 +206,8 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
         "loopx issue-fix feasibility "
     )
     rendered = render_start_goal_guided_markdown(payload)
+    assert "authority: open public issue; source clues are evidence only" in rendered
+    assert "discover: `gh issue list " in rendered
     assert "loopx issue-fix workflow-plan " in rendered
     assert "loopx issue-fix feasibility " in rendered
     assert len(rendered.replace(str(project), "<project>")) <= 3_200
@@ -207,7 +216,14 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
         for step in transaction["ordered_steps"]
         if step["id"] == "write_ordered_todos"
     )
+    assert "--project ." in todo_command
     assert "--action-kind <action_kind>" in todo_command
+    refresh_command = next(
+        step["command"]
+        for step in transaction["ordered_steps"]
+        if step["id"] == "refresh_state"
+    )
+    assert "--project ." in refresh_command
     assert all(
         field not in todo_command
         for field in ("issue_url", "issue_number", "base_sha", "acceptance")
@@ -227,7 +243,11 @@ def test_non_issue_goal_does_not_select_capability_route(tmp_path: Path) -> None
 
     transaction = payload["guided_transaction"]
     assert "selected_capability_route" not in transaction
-    assert transaction["ordered_steps"][-1]["id"] == "scheduler_ack_when_needed"
+    assert transaction["ordered_steps"][-1]["id"] == "quota_guard"
+    assert all(
+        step["id"] != "scheduler_ack_when_needed"
+        for step in transaction["ordered_steps"]
+    )
     assert (
         payload["command_pack"]["goal_start_contract"]["selected_capability_route"]
         is None

@@ -130,6 +130,18 @@ the generic Todo schema: Todos continue to schedule work, while issue identity,
 prior-work checks, repository evidence, reproduction, scope, and validation
 remain owned by `issue_fix` state.
 
+Before planning implementation, select a currently open public tracker issue.
+Repository TODO/FIXME entries, warnings, and incidental test failures may
+support later reproduction, but they are not issue identity:
+
+```bash
+gh issue list \
+  --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+  --state open \
+  --limit 20 \
+  --json number,title,url,labels
+```
+
 ```bash
 loopx issue-fix workflow-plan \
   --url <github-issue-or-pr-url> \
