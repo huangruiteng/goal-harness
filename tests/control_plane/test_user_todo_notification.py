@@ -1,4 +1,7 @@
-from loopx.control_plane.todos.user_gate import build_user_todo_notification
+from loopx.control_plane.todos.user_gate import (
+    apply_scoped_user_gate_fallback_projection,
+    build_user_todo_notification,
+)
 
 
 def test_user_gate_notification_repeats_until_resolved() -> None:
@@ -60,3 +63,59 @@ def test_closed_user_todo_summary_has_no_notification() -> None:
         )
         == {}
     )
+
+
+def test_scoped_user_gate_fallback_projects_executable_bypass() -> None:
+    payload = {
+        "decision": "skip",
+        "effective_action": "monitor_quiet_skip",
+        "should_run": False,
+        "execution_obligation": {"source": "base"},
+    }
+    fallback = {
+        "recommended_action": "advance the non-gated todo",
+        "reason": "the user gate has a narrower action scope",
+    }
+
+    projected = apply_scoped_user_gate_fallback_projection(
+        payload,
+        fallback=fallback,
+        replan_decision_allowed=False,
+    )
+
+    assert payload["decision"] == "skip"
+    assert projected["decision"] == "safe_bypass_user_gate_fallback"
+    assert projected["effective_action"] == "scoped_user_gate_fallback"
+    assert projected["should_run"] is True
+    assert projected["scoped_user_gate_fallback"] == fallback
+    assert projected["safe_bypass_allowed"] is True
+    assert projected["safe_bypass_kind"] == "scoped_user_gate_fallback"
+    assert projected["actionable_by_codex"] is True
+    assert projected["execution_obligation"] == {
+        "source": "base",
+        "must_attempt_work": True,
+        "kind": "scoped_user_gate_fallback",
+        "minimum": "one_non_gated_fallback_segment_after_user_gate_notice",
+        "delivery_allowed": True,
+        "notify_is_execution_gate": False,
+        "contract": "scoped_user_gate_fallback",
+        "contract_obligation": "advance the non-gated todo",
+        "reason": "the user gate has a narrower action scope",
+    }
+
+
+def test_scoped_user_gate_fallback_does_not_override_replan() -> None:
+    payload = {
+        "decision": "autonomous_replan_required",
+        "effective_action": "autonomous_replan_required",
+        "should_run": True,
+    }
+
+    projected = apply_scoped_user_gate_fallback_projection(
+        payload,
+        fallback={"recommended_action": "advance the non-gated todo"},
+        replan_decision_allowed=True,
+    )
+
+    assert projected is payload
+    assert "scoped_user_gate_fallback" not in projected

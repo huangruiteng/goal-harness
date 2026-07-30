@@ -111,6 +111,7 @@ def test_unrelated_user_gate_allows_ready_deferred_successor_replan() -> None:
     assert payload["interaction_contract"]["mode"] == "scoped_user_gate_fallback"
     assert payload["interaction_contract"]["agent_channel"]["must_attempt"] is True
     assert payload["interaction_contract"]["agent_channel"]["delivery_allowed"] is True
+    assert payload["requires_user_action"] is True
     assert "response_plan" not in payload["interaction_contract"]
     assert "replan ready deferred successor" in payload["interaction_contract"][
         "agent_channel"
