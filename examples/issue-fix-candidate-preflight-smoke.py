@@ -59,10 +59,25 @@ def fixture() -> dict[str, object]:
                     "url": "https://github.com/volcengine/OpenViking/pull/2999",
                     "related_issue_refs": ["#3005"],
                     "relation": "implementation",
-                    "current_revision_verified": True,
+                    "current_revision_verified": False,
+                    "revision": "a" * 40,
                 }
             ],
         ),
+        "candidate_resolution": {
+            "schema_version": "issue_fix_candidate_resolution_v0",
+            "repo": "volcengine/OpenViking",
+            "issue_ref": "#3005",
+            "rows": [
+                {
+                    "kind": "pr_revision",
+                    "ref": "pull_2999",
+                    "revision": "a" * 40,
+                    "outcome": "implementation",
+                }
+            ],
+            "raw_content_captured": False,
+        },
         "agentic_recall_receipt": {
             "status": "completed_no_influence",
             "call_count": 2,
@@ -114,9 +129,9 @@ def main() -> int:
     assert plan["candidate_fix_workflow_allowed"] is False, plan
     assert_reuse(plan["candidate_preflight"])
     todos = plan["ordered_loopx_todo_writeback_preview"]
-    assert [todo["action_kind"] for todo in todos] == [
-        "issue_fix_reuse_existing_pr"
-    ], todos
+    assert [todo["action_kind"] for todo in todos] == ["issue_fix_reuse_existing_pr"], (
+        todos
+    )
     assert "agentic recall" in todos[0]["text"], todos
     assert plan["first_screen"]["top_agent_todo"] == todos[0], plan
 
@@ -133,9 +148,7 @@ def main() -> int:
         candidate_preflight_input=fixture(),
         generated_at=generated_at,
     )
-    gated_non_proceed_todos = gated_non_proceed[
-        "ordered_loopx_todo_writeback_preview"
-    ]
+    gated_non_proceed_todos = gated_non_proceed["ordered_loopx_todo_writeback_preview"]
     assert [todo["action_kind"] for todo in gated_non_proceed_todos] == [
         "issue_fix_reuse_existing_pr"
     ], gated_non_proceed_todos
@@ -152,6 +165,7 @@ def main() -> int:
                 "state": "MERGED",
                 "url": "https://github.com/volcengine/OpenViking/pull/2998",
                 "closing_issue_refs": ["#3005"],
+                "revision": "b" * 40,
             }
         ],
     )
@@ -170,16 +184,15 @@ def main() -> int:
 
     unverified = fixture()
     unverified["domain_state"] = None
-    unverified["semantic_pr_evidence"]["rows"][0][
-        "current_revision_verified"
-    ] = False
+    unverified.pop("candidate_resolution")
     unverified_candidate = build_issue_fix_candidate_preflight_packet(
         repo="volcengine/OpenViking",
         issue_ref="#3005",
         input_payload=unverified,
         generated_at=generated_at,
     )
-    assert unverified_candidate["decision"]["route"] == "comment_only", (
+    assert unverified_candidate["decision"]["route"] is None, unverified_candidate
+    assert unverified_candidate["admission"]["state"] == "verification_required", (
         unverified_candidate
     )
     assert unverified_candidate["decision"]["reason_codes"] == [

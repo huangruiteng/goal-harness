@@ -75,6 +75,27 @@ query($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
 }
 """
 
+_QUERY_SPECS = (
+    (
+        "closing",
+        _CLOSING_PULL_REQUESTS_QUERY,
+        "closedByPullRequestsReferences",
+        "candidate closing pull request read",
+    ),
+    (
+        "cross_refs",
+        _CROSS_REFERENCED_PULL_REQUESTS_QUERY,
+        "timelineItems",
+        "candidate cross-reference read",
+    ),
+    (
+        "comments",
+        _MAINTAINER_COMMENTS_QUERY,
+        "comments",
+        "candidate maintainer disposition read",
+    ),
+)
+
 
 def _query_fingerprint(query: str) -> str:
     canonical = " ".join(query.split())
@@ -156,7 +177,9 @@ def _connection_projection(
         nodes = projection.get("nodes")
         if not isinstance(nodes, list):
             raise TypeError(f"public GitHub {operation} returned invalid nodes")
-        rows.extend(dict(node) for node in nodes if isinstance(node, Mapping))
+        if any(not isinstance(node, Mapping) for node in nodes):
+            raise TypeError(f"public GitHub {operation} returned an unparseable node")
+        rows.extend(dict(node) for node in nodes)
         page_info = projection.get("pageInfo")
         if not isinstance(page_info, Mapping):
             raise TypeError(f"public GitHub {operation} omitted pageInfo")
@@ -185,6 +208,55 @@ def _source_projection(
     }
 
 
+def _validated_source_receipt(
+    raw: object,
+    *,
+    field: str,
+) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        raise TypeError(f"{field} source receipt must be an object")
+    if raw.get("complete") is not True or raw.get("truncated") is not False:
+        raise ValueError(f"{field} source receipt must be complete and non-truncated")
+    if raw.get("raw_provider_payload_captured") is not False:
+        raise ValueError(f"{field} source receipt must not capture raw payloads")
+    for required in (
+        "provider",
+        "observed_at",
+        "query_fingerprint",
+        "page_count",
+        "result_count",
+    ):
+        if required not in raw:
+            raise ValueError(f"{field} source receipt requires {required}")
+    return dict(raw)
+
+
+def _required_mapping(raw: object, *, field: str) -> Mapping[str, Any]:
+    if not isinstance(raw, Mapping):
+        raise TypeError(f"{field} must be an object")
+    return raw
+
+
+def _required_pr_projection(
+    raw: Mapping[str, Any],
+    *,
+    field: str,
+) -> tuple[int, str, str, str]:
+    pr_number = raw.get("number")
+    if not isinstance(pr_number, int) or pr_number <= 0:
+        raise ValueError(f"{field}.number must be a positive integer")
+    state = str(raw.get("state") or "").strip().upper()
+    if state not in {"OPEN", "CLOSED", "MERGED"}:
+        raise ValueError(f"{field}.state must be OPEN, CLOSED, or MERGED")
+    url = str(raw.get("url") or "").strip()
+    if not url:
+        raise ValueError(f"{field}.url is required")
+    revision = str(raw.get("headRefOid") or "").strip()
+    if not revision:
+        raise ValueError(f"{field}.headRefOid is required")
+    return pr_number, state, url, revision
+
+
 def build_public_github_candidate_preflight_input(
     *,
     repo: str,
@@ -211,55 +283,85 @@ def build_public_github_candidate_preflight_input(
         raise ValueError("candidate evidence issue_state must be OPEN or CLOSED")
 
     numeric_by_number: dict[int, dict[str, Any]] = {}
-    for raw in closing_pull_requests:
-        pr_number = raw.get("number")
-        if not isinstance(pr_number, int) or pr_number <= 0:
-            continue
+    for index, candidate in enumerate(closing_pull_requests):
+        raw = _required_mapping(
+            candidate,
+            field=f"closing_pull_requests[{index}]",
+        )
+        pr_number, pr_state, url, revision = _required_pr_projection(
+            raw,
+            field=f"closing_pull_requests[{index}]",
+        )
         numeric_by_number[pr_number] = {
             "repo": canonical_repo,
             "pr_ref": f"#{pr_number}",
-            "state": str(raw.get("state") or "UNKNOWN").upper(),
-            "url": str(raw.get("url") or ""),
+            "state": pr_state,
+            "url": url,
             "closing_issue_refs": [canonical_issue],
-            "revision": str(raw.get("headRefOid") or "") or None,
+            "revision": revision,
         }
 
     semantic_by_number: dict[int, dict[str, Any]] = {}
-    for raw in cross_referenced_pull_requests:
-        source = raw.get("source") if isinstance(raw.get("source"), Mapping) else raw
-        if source.get("__typename") not in {None, "PullRequest"}:
+    for index, candidate in enumerate(cross_referenced_pull_requests):
+        raw = _required_mapping(
+            candidate,
+            field=f"cross_referenced_pull_requests[{index}]",
+        )
+        source = _required_mapping(
+            raw.get("source"),
+            field=f"cross_referenced_pull_requests[{index}].source",
+        )
+        source_type = str(source.get("__typename") or "").strip()
+        if not source_type:
+            raise ValueError(
+                f"cross_referenced_pull_requests[{index}].source.__typename is required"
+            )
+        if source_type != "PullRequest":
             continue
-        pr_number = source.get("number")
-        if (
-            not isinstance(pr_number, int)
-            or pr_number <= 0
-            or pr_number in numeric_by_number
-        ):
+        pr_number, pr_state, url, revision = _required_pr_projection(
+            source,
+            field=f"cross_referenced_pull_requests[{index}].source",
+        )
+        if pr_number in numeric_by_number:
             continue
-        revision = str(source.get("headRefOid") or "").strip()
         semantic_by_number[pr_number] = {
             "repo": canonical_repo,
             "pr_ref": f"#{pr_number}",
-            "state": str(source.get("state") or "UNKNOWN").upper(),
-            "url": str(source.get("url") or ""),
+            "state": pr_state,
+            "url": url,
             "related_issue_refs": [canonical_issue],
             "relation": "fix_candidate",
             # A cross-reference and a current head OID prove that the candidate
             # exists, not that its current revision implements this issue.
             "current_revision_verified": False,
-            "revision": revision or None,
+            "revision": revision,
         }
 
-    maintainer_comment_refs = sorted(
-        {
-            str(comment.get("url") or "").strip()
-            for comment in maintainer_comments
-            if str(comment.get("authorAssociation") or "").upper()
-            in _MAINTAINER_ASSOCIATIONS
-            and str(comment.get("url") or "").strip()
-        }
+    maintainer_comment_refs: list[str] = []
+    for index, candidate in enumerate(maintainer_comments):
+        comment = _required_mapping(
+            candidate,
+            field=f"maintainer_comments[{index}]",
+        )
+        association = str(comment.get("authorAssociation") or "").strip().upper()
+        if not association:
+            raise ValueError(
+                f"maintainer_comments[{index}].authorAssociation is required"
+            )
+        url = str(comment.get("url") or "").strip()
+        if not url:
+            raise ValueError(f"maintainer_comments[{index}].url is required")
+        if association in _MAINTAINER_ASSOCIATIONS:
+            maintainer_comment_refs.append(url)
+    maintainer_comment_refs = sorted(set(maintainer_comment_refs))
+    numeric_source = _validated_source_receipt(
+        source_receipts.get("numeric_pr_evidence"),
+        field="numeric_pr_evidence",
     )
-    domain_route = "comment_only" if maintainer_comment_refs else "proceed"
+    semantic_source = _validated_source_receipt(
+        source_receipts.get("semantic_pr_evidence"),
+        field="semantic_pr_evidence",
+    )
     return {
         "schema_version": ISSUE_FIX_CANDIDATE_PREFLIGHT_INPUT_SCHEMA_VERSION,
         "domain_state": {
@@ -267,7 +369,7 @@ def build_public_github_candidate_preflight_input(
             "issue_ref": canonical_issue,
             "status": state.lower(),
             "terminal": state == "CLOSED",
-            "route": domain_route,
+            "route": None,
             "maintainer_comment_refs": maintainer_comment_refs,
         },
         "numeric_pr_evidence": {
@@ -276,7 +378,7 @@ def build_public_github_candidate_preflight_input(
             "query_scope": "issue_specific_all_states",
             "complete": True,
             "truncated": False,
-            "source": dict(source_receipts["numeric_pr_evidence"]),
+            "source": numeric_source,
             "rows": list(numeric_by_number.values()),
         },
         "semantic_pr_evidence": {
@@ -285,7 +387,7 @@ def build_public_github_candidate_preflight_input(
             "query_scope": "issue_specific_current_revision",
             "complete": True,
             "truncated": False,
-            "source": dict(source_receipts["semantic_pr_evidence"]),
+            "source": semantic_source,
             "rows": list(semantic_by_number.values()),
         },
         "source_receipt": {
@@ -333,48 +435,30 @@ def collect_public_github_candidate_preflight_input(
         raise ValueError("candidate evidence repo must use owner/name")
     owner, name = canonical_repo.split("/", 1)
 
-    closing_pages = _run_graphql_pages(
-        query=_CLOSING_PULL_REQUESTS_QUERY,
-        owner=owner,
-        name=name,
-        number=number,
-        timeout_seconds=remaining_timeout(),
-        operation="candidate closing pull request read",
-    )
-    state, closing = _connection_projection(
-        closing_pages,
-        connection="closedByPullRequestsReferences",
-        operation="candidate closing pull request read",
-    )
-    cross_ref_pages = _run_graphql_pages(
-        query=_CROSS_REFERENCED_PULL_REQUESTS_QUERY,
-        owner=owner,
-        name=name,
-        number=number,
-        timeout_seconds=remaining_timeout(),
-        operation="candidate cross-reference read",
-    )
-    cross_ref_state, cross_refs = _connection_projection(
-        cross_ref_pages,
-        connection="timelineItems",
-        operation="candidate cross-reference read",
-    )
-    comment_pages = _run_graphql_pages(
-        query=_MAINTAINER_COMMENTS_QUERY,
-        owner=owner,
-        name=name,
-        number=number,
-        timeout_seconds=remaining_timeout(),
-        operation="candidate maintainer disposition read",
-    )
-    comment_state, comments = _connection_projection(
-        comment_pages,
-        connection="comments",
-        operation="candidate maintainer disposition read",
-    )
-    if {state, cross_ref_state, comment_state} != {state}:
+    observations: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
+    states: set[str] = set()
+    for key, query, connection, operation in _QUERY_SPECS:
+        pages = _run_graphql_pages(
+            query=query,
+            owner=owner,
+            name=name,
+            number=number,
+            timeout_seconds=remaining_timeout(),
+            operation=operation,
+        )
+        state, rows = _connection_projection(
+            pages,
+            connection=connection,
+            operation=operation,
+        )
+        observations[key] = (pages, rows)
+        states.add(state)
+    if len(states) != 1:
         raise ValueError("public GitHub candidate evidence returned inconsistent state")
 
+    closing_pages, closing = observations["closing"]
+    cross_ref_pages, cross_refs = observations["cross_refs"]
+    _, comments = observations["comments"]
     source_receipts = {
         "numeric_pr_evidence": _source_projection(
             query=_CLOSING_PULL_REQUESTS_QUERY,
@@ -392,7 +476,7 @@ def collect_public_github_candidate_preflight_input(
     return build_public_github_candidate_preflight_input(
         repo=canonical_repo,
         issue_ref=str(reference["issue_ref"]),
-        issue_state=state,
+        issue_state=states.pop(),
         closing_pull_requests=closing,
         cross_referenced_pull_requests=cross_refs,
         maintainer_comments=comments,

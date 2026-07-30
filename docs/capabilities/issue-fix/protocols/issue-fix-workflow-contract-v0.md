@@ -17,28 +17,31 @@ open PRs, merge, publish, or run destructive git without an explicit gate.
 
 ## Workflow Stages
 
-1. **Candidate preflight:** when the caller supplies
-   `issue_fix_candidate_preflight_input_v0`, reconcile prior issue-fix domain
-   state, all-state numeric PR references, and current-revision-verified
-   semantic implementation PR evidence before projecting patch-planning work.
+1. **Candidate preflight:** reconcile prior issue-fix domain state, all-state
+   closing PR references, cross-references, and maintainer-comment metadata
+   before projecting patch-planning work. Without source evidence, admission is
+   `evidence_required`, the final route is absent, and the candidate is not
+   runnable.
    Each PR evidence field is an issue-specific query receipt carrying
    `repo`, `issue_ref`, `query_scope`, `complete`, `truncated`, and `rows`.
    Each field accepts one receipt object, not a list:
    `numeric_pr_evidence.query_scope` is `issue_specific_all_states`, while
    `semantic_pr_evidence.query_scope` is `issue_specific_current_revision`.
-   Empty rows are valid only for complete, non-truncated receipts; capped
-   aggregate indexes may generate candidates but cannot prove absence.
+   Empty rows are valid only for complete, non-truncated receipts. Every
+   returned row must be parseable and issue-scoped; malformed rows invalidate
+   the receipt rather than disappearing into a false negative.
    `--fetch-candidate-evidence` invokes the bounded built-in public GitHub
    collector; `--candidate-preflight-json` remains the provider-neutral
-   adapter/test seam. The result is `proceed`, `reuse_existing_pr`,
-   `comment_only`, or `skip`. With a goal id, workflow planning persists that
-   source-qualified result to `candidate-preflight.jsonl`. Non-proceed routes
-   suppress feasibility and preserve any existing agentic-recall receipt
-   instead of opening another recall window. Terminal domain state or a
-   matching merged implementation takes precedence over a simultaneous open
-   implementation. Non-proceed routes also suppress unrelated body/comment
-   read gates because no new candidate classification will consume that
-   provider content.
+   adapter/test seam. Admission is `evidence_required`,
+   `verification_required`, `admitted`, or `terminal`; only final admission
+   exposes `proceed`, `reuse_existing_pr`, `comment_only`, or `skip`.
+   Cross-references, closed PRs, and maintainer comments project typed
+   successors instead of masquerading as final `comment_only`.
+   `issue_fix_candidate_resolution_v0` is the single compact resolution input:
+   every row must match current source evidence, and PR resolution binds the
+   exact head revision. A changed head therefore invalidates stale resolution.
+   Comment content remains behind the provider-content gate and only its
+   compact disposition may enter the resolution receipt.
 2. **Metadata preview:** build `github_issue_metadata_preview_v0` from a public
    URL, compact reference, mocked metadata, or caller-approved metadata fetch.
    Allowed fields are repo, issue or PR number, state, title summary, labels,
@@ -224,6 +227,8 @@ output shape.
 - `issue_fix_intake_v0`
 - `issue_fix_workflow_plan_packet_v0`
 - `issue_fix_candidate_preflight_v0`
+- `issue_fix_candidate_resolution_v0`
+- `issue_fix_candidate_successor_v0`
 - `issue_fix_candidate_preflight_domain_state_projection_v0`
 - `issue_fix_repository_context_input_v0`
 - `issue_fix_repository_context_v0`

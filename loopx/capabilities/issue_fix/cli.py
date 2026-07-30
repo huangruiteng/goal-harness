@@ -383,6 +383,15 @@ def register_issue_fix_commands(
         help="Timeout for --fetch-candidate-evidence.",
     )
     workflow_parser.add_argument(
+        "--candidate-resolution-json",
+        default=None,
+        help=(
+            "Optional issue_fix_candidate_resolution_v0 that resolves source-backed "
+            "PR revisions, closed PRs, or maintainer comments. Requires "
+            "--fetch-candidate-evidence so stale source bindings fail closed."
+        ),
+    )
+    workflow_parser.add_argument(
         "--goal-id",
         default=None,
         help=(
@@ -983,6 +992,10 @@ def handle_issue_fix_command(
                     "--fetch-candidate-evidence cannot be combined with "
                     "--candidate-preflight-json"
                 )
+            if args.candidate_resolution_json and not args.fetch_candidate_evidence:
+                raise ValueError(
+                    "--candidate-resolution-json requires --fetch-candidate-evidence"
+                )
             provider_path = args.repository_memory_provider_json or (
                 None
                 if args.repository_memory_json
@@ -995,6 +1008,7 @@ def handle_issue_fix_command(
                     args.repository_context_json,
                     args.repository_memory_json,
                     args.candidate_preflight_json,
+                    args.candidate_resolution_json,
                     provider_path,
                 )
                 if value == "-"
@@ -1024,6 +1038,10 @@ def handle_issue_fix_command(
                         timeout_seconds=args.candidate_evidence_timeout_seconds,
                     )
                 )
+                if args.candidate_resolution_json:
+                    candidate_preflight_input["candidate_resolution"] = (
+                        _load_json_object(args.candidate_resolution_json)
+                    )
             else:
                 candidate_preflight_input = (
                     _load_json_object(args.candidate_preflight_json)

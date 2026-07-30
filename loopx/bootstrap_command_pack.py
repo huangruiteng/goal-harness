@@ -1508,6 +1508,10 @@ def build_start_goal_guided_packet(
 
 
 def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
+    def command_summary(value: Any) -> str:
+        parts = str(value or "").split()
+        return " ".join(parts[:3]) + (" ..." if len(parts) > 3 else "")
+
     transaction = payload.get("guided_transaction")
     transaction = transaction if isinstance(transaction, dict) else {}
     command_pack = payload.get("command_pack")
@@ -1559,13 +1563,12 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
                     "   - preflight: refresh "
                     f"{step.get('authority_refresh_required')}; "
                     f"provide {required_evidence}; "
-                    f"{preflight.get('evidence_receipt_rule')}; "
                     f"{preflight.get('decision_rule')}"
                 )
             step_lines.extend(
                 [
-                    f"   - qualify: `{entry_command}`",
-                    f"   - proceed: `{admission_command}`",
+                    f"   - qualify: `{command_summary(entry_command)}`",
+                    f"   - proceed: `{command_summary(admission_command)}`",
                 ]
             )
             continue

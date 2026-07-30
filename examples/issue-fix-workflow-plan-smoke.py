@@ -94,18 +94,18 @@ def assert_workflow_shape(payload: dict[str, Any]) -> None:
     assert first_screen["agent_can_continue"] is True, first_screen
 
     todos = payload["ordered_loopx_todo_writeback_preview"]
-    assert len(todos) >= 2, todos
+    assert len(todos) >= 1, todos
     assert [todo["planner_order"] for todo in todos] == sorted(
         todo["planner_order"] for todo in todos
     )
-    assert [todo["action_kind"] for todo in todos[:2]] == [
-        "issue_fix_public_metadata_classification",
-        "issue_fix_feasibility_decision",
+    assert payload["candidate_preflight"]["admission"]["state"] == ("evidence_required")
+    assert [todo["action_kind"] for todo in todos[:1]] == [
+        "issue_fix_collect_candidate_evidence"
     ]
     assert not any(
         todo["action_kind"] == "issue_fix_branch_validation" for todo in todos
     ), todos
-    assert [todo["priority"] for todo in todos[:2]] == ["P0", "P0"]
+    assert [todo["priority"] for todo in todos[:1]] == ["P0"]
     assert all(todo["would_write"] is False for todo in todos)
     assert all(todo["requires_execute_flag"] is True for todo in todos)
 
@@ -244,10 +244,7 @@ def main() -> int:
         for todo in cli_packet["ordered_loopx_todo_writeback_preview"]
         if todo["action_kind"] == "approve_github_issue_body_or_comment_read"
     ]
-    assert len(gated) == 1, cli_packet
-    assert gated[0]["role"] == "user", gated
-    assert gated[0]["priority"] == "P0", gated
-    assert gated[0]["would_write"] is False, gated
+    assert gated == [], cli_packet
     assert_public_safe(result.stdout)
 
     markdown = subprocess.run(

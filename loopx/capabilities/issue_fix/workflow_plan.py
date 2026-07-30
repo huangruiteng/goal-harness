@@ -106,8 +106,10 @@ def _todo_preview(
     text: str,
     depends_on: Sequence[str],
     blocks: Sequence[str] | None = None,
+    target_key: str | None = None,
+    next_command_preview: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    preview = {
         "schema_version": "loopx_todo_writeback_preview_v0",
         "planner_order": planner_order,
         "command_preview": "loopx todo add",
@@ -122,6 +124,11 @@ def _todo_preview(
         "would_write": False,
         "requires_execute_flag": True,
     }
+    if target_key:
+        preview["target_key"] = target_key
+    if next_command_preview:
+        preview["next_command_preview"] = next_command_preview
+    return preview
 
 
 def _resolution_route_candidates(
@@ -368,7 +375,7 @@ def build_issue_fix_workflow_plan_packet(
     )
     feasibility_checkpoint = _feasibility_checkpoint_plan()
     post_pr_monitor = _post_pr_lifecycle_monitor_plan()
-    agent_todos = [
+    default_agent_todos = [
         _todo_preview(
             planner_order=1,
             role="agent",
@@ -401,14 +408,71 @@ def build_issue_fix_workflow_plan_packet(
             depends_on=["issue_fix_public_metadata_classification"],
         ),
     ]
-    preflight_route = str(
-        (candidate_preflight.get("decision") or {}).get("route") or "proceed"
-    )
-    if preflight_route != "proceed":
-        existing_refs = list(
-            (candidate_preflight.get("decision") or {}).get("existing_pr_refs")
-            or []
+    preflight_decision = candidate_preflight.get("decision") or {}
+    preflight_admission = candidate_preflight.get("admission") or {}
+    preflight_route = preflight_decision.get("route")
+    admission_state = str(preflight_admission.get("state") or "")
+    successors = list(preflight_admission.get("successors") or [])
+    agent_todos = default_agent_todos
+    if admission_state in {"evidence_required", "verification_required"}:
+        successor_text = {
+            "issue_fix_collect_candidate_evidence": (
+                "[P0] Collect complete source-backed closing PR, cross-reference, "
+                f"and maintainer-comment metadata for {repo_label} {issue_label}; "
+                "rerun candidate admission before implementation."
+            ),
+            "issue_fix_verify_pr_current_revision": (
+                "[P0] Inspect {ref} at revision {revision} and record whether that "
+                f"exact revision implements {repo_label} {issue_label}; rerun "
+                "candidate admission with the compact resolution receipt."
+            ),
+            "issue_fix_resolve_closed_candidate": (
+                "[P0] Classify why closed candidate {ref} ended and record retry, "
+                f"comment-only, or skip for {repo_label} {issue_label}; do not "
+                "silently reopen implementation."
+            ),
+            "issue_fix_read_maintainer_disposition": (
+                "[P0] After the provider-content gate, read the referenced maintainer "
+                f"comments for {repo_label} {issue_label}, retain only a compact "
+                "non-blocking, comment-only, or skip outcome, and rerun admission."
+            ),
+        }
+        collect_command = (
+            "loopx issue-fix workflow-plan --url <github-issue-url> "
+            "--fetch-candidate-evidence --goal-id <goal-id> --format json"
         )
+        resolution_command = (
+            "loopx issue-fix workflow-plan --url <github-issue-url> "
+            "--fetch-candidate-evidence "
+            "--candidate-resolution-json <candidate-resolution.json> "
+            "--goal-id <goal-id> --format json"
+        )
+        agent_todos = []
+        for order, successor in enumerate(successors, start=1):
+            action_kind = str(successor.get("action_kind") or "")
+            template = successor_text[action_kind]
+            agent_todos.append(
+                _todo_preview(
+                    planner_order=order,
+                    role="agent",
+                    priority="P0",
+                    task_class="advancement_task",
+                    action_kind=action_kind,
+                    text=template.format(
+                        ref=successor.get("ref"),
+                        revision=successor.get("revision"),
+                    ),
+                    depends_on=["issue_fix_candidate_preflight_v0"],
+                    target_key=str(successor.get("target_key") or ""),
+                    next_command_preview=(
+                        collect_command
+                        if action_kind == "issue_fix_collect_candidate_evidence"
+                        else resolution_command
+                    ),
+                )
+            )
+    elif preflight_route != "proceed":
+        existing_refs = list(preflight_decision.get("existing_pr_refs") or [])
         route_action = {
             "reuse_existing_pr": "issue_fix_reuse_existing_pr",
             "comment_only": "issue_fix_existing_work_disposition",
@@ -442,10 +506,18 @@ def build_issue_fix_workflow_plan_packet(
             )
         ]
     user_gates: list[dict[str, Any]] = []
-    if gated_fields and preflight_route == "proceed":
+    comment_read_required = any(
+        isinstance(successor, Mapping)
+        and successor.get("action_kind") == "issue_fix_read_maintainer_disposition"
+        for successor in successors
+    )
+    if (gated_fields and preflight_route == "proceed") or comment_read_required:
+        gate_fields = sorted(
+            set(gated_fields) | ({"comments"} if comment_read_required else set())
+        )
         user_gates.append(
             _todo_preview(
-                planner_order=3,
+                planner_order=len(agent_todos) + 1,
                 role="user",
                 priority="P0",
                 task_class="user_gate",
@@ -457,7 +529,7 @@ def build_issue_fix_workflow_plan_packet(
                 depends_on=["content_ops_issue_fix_metadata_preview_packet_v0"],
                 blocks=["private_repro_material_read", "raw_issue_body_read"],
             )
-            | {"gated_fields": gated_fields},
+            | {"gated_fields": gate_fields},
         )
     ordered_previews = sorted(
         agent_todos + user_gates,
@@ -588,6 +660,11 @@ def build_issue_fix_workflow_plan_packet(
             "reopen patch planning"
         ),
     }.get(preflight_route)
+    if admission_state in {"evidence_required", "verification_required"}:
+        preflight_next_action = (
+            "complete the projected source-bound candidate successor, then rerun "
+            "candidate admission; do not enter feasibility or patch planning"
+        )
     first_screen = {
         "waiting_on": "agent",
         "user_action_required": False,
@@ -627,7 +704,10 @@ def build_issue_fix_workflow_plan_packet(
         "repository_context_input_contract": repository_context_input_contract(),
         "repository_context": repository_context,
         "candidate_preflight": candidate_preflight,
-        "candidate_fix_workflow_allowed": preflight_route == "proceed",
+        "candidate_fix_workflow_allowed": preflight_decision.get(
+            "candidate_runnable"
+        )
+        is True,
         "first_screen": first_screen,
         "branch_plan": branch_plan,
         "resolution_route_candidates": resolution_routes,
@@ -758,7 +838,36 @@ def validate_issue_fix_workflow_plan_packet(
     preflight_decision = (
         preflight_decision if isinstance(preflight_decision, Mapping) else {}
     )
+    preflight_admission = candidate_preflight.get("admission")
+    if not isinstance(preflight_admission, Mapping):
+        errors.append("candidate_preflight admission is required")
+        preflight_admission = {}
+    admission_state = preflight_admission.get("state")
+    if admission_state not in {
+        "evidence_required",
+        "verification_required",
+        "admitted",
+        "terminal",
+    }:
+        errors.append("candidate_preflight admission state is invalid")
+    admission_successors = preflight_admission.get("successors")
+    if not isinstance(admission_successors, Sequence) or isinstance(
+        admission_successors, (str, bytes)
+    ):
+        errors.append("candidate_preflight admission successors must be a list")
+        admission_successors = []
+    if admission_state in {"evidence_required", "verification_required"}:
+        if preflight_decision.get("route") is not None:
+            errors.append("pending candidate admission must not expose a final route")
+        if not admission_successors:
+            errors.append("pending candidate admission requires a successor")
+    elif admission_successors:
+        errors.append("final candidate admission must not retain successors")
     candidate_runnable = preflight_decision.get("candidate_runnable") is True
+    if candidate_runnable and (
+        admission_state != "admitted" or preflight_decision.get("route") != "proceed"
+    ):
+        errors.append("candidate runnable requires admitted proceed")
     if packet.get("candidate_fix_workflow_allowed") is not candidate_runnable:
         errors.append("candidate workflow permission must match preflight decision")
 
@@ -1031,6 +1140,7 @@ def render_issue_fix_workflow_plan_markdown(payload: dict[str, Any]) -> str:
     candidate_preflight = payload.get("candidate_preflight")
     if isinstance(candidate_preflight, Mapping):
         decision = candidate_preflight.get("decision") or {}
+        admission = candidate_preflight.get("admission") or {}
         evidence = candidate_preflight.get("evidence") or {}
         recall = candidate_preflight.get("agentic_recall") or {}
         lines.extend(
@@ -1039,9 +1149,12 @@ def render_issue_fix_workflow_plan_markdown(payload: dict[str, Any]) -> str:
                 "## Candidate Preflight",
                 "",
                 f"- configured: `{candidate_preflight.get('configured')}`",
+                f"- admission: `{admission.get('state')}`",
                 f"- route: `{decision.get('route')}`",
                 f"- candidate_runnable: `{decision.get('candidate_runnable')}`",
                 f"- existing_pr_refs: `{decision.get('existing_pr_refs')}`",
+                f"- successor_action_kinds: "
+                f"`{[row.get('action_kind') for row in admission.get('successors', []) if isinstance(row, Mapping)]}`",
                 f"- domain_state_matched: `{evidence.get('domain_state_matched')}`",
                 f"- agentic_recall_action: `{recall.get('action')}`",
                 f"- provider_calls_performed: `{recall.get('provider_calls_performed')}`",
