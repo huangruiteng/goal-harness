@@ -26,10 +26,7 @@ from ..handoff_budget import build_handoff_interface_budget
 from ..presentation.renderers.status_markdown import render_status_markdown
 from ..quota import build_quota_should_run
 from ..review_packet import build_review_packet, render_review_packet_markdown
-from ..status import (
-    AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK,
-    collect_status,
-)
+from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],

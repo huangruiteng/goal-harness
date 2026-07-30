@@ -765,7 +765,12 @@ def assert_markdown_same_agent_continuation_read_path(root: Path) -> None:
     )
     refreshed_item = find_queue_item(refreshed_status, goal_id=MARKDOWN_GOAL_ID)
     assert refreshed_item["waiting_on"] == "codex", refreshed_item
-    assert successor_todo_id in json.dumps(refreshed_item["agent_todos"], sort_keys=True), refreshed_item
+    assert refreshed_item["project_asset"]["agent_lane_next_action"]["todo_id"] == (
+        successor_todo_id
+    ), refreshed_item
+    assert refreshed_item["project_asset"]["agent_todos"]["payload_reference"][
+        "canonical_path"
+    ] == "attention_queue.items[].agent_todos", refreshed_item
     assert source_todo_id not in refreshed_item["recommended_action"], refreshed_item
 
     packet_payload = run_cli(
@@ -810,7 +815,9 @@ def run_fixture_canary(root: Path) -> None:
     assert CANARY_TODO_TITLE in queue_item["recommended_action"], queue_item
     assert queue_item["state_event_projection"]["source"] == "event_log", queue_item
     assert_event_projected_agent_todo(queue_item["agent_todos"])
-    assert_event_projected_agent_todo(queue_item["project_asset"]["agent_todos"])
+    assert queue_item["project_asset"]["agent_todos"]["payload_reference"][
+        "canonical_path"
+    ] == "attention_queue.items[].agent_todos", queue_item
 
     quota_payload = run_cli(
         registry_path,
