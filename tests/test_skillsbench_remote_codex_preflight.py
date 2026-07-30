@@ -87,6 +87,28 @@ def test_missing_codex_cli_has_precise_runner_attribution(tmp_path: Path) -> Non
     )
 
 
+def test_sandbox_install_failure_precedes_missing_bridge_trace() -> None:
+    attribution = skillsbench_loop._runner_prerequisite_failure_attribution(
+        {
+            "host_local_acp_launch_status": "sandbox_install_failed",
+            "host_local_acp_install_failed_stage": "snapshot_build_config",
+            "remote_command_file_bridge_agent_operation_trace_required": True,
+            "remote_command_file_bridge_agent_operation_trace_satisfied": False,
+            "remote_command_file_bridge_agent_operation_trace_status": (
+                "agent_operation_trace_missing"
+            ),
+        }
+    )
+
+    assert attribution is not None
+    assert attribution[0] == "skillsbench_host_local_acp_sandbox_install_failed"
+    assert attribution[2] == [
+        "skillsbench_host_local_acp_sandbox_install_failed",
+        "skillsbench_host_local_acp_sandbox_install_failed_snapshot_build_config",
+        "skillsbench_runner_setup_error",
+    ]
+
+
 def test_host_local_codex_cli_preflight_fails_when_selected_sandbox_cannot_run(
     tmp_path: Path,
 ) -> None:

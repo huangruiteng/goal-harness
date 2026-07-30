@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,16 +21,15 @@ from .project_prompt import (
     shell_arg,
 )
 from .registry import read_json, registry_goals
-
+from .skill_install_readback import (
+    ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+    configured_host_skills_dir,
+    inspect_skill_install_readback,
+)
 
 SCHEMA_VERSION = "loopx_agent_onboarding_v0"
 HOST_SKILL_DELIVERY_SCHEMA_VERSION = "loopx_host_skill_delivery_v0"
-REQUIRED_HOST_SKILL_IDS = [
-    "loopx-project",
-    "loopx-pr-review",
-    "loopx-doc-registry",
-    "loopx-self-repair",
-]
+REQUIRED_HOST_SKILL_IDS = ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS
 CHANGE_QUALITY_SKILL_ID = "loopx-change-quality"
 
 
@@ -92,6 +92,7 @@ def _skill_delivery_contract(
     project: str = ".",
     cli_bin: str = "loopx",
     active_project_skill_ids: list[str] | None = None,
+    host_skills_dir: Path | None = None,
 ) -> dict[str, Any]:
     active_project_skills = list(dict.fromkeys(active_project_skill_ids or []))
     project_surface = _project_skill_surface(agent_type)
@@ -141,11 +142,24 @@ def _skill_delivery_contract(
         *active_project_skills,
     ]
     ark_managed_agent = agent_type == "ark-managed-agent"
+    filesystem_readback = (
+        inspect_skill_install_readback(
+            skills_dir=host_skills_dir,
+            required_skill_ids=REQUIRED_HOST_SKILL_IDS,
+            source_root=Path(__file__).resolve().parents[1],
+        )
+        if ark_managed_agent
+        else None
+    )
     return {
         "schema_version": HOST_SKILL_DELIVERY_SCHEMA_VERSION,
         "mode": "host_managed",
         "owner": "loopx_install_script" if ark_managed_agent else "custom_agent_host",
-        "status": "pending_host_readback",
+        "status": (
+            str(filesystem_readback["status"])
+            if filesystem_readback
+            else "pending_host_readback"
+        ),
         "codex_skills_root_required": False,
         "required_for_cli_health": False,
         "required_for_loopx_workflow": True,
@@ -159,17 +173,35 @@ def _skill_delivery_contract(
         **(
             {
                 "preferred_delivery": "fixed_install_script",
+                "onboarding_role": "read_only_verifier",
+                "onboarding_required_for_install": False,
                 "install_script": "scripts/install-local.sh",
+                "no_clone_install_command": (
+                    "curl -fsSL "
+                    "https://raw.githubusercontent.com/huangruiteng/loopx/main/"
+                    "scripts/install-from-github.sh"
+                    " | env "
+                    f"LOOPX_SKILLS_DIR={shell_arg(f'{project}/.agents/skills')} "
+                    "LOOPX_ENTRY_HOST_SURFACE=ark-managed-agent "
+                    "LOOPX_INSTALL_SLASH_COMMANDS=0 bash"
+                ),
                 "skills_dir_env": "LOOPX_SKILLS_DIR",
+                "entry_host_surface_env": "LOOPX_ENTRY_HOST_SURFACE",
+                "entry_host_surface": "ark-managed-agent",
                 "target_layout": f"{project}/.agents/skills",
+                "fixed_installer_skill_ids": REQUIRED_HOST_SKILL_IDS,
+                "filesystem_readback": filesystem_readback,
             }
             if ark_managed_agent
             else {}
         ),
         "source_repository": "https://github.com/huangruiteng/loopx",
         "source_directories": [
-            f"skills/{skill_id}" for skill_id in required_skill_ids
+            f"skills/{skill_id}"
+            for skill_id in required_skill_ids
+            if skill_id != "loopx"
         ],
+        "generated_skill_ids": ["loopx"],
         "source_contract": (
             "Use the same LoopX release or repository revision as the CLI when "
             "materializing skills or injecting equivalent SKILL.md instructions "
@@ -208,8 +240,9 @@ def _bootstrap_pack_command(
         "codex-cli": "codex-cli-tui",
         "claude-code": "claude-code",
         "opencode": "opencode",
+        "ark-managed-agent": "ark-managed-agent",
         "manual": "shell",
-        "other-agent": "worker-bridge",
+        "other-agent": "other-agent",
     }
     parts = [
         shell_arg(cli_bin),
@@ -219,7 +252,7 @@ def _bootstrap_pack_command(
         "--goal-id",
         shell_arg(goal_id),
         "--host-surface",
-        shell_arg(surface_by_type.get(agent_type, "worker-bridge")),
+        shell_arg(surface_by_type[agent_type]),
     ]
     if agent_id:
         parts.extend(["--agent-id", shell_arg(agent_id)])
@@ -243,6 +276,11 @@ def _start_instruction(agent_type: str) -> str:
         return "Run `/loopx <task>` to arm LoopX, then run native `/loop`."
     if agent_type == "opencode":
         return "Run `/loopx <task>`; after todo writeback, call `loopx_goal_activate` with the generated heartbeat task body."
+    if agent_type == "ark-managed-agent":
+        return (
+            "Use `$loopx <task>` as the ordinary task entry; after its todo "
+            "writeback, submit the generated Goal task body exactly once."
+        )
     if agent_type == "manual":
         return "Use the CLI packet and wire an external scheduler, or run quota/status/todo commands manually."
     return (
@@ -286,6 +324,7 @@ def build_agent_onboarding_packet(
         project=resolved_project,
         cli_bin=cli_bin,
         active_project_skill_ids=active_project_skill_ids,
+        host_skills_dir=configured_host_skills_dir(os.environ),
     )
     registered_agents = registered_agent_ids_from_registry(
         registry_path,
@@ -480,6 +519,11 @@ def render_agent_onboarding_markdown(payload: dict[str, Any]) -> str:
                 "## Host-Managed Skill Delivery",
                 "",
                 f"- owner: `{skill_delivery.get('owner')}`",
+                f"- onboarding_role: `{skill_delivery.get('onboarding_role')}`",
+                (
+                    "- onboarding_required_for_install: "
+                    f"`{skill_delivery.get('onboarding_required_for_install')}`"
+                ),
                 f"- required_for_cli_health: `{skill_delivery.get('required_for_cli_health')}`",
                 f"- required_for_loopx_workflow: `{skill_delivery.get('required_for_loopx_workflow')}`",
                 f"- delivery_options: `{','.join(skill_delivery.get('delivery_options') or [])}`",
@@ -491,6 +535,33 @@ def render_agent_onboarding_markdown(payload: dict[str, Any]) -> str:
                 f"- source_contract: {skill_delivery.get('source_contract')}",
             ]
         )
+        if skill_delivery.get("no_clone_install_command"):
+            lines.extend(
+                [
+                    "",
+                    "```bash",
+                    str(skill_delivery["no_clone_install_command"]),
+                    "```",
+                ]
+            )
+        filesystem_readback = skill_delivery.get("filesystem_readback")
+        if isinstance(filesystem_readback, dict):
+            lines.extend(
+                [
+                    f"- filesystem_readback_status: `{filesystem_readback.get('status')}`",
+                    f"- filesystem_readback_ready: `{filesystem_readback.get('ready')}`",
+                    f"- filesystem_readback_skills_dir: `{filesystem_readback.get('skills_dir')}`",
+                    f"- filesystem_readback_source_revision: `{filesystem_readback.get('source_revision')}`",
+                    (
+                        "- filesystem_readback_source_revision_matches: "
+                        f"`{filesystem_readback.get('source_revision_matches')}`"
+                    ),
+                    (
+                        "- filesystem_readback_materialized_skill_ids: "
+                        f"`{','.join(filesystem_readback.get('materialized_skill_ids') or [])}`"
+                    ),
+                ]
+            )
     lines.extend(["", "```bash", str(commands.get("bootstrap_command_pack") or ""), "```"])
     if commands.get("codex_cli_bootstrap_message"):
         lines.extend(["", "```bash", str(commands.get("codex_cli_bootstrap_message")), "```"])

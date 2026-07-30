@@ -88,6 +88,19 @@ Optional env:
                                        Set to 1 to stop after real job-root and
                                        environment materialization, before any
                                        agent or verifier lifecycle
+  SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY
+                                       With setup-only preflight, set to 1 to
+                                       exercise agent install and stop before
+                                       agent execution or verification
+  SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY
+                                       With setup-only agent install, set to 1
+                                       to initialize a task-free ACP session and
+                                       prove one LoopX state read/write lifecycle
+  SKILLSBENCH_SCORED_LIFECYCLE_CANARY_TIMEOUT_SEC
+                                       Strict canary terminal budget, default 180
+  SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT
+                                       Local public canary receipt required for
+                                       every non-setup scored launch
   SKILLSBENCH_PRODUCT_MODE_SOFT_VERIFY_POLICY
                                        Optional product-mode intermediate
                                        verifier policy: every-round or
@@ -274,6 +287,10 @@ skip_global_ledger_sync="${SKILLSBENCH_SKIP_GLOBAL_LEDGER_SYNC:-0}"
 skip_current_aggregate_update="${SKILLSBENCH_SKIP_CURRENT_AGGREGATE_UPDATE:-0}"
 allow_staged_bootstrap_repair_run="${SKILLSBENCH_ALLOW_STAGED_BOOTSTRAP_REPAIR_RUN:-0}"
 setup_only_public_preflight="${SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT:-0}"
+setup_only_agent_install_canary="${SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY:-0}"
+setup_only_scored_lifecycle_canary="${SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY:-0}"
+scored_lifecycle_canary_timeout="${SKILLSBENCH_SCORED_LIFECYCLE_CANARY_TIMEOUT_SEC:-180}"
+scored_lifecycle_readiness_receipt="${SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT:-}"
 benchmark_egress_proxy_mode="${SKILLSBENCH_BENCHMARK_EGRESS_PROXY_MODE:-require}"
 benchmark_egress_no_proxy="${SKILLSBENCH_BENCHMARK_EGRESS_NO_PROXY:-}"
 docker_apt_source_mode="${SKILLSBENCH_DOCKER_APT_SOURCE_MODE:-}"
@@ -326,6 +343,26 @@ validate_bool_toggle \
 validate_bool_toggle \
   SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT "$setup_only_public_preflight"
 validate_bool_toggle \
+  SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY "$setup_only_agent_install_canary"
+validate_bool_toggle \
+  SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY \
+  "$setup_only_scored_lifecycle_canary"
+if [[ "$setup_only_agent_install_canary" == "1" ]] &&
+  [[ "$setup_only_public_preflight" != "1" ]]; then
+  echo "SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY requires SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT=1" >&2
+  exit 2
+fi
+if [[ "$setup_only_scored_lifecycle_canary" == "1" ]] &&
+  [[ "$setup_only_agent_install_canary" != "1" ]]; then
+  echo "SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY requires SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY=1" >&2
+  exit 2
+fi
+if [[ ! "$scored_lifecycle_canary_timeout" =~ ^[1-9][0-9]*$ ]] ||
+  ((10#$scored_lifecycle_canary_timeout > 300)); then
+  echo "SKILLSBENCH_SCORED_LIFECYCLE_CANARY_TIMEOUT_SEC must be between 1 and 300" >&2
+  exit 2
+fi
+validate_bool_toggle \
   SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL "$local_codex_split_control"
 if [[ "$local_codex_split_control" == "1" ]] &&
   [[ "$local_codex_sandbox" != "workspace-write" ]]; then
@@ -371,6 +408,49 @@ if [[ -n "$product_mode_soft_verify_policy" ]] &&
   [[ "$product_mode_soft_verify_policy" != "final-only" ]]; then
   echo "SKILLSBENCH_PRODUCT_MODE_SOFT_VERIFY_POLICY must be every-round or final-only" >&2
   exit 2
+fi
+scored_lifecycle_readiness="not_required_for_setup_only"
+if [[ "$setup_only_public_preflight" == "1" ]]; then
+  if [[ "$setup_only_scored_lifecycle_canary" == "1" ]]; then
+    scored_lifecycle_readiness="canary_will_generate_receipt"
+  fi
+elif [[ "$dry_run" == "true" ]]; then
+  scored_lifecycle_readiness="required_at_live_launch"
+else
+  if [[ -z "$scored_lifecycle_readiness_receipt" ]]; then
+    echo "SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT is required before scored launch" >&2
+    exit 3
+  fi
+  if ! scored_lifecycle_gate="$(
+    PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}" \
+      python3 - \
+      "$scored_lifecycle_readiness_receipt" \
+      "$SKILLSBENCH_EXPECTED_LOOPX_GIT_HEAD" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from loopx.benchmark_adapters.skillsbench_setup_preflight import (
+    skillsbench_scored_lifecycle_readiness_gate,
+)
+
+try:
+    receipt = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    receipt = {}
+gate = skillsbench_scored_lifecycle_readiness_gate(
+    receipt if isinstance(receipt, dict) else {},
+    expected_git_head=sys.argv[2],
+)
+print(json.dumps(gate, sort_keys=True))
+raise SystemExit(0 if gate["allowed"] else 1)
+PY
+  )"; then
+    printf '%s\n' "$scored_lifecycle_gate" >&2
+    exit 3
+  fi
+  unset scored_lifecycle_gate
+  scored_lifecycle_readiness="passed"
 fi
 remote_codex_bin_mode="path_lookup"
 if [[ -n "${SKILLSBENCH_REMOTE_CODEX_BIN:-}" ]]; then
@@ -512,6 +592,15 @@ fi
 goal_id="${SKILLSBENCH_GOAL_ID:-loopx-meta}"
 local_run_ledger="${SKILLSBENCH_LOCAL_RUN_LEDGER_PATH:-.local/goals/${goal_id}/skillsbench-ledgers/live-standard-run-ledger.json}"
 route="${SKILLSBENCH_ROUTE:-codex-cli-goal-baseline}"
+if [[ "$setup_only_scored_lifecycle_canary" == "1" ]]; then
+  case "$route" in
+    loopx-product-mode|loopx-goal-start-product-mode|loopx-turn-agent-cli) ;;
+    *)
+      echo "SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY requires a case-local LoopX route" >&2
+      exit 2
+      ;;
+  esac
+fi
 if [[ "$route" == "loopx-turn-agent-cli" ]] &&
   [[ -z "$loopx_turn_validation_command" ]]; then
   echo "SKILLSBENCH_LOOPX_TURN_VALIDATION_COMMAND is required for loopx-turn-agent-cli" >&2
@@ -688,6 +777,16 @@ if [[ "$allow_staged_bootstrap_repair_run" == "1" ]]; then
 fi
 if [[ "$setup_only_public_preflight" == "1" ]]; then
   extra_runner_args+=(--setup-only-public-preflight)
+fi
+if [[ "$setup_only_agent_install_canary" == "1" ]]; then
+  extra_runner_args+=(--setup-only-agent-install-canary)
+fi
+if [[ "$setup_only_scored_lifecycle_canary" == "1" ]]; then
+  extra_runner_args+=(
+    --setup-only-scored-lifecycle-canary
+    --scored-lifecycle-canary-timeout-sec
+    "$scored_lifecycle_canary_timeout"
+  )
 fi
 if [[ -n "$benchmark_egress_no_proxy" ]]; then
   extra_runner_args+=(
@@ -866,6 +965,7 @@ supervisor_cmd=(
   --local-public-artifact-dir "$public_dir"
   --private-log-path "${private_dir}/remote-command.log"
   --public-output-path "${public_dir}/supervisor.public.json"
+  --owner-control-id "$run_group"
 )
 
 if [[ -n "$local_proxy_command" ]]; then
@@ -942,6 +1042,15 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'codex_cli_goal_thread_prewarm=%s\n' "$codex_cli_goal_thread_prewarm"
   printf 'allow_staged_bootstrap_repair_run=%s\n' "$allow_staged_bootstrap_repair_run"
   printf 'setup_only_public_preflight=%s\n' "$setup_only_public_preflight"
+  printf 'setup_only_agent_install_canary=%s\n' \
+    "$setup_only_agent_install_canary"
+  printf 'setup_only_scored_lifecycle_canary=%s\n' \
+    "$setup_only_scored_lifecycle_canary"
+  printf 'scored_lifecycle_canary_timeout_sec=%s\n' \
+    "$scored_lifecycle_canary_timeout"
+  printf 'scored_lifecycle_readiness=%s\n' \
+    "$scored_lifecycle_readiness"
+  printf 'scored_lifecycle_readiness_receipt_path_recorded=false\n'
   printf 'public_artifact_sync_interval_sec=%s\n' \
     "$public_artifact_sync_interval"
   printf 'benchmark_egress_proxy_mode=%s\n' "$benchmark_egress_proxy_mode"
@@ -1073,6 +1182,11 @@ local_codex_sandbox=${local_codex_sandbox}
 codex_cli_goal_thread_prewarm=${codex_cli_goal_thread_prewarm}
 allow_staged_bootstrap_repair_run=${allow_staged_bootstrap_repair_run}
 setup_only_public_preflight=${setup_only_public_preflight}
+setup_only_agent_install_canary=${setup_only_agent_install_canary}
+setup_only_scored_lifecycle_canary=${setup_only_scored_lifecycle_canary}
+scored_lifecycle_canary_timeout_sec=${scored_lifecycle_canary_timeout}
+scored_lifecycle_readiness=${scored_lifecycle_readiness}
+scored_lifecycle_readiness_receipt_path_recorded=false
 exact_host_codex_sandbox_preflight=${exact_host_codex_sandbox_preflight}
 exact_host_codex_sandbox_preflight_timeout_sec=${exact_host_codex_sandbox_preflight_timeout}
 public_artifact_sync_interval_sec=${public_artifact_sync_interval}

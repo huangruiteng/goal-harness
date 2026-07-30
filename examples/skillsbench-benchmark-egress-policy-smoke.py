@@ -397,6 +397,7 @@ def test_public_launcher_batches_three_cases_with_closeout_sync() -> None:
     ), output
     assert "--remote-failure-cleanup-pattern" in output, output
     assert "--remote-failure-cleanup-include-docker" in output, output
+    assert "--owner-control-id skillsbench-codex-cli-goal-xhigh-" in output, output
     assert "--update-ledger" not in output, output
     assert "--codex-cli-goal-thread-prewarm" not in output, output
     assert "--allow-staged-bootstrap-repair-run" not in output, output

@@ -360,6 +360,7 @@ def main() -> int:
     runs.sort(key=lambda item: (item["case_id"], item["contract_version"]))
     receipt = build_change_quality_shadow_receipt(
         matrix=selected_matrix,
+        declared_matrix=matrix,
         runs=runs,
         model_ref=f"{args.model}:{args.reasoning_effort}",
         source_commit=source_commit,

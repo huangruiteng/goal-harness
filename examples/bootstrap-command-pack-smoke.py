@@ -243,7 +243,10 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         assert "--progress-scope agent_lane" in refresh_command
         assert "--health-check" not in refresh_command
         assert "Same-priority items use that write order as the tie-breaker" in str(payload["message"])
-        assert "preview the issue-fix route before todo writeback" in str(payload["message"])
+        assert "preview the issue-fix route:" in str(payload["message"])
+        assert "preview the issue-fix route before todo writeback" not in str(
+            payload["message"]
+        )
         assert "PR lifecycle monitor" in str(payload["message"])
         assert "default top requestable non-author reviewer" in str(payload["message"])
         domain_routes = goal_start["domain_route_hints"]
@@ -624,7 +627,10 @@ def test_skill_slash_fallback_contract() -> None:
     assert "loopx bootstrap-command-pack --project ." in skill_text
     assert "loopx start-goal --guided --project ." in skill_text
     assert "canonical_project_alias" in skill_text
-    assert "worktree-local shadow goal" in skill_text
+    assert (
+        "`start-goal --project` keeps the requested project route" in skill_text
+    )
+    assert "Lower-level diagnostic command packs" in normalized
     assert '--goal-text "<GOAL_TEXT>"' in skill_text
     assert "bare `/loopx` read-only command" in skill_text
     assert "explicit goal-start intent" in normalized

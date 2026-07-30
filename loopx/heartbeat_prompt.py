@@ -7,6 +7,7 @@ from typing import Any
 from .ark_managed_agent_host import build_ark_managed_agent_host_contract
 from .agent_registry import normalize_registered_agents
 from .project_prompt import (
+    render_accountable_progress_refresh_command,
     render_available_capability_args,
     render_cli_preflight,
     render_quota_guard_command,
@@ -59,11 +60,15 @@ SCHEDULER_HINT_THIN_RULE = (
 RUNTIME_CAPABILITY_PROJECTION_THIN_RULE = (
     "Observed capabilities -> `--available-capability`; never user gates."
 )
+RUNTIME_EXECUTION_ROUTING_RULE = (
+    "Normal turns use CLI `interaction_contract`; use `loopx-project` for "
+    "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
+)
 INTERFACE_BUDGET_CHARS = {
     "full": 12_000,
     "compact": 6_200,
     "brief": 3_500,
-    "thin": 1_570,
+    "thin": 1_750,
     "visible_goal": 4_000,
 }
 CODEX_VISIBLE_GOAL_MAX_CHARS = INTERFACE_BUDGET_CHARS["visible_goal"]
@@ -455,13 +460,10 @@ def build_heartbeat_prompt(
         cli_bin=cli_bin,
         agent_id=normalized_agent_id,
     )
-    progress_refresh_state_command = render_refresh_state_command(
+    progress_refresh_state_command = render_accountable_progress_refresh_command(
         goal_id,
         cli_bin=cli_bin,
         agent_id=normalized_agent_id,
-        classification="<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
-        delivery_batch_scale="multi_surface",
-        delivery_outcome="outcome_progress",
     )
     cli_preflight = render_cli_preflight(cli_bin=cli_bin)
     pr_review_pre_quota_command = (
@@ -723,9 +725,10 @@ If the result says `should_run=false`:
 - If the payload also says `safe_bypass_allowed=true` and the same gate has
   already been surfaced, the gate blocks only the gated delivery path. You may
   do exactly one bounded safe-bypass step from the Priority Stack that does not
-  depend on that gate; validate, write back, optionally refresh, spend once, and
-  report compactly. If `user_todo_summary.open_count > 0`, include those todos
-  and do not say "no new user action". If none exists, report the gate.
+  depend on that gate; validate, write back, refresh accountable progress, spend
+  once, and report compactly. If `user_todo_summary.open_count > 0`, include
+  those todos and do not say "no new user action". If none exists, report the
+  gate.
 - If `effective_action=monitor_quiet_skip`, receipt/stall is written; quiet
   unless replan. On receipt write failure, retry same id. No edits/spend;
   receipts do not self-stop.
@@ -780,8 +783,9 @@ If the result says `should_run=true`:
    permission. Then use
    `heartbeat_recommendation`: `recommended_mode=run_first_read_only_map` means
    run its `command` as a real read-only map, then
-   validate/save the `read_only_project_map` result, append exactly one
-   heartbeat spend, sync or refresh state if needed, and `NOTIFY`. If it says
+   validate/save the `read_only_project_map` result, refresh accountable
+   progress, append exactly one heartbeat spend, sync state if needed, and
+   `NOTIFY`. If it says
    `recommended_mode=mapped_noop_if_unchanged` with `stop_if_unchanged=true`,
    and you find no new user instruction, owner evidence, agent todo, stale
    source, or safe handoff, return quiet `DONT_NOTIFY`: do not run, edit, or
@@ -830,8 +834,15 @@ If the result says `should_run=true`:
    a successor todo, or include a compact no-follow-up rationale.
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the LoopX checkout.
-8. After validation and writeback complete, append exactly one spend event
-   before any state-only refresh that might close the active delivery lane:
+8. After validation/writeback, use actual class/scale/outcome; never default or
+   upgrade to `multi_surface` / `outcome_progress`. Record accountable delivery:
+
+   ```bash
+   {progress_refresh_state_command}
+   ```
+
+   Spend consumes this causal record; plain state-only refresh cannot replace
+   it. Then spend once:
 
    ```bash
    {quota_spend_command}
@@ -843,19 +854,13 @@ If the result says `should_run=true`:
    a bounded safe-bypass step, append this same spend event once after
    validation/writeback.
 
-9. If the dashboard or controller needs state after spend, refresh:
+9. After spend, optionally refresh state-only:
 
    ```bash
    {refresh_state_command}
    ```
 
-   For a validated progress artifact, add a public-safe classification and
-   explicit delivery hints so readiness does not infer from classification
-   names:
-
-   ```bash
-   {progress_refresh_state_command}
-   ```
+   Never emit accountable progress after spend; it creates an unspent record.
 
 10. Return compactly. `NOTIFY` only for an artifact, gate, blocker, or self-stop;
     otherwise use `DONT_NOTIFY`.
@@ -921,12 +926,13 @@ Blocker-push first; obey
 `handoff_delivery_contract`; do 1 bounded segment/batch when
 `execution_obligation.must_attempt_work=true`; if recovery, run
 ranker/cross-domain evidence recovery or blocker writeback;
-validate/writeback/todos; successor todo or no-follow-up rationale for
-non-trivial feature slices; spend once; refresh with explicit delivery
-scale/outcome for progress artifacts. Stop on private, credentials, destructive
-git, prod, or review rules.
-Spend exactly once only after completed delivery or safe-bypass work:
+validate/writeback/todos; done->successor/rationale.
+Progress (actual values; no upgrade):
+`{progress_refresh_state_command}`
+Spend once:
 `{quota_spend_command}`
+Optional state-only post-spend:
+`{refresh_state_command}`
 
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs, or
 duplicate accounting. Compact return; `NOTIFY` only for artifact/gate/blocker/self-stop.
@@ -1007,7 +1013,8 @@ If `should_run=true`:
    `notify_user_on_open_todo=true` blocker-push notification.
    Then follow `heartbeat_recommendation`:
    `run_first_read_only_map` means run exact real-map command, then
-   validate/save/spend/refresh/`NOTIFY`; `mapped_noop_if_unchanged` plus
+   validate/save/accountable-refresh/spend/`NOTIFY`;
+   `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if no new instruction/evidence/
    todo/stale source/safe handoff.
    `task_orchestration_contract`: activate/resume eligible peer lanes; the
@@ -1028,13 +1035,15 @@ If `should_run=true`:
    use `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate|user_action`
    for owner todos and `--role agent` for agent todos, not prose. Nontrivial done ->
    successor todo or no-follow-up rationale.
-9. After delivery/safe-bypass, spend once before refresh:
+9. Account actual validated class/scale/outcome; never default/upgrade. Then
+   refresh and spend:
 
 ```bash
+{progress_refresh_state_command}
 {quota_spend_command}
 ```
 
-10. Refresh after spend if needed; progress: `{progress_refresh_state_command}`.
+10. Optional state-only post-spend: `{refresh_state_command}`; never accountable.
 
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs,
 self-cancel turns, or duplicate accounting.
@@ -1114,6 +1123,8 @@ def _render_goal_task_body(
     return f"""Advance LoopX goal `{goal_id}` from `{active_state}` {host_preamble}
 {scope_block}
 
+{RUNTIME_EXECUTION_ROUTING_RULE}
+
 At every continuation, inspect LoopX state/status and the repository. {prequota_block}Run
 `{quota_guard_command}` and follow its `interaction_contract`.
 
@@ -1123,11 +1134,15 @@ wait quietly. Scheduler hints are diagnostic here and must not mutate host
 automation.
 
 If `should_run=true`, choose the highest-priority in-scope unblocked agent todo.
-Honor claims/leases, blocker-push and recovery obligations. Complete one bounded,
-coherent delivery segment; validate it; write public-safe evidence, critic, and
-next action back to LoopX. A non-trivial completion needs a successor todo or an
-explicit no-follow-up rationale. After validated writeback, refresh the
-accountable progress record before spending:
+Honor claims/leases, blocker-push and recovery obligations. Before dependent work,
+persist material scope/acceptance/non-goal changes in current evidence and the next
+todo. Complete one bounded segment; validate it; write public-safe evidence, critic,
+and next action back to LoopX. A non-trivial completion needs a successor todo or
+an explicit no-follow-up rationale. After validated writeback, replace all three
+accountable-refresh placeholders with this turn's actual classification, batch
+scale, and outcome; never default or upgrade them to
+`multi_surface` / `outcome_progress`. Then refresh the accountable progress
+record before spending:
 `{progress_refresh_state_command}`. Then spend exactly once against that refresh:
 `{quota_spend_command}`.
 
@@ -1228,25 +1243,24 @@ def render_thin_heartbeat_task_body(
         else "`quota should-run`"
     )
     pr_review_pre_quota_instruction = (
-        f"Pre: `{pr_review_pre_quota_command}`\n"
+        f"`{pr_review_pre_quota_command}`\n"
         if pr_review_pre_quota_command
         else ""
     )
     return f"""Advance `{goal_id}` from {active_state}.
 
-No runtime `loopx-project`; repair: `loopx-self-repair`.
-LoopX CLI = truth.
+{RUNTIME_EXECUTION_ROUTING_RULE}
 {scope_sentence}
 
-Inspect state/status/repo; run
-{pr_review_pre_quota_instruction}{quota_guard_instruction}; follow `interaction_contract`.
+Inspect state/status/repo.
 `LOOPX_TURN=<current_time_iso>`; reuse.
+{pr_review_pre_quota_instruction}{quota_guard_instruction}.
 NOTIFY Chinese actions incl. non_blocking false/0; not only "owner gate";
 missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
 DONT_NOTIFY+false/0 only: quiet.
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-Batch/no-op; spend post-writeback.
+writeback: actual class/scale/outcome accountable refresh->spend; no upgrade.
 Done->todo/rationale; guard receipt; 2 stalls->replan.
 `lark_event_inbox`: reply_due; drain_command/reply-readback/ACK.
 

@@ -27,6 +27,8 @@ def _load_supervisor_module():
 def _write_fake_ssh(path: Path) -> None:
     path.write_text(
         """#!/usr/bin/env python3
+import os
+import signal
 import sys
 import time
 
@@ -36,6 +38,9 @@ elif "# LOOPX_REVERSE_TUNNEL_PROBE" in sys.argv[-1]:
     print("HTTP/1.1 200 OK")
 elif sys.argv[-1] == "run-benchmark":
     time.sleep(0.2)
+elif sys.argv[-1] == "terminate-supervisor":
+    time.sleep(0.1)
+    os.kill(os.getppid(), signal.SIGTERM)
 elif sys.argv[-1] == "fail-arguments":
     print("usage: runner [--known]", file=sys.stderr)
     print("runner: error: unrecognized arguments: --private-value", file=sys.stderr)
@@ -377,6 +382,26 @@ def test_main_finalizes_public_liveness_after_unhandled_supervisor_failure(
         )
     )
     previous_payload["tunnel_ready"] = True
+    previous_payload["active_phase"] = {
+        "schema_version": "skillsbench_supervisor_active_phase_v0",
+        "state": "observed",
+        "benchmark_live_worker_phase": {
+            "schema_version": "benchmark_live_worker_phase_v0",
+            "current_phase": "agent_active",
+            "next_required_phase": "",
+            "phase_ready": {
+                "runtime_preparing": True,
+                "worker_prepared": True,
+                "worker_running": True,
+                "agent_active": True,
+            },
+            "worker_live": True,
+            "agent_active_observed": True,
+            "terminal": False,
+            "terminal_disposition": "open",
+            "public_evidence_only": True,
+        },
+    }
     supervisor._write_public_checkpoint(
         str(public_output),
         previous_payload,
@@ -413,6 +438,11 @@ def test_main_finalizes_public_liveness_after_unhandled_supervisor_failure(
     assert persisted["public_liveness"]["terminal"] is True
     assert persisted["public_liveness"]["process_alive"] is False
     assert persisted["public_liveness"]["heartbeat_count"] == 5
+    phase = persisted["active_phase"]["benchmark_live_worker_phase"]
+    assert phase["agent_active_observed"] is True
+    assert phase["terminal"] is True
+    assert phase["worker_live"] is False
+    assert phase["terminal_disposition"] == "failed"
     fallback = persisted["public_terminal_fallback"]
     assert fallback["triggered"] is True
     assert fallback["exception_message_recorded"] is False
@@ -458,8 +488,61 @@ def test_main_finalizes_public_liveness_after_termination_signal(
     assert fallback["trigger"] == "supervisor_termination_signal"
     assert fallback["signal_name"] == "SIGTERM"
     assert fallback["exception_message_recorded"] is False
+    closeout = persisted["terminal_closeout"]
+    assert closeout["status"] == "complete"
+    assert closeout["disposition"] == "typed_exclusion"
+    assert closeout["official_score_countable"] is False
+    assert closeout["retry_recommended"] is False
+    assert closeout["rotation_allowed"] is True
+    closeout_path = public_output.with_name("supervisor_closeout.compact.json")
+    assert json.loads(closeout_path.read_text(encoding="utf-8")) == closeout
     assert '"signal_name": "SIGTERM"' in captured.out
     assert "_SupervisorTerminationSignal" in captured.err
+
+
+def test_runtime_termination_writes_closeout_and_cleans_local_processes(
+    tmp_path: Path,
+) -> None:
+    supervisor = _load_supervisor_module()
+    supervisor.PUBLIC_LIVENESS_INTERVAL_SEC = 0.05
+    fake_ssh = tmp_path / "fake-ssh"
+    public_output = tmp_path / "public" / "supervisor.public.json"
+    _write_fake_ssh(fake_ssh)
+
+    returncode = supervisor.main(
+        [
+            "--ssh-bin",
+            str(fake_ssh),
+            "--ssh-destination",
+            "runner.example",
+            "--remote-command",
+            "terminate-supervisor",
+            "--public-output-path",
+            str(public_output),
+            "--probe-interval-sec",
+            "0.01",
+            "--probe-timeout-sec",
+            "5",
+            "--tunnel-ready-timeout-sec",
+            "5",
+            "--tunnel-health-interval-sec",
+            "0",
+            "--run-timeout-sec",
+            "5",
+        ]
+    )
+    persisted = json.loads(public_output.read_text(encoding="utf-8"))
+
+    assert returncode == 128 + signal.SIGTERM
+    assert persisted["first_blocker"] == "supervisor_termination_signal"
+    assert persisted["public_liveness"]["terminal"] is True
+    assert persisted["tunnel_cleanup_status"] == "terminated"
+    assert persisted["terminal_closeout"]["disposition"] == "typed_exclusion"
+    assert persisted["terminal_closeout"]["signal_name"] == "SIGTERM"
+    assert (
+        persisted["public_terminal_fallback"]["trigger"]
+        == "supervisor_termination_signal"
+    )
 
 
 def test_remote_command_failure_subtype_uses_public_allowlist() -> None:

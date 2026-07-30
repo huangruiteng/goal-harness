@@ -65,11 +65,15 @@ MUST_HAVE = (
 )
 SPEND_MUST_HAVE = (
     "validation / writeback 完成后",
-    "state-only `refresh-state` 之前",
-    "只 append 一次 quota spend",
+    "三个 placeholder",
+    "`multi_surface` / `outcome_progress`",
+    "accountable delivery",
+    "普通 state-only refresh 不能替代它",
+    "然后只 append 一次 quota spend",
     'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id',
     "--source adapter --execute",
-    "再在 spend 后 refresh",
+    "在 spend 后仍需状态更新",
+    "不要在 spend 后追加另一个 accountable progress refresh",
     "不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账",
     "实际完成了 `safe_bypass_allowed=true` 的 bounded safe-bypass 工作，要记一次账",
     "不要重复执行。",
@@ -168,6 +172,19 @@ def main() -> int:
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" '
         "quota spend-slot --goal-id new-project-main-control --slots 1 --source adapter --execute"
     ), payload
+    assert payload["progress_refresh_command"] == (
+        "loopx refresh-state --goal-id new-project-main-control "
+        "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION> "
+        "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE> "
+        "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>"
+    ), payload
+    prompt = str(payload["prompt"])
+    progress_refresh = str(payload["progress_refresh_command"])
+    quota_spend = str(payload["quota_spend_command"])
+    state_only_refresh = str(payload["refresh_command"])
+    assert prompt.index(progress_refresh) < prompt.index(quota_spend), prompt
+    assert prompt.index(quota_spend) < prompt.rindex(state_only_refresh), prompt
+    assert "不要默认或拔高成 `multi_surface` / `outcome_progress`" in prompt, prompt
     assert_quota_guard(payload["prompt"])
     assert_quota_guard(DOC.read_text(encoding="utf-8"))
 

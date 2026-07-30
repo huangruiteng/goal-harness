@@ -177,4 +177,7 @@ runner retains only result digests, bounded scores, usage, and latency; prompts,
 model responses, stderr, command logs, and temporary worktrees are discarded.
 A passing shadow may recommend strict-receipt promotion, but the receipt
 explicitly sets `automatic_policy_mutation_allowed=false`. Repository policy
-still changes through its normal owner and control-plane path.
+still changes through its normal owner and control-plane path. `--case-id`
+runs remain useful diagnostics, but only a run over the complete currently
+declared matrix may emit that promotion recommendation; an older receipt also
+becomes ineligible when the matrix grows.

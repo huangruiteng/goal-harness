@@ -10,6 +10,7 @@ from loopx.host_loop_activation import (
     normalize_agent_type,
     scheduler_command_binding_for_agent_type,
 )
+from loopx.project_prompt import render_accountable_progress_refresh_command
 
 
 def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -> None:
@@ -22,6 +23,7 @@ def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -
     assert agent_type_for_host_surface("codex-cli-tui") == "codex-cli"
     assert normalize_agent_type("Open Code") == "opencode"
     assert agent_type_for_host_surface("opencode") == "opencode"
+    assert agent_type_for_host_surface("ark-managed-agent") == "ark-managed-agent"
 
     packet = build_host_loop_activation_packet(
         agent_type="codex-ide-plugin",
@@ -82,6 +84,52 @@ def test_goal_hosts_attribute_spend_to_current_progress_refresh(
     spend_command = f"`{payload['quota_spend_command']}`"
 
     assert task_body.index(refresh_command) < task_body.index(spend_command)
+    assert "<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in refresh_command
+    assert "<ACTUAL_DELIVERY_BATCH_SCALE>" in refresh_command
+    assert "<ACTUAL_DELIVERY_OUTCOME>" in refresh_command
+    assert "--delivery-batch-scale multi_surface" not in refresh_command
+    assert "--delivery-outcome outcome_progress" not in refresh_command
+    normalized_task_body = " ".join(task_body.split())
+    assert (
+        "never default or upgrade them to `multi_surface` / `outcome_progress`"
+        in normalized_task_body
+    )
+
+
+@pytest.mark.parametrize(
+    "runtime_profile",
+    ("ark_managed_agent_goal", "codex_app_ssh_goal"),
+)
+def test_goal_hosts_share_narrow_runtime_skill_routing(
+    runtime_profile: str,
+) -> None:
+    payload = build_heartbeat_prompt(
+        goal_id="goal-runtime-routing-fixture",
+        thin=True,
+        runtime_profile=runtime_profile,
+    )
+    task_body = " ".join(payload["task_body"].split())
+
+    assert (
+        "Normal turns use CLI `interaction_contract`; use `loopx-project` for "
+        "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
+        in task_body
+    )
+
+
+def test_accountable_refresh_preserves_explicit_validated_turn_semantics() -> None:
+    command = render_accountable_progress_refresh_command(
+        "validated-turn-fixture",
+        classification="contract_only_preparation",
+        delivery_batch_scale="single_surface",
+        delivery_outcome="surface_only",
+    )
+
+    assert "--classification contract_only_preparation" in command
+    assert "--delivery-batch-scale single_surface" in command
+    assert "--delivery-outcome surface_only" in command
+    assert "multi_surface" not in command
+    assert "outcome_progress" not in command
 
 
 def test_codex_app_activation_uses_narrow_runtime_profile() -> None:

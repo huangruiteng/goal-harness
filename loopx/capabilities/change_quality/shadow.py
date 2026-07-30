@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -20,6 +20,7 @@ CHANGE_QUALITY_SHADOW_RECEIPT_SCHEMA_VERSION = "change_quality_shadow_receipt_v0
 CHANGE_QUALITY_SHADOW_CONTRACT_VERSIONS = ("v0", "v1")
 CHANGE_QUALITY_SHADOW_CASE_KINDS = (
     "real_pr_clean",
+    "real_pr_adversarial",
     "synthetic_simplification",
 )
 CHANGE_QUALITY_SHADOW_FINDING_CLASSES = (
@@ -142,7 +143,7 @@ def load_change_quality_shadow_matrix(path: Path) -> dict[str, Any]:
         if not isinstance(source, Mapping):
             raise ValueError(f"cases[{index}].source must be an object")
         normalized_source: dict[str, Any]
-        if kind == "real_pr_clean":
+        if kind.startswith("real_pr_"):
             pull_request = source.get("pull_request")
             if not isinstance(pull_request, int) or pull_request < 1:
                 raise ValueError(f"cases[{index}].source.pull_request must be positive")
@@ -338,7 +339,7 @@ def build_change_quality_shadow_prompt(
     if contract_version not in CHANGE_QUALITY_SHADOW_CONTRACT_VERSIONS:
         raise ValueError("unknown change-quality shadow contract version")
     source = dict(case["source"])
-    if case["kind"] == "real_pr_clean":
+    if case["kind"].startswith("real_pr_"):
         scope = (
             f"Review commit range {source['base_ref']}..{source['head_ref']}. "
             "Use git diff and repository files to inspect the exact change."
@@ -549,11 +550,15 @@ def grade_change_quality_shadow_result(
 def build_change_quality_shadow_receipt(
     *,
     matrix: Mapping[str, Any],
-    runs: list[Mapping[str, Any]],
+    declared_matrix: Mapping[str, Any],
+    runs: Sequence[Mapping[str, Any]],
     model_ref: str,
     source_commit: str,
 ) -> dict[str, Any]:
     case_count = len(matrix["cases"])
+    expected_case_ids = sorted(case["case_id"] for case in matrix["cases"])
+    matrix_digest = _digest(dict(matrix))
+    declared_matrix_digest = _digest(dict(declared_matrix))
     arms: dict[str, dict[str, Any]] = {}
     for version in CHANGE_QUALITY_SHADOW_CONTRACT_VERSIONS:
         selected = [dict(item) for item in runs if item["contract_version"] == version]
@@ -617,8 +622,19 @@ def build_change_quality_shadow_receipt(
     latency_ratio = (
         round(v1["latency_ms"] / v0["latency_ms"], 4) if v0["latency_ms"] else None
     )
+    exact_valid_arms = {
+        version: sorted(
+            item["case_id"]
+            for item in runs
+            if item["contract_version"] == version and item.get("valid") is True
+        )
+        == expected_case_ids
+        for version in CHANGE_QUALITY_SHADOW_CONTRACT_VERSIONS
+    }
     acceptance = {
-        "all_v1_runs_valid": v1["valid_count"] == case_count,
+        "full_declared_matrix_evaluated": matrix_digest == declared_matrix_digest,
+        "all_v0_runs_valid": exact_valid_arms["v0"],
+        "all_v1_runs_valid": exact_valid_arms["v1"],
         "v1_primary_lenses_complete": v1["primary_lens_completeness"] == 1.0,
         "v1_simplify_precision_at_least_0_8": v1["precision"] >= 0.8,
         "v1_simplify_recall_at_least_0_8": v1["recall"] >= 0.8,
@@ -642,9 +658,11 @@ def build_change_quality_shadow_receipt(
             field="source_commit",
             limit=64,
         ),
-        "matrix_digest": _digest(dict(matrix)),
+        "matrix_digest": matrix_digest,
+        "declared_matrix_digest": declared_matrix_digest,
         "evaluation_focus": "simplify_first",
         "case_count": case_count,
+        "declared_case_count": len(declared_matrix["cases"]),
         "arms": arms,
         "budget_comparison": {
             "v1_to_v0_output_token_ratio": token_ratio,

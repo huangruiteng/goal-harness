@@ -271,8 +271,10 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
 def validate_capability_gap_options(args: argparse.Namespace) -> None:
     if not args.capability_gap_status:
         return
-    if args.todo_command not in {"add", "update"}:
-        raise ValueError("--capability-gap-status is supported only by todo add/update")
+    if args.todo_command not in {"add", "update", "complete"}:
+        raise ValueError(
+            "--capability-gap-status is supported only by todo add/update/complete"
+        )
     if args.role != "agent":
         raise ValueError("--capability-gap-status requires --role agent")
     if not args.target_capabilities:

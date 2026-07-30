@@ -36,6 +36,20 @@ def git_output(args: list[str]) -> str | None:
     return result.stdout.strip() or None
 
 
+def normal_turns_use_cli_interaction_contract(task_body: str) -> bool:
+    clauses = " ".join(task_body.split()).replace(";", ".").split(".")
+    for clause in clauses:
+        normalized = clause.lower()
+        if (
+            "`interaction_contract`" in normalized
+            and "cli" in normalized
+            and ("normal turn" in normalized or "normal-turn" in normalized)
+            and any(marker in normalized for marker in (" use ", " follow ", " authority"))
+        ):
+            return True
+    return False
+
+
 def source_git_commit(root: Path = REPO_ROOT) -> str:
     if root == REPO_ROOT:
         commit = git_output(["rev-parse", "HEAD"])
@@ -309,6 +323,7 @@ def main() -> int:
         assert skill_readback["integration_mode"] == "fixed_install_script"
         assert skill_readback["source"]["revision"] == source_commit
         assert set(skill_readback["materialized_skill_ids"]) == {
+            "loopx",
             "loopx-doc-registry",
             "loopx-pr-review",
             "loopx-project",
@@ -340,8 +355,9 @@ def main() -> int:
             "This command is read-only",
             "JSON output returns a minimized handoff payload with `handoff_text` instead of the full operator packet",
             "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
-            "--delivery-batch-scale multi_surface",
-            "--delivery-outcome outcome_progress",
+            "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>",
+            "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>",
+            "Never default or upgrade a smaller/preparatory turn",
             "do not infer scale/outcome from the classification name",
         ):
             assert phrase in compact_skill_text, phrase
@@ -377,6 +393,7 @@ def main() -> int:
         loopx_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
         loopx_command_skill_text = loopx_command_skill.read_text(encoding="utf-8")
         assert "surface=codex-skills" in loopx_command_skill_text, loopx_command_skill_text
+        assert "`ark-managed-agent` for Ark Managed Agent" in loopx_command_skill_text
         loopx_openai_metadata = loopx_command_skill.parent / "agents" / "openai.yaml"
         loopx_openai_metadata_text = loopx_openai_metadata.read_text(encoding="utf-8")
         assert 'display_name: "LoopX"' in loopx_openai_metadata_text, loopx_openai_metadata_text
@@ -713,13 +730,21 @@ def main() -> int:
         assert payload["thin"] is True, payload
         assert payload["interface_budget"]["mode"] == "thin", payload
         assert payload["interface_budget"]["within_budget"] is True, payload
-        assert "--delivery-batch-scale multi_surface" in payload["progress_refresh_state_command"], payload
-        assert "--delivery-outcome outcome_progress" in payload["progress_refresh_state_command"], payload
+        assert "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>" in payload["progress_refresh_state_command"], payload
+        assert "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>" in payload["progress_refresh_state_command"], payload
+        assert "--delivery-batch-scale multi_surface" not in payload["progress_refresh_state_command"], payload
+        assert "--delivery-outcome outcome_progress" not in payload["progress_refresh_state_command"], payload
         assert "<PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in payload["progress_refresh_state_command"], payload
-        assert "follow `interaction_contract`" in payload["task_body"], payload
+        assert normal_turns_use_cli_interaction_contract(payload["task_body"]), payload
+        assert not normal_turns_use_cli_interaction_contract(
+            "Normal turns use the runtime skill; recovery may inspect CLI `interaction_contract`."
+        )
+        assert not normal_turns_use_cli_interaction_contract(
+            "Normal turns use the runtime skill and repair contract."
+        )
         assert "`LOOPX_TURN=<current_time_iso>`; reuse." in payload["task_body"], payload
         assert "guard receipt; 2 stalls->replan" in payload["task_body"], payload
-        assert "spend post-writeback" in payload["task_body"], payload
+        assert "actual class/scale/outcome accountable refresh->spend" in payload["task_body"], payload
         assert payload["cli_bin"] == "loopx", payload
 
         canary_cli = subprocess.run(
@@ -747,8 +772,14 @@ def main() -> int:
         assert "loopx-canary doctor" in canary_payload["cli_preflight"], canary_payload
         assert "loopx-canary --format json" in canary_payload["quota_guard_command"], canary_payload
         assert "loopx-canary heartbeat-prompt --compact" in canary_payload["task_body"], canary_payload
-        assert "refresh with explicit delivery" in canary_payload["task_body"], canary_payload
-        assert "scale/outcome for progress artifacts" in canary_payload["task_body"], canary_payload
+        canary_task_body = canary_payload["task_body"]
+        progress_command = canary_payload["progress_refresh_state_command"]
+        spend_command = canary_payload["quota_spend_command"]
+        assert progress_command in canary_task_body, canary_payload
+        assert spend_command in canary_task_body, canary_payload
+        assert canary_task_body.index(progress_command) < canary_task_body.index(
+            spend_command
+        ), canary_payload
 
         fresh_install = run_install(env, "install-smoke-fresh")
         assert "loopx installed locally" in fresh_install.stdout, fresh_install.stdout

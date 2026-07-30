@@ -15,12 +15,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-local.sh"
 
 
-def run_install(env: dict[str, str], *, release_id: str) -> subprocess.CompletedProcess[str]:
+def run_install(
+    env: dict[str, str],
+    *,
+    release_id: str,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(INSTALL_SCRIPT)],
         cwd=REPO_ROOT,
         env={**env, "LOOPX_RELEASE_ID": release_id},
-        check=True,
+        check=check,
         capture_output=True,
         text=True,
     )
@@ -56,6 +61,7 @@ def assert_untrusted_checkout_is_canary_only() -> None:
         skills_dir = Path(tmp) / "workspace" / ".agents" / "skills"
         env["LOOPX_INSTALL_SKILL"] = "1"
         env["LOOPX_SKILLS_DIR"] = str(skills_dir)
+        env["LOOPX_ENTRY_HOST_SURFACE"] = "ark-managed-agent"
         stale_lock = skills_dir / ".loopx-install-lock"
         stale_lock.mkdir(parents=True)
         (stale_lock / "pid").write_text("999999999\n", encoding="utf-8")
@@ -74,6 +80,7 @@ def assert_untrusted_checkout_is_canary_only() -> None:
         assert canary.resolve() == REPO_ROOT / "scripts" / "loopx", canary.resolve()
         assert not releases_dir.exists(), releases_dir
         expected_skill_ids = {
+            "loopx",
             "loopx-doc-registry",
             "loopx-pr-review",
             "loopx-project",
@@ -82,6 +89,11 @@ def assert_untrusted_checkout_is_canary_only() -> None:
         assert {
             path.parent.name for path in skills_dir.glob("*/SKILL.md")
         } == expected_skill_ids
+        loopx_entry = (skills_dir / "loopx" / "SKILL.md").read_text(encoding="utf-8")
+        assert "exact current host `ark-managed-agent`" in loopx_entry
+        assert "--host-surface ark-managed-agent" in loopx_entry
+        assert f"`{canary} start-goal" in loopx_entry
+        assert "`loopx start-goal" not in loopx_entry
         assert not (skills_dir / "loopx-change-quality").exists()
         assert not (skills_dir / "loopx-material").exists()
         readback = json.loads(
@@ -114,6 +126,31 @@ def assert_untrusted_checkout_preserves_implicit_default_skill_root() -> None:
         assert not (implicit_skill.parents[1] / ".loopx-skill-install.json").exists()
 
 
+def assert_exact_host_install_rejects_user_owned_entry_skill() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-entry-skill-collision-") as tmp:
+        env, _bin_dir, _releases_dir = base_env(Path(tmp))
+        skills_dir = Path(tmp) / "workspace" / ".agents" / "skills"
+        user_skill = skills_dir / "loopx" / "SKILL.md"
+        user_skill.parent.mkdir(parents=True)
+        user_skill.write_text("# User-owned LoopX skill\n", encoding="utf-8")
+        stale_readback = skills_dir / ".loopx-skill-install.json"
+        stale_readback.write_text('{"materialized_skill_ids":["loopx"]}\n', encoding="utf-8")
+        env["LOOPX_INSTALL_SKILL"] = "1"
+        env["LOOPX_SKILLS_DIR"] = str(skills_dir)
+        env["LOOPX_ENTRY_HOST_SURFACE"] = "ark-managed-agent"
+
+        install = run_install(
+            env,
+            release_id="guarded-entry-collision",
+            check=False,
+        )
+
+        assert install.returncode != 0, install.stdout
+        assert "exact-host entry skill was not materialized" in install.stderr
+        assert user_skill.read_text(encoding="utf-8") == "# User-owned LoopX skill\n"
+        assert not stale_readback.exists()
+
+
 def assert_explicit_promotion_is_auditable() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-promotion-explicit-") as tmp:
         env, bin_dir, _releases_dir = base_env(Path(tmp))
@@ -144,6 +181,7 @@ def assert_explicit_promotion_is_auditable() -> None:
 def main() -> int:
     assert_untrusted_checkout_is_canary_only()
     assert_untrusted_checkout_preserves_implicit_default_skill_root()
+    assert_exact_host_install_rejects_user_owned_entry_skill()
     assert_explicit_promotion_is_auditable()
     print("local-install-promotion-boundary-smoke ok")
     return 0

@@ -68,30 +68,53 @@ loopx heartbeat-prompt --thin --goal-id <GOAL_ID> --agent-id <AGENT_ID> \
   --runtime-profile ark_managed_agent_goal
 ```
 
-The same contract is available through first-class onboarding with
-`--agent-type ark-managed-agent`. Because this host does not use a
-Codex-specific skill directory, onboarding requires host-managed delivery and
-readback of the LoopX workflow skills from the same LoopX revision as the CLI.
-The fixed installer is shared with Codex; only its target root changes:
+The same contract is visible through first-class onboarding with
+`--agent-type ark-managed-agent`. Onboarding is a read-only verifier, not an
+installer or an installation prerequisite. Because this host does not use a
+Codex-specific skill directory, the fixed installer shared with Codex writes
+the LoopX workflow skills into a host-native target root. The packaged
+no-clone path is:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh \
+  | env LOOPX_SKILLS_DIR=<PROJECT_WORKSPACE>/.agents/skills \
+      LOOPX_ENTRY_HOST_SURFACE=ark-managed-agent \
+      LOOPX_INSTALL_SLASH_COMMANDS=0 bash
+```
+
+For a contributor checkout, the equivalent command is:
 
 ```bash
 LOOPX_SKILLS_DIR=<PROJECT_WORKSPACE>/.agents/skills \
+  LOOPX_ENTRY_HOST_SURFACE=ark-managed-agent \
   LOOPX_INSTALL_SLASH_COMMANDS=0 \
   <LOOPX_CHECKOUT>/scripts/install-local.sh
 ```
 
 This is also the supported canary path for an untrusted or dirty checkout.
 With an explicit `LOOPX_SKILLS_DIR`, the script materializes the release-owned
-workflow skills and writes `.loopx-skill-install.json` without promoting the
-checkout as the default `loopx` executable. Without that explicit target, a
-canary-only install leaves the existing default skill root unchanged.
+workflow skills, including the generated `$loopx` task-entry skill, and writes
+`.loopx-skill-install.json` without promoting the checkout as the default
+`loopx` executable. The Managed Agent's ordinary task turn starts with
+`$loopx <task>`; that skill writes the business todo before the host submits the
+generated Goal task body exactly once. The controller must not pre-seed that
+business todo. The generated entry skill binds the exact Managed Agent host at
+install time, and its start-goal transaction preserves that host, task text,
+and declared capabilities across bootstrap inspection. Without an explicit
+target, a canary-only install leaves the existing default skill root unchanged.
 
-The installer is the sole owner of filesystem mutation. The manifest records
-the materialized skill ids, source revision, and per-skill content digests so
-read-only host checks can verify delivery without becoming a second installer.
-Filesystem materialization is distinct from the host's runtime loaded-skill
-readback; the latter is still required before claiming that the skills were
-injected into an active agent context.
+The installer is the sole owner of filesystem mutation for both Codex and Ark
+Managed Agent. Its default target is the Codex skill root; Ark Managed Agent
+supplies a host-native `LOOPX_SKILLS_DIR` and binds the generated entry with
+`LOOPX_ENTRY_HOST_SURFACE`. The manifest records the materialized skill ids,
+source revision, and per-skill content digests so `doctor` and onboarding can
+verify delivery read-only without becoming second installers. Running either
+check is optional for installation. Run a check with the same
+`LOOPX_SKILLS_DIR` to report the filesystem readback status and source
+revision. Filesystem materialization is distinct from the host's runtime
+loaded-skill readback; the latter is still required before claiming that the
+skills were injected into an active agent context.
 
 Local-development and cloud transports must send the exact same `task_body` as
 their goal prompt. They may differ in endpoint, authentication, session id, or
@@ -104,6 +127,11 @@ runtime owns continuation, host session state is non-authoritative, and the
 LoopX Turn driver is not required. Durable policy remains in current
 `quota should-run.interaction_contract`, active state, todos, vision, and
 writeback.
+
+A dependent work step may begin only after material upstream results have
+crossed the durable boundary: update the current todo evidence and the next
+executable todo with any scope, acceptance, or non-goal delta, then refresh
+state and read back quota. Chat/model summaries are not durable state.
 
 Runtime capabilities discovered after activation do not regenerate the Goal
 prompt. `quota should-run` returns the existing

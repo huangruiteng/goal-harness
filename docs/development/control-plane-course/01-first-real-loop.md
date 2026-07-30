@@ -457,11 +457,20 @@ def handle_start_goal_command(args, print_payload) -> int:
 
 #### 2. Connection inspection 把“能否复用现有状态”编码成有限状态
 
-`loopx/bootstrap_command_pack.py::inspect_bootstrap_connection` 先解析 canonical project alias，再检查 registry 与 state file：
+`loopx/bootstrap_command_pack.py::inspect_bootstrap_connection` 先按调用方选择
+exact 或 canonical project route，再检查 registry 与 state file：
 
 ```python
 input_project = _resolve_project(project)
-alias = resolve_canonical_project_alias(input_project, goal_id=goal_id)
+alias = (
+    resolve_canonical_project_alias(input_project, goal_id=goal_id)
+    if resolve_linked_worktree_alias
+    else {
+        "applied": False,
+        "kind": "exact_project_route",
+        "input_project": str(input_project),
+    }
+)
 resolved_project = (
     _resolve_project(Path(str(alias.get("canonical_project"))))
     if alias.get("applied") and alias.get("canonical_project")
@@ -485,7 +494,9 @@ return {
 
 不要把这段理解成一串文件存在性判断。它实际上在守住两个不变量：
 
-- linked worktree 必须回到 canonical project truth，不能生成影子 goal；
+- `start-goal --project` 保留用户指定的 linked worktree，避免继承其他
+  worktree 的旧 goal；诊断既有连接的 `bootstrap-command-pack` 才允许回到
+  canonical project truth；
 - 只有 registry entry 与其声明的 state file 同时成立，才能无确认地复用连接。
 
 建议观察：临时把 `state_file` 指向不存在的文件，只运行 preview，确认状态是 `state_file_missing`，且没有发生写入。

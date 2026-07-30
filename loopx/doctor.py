@@ -17,6 +17,11 @@ from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path
 from .project_skill_delivery import discover_project_scoped_skill_ids
 from .registry_writability import probe_registry_write_path
 from .release_manifest import load_release_manifest, release_version_tag
+from .skill_install_readback import (
+    ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+    configured_host_skills_dir,
+    inspect_skill_install_readback,
+)
 
 
 PROMOTION_READINESS_CLASSIFICATIONS = {
@@ -29,8 +34,8 @@ RELEASE_ID_TIMESTAMP_RE = re.compile(r"^\d{8}T\d{6}Z$")
 REQUIRED_INSTALLED_SKILL_PHRASES = {
     "loopx-project": (
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
-        "--delivery-batch-scale multi_surface",
-        "--delivery-outcome outcome_progress",
+        "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>",
+        "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>",
     ),
     "loopx-pr-review": (
         "loopx --format json pr-review --state all",
@@ -717,6 +722,15 @@ def collect_doctor(
         and agent_type_uses_host_managed_skills(canonical_agent_type)
     )
     installed_skills_required = not host_managed_skill_delivery
+    host_skill_install_readback = (
+        inspect_skill_install_readback(
+            skills_dir=configured_host_skills_dir(os.environ),
+            required_skill_ids=ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+            source_root=Path(__file__).resolve().parents[1],
+        )
+        if canonical_agent_type == "ark-managed-agent"
+        else None
+    )
     loopx_path = resolve_command_path("loopx")
     invocation_path = current_script_invocation_path()
     loopx_canary_path = resolve_command_path("loopx-canary")
@@ -812,6 +826,19 @@ def collect_doctor(
         require_installed_skills=installed_skills_required,
         doctor_agent_type=canonical_agent_type,
     )
+    if installed_skills_required:
+        skill_delivery_status = (
+            "ready"
+            if all(
+                skill.get("exists") and skill.get("required_phrases")
+                for skill in skills.values()
+            )
+            else "repair_recommended"
+        )
+    elif host_skill_install_readback:
+        skill_delivery_status = str(host_skill_install_readback["status"])
+    else:
+        skill_delivery_status = "external_readback_required"
     skill_delivery = {
         "agent_type": canonical_agent_type,
         "owner": (
@@ -826,16 +853,11 @@ def collect_doctor(
         "mode": "surface_managed" if installed_skills_required else "host_managed",
         "codex_skills_root_applicable": installed_skills_required,
         "installed_skills_required_for_freshness": installed_skills_required,
-        "status": (
-            "ready"
-            if installed_skills_required
-            and all(
-                skill.get("exists") and skill.get("required_phrases")
-                for skill in skills.values()
-            )
-            else "repair_recommended"
-            if installed_skills_required
-            else "external_readback_required"
+        "status": skill_delivery_status,
+        **(
+            {"filesystem_readback": host_skill_install_readback}
+            if host_skill_install_readback
+            else {}
         ),
     }
     default_global_registry = global_registry_path(DEFAULT_RUNTIME_ROOT)
@@ -974,6 +996,19 @@ def collect_doctor(
                 else ",".join(globally_visible_project_skills)
             ),
         },
+        *(
+            [
+                {
+                    "id": "host_skill_installation_readback",
+                    "required": False,
+                    "ok": bool(host_skill_install_readback.get("ready")),
+                    "applicable": True,
+                    "detail": str(host_skill_install_readback.get("reason")),
+                }
+            ]
+            if host_skill_install_readback
+            else []
+        ),
         {
             "id": "global_registry_writable",
             "required": True,
@@ -1039,8 +1074,15 @@ def collect_doctor(
         "globally_visible_project_skills": globally_visible_project_skills,
         "checks": checks,
         "fix": (
-            "Do not infer custom-host skill delivery from `~/.codex/skills`; "
-            "verify the host-managed loaded-skill readback from `loopx agent-onboard`."
+            "Set `LOOPX_SKILLS_DIR=<PROJECT_WORKSPACE>/.agents/skills` and rerun "
+            f"`{repo_root / 'scripts' / 'install-local.sh'}`; then rerun doctor "
+            "with the same environment. Filesystem readback proves materialization; "
+            "the host must still report its runtime loaded-skill readback."
+            if canonical_agent_type == "ark-managed-agent"
+            else (
+                "Do not infer custom-host skill delivery from `~/.codex/skills`; "
+                "verify the host-managed loaded-skill readback from `loopx agent-onboard`."
+            )
             if canonical_agent_type
             and agent_type_uses_host_managed_skills(canonical_agent_type)
             else (

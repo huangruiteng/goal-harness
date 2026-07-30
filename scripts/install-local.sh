@@ -17,6 +17,7 @@ Common environment variables:
   LOOPX_INSTALL_CANARY=0           Skip the loopx-canary executable.
   LOOPX_INSTALL_SKILL=0            Skip packaged workflow skills.
   LOOPX_SKILLS_DIR=/path           Install workflow skills into this host-native root.
+  LOOPX_ENTRY_HOST_SURFACE=...     Bind generated $loopx to an exact host (ark-managed-agent).
   LOOPX_INSTALL_SLASH_COMMANDS=0   Skip Codex and Claude command skills.
   LOOPX_INSTALL_OPENCODE=0         Install the OpenCode goal bridge surface.
   CODEX_HOME=/path                 Override the Codex home directory.
@@ -57,6 +58,11 @@ if [[ "${LOOPX_SKILLS_DIR+x}" == "x" ]]; then
   skills_dir_explicit=1
 fi
 skills_dir="${LOOPX_SKILLS_DIR:-$codex_home/skills}"
+entry_host_surface="${LOOPX_ENTRY_HOST_SURFACE:-}"
+if [[ -n "$entry_host_surface" && "$entry_host_surface" != "ark-managed-agent" ]]; then
+  echo "loopx installer error: unsupported LOOPX_ENTRY_HOST_SURFACE: $entry_host_surface" >&2
+  exit 2
+fi
 man_root="${LOOPX_MAN_ROOT:-$HOME/.local/share/man}"
 man_dir="${LOOPX_MAN_DIR:-$man_root/man1}"
 install_skill="${LOOPX_INSTALL_SKILL:-1}"
@@ -286,7 +292,8 @@ PY
 install_workflow_skills() {
   local skills_source="$1"
   local source_root="$2"
-  local skill_source skill_name skill_scope_file skill_target skill_tmp
+  local entry_cli_bin="$3"
+  local skill_source skill_name skill_scope_file skill_target skill_tmp entry_status
   local -a installed_skill_ids=()
   skill_line="- skill: skipped"
   if [[ "$install_skill" == "0" || ! -d "$skills_source" ]]; then
@@ -339,24 +346,64 @@ install_workflow_skills() {
   done < <(find "$skills_source" -mindepth 1 -maxdepth 1 -type d -print | sort)
 
   if [[ "${#installed_skill_ids[@]}" -gt 0 ]]; then
-    LOOPX_SKILL_INSTALL_DIR="$skills_dir" \
-      LOOPX_SKILL_INSTALL_SOURCE_ROOT="$source_root" \
-      LOOPX_SKILL_INSTALL_IDS="$(printf '%s\n' "${installed_skill_ids[@]}")" \
-      LOOPX_SKILL_INSTALLED_AT="$installed_at" \
-      PYTHONPATH="$source_root${PYTHONPATH:+:$PYTHONPATH}" \
-      "${LOOPX_PYTHON:-python3}" - <<'PY'
+    if ! entry_status="$(
+      LOOPX_SKILL_INSTALL_DIR="$skills_dir" \
+        LOOPX_SKILL_INSTALL_SOURCE_ROOT="$source_root" \
+        LOOPX_SKILL_INSTALL_IDS="$(printf '%s\n' "${installed_skill_ids[@]}")" \
+        LOOPX_SKILL_INSTALLED_AT="$installed_at" \
+        LOOPX_SKILL_ENTRY_CLI_BIN="$entry_cli_bin" \
+        LOOPX_SKILL_ENTRY_HOST_SURFACE="$entry_host_surface" \
+        PYTHONPATH="$source_root${PYTHONPATH:+:$PYTHONPATH}" \
+        "${LOOPX_PYTHON:-python3}" - <<'PY'
 import os
+import sys
 from pathlib import Path
 
-from loopx.skill_install_readback import write_skill_install_readback
+from loopx.skill_install_readback import (
+    SKILL_INSTALL_READBACK_FILENAME,
+    write_skill_install_readback,
+)
+from loopx.slash_command_install import materialize_loopx_entry_skill
 
+result = materialize_loopx_entry_skill(
+    skills_dir=Path(os.environ["LOOPX_SKILL_INSTALL_DIR"]),
+    execute=True,
+    cli_bin=os.environ["LOOPX_SKILL_ENTRY_CLI_BIN"],
+    host_surface=os.environ.get("LOOPX_SKILL_ENTRY_HOST_SURFACE") or None,
+)
+status = str(result["status"])
+materialized_skill_ids = os.environ["LOOPX_SKILL_INSTALL_IDS"].splitlines()
+managed_statuses = {"created", "updated", "unchanged", "upgraded_legacy_managed"}
+if status in managed_statuses:
+    materialized_skill_ids.append("loopx")
+elif os.environ.get("LOOPX_SKILL_ENTRY_HOST_SURFACE"):
+    (
+        Path(os.environ["LOOPX_SKILL_INSTALL_DIR"])
+        / SKILL_INSTALL_READBACK_FILENAME
+    ).unlink(missing_ok=True)
+    print(
+        "loopx installer error: exact-host entry skill was not materialized "
+        f"(status={status}, path={result['path']})",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 write_skill_install_readback(
     skills_dir=Path(os.environ["LOOPX_SKILL_INSTALL_DIR"]),
-    skill_ids=os.environ["LOOPX_SKILL_INSTALL_IDS"].splitlines(),
+    skill_ids=materialized_skill_ids,
     source_root=Path(os.environ["LOOPX_SKILL_INSTALL_SOURCE_ROOT"]),
     installed_at=os.environ["LOOPX_SKILL_INSTALLED_AT"],
 )
+print(status)
 PY
+    )"; then
+      return 1
+    fi
+    if [[ "$entry_status" == "created" || "$entry_status" == "updated" \
+      || "$entry_status" == "unchanged" || "$entry_status" == "upgraded_legacy_managed" ]]; then
+      skill_line="${skill_line}- generated skill: $skills_dir/loopx"$'\n'
+    else
+      skill_line="${skill_line}- generated skill: not materialized ($entry_status)"$'\n'
+    fi
     skill_line="${skill_line}- skill readback: $skills_dir/.loopx-skill-install.json"$'\n'
   fi
   skill_line="${skill_line%$'\n'}"
@@ -527,7 +574,7 @@ if [[ "$promote_default" == "0" ]]; then
   "$bin_dir/loopx-canary" doctor >/dev/null
   skill_line="- skill: unchanged (set LOOPX_SKILLS_DIR to install canary workflow skills)"
   if [[ "$skills_dir_explicit" == "1" ]]; then
-    install_workflow_skills "$repo_root/skills" "$repo_root"
+    install_workflow_skills "$repo_root/skills" "$repo_root" "$bin_dir/loopx-canary"
   fi
   cat <<EOF
 loopx checkout installed as canary only
@@ -658,7 +705,7 @@ if [[ "$install_canary" != "0" ]]; then
   "$bin_dir/loopx-canary" doctor >/dev/null
 fi
 
-install_workflow_skills "$release_dir/skills" "$release_dir"
+install_workflow_skills "$release_dir/skills" "$release_dir" "$bin_dir/loopx"
 
 slash_line="- slash commands: skipped"
 install_slash_commands="${LOOPX_INSTALL_SLASH_COMMANDS:-1}"

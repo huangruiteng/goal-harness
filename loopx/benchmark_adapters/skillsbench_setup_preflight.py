@@ -10,7 +10,11 @@ from .skillsbench_failure_signals import (
 )
 
 
-SCHEMA_VERSION = "skillsbench_setup_only_public_preflight_v0"
+SCHEMA_VERSION = "skillsbench_setup_only_public_preflight_v1"
+SCORED_LIFECYCLE_READINESS_GATE_SCHEMA_VERSION = (
+    "skillsbench_scored_lifecycle_readiness_gate_v0"
+)
+MAX_SCORED_LIFECYCLE_TERMINAL_BUDGET_SEC = 300
 COMPOSE_TYPED_CAUSE_SCHEMA_VERSION = "skillsbench_compose_typed_cause_v0"
 APT_TRANSPORT_RECEIPT_SCHEMA_VERSION = "skillsbench_apt_transport_failure_receipt_v0"
 _PATCH_SUFFIX = "_patch_applied"
@@ -325,7 +329,24 @@ def _base_result(
         "environment_ready_hook_requested": False,
         "environment_ready_hook_invoked": False,
         "environment_ready_hook_status": "not_requested",
+        "agent_install_canary_requested": False,
+        "agent_install_canary_status": "not_requested",
         "agent_install_invoked": False,
+        "scored_lifecycle_canary_requested": False,
+        "scored_lifecycle_canary_status": "not_requested",
+        "scored_lifecycle_terminal_budget_sec": 0,
+        "case_goal_state_initialized_before_agent": False,
+        "acp_session_initialized": False,
+        "agent_active_observed": False,
+        "loopx_state_read_count": 0,
+        "loopx_state_write_count": 0,
+        "task_prompt_sent": False,
+        "benchmark_task_launched": False,
+        "scored_launch_allowed": False,
+        "scored_launch_blocker": "scored_lifecycle_canary_not_requested",
+        "loopx_runner_source_git_head": "",
+        "loopx_runner_source_expected_git_head": "",
+        "loopx_runner_source_matches_expected": False,
         "agent_execution_invoked": False,
         "verifier_invoked": False,
         "dependency_classes": [],
@@ -364,6 +385,107 @@ def _base_result(
     }
 
 
+def skillsbench_scored_lifecycle_readiness_gate(
+    receipt: Mapping[str, Any],
+    *,
+    expected_git_head: str,
+) -> dict[str, Any]:
+    """Validate the public task-free receipt required before scored launch."""
+
+    expected = str(expected_git_head or "").strip()
+    observed = str(receipt.get("loopx_runner_source_git_head") or "").strip()
+    blockers: list[str] = []
+    read_count = receipt.get("loopx_state_read_count")
+    write_count = receipt.get("loopx_state_write_count")
+    terminal_budget = receipt.get("scored_lifecycle_terminal_budget_sec")
+    required = (
+        (
+            receipt.get("schema_version") == SCHEMA_VERSION,
+            "receipt_schema_mismatch",
+        ),
+        (receipt.get("status") == "passed", "preflight_not_passed"),
+        (
+            receipt.get("cleanup_status") == "completed",
+            "preflight_cleanup_incomplete",
+        ),
+        (
+            receipt.get("scored_lifecycle_canary_status") == "passed",
+            "scored_lifecycle_canary_not_passed",
+        ),
+        (
+            isinstance(terminal_budget, int)
+            and not isinstance(terminal_budget, bool)
+            and 1 <= terminal_budget <= MAX_SCORED_LIFECYCLE_TERMINAL_BUDGET_SEC,
+            "scored_lifecycle_terminal_budget_invalid",
+        ),
+        (
+            receipt.get("case_goal_state_initialized_before_agent") is True,
+            "case_state_seed_not_observed",
+        ),
+        (
+            receipt.get("acp_session_initialized") is True,
+            "acp_session_not_initialized",
+        ),
+        (
+            receipt.get("agent_active_observed") is True,
+            "agent_active_not_observed",
+        ),
+        (
+            isinstance(read_count, int)
+            and not isinstance(read_count, bool)
+            and read_count >= 1,
+            "loopx_state_read_not_observed",
+        ),
+        (
+            isinstance(write_count, int)
+            and not isinstance(write_count, bool)
+            and write_count >= 1,
+            "loopx_state_write_not_observed",
+        ),
+        (
+            receipt.get("task_prompt_sent") is False,
+            "task_prompt_boundary_not_proven",
+        ),
+        (
+            receipt.get("benchmark_task_launched") is False,
+            "benchmark_task_boundary_not_proven",
+        ),
+        (
+            receipt.get("agent_execution_invoked") is False,
+            "agent_execution_boundary_not_proven",
+        ),
+        (
+            receipt.get("verifier_invoked") is False,
+            "verifier_boundary_not_proven",
+        ),
+        (
+            receipt.get("scored_launch_allowed") is True,
+            "receipt_does_not_allow_scored_launch",
+        ),
+    )
+    blockers.extend(reason for passed, reason in required if not passed)
+    if not expected:
+        blockers.append("expected_loopx_git_head_missing")
+    elif not observed or not observed.startswith(expected):
+        blockers.append("loopx_runner_source_git_head_mismatch")
+    if receipt.get("loopx_runner_source_matches_expected") is not True:
+        blockers.append("loopx_runner_source_match_not_proven")
+
+    return {
+        "schema_version": SCORED_LIFECYCLE_READINESS_GATE_SCHEMA_VERSION,
+        "allowed": not blockers,
+        "blockers": blockers,
+        "expected_git_head": expected[:40],
+        "observed_git_head": observed[:40],
+        "raw_logs_read": False,
+        "raw_task_text_read": False,
+        "raw_trajectory_read": False,
+        "raw_verifier_output_read": False,
+        "host_paths_recorded": False,
+        "secret_values_recorded": False,
+    }
+
+
 def _emit_progress(
     callback: Callable[[Mapping[str, Any]], None] | None,
     result: Mapping[str, Any],
@@ -382,8 +504,13 @@ async def run_setup_only_public_preflight(
     cleanup_timeout_sec: float = 30.0,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
     environment_ready_hook: Callable[[Any], Awaitable[None]] | None = None,
+    agent_install_canary: bool = False,
+    scored_lifecycle_canary: (
+        Callable[[Any], Awaitable[Mapping[str, Any]]] | None
+    ) = None,
+    scored_lifecycle_timeout_sec: float = 180.0,
 ) -> dict[str, Any]:
-    """Materialize a BenchFlow environment without installing or running an agent."""
+    """Materialize a BenchFlow environment and optionally canary scored readiness."""
 
     result = _base_result(
         task_staging=task_staging,
@@ -391,12 +518,26 @@ async def run_setup_only_public_preflight(
     )
     stage_timeout_sec = max(1.0, stage_timeout_sec)
     cleanup_timeout_sec = max(1.0, cleanup_timeout_sec)
+    scored_lifecycle_timeout_sec = max(0.01, scored_lifecycle_timeout_sec)
     rollout: Any | None = None
     restore_compose_boundary: Callable[[], None] | None = None
+    scored_lifecycle_started_at: float | None = None
     failed = False
     if environment_ready_hook is not None:
         result["environment_ready_hook_requested"] = True
         result["environment_ready_hook_status"] = "pending"
+    if agent_install_canary:
+        result["agent_install_canary_requested"] = True
+        result["agent_install_canary_status"] = "pending"
+    if scored_lifecycle_canary is not None:
+        if not agent_install_canary:
+            raise ValueError("scored lifecycle canary requires agent install canary")
+        result["scored_lifecycle_canary_requested"] = True
+        result["scored_lifecycle_canary_status"] = "pending"
+        result["scored_lifecycle_terminal_budget_sec"] = int(
+            scored_lifecycle_timeout_sec
+        )
+        result["scored_launch_blocker"] = "scored_lifecycle_canary_not_passed"
     _emit_progress(progress_callback, result)
     try:
         rollout = await asyncio.wait_for(
@@ -434,13 +575,108 @@ async def run_setup_only_public_preflight(
                 timeout=stage_timeout_sec,
             )
             result["environment_ready_hook_status"] = "passed"
+        if agent_install_canary:
+            scored_lifecycle_started_at = (
+                asyncio.get_running_loop().time()
+                if scored_lifecycle_canary is not None
+                else None
+            )
+            result["stage"] = "agent_install_canary"
+            result["agent_install_invoked"] = True
+            result["agent_install_canary_status"] = "running"
+            _emit_progress(progress_callback, result)
+            await asyncio.wait_for(
+                rollout.install_agent(),
+                timeout=(
+                    scored_lifecycle_timeout_sec
+                    if scored_lifecycle_canary is not None
+                    else stage_timeout_sec
+                ),
+            )
+            result["agent_install_canary_status"] = "passed"
+        if scored_lifecycle_canary is not None:
+            if scored_lifecycle_started_at is None:
+                raise RuntimeError("scored lifecycle canary budget did not start")
+            result["stage"] = "scored_lifecycle_canary"
+            result["scored_lifecycle_canary_status"] = "running"
+            _emit_progress(progress_callback, result)
+            remaining_timeout_sec = max(
+                0.001,
+                scored_lifecycle_timeout_sec
+                - (
+                    asyncio.get_running_loop().time()
+                    - scored_lifecycle_started_at
+                ),
+            )
+            lifecycle = await asyncio.wait_for(
+                scored_lifecycle_canary(rollout),
+                timeout=remaining_timeout_sec,
+            )
+            for field in (
+                "case_goal_state_initialized_before_agent",
+                "acp_session_initialized",
+                "agent_active_observed",
+                "task_prompt_sent",
+                "benchmark_task_launched",
+                "loopx_runner_source_matches_expected",
+            ):
+                result[field] = lifecycle.get(field) is True
+            for field in ("loopx_state_read_count", "loopx_state_write_count"):
+                value = lifecycle.get(field)
+                result[field] = (
+                    max(0, int(value))
+                    if isinstance(value, int) and not isinstance(value, bool)
+                    else 0
+                )
+            for field in (
+                "loopx_runner_source_git_head",
+                "loopx_runner_source_expected_git_head",
+            ):
+                value = lifecycle.get(field)
+                result[field] = str(value or "")[:40]
+            readiness = skillsbench_scored_lifecycle_readiness_gate(
+                {
+                    **result,
+                    "status": "passed",
+                    "cleanup_status": "completed",
+                    "scored_lifecycle_canary_status": "passed",
+                    "scored_launch_allowed": True,
+                },
+                expected_git_head=result[
+                    "loopx_runner_source_expected_git_head"
+                ],
+            )
+            if readiness["allowed"] is not True:
+                raise RuntimeError("scored lifecycle canary did not prove readiness")
+            result["scored_lifecycle_canary_status"] = "passed"
+            result["scored_launch_allowed"] = True
+            result["scored_launch_blocker"] = "none"
         result["status"] = "passed"
-        result["stage"] = "environment_ready_before_agent"
+        result["stage"] = (
+            "scored_runtime_ready"
+            if scored_lifecycle_canary is not None
+            else (
+                "agent_install_ready_before_execution"
+                if agent_install_canary
+                else "environment_ready_before_agent"
+            )
+        )
         result["exit_category"] = "passed"
     except Exception as exc:
         failed = True
         if result["environment_ready_hook_status"] == "running":
             result["environment_ready_hook_status"] = "failed"
+        if result["agent_install_canary_status"] == "running":
+            result["agent_install_canary_status"] = "failed"
+        if result["scored_lifecycle_canary_status"] == "running":
+            result["scored_lifecycle_canary_status"] = "failed"
+        elif (
+            result["scored_lifecycle_canary_requested"] is True
+            and result["scored_lifecycle_canary_status"] == "pending"
+        ):
+            result["scored_lifecycle_canary_status"] = "blocked_before_start"
+        result["scored_launch_allowed"] = False
+        result["scored_launch_blocker"] = "scored_lifecycle_canary_not_passed"
         if rollout is not None:
             result["job_root_materialized"] = (
                 getattr(rollout, "_rollout_dir", None) is not None
@@ -522,6 +758,8 @@ async def run_setup_only_public_preflight(
                 result["cleanup_status"] = "completed"
             except Exception:
                 result["cleanup_status"] = "failed"
+                result["scored_launch_allowed"] = False
+                result["scored_launch_blocker"] = "preflight_cleanup_incomplete"
                 if not failed:
                     result["status"] = "failed"
                     result["failure_stage"] = "cleanup"

@@ -19,6 +19,7 @@ from loopx.benchmark_adapters.skillsbench_setup_preflight import (
     SkillsBenchComposeCommandFailure,
     install_skillsbench_compose_typed_cause_boundary,
     run_setup_only_public_preflight,
+    skillsbench_scored_lifecycle_readiness_gate,
 )
 from loopx.status import compact_benchmark_run
 from scripts.skillsbench_automation_loop import (
@@ -37,6 +38,7 @@ from scripts.skillsbench_automation_loop import (
 class FakeRollout:
     failure_stage = ""
     failure: Exception | None = None
+    install_delay_sec = 0.0
     events: list[str] = []
 
     def __init__(self) -> None:
@@ -62,6 +64,13 @@ class FakeRollout:
         if self.failure_stage == "environment_start" and self.failure is not None:
             raise self.failure
 
+    async def install_agent(self) -> None:
+        self.events.append("install_agent")
+        if self.install_delay_sec:
+            await asyncio.sleep(self.install_delay_sec)
+        if self.failure_stage == "agent_install" and self.failure is not None:
+            raise self.failure
+
     async def cleanup(self) -> None:
         self.events.append("cleanup")
         if self.failure_stage == "cleanup" and self.failure is not None:
@@ -72,6 +81,7 @@ class FakeRollout:
 def reset_fake_rollout() -> None:
     FakeRollout.failure_stage = ""
     FakeRollout.failure = None
+    FakeRollout.install_delay_sec = 0.0
     FakeRollout.events = []
 
 
@@ -216,6 +226,158 @@ def test_setup_only_preflight_cleans_up_after_environment_hook_failure() -> None
     assert "private callback detail" not in json.dumps(result, sort_keys=True)
 
 
+def test_setup_only_preflight_canaries_agent_install_without_execution() -> None:
+    result = asyncio.run(
+        run_setup_only_public_preflight(
+            rollout_type=FakeRollout,
+            config=object(),
+            stage_timeout_sec=1,
+            agent_install_canary=True,
+        )
+    )
+
+    assert result["status"] == "passed"
+    assert result["stage"] == "agent_install_ready_before_execution"
+    assert result["agent_install_canary_requested"] is True
+    assert result["agent_install_canary_status"] == "passed"
+    assert result["agent_install_invoked"] is True
+    assert result["agent_execution_invoked"] is False
+    assert result["verifier_invoked"] is False
+    assert FakeRollout.events == [
+        "create",
+        "setup",
+        "start",
+        "install_agent",
+        "cleanup",
+    ]
+
+
+def test_setup_only_preflight_classifies_agent_install_canary_failure() -> None:
+    FakeRollout.failure_stage = "agent_install"
+    FakeRollout.failure = RuntimeError("private provider install detail")
+
+    result = asyncio.run(
+        run_setup_only_public_preflight(
+            rollout_type=FakeRollout,
+            config=object(),
+            stage_timeout_sec=1,
+            agent_install_canary=True,
+        )
+    )
+
+    assert result["status"] == "failed"
+    assert result["failure_stage"] == "agent_install_canary"
+    assert result["agent_install_canary_status"] == "failed"
+    assert result["cleanup_status"] == "completed"
+    assert result["agent_execution_invoked"] is False
+    assert result["verifier_invoked"] is False
+    assert "private provider install detail" not in json.dumps(result, sort_keys=True)
+
+
+def test_setup_only_preflight_proves_task_free_scored_lifecycle() -> None:
+    async def scored_lifecycle_canary(_rollout: object) -> dict[str, object]:
+        FakeRollout.events.append("scored_lifecycle_canary")
+        return {
+            "case_goal_state_initialized_before_agent": True,
+            "acp_session_initialized": True,
+            "agent_active_observed": True,
+            "loopx_state_read_count": 1,
+            "loopx_state_write_count": 1,
+            "task_prompt_sent": False,
+            "benchmark_task_launched": False,
+            "loopx_runner_source_git_head": "abc123def456",
+            "loopx_runner_source_expected_git_head": "abc123",
+            "loopx_runner_source_matches_expected": True,
+        }
+
+    result = asyncio.run(
+        run_setup_only_public_preflight(
+            rollout_type=FakeRollout,
+            config=object(),
+            stage_timeout_sec=1,
+            agent_install_canary=True,
+            scored_lifecycle_canary=scored_lifecycle_canary,
+            scored_lifecycle_timeout_sec=2,
+        )
+    )
+
+    assert result["status"] == "passed"
+    assert result["stage"] == "scored_runtime_ready"
+    assert result["scored_lifecycle_canary_status"] == "passed"
+    assert result["scored_lifecycle_terminal_budget_sec"] == 2
+    assert result["agent_active_observed"] is True
+    assert result["loopx_state_read_count"] == 1
+    assert result["loopx_state_write_count"] == 1
+    assert result["scored_launch_allowed"] is True
+    assert result["scored_launch_blocker"] == "none"
+    assert result["task_prompt_sent"] is False
+    assert result["benchmark_task_launched"] is False
+    assert result["agent_execution_invoked"] is False
+    assert result["verifier_invoked"] is False
+    assert FakeRollout.events == [
+        "create",
+        "setup",
+        "start",
+        "install_agent",
+        "scored_lifecycle_canary",
+        "cleanup",
+    ]
+
+
+def test_scored_lifecycle_gate_fails_closed_without_state_write() -> None:
+    receipt = {
+        "schema_version": "skillsbench_setup_only_public_preflight_v1",
+        "status": "passed",
+        "cleanup_status": "completed",
+        "scored_lifecycle_canary_status": "passed",
+        "scored_lifecycle_terminal_budget_sec": 180,
+        "case_goal_state_initialized_before_agent": True,
+        "acp_session_initialized": True,
+        "agent_active_observed": True,
+        "loopx_state_read_count": 1,
+        "loopx_state_write_count": 0,
+        "task_prompt_sent": False,
+        "benchmark_task_launched": False,
+        "agent_execution_invoked": False,
+        "verifier_invoked": False,
+        "scored_launch_allowed": True,
+        "loopx_runner_source_git_head": "abc123def456",
+        "loopx_runner_source_matches_expected": True,
+    }
+
+    gate = skillsbench_scored_lifecycle_readiness_gate(
+        receipt,
+        expected_git_head="abc123",
+    )
+
+    assert gate["allowed"] is False
+    assert gate["blockers"] == ["loopx_state_write_not_observed"]
+
+
+def test_scored_lifecycle_budget_includes_agent_install() -> None:
+    async def unreachable_canary(_rollout: object) -> dict[str, object]:
+        raise AssertionError("canary must not run after install budget expires")
+
+    FakeRollout.install_delay_sec = 0.03
+    result = asyncio.run(
+        run_setup_only_public_preflight(
+            rollout_type=FakeRollout,
+            config=object(),
+            stage_timeout_sec=1,
+            agent_install_canary=True,
+            scored_lifecycle_canary=unreachable_canary,
+            scored_lifecycle_timeout_sec=0.01,
+        )
+    )
+
+    assert result["status"] == "failed"
+    assert result["failure_stage"] == "agent_install_canary"
+    assert result["agent_install_canary_status"] == "failed"
+    assert result["scored_lifecycle_canary_status"] == "blocked_before_start"
+    assert result["scored_launch_allowed"] is False
+    assert result["cleanup_status"] == "completed"
+
+
 def test_formal_run_lifecycle_receipt_projects_live_worker_without_private_logs(
     tmp_path: Path,
 ) -> None:
@@ -340,6 +502,74 @@ def test_setup_only_runner_mode_bypasses_formal_round_budget() -> None:
     assert plan["setup_only_public_preflight_json"].endswith(
         "setup_only_preflight.public.json"
     )
+
+
+def test_setup_only_agent_install_canary_is_publicly_projected() -> None:
+    args = parse_args(
+        [
+            "--task-id",
+            "flink-query",
+            "--route",
+            "loopx-goal-start-product-mode",
+            "--setup-only-public-preflight",
+            "--setup-only-agent-install-canary",
+        ]
+    )
+
+    plan = build_plan(args)
+    assert args.setup_only_agent_install_canary is True
+    assert plan["setup_only_agent_install_canary"] is True
+    assert _public_runner_config(plan)["setup_only_agent_install_canary"] is True
+
+
+def test_setup_only_agent_install_canary_requires_setup_only_mode() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(
+            [
+                "--task-id",
+                "flink-query",
+                "--setup-only-agent-install-canary",
+            ]
+        )
+
+
+def test_setup_only_scored_lifecycle_canary_is_publicly_projected() -> None:
+    args = parse_args(
+        [
+            "--task-id",
+            "flink-query",
+            "--route",
+            "loopx-goal-start-product-mode",
+            "--host-local-acp-launch",
+            "--setup-only-public-preflight",
+            "--setup-only-agent-install-canary",
+            "--setup-only-scored-lifecycle-canary",
+            "--scored-lifecycle-canary-timeout-sec",
+            "90",
+        ]
+    )
+
+    plan = build_plan(args)
+    public = _public_runner_config(plan)
+    assert args.setup_only_scored_lifecycle_canary is True
+    assert plan["setup_only_scored_lifecycle_canary"] is True
+    assert public["setup_only_scored_lifecycle_canary"] is True
+    assert public["scored_lifecycle_canary_timeout_sec"] == 90
+
+
+def test_setup_only_scored_lifecycle_canary_requires_agent_install() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(
+            [
+                "--task-id",
+                "flink-query",
+                "--route",
+                "loopx-goal-start-product-mode",
+                "--host-local-acp-launch",
+                "--setup-only-public-preflight",
+                "--setup-only-scored-lifecycle-canary",
+            ]
+        )
 
 
 def test_primary_pip_index_mode_is_publicly_attributable() -> None:

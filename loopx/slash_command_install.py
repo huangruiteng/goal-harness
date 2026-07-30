@@ -116,14 +116,16 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "argument_hint": "[task text]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, or `opencode` for OpenCode.",
+                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, `opencode` for OpenCode, or `ark-managed-agent` for Ark Managed Agent.",
                 f"If arguments are present, preserve them as the task text and run `{cli_bin} start-goal --guided --project . --goal-text \"$ARGUMENTS\" --host-surface <exact-current-host>` before planning work. If the host is unclear, omit the flag once and follow the returned host-surface selection gate.",
+                f"Treat the returned `ordered_steps` as a required transaction. On first connection, run its bootstrap command, then plan and execute at least one business `{cli_bin} todo add` derived from `$ARGUMENTS` before substantive task work. Encode priority in the todo text such as `[P0]`; `{cli_bin} todo add` has no `--priority` flag. Do not continue until LoopX status shows that business Agent Todo.",
+                f"Before dependent work, persist material scope, acceptance, or non-goal changes in current Todo evidence and the next executable Todo; then run `{cli_bin} refresh-state` and verify quota readback. Chat/model summaries are not durable state.",
                 f"If that packet exposes a goal-selection gate, rerun one exact choice before any mutation. When the user asks to create or become a new peer/meta/supervisor agent, do not reuse an existing registered identity: choose a new public-safe agent id, preview then apply `{cli_bin} register-agent --goal-id <selected-goal-id> --agent-id <new-agent-id> --execute`, and rerun start-goal with explicit `--goal-id` and `--agent-id` before todo writeback.",
                 f"If arguments are empty, inspect `{cli_bin} bootstrap-command-pack --project .`, `{cli_bin} status`, and `{cli_bin} slash-commands` before changing files.",
-                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli`, `claude-code`, or `opencode`, never ambiguous `codex`.",
+                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli`, `claude-code`, `opencode`, or `ark-managed-agent`, never ambiguous `codex`.",
                 f"Do not configure optional features during first-run. Only when the task needs bounded child agents or Explore, inspect `{cli_bin} configure-goal --goal-id <resolved-goal-id>` and its `configuration_catalog`; preview before explicit apply and never auto-enable a feature merely because it exists.",
                 "When project work is started, plan ordered P0/P1/P2 todos, write them through LoopX todo state, refresh state, activate the host loop if missing/stale, run quota, and complete one bounded delivery segment through validation plus LoopX writeback or an exact blocker; do not return merely after setup, planning, or claim.",
-                "Host loop activation means Codex App heartbeat automation; Codex App over SSH, the Codex IDE plugin, or CLI visible `/goal <task_body>`; Claude Code native `/loop`; OpenCode `loopx_goal_activate`; or a custom host-loop gate from `loopx agent-onboard`.",
+                "Host loop activation means Codex App heartbeat automation; Codex App over SSH, the Codex IDE plugin, or CLI visible `/goal <task_body>`; Claude Code native `/loop`; OpenCode `loopx_goal_activate`; Ark Managed Agent one-shot Goal submission; or a custom host-loop gate from `loopx agent-onboard`.",
                 "If this session cannot mutate the host loop surface, surface the exact pasteable gate instead of saying LoopX is autonomously connected.",
             ],
         },
@@ -202,6 +204,58 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             )
         specs.extend(legacy_specs)
     return specs
+
+
+def _command_skill_content(spec: dict[str, Any], *, surface: str) -> str:
+    return _skill_body(
+        command=str(spec["command"]),
+        title=f"LoopX {spec['command']}",
+        description=str(spec["description"]),
+        argument_hint=str(spec["argument_hint"]),
+        instructions=list(spec["instructions"]),
+        surface=surface,
+        front_matter_name=str(spec["name"]),
+    )
+
+
+def materialize_loopx_entry_skill(
+    *,
+    skills_dir: Path,
+    execute: bool,
+    cli_bin: str = "loopx",
+    host_surface: str | None = None,
+) -> dict[str, Any]:
+    """Materialize the generated ``$loopx`` entry skill into a host skill root."""
+
+    if host_surface not in {None, "ark-managed-agent"}:
+        raise ValueError(f"unsupported fixed LoopX entry host surface: {host_surface}")
+    spec = next(
+        item
+        for item in _command_prompt_specs(
+            cli_bin=cli_bin,
+            include_legacy_aliases=False,
+        )
+        if item["name"] == "loopx"
+    )
+    if host_surface:
+        instructions = list(spec["instructions"])
+        instructions[1] = (
+            "This entry skill is installed for the exact current host "
+            f"`{host_surface}`; do not infer or substitute another host surface."
+        )
+        instructions[2] = (
+            f"If arguments are present, preserve them as the task text and run "
+            f'`{cli_bin} start-goal --guided --project . --goal-text "$ARGUMENTS" '
+            f"--host-surface {host_surface}` before planning work."
+        )
+        spec = {**spec, "instructions": instructions}
+    skill_path = skills_dir / "loopx" / "SKILL.md"
+    content = _command_skill_content(spec, surface="codex-skills")
+    return {
+        "skill_id": "loopx",
+        "path": str(skill_path),
+        "status": _target_status(skill_path, content, execute=execute),
+    }
 
 
 def _is_legacy_upgradable_loopx_file(existing: str) -> bool:
@@ -550,15 +604,7 @@ def install_slash_commands(
                     }
                 )
                 continue
-            skill_content = _skill_body(
-                command=str(spec["command"]),
-                title=f"LoopX {spec['command']}",
-                description=str(spec["description"]),
-                argument_hint=str(spec["argument_hint"]),
-                instructions=list(spec["instructions"]),
-                surface="codex-skills",
-                front_matter_name=str(spec["name"]),
-            )
+            skill_content = _command_skill_content(spec, surface="codex-skills")
             skill_status = _target_status(skill_path, skill_content, execute=execute)
             installed.append(
                 {

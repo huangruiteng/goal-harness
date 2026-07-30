@@ -303,7 +303,7 @@ def normalize_agent_type(value: str | None) -> str:
 
 
 def agent_type_for_host_surface(value: str | None) -> str:
-    key = (value or "chat-box").strip().lower()
+    key = (value or "codex-app").strip().lower()
     if key in HOST_SURFACE_TO_AGENT_TYPE:
         return HOST_SURFACE_TO_AGENT_TYPE[key]
     return normalize_agent_type(key)

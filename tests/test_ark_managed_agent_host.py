@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 from loopx.agent_onboarding import (
     REQUIRED_HOST_SKILL_IDS,
     _skill_delivery_contract,
+    build_agent_onboarding_packet,
 )
 from loopx.control_plane.testing.canary_harness import (
     run_json_cli,
@@ -16,6 +19,31 @@ from loopx.host_loop_activation import (
     agent_type_uses_host_managed_skills,
     build_host_loop_activation_packet,
 )
+from loopx.skill_install_readback import (
+    PACKAGED_HOST_SKILL_IDS,
+    SKILL_INSTALL_READBACK_FILENAME,
+    inspect_skill_install_readback,
+    write_skill_install_readback,
+)
+from loopx.slash_command_install import materialize_loopx_entry_skill
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _materialize_workflow_skills(skills_dir: Path) -> None:
+    for skill_id in PACKAGED_HOST_SKILL_IDS:
+        shutil.copytree(REPO_ROOT / "skills" / skill_id, skills_dir / skill_id)
+    entry = materialize_loopx_entry_skill(
+        skills_dir=skills_dir,
+        execute=True,
+        host_surface="ark-managed-agent",
+    )
+    assert entry["status"] == "created"
+    write_skill_install_readback(
+        skills_dir=skills_dir,
+        skill_ids=REQUIRED_HOST_SKILL_IDS,
+        source_root=REPO_ROOT,
+    )
 
 
 CONTINUITY_GOAL_ID = "managed-agent-continuity-fixture"
@@ -43,8 +71,17 @@ def test_goal_prompt_is_one_transport_independent_activation() -> None:
     assert "Goal runtime owns continuation and inner iterations" in normalized
     assert "goal loop, not automation" in normalized
     assert "invoke LoopX Turn" in normalized
+    assert (
+        "Normal turns use CLI `interaction_contract`; use `loopx-project` for "
+        "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
+        in normalized
+    )
     assert "choose the highest-priority in-scope unblocked agent todo" in normalized
     assert "Honor claims/leases, blocker-push and recovery obligations" in normalized
+    assert (
+        "Before dependent work, persist material scope/acceptance/non-goal changes "
+        "in current evidence and the next todo"
+    ) in normalized
     assert "refresh the accountable progress record before spending" in normalized
 
 
@@ -104,7 +141,8 @@ def test_host_activation_submits_one_goal_without_turn_or_automation() -> None:
     assert "loopx turn run-once" not in str(packet).lower()
 
 
-def test_host_requires_host_managed_loopx_skill_delivery() -> None:
+def test_host_requires_host_managed_loopx_skill_delivery(monkeypatch) -> None:
+    monkeypatch.delenv("LOOPX_SKILLS_DIR", raising=False)
     contract = _skill_delivery_contract("ark-managed-agent")
 
     assert contract["mode"] == "host_managed"
@@ -113,23 +151,157 @@ def test_host_requires_host_managed_loopx_skill_delivery() -> None:
     assert contract["host_readback_required"] is True
     assert contract["codex_skills_root_required"] is False
     assert contract["preferred_delivery"] == "fixed_install_script"
+    assert contract["onboarding_role"] == "read_only_verifier"
+    assert contract["onboarding_required_for_install"] is False
     assert contract["install_script"] == "scripts/install-local.sh"
+    assert (
+        contract["no_clone_install_command"] == "curl -fsSL "
+        "https://raw.githubusercontent.com/huangruiteng/loopx/main/"
+        "scripts/install-from-github.sh"
+        " | env LOOPX_SKILLS_DIR=./.agents/skills "
+        "LOOPX_ENTRY_HOST_SURFACE=ark-managed-agent "
+        "LOOPX_INSTALL_SLASH_COMMANDS=0 bash"
+    )
     assert contract["skills_dir_env"] == "LOOPX_SKILLS_DIR"
+    assert contract["entry_host_surface_env"] == "LOOPX_ENTRY_HOST_SURFACE"
+    assert contract["entry_host_surface"] == "ark-managed-agent"
     assert contract["target_layout"] == "./.agents/skills"
+    assert contract["generated_skill_ids"] == ["loopx"]
+    assert "skills/loopx" not in contract["source_directories"]
+    assert contract["fixed_installer_skill_ids"] == REQUIRED_HOST_SKILL_IDS
+    assert contract["filesystem_readback"]["status"] == "skills_dir_not_configured"
     assert agent_type_uses_host_managed_skills("ark-managed-agent") is True
 
 
-def test_doctor_checks_host_readback_instead_of_codex_skill_root() -> None:
+def test_host_onboarding_starts_from_loopx_skill_before_goal_submission() -> None:
+    from loopx.agent_onboarding import _start_instruction
+
+    instruction = _start_instruction("ark-managed-agent")
+
+    assert instruction.startswith("Use `$loopx <task>` as the ordinary task entry")
+    assert "todo writeback" in instruction
+    assert "submit the generated Goal task body exactly once" in instruction
+
+
+def test_doctor_checks_host_installation_readback_instead_of_codex_skill_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    skills_dir = tmp_path / "workspace" / ".agents" / "skills"
+    _materialize_workflow_skills(skills_dir)
+    monkeypatch.setenv("LOOPX_SKILLS_DIR", str(skills_dir))
+
     payload = collect_doctor(agent_type="ark-managed-agent")
 
     assert payload["skill_delivery"]["mode"] == "host_managed"
     assert payload["skill_delivery"]["owner"] == "loopx_install_script"
     assert payload["skill_delivery"]["codex_skills_root_applicable"] is False
+    readback = payload["skill_delivery"]["filesystem_readback"]
+    assert readback["status"] == "ready_for_host_load"
+    assert readback["ready"] is True
+    assert readback["source_revision"]
     skill_checks = {
         item["id"]: item for item in payload["checks"] if item["id"].startswith("installed_")
     }
     assert skill_checks
     assert all(item["applicable"] is False for item in skill_checks.values())
+    host_check = next(
+        item
+        for item in payload["checks"]
+        if item["id"] == "host_skill_installation_readback"
+    )
+    assert host_check["ok"] is True
+    assert host_check["required"] is False
+
+
+def test_onboarding_projects_verified_filesystem_readback(
+    tmp_path: Path,
+) -> None:
+    skills_dir = tmp_path / ".agents" / "skills"
+    _materialize_workflow_skills(skills_dir)
+
+    contract = _skill_delivery_contract(
+        "ark-managed-agent",
+        host_skills_dir=skills_dir,
+    )
+
+    assert contract["status"] == "ready_for_host_load"
+    assert contract["filesystem_readback"]["ready"] is True
+    assert contract["host_readback_required"] is True
+
+
+def test_skill_readback_rejects_content_changed_after_install(tmp_path: Path) -> None:
+    skills_dir = tmp_path / ".agents" / "skills"
+    _materialize_workflow_skills(skills_dir)
+    skill_path = skills_dir / REQUIRED_HOST_SKILL_IDS[0] / "SKILL.md"
+    skill_path.write_text(
+        skill_path.read_text(encoding="utf-8") + "\npost-install mutation\n",
+        encoding="utf-8",
+    )
+
+    readback = inspect_skill_install_readback(
+        skills_dir=skills_dir,
+        required_skill_ids=REQUIRED_HOST_SKILL_IDS,
+    )
+
+    assert readback["ready"] is False
+    assert readback["status"] == "skill_digest_mismatch"
+    assert readback["digest_mismatches"] == [REQUIRED_HOST_SKILL_IDS[0]]
+
+
+def test_skill_readback_rejects_a_different_cli_source_revision(
+    tmp_path: Path,
+) -> None:
+    skills_dir = tmp_path / ".agents" / "skills"
+    _materialize_workflow_skills(skills_dir)
+    manifest_path = skills_dir / SKILL_INSTALL_READBACK_FILENAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["source"]["revision"] = "0" * 40
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    readback = inspect_skill_install_readback(
+        skills_dir=skills_dir,
+        required_skill_ids=REQUIRED_HOST_SKILL_IDS,
+        source_root=REPO_ROOT,
+    )
+
+    assert readback["ready"] is False
+    assert readback["status"] == "source_revision_mismatch"
+    assert readback["source_revision_matches"] is False
+
+
+def test_skill_readback_records_the_resolved_archive_revision(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    skills_dir = tmp_path / ".agents" / "skills"
+    _materialize_workflow_skills(skills_dir)
+    archive_root = tmp_path / "archive"
+    archive_root.mkdir()
+    resolved_commit = "a" * 40
+    monkeypatch.setenv("LOOPX_RESOLVED_SOURCE_GIT_COMMIT", resolved_commit)
+    write_skill_install_readback(
+        skills_dir=skills_dir,
+        skill_ids=REQUIRED_HOST_SKILL_IDS,
+        source_root=archive_root,
+    )
+    (archive_root / "release.json").write_text(
+        json.dumps({"source": {"git_commit": resolved_commit}}) + "\n",
+        encoding="utf-8",
+    )
+
+    readback = inspect_skill_install_readback(
+        skills_dir=skills_dir,
+        required_skill_ids=REQUIRED_HOST_SKILL_IDS,
+        source_root=archive_root,
+    )
+
+    assert readback["ready"] is True
+    assert readback["source_revision"] == resolved_commit
+    assert readback["source_revision_matches"] is True
 
 
 def _write_continuity_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -180,6 +352,22 @@ def _write_continuity_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         quota_allowed_slots=None,
     )
     return project, runtime, registry
+
+
+def test_host_onboarding_replays_the_managed_agent_surface(tmp_path: Path) -> None:
+    project, _runtime, _registry = _write_continuity_fixture(tmp_path)
+
+    payload = build_agent_onboarding_packet(
+        project=project,
+        agent_type="ark-managed-agent",
+        goal_id=CONTINUITY_GOAL_ID,
+        agent_id=CONTINUITY_AGENT_ID,
+        task_text="Continue the public qualification.",
+    )
+
+    command = payload["commands"]["bootstrap_command_pack"]
+    assert "--host-surface ark-managed-agent" in command
+    assert "worker-bridge" not in command
 
 
 def _fresh_host_quota_read(

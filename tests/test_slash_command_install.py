@@ -2,7 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from loopx.slash_command_install import install_slash_commands
+from loopx.slash_command_install import (
+    install_slash_commands,
+    materialize_loopx_entry_skill,
+)
 
 
 MANAGED_SKILL = "<!-- loopx-managed-slash-command:v1 command=/loopx surface=codex-skills -->\n"
@@ -21,6 +24,63 @@ def _row(payload: dict[str, object], mechanism: str) -> dict[str, object]:
 def _loopx_paths(codex_home: Path) -> tuple[Path, Path]:
     skill = codex_home / "skills" / "loopx" / "SKILL.md"
     return skill, skill.parent / "agents" / "openai.yaml"
+
+
+def test_host_materialization_installs_generated_loopx_entry_skill(
+    tmp_path: Path,
+) -> None:
+    skills_dir = tmp_path / "skills"
+
+    created = materialize_loopx_entry_skill(
+        skills_dir=skills_dir,
+        execute=True,
+    )
+
+    skill = skills_dir / "loopx" / "SKILL.md"
+    skill_text = skill.read_text(encoding="utf-8")
+    assert created == {
+        "skill_id": "loopx",
+        "path": str(skill),
+        "status": "created",
+    }
+    assert 'name: "loopx"' in skill_text
+    assert "`ark-managed-agent` for Ark Managed Agent" in skill_text
+    assert "Ark Managed Agent one-shot Goal submission" in skill_text
+    assert materialize_loopx_entry_skill(
+        skills_dir=skills_dir,
+        execute=True,
+    )["status"] == "unchanged"
+
+
+def test_host_materialization_can_bind_exact_managed_agent_surface(
+    tmp_path: Path,
+) -> None:
+    skills_dir = tmp_path / "skills"
+
+    materialize_loopx_entry_skill(
+        skills_dir=skills_dir,
+        execute=True,
+        host_surface="ark-managed-agent",
+    )
+
+    skill_text = (skills_dir / "loopx" / "SKILL.md").read_text(encoding="utf-8")
+    assert "exact current host `ark-managed-agent`" in skill_text
+    assert "--host-surface ark-managed-agent" in skill_text
+    assert "--host-surface <exact-current-host>" not in skill_text
+    assert "before substantive task work" in skill_text
+    assert "has no `--priority` flag" in skill_text
+    assert "Before dependent work, persist material scope" in skill_text
+    assert "current Todo evidence and the next executable Todo" in skill_text
+    assert "Chat/model summaries are not durable state" in skill_text
+
+
+def test_host_materialization_rejects_unknown_fixed_surface(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unsupported fixed LoopX entry host surface"):
+        materialize_loopx_entry_skill(
+            skills_dir=tmp_path / "skills",
+            execute=True,
+            host_surface="guessed-host",
+        )
 
 
 def test_codex_install_upgrades_managed_loopx_facade(tmp_path: Path) -> None:
@@ -42,6 +102,7 @@ def test_codex_install_upgrades_managed_loopx_facade(tmp_path: Path) -> None:
     assert "Treat this as the LoopX `/loopx` explicit LoopX command skill." in skill_text
     assert "--host-surface <exact-current-host>" in skill_text
     assert "`codex-ide-plugin` only for the IDE plugin" in skill_text
+    assert "`ark-managed-agent` for Ark Managed Agent" in skill_text
     assert (
         "Codex App over SSH, the Codex IDE plugin, or CLI visible "
         "`/goal <task_body>`"

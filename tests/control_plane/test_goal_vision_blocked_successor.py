@@ -503,7 +503,20 @@ def test_two_identical_blocked_successor_waits_trigger_bounded_replan() -> None:
         "frontier_identity"
     ]
 
-    guard = _quota_with_replan_runs([*polls, _vision_run()])
+    quiet_monitor = quota_todo_item(
+        todo_id=MONITOR_ID,
+        index=3,
+        text="[P2] Wait quietly for material monitor evidence.",
+        task_class="continuous_monitor",
+        claimed_by=AGENT_ID,
+        target_key="future-monitor-target",
+        cadence="1d",
+        next_due_at="2099-01-01T00:00:00+00:00",
+    )
+    guard = _quota_with_replan_runs(
+        [*polls, _vision_run()],
+        extra_agent_items=[quiet_monitor],
+    )
 
     assert guard["decision"] == "autonomous_replan_required"
     assert guard["should_run"] is True
@@ -528,7 +541,16 @@ def test_two_identical_blocked_successor_waits_trigger_bounded_replan() -> None:
     assert "watch-lane continuation" not in obligation["todo_actions"][-1]["text"]
     primary_action = guard["interaction_contract"]["agent_channel"]["primary_action"]
     assert "watch-lane continuation alone" in primary_action
+    assert "wait quietly for material monitor evidence" not in primary_action
     assert "otherwise record a no-spend wait continuation" not in primary_action
+    cli_actions = guard["interaction_contract"]["cli_channel"]["next_cli_actions"]
+    todo_add = next(action for action in cli_actions if "todo add" in action)
+    assert f"--claimed-by {AGENT_ID}" in todo_add
+    assert "--agent-id" not in todo_add
+    assert any(
+        "--repair-delta-kind runnable_todo_set" in action
+        for action in cli_actions
+    )
 
 
 def test_as_needed_blocked_successor_guidance_keeps_wait_continuation() -> None:

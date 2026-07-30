@@ -152,16 +152,18 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         action="append",
         help=(
             "For todo add/update, declare a capability this todo is building, "
-            "repairing, materializing, or parity-checking. This is not a hard "
-            "execution prerequisite."
+            "repairing, materializing, or parity-checking. On complete, pair it "
+            "with --capability-gap-status to close that lifecycle. This is not a "
+            "hard execution prerequisite."
         ),
     )
     todo_parser.add_argument(
         "--capability-gap-status",
         choices=["found", "fixed", "real_callsite_verified"],
         help=(
-            "For agent todo add/update, append an auditable capability-gap lifecycle "
-            "event. Requires --target-capability; the todo_id is the stable gap id."
+            "For agent todo add/update/complete, append an auditable capability-gap "
+            "lifecycle event. Requires --target-capability; the todo_id is the "
+            "stable gap id."
         ),
     )
     todo_parser.add_argument(

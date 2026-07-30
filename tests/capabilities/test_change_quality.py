@@ -874,6 +874,7 @@ def test_quality_skill_delivery_is_policy_conditional_and_host_neutral(
 ) -> None:
     inactive = _skill_delivery_contract("other-agent")
     assert inactive["required_skill_ids"] == [
+        "loopx",
         "loopx-project",
         "loopx-pr-review",
         "loopx-doc-registry",

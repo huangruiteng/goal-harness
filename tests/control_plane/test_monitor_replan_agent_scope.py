@@ -548,6 +548,7 @@ def test_nonblocking_user_action_does_not_suppress_empty_frontier_replan() -> No
         "todo add" in action
         and "--task-class advancement_task" in action
         and f"--claimed-by {AGENT_ID}" in action
+        and "--agent-id" not in action
         for action in cli_actions
     ), cli_actions
     assert any(

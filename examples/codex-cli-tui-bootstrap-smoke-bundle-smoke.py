@@ -139,6 +139,10 @@ def main() -> None:
         assert "quota should-run" in bundle["quota_guard_command"], bundle
         assert "--agent-id codex-side-bypass" in bundle["quota_guard_command"], bundle
         assert "refresh-state --goal-id public-fresh-codex-cli-goal" in bundle["refresh_command"], bundle
+        assert "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>" in bundle["progress_refresh_command"], bundle
+        assert "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>" in bundle["progress_refresh_command"], bundle
+        assert "--delivery-outcome outcome_progress" not in bundle["progress_refresh_command"], bundle
+        assert "--agent-id codex-side-bypass" in bundle["progress_refresh_command"], bundle
         assert "quota spend-slot" in bundle["quota_spend_command"], bundle
         assert "--source heartbeat --execute --agent-id codex-side-bypass" in bundle["quota_spend_command"], bundle
         assert any("message-only command" in item for item in bundle["validation_checklist"]), bundle

@@ -41,11 +41,11 @@ If there is any non-whitespace text after `/loopx`, it is goal text. Preserve
 that exact trailing text, pass it to the guided start preview, and do not
 downgrade the request into a status or inspection turn.
 
-When the target is a linked git worktree, trust the command pack's
-`canonical_project_alias` / `source_registry` route. Do not manually run
-`loopx bootstrap` in the linked worktree merely because its local `.loopx`
-state is missing or stale; that can create a worktree-local shadow goal instead
-of updating the canonical project state.
+`start-goal --project` keeps the requested project route, including a linked
+git worktree, so a fresh task cannot inherit an older worktree's goal.
+Lower-level diagnostic command packs may still report a canonical
+`canonical_project_alias` / `source_registry` route. Do not manually replace
+either route with an unadvertised bootstrap command.
 
 From the target project root, pass the text after `/loopx` as the explicit
 goal-start objective before planning or writing project state:
@@ -784,11 +784,15 @@ from the classification name:
 loopx refresh-state \
   --goal-id <STABLE_GOAL_ID> \
   --classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION> \
-  --delivery-batch-scale multi_surface \
-  --delivery-outcome outcome_progress \
+  --delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE> \
+  --delivery-outcome <ACTUAL_DELIVERY_OUTCOME> \
   --agent-id <REGISTERED_AGENT_ID> \
   --progress-scope goal
 ```
+
+Replace all three placeholders from the current validated turn. Never default
+or upgrade a smaller/preparatory turn to `multi_surface` / `outcome_progress`
+just because those values would satisfy a delivery floor.
 
 If the current run may write local LoopX state but its runtime boundary forbids
 configured external sink writes, keep `explore_graph.enabled` unchanged and add

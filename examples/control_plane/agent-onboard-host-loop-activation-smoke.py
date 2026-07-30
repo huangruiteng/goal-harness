@@ -75,6 +75,7 @@ def main() -> int:
     assert agent_type_for_host_surface("codex-ide") == "codex-ide-plugin"
     assert agent_type_for_host_surface("codex-cli-tui") == "codex-cli"
     assert agent_type_for_host_surface("opencode") == "opencode"
+    assert agent_type_for_host_surface("ark-managed-agent") == "ark-managed-agent"
 
     codex_app = build_host_loop_activation_packet(agent_type="codex-app", goal_id="demo")
     codex_app_ssh = build_host_loop_activation_packet(
@@ -85,6 +86,10 @@ def main() -> int:
     codex_cli = build_host_loop_activation_packet(agent_type="codex-cli", goal_id="demo")
     claude_code = build_host_loop_activation_packet(agent_type="claude-code", goal_id="demo")
     opencode = build_host_loop_activation_packet(agent_type="opencode", goal_id="demo")
+    ark_managed_agent = build_host_loop_activation_packet(
+        agent_type="ark-managed-agent",
+        goal_id="demo",
+    )
     assert codex_app["activation_method"] == "create_or_update_codex_app_automation", codex_app
     assert codex_app_ssh["activation_method"] == "set_visible_goal", codex_app_ssh
     assert codex_app_ssh["host_surface"] == "codex_app_ssh_visible_goal_mode", codex_app_ssh
@@ -106,6 +111,8 @@ def main() -> int:
     assert opencode["activation_method"] == "activate_loopx_opencode_goal_bridge", opencode
     assert opencode["host_mutation"]["host_tool"] == "loopx_goal_activate", opencode
     assert "--runtime-profile generic_cli" in opencode["commands"]["heartbeat_prompt"], opencode
+    assert ark_managed_agent["activation_method"] == "submit_goal_once", ark_managed_agent
+    assert ark_managed_agent["host_surface"] == "ark_managed_agent_goal_mode", ark_managed_agent
     gated_activation = build_host_loop_activation_packet(
         agent_type="codex-app",
         goal_id="multi-agent-demo",
@@ -416,6 +423,8 @@ def main() -> int:
         other_commands = other_agent_onboarding["commands"]
         assert "install_command_facade" not in other_commands
         assert "doctor --agent-type other-agent" in other_commands["doctor_or_install"]
+        assert "--host-surface other-agent" in other_commands["bootstrap_command_pack"]
+        assert "worker-bridge" not in other_commands["bootstrap_command_pack"]
         delivery = other_agent_onboarding["skill_delivery"]
         assert delivery["mode"] == "host_managed", delivery
         assert delivery["owner"] == "custom_agent_host", delivery
@@ -424,6 +433,7 @@ def main() -> int:
         assert delivery["required_for_cli_health"] is False, delivery
         assert delivery["required_for_loopx_workflow"] is True, delivery
         assert set(delivery["required_skill_ids"]) == {
+            "loopx",
             "loopx-project",
             "loopx-pr-review",
             "loopx-doc-registry",
@@ -434,8 +444,11 @@ def main() -> int:
             "prompt_injection",
         ], delivery
         assert delivery["source_directories"] == [
-            f"skills/{skill_id}" for skill_id in delivery["required_skill_ids"]
+            f"skills/{skill_id}"
+            for skill_id in delivery["required_skill_ids"]
+            if skill_id != "loopx"
         ], delivery
+        assert delivery["generated_skill_ids"] == ["loopx"], delivery
         assert delivery["host_readback_required"] is True, delivery
         assert set(delivery["readback_fields"]) == {
             "integration_mode",

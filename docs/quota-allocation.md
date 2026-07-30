@@ -989,12 +989,19 @@ Post-turn accounting protocol:
 
 - call `quota should-run` before spending delivery compute;
 - do the bounded automatic turn, validation, and state writeback;
+- append an accountable `refresh-state` with `delivery_outcome=outcome_progress`
+  or `primary_goal_outcome` before spend. This run is the causal delivery record
+  consumed by `spend-slot`; a plain `state_refreshed` run without delivery
+  outcome is quota-neutral and cannot replace it;
 - append exactly one `quota spend-slot --execute` event for that completed
   turn after validated writeback. When the writeback is a state refresh that
   moves the guard from eligible/replan to waiting, `spend-slot` may still
   account the latest unspent `outcome_progress` delivery run once; a later
   duplicate spend is rejected because the latest run is then the spend event,
   not the delivery run.
+- after spend, an optional plain state-only refresh may update dashboard or
+  controller state. Do not append another accountable progress refresh after
+  spend, because it would become a new unspent delivery record;
 - keep accountable delivery attribution on the worktree that produced it. If
   `refresh-state` must run from a separate registry checkout, pass
   `--delivery-workspace-path <delivery-worktree>`; the path is validated locally

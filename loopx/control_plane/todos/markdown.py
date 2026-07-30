@@ -23,17 +23,28 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
             lines.extend(
                 [
                     f"- agent_id_filter: `{payload.get('agent_id_filter')}`",
-                    f"- unfiltered_todo_count: `{payload.get('unfiltered_todo_count')}`",
+                    (
+                        "- unfiltered_todo_count: `"
+                        f"{payload.get('unfiltered_todo_count')}`"
+                    ),
                     f"- filter_semantics: `{payload.get('filter_semantics')}`",
                 ]
             )
-        projection = payload.get("state_event_projection")
+        projection = payload.get("todo_list_projection")
         if isinstance(projection, dict):
+            lines.append(
+                f"- returned_todo_count: `{payload.get('returned_todo_count')}`"
+            )
+        state_event_projection = payload.get("state_event_projection")
+        if isinstance(state_event_projection, dict):
             lines.extend(
                 [
-                    f"- event_log: `{projection.get('event_log')}`",
-                    f"- source_event_count: `{projection.get('source_event_count')}`",
-                    f"- last_event_id: `{projection.get('last_event_id')}`",
+                    f"- event_log: `{state_event_projection.get('event_log')}`",
+                    (
+                        "- source_event_count: `"
+                        f"{state_event_projection.get('source_event_count')}`"
+                    ),
+                    f"- last_event_id: `{state_event_projection.get('last_event_id')}`",
                 ]
             )
         for key, heading in (

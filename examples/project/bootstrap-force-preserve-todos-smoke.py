@@ -75,7 +75,14 @@ def main() -> int:
         assert warning["will_replace_active_state"] is False, warning
         assert warning["preserve_todos_requested"] is True, warning
         assert "configure-goal --write-scope" in warning["recommended_scope_migration"], warning
-        assert state_file.read_text(encoding="utf-8") == todo_state
+        migrated_state = state_file.read_text(encoding="utf-8")
+        assert "- [ ] Preserve this during reconnect." in migrated_state
+        assert "## User Todo / Owner Review Reading Queue" in migrated_state
+        assert preserved["todo_source_migration"] == {
+            "schema_version": "todo_source_section_migration_v0",
+            "added_roles": ["user"],
+            "applied": True,
+        }, preserved
         assert goal_from_registry(project)["coordination"]["write_scope"] == ["src/**"]
 
         replaced = run_cli(

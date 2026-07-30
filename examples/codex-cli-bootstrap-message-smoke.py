@@ -74,6 +74,16 @@ def assert_message_contract(payload: dict[str, object]) -> None:
     assert any("host loop surface activated" in item for item in checklist), payload
     assert any("registry/quota identity alone" in item for item in checklist), payload
     assert any("no raw Codex transcripts" in item for item in checklist), payload
+    progress_refresh = str(payload["progress_refresh_command"])
+    quota_spend = str(payload["quota_spend_command"])
+    state_only_refresh = str(payload["refresh_command"])
+    assert "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in progress_refresh, payload
+    assert "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>" in progress_refresh, payload
+    assert "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>" in progress_refresh, payload
+    assert "--delivery-batch-scale multi_surface" not in progress_refresh, payload
+    assert "--delivery-outcome outcome_progress" not in progress_refresh, payload
+    assert "--agent-id codex-side-bypass" in progress_refresh, payload
+    assert "--progress-scope agent_lane" in progress_refresh, payload
     message = str(payload["message"])
     normalized = " ".join(message.split())
     assert message.startswith("Install and connect LoopX for this repo"), message
@@ -85,7 +95,11 @@ def assert_message_contract(payload: dict[str, object]) -> None:
     assert normalized.index("shared global registry for this goal") < normalized.index("loopx bootstrap"), message
     assert normalized.index("bootstrap/connect this project") < normalized.index("heartbeat-prompt --thin"), message
     assert normalized.index("quota should-run") < normalized.index("interaction_contract"), message
-    assert normalized.index("refresh-state") < normalized.index("quota spend-slot"), message
+    assert message.index(progress_refresh) < message.index(quota_spend), message
+    assert message.index(quota_spend) < message.rindex(state_only_refresh), message
+    assert "must not carry a delivery outcome" in normalized, message
+    assert "Do not append another accountable progress refresh after spend" in normalized, message
+    assert "Never default or upgrade them to `multi_surface` / `outcome_progress`" in message, message
     assert "do not run `loopx bootstrap` for the same `goal_id`" in normalized, message
     assert "Only run bootstrap when the probe clearly says the goal is absent" in normalized, message
     assert "registry/quota identity alone" in normalized, message

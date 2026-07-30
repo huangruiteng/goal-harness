@@ -11,6 +11,9 @@ from ..control_plane.runtime.status_projection_cache import (
     resolve_status_projection_cache_runtime_root,
     write_status_projection_cache,
 )
+from ..control_plane.status_agent_lane_projection import (
+    compact_agent_lane_status_payload_for_display,
+)
 from ..control_plane.todos.contract import normalize_todo_claimed_by
 from ..control_plane.todos.quota_summary import (
     compact_agent_lane_todos_for_status_display,
@@ -23,10 +26,7 @@ from ..handoff_budget import build_handoff_interface_budget
 from ..presentation.renderers.status_markdown import render_status_markdown
 from ..quota import build_quota_should_run
 from ..review_packet import build_review_packet, render_review_packet_markdown
-from ..status import (
-    AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK,
-    collect_status,
-)
+from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -402,6 +402,10 @@ def handle_status_command(
                 collection_limit=collection_limit,
             )
             compact_agent_lane_todos_for_status_display(payload)
+            compact_agent_lane_status_payload_for_display(
+                payload,
+                agent_id=args.agent_id,
+            )
             compact_agent_lane_todo_index_for_status_display(payload)
     except Exception as exc:
         payload = {

@@ -145,6 +145,52 @@ def build_user_todo_notification(
     }
 
 
+def apply_scoped_user_gate_fallback_projection(
+    payload: dict[str, Any],
+    *,
+    fallback: dict[str, Any] | None,
+    replan_decision_allowed: bool,
+) -> dict[str, Any]:
+    if not fallback or replan_decision_allowed:
+        return payload
+
+    projected = dict(payload)
+    projected["scoped_user_gate_fallback"] = fallback
+    projected["should_run"] = True
+    if projected.get("decision") == "skip":
+        projected["decision"] = "safe_bypass_user_gate_fallback"
+    if projected.get("effective_action") in {"skip", "monitor_quiet_skip", None}:
+        projected["effective_action"] = "scoped_user_gate_fallback"
+
+    execution_obligation = (
+        dict(projected.get("execution_obligation"))
+        if isinstance(projected.get("execution_obligation"), dict)
+        else {}
+    )
+    execution_obligation.update(
+        {
+            "must_attempt_work": True,
+            "kind": "scoped_user_gate_fallback",
+            "minimum": "one_non_gated_fallback_segment_after_user_gate_notice",
+            "delivery_allowed": True,
+            "notify_is_execution_gate": False,
+            "contract": "scoped_user_gate_fallback",
+            "contract_obligation": fallback.get("recommended_action"),
+            "reason": fallback.get("reason"),
+        }
+    )
+    projected["execution_obligation"] = execution_obligation
+    projected["safe_bypass_allowed"] = True
+    projected["safe_bypass_kind"] = "scoped_user_gate_fallback"
+    projected["safe_bypass_policy"] = (
+        "The user gate blocks only the matched agent action scope. Surface "
+        "that gate, then advance the selected non-gated fallback; spend only "
+        "after validated writeback."
+    )
+    projected["actionable_by_codex"] = True
+    return projected
+
+
 def build_gate_prompt(
     item: dict[str, Any],
     *,

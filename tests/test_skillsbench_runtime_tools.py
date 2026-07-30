@@ -2,9 +2,15 @@ from loopx.benchmark_adapters import skillsbench_dockerfile_runtime
 from scripts.skillsbench_automation_loop import (
     DOCKER_BENCHMARK_EGRESS_PROXY_BEGIN,
     DOCKER_CODEX_ACP_RUNTIME_TOOLS_BEGIN,
+    _benchflow_environment_name,
     patch_dockerfile_codex_acp_runtime_tools,
     stage_task_for_sandbox,
 )
+
+
+def test_benchflow_environment_name_preserves_keyword_environment() -> None:
+    assert _benchflow_environment_name((), {"environment": "docker"}) == "docker"
+    assert _benchflow_environment_name(("docker",), {}) == "docker"
 
 
 def test_runtime_tools_retries_apt_with_public_mirrors(tmp_path) -> None:

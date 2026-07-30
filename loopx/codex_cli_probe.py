@@ -865,6 +865,7 @@ def build_codex_cli_one_message_loop_pilot(
             "invocation_mode": bootstrap.get("invocation_mode"),
             "heartbeat_prompt_json_command": bootstrap.get("heartbeat_prompt_json_command"),
             "quota_guard_command": bootstrap.get("quota_guard_command"),
+            "progress_refresh_command": bootstrap.get("progress_refresh_command"),
             "refresh_command": bootstrap.get("refresh_command"),
             "quota_spend_command": bootstrap.get("quota_spend_command"),
         },

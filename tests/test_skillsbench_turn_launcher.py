@@ -24,6 +24,33 @@ def _base_env(tmp_path: Path) -> dict[str, str]:
     env.pop("SKILLSBENCH_RUNNER_PROFILE", None)
     env.pop("SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND", None)
     env.pop("SKILLSBENCH_REMOTE_CODEX_PROXY_PORT", None)
+    readiness_receipt = tmp_path / "scored-lifecycle-readiness.public.json"
+    readiness_receipt.write_text(
+        json.dumps(
+            {
+                "schema_version": "skillsbench_setup_only_public_preflight_v1",
+                "status": "passed",
+                "cleanup_status": "completed",
+                "scored_lifecycle_canary_status": "passed",
+                "scored_lifecycle_terminal_budget_sec": 180,
+                "case_goal_state_initialized_before_agent": True,
+                "acp_session_initialized": True,
+                "agent_active_observed": True,
+                "loopx_state_read_count": 1,
+                "loopx_state_write_count": 1,
+                "task_prompt_sent": False,
+                "benchmark_task_launched": False,
+                "agent_execution_invoked": False,
+                "verifier_invoked": False,
+                "scored_launch_allowed": True,
+                "loopx_runner_source_git_head": "abc1234def5678",
+                "loopx_runner_source_matches_expected": True,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     env.update(
         {
             "XDG_STATE_HOME": str(tmp_path / "state"),
@@ -31,6 +58,9 @@ def _base_env(tmp_path: Path) -> dict[str, str]:
             "SKILLSBENCH_REMOTE_ROOT": "/remote/loopx",
             "SKILLSBENCH_ROOT": "/remote/skillsbench",
             "SKILLSBENCH_EXPECTED_LOOPX_GIT_HEAD": "abc1234",
+            "SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT": str(
+                readiness_receipt
+            ),
             "SKILLSBENCH_DOCKER_PROXY_HOST": "host.docker.internal",
             "SKILLSBENCH_DOCKER_API_VERSION": "1.43",
             "SKILLSBENCH_RUN_STAMP": "20260716T000000CST",
@@ -941,6 +971,10 @@ def test_setup_only_launcher_enables_incremental_public_artifact_sync(
 ) -> None:
     env = _base_env(tmp_path)
     env["SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT"] = "1"
+    env["SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY"] = "1"
+    env["SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY"] = "1"
+    env["SKILLSBENCH_SCORED_LIFECYCLE_CANARY_TIMEOUT_SEC"] = "90"
+    env["SKILLSBENCH_ROUTE"] = "loopx-goal-start-product-mode"
     env["SKILLSBENCH_APPEND_HISTORY"] = "1"
 
     proc = subprocess.run(
@@ -957,7 +991,60 @@ def test_setup_only_launcher_enables_incremental_public_artifact_sync(
     assert "exact_host_codex_sandbox_preflight=not_required" in proc.stdout
     assert "--public-artifact-sync-interval-sec 30" in proc.stdout
     assert "--setup-only-public-preflight" in proc.stdout
+    assert "--setup-only-agent-install-canary" in proc.stdout
+    assert "--setup-only-scored-lifecycle-canary" in proc.stdout
+    assert "--scored-lifecycle-canary-timeout-sec 90" in proc.stdout
+    assert "setup_only_agent_install_canary=1" in proc.stdout
+    assert "setup_only_scored_lifecycle_canary=1" in proc.stdout
+    assert "scored_lifecycle_readiness=canary_will_generate_receipt" in proc.stdout
     assert "--append-history" not in proc.stdout
+
+
+def test_launcher_rejects_agent_install_canary_without_setup_only(
+    tmp_path: Path,
+) -> None:
+    env = _base_env(tmp_path)
+    env["SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY"] = "1"
+
+    proc = subprocess.run(
+        [str(LAUNCHER), "--dry-run", "public-smoke-case", "invalid-canary"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 2
+    assert (
+        "SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY requires "
+        "SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT=1"
+    ) in proc.stderr
+
+
+def test_launcher_blocks_live_scored_launch_without_lifecycle_receipt(
+    tmp_path: Path,
+) -> None:
+    env = _base_env(tmp_path)
+    env.pop("SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT")
+
+    proc = subprocess.run(
+        [str(LAUNCHER), "public-smoke-case", "missing-lifecycle-receipt"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 3
+    assert (
+        "SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT is required before "
+        "scored launch"
+    ) in proc.stderr
+    assert "pid=" not in proc.stdout
 
 
 def test_formal_launcher_enables_incremental_public_artifact_sync(
