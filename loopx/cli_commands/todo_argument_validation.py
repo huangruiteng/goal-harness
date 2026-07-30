@@ -105,7 +105,6 @@ _TODO_UPDATE_UNSUPPORTED_FIELDS = (
     ("self_merged", "todo update does not support --self-merged"),
 )
 
-
 def register_todo_linkage_arguments(
     todo_parser: argparse.ArgumentParser,
 ) -> None:
@@ -277,6 +276,32 @@ def validate_todo_update_options(args: argparse.Namespace) -> None:
     for field, message in _TODO_UPDATE_UNSUPPORTED_FIELDS:
         if getattr(args, field):
             raise ValueError(message)
+
+
+def validate_todo_complete_options(args: argparse.Namespace) -> None:
+    if not args.todo_id:
+        raise ValueError("todo complete requires --todo-id")
+    if args.explore_result_node_refs or args.clear_explore_result_node_refs:
+        raise ValueError("todo complete does not update --explore-result-node-ref; use todo update first")
+    if args.claimed_by and args.clear_claim:
+        raise ValueError("todo complete accepts either --claimed-by or --clear-claim, not both")
+    if any(getattr(args, field) for field in ("task_repository", "bound_agent", "goal_bound", "blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "global_gate", "clear_global_gate", "unblocks_todo_id", "resume_when")):
+        raise ValueError("todo complete does not update current todo routing metadata; use todo update first")
+    if any(getattr(args, field) for field in ("monitor_target_key", "cadence", "next_due_at", "expires_at")):
+        raise ValueError("todo complete does not update target or monitor schedule metadata; use todo update before completion")
+    if args.no_follow_up and (args.next_agent_todo or args.next_user_todo):
+        raise ValueError("--no-follow-up cannot be combined with successor todos")
+    if args.no_follow_up and args.successor_todo_ids:
+        raise ValueError("--no-follow-up cannot be combined with successor todos")
+    if args.successor_todo_ids and (args.next_agent_todo or args.next_user_todo):
+        raise ValueError("--successor-todo-id links existing work and cannot be combined with --next-agent-todo or --next-user-todo")
+    if args.no_follow_up and not (args.note or args.evidence):
+        raise ValueError("--no-follow-up requires --note or --evidence")
+    if args.followups:
+        raise ValueError("todo complete does not support --follow-up; use `todo capture-followups`")
+    if args.continuation_policy:
+        raise ValueError("todo complete does not update --continuation-policy; use todo update first")
+    validate_successor_routing_options(args)
 
 
 def validate_shared_todo_options(args: argparse.Namespace) -> None:

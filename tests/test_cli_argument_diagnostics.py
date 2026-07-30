@@ -8,6 +8,7 @@ from loopx.cli import build_parser, main, output_format, resolve_global_output_f
 from loopx.cli_commands.quota import _validate_quota_command_request
 from loopx.cli_commands.todo_argument_validation import (
     validate_todo_claim_options,
+    validate_todo_complete_options,
     validate_todo_update_options,
 )
 
@@ -296,6 +297,104 @@ def test_todo_update_validation_accepts_a_mutable_field() -> None:
     )
 
     validate_todo_update_options(args)
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected"),
+    [
+        ([], "todo complete requires --todo-id"),
+        (
+            ["--todo-id", "todo_example", "--explore-result-node-ref", "result_1"],
+            "todo complete does not update --explore-result-node-ref; "
+            "use todo update first",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--claimed-by",
+                "codex-example",
+                "--clear-claim",
+            ],
+            "todo complete accepts either --claimed-by or --clear-claim, not both",
+        ),
+        (
+            ["--todo-id", "todo_example", "--task-repository", "git:example/repo"],
+            "todo complete does not update current todo routing metadata; "
+            "use todo update first",
+        ),
+        (
+            ["--todo-id", "todo_example", "--cadence", "1h"],
+            "todo complete does not update target or monitor schedule metadata; "
+            "use todo update before completion",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--no-follow-up",
+                "--next-agent-todo",
+                "Continue.",
+            ],
+            "--no-follow-up cannot be combined with successor todos",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--successor-todo-id",
+                "todo_successor",
+                "--next-agent-todo",
+                "Continue.",
+            ],
+            "--successor-todo-id links existing work and cannot be combined with "
+            "--next-agent-todo or --next-user-todo",
+        ),
+        (
+            ["--todo-id", "todo_example", "--no-follow-up"],
+            "--no-follow-up requires --note or --evidence",
+        ),
+        (
+            ["--todo-id", "todo_example", "--continuation-policy", "same_agent_non_delivery"],
+            "todo complete does not update --continuation-policy; use todo update first",
+        ),
+        (
+            ["--todo-id", "todo_example", "--next-user-todo", "Approve."],
+            "--next-user-todo requires explicit --next-user-task-class "
+            "user_action|user_gate",
+        ),
+    ],
+)
+def test_todo_complete_validation_preserves_exact_diagnostics(
+    extra_args: list[str],
+    expected: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["todo", "complete", "--goal-id", "example-goal", *extra_args]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_complete_options(args)
+
+    assert str(exc_info.value) == expected
+
+
+def test_todo_complete_validation_accepts_no_follow_up_with_evidence() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "complete",
+            "--goal-id",
+            "example-goal",
+            "--todo-id",
+            "todo_example",
+            "--no-follow-up",
+            "--evidence",
+            "validated",
+        ]
+    )
+
+    validate_todo_complete_options(args)
 
 
 @pytest.mark.parametrize(

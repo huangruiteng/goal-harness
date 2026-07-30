@@ -30,6 +30,7 @@ from .todo_argument_validation import (
     validate_shared_todo_options,
     validate_successor_routing_options,
     validate_todo_claim_options,
+    validate_todo_complete_options,
     validate_todo_update_options,
 )
 from .todo_event import RolloutEventAppender, append_todo_rollout_event
@@ -547,36 +548,7 @@ def handle_todo_command(
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "complete":
-            if not args.todo_id:
-                raise ValueError("todo complete requires --todo-id")
-            if args.explore_result_node_refs or args.clear_explore_result_node_refs:
-                raise ValueError(
-                    "todo complete does not update --explore-result-node-ref; use todo update first"
-                )
-            if args.claimed_by and args.clear_claim:
-                raise ValueError("todo complete accepts either --claimed-by or --clear-claim, not both")
-            if args.task_repository or args.bound_agent or args.goal_bound or args.blocks_agent or args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.clear_global_gate or args.unblocks_todo_id or args.resume_when:
-                raise ValueError("todo complete does not update current todo routing metadata; use todo update first")
-            if args.monitor_target_key or args.cadence or args.next_due_at or args.expires_at:
-                raise ValueError(
-                    "todo complete does not update target or monitor schedule metadata; "
-                    "use todo update before completion"
-                )
-            if args.no_follow_up and (args.next_agent_todo or args.next_user_todo):
-                raise ValueError("--no-follow-up cannot be combined with successor todos")
-            if args.no_follow_up and args.successor_todo_ids:
-                raise ValueError("--no-follow-up cannot be combined with successor todos")
-            if args.successor_todo_ids and (args.next_agent_todo or args.next_user_todo):
-                raise ValueError("--successor-todo-id links existing work and cannot be combined with --next-agent-todo or --next-user-todo")
-            if args.no_follow_up and not (args.note or args.evidence):
-                raise ValueError("--no-follow-up requires --note or --evidence")
-            if args.followups:
-                raise ValueError("todo complete does not support --follow-up; use `todo capture-followups`")
-            if args.continuation_policy:
-                raise ValueError(
-                    "todo complete does not update --continuation-policy; use todo update first"
-                )
-            validate_successor_routing_options(args)
+            validate_todo_complete_options(args)
             payload = complete_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
