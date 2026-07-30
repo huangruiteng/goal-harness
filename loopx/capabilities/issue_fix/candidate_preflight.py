@@ -422,6 +422,16 @@ def build_issue_fix_candidate_preflight_packet(
             "provider_calls_performed": 0,
             "raw_memory_captured": False,
         },
+        "domain_state_projection": {
+            "schema_version": "issue_fix_candidate_preflight_domain_state_projection_v0",
+            "domain_pack": "issue_fix",
+            "stream": "candidate-preflight",
+            "key": {
+                "repo": canonical_repo,
+                "issue_ref": canonical_issue_ref,
+            },
+            "write_performed": False,
+        },
         "provider_neutral": True,
         "external_reads_performed": False,
         "external_writes_performed": False,

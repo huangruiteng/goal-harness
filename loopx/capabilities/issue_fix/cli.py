@@ -9,10 +9,12 @@ from ...agent_registry import load_goal_from_registry
 from ...boundary_authority import checkpointed_boundary_authority_summary
 from ...control_plane.runtime.time import now_utc_iso
 from ...domain_packs.issue_fix import (
+    default_issue_fix_candidate_preflight_ledger_path,
     default_issue_fix_domain_state_ledger_path,
     default_issue_fix_feasibility_ledger_path,
     default_issue_fix_repository_snapshot_ledger_path,
     retain_issue_fix_repository_snapshot_jsonl,
+    upsert_issue_fix_candidate_preflight_ledger_jsonl,
     upsert_issue_fix_feasibility_ledger_jsonl,
     upsert_issue_fix_pr_lifecycle_ledger_jsonl,
 )
@@ -379,6 +381,32 @@ def register_issue_fix_commands(
         type=int,
         default=30,
         help="Timeout for --fetch-candidate-evidence.",
+    )
+    workflow_parser.add_argument(
+        "--goal-id",
+        default=None,
+        help=(
+            "Goal id used to persist the source-qualified candidate admission "
+            "receipt before any feasibility or implementation decision."
+        ),
+    )
+    workflow_parser.add_argument(
+        "--project",
+        default=".",
+        help="Project root for the default issue_fix candidate preflight ledger.",
+    )
+    workflow_parser.add_argument(
+        "--candidate-preflight-ledger-path",
+        default=None,
+        help="Optional candidate preflight JSONL path. Overrides the default path.",
+    )
+    workflow_parser.add_argument(
+        "--no-write-domain-state",
+        action="store_true",
+        help=(
+            "Keep candidate preflight preview-only even when --goal-id or an "
+            "explicit ledger path is present."
+        ),
     )
     workflow_parser.add_argument(
         "--repository-memory-json",
@@ -1032,6 +1060,36 @@ def handle_issue_fix_command(
                 candidate_preflight_input=candidate_preflight_input,
                 generated_at=generated_at,
             )
+            candidate_preflight = payload.get("candidate_preflight")
+            should_write_candidate_preflight = bool(
+                not args.no_write_domain_state
+                and (args.goal_id or args.candidate_preflight_ledger_path)
+            )
+            if should_write_candidate_preflight:
+                if not isinstance(candidate_preflight, dict):
+                    raise ValueError(
+                        "workflow plan omitted the candidate preflight receipt"
+                    )
+                candidate_preflight_ledger_path = (
+                    Path(args.candidate_preflight_ledger_path).expanduser()
+                    if args.candidate_preflight_ledger_path
+                    else default_issue_fix_candidate_preflight_ledger_path(
+                        project=args.project,
+                        goal_id=args.goal_id,
+                    )
+                )
+                upsert_issue_fix_candidate_preflight_ledger_jsonl(
+                    candidate_preflight_ledger_path,
+                    candidate_preflight,
+                )
+            elif isinstance(candidate_preflight, dict):
+                domain_state = candidate_preflight.get("domain_state_projection")
+                if isinstance(domain_state, dict):
+                    domain_state["write_skipped_reason"] = (
+                        "explicitly_disabled"
+                        if args.no_write_domain_state
+                        else "goal_id_or_ledger_path_missing"
+                    )
             renderer = render_issue_fix_workflow_plan_markdown
         elif args.issue_fix_command == "feasibility":
             provider_path = args.repository_memory_provider_json or (

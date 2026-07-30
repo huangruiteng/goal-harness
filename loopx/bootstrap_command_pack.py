@@ -586,6 +586,8 @@ def _selected_goal_capability_route(goal_text: str | None) -> dict[str, Any] | N
             "status": "qualification_required",
             "state_owner": "issue_fix",
             "route_scope": "start_goal_bootstrap_only",
+            "candidate_receipt_stream": "candidate-preflight",
+            "feasibility_required_for_route": "proceed",
             "durable_reentry_fields": ["action_kind", "target_key"],
         },
         "activation_condition": (
@@ -706,8 +708,8 @@ def _goal_start_contract(
                     "issue_fix_pr_lifecycle_template"
                 ],
                 "writeback": (
-                    "write metadata classification plus the feasibility checkpoint first, then "
-                    "write only its selected route successor or no-follow-up; "
+                    "persist source-qualified candidate preflight; only proceed enters "
+                    "feasibility and writes its successor; otherwise reuse, disposition, or close; "
                     "private repro material, issue body/comment reads, external comments, PR creation, "
                     "merge, publish, destructive git, and production actions stay explicit gates; "
                     "after PR creation, use active external-review-request authority to call "
@@ -1423,12 +1425,16 @@ def build_start_goal_guided_packet(
                 "activation_condition": selected_capability_route[
                     "activation_condition"
                 ],
-                "durable_successor_source": (
-                    "admission_result.transition.projected_todo"
-                ),
+                "durable_successor_sources": {
+                    "proceed": "admission_result.transition.projected_todo",
+                    "non_proceed": (
+                        "entry_result.ordered_loopx_todo_writeback_preview"
+                    ),
+                },
                 "completion_condition": (
-                    "persist admission state and write its exact successor Todo "
-                    "with action_kind and target_key, or record no-follow-up"
+                    "persist candidate preflight; for proceed, persist feasibility "
+                    "and write its exact successor Todo; for non-proceed, write the "
+                    "preflight successor or record no-follow-up"
                 ),
                 "when_condition_unmet": (
                     "keep candidate discovery or qualification as a normal Todo, "
@@ -1559,7 +1565,7 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
             step_lines.extend(
                 [
                     f"   - qualify: `{entry_command}`",
-                    f"   - admit: `{admission_command}`",
+                    f"   - proceed: `{admission_command}`",
                 ]
             )
             continue
@@ -1714,7 +1720,7 @@ For GitHub issue/PR fix goals, preview the issue-fix route:
 {commands.get("issue_fix_workflow_plan_template", "")}
 ```
 
-Write only metadata classification plus the feasibility checkpoint from this preview. Then run the compact decision and write only its selected successor or no-follow-up:
+Persist candidate preflight. Non-proceed: write its successor/no-follow-up; skip feasibility. Proceed: run feasibility and write its successor:
 
 ```bash
 {commands.get("issue_fix_feasibility_template", "")}

@@ -68,6 +68,7 @@ def build_issue_fix_goal_command_templates(
             "--repository-context-json <compact-context.json> "
             "--fetch-candidate-evidence "
             "--validation-label '<validation command>' "
+            f"--goal-id {goal} "
             "--format json"
         ),
         "issue_fix_feasibility_template": (
@@ -227,6 +228,8 @@ def _feasibility_checkpoint_plan() -> dict[str, Any]:
         ),
         "input_contract": "compact_public_safe_agent_observation",
         "selects_exactly_one_route": True,
+        "required_when_candidate_preflight_route": "proceed",
+        "non_proceed_receipt_stream": "candidate-preflight",
         "routes": ["fix_pr", "comment_only", "triage_only"],
         "fix_pr_requires": [
             "bounded_scope",
@@ -736,6 +739,21 @@ def validate_issue_fix_workflow_plan_packet(
         errors.append("candidate_preflight must not perform external reads")
     if candidate_preflight.get("external_writes_performed") is not False:
         errors.append("candidate_preflight must not perform external writes")
+    preflight_projection = candidate_preflight.get("domain_state_projection")
+    if not isinstance(preflight_projection, Mapping):
+        errors.append("candidate_preflight domain_state_projection is required")
+    else:
+        if (
+            preflight_projection.get("schema_version")
+            != "issue_fix_candidate_preflight_domain_state_projection_v0"
+        ):
+            errors.append("candidate_preflight domain_state_projection has wrong schema")
+        if preflight_projection.get("stream") != "candidate-preflight":
+            errors.append("candidate_preflight domain_state_projection has wrong stream")
+        if preflight_projection.get("write_performed") is not False:
+            errors.append(
+                "workflow-plan builder must leave candidate preflight write pending"
+            )
     preflight_decision = candidate_preflight.get("decision")
     preflight_decision = (
         preflight_decision if isinstance(preflight_decision, Mapping) else {}
@@ -769,6 +787,10 @@ def validate_issue_fix_workflow_plan_packet(
         feasibility = {}
     if feasibility.get("selects_exactly_one_route") is not True:
         errors.append("feasibility checkpoint must select exactly one route")
+    if feasibility.get("required_when_candidate_preflight_route") != "proceed":
+        errors.append("feasibility checkpoint must only follow a proceed preflight")
+    if feasibility.get("non_proceed_receipt_stream") != "candidate-preflight":
+        errors.append("non-proceed candidates must use candidate-preflight receipts")
     if feasibility.get("writes_domain_state_by_default_with_goal_id") is not True:
         errors.append("feasibility checkpoint must default-write domain state")
     if (
