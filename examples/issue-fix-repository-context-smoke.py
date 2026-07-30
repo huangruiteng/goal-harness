@@ -122,16 +122,16 @@ def main() -> int:
     )
     assert workflow["ok"] is True, workflow
     assert workflow["repository_context"]["context_status"] == "grounded", workflow
-    assert "use the grounded repository context" in workflow["first_screen"][
-        "next_safe_action"
-    ], workflow
+    assert workflow["candidate_preflight"]["admission"]["state"] == "evidence_required"
+    assert (
+        workflow["first_screen"]["top_agent_todo"]["action_kind"]
+        == "issue_fix_collect_candidate_evidence"
+    ), workflow
+    assert "candidate successor" in workflow["first_screen"]["next_safe_action"], workflow
     actions = [
         row["action_kind"] for row in workflow["ordered_loopx_todo_writeback_preview"]
     ]
-    assert actions == [
-        "issue_fix_public_metadata_classification",
-        "issue_fix_feasibility_decision",
-    ], actions
+    assert actions == ["issue_fix_collect_candidate_evidence"], actions
     legacy_workflow = json.loads(json.dumps(workflow))
     legacy_workflow.pop("repository_context")
     assert validate_issue_fix_workflow_plan_packet(legacy_workflow)["ok"] is True
