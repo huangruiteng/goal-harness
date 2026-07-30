@@ -869,6 +869,64 @@ def test_premerge_cli_enforces_goal_receipt_policy(
     assert payload["gate"]["self_merge_allowed"] is False
 
 
+def test_premerge_cli_resolves_global_registry_after_successful_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, registry, runtime_root = _fixture(tmp_path)
+    runtime_root.mkdir()
+    global_registry = runtime_root / "registry.global.json"
+    global_registry.write_text(registry.read_text(encoding="utf-8"), encoding="utf-8")
+    (repo / "app.py").write_text("value = 2\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    def successful_gate(**kwargs: object) -> dict[str, object]:
+        assert kwargs["execute"] is True
+        return {
+            "ok": True,
+            "gate": {
+                "status": "passed",
+                "merge_gate_passed": True,
+                "self_merge_allowed": True,
+            },
+            "validation_summary": {
+                "selected_check_count": 1,
+                "executed_check_count": 1,
+                "failure_count": 0,
+            },
+            "recommended_pr_comment_fields": [],
+        }
+
+    monkeypatch.setattr(
+        "loopx.cli_commands.canary.build_premerge_validation_gate",
+        successful_gate,
+    )
+
+    exit_code = main(
+        [
+            "--runtime-root",
+            str(runtime_root),
+            "--format",
+            "json",
+            "canary",
+            "premerge",
+            "--from-git-diff",
+            "--git-diff-base",
+            "HEAD",
+            "--goal-id",
+            GOAL_ID,
+            "--no-progress",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["gate"]["merge_gate_passed"] is True
+    assert payload["change_quality_qualification"]["status"] == "disabled"
+    assert not (repo / ".loopx" / "registry.json").exists()
+
+
 def test_quality_skill_delivery_is_policy_conditional_and_host_neutral(
     tmp_path: Path,
 ) -> None:

@@ -304,7 +304,6 @@ def main(argv: list[str] | None = None) -> int:
             "codex-cli-visible-driver-run",
             "codex-cli-visible-driver-plan",
             "codex-cli-visible-session-proof",
-            "canary",
             "demo",
             "doctor",
             "new-project-prompt",
