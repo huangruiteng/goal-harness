@@ -105,6 +105,28 @@ content, or invent community attribution for a founder-only release. The
 release PR and final GitHub release body must preserve the same bilingual
 attribution.
 
+### Release Capability Usage Gate
+
+When a release introduces or materially changes an optional capability,
+workflow, managed skill, or host surface, the final GitHub release body must
+teach the user how to operate it. For every affected surface, include matching
+English and Chinese entries with:
+
+- exact activation or per-command/profile opt-in;
+- a minimum runnable validation or readback command;
+- exact disable, uninstall, envelope-removal, or rollback guidance;
+- the authority and privacy boundary that activation does not grant;
+- a canonical versioned documentation link.
+
+Save the complete final release body in an ignored or temporary Markdown file.
+Run `examples/release/release-readiness-doc-smoke.py --release-notes ...` with
+one `--surface` argument per affected surface before publication, then read the
+remote body back and run the same check again. A release with no applicable
+surface changes must use `--expect-no-optional-capability-changes` and include
+the validator's explicit bilingual no-change declarations. Never treat the
+existence of a checklist, a release PR draft, or architecture-only capability
+copy as proof that the final release body is usable.
+
 ## First-Screen Review Gate
 
 Treat the first visible screen of public product surfaces as owner-reviewed
