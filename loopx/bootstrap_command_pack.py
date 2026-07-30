@@ -679,9 +679,8 @@ def _goal_start_contract(
                 "preview_command": (
                     "loopx issue-fix workflow-plan --url <github-issue-or-pr-url> "
                     "--repo-path <approved-repo> --repository-context-json "
-                    "<compact-context.json> --candidate-preflight-json "
-                    "<compact-prior-work.json> --validation-label "
-                    "'<validation command>' --format json"
+                    "<compact-context.json> --validation-label '<validation command>' "
+                    "--format json"
                 ),
                 "decision_command": (
                     "loopx issue-fix feasibility --url <github-issue-url> "
@@ -958,7 +957,6 @@ def build_loopx_bootstrap_command_pack(
                 "--url <github-issue-or-pr-url> "
                 "--repo-path <approved-repo> "
                 "--repository-context-json <compact-context.json> "
-                "--candidate-preflight-json <compact-prior-work.json> "
                 "--validation-label '<validation command>' "
                 "--format json"
             ),

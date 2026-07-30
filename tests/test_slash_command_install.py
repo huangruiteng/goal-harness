@@ -7,6 +7,7 @@ from loopx.slash_command_install import (
     materialize_loopx_entry_skill,
 )
 
+
 MANAGED_SKILL = "<!-- loopx-managed-slash-command:v1 command=/loopx surface=codex-skills -->\n"
 MANAGED_METADATA = (
     "# <!-- loopx-managed-slash-command:v1 command=/loopx "

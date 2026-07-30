@@ -9,6 +9,7 @@ from .candidate_preflight import build_issue_fix_candidate_preflight_packet
 from .intake_surface import build_content_ops_issue_fix_metadata_preview_packet
 from .repository_context import build_issue_fix_repository_context_packet
 
+
 ISSUE_FIX_WORKFLOW_PLAN_PACKET_SCHEMA_VERSION = "issue_fix_workflow_plan_packet_v0"
 _PUBLIC_GITHUB_ISSUE_OR_PR = re.compile(
     r"https://github\.com/[^/\s]+/[^/\s]+/(?:issues|pull)/[1-9][0-9]*"

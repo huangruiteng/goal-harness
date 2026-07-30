@@ -8,6 +8,7 @@ from typing import Any
 from .opencode_goal_mode import plugin_source, runtime_source
 from .slash_commands import build_slash_command_catalog
 
+
 SCHEMA_VERSION = "loopx_slash_command_install_v0"
 MANAGED_MARKER_PREFIX = "<!-- loopx-managed-slash-command:v1"
 LEGACY_UPGRADABLE_SIGNATURES = (

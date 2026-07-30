@@ -135,7 +135,6 @@ loopx issue-fix workflow-plan \
   --url <github-issue-or-pr-url> \
   --repo-path <approved-repo> \
   --repository-context-json <compact-context.json> \
-  --candidate-preflight-json <compact-prior-work.json> \
   --validation-label "<validation command>" \
   --format json
 ```
