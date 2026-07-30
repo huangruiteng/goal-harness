@@ -7,8 +7,11 @@ from typing import Any
 from .acceptance_loop import build_issue_fix_caller_repo_branch_packet
 from .candidate_preflight import build_issue_fix_candidate_preflight_packet
 from .intake_surface import build_content_ops_issue_fix_metadata_preview_packet
-from .repository_context import build_issue_fix_repository_context_packet
-
+from .repository_context import (
+    ISSUE_FIX_REPOSITORY_CONTEXT_INPUT_SCHEMA_VERSION,
+    build_issue_fix_repository_context_packet,
+    repository_context_input_contract,
+)
 
 ISSUE_FIX_WORKFLOW_PLAN_PACKET_SCHEMA_VERSION = "issue_fix_workflow_plan_packet_v0"
 _PUBLIC_GITHUB_ISSUE_OR_PR = re.compile(
@@ -561,6 +564,7 @@ def build_issue_fix_workflow_plan_packet(
             "body_captured": False,
             "comment_bodies_captured": False,
         },
+        "repository_context_input_contract": repository_context_input_contract(),
         "repository_context": repository_context,
         "candidate_preflight": candidate_preflight,
         "candidate_fix_workflow_allowed": preflight_route == "proceed",
@@ -649,6 +653,15 @@ def validate_issue_fix_workflow_plan_packet(
             is not True
         ):
             errors.append("repository_context must deny external-write authority")
+
+    repository_context_contract = packet.get("repository_context_input_contract")
+    if not isinstance(repository_context_contract, Mapping):
+        errors.append("repository_context_input_contract is required")
+    elif (
+        repository_context_contract.get("schema_version")
+        != ISSUE_FIX_REPOSITORY_CONTEXT_INPUT_SCHEMA_VERSION
+    ):
+        errors.append("repository_context_input_contract has wrong schema")
 
     candidate_preflight = packet.get("candidate_preflight")
     if not isinstance(candidate_preflight, Mapping):

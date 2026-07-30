@@ -194,6 +194,12 @@ An issue-fix workflow is PR-review-ready only when all of these are true:
 - no external issue comment, PR creation, merge, publish, production action, or
   destructive git action occurred.
 
+`issue_fix_workflow_plan_packet_v0` also projects a
+`repository_context_input_contract` with the accepted top-level/source fields
+and a minimal example. Hosts should construct feasibility input from that
+contract instead of copying the normalized `issue_fix_repository_context_v0`
+output shape.
+
 ## Related Schemas
 
 - `github_issue_metadata_preview_v0`

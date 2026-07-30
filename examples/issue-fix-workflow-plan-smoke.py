@@ -68,6 +68,18 @@ def assert_workflow_shape(payload: dict[str, Any]) -> None:
     assert payload["ok"] is True, payload
     assert payload["schema_version"] == ISSUE_FIX_WORKFLOW_PLAN_PACKET_SCHEMA_VERSION
     assert payload["mode"] == "issue-fix-workflow-plan"
+    context_contract = payload["repository_context_input_contract"]
+    assert context_contract["schema_version"] == "issue_fix_repository_context_input_v0"
+    assert context_contract["allowed_fields"] == [
+        "repository_revision",
+        "schema_version",
+        "sources",
+    ]
+    assert context_contract["minimal_example"]["sources"][0]["supports"] == [
+        "change_scope",
+        "reproduction",
+        "validation",
+    ]
     assert payload["external_writes_performed"] is False
     assert payload["todo_write_performed"] is False
     assert payload["local_paths_captured"] is False
