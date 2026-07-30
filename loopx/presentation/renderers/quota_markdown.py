@@ -899,21 +899,9 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- execution_obligation_reason: {execution_obligation.get('reason')}")
     interaction_contract = as_dict(payload.get("interaction_contract"))
     if interaction_contract:
-        user_channel = (
-            interaction_contract.get("user_channel")
-            if isinstance(interaction_contract.get("user_channel"), dict)
-            else {}
-        )
-        agent_channel = (
-            interaction_contract.get("agent_channel")
-            if isinstance(interaction_contract.get("agent_channel"), dict)
-            else {}
-        )
-        cli_channel = (
-            interaction_contract.get("cli_channel")
-            if isinstance(interaction_contract.get("cli_channel"), dict)
-            else {}
-        )
+        user_channel = as_dict(interaction_contract.get("user_channel"))
+        agent_channel = as_dict(interaction_contract.get("agent_channel"))
+        cli_channel = as_dict(interaction_contract.get("cli_channel"))
         lines.append(
             "- interaction_contract: "
             f"schema={interaction_contract.get('schema_version')} "
@@ -925,12 +913,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if agent_channel.get("primary_action"):
             lines.append(f"- interaction_agent_action: {agent_channel.get('primary_action')}")
-        resolution_trace = (
-            agent_channel.get("resolution_trace")
-            if isinstance(agent_channel.get("resolution_trace"), dict)
-            else {}
-        )
-        if resolution_trace:
+        if resolution_trace := as_dict(agent_channel.get("resolution_trace")):
             lines.append(
                 f"- interaction_agent_resolution: {resolution_trace.get('summary')}"
             )
@@ -948,27 +931,11 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- automation_pause_policy: {automation_liveness.get('pause_policy')}")
     scheduler_hint = as_dict(payload.get("scheduler_hint"))
     if scheduler_hint:
-        codex_app = (
-            scheduler_hint.get("codex_app")
-            if isinstance(scheduler_hint.get("codex_app"), dict)
-            else {}
-        )
-        unchanged_poll = (
-            scheduler_hint.get("unchanged_poll")
-            if isinstance(scheduler_hint.get("unchanged_poll"), dict)
-            else {}
-        )
-        limits = unchanged_poll.get("limits") if isinstance(unchanged_poll.get("limits"), dict) else {}
-        codex_cli_tui = (
-            scheduler_hint.get("codex_cli_tui")
-            if isinstance(scheduler_hint.get("codex_cli_tui"), dict)
-            else {}
-        )
-        claude_code_loop = (
-            scheduler_hint.get("claude_code_loop")
-            if isinstance(scheduler_hint.get("claude_code_loop"), dict)
-            else {}
-        )
+        codex_app = as_dict(scheduler_hint.get("codex_app"))
+        unchanged_poll = as_dict(scheduler_hint.get("unchanged_poll"))
+        limits = as_dict(unchanged_poll.get("limits"))
+        codex_cli_tui = as_dict(scheduler_hint.get("codex_cli_tui"))
+        claude_code_loop = as_dict(scheduler_hint.get("claude_code_loop"))
         cli_unchanged_limit = (
             limits.get("codex_cli_tui")
             if "codex_cli_tui" in limits
@@ -992,12 +959,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if scheduler_hint.get("reason"):
             lines.append(f"- scheduler_hint_reason: {scheduler_hint.get('reason')}")
-        reset_policy = (
-            scheduler_hint.get("reset_policy")
-            if isinstance(scheduler_hint.get("reset_policy"), dict)
-            else {}
-        )
-        if reset_policy:
+        if reset_policy := as_dict(scheduler_hint.get("reset_policy")):
             lines.append(
                 "- scheduler_reset: "
                 f"initial_interval={reset_policy.get('codex_app_initial_interval_minutes')} "
