@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..benchmark_adapters.agents_last_exam import (
@@ -61,6 +62,237 @@ PrintPayload = Callable[
     None,
 ]
 BenchmarkRolloutEventAppender = Callable[..., dict[str, object]]
+
+
+@dataclass(frozen=True)
+class _HistoryAppendSpec:
+    action: str
+    input_attr: str
+    input_option: str
+    schema_name: str
+    payload_key: str
+    default_classification: str
+    compact: Callable[..., dict[str, object]]
+    append: Callable[..., dict[str, object]]
+    render: Callable[..., str]
+
+
+_HISTORY_JSON_APPEND_SPECS = {
+    spec.action: spec
+    for spec in (
+        _HistoryAppendSpec(
+            action="append-benchmark-run",
+            input_attr="benchmark_run_json",
+            input_option="--benchmark-run-json",
+            schema_name="benchmark_run_v0",
+            payload_key="benchmark_run",
+            default_classification="benchmark_run_v0",
+            compact=compact_benchmark_run,
+            append=append_benchmark_run,
+            render=render_benchmark_run_append_markdown,
+        ),
+        _HistoryAppendSpec(
+            action="append-benchmark-result",
+            input_attr="benchmark_result_json",
+            input_option="--benchmark-result-json",
+            schema_name="benchmark_result_v0",
+            payload_key="benchmark_result",
+            default_classification="benchmark_result_v0",
+            compact=compact_benchmark_result,
+            append=append_benchmark_result,
+            render=render_benchmark_result_append_markdown,
+        ),
+        _HistoryAppendSpec(
+            action="append-benchmark-comparison",
+            input_attr="benchmark_comparison_json",
+            input_option="--benchmark-comparison-json",
+            schema_name="benchmark_comparison_v0",
+            payload_key="benchmark_comparison",
+            default_classification="benchmark_comparison_v0",
+            compact=compact_benchmark_comparison,
+            append=append_benchmark_comparison,
+            render=render_benchmark_comparison_append_markdown,
+        ),
+        _HistoryAppendSpec(
+            action="append-benchmark-learning-ledger",
+            input_attr="benchmark_learning_ledger_json",
+            input_option="--benchmark-learning-ledger-json",
+            schema_name="benchmark_learning_ledger_v0",
+            payload_key="benchmark_learning_ledger",
+            default_classification="benchmark_learning_ledger_v0",
+            compact=compact_benchmark_learning_ledger,
+            append=append_benchmark_learning_ledger,
+            render=render_benchmark_learning_ledger_append_markdown,
+        ),
+        _HistoryAppendSpec(
+            action="append-benchmark-report",
+            input_attr="benchmark_report_json",
+            input_option="--benchmark-report-json",
+            schema_name="benchmark_experiment_report_v0",
+            payload_key="benchmark_experiment_report",
+            default_classification="benchmark_experiment_report_v0",
+            compact=compact_benchmark_experiment_report,
+            append=append_benchmark_experiment_report,
+            render=render_benchmark_experiment_report_append_markdown,
+        ),
+        _HistoryAppendSpec(
+            action="append-active-user-assisted-pilot",
+            input_attr="active_user_pilot_json",
+            input_option="--active-user-pilot-json",
+            schema_name="active_user_assisted_pilot_v0",
+            payload_key="active_user_assisted_pilot",
+            default_classification="active_user_assisted_pilot_v0",
+            compact=compact_active_user_assisted_pilot,
+            append=append_active_user_assisted_pilot,
+            render=render_active_user_assisted_pilot_append_markdown,
+        ),
+    )
+}
+
+
+def _validate_append_request(args: argparse.Namespace, action: str) -> None:
+    if args.dry_run and args.execute:
+        raise ValueError(
+            f"history {action} accepts either --dry-run or --execute, not both"
+        )
+    if not args.goal_id:
+        raise ValueError(f"history {action} requires --goal-id")
+
+
+def _load_compact_history_input(
+    args: argparse.Namespace,
+    spec: _HistoryAppendSpec,
+) -> dict[str, object]:
+    input_path = getattr(args, spec.input_attr)
+    if not input_path:
+        raise ValueError(f"history {spec.action} requires {spec.input_option}")
+    raw_input = json.loads(
+        sys.stdin.read()
+        if input_path == "-"
+        else Path(input_path).expanduser().read_text(encoding="utf-8")
+    )
+    if not isinstance(raw_input, dict):
+        raise ValueError(f"{spec.input_option} must contain a JSON object")
+    compacted = spec.compact(raw_input)
+    if not compacted:
+        raise ValueError(
+            f"{spec.input_option} did not contain a compactable {spec.schema_name} object"
+        )
+    return compacted
+
+
+def _history_global_sync(
+    args: argparse.Namespace,
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    dry_run: bool,
+) -> dict[str, object]:
+    if args.no_global_sync:
+        return {
+            "ok": True,
+            "dry_run": dry_run,
+            "skipped": True,
+            "reason": "disabled by --no-global-sync",
+        }
+    return sync_project_registry_to_global(
+        registry_path=registry_path,
+        runtime_root_override=runtime_root_arg,
+        goal_id=args.goal_id,
+        dry_run=dry_run,
+    )
+
+
+def _append_history_record(
+    args: argparse.Namespace,
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    spec: _HistoryAppendSpec,
+    record: dict[str, object],
+    default_classification: str | None = None,
+    rollout_event: BenchmarkRolloutEventAppender | None = None,
+) -> dict[str, object]:
+    dry_run = not bool(args.execute)
+    payload = spec.append(
+        registry_path=registry_path,
+        runtime_root_override=runtime_root_arg,
+        goal_id=args.goal_id,
+        **{spec.payload_key: record},
+        classification=(
+            args.classification or default_classification or spec.default_classification
+        ),
+        recommended_action=args.recommended_action,
+        delivery_batch_scale=args.delivery_batch_scale,
+        delivery_outcome=args.delivery_outcome,
+        dry_run=dry_run,
+    )
+    payload["global_sync"] = _history_global_sync(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=runtime_root_arg,
+        dry_run=dry_run,
+    )
+    if rollout_event is not None:
+        rollout_event(
+            payload,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+            command="history",
+            action=spec.action,
+        )
+    return payload
+
+
+def _history_append_error(
+    args: argparse.Namespace,
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    classification: str,
+    error: Exception,
+) -> dict[str, object]:
+    return {
+        "ok": False,
+        "dry_run": not bool(args.execute),
+        "appended": False,
+        "registry": str(registry_path),
+        "runtime_root": runtime_root_arg,
+        "goal_id": args.goal_id,
+        "classification": args.classification or classification,
+        "error": str(error),
+    }
+
+
+def _handle_json_history_append(
+    args: argparse.Namespace,
+    *,
+    registry_path: Path,
+    runtime_root_arg: str | None,
+    print_payload: PrintPayload,
+    spec: _HistoryAppendSpec,
+    rollout_event: BenchmarkRolloutEventAppender | None,
+) -> int:
+    try:
+        _validate_append_request(args, spec.action)
+        payload = _append_history_record(
+            args,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+            spec=spec,
+            record=_load_compact_history_input(args, spec),
+            rollout_event=rollout_event,
+        )
+    except Exception as exc:
+        payload = _history_append_error(
+            args,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+            classification=spec.default_classification,
+            error=exc,
+        )
+    print_payload(payload, args.format, spec.render)
+    return 0 if payload.get("ok") else 1
 
 
 def register_history_command(subparsers: argparse._SubParsersAction) -> None:
@@ -272,7 +504,9 @@ def handle_history_command(
                 raw_plan = (
                     sys.stdin.read()
                     if args.review_plan_json == "-"
-                    else Path(args.review_plan_json).expanduser().read_text(encoding="utf-8")
+                    else Path(args.review_plan_json)
+                    .expanduser()
+                    .read_text(encoding="utf-8")
                 )
                 reviewed_plan = json.loads(raw_plan)
                 if not isinstance(reviewed_plan, dict):
@@ -303,365 +537,47 @@ def handle_history_command(
         print_payload(payload, args.format, render_index_collision_rebuild_markdown)
         return 0 if payload.get("ok") else 1
 
-    if args.history_action == "append-benchmark-run":
-        try:
-            if args.dry_run and args.execute:
-                raise ValueError("history append-benchmark-run accepts either --dry-run or --execute, not both")
-            if not args.goal_id:
-                raise ValueError("history append-benchmark-run requires --goal-id")
-            if not args.benchmark_run_json:
-                raise ValueError("history append-benchmark-run requires --benchmark-run-json")
-
-            if args.benchmark_run_json == "-":
-                benchmark_run_input = json.loads(sys.stdin.read())
-            else:
-                benchmark_run_input = json.loads(Path(args.benchmark_run_json).expanduser().read_text(encoding="utf-8"))
-            if not isinstance(benchmark_run_input, dict):
-                raise ValueError("--benchmark-run-json must contain a JSON object")
-            benchmark_run = compact_benchmark_run(benchmark_run_input)
-            if not benchmark_run:
-                raise ValueError("--benchmark-run-json did not contain a compactable benchmark_run_v0 object")
-
-            dry_run = not bool(args.execute)
-            payload = append_benchmark_run(
-                registry_path=registry_path,
-                runtime_root_override=runtime_root_arg,
-                goal_id=args.goal_id,
-                benchmark_run=benchmark_run,
-                classification=args.classification or "benchmark_run_v0",
-                recommended_action=args.recommended_action,
-                delivery_batch_scale=args.delivery_batch_scale,
-                delivery_outcome=args.delivery_outcome,
-                dry_run=dry_run,
-            )
-            if args.no_global_sync:
-                payload["global_sync"] = {
-                    "ok": True,
-                    "dry_run": dry_run,
-                    "skipped": True,
-                    "reason": "disabled by --no-global-sync",
-                }
-            else:
-                payload["global_sync"] = sync_project_registry_to_global(
-                    registry_path=registry_path,
-                    runtime_root_override=runtime_root_arg,
-                    goal_id=args.goal_id,
-                    dry_run=dry_run,
-                )
-            append_benchmark_run_rollout_event(
-                payload,
-                registry_path=registry_path,
-                runtime_root_arg=runtime_root_arg,
-                command="history",
-                action="append-benchmark-run",
-            )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "dry_run": not bool(args.execute),
-                "appended": False,
-                "registry": str(registry_path),
-                "runtime_root": runtime_root_arg,
-                "goal_id": args.goal_id,
-                "classification": args.classification or "benchmark_run_v0",
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_benchmark_run_append_markdown)
-        return 0 if payload.get("ok") else 1
-
-    if args.history_action == "append-benchmark-result":
-        try:
-            if args.dry_run and args.execute:
-                raise ValueError("history append-benchmark-result accepts either --dry-run or --execute, not both")
-            if not args.goal_id:
-                raise ValueError("history append-benchmark-result requires --goal-id")
-            if not args.benchmark_result_json:
-                raise ValueError("history append-benchmark-result requires --benchmark-result-json")
-
-            if args.benchmark_result_json == "-":
-                benchmark_result_input = json.loads(sys.stdin.read())
-            else:
-                benchmark_result_input = json.loads(Path(args.benchmark_result_json).expanduser().read_text(encoding="utf-8"))
-            if not isinstance(benchmark_result_input, dict):
-                raise ValueError("--benchmark-result-json must contain a JSON object")
-            benchmark_result = compact_benchmark_result(benchmark_result_input)
-            if not benchmark_result:
-                raise ValueError("--benchmark-result-json did not contain a compactable benchmark_result_v0 object")
-
-            dry_run = not bool(args.execute)
-            payload = append_benchmark_result(
-                registry_path=registry_path,
-                runtime_root_override=runtime_root_arg,
-                goal_id=args.goal_id,
-                benchmark_result=benchmark_result,
-                classification=args.classification or "benchmark_result_v0",
-                recommended_action=args.recommended_action,
-                delivery_batch_scale=args.delivery_batch_scale,
-                delivery_outcome=args.delivery_outcome,
-                dry_run=dry_run,
-            )
-            if args.no_global_sync:
-                payload["global_sync"] = {
-                    "ok": True,
-                    "dry_run": dry_run,
-                    "skipped": True,
-                    "reason": "disabled by --no-global-sync",
-                }
-            else:
-                payload["global_sync"] = sync_project_registry_to_global(
-                    registry_path=registry_path,
-                    runtime_root_override=runtime_root_arg,
-                    goal_id=args.goal_id,
-                    dry_run=dry_run,
-                )
-            append_benchmark_result_rollout_event(
-                payload,
-                registry_path=registry_path,
-                runtime_root_arg=runtime_root_arg,
-                command="history",
-                action="append-benchmark-result",
-            )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "dry_run": not bool(args.execute),
-                "appended": False,
-                "registry": str(registry_path),
-                "runtime_root": runtime_root_arg,
-                "goal_id": args.goal_id,
-                "classification": args.classification or "benchmark_result_v0",
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_benchmark_result_append_markdown)
-        return 0 if payload.get("ok") else 1
-
-    if args.history_action == "append-benchmark-comparison":
-        try:
-            if args.dry_run and args.execute:
-                raise ValueError("history append-benchmark-comparison accepts either --dry-run or --execute, not both")
-            if not args.goal_id:
-                raise ValueError("history append-benchmark-comparison requires --goal-id")
-            if not args.benchmark_comparison_json:
-                raise ValueError("history append-benchmark-comparison requires --benchmark-comparison-json")
-
-            if args.benchmark_comparison_json == "-":
-                benchmark_comparison_input = json.loads(sys.stdin.read())
-            else:
-                benchmark_comparison_input = json.loads(
-                    Path(args.benchmark_comparison_json).expanduser().read_text(encoding="utf-8")
-                )
-            if not isinstance(benchmark_comparison_input, dict):
-                raise ValueError("--benchmark-comparison-json must contain a JSON object")
-            benchmark_comparison = compact_benchmark_comparison(benchmark_comparison_input)
-            if not benchmark_comparison:
-                raise ValueError(
-                    "--benchmark-comparison-json did not contain a compactable benchmark_comparison_v0 object"
-                )
-
-            dry_run = not bool(args.execute)
-            payload = append_benchmark_comparison(
-                registry_path=registry_path,
-                runtime_root_override=runtime_root_arg,
-                goal_id=args.goal_id,
-                benchmark_comparison=benchmark_comparison,
-                classification=args.classification or "benchmark_comparison_v0",
-                recommended_action=args.recommended_action,
-                delivery_batch_scale=args.delivery_batch_scale,
-                delivery_outcome=args.delivery_outcome,
-                dry_run=dry_run,
-            )
-            if args.no_global_sync:
-                payload["global_sync"] = {
-                    "ok": True,
-                    "dry_run": dry_run,
-                    "skipped": True,
-                    "reason": "disabled by --no-global-sync",
-                }
-            else:
-                payload["global_sync"] = sync_project_registry_to_global(
-                    registry_path=registry_path,
-                    runtime_root_override=runtime_root_arg,
-                    goal_id=args.goal_id,
-                    dry_run=dry_run,
-                )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "dry_run": not bool(args.execute),
-                "appended": False,
-                "registry": str(registry_path),
-                "runtime_root": runtime_root_arg,
-                "goal_id": args.goal_id,
-                "classification": args.classification or "benchmark_comparison_v0",
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_benchmark_comparison_append_markdown)
-        return 0 if payload.get("ok") else 1
-
-    if args.history_action == "append-benchmark-learning-ledger":
-        try:
-            if args.dry_run and args.execute:
-                raise ValueError(
-                    "history append-benchmark-learning-ledger accepts either --dry-run or --execute, not both"
-                )
-            if not args.goal_id:
-                raise ValueError("history append-benchmark-learning-ledger requires --goal-id")
-            if not args.benchmark_learning_ledger_json:
-                raise ValueError(
-                    "history append-benchmark-learning-ledger requires --benchmark-learning-ledger-json"
-                )
-
-            if args.benchmark_learning_ledger_json == "-":
-                ledger_input = json.loads(sys.stdin.read())
-            else:
-                ledger_input = json.loads(
-                    Path(args.benchmark_learning_ledger_json).expanduser().read_text(encoding="utf-8")
-                )
-            if not isinstance(ledger_input, dict):
-                raise ValueError("--benchmark-learning-ledger-json must contain a JSON object")
-            benchmark_learning_ledger = compact_benchmark_learning_ledger(ledger_input)
-            if not benchmark_learning_ledger:
-                raise ValueError(
-                    "--benchmark-learning-ledger-json did not contain a compactable benchmark_learning_ledger_v0 object"
-                )
-
-            dry_run = not bool(args.execute)
-            payload = append_benchmark_learning_ledger(
-                registry_path=registry_path,
-                runtime_root_override=runtime_root_arg,
-                goal_id=args.goal_id,
-                benchmark_learning_ledger=benchmark_learning_ledger,
-                classification=args.classification or "benchmark_learning_ledger_v0",
-                recommended_action=args.recommended_action,
-                delivery_batch_scale=args.delivery_batch_scale,
-                delivery_outcome=args.delivery_outcome,
-                dry_run=dry_run,
-            )
-            if args.no_global_sync:
-                payload["global_sync"] = {
-                    "ok": True,
-                    "dry_run": dry_run,
-                    "skipped": True,
-                    "reason": "disabled by --no-global-sync",
-                }
-            else:
-                payload["global_sync"] = sync_project_registry_to_global(
-                    registry_path=registry_path,
-                    runtime_root_override=runtime_root_arg,
-                    goal_id=args.goal_id,
-                    dry_run=dry_run,
-                )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "dry_run": not bool(args.execute),
-                "appended": False,
-                "registry": str(registry_path),
-                "runtime_root": runtime_root_arg,
-                "goal_id": args.goal_id,
-                "classification": args.classification or "benchmark_learning_ledger_v0",
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_benchmark_learning_ledger_append_markdown)
-        return 0 if payload.get("ok") else 1
-
-    if args.history_action == "append-benchmark-report":
-        try:
-            if args.dry_run and args.execute:
-                raise ValueError("history append-benchmark-report accepts either --dry-run or --execute, not both")
-            if not args.goal_id:
-                raise ValueError("history append-benchmark-report requires --goal-id")
-            if not args.benchmark_report_json:
-                raise ValueError("history append-benchmark-report requires --benchmark-report-json")
-
-            if args.benchmark_report_json == "-":
-                benchmark_report_input = json.loads(sys.stdin.read())
-            else:
-                benchmark_report_input = json.loads(
-                    Path(args.benchmark_report_json).expanduser().read_text(encoding="utf-8")
-                )
-            if not isinstance(benchmark_report_input, dict):
-                raise ValueError("--benchmark-report-json must contain a JSON object")
-            benchmark_report = compact_benchmark_experiment_report(benchmark_report_input)
-            if not benchmark_report:
-                raise ValueError(
-                    "--benchmark-report-json did not contain a compactable benchmark_experiment_report_v0 object"
-                )
-
-            dry_run = not bool(args.execute)
-            payload = append_benchmark_experiment_report(
-                registry_path=registry_path,
-                runtime_root_override=runtime_root_arg,
-                goal_id=args.goal_id,
-                benchmark_experiment_report=benchmark_report,
-                classification=args.classification or "benchmark_experiment_report_v0",
-                recommended_action=args.recommended_action,
-                delivery_batch_scale=args.delivery_batch_scale,
-                delivery_outcome=args.delivery_outcome,
-                dry_run=dry_run,
-            )
-            if args.no_global_sync:
-                payload["global_sync"] = {
-                    "ok": True,
-                    "dry_run": dry_run,
-                    "skipped": True,
-                    "reason": "disabled by --no-global-sync",
-                }
-            else:
-                payload["global_sync"] = sync_project_registry_to_global(
-                    registry_path=registry_path,
-                    runtime_root_override=runtime_root_arg,
-                    goal_id=args.goal_id,
-                    dry_run=dry_run,
-                )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "dry_run": not bool(args.execute),
-                "appended": False,
-                "registry": str(registry_path),
-                "runtime_root": runtime_root_arg,
-                "goal_id": args.goal_id,
-                "classification": args.classification or "benchmark_experiment_report_v0",
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_benchmark_experiment_report_append_markdown)
-        return 0 if payload.get("ok") else 1
+    append_spec = _HISTORY_JSON_APPEND_SPECS.get(args.history_action)
+    if append_spec is not None:
+        rollout_event = {
+            "append-benchmark-run": append_benchmark_run_rollout_event,
+            "append-benchmark-result": append_benchmark_result_rollout_event,
+        }.get(append_spec.action)
+        return _handle_json_history_append(
+            args,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+            print_payload=print_payload,
+            spec=append_spec,
+            rollout_event=rollout_event,
+        )
 
     if args.history_action == "append-agents-last-exam-result-report":
         try:
-            if args.dry_run and args.execute:
-                raise ValueError(
-                    "history append-agents-last-exam-result-report accepts either --dry-run or --execute, not both"
-                )
-            if not args.goal_id:
-                raise ValueError("history append-agents-last-exam-result-report requires --goal-id")
+            action = "append-agents-last-exam-result-report"
+            _validate_append_request(args, action)
             if not args.agents_last_exam_run_dir:
                 raise ValueError(
-                    "history append-agents-last-exam-result-report requires --agents-last-exam-run-dir"
+                    f"history {action} requires --agents-last-exam-run-dir"
                 )
-
             benchmark_report_input = build_agents_last_exam_result_benchmark_report(
                 Path(args.agents_last_exam_run_dir).expanduser(),
                 report_id=args.report_id,
             )
-            benchmark_report = compact_benchmark_experiment_report(benchmark_report_input)
+            benchmark_report = compact_benchmark_experiment_report(
+                benchmark_report_input
+            )
             if not benchmark_report:
                 raise ValueError(
                     "--agents-last-exam-run-dir did not produce a compactable benchmark_experiment_report_v0 object"
                 )
-
-            dry_run = not bool(args.execute)
-            payload = append_benchmark_experiment_report(
+            payload = _append_history_record(
+                args,
                 registry_path=registry_path,
-                runtime_root_override=runtime_root_arg,
-                goal_id=args.goal_id,
-                benchmark_experiment_report=benchmark_report,
-                classification=args.classification or "agents_last_exam_result_report_v0",
-                recommended_action=args.recommended_action,
-                delivery_batch_scale=args.delivery_batch_scale,
-                delivery_outcome=args.delivery_outcome,
-                dry_run=dry_run,
+                runtime_root_arg=runtime_root_arg,
+                spec=_HISTORY_JSON_APPEND_SPECS["append-benchmark-report"],
+                record=benchmark_report,
+                default_classification="agents_last_exam_result_report_v0",
             )
             payload["benchmark_report_source"] = {
                 "kind": "agents_last_exam_run_dir",
@@ -669,99 +585,17 @@ def handle_history_command(
                 "raw_surface_content_recorded": False,
                 "local_paths_recorded": False,
             }
-            if args.no_global_sync:
-                payload["global_sync"] = {
-                    "ok": True,
-                    "dry_run": dry_run,
-                    "skipped": True,
-                    "reason": "disabled by --no-global-sync",
-                }
-            else:
-                payload["global_sync"] = sync_project_registry_to_global(
-                    registry_path=registry_path,
-                    runtime_root_override=runtime_root_arg,
-                    goal_id=args.goal_id,
-                    dry_run=dry_run,
-                )
         except Exception as exc:
-            payload = {
-                "ok": False,
-                "dry_run": not bool(args.execute),
-                "appended": False,
-                "registry": str(registry_path),
-                "runtime_root": runtime_root_arg,
-                "goal_id": args.goal_id,
-                "classification": args.classification or "agents_last_exam_result_report_v0",
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_benchmark_experiment_report_append_markdown)
-        return 0 if payload.get("ok") else 1
-
-    if args.history_action == "append-active-user-assisted-pilot":
-        try:
-            if args.dry_run and args.execute:
-                raise ValueError(
-                    "history append-active-user-assisted-pilot accepts either --dry-run or --execute, not both"
-                )
-            if not args.goal_id:
-                raise ValueError("history append-active-user-assisted-pilot requires --goal-id")
-            if not args.active_user_pilot_json:
-                raise ValueError(
-                    "history append-active-user-assisted-pilot requires --active-user-pilot-json"
-                )
-
-            if args.active_user_pilot_json == "-":
-                active_user_pilot_input = json.loads(sys.stdin.read())
-            else:
-                active_user_pilot_input = json.loads(
-                    Path(args.active_user_pilot_json).expanduser().read_text(encoding="utf-8")
-                )
-            if not isinstance(active_user_pilot_input, dict):
-                raise ValueError("--active-user-pilot-json must contain a JSON object")
-            active_user_pilot = compact_active_user_assisted_pilot(active_user_pilot_input)
-            if not active_user_pilot:
-                raise ValueError(
-                    "--active-user-pilot-json did not contain a compactable active_user_assisted_pilot_v0 object"
-                )
-
-            dry_run = not bool(args.execute)
-            payload = append_active_user_assisted_pilot(
+            payload = _history_append_error(
+                args,
                 registry_path=registry_path,
-                runtime_root_override=runtime_root_arg,
-                goal_id=args.goal_id,
-                active_user_assisted_pilot=active_user_pilot,
-                classification=args.classification or "active_user_assisted_pilot_v0",
-                recommended_action=args.recommended_action,
-                delivery_batch_scale=args.delivery_batch_scale,
-                delivery_outcome=args.delivery_outcome,
-                dry_run=dry_run,
+                runtime_root_arg=runtime_root_arg,
+                classification="agents_last_exam_result_report_v0",
+                error=exc,
             )
-            if args.no_global_sync:
-                payload["global_sync"] = {
-                    "ok": True,
-                    "dry_run": dry_run,
-                    "skipped": True,
-                    "reason": "disabled by --no-global-sync",
-                }
-            else:
-                payload["global_sync"] = sync_project_registry_to_global(
-                    registry_path=registry_path,
-                    runtime_root_override=runtime_root_arg,
-                    goal_id=args.goal_id,
-                    dry_run=dry_run,
-                )
-        except Exception as exc:
-            payload = {
-                "ok": False,
-                "dry_run": not bool(args.execute),
-                "appended": False,
-                "registry": str(registry_path),
-                "runtime_root": runtime_root_arg,
-                "goal_id": args.goal_id,
-                "classification": args.classification or "active_user_assisted_pilot_v0",
-                "error": str(exc),
-            }
-        print_payload(payload, args.format, render_active_user_assisted_pilot_append_markdown)
+        print_payload(
+            payload, args.format, render_benchmark_experiment_report_append_markdown
+        )
         return 0 if payload.get("ok") else 1
 
     try:
