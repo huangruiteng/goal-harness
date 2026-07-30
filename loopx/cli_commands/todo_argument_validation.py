@@ -28,6 +28,7 @@ TODO_OPTION_FIELDS = (
     ("--clear-explore-result-node-refs", "clear_explore_result_node_refs"),
     ("--decision-scope", "decision_scope"),
     ("--required-decision-scope", "required_decision_scopes"),
+    ("--decision-outcome", "decision_outcome"),
     ("--claimed-by", "claimed_by"),
     ("--bound-agent", "bound_agent"),
     ("--goal-bound", "goal_bound"),
@@ -196,6 +197,27 @@ def unsupported_todo_options(
         for flag, field in TODO_OPTION_FIELDS
         if field not in allowed and getattr(args, field, None)
     ]
+
+
+def validate_todo_claim_options(args: argparse.Namespace) -> None:
+    if not args.todo_id:
+        raise ValueError("todo claim requires --todo-id")
+    if not args.claimed_by:
+        raise ValueError("todo claim requires --claimed-by")
+    if args.clear_claim:
+        raise ValueError(
+            "todo claim requires --claimed-by and does not support --clear-claim"
+        )
+    unsupported = unsupported_todo_options(
+        args,
+        allowed_fields={"role", "todo_id", "claimed_by", "agent_id", "state_file"},
+    )
+    if unsupported:
+        raise ValueError(
+            "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
+            "--project, --state-file, and --dry-run; unsupported: "
+            + ", ".join(unsupported)
+        )
 
 
 def validate_shared_todo_options(args: argparse.Namespace) -> None:

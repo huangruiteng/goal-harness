@@ -29,6 +29,7 @@ from .todo_argument_validation import (
     validate_capability_gap_options,
     validate_shared_todo_options,
     validate_successor_routing_options,
+    validate_todo_claim_options,
 )
 from .todo_event import RolloutEventAppender, append_todo_rollout_event
 
@@ -478,69 +479,7 @@ def handle_todo_command(
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "claim":
-            if not args.todo_id:
-                raise ValueError("todo claim requires --todo-id")
-            if not args.claimed_by:
-                raise ValueError("todo claim requires --claimed-by")
-            if args.clear_claim:
-                raise ValueError("todo claim requires --claimed-by and does not support --clear-claim")
-            unsupported = [
-                flag
-                for flag, value in (
-                    ("--text", args.text),
-                    ("--status", args.status),
-                    ("--note", args.note),
-                    ("--evidence", args.evidence),
-                    ("--reason", args.reason),
-                    ("--task-class", args.task_class),
-                    ("--action-kind", args.action_kind),
-                    ("--task-repository", args.task_repository),
-                    ("--continuation-policy", args.continuation_policy),
-                    ("--required-write-scope", args.required_write_scopes),
-                    ("--required-capability", args.required_capabilities),
-                    ("--target-capability", args.target_capabilities),
-                    ("--explore-result-node-ref", args.explore_result_node_refs),
-                    ("--clear-explore-result-node-refs", args.clear_explore_result_node_refs),
-                    ("--decision-scope", args.decision_scope),
-                    ("--required-decision-scope", args.required_decision_scopes),
-                    ("--decision-outcome", args.decision_outcome),
-                    ("--bound-agent", args.bound_agent),
-                    ("--goal-bound", args.goal_bound),
-                    ("--blocks-agent", args.blocks_agent),
-                    ("--clear-blocks-agent", args.clear_blocks_agent),
-                    ("--excluded-agent", args.excluded_agents),
-                    ("--clear-excluded-agents", args.clear_excluded_agents),
-                    ("--global-gate", args.global_gate),
-                    ("--clear-global-gate", args.clear_global_gate),
-                    ("--unblocks-todo-id", args.unblocks_todo_id),
-                    ("--successor-todo-id", args.successor_todo_ids),
-                    ("--resume-when", args.resume_when),
-                    ("--target-key", args.monitor_target_key),
-                    ("--cadence", args.cadence),
-                    ("--next-due-at", args.next_due_at),
-                    ("--expires-at", args.expires_at),
-                    ("--no-follow-up", args.no_follow_up),
-                    ("--next-agent-todo", args.next_agent_todo),
-                    ("--next-user-todo", args.next_user_todo),
-                    ("--next-user-task-class", args.next_user_task_class),
-                    ("--next-claimed-by", args.next_claimed_by),
-                    ("--next-task-class", args.next_task_class),
-                    ("--next-action-kind", args.next_action_kind),
-                    ("--next-task-repository", args.next_task_repository),
-                    ("--next-required-capability", args.next_required_capabilities),
-                    ("--next-continuation-policy", args.next_continuation_policy),
-                    ("--next-excluded-agent", args.next_excluded_agents),
-                    ("--self-merged", args.self_merged),
-                    ("--follow-up", args.followups),
-                )
-                if value
-            ]
-            if unsupported:
-                raise ValueError(
-                    "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
-                    "--project, --state-file, and --dry-run; unsupported: "
-                    + ", ".join(unsupported)
-                )
+            validate_todo_claim_options(args)
             payload = update_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,

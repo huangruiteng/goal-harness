@@ -6,6 +6,7 @@ import pytest
 
 from loopx.cli import build_parser, main, output_format, resolve_global_output_format
 from loopx.cli_commands.quota import _validate_quota_command_request
+from loopx.cli_commands.todo_argument_validation import validate_todo_claim_options
 
 
 @pytest.mark.parametrize(
@@ -151,6 +152,55 @@ def test_quota_command_request_validation_preserves_exact_diagnostics(
 
     with pytest.raises(ValueError) as exc_info:
         _validate_quota_command_request(args)
+
+    assert str(exc_info.value) == expected
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected"),
+    [
+        ([], "todo claim requires --todo-id"),
+        (
+            ["--todo-id", "todo_example"],
+            "todo claim requires --claimed-by",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--claimed-by",
+                "codex-example",
+                "--clear-claim",
+            ],
+            "todo claim requires --claimed-by and does not support --clear-claim",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--claimed-by",
+                "codex-example",
+                "--decision-outcome",
+                "approve",
+                "--next-agent-todo",
+                "Continue the work.",
+            ],
+            "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
+            "--project, --state-file, and --dry-run; unsupported: "
+            "--decision-outcome, --next-agent-todo",
+        ),
+    ],
+)
+def test_todo_claim_validation_preserves_exact_diagnostics(
+    extra_args: list[str],
+    expected: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["todo", "claim", "--goal-id", "example-goal", *extra_args]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_claim_options(args)
 
     assert str(exc_info.value) == expected
 
