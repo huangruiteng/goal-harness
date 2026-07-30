@@ -236,6 +236,21 @@ def unsupported_todo_options(
     ]
 
 
+def _validate_todo_option_subset(args: argparse.Namespace, allowed_fields: Iterable[str], error_prefix: str) -> None:
+    unsupported = unsupported_todo_options(args, allowed_fields=allowed_fields)
+    if unsupported:
+        raise ValueError(error_prefix + ", ".join(unsupported))
+
+
+def validate_todo_list_options(args: argparse.Namespace) -> None:
+    _validate_todo_option_subset(
+        args,
+        {"role", "todo_id", "status", "agent_id", "state_file"},
+        "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
+        "--agent-id, --project, --state-file, --dry-run, and --format; unsupported: ",
+    )
+
+
 def validate_todo_claim_options(args: argparse.Namespace) -> None:
     if not args.todo_id:
         raise ValueError("todo claim requires --todo-id")
@@ -245,16 +260,12 @@ def validate_todo_claim_options(args: argparse.Namespace) -> None:
         raise ValueError(
             "todo claim requires --claimed-by and does not support --clear-claim"
         )
-    unsupported = unsupported_todo_options(
+    _validate_todo_option_subset(
         args,
-        allowed_fields={"role", "todo_id", "claimed_by", "agent_id", "state_file"},
+        {"role", "todo_id", "claimed_by", "agent_id", "state_file"},
+        "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
+        "--project, --state-file, and --dry-run; unsupported: ",
     )
-    if unsupported:
-        raise ValueError(
-            "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
-            "--project, --state-file, and --dry-run; unsupported: "
-            + ", ".join(unsupported)
-        )
 
 
 def validate_todo_update_options(args: argparse.Namespace) -> None:
@@ -350,15 +361,12 @@ def validate_todo_archive_completed_options(args: argparse.Namespace) -> None:
 
 
 def validate_todo_suggest_options(args: argparse.Namespace) -> None:
-    unsupported = unsupported_todo_options(
+    _validate_todo_option_subset(
         args,
-        allowed_fields={"agent_id", "suggestion_sources", "suggestion_limit", "suggestion_trigger"},
+        {"agent_id", "suggestion_sources", "suggestion_limit", "suggestion_trigger"},
+        "todo suggest only accepts --goal-id, optional --project, --agent-id, "
+        "--from, --limit, --trigger, --dry-run, and --format; unsupported: ",
     )
-    if unsupported:
-        raise ValueError(
-            "todo suggest only accepts --goal-id, optional --project, --agent-id, "
-            "--from, --limit, --trigger, --dry-run, and --format; unsupported: " + ", ".join(unsupported)
-        )
 
 
 def validate_todo_capture_followups_options(args: argparse.Namespace) -> None:
@@ -369,20 +377,17 @@ def validate_todo_capture_followups_options(args: argparse.Namespace) -> None:
     for triggered, message in checks:
         if triggered:
             raise ValueError(message)
-    unsupported = unsupported_todo_options(
+    _validate_todo_option_subset(
         args,
-        allowed_fields={
+        {
             "text", "followups", "evidence", "task_class", "action_kind",
             "continuation_policy", "required_write_scopes", "required_capabilities",
             "target_capabilities", "required_decision_scopes", "state_file",
         },
+        "todo capture-followups only accepts --goal-id, --follow-up, optional "
+        "--text shorthand, --evidence, routing metadata, --project, --state-file, "
+        "and --dry-run; unsupported: ",
     )
-    if unsupported:
-        raise ValueError(
-            "todo capture-followups only accepts --goal-id, --follow-up, optional "
-            "--text shorthand, --evidence, routing metadata, --project, --state-file, "
-            "and --dry-run; unsupported: " + ", ".join(unsupported)
-        )
 
 
 def validate_shared_todo_options(args: argparse.Namespace) -> None:

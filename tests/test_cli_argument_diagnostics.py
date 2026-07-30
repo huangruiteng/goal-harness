@@ -11,6 +11,7 @@ from loopx.cli_commands.todo_argument_validation import (
     validate_todo_capture_followups_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
+    validate_todo_list_options,
     validate_todo_suggest_options,
     validate_todo_supersede_options,
     validate_todo_update_options,
@@ -79,6 +80,56 @@ def test_quota_include_detail_rejects_non_should_run_command(
     assert payload["error"] == (
         "--include-detail is only valid with `quota should-run`"
     )
+
+
+def test_todo_list_validation_preserves_exact_unsupported_diagnostic() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "list",
+            "--goal-id",
+            "example-goal",
+            "--note",
+            "not accepted",
+            "--evidence",
+            "not accepted",
+        ]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_list_options(args)
+
+    assert str(exc_info.value) == (
+        "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
+        "--agent-id, --project, --state-file, --dry-run, and --format; unsupported: "
+        "--note, --evidence"
+    )
+
+
+def test_todo_list_validation_accepts_read_filters() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "list",
+            "--goal-id",
+            "example-goal",
+            "--role",
+            "agent",
+            "--status",
+            "open",
+            "--todo-id",
+            "todo_example",
+            "--agent-id",
+            "codex-example",
+            "--project",
+            ".",
+            "--state-file",
+            "ACTIVE_GOAL_STATE.md",
+            "--dry-run",
+        ]
+    )
+
+    validate_todo_list_options(args)
 
 
 def test_deprecated_scheduler_detail_alias_is_hidden_from_help(

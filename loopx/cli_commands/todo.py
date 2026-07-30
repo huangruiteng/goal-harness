@@ -25,13 +25,13 @@ from ..todos import (
 from .todo_argument_validation import (
     register_todo_linkage_arguments,
     register_todo_successor_creation_arguments,
-    unsupported_todo_options,
     validate_capability_gap_options,
     validate_shared_todo_options,
     validate_todo_archive_completed_options,
     validate_todo_capture_followups_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
+    validate_todo_list_options,
     validate_todo_suggest_options,
     validate_todo_supersede_options,
     validate_todo_update_options,
@@ -390,16 +390,7 @@ def handle_todo_command(
         validate_shared_todo_options(args)
         validate_capability_gap_options(args)
         if args.todo_command == "list":
-            unsupported = unsupported_todo_options(
-                args,
-                allowed_fields={"role", "todo_id", "status", "agent_id", "state_file"},
-            )
-            if unsupported:
-                raise ValueError(
-                    "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
-                    "--agent-id, --project, --state-file, --dry-run, and --format; unsupported: "
-                    + ", ".join(unsupported)
-                )
+            validate_todo_list_options(args)
             payload = list_goal_todos(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
