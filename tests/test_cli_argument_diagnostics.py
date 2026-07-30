@@ -10,6 +10,7 @@ from loopx.cli_commands.todo_argument_validation import (
     validate_todo_archive_completed_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
+    validate_todo_suggest_options,
     validate_todo_supersede_options,
     validate_todo_update_options,
 )
@@ -554,6 +555,54 @@ def test_todo_archive_completed_validation_accepts_role_and_limit() -> None:
     )
 
     validate_todo_archive_completed_options(args)
+
+
+def test_todo_suggest_validation_preserves_exact_unsupported_diagnostic(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = main(
+        [
+            "--format",
+            "json",
+            "todo",
+            "suggest",
+            "--goal-id",
+            "example-goal",
+            "--todo-id",
+            "todo_example",
+            "--note",
+            "not accepted",
+        ]
+    )
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == (
+        "todo suggest only accepts --goal-id, optional --project, --agent-id, "
+        "--from, --limit, --trigger, --dry-run, and --format; unsupported: "
+        "--todo-id, --note"
+    )
+
+
+def test_todo_suggest_validation_accepts_suggestion_scope_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "suggest",
+            "--goal-id",
+            "example-goal",
+            "--agent-id",
+            "codex-example",
+            "--from",
+            "recent-repo",
+            "--limit",
+            "3",
+            "--trigger",
+            "quality-watch",
+        ]
+    )
+
+    validate_todo_suggest_options(args)
 
 
 @pytest.mark.parametrize(

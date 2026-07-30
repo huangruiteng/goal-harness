@@ -349,6 +349,18 @@ def validate_todo_archive_completed_options(args: argparse.Namespace) -> None:
             raise ValueError(message)
 
 
+def validate_todo_suggest_options(args: argparse.Namespace) -> None:
+    unsupported = unsupported_todo_options(
+        args,
+        allowed_fields={"agent_id", "suggestion_sources", "suggestion_limit", "suggestion_trigger"},
+    )
+    if unsupported:
+        raise ValueError(
+            "todo suggest only accepts --goal-id, optional --project, --agent-id, "
+            "--from, --limit, --trigger, --dry-run, and --format; unsupported: " + ", ".join(unsupported)
+        )
+
+
 def validate_shared_todo_options(args: argparse.Namespace) -> None:
     agent_id_allowed_for_user_authoring = (
         args.todo_command == "add"

@@ -31,6 +31,7 @@ from .todo_argument_validation import (
     validate_todo_archive_completed_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
+    validate_todo_suggest_options,
     validate_todo_supersede_options,
     validate_todo_update_options,
 )
@@ -615,21 +616,7 @@ def handle_todo_command(
                 dry_run=not bool(args.execute),
             )
         elif args.todo_command == "suggest":
-            unsupported = unsupported_todo_options(
-                args,
-                allowed_fields={
-                    "agent_id",
-                    "suggestion_sources",
-                    "suggestion_limit",
-                    "suggestion_trigger",
-                },
-            )
-            if unsupported:
-                raise ValueError(
-                    "todo suggest only accepts --goal-id, optional --project, --agent-id, "
-                    "--from, --limit, --trigger, --dry-run, and --format; unsupported: "
-                    + ", ".join(unsupported)
-                )
+            validate_todo_suggest_options(args)
             payload = build_todo_suggestion_prompt_packet(
                 goal_id=args.goal_id,
                 project=Path(args.project).expanduser() if args.project else None,
