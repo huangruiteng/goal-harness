@@ -69,6 +69,11 @@ Decision Context 不会：
 如果 provider 不可用，它会记录 provider health，并 fail open 到剩余 authority
 source；不会阻断 Core lifecycle，也不会静默推进 source cursor。
 
+Assembly 还会输出 `decision_source_coverage_v0`。它把每个优先级的扫描状态、
+exact-read 完整度和未覆盖的 P0 source 投影为公开安全的回执。`P0 incomplete`
+不阻断安全的 LoopX lifecycle，但调用方必须显式标记结论为部分覆盖，或者先通过
+其他 authority 路径补齐 exact read；不能把 fail-open 误写成“所有关键上下文已检查”。
+
 ## 三类可审计产物
 
 | 产物 | 回答的问题 | 典型内容 |

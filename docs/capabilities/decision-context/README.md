@@ -77,6 +77,13 @@ If a provider is unavailable, the capability fails open to the remaining
 authority sources and records provider health. It does not block the Core
 lifecycle or silently advance source cursors.
 
+The assembly also emits `decision_source_coverage_v0`. This public-safe receipt
+summarizes scan status, exact-read completeness, and uncovered P0 sources by
+priority. Incomplete P0 coverage does not block safe LoopX lifecycle work, but
+the caller must label the conclusion as partial or exact-read the missing
+authority through another path. Fail-open must not masquerade as complete
+context coverage.
+
 ## Three Auditable Outputs
 
 | Output | Answers | Typical contents |
