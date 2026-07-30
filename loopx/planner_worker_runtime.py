@@ -3,7 +3,7 @@ from __future__ import annotations
 import stat
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Literal, Protocol, TypedDict
 
 from .planner_worker import (
     AdapterTurn,
@@ -37,10 +37,24 @@ class WorkerAdapter(Protocol):
     ) -> AdapterTurn: ...
 
 
+WorkspaceFileType = Literal[
+    "regular",
+    "symlink",
+    "directory",
+    "special",
+    "deleted",
+]
+
+
+class WorkspaceChange(TypedDict):
+    size: int | None
+    file_type: WorkspaceFileType
+
+
 class WorkspaceObserver(Protocol):
     def assert_clean(self, cwd: Path) -> None: ...
 
-    def changed_files(self, cwd: Path) -> dict[str, int | None]: ...
+    def changed_files(self, cwd: Path) -> dict[str, WorkspaceChange]: ...
 
 
 ValidationRunner = Callable[[str, Path], ValidationResult]
@@ -57,7 +71,7 @@ def _is_within_workspace(path: Path, workspace: Path) -> bool:
 def _target_path_violations(
     *,
     workdir: Path,
-    step: dict,
+    step: dict[str, Any],
     after_worker: bool,
 ) -> list[str]:
     violations: list[str] = []
@@ -86,6 +100,51 @@ def _target_path_violations(
         if not stat.S_ISREG(mode):
             violations.append(f"{relative}:unsupported_file_type")
     return violations
+
+
+def _write_scope_for_step(
+    *,
+    workdir: Path,
+    step: dict[str, Any],
+    changed_files: dict[str, WorkspaceChange],
+) -> dict[str, Any]:
+    target_files = set(step["target_files"])
+    action_kind = str(step["action_kind"])
+    allow_extra_files = bool(step["context_budget"]["allow_extra_files"])
+    violations = [] if allow_extra_files else sorted(set(changed_files) - target_files)
+    unsupported_paths: list[str] = []
+    for path, change in changed_files.items():
+        file_type = change["file_type"]
+        planned_deletion = (
+            file_type == "deleted" and action_kind == "delete" and path in target_files
+        )
+        if file_type != "regular" and not planned_deletion:
+            unsupported_paths.append(path)
+            violations.append(f"{path}:unsupported_file_type:{file_type}")
+    if len(changed_files) > int(step["context_budget"]["max_files"]):
+        violations.append("context_budget.max_files")
+    oversized = sorted(
+        path
+        for path, change in changed_files.items()
+        if change["file_type"] == "regular"
+        and change["size"] is not None
+        and change["size"] > int(step["context_budget"]["max_bytes_per_file"])
+    )
+    violations.extend(f"{path}:max_bytes_per_file" for path in oversized)
+    violations.extend(
+        _target_path_violations(
+            workdir=workdir,
+            step=step,
+            after_worker=True,
+        )
+    )
+    violations = sorted(set(violations))
+    return {
+        "passed": not violations,
+        "changed_files": changed_files,
+        "unsupported_paths": sorted(unsupported_paths),
+        "violations": violations,
+    }
 
 
 def _usage_receipt(
@@ -123,10 +182,10 @@ def _receipt(
     executor: str | None,
     model_route: dict[str, str] | None,
     validation: list[ValidationResult],
-    write_scope: dict,
+    write_scope: dict[str, Any],
     planner_turn: AdapterTurn,
     worker_turn: AdapterTurn | None,
-) -> dict:
+) -> dict[str, Any]:
     return {
         "schema_version": PLANNER_WORKER_RECEIPT_SCHEMA_VERSION,
         "status": status,
@@ -161,7 +220,7 @@ def run_planner_worker_once(
     approved_validation_commands: set[str] | frozenset[str],
     model_routes: dict[str, dict[str, str]],
     completed_step_ids: list[str] | tuple[str, ...] | set[str] = (),
-) -> dict:
+) -> dict[str, Any]:
     """Run one strict experimental Planner -> Worker -> validation slice."""
 
     workdir = Path(cwd).resolve()
@@ -277,41 +336,12 @@ def run_planner_worker_once(
         cwd=workdir,
     )
     changed_files = workspace_observer.changed_files(workdir)
-    target_files = set(step["target_files"])
-    allow_extra_files = bool(step["context_budget"]["allow_extra_files"])
-    unsupported_paths = sorted(
-        path for path, size in changed_files.items() if size is None
+    write_scope = _write_scope_for_step(
+        workdir=workdir,
+        step=step,
+        changed_files=changed_files,
     )
-    violations = (
-        []
-        if allow_extra_files
-        else sorted(set(changed_files) - target_files)
-    )
-    violations.extend(f"{path}:unsupported_file_type" for path in unsupported_paths)
-    if len(changed_files) > int(step["context_budget"]["max_files"]):
-        violations.append("context_budget.max_files")
-    oversized = sorted(
-        path
-        for path, size in changed_files.items()
-        if size is not None
-        and size > int(step["context_budget"]["max_bytes_per_file"])
-    )
-    violations.extend(f"{path}:max_bytes_per_file" for path in oversized)
-    violations.extend(
-        _target_path_violations(
-            workdir=workdir,
-            step=step,
-            after_worker=True,
-        )
-    )
-    violations = sorted(set(violations))
-    write_scope = {
-        "passed": not violations,
-        "changed_files": changed_files,
-        "unsupported_paths": unsupported_paths,
-        "violations": violations,
-    }
-    if violations:
+    if not write_scope["passed"]:
         return _receipt(
             status="failed",
             plan_id=str(plan["plan_id"]),
@@ -328,6 +358,24 @@ def run_planner_worker_once(
         validation_runner(command, workdir)
         for command in step["validation_commands"]
     ]
+    write_scope = _write_scope_for_step(
+        workdir=workdir,
+        step=step,
+        changed_files=workspace_observer.changed_files(workdir),
+    )
+    if not write_scope["passed"]:
+        return _receipt(
+            status="failed",
+            plan_id=str(plan["plan_id"]),
+            step_id=str(step["step_id"]),
+            reason="Validation left the workspace outside the Planner contract",
+            executor=resolved["executor"],
+            model_route=worker_route,
+            validation=validation,
+            write_scope=write_scope,
+            planner_turn=planner_turn,
+            worker_turn=worker_turn,
+        )
     validation_passed = bool(validation) and all(result.passed for result in validation)
     return _receipt(
         status="completed" if validation_passed else "failed",

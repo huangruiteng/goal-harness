@@ -15,7 +15,7 @@ from loopx.planner_worker import (
     PLANNER_WORKER_STEP_SCHEMA_VERSION,
     ValidationResult,
 )
-from loopx.planner_worker_runtime import run_planner_worker_once
+from loopx.planner_worker_runtime import WorkspaceChange, run_planner_worker_once
 
 
 def executable_plan() -> dict:
@@ -117,7 +117,7 @@ class FixtureWorkspaceObserver:
     def assert_clean(self, cwd: Path) -> None:
         self.before = self._snapshot(cwd)
 
-    def changed_files(self, cwd: Path) -> dict[str, int]:
+    def changed_files(self, cwd: Path) -> dict[str, WorkspaceChange]:
         after = self._snapshot(cwd)
         changed = {
             path
@@ -125,7 +125,10 @@ class FixtureWorkspaceObserver:
             if self.before.get(path) != after.get(path)
         }
         return {
-            path: len(after.get(path, b""))
+            path: {
+                "size": len(after[path]) if path in after else None,
+                "file_type": "regular" if path in after else "deleted",
+            }
             for path in sorted(changed)
         }
 
@@ -465,6 +468,106 @@ def test_runtime_revalidates_target_path_after_worker(tmp_path: Path) -> None:
     assert "result.txt:resolved_outside_workspace" in receipt["write_scope"]["violations"]
 
 
+def test_runtime_rejects_extra_symlink_when_extra_files_are_allowed(
+    tmp_path: Path,
+) -> None:
+    import os
+    import subprocess
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "result.txt").write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", "result.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    plan = executable_plan()
+    plan["steps"][0]["context_budget"]["allow_extra_files"] = True
+    plan["steps"][0]["context_budget"]["max_files"] = 2
+
+    class ExtraSymlinkWorker:
+        def execute(
+            self,
+            *,
+            prompt: str,
+            model_route: dict[str, str],
+            cwd: Path,
+        ) -> AdapterTurn:
+            (cwd / "result.txt").write_text("expected\n", encoding="utf-8")
+            os.symlink(outside, cwd / "extra-link")
+            return AdapterTurn(
+                output_text="updated fixture", usage={}, usage_complete=False
+            )
+
+    receipt = run_planner_worker_once(
+        objective="Update one fixture.",
+        task_instruction="Use the Planner result.",
+        cwd=tmp_path,
+        planner=FakePlanner(plan),
+        worker=ExtraSymlinkWorker(),
+        validation_runner=fixture_validation,
+        workspace_observer=GitWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
+        model_routes={
+            "planner": {"model": "gpt-5.5", "effort": "high"},
+            "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
+            "strong_worker": {"model": "gpt-5.5", "effort": "high"},
+        },
+    )
+
+    assert receipt["status"] == "failed"
+    assert receipt["validation"] == []
+    assert receipt["write_scope"]["unsupported_paths"] == ["extra-link"]
+    assert (
+        "extra-link:unsupported_file_type:symlink"
+        in receipt["write_scope"]["violations"]
+    )
+
+
+def test_runtime_audits_validation_changes_before_success(tmp_path: Path) -> None:
+    def mutating_validation(command: str, cwd: Path) -> ValidationResult:
+        (cwd / "validation-side-effect.txt").write_text("dirty\n", encoding="utf-8")
+        return ValidationResult(command=command, passed=True, exit_code=0)
+
+    receipt = run_planner_worker_once(
+        objective="Update one fixture.",
+        task_instruction="Use the Planner result.",
+        cwd=tmp_path,
+        planner=FakePlanner(executable_plan()),
+        worker=FixtureWorker(),
+        validation_runner=mutating_validation,
+        workspace_observer=FixtureWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
+        model_routes={
+            "planner": {"model": "gpt-5.5", "effort": "high"},
+            "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
+            "strong_worker": {"model": "gpt-5.5", "effort": "high"},
+        },
+    )
+
+    assert receipt["status"] == "failed"
+    assert receipt["validation"] == [
+        {"command": "python3 verify.py", "passed": True, "exit_code": 0}
+    ]
+    assert receipt["write_scope"]["changed_files"]["validation-side-effect.txt"] == {
+        "size": len("dirty\n"),
+        "file_type": "regular",
+    }
+    assert "validation-side-effect.txt" in receipt["write_scope"]["violations"]
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -514,7 +617,9 @@ def test_git_workspace_observer_detects_ignored_private_state_change(
 
     (tmp_path / "private.txt").write_text("after\n", encoding="utf-8")
 
-    assert observer.changed_files(tmp_path) == {"private.txt": len("after\n")}
+    assert observer.changed_files(tmp_path) == {
+        "private.txt": {"size": len("after\n"), "file_type": "regular"}
+    }
 
 
 def test_git_workspace_observer_detects_file_mode_change(tmp_path: Path) -> None:
@@ -543,7 +648,9 @@ def test_git_workspace_observer_detects_file_mode_change(tmp_path: Path) -> None
 
     tracked.chmod(0o755)
 
-    assert observer.changed_files(tmp_path) == {"tracked.txt": len("unchanged\n")}
+    assert observer.changed_files(tmp_path) == {
+        "tracked.txt": {"size": len("unchanged\n"), "file_type": "regular"}
+    }
 
 
 def test_git_workspace_observer_detects_directory_mode_change(
@@ -576,7 +683,9 @@ def test_git_workspace_observer_detects_directory_mode_change(
     current_mode = package.stat().st_mode & 0o777
     package.chmod(0o755 if current_mode != 0o755 else 0o700)
 
-    assert observer.changed_files(tmp_path) == {"pkg": None}
+    assert observer.changed_files(tmp_path) == {
+        "pkg": {"size": None, "file_type": "directory"}
+    }
 
 
 def test_git_workspace_observer_reports_new_directory_by_leaf_file(
@@ -609,7 +718,7 @@ def test_git_workspace_observer_reports_new_directory_by_leaf_file(
     nested.write_text("created\n", encoding="utf-8")
 
     assert observer.changed_files(tmp_path) == {
-        "new/result.txt": len("created\n")
+        "new/result.txt": {"size": len("created\n"), "file_type": "regular"}
     }
 
 
@@ -641,7 +750,9 @@ def test_git_workspace_observer_detects_worktree_mode_change(
     current_mode = tmp_path.stat().st_mode & 0o777
     tmp_path.chmod(0o755 if current_mode != 0o755 else 0o700)
 
-    assert observer.changed_files(tmp_path) == {".": None}
+    assert observer.changed_files(tmp_path) == {
+        ".": {"size": None, "file_type": "directory"}
+    }
 
 
 def test_git_workspace_observer_detects_fifo_without_blocking(
@@ -672,7 +783,9 @@ def test_git_workspace_observer_detects_fifo_without_blocking(
 
     os.mkfifo(tmp_path / "worker.fifo")
 
-    assert observer.changed_files(tmp_path) == {"worker.fifo": None}
+    assert observer.changed_files(tmp_path) == {
+        "worker.fifo": {"size": None, "file_type": "special"}
+    }
 
 
 def test_git_workspace_observer_detects_unix_socket() -> None:
@@ -711,7 +824,9 @@ def test_git_workspace_observer_detects_unix_socket() -> None:
                 if exc.errno in {errno.EACCES, errno.EPERM}:
                     pytest.skip("sandbox does not permit creating Unix sockets")
                 raise
-            assert observer.changed_files(short_path) == {"worker.sock": None}
+            assert observer.changed_files(short_path) == {
+                "worker.sock": {"size": None, "file_type": "special"}
+            }
         finally:
             worker_socket.close()
 

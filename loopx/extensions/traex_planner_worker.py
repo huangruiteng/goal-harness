@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from ..planner_worker import AdapterTurn, ValidationResult
-from ..planner_worker_runtime import run_planner_worker_once
+from ..planner_worker_runtime import (
+    WorkspaceChange,
+    WorkspaceFileType,
+    run_planner_worker_once,
+)
 
 
 TRAEX_PLANNER_WORKER_PROBE_SCHEMA_VERSION = "traex_planner_worker_probe_v1"
@@ -288,7 +292,28 @@ class GitWorkspaceObserver:
             )
         self._before = self._snapshot(cwd)
 
-    def changed_files(self, cwd: Path) -> dict[str, int | None]:
+    @staticmethod
+    def _workspace_change(
+        entry: tuple[int, str, int] | None,
+    ) -> WorkspaceChange:
+        if entry is None:
+            return {"size": None, "file_type": "deleted"}
+        size, _, mode = entry
+        file_type: WorkspaceFileType
+        if stat.S_ISREG(mode):
+            file_type = "regular"
+        elif stat.S_ISLNK(mode):
+            file_type = "symlink"
+        elif stat.S_ISDIR(mode):
+            file_type = "directory"
+        else:
+            file_type = "special"
+        return {
+            "size": size if file_type in {"regular", "symlink"} else None,
+            "file_type": file_type,
+        }
+
+    def changed_files(self, cwd: Path) -> dict[str, WorkspaceChange]:
         if self._before is not None:
             after = self._snapshot(cwd)
             changed_paths = {
@@ -301,17 +326,10 @@ class GitWorkspaceObserver:
                     and stat.S_ISDIR(after[path][2])
                 )
             }
-            changed: dict[str, int | None] = {}
+            snapshot_changes: dict[str, WorkspaceChange] = {}
             for path in sorted(changed_paths):
-                entry = after.get(path) or self._before.get(path)
-                assert entry is not None
-                mode = entry[2]
-                changed[path] = (
-                    entry[0]
-                    if stat.S_ISREG(mode) or stat.S_ISLNK(mode)
-                    else None
-                )
-            return changed
+                snapshot_changes[path] = self._workspace_change(after.get(path))
+            return snapshot_changes
         result = subprocess.run(
             ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             cwd=cwd,
@@ -320,7 +338,7 @@ class GitWorkspaceObserver:
         )
         if result.returncode != 0:
             raise TraexPlannerWorkerError("unable to inspect planner-worker git changes")
-        changed: dict[str, int] = {}
+        status_changes: dict[str, WorkspaceChange] = {}
         entries = [entry for entry in result.stdout.split(b"\0") if entry]
         index = 0
         while index < len(entries):
@@ -330,9 +348,25 @@ class GitWorkspaceObserver:
             if status[0] in {"R", "C"} and index + 1 < len(entries):
                 index += 1
             file_path = cwd / path
-            changed[path] = file_path.stat().st_size if file_path.is_file() else 0
+            try:
+                mode = file_path.lstat().st_mode
+            except FileNotFoundError:
+                status_changes[path] = self._workspace_change(None)
+            else:
+                if stat.S_ISREG(mode):
+                    payload_size = file_path.stat().st_size
+                elif stat.S_ISLNK(mode):
+                    payload_size = len(
+                        os.readlink(file_path).encode(
+                            "utf-8",
+                            errors="surrogateescape",
+                        )
+                    )
+                else:
+                    payload_size = 0
+                status_changes[path] = self._workspace_change((payload_size, "", mode))
             index += 1
-        return dict(sorted(changed.items()))
+        return dict(sorted(status_changes.items()))
 
 
 def run_traex_planner_worker_probe(
