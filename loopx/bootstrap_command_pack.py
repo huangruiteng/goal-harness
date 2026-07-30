@@ -1512,6 +1512,16 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
         parts = str(value or "").split()
         return " ".join(parts[:3]) + (" ..." if len(parts) > 3 else "")
 
+    def actionable_shell_command(value: Any) -> str:
+        lines = [
+            line.removesuffix("\\").strip()
+            for line in str(value or "").splitlines()
+            if line.strip()
+        ]
+        if len(lines) > 1 and lines[0].startswith("cd "):
+            return f"{lines[0]} && {' '.join(lines[1:])}"
+        return " ".join(lines)
+
     transaction = payload.get("guided_transaction")
     transaction = transaction if isinstance(transaction, dict) else {}
     command_pack = payload.get("command_pack")
@@ -1572,14 +1582,15 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
                 ]
             )
             continue
-        step_lines.extend(
-            [
-                f"{index}. `{step.get('id')}` ({step.get('kind')})",
-                f"   - purpose: {step.get('purpose')}",
-            ]
-        )
+        step_label = f"{index}. `{step.get('id')}` ({step.get('kind')}): "
+        step_lines.append(step_label + str(step.get("purpose")))
         if command:
-            step_lines.append(f"   - command/source: `{str(command).splitlines()[0]}`")
+            rendered_command = (
+                actionable_shell_command(command)
+                if step.get("id") == "connect_if_needed"
+                else str(command).splitlines()[0]
+            )
+            step_lines.append(f"   - command/source: `{rendered_command}`")
     preserve = transaction.get("preserve_todos_policy")
     preserve = preserve if isinstance(preserve, dict) else {}
     identity_gate = transaction.get("identity_selection_gate")
@@ -1632,13 +1643,11 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
         )
     return f"""# Guided Start Goal
 
-- schema: `{payload.get("schema_version")}`
-- read_only: `{payload.get("read_only")}`
 - project: `{payload.get("project")}`
 - goal_id: `{payload.get("goal_id")}`
 - goal_text: `{payload.get("goal_text")}`
 
-Dry-run preview; mutations require explicit host/agent commands.
+Preview only; follow ordered commands to mutate.
 
 ## Ordered Transaction
 
@@ -1649,9 +1658,7 @@ Dry-run preview; mutations require explicit host/agent commands.
 
 ## Todo Preservation
 
-- force_bootstrap_default: `{preserve.get("force_bootstrap_default")}`
-- before_destructive_reconnect: {preserve.get("before_destructive_reconnect")}
-- preferred_scope_change: {preserve.get("preferred_scope_change")}
+- bootstrap: `{preserve.get("force_bootstrap_default")}`; reconnect: {preserve.get("before_destructive_reconnect")}; scope change: {preserve.get("preferred_scope_change")}
 """
 
 
