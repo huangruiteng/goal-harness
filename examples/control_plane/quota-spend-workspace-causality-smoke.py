@@ -27,6 +27,10 @@ GOAL_ID = "quota-spend-workspace-causality"
 AGENT_ID = "codex-peer"
 DELIVERY_REPOSITORY = "git:example.invalid/loopx/delivery"
 
+# Keep fixture repositories isolated from user-global Git integrations that
+# may write into .git asynchronously during temporary-directory cleanup.
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+
 
 def run_git(cwd: Path, *args: str) -> None:
     subprocess.run(
