@@ -157,6 +157,7 @@ loopx issue-fix workflow-plan \
   --url <github-issue-or-pr-url> \
   --repo-path <approved-repo> \
   --repository-context-json <compact-context.json> \
+  --candidate-preflight-json <candidate-preflight.json> \
   --validation-label "<validation command>" \
   --format json
 ```
@@ -166,6 +167,10 @@ branch planning, validation labels, the feasibility checkpoint, and PR review
 readiness blockers into `/loopx <goal text>`. Repository context pins compact
 policy, architecture, change-scope, reproduction, and validation refs to a
 revision; memory and external experts stay advisory until repository-verified.
+Refresh the issue body and latest comments, then provide all-state numeric PR
+references plus any current-revision-verified semantic candidates in the
+candidate preflight input. Only a `proceed` decision may start a new
+implementation; other routes reuse, disposition, or skip existing work.
 Initially write only metadata classification and the feasibility checkpoint in
 priority and planner order. Then record a compact observation and let LoopX
 select exactly one route:

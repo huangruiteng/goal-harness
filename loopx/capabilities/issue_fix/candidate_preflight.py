@@ -6,7 +6,6 @@ from typing import Any
 from ...control_plane.runtime.public_safety import public_safe_compact_text
 from .metadata_preview import normalise_github_issue_reference
 
-
 ISSUE_FIX_CANDIDATE_PREFLIGHT_INPUT_SCHEMA_VERSION = (
     "issue_fix_candidate_preflight_input_v0"
 )
@@ -14,6 +13,19 @@ ISSUE_FIX_CANDIDATE_PREFLIGHT_SCHEMA_VERSION = "issue_fix_candidate_preflight_v0
 
 _TERMINAL_DOMAIN_STATES = {"closed", "done", "resolved", "superseded", "terminal"}
 _IMPLEMENTATION_RELATIONS = {"implementation", "implements", "fix_candidate"}
+_REQUIRED_EVIDENCE_FIELDS = ("numeric_pr_evidence", "semantic_pr_evidence")
+
+
+def candidate_preflight_input_contract() -> dict[str, Any]:
+    """Describe the compact prior-work evidence required before implementation."""
+
+    return {
+        "schema_version": ISSUE_FIX_CANDIDATE_PREFLIGHT_INPUT_SCHEMA_VERSION,
+        "required_before_implementation": True,
+        "required_evidence_fields": list(_REQUIRED_EVIDENCE_FIELDS),
+        "semantic_evidence_rule": "current_revision_verified candidates only",
+        "decision_rule": "only proceed may start a new implementation",
+    }
 
 
 def _safe_ref(value: object, *, field: str) -> str:
@@ -144,6 +156,14 @@ def build_issue_fix_candidate_preflight_packet(
         raise ValueError(
             "candidate preflight input schema_version must be "
             "issue_fix_candidate_preflight_input_v0"
+        )
+    missing_evidence = [
+        field for field in _REQUIRED_EVIDENCE_FIELDS if field not in payload
+    ]
+    if configured and missing_evidence:
+        raise ValueError(
+            "candidate preflight input requires evidence fields: "
+            f"{missing_evidence}"
         )
 
     domain = _domain_projection(

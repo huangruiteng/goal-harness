@@ -66,6 +66,7 @@ def build_issue_fix_goal_command_templates(
             "--url <github-issue-or-pr-url> "
             "--repo-path <approved-repo> "
             "--repository-context-json <compact-context.json> "
+            "--candidate-preflight-json <candidate-preflight.json> "
             "--validation-label '<validation command>' "
             "--format json"
         ),

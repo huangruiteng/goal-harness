@@ -13,6 +13,9 @@ from loopx.bootstrap_command_pack import (
     build_start_goal_guided_packet,
     render_start_goal_guided_markdown,
 )
+from loopx.capabilities.issue_fix.candidate_preflight import (
+    build_issue_fix_candidate_preflight_packet,
+)
 from loopx.cli import main as cli_main
 
 GOAL_ID = "guided-projection-goal"
@@ -184,6 +187,17 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
         "entry_command_key": "issue_fix_workflow_plan_template",
         "admission_command_key": "issue_fix_feasibility_template",
         "candidate_authority": "public_open_tracker_issue",
+        "authority_refresh_required": "current issue body and latest comments",
+        "candidate_preflight": {
+            "schema_version": "issue_fix_candidate_preflight_input_v0",
+            "required_before_implementation": True,
+            "required_evidence_fields": [
+                "numeric_pr_evidence",
+                "semantic_pr_evidence",
+            ],
+            "semantic_evidence_rule": "current_revision_verified candidates only",
+            "decision_rule": "only proceed may start a new implementation",
+        },
         "implementation_admission": {
             "status": "qualification_required",
             "state_owner": "issue_fix",
@@ -216,15 +230,21 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert commands[route["entry_command_key"]].startswith(
         "loopx issue-fix workflow-plan "
     )
+    assert "--candidate-preflight-json <candidate-preflight.json>" in commands[
+        route["entry_command_key"]
+    ]
+    assert guard["candidate_preflight"]["required_before_implementation"] is True
     assert commands[route["admission_command_key"]].startswith(
         "loopx issue-fix feasibility "
     )
     rendered = render_start_goal_guided_markdown(payload)
     assert "authority: open public issue; source clues are evidence only" in rendered
     assert "discover: `gh issue list " in rendered
+    assert "numeric_pr_evidence + semantic_pr_evidence" in rendered
+    assert "only proceed may start a new implementation" in rendered
     assert "loopx issue-fix workflow-plan " in rendered
     assert "loopx issue-fix feasibility " in rendered
-    assert len(rendered.replace(str(project), "<project>")) <= 3_200
+    assert len(rendered.replace(str(project), "<project>")) <= 3_600
     todo_command = next(
         step["command_template"]
         for step in transaction["ordered_steps"]
@@ -243,6 +263,23 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
         field not in todo_command
         for field in ("issue_url", "issue_number", "base_sha", "acceptance")
     )
+
+
+def test_configured_candidate_preflight_requires_prior_work_evidence() -> None:
+    try:
+        build_issue_fix_candidate_preflight_packet(
+            repo="volcengine/OpenViking",
+            issue_ref="#3005",
+            input_payload={
+                "schema_version": "issue_fix_candidate_preflight_input_v0",
+                "semantic_pr_evidence": [],
+            },
+            generated_at="2026-07-30T00:00:00Z",
+        )
+    except ValueError as error:
+        assert "numeric_pr_evidence" in str(error)
+    else:
+        raise AssertionError("configured preflight must require prior-work evidence")
 
 
 def test_non_issue_goal_does_not_select_capability_route(tmp_path: Path) -> None:

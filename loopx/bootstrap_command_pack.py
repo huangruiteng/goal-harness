@@ -6,6 +6,9 @@ from typing import Any
 
 from .agent_registry import registered_agent_ids_from_registry
 from .bootstrap import default_goal_id
+from .capabilities.issue_fix.candidate_preflight import (
+    candidate_preflight_input_contract,
+)
 from .capabilities.issue_fix.workflow_plan import (
     ISSUE_FIX_GOAL_CANDIDATE_DISCOVERY_COMMAND_TEMPLATE,
     build_issue_fix_goal_command_templates,
@@ -577,6 +580,8 @@ def _selected_goal_capability_route(goal_text: str | None) -> dict[str, Any] | N
         "entry_command_key": "issue_fix_workflow_plan_template",
         "admission_command_key": "issue_fix_feasibility_template",
         "candidate_authority": "public_open_tracker_issue",
+        "authority_refresh_required": "current issue body and latest comments",
+        "candidate_preflight": candidate_preflight_input_contract(),
         "implementation_admission": {
             "status": "qualification_required",
             "state_owner": "issue_fix",
@@ -1405,6 +1410,12 @@ def build_start_goal_guided_packet(
                 "candidate_authority": selected_capability_route[
                     "candidate_authority"
                 ],
+                "authority_refresh_required": selected_capability_route[
+                    "authority_refresh_required"
+                ],
+                "candidate_preflight": selected_capability_route[
+                    "candidate_preflight"
+                ],
                 "command_source": f"#/command_pack/commands/{entry_key}",
                 "admission_command_source": (
                     f"#/command_pack/commands/{admission_key}"
@@ -1535,6 +1546,18 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
             if discovery_command:
                 step_lines.append(
                     f"   - discover: `{str(discovery_command).splitlines()[0]}`"
+                )
+            preflight = step.get("candidate_preflight")
+            if isinstance(preflight, dict):
+                required_evidence = " + ".join(
+                    str(field)
+                    for field in preflight.get("required_evidence_fields") or []
+                )
+                step_lines.append(
+                    "   - preflight: refresh "
+                    f"{step.get('authority_refresh_required')}; "
+                    f"provide {required_evidence}; "
+                    f"{preflight.get('decision_rule')}"
                 )
             step_lines.extend(
                 [
