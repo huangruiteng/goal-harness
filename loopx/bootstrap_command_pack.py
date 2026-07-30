@@ -6,6 +6,7 @@ from typing import Any
 
 from .agent_registry import registered_agent_ids_from_registry
 from .bootstrap import default_goal_id
+from .capabilities.issue_fix.workflow_plan import match_issue_fix_goal_intent
 from .host_loop_activation import (
     agent_type_for_host_surface,
     build_host_loop_activation_packet,
@@ -34,6 +35,7 @@ GUIDED_COMMAND_PACK_PROJECTION_SCHEMA_VERSION = (
     "loopx_guided_command_pack_projection_v0"
 )
 HOST_SURFACE_SELECTION_SCHEMA_VERSION = "loopx_host_surface_selection_gate_v0"
+GOAL_CAPABILITY_ROUTE_SCHEMA_VERSION = "loopx_goal_capability_route_v0"
 START_GOAL_HOST_SURFACES = (
     "codex-app",
     "codex-app-ssh",
@@ -561,11 +563,36 @@ def _goal_start_bootstrap_command(
     return "\n".join(lines)
 
 
-def _goal_start_contract(*, goal_text: str | None, connected: bool, agent_type: str) -> dict[str, Any]:
+def _selected_goal_capability_route(goal_text: str | None) -> dict[str, Any] | None:
+    reason_code = match_issue_fix_goal_intent(goal_text)
+    if reason_code is None:
+        return None
+    return {
+        "schema_version": GOAL_CAPABILITY_ROUTE_SCHEMA_VERSION,
+        "capability_id": "issue-fix",
+        "selection_source": "explicit_goal_text",
+        "selection_reason_code": reason_code,
+        "entry_command_key": "issue_fix_workflow_plan_template",
+        "admission_command_key": "issue_fix_feasibility_template",
+        "implementation_admission": {
+            "status": "qualification_required",
+            "state_owner": "issue_fix",
+        },
+        "activation_condition": (
+            "after selecting a public issue candidate and before substantive "
+            "implementation"
+        ),
+    }
+
+
+def _goal_start_contract(
+    *, goal_text: str | None, connected: bool, agent_type: str
+) -> dict[str, Any]:
     return {
         "schema_version": GOAL_START_SCHEMA_VERSION,
         "slash_syntax": "/loopx <goal text>",
         "goal_text": goal_text,
+        "selected_capability_route": _selected_goal_capability_route(goal_text),
         "explicit_invocation_confirms_project_local_state_writes": True,
         "connect_if_needed": True,
         "bootstrap_policy": "create project-local LoopX state only when no matching registry goal exists",
@@ -652,7 +679,9 @@ def _goal_start_contract(*, goal_text: str | None, connected: bool, agent_type: 
                 "preview_command": (
                     "loopx issue-fix workflow-plan --url <github-issue-or-pr-url> "
                     "--repo-path <approved-repo> --repository-context-json "
-                    "<compact-context.json> --validation-label '<validation command>' --format json"
+                    "<compact-context.json> --candidate-preflight-json "
+                    "<compact-prior-work.json> --validation-label "
+                    "'<validation command>' --format json"
                 ),
                 "decision_command": (
                     "loopx issue-fix feasibility --url <github-issue-url> "
@@ -929,6 +958,7 @@ def build_loopx_bootstrap_command_pack(
                 "--url <github-issue-or-pr-url> "
                 "--repo-path <approved-repo> "
                 "--repository-context-json <compact-context.json> "
+                "--candidate-preflight-json <compact-prior-work.json> "
                 "--validation-label '<validation command>' "
                 "--format json"
             ),
@@ -1261,6 +1291,16 @@ def build_start_goal_guided_packet(
     activation = command_pack.get("host_loop_activation")
     activation = activation if isinstance(activation, dict) else {}
     identity_selection_gate = activation.get("identity_selection_gate")
+    goal_start_contract = command_pack.get("goal_start_contract")
+    goal_start_contract = (
+        goal_start_contract if isinstance(goal_start_contract, dict) else {}
+    )
+    selected_capability_route = goal_start_contract.get("selected_capability_route")
+    selected_capability_route = (
+        selected_capability_route
+        if isinstance(selected_capability_route, dict)
+        else None
+    )
     guided_transaction = {
         "schema_version": GUIDED_START_SCHEMA_VERSION,
         "mode": "dry_run_preview",
@@ -1349,6 +1389,30 @@ def build_start_goal_guided_packet(
                 "purpose": "select one registered agent lane before generating heartbeat or quota commands",
             },
         )
+    if selected_capability_route is not None:
+        entry_key = str(selected_capability_route["entry_command_key"])
+        admission_key = str(selected_capability_route["admission_command_key"])
+        guided_transaction["ordered_steps"].append(
+            {
+                "id": "qualify_selected_capability",
+                "kind": "capability_guard",
+                "command_source": f"#/command_pack/commands/{entry_key}",
+                "admission_command_source": (
+                    f"#/command_pack/commands/{admission_key}"
+                ),
+                "activation_condition": selected_capability_route[
+                    "activation_condition"
+                ],
+                "when_condition_unmet": (
+                    "keep candidate discovery or qualification as a normal Todo, "
+                    "then re-enter this guard after selecting a public candidate"
+                ),
+                "purpose": (
+                    "persist capability-owned qualification before implementation"
+                ),
+            }
+        )
+        guided_transaction["selected_capability_route"] = selected_capability_route
     detail_command = _start_goal_detail_command(
         project=str(command_pack.get("project") or project),
         goal_id=str(command_pack.get("goal_id") or "") or None,

@@ -124,11 +124,18 @@ When `/loopx <goal text>` contains a public GitHub issue/PR URL or an explicit
 issue-fix intent, the planner should preview the dedicated capability route
 before writing todos:
 
+`start-goal` projects that decision as a typed `selected_capability_route`.
+The route names the capability's entry and admission commands without changing
+the generic Todo schema: Todos continue to schedule work, while issue identity,
+prior-work checks, repository evidence, reproduction, scope, and validation
+remain owned by `issue_fix` state.
+
 ```bash
 loopx issue-fix workflow-plan \
   --url <github-issue-or-pr-url> \
   --repo-path <approved-repo> \
   --repository-context-json <compact-context.json> \
+  --candidate-preflight-json <compact-prior-work.json> \
   --validation-label "<validation command>" \
   --format json
 ```

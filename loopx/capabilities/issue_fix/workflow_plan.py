@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -8,8 +9,34 @@ from .candidate_preflight import build_issue_fix_candidate_preflight_packet
 from .intake_surface import build_content_ops_issue_fix_metadata_preview_packet
 from .repository_context import build_issue_fix_repository_context_packet
 
-
 ISSUE_FIX_WORKFLOW_PLAN_PACKET_SCHEMA_VERSION = "issue_fix_workflow_plan_packet_v0"
+_PUBLIC_GITHUB_ISSUE_OR_PR = re.compile(
+    r"https://github\.com/[^/\s]+/[^/\s]+/(?:issues|pull)/[1-9][0-9]*"
+)
+_ISSUE_FIX_TARGET = re.compile(
+    r"\b(?:github issue|issue|issues|pull request|pull requests|pr)\b"
+)
+_ISSUE_FIX_ACTION = re.compile(
+    r"\b(?:fix|fixes|fixed|fixing|repair|repairs|resolve|resolves|solver)\b"
+)
+
+
+def match_issue_fix_goal_intent(goal_text: str | None) -> str | None:
+    """Return why an explicit goal should enter the issue-fix capability."""
+
+    text = " ".join((goal_text or "").split()).casefold()
+    if not text:
+        return None
+    if _PUBLIC_GITHUB_ISSUE_OR_PR.search(text):
+        return "public_issue_or_pr_reference"
+    has_target = _ISSUE_FIX_TARGET.search(text)
+    has_action = (
+        _ISSUE_FIX_ACTION.search(text)
+        or "issue-fix" in text
+        or "修复" in text
+        or "解决" in text
+    )
+    return "issue_fix_intent" if has_target and has_action else None
 
 
 def _todo_preview(

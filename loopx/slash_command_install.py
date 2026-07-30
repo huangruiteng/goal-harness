@@ -8,7 +8,6 @@ from typing import Any
 from .opencode_goal_mode import plugin_source, runtime_source
 from .slash_commands import build_slash_command_catalog
 
-
 SCHEMA_VERSION = "loopx_slash_command_install_v0"
 MANAGED_MARKER_PREFIX = "<!-- loopx-managed-slash-command:v1"
 LEGACY_UPGRADABLE_SIGNATURES = (
@@ -119,6 +118,7 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
                 "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, `opencode` for OpenCode, or `ark-managed-agent` for Ark Managed Agent.",
                 f"If arguments are present, preserve them as the task text and run `{cli_bin} start-goal --guided --project . --goal-text \"$ARGUMENTS\" --host-surface <exact-current-host>` before planning work. If the host is unclear, omit the flag once and follow the returned host-surface selection gate.",
                 f"Treat the returned `ordered_steps` as a required transaction. On first connection, run its bootstrap command, then plan and execute at least one business `{cli_bin} todo add` derived from `$ARGUMENTS` before substantive task work. Encode priority in the todo text such as `[P0]`; `{cli_bin} todo add` has no `--priority` flag. Do not continue until LoopX status shows that business Agent Todo.",
+                "If `selected_capability_route` is present, run its entry and admission commands before substantive implementation. Keep capability facts in capability-owned state; generic Todos remain scheduling records.",
                 f"Before dependent work, persist material scope, acceptance, or non-goal changes in current Todo evidence and the next executable Todo; then run `{cli_bin} refresh-state` and verify quota readback. Chat/model summaries are not durable state.",
                 f"If that packet exposes a goal-selection gate, rerun one exact choice before any mutation. When the user asks to create or become a new peer/meta/supervisor agent, do not reuse an existing registered identity: choose a new public-safe agent id, preview then apply `{cli_bin} register-agent --goal-id <selected-goal-id> --agent-id <new-agent-id> --execute`, and rerun start-goal with explicit `--goal-id` and `--agent-id` before todo writeback.",
                 f"If arguments are empty, inspect `{cli_bin} bootstrap-command-pack --project .`, `{cli_bin} status`, and `{cli_bin} slash-commands` before changing files.",

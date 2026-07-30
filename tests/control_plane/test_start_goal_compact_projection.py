@@ -150,6 +150,95 @@ def test_default_projection_preserves_host_actions_and_json_anchors(
         _resolve_pointer(projection, ref["json_pointer"])
 
 
+def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="ark-managed-agent",
+        goal_text=(
+            "Autonomously deliver review-ready fixes for two distinct open "
+            "repository issues in one long-running Goal."
+        ),
+        available_capabilities=["network"],
+    )
+
+    transaction = payload["guided_transaction"]
+    route = transaction["selected_capability_route"]
+    assert route == {
+        "schema_version": "loopx_goal_capability_route_v0",
+        "capability_id": "issue-fix",
+        "selection_source": "explicit_goal_text",
+        "selection_reason_code": "issue_fix_intent",
+        "entry_command_key": "issue_fix_workflow_plan_template",
+        "admission_command_key": "issue_fix_feasibility_template",
+        "implementation_admission": {
+            "status": "qualification_required",
+            "state_owner": "issue_fix",
+        },
+        "activation_condition": (
+            "after selecting a public issue candidate and before substantive "
+            "implementation"
+        ),
+    }
+    guard = transaction["ordered_steps"][-1]
+    assert guard["id"] == "qualify_selected_capability"
+    assert guard["command_source"].endswith(
+        "/commands/issue_fix_workflow_plan_template"
+    )
+    assert guard["admission_command_source"].endswith(
+        "/commands/issue_fix_feasibility_template"
+    )
+    todo_command = next(
+        step["command_template"]
+        for step in transaction["ordered_steps"]
+        if step["id"] == "write_ordered_todos"
+    )
+    assert "--action-kind <action_kind>" in todo_command
+    assert all(
+        field not in todo_command
+        for field in ("issue_url", "issue_number", "base_sha", "acceptance")
+    )
+
+
+def test_non_issue_goal_does_not_select_capability_route(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="ark-managed-agent",
+        goal_text="Improve the public onboarding documentation.",
+    )
+
+    transaction = payload["guided_transaction"]
+    assert "selected_capability_route" not in transaction
+    assert transaction["ordered_steps"][-1]["id"] == "scheduler_ack_when_needed"
+    assert (
+        payload["command_pack"]["goal_start_contract"]["selected_capability_route"]
+        is None
+    )
+    referenced = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="ark-managed-agent",
+        goal_text="Review https://github.com/owner/repo/pull/42.",
+    )
+    assert (
+        referenced["guided_transaction"]["selected_capability_route"][
+            "selection_reason_code"
+        ]
+        == "public_issue_or_pr_reference"
+    )
+
+
 def test_explicit_cold_path_restores_the_complete_command_pack(tmp_path: Path) -> None:
     project = _write_connected_project(tmp_path)
     compact = _build(project, include_detail=False)
