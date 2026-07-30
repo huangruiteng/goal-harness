@@ -304,6 +304,34 @@ def validate_todo_complete_options(args: argparse.Namespace) -> None:
     validate_successor_routing_options(args)
 
 
+def validate_todo_supersede_options(args: argparse.Namespace) -> None:
+    if not args.todo_id:
+        raise ValueError("todo supersede requires --todo-id")
+    if args.explore_result_node_refs or args.clear_explore_result_node_refs:
+        raise ValueError("todo supersede does not update --explore-result-node-ref; use todo update first")
+    if args.decision_outcome:
+        raise ValueError("todo supersede does not accept --decision-outcome; use todo complete")
+    if args.claimed_by:
+        raise ValueError("todo supersede does not support --claimed-by; use --next-claimed-by to assign the successor, or omit it to inherit the superseded todo owner when present")
+    if args.clear_claim:
+        raise ValueError("todo supersede does not support --clear-claim")
+    if args.self_merged:
+        raise ValueError("todo supersede does not support --self-merged")
+    if args.no_follow_up:
+        raise ValueError("todo supersede does not support --no-follow-up")
+    if args.followups:
+        raise ValueError("todo supersede does not support --follow-up; use `todo capture-followups`")
+    if args.continuation_policy:
+        raise ValueError("todo supersede does not update --continuation-policy; use todo update first")
+    validate_successor_routing_options(args)
+    if any(getattr(args, field) for field in ("blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "global_gate", "clear_global_gate", "unblocks_todo_id", "resume_when")):
+        raise ValueError("todo supersede does not update current todo routing metadata; use todo update first")
+    if args.successor_todo_ids:
+        raise ValueError("todo supersede does not support --successor-todo-id; use --next-agent-todo or update the source todo before supersede")
+    if any(getattr(args, field) for field in ("monitor_target_key", "cadence", "next_due_at", "expires_at")):
+        raise ValueError("todo supersede does not update target or monitor schedule metadata; use todo update before supersede")
+
+
 def validate_shared_todo_options(args: argparse.Namespace) -> None:
     agent_id_allowed_for_user_authoring = (
         args.todo_command == "add"

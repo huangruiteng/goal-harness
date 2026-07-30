@@ -28,9 +28,9 @@ from .todo_argument_validation import (
     unsupported_todo_options,
     validate_capability_gap_options,
     validate_shared_todo_options,
-    validate_successor_routing_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
+    validate_todo_supersede_options,
     validate_todo_update_options,
 )
 from .todo_event import RolloutEventAppender, append_todo_rollout_event
@@ -579,44 +579,7 @@ def handle_todo_command(
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "supersede":
-            if not args.todo_id:
-                raise ValueError("todo supersede requires --todo-id")
-            if args.explore_result_node_refs or args.clear_explore_result_node_refs:
-                raise ValueError(
-                    "todo supersede does not update --explore-result-node-ref; use todo update first"
-                )
-            if args.decision_outcome:
-                raise ValueError(
-                    "todo supersede does not accept --decision-outcome; use todo complete"
-                )
-            if args.claimed_by:
-                raise ValueError(
-                    "todo supersede does not support --claimed-by; use --next-claimed-by "
-                    "to assign the successor, or omit it to inherit the superseded todo "
-                    "owner when present"
-                )
-            if args.clear_claim:
-                raise ValueError("todo supersede does not support --clear-claim")
-            if args.self_merged:
-                raise ValueError("todo supersede does not support --self-merged")
-            if args.no_follow_up:
-                raise ValueError("todo supersede does not support --no-follow-up")
-            if args.followups:
-                raise ValueError("todo supersede does not support --follow-up; use `todo capture-followups`")
-            if args.continuation_policy:
-                raise ValueError(
-                    "todo supersede does not update --continuation-policy; use todo update first"
-                )
-            validate_successor_routing_options(args)
-            if args.blocks_agent or args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.clear_global_gate or args.unblocks_todo_id or args.resume_when:
-                raise ValueError("todo supersede does not update current todo routing metadata; use todo update first")
-            if args.successor_todo_ids:
-                raise ValueError("todo supersede does not support --successor-todo-id; use --next-agent-todo or update the source todo before supersede")
-            if args.monitor_target_key or args.cadence or args.next_due_at or args.expires_at:
-                raise ValueError(
-                    "todo supersede does not update target or monitor schedule metadata; "
-                    "use todo update before supersede"
-                )
+            validate_todo_supersede_options(args)
             payload = supersede_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,

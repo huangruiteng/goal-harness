@@ -9,6 +9,7 @@ from loopx.cli_commands.quota import _validate_quota_command_request
 from loopx.cli_commands.todo_argument_validation import (
     validate_todo_claim_options,
     validate_todo_complete_options,
+    validate_todo_supersede_options,
     validate_todo_update_options,
 )
 
@@ -395,6 +396,90 @@ def test_todo_complete_validation_accepts_no_follow_up_with_evidence() -> None:
     )
 
     validate_todo_complete_options(args)
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected"),
+    [
+        ([], "todo supersede requires --todo-id"),
+        (
+            ["--todo-id", "todo_example", "--explore-result-node-ref", "result_1"],
+            "todo supersede does not update --explore-result-node-ref; "
+            "use todo update first",
+        ),
+        (
+            ["--todo-id", "todo_example", "--decision-outcome", "approve"],
+            "todo supersede does not accept --decision-outcome; use todo complete",
+        ),
+        (
+            ["--todo-id", "todo_example", "--claimed-by", "codex-example"],
+            "todo supersede does not support --claimed-by; use --next-claimed-by "
+            "to assign the successor, or omit it to inherit the superseded todo "
+            "owner when present",
+        ),
+        (
+            ["--todo-id", "todo_example", "--self-merged"],
+            "todo supersede does not support --self-merged",
+        ),
+        (
+            ["--todo-id", "todo_example", "--no-follow-up"],
+            "todo supersede does not support --no-follow-up",
+        ),
+        (
+            ["--todo-id", "todo_example", "--continuation-policy", "same_agent_non_delivery"],
+            "todo supersede does not update --continuation-policy; use todo update first",
+        ),
+        (
+            ["--todo-id", "todo_example", "--next-user-todo", "Approve."],
+            "--next-user-todo requires explicit --next-user-task-class "
+            "user_action|user_gate",
+        ),
+        (
+            ["--todo-id", "todo_example", "--blocks-agent", "codex-example"],
+            "todo supersede does not update current todo routing metadata; "
+            "use todo update first",
+        ),
+        (
+            ["--todo-id", "todo_example", "--successor-todo-id", "todo_successor"],
+            "todo supersede does not support --successor-todo-id; "
+            "use --next-agent-todo or update the source todo before supersede",
+        ),
+        (
+            ["--todo-id", "todo_example", "--target-key", "monitor"],
+            "todo supersede does not update target or monitor schedule metadata; "
+            "use todo update before supersede",
+        ),
+    ],
+)
+def test_todo_supersede_validation_preserves_exact_diagnostics(
+    extra_args: list[str],
+    expected: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["todo", "supersede", "--goal-id", "example-goal", *extra_args]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_supersede_options(args)
+
+    assert str(exc_info.value) == expected
+
+
+def test_todo_supersede_validation_accepts_successor_creation() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "supersede",
+            "--goal-id",
+            "example-goal",
+            "--todo-id",
+            "todo_example",
+            "--next-agent-todo",
+            "Continue.",
+        ]
+    )
+
+    validate_todo_supersede_options(args)
 
 
 @pytest.mark.parametrize(
