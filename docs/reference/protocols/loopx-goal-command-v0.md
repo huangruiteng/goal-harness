@@ -177,8 +177,9 @@ maintainer comment metadata without retaining bodies. Exact closing
 references may be reused directly. Cross-references remain
 `verification_required` until their exact current revision is inspected;
 maintainer comments project a content-read gate plus disposition successor.
-The optional `--candidate-resolution-json` binds those compact outcomes back
-to current source rows, so a changed PR head fails closed. A capped aggregate
+The optional `--candidate-resolution-json` binds those compact outcomes to the
+current PR head or maintainer-comment `updatedAt` revision before they feed back
+to current source rows, so a changed source revision fails closed. A capped aggregate
 PR index may generate candidates but cannot prove that prior work is absent.
 The command persists the preflight receipt when `--goal-id` is present. Only
 an `admitted` `proceed` decision may start a new implementation and enter

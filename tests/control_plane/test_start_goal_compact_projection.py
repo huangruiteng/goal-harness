@@ -236,7 +236,10 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     rendered = render_start_goal_guided_markdown(payload)
     assert "authority: open public issue; source clues are evidence only" in rendered
     assert "discover: `gh issue list " in rendered
-    assert "numeric_pr_evidence + semantic_pr_evidence" in rendered
+    assert (
+        "numeric_pr_evidence + semantic_pr_evidence + "
+        "maintainer_comment_evidence"
+    ) in rendered
     assert "only admitted proceed may start a new implementation" in rendered
     assert "loopx issue-fix workflow-plan " in rendered
     assert "loopx issue-fix feasibility " in rendered
@@ -294,6 +297,9 @@ def test_candidate_preflight_rejects_unqualified_negative_evidence() -> None:
         "schema_version": "issue_fix_candidate_preflight_input_v0",
         "numeric_pr_evidence": receipt("issue_specific_all_states"),
         "semantic_pr_evidence": receipt("issue_specific_current_revision"),
+        "maintainer_comment_evidence": receipt(
+            "issue_specific_comment_metadata"
+        ),
     }
     packet = build_issue_fix_candidate_preflight_packet(
         repo="volcengine/OpenViking",
@@ -303,6 +309,20 @@ def test_candidate_preflight_rejects_unqualified_negative_evidence() -> None:
     )
     assert packet["decision"]["route"] == "proceed"
     assert packet["input_contract"] == candidate_preflight_input_contract()
+
+    missing_comment_evidence = dict(complete)
+    missing_comment_evidence.pop("maintainer_comment_evidence")
+    try:
+        build_issue_fix_candidate_preflight_packet(
+            repo="volcengine/OpenViking",
+            issue_ref="#3005",
+            input_payload=missing_comment_evidence,
+            generated_at="2026-07-30T00:00:00Z",
+        )
+    except ValueError as error:
+        assert "maintainer_comment_evidence" in str(error)
+    else:
+        raise AssertionError("missing comment evidence must not admit a candidate")
 
     invalid_inputs = [
         {
@@ -356,6 +376,7 @@ def test_candidate_preflight_contract_describes_receipt_shapes() -> None:
     } == {
         "numeric_pr_evidence": "issue_specific_all_states",
         "semantic_pr_evidence": "issue_specific_current_revision",
+        "maintainer_comment_evidence": "issue_specific_comment_metadata",
     }
     for receipt in receipts.values():
         assert receipt["cardinality"] == "one_receipt_object"

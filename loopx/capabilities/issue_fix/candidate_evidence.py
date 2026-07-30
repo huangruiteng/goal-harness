@@ -8,14 +8,9 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .candidate_preflight import (
-    ISSUE_FIX_CANDIDATE_PREFLIGHT_INPUT_SCHEMA_VERSION,
-)
+from .candidate_preflight import ISSUE_FIX_CANDIDATE_PREFLIGHT_INPUT_SCHEMA_VERSION
 from .metadata_preview import normalise_github_issue_reference
 
-ISSUE_FIX_CANDIDATE_EVIDENCE_SOURCE_SCHEMA_VERSION = (
-    "issue_fix_candidate_evidence_source_v0"
-)
 _MAINTAINER_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
 
 _CLOSING_PULL_REQUESTS_QUERY = """
@@ -337,7 +332,7 @@ def build_public_github_candidate_preflight_input(
             "revision": revision,
         }
 
-    maintainer_comment_refs: list[str] = []
+    maintainer_comments_by_ref: dict[str, dict[str, str]] = {}
     for index, candidate in enumerate(maintainer_comments):
         comment = _required_mapping(
             candidate,
@@ -352,8 +347,22 @@ def build_public_github_candidate_preflight_input(
         if not url:
             raise ValueError(f"maintainer_comments[{index}].url is required")
         if association in _MAINTAINER_ASSOCIATIONS:
-            maintainer_comment_refs.append(url)
-    maintainer_comment_refs = sorted(set(maintainer_comment_refs))
+            revision = str(comment.get("updatedAt") or "").strip()
+            if not revision:
+                raise ValueError(
+                    f"maintainer_comments[{index}].updatedAt is required"
+                )
+            if url in maintainer_comments_by_ref:
+                raise ValueError(
+                    f"maintainer_comments contains duplicate comment {url}"
+                )
+            maintainer_comments_by_ref[url] = {
+                "ref": url,
+                "revision": revision,
+            }
+    maintainer_comment_rows = [
+        maintainer_comments_by_ref[ref] for ref in sorted(maintainer_comments_by_ref)
+    ]
     numeric_source = _validated_source_receipt(
         source_receipts.get("numeric_pr_evidence"),
         field="numeric_pr_evidence",
@@ -361,6 +370,10 @@ def build_public_github_candidate_preflight_input(
     semantic_source = _validated_source_receipt(
         source_receipts.get("semantic_pr_evidence"),
         field="semantic_pr_evidence",
+    )
+    comment_source = _validated_source_receipt(
+        source_receipts.get("maintainer_comment_evidence"),
+        field="maintainer_comment_evidence",
     )
     return {
         "schema_version": ISSUE_FIX_CANDIDATE_PREFLIGHT_INPUT_SCHEMA_VERSION,
@@ -370,7 +383,9 @@ def build_public_github_candidate_preflight_input(
             "status": state.lower(),
             "terminal": state == "CLOSED",
             "route": None,
-            "maintainer_comment_refs": maintainer_comment_refs,
+            "maintainer_comment_refs": [
+                row["ref"] for row in maintainer_comment_rows
+            ],
         },
         "numeric_pr_evidence": {
             "repo": canonical_repo,
@@ -390,17 +405,14 @@ def build_public_github_candidate_preflight_input(
             "source": semantic_source,
             "rows": list(semantic_by_number.values()),
         },
-        "source_receipt": {
-            "schema_version": ISSUE_FIX_CANDIDATE_EVIDENCE_SOURCE_SCHEMA_VERSION,
-            "provider": "github_graphql",
-            "observed_at": generated_at,
-            "issue_ref": canonical_issue,
+        "maintainer_comment_evidence": {
             "repo": canonical_repo,
-            "maintainer_comment_refs": maintainer_comment_refs,
-            "external_reads_performed": True,
-            "external_writes_performed": False,
-            "raw_provider_payload_captured": False,
-            "credentials_captured": False,
+            "issue_ref": canonical_issue,
+            "query_scope": "issue_specific_comment_metadata",
+            "complete": True,
+            "truncated": False,
+            "source": comment_source,
+            "rows": maintainer_comment_rows,
         },
     }
 
@@ -458,7 +470,7 @@ def collect_public_github_candidate_preflight_input(
 
     closing_pages, closing = observations["closing"]
     cross_ref_pages, cross_refs = observations["cross_refs"]
-    _, comments = observations["comments"]
+    comment_pages, comments = observations["comments"]
     source_receipts = {
         "numeric_pr_evidence": _source_projection(
             query=_CLOSING_PULL_REQUESTS_QUERY,
@@ -471,6 +483,12 @@ def collect_public_github_candidate_preflight_input(
             observed_at=generated_at,
             page_count=len(cross_ref_pages),
             result_count=len(cross_refs),
+        ),
+        "maintainer_comment_evidence": _source_projection(
+            query=_MAINTAINER_COMMENTS_QUERY,
+            observed_at=generated_at,
+            page_count=len(comment_pages),
+            result_count=len(comments),
         ),
     }
     return build_public_github_candidate_preflight_input(

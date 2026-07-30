@@ -15,11 +15,12 @@ ISSUE_FIX_CANDIDATE_RESOLUTION_SCHEMA_VERSION = "issue_fix_candidate_resolution_
 _TERMINAL_DOMAIN_STATES = {"closed", "done", "resolved", "superseded", "terminal"}
 _IMPLEMENTATION_RELATIONS = {"implementation", "implements", "fix_candidate"}
 _PR_STATES = {"OPEN", "CLOSED", "MERGED"}
-_REQUIRED_EVIDENCE_FIELDS = ("numeric_pr_evidence", "semantic_pr_evidence")
 _EVIDENCE_QUERY_SCOPES = {
     "numeric_pr_evidence": "issue_specific_all_states",
     "semantic_pr_evidence": "issue_specific_current_revision",
+    "maintainer_comment_evidence": "issue_specific_comment_metadata",
 }
+_REQUIRED_EVIDENCE_FIELDS = tuple(_EVIDENCE_QUERY_SCOPES)
 _RESOLUTION_OUTCOMES = {
     "pr_revision": {"implementation", "not_implementation"},
     "closed_pr": {"retry_new_implementation", "comment_only", "skip"},
@@ -67,7 +68,7 @@ def _safe_ref(value: object, *, field: str) -> str:
     compact = public_safe_compact_text(str(value or ""), limit=220)
     if not compact:
         raise ValueError(f"{field} must be a compact public-safe value")
-    return compact
+    return str(compact)
 
 
 def _normalise_issue_ref(repo: str, value: object) -> str | None:
@@ -106,14 +107,13 @@ def _issue_refs(
     return refs
 
 
-def _evidence_rows(
+def _evidence_receipt_rows(
     raw: object,
     *,
     field: str,
     repo: str,
     issue_ref: str,
-    semantic: bool,
-) -> list[dict[str, Any]]:
+) -> Sequence[object]:
     if not isinstance(raw, Mapping):
         raise TypeError(
             f"{field} must be one evidence receipt object, not a list; "
@@ -131,6 +131,23 @@ def _evidence_rows(
     rows = raw.get("rows")
     if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
         raise TypeError(f"{field}.rows must be a list")
+    return rows
+
+
+def _evidence_rows(
+    raw: object,
+    *,
+    field: str,
+    repo: str,
+    issue_ref: str,
+    semantic: bool,
+) -> list[dict[str, Any]]:
+    rows = _evidence_receipt_rows(
+        raw,
+        field=field,
+        repo=repo,
+        issue_ref=issue_ref,
+    )
 
     validated: list[dict[str, Any]] = []
     seen_refs: set[str] = set()
@@ -186,6 +203,37 @@ def _evidence_rows(
     return validated
 
 
+def _comment_evidence_rows(
+    raw: object,
+    *,
+    repo: str,
+    issue_ref: str,
+) -> list[dict[str, str]]:
+    field = "maintainer_comment_evidence"
+    rows = _evidence_receipt_rows(
+        raw,
+        field=field,
+        repo=repo,
+        issue_ref=issue_ref,
+    )
+    comments: list[dict[str, str]] = []
+    seen_refs: set[str] = set()
+    for index, raw_row in enumerate(rows):
+        row_field = f"{field}.rows[{index}]"
+        if not isinstance(raw_row, Mapping):
+            raise TypeError(f"{row_field} must be an object")
+        ref = _safe_ref(raw_row.get("ref"), field=f"{row_field}.ref")
+        revision = _safe_ref(
+            raw_row.get("revision"),
+            field=f"{row_field}.revision",
+        )
+        if ref in seen_refs:
+            raise ValueError(f"{field}.rows contains duplicate ref {ref}")
+        seen_refs.add(ref)
+        comments.append({"ref": ref, "revision": revision})
+    return comments
+
+
 def _domain_projection(
     raw: object,
     *,
@@ -212,45 +260,6 @@ def _domain_projection(
     }
 
 
-def _source_receipt_projection(raw: object) -> dict[str, Any] | None:
-    if not isinstance(raw, Mapping):
-        return None
-    maintainer_refs = raw.get("maintainer_comment_refs")
-    if not isinstance(maintainer_refs, Sequence) or isinstance(
-        maintainer_refs, (str, bytes)
-    ):
-        raise TypeError("source_receipt.maintainer_comment_refs must be a list")
-    refs = [
-        _safe_ref(value, field="source_receipt.maintainer_comment_refs")
-        for value in maintainer_refs
-    ]
-    if len(refs) != len(set(refs)):
-        raise ValueError("source_receipt.maintainer_comment_refs must be unique")
-    if raw.get("external_reads_performed") is not True:
-        raise ValueError("source_receipt must record external_reads_performed=true")
-    for field in (
-        "external_writes_performed",
-        "raw_provider_payload_captured",
-        "credentials_captured",
-    ):
-        if raw.get(field) is not False:
-            raise ValueError(f"source_receipt must keep {field}=false")
-    return {
-        "schema_version": _safe_ref(
-            raw.get("schema_version"), field="source_receipt.schema_version"
-        ),
-        "provider": _safe_ref(raw.get("provider"), field="source_receipt.provider"),
-        "observed_at": _safe_ref(
-            raw.get("observed_at"), field="source_receipt.observed_at"
-        ),
-        "maintainer_comment_refs": refs,
-        "external_reads_performed": True,
-        "external_writes_performed": False,
-        "raw_provider_payload_captured": False,
-        "credentials_captured": False,
-    }
-
-
 def _resolution_rows(
     raw: object,
     *,
@@ -258,7 +267,7 @@ def _resolution_rows(
     issue_ref: str,
     numeric: Sequence[Mapping[str, Any]],
     semantic: Sequence[Mapping[str, Any]],
-    comment_refs: Sequence[str],
+    comment_revisions: Mapping[str, str],
 ) -> dict[tuple[str, str], dict[str, Any]]:
     if raw is None:
         return {}
@@ -281,7 +290,6 @@ def _resolution_rows(
 
     numeric_by_ref = {str(row["pr_ref"]): row for row in numeric}
     semantic_by_ref = {str(row["pr_ref"]): row for row in semantic}
-    comments = set(comment_refs)
     resolutions: dict[tuple[str, str], dict[str, Any]] = {}
     for index, raw_row in enumerate(rows):
         field = f"candidate_resolution.rows[{index}]"
@@ -316,8 +324,14 @@ def _resolution_rows(
                 raise ValueError(
                     f"{field}.revision must match the current source revision"
                 )
-        elif ref not in comments:
-            raise ValueError(f"{field} does not match a source maintainer comment")
+        else:
+            source_revision = comment_revisions.get(ref)
+            if source_revision is None:
+                raise ValueError(f"{field} does not match a source maintainer comment")
+            if revision != source_revision:
+                raise ValueError(
+                    f"{field}.revision must match the current source comment revision"
+                )
         resolutions[key] = {
             "kind": kind,
             "ref": ref,
@@ -393,7 +407,7 @@ def build_issue_fix_candidate_preflight_packet(
     )
     numeric: list[dict[str, Any]] = []
     semantic_candidates: list[dict[str, Any]] = []
-    source_receipt: dict[str, Any] | None = None
+    comment_rows: list[dict[str, str]] = []
     if configured:
         numeric = _evidence_rows(
             payload.get("numeric_pr_evidence"),
@@ -409,19 +423,21 @@ def build_issue_fix_candidate_preflight_packet(
             issue_ref=canonical_issue_ref,
             semantic=True,
         )
-        source_receipt = _source_receipt_projection(payload.get("source_receipt"))
-    comment_refs = (
-        list(source_receipt.get("maintainer_comment_refs") or [])
-        if source_receipt
-        else []
-    )
+        comment_rows = _comment_evidence_rows(
+            payload.get("maintainer_comment_evidence"),
+            repo=canonical_repo,
+            issue_ref=canonical_issue_ref,
+        )
+    comment_revisions = {
+        str(row["ref"]): str(row["revision"]) for row in comment_rows
+    }
     resolutions = _resolution_rows(
         payload.get("candidate_resolution"),
         repo=canonical_repo,
         issue_ref=canonical_issue_ref,
         numeric=numeric,
         semantic=semantic_candidates,
-        comment_refs=comment_refs,
+        comment_revisions=comment_revisions,
     )
 
     semantic: list[dict[str, Any]] = []
@@ -467,7 +483,9 @@ def build_issue_fix_candidate_preflight_packet(
             )
 
     unresolved_comments = [
-        ref for ref in comment_refs if ("maintainer_comment", ref) not in resolutions
+        ref
+        for ref in comment_revisions
+        if ("maintainer_comment", ref) not in resolutions
     ]
     if unresolved_comments:
         successors.append(
@@ -537,6 +555,15 @@ def build_issue_fix_candidate_preflight_packet(
         route = "skip"
         reason_codes = ["merged_implementation_pr"]
         successors = []
+    elif unresolved_comments:
+        admission_state = "verification_required"
+        route = None
+        successors = [
+            successor
+            for successor in successors
+            if successor["action_kind"] == "issue_fix_read_maintainer_disposition"
+        ]
+        reason_codes = ["maintainer_comment_requires_disposition"]
     elif any(row["state"] == "OPEN" for row in effective_prs):
         admission_state = "admitted"
         route = "reuse_existing_pr"
@@ -567,6 +594,11 @@ def build_issue_fix_candidate_preflight_packet(
         str(recall.get("status") or ""), limit=120
     )
     candidate_runnable = admission_state == "admitted" and route == "proceed"
+    unverified_semantic = [
+        row
+        for row in semantic_candidates
+        if ("pr_revision", str(row["pr_ref"])) not in resolutions
+    ]
     return {
         "ok": True,
         "schema_version": ISSUE_FIX_CANDIDATE_PREFLIGHT_SCHEMA_VERSION,
@@ -592,15 +624,13 @@ def build_issue_fix_candidate_preflight_packet(
             "domain_route": domain.get("route") if domain else None,
             "numeric_pr_matches": numeric,
             "semantic_pr_matches": semantic,
-            "semantic_pr_candidates_unverified": [
-                row
-                for row in semantic_candidates
-                if ("pr_revision", str(row["pr_ref"])) not in resolutions
-            ],
+            "semantic_pr_candidates_unverified": unverified_semantic,
+            "maintainer_comment_matches": comment_rows,
             "candidate_resolutions": list(resolutions.values()),
             "all_state_numeric_checked": configured,
-            "semantic_implementation_checked": configured,
-            "source_receipt": source_receipt,
+            "semantic_implementation_checked": configured
+            and not unverified_semantic,
+            "maintainer_comments_checked": configured,
         },
         "agentic_recall": {
             "receipt_status": receipt_status or None,

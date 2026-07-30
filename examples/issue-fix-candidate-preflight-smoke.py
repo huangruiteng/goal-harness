@@ -64,6 +64,10 @@ def fixture() -> dict[str, object]:
                 }
             ],
         ),
+        "maintainer_comment_evidence": evidence_receipt(
+            "issue_specific_comment_metadata",
+            [],
+        ),
         "candidate_resolution": {
             "schema_version": "issue_fix_candidate_resolution_v0",
             "repo": "volcengine/OpenViking",

@@ -25,8 +25,10 @@ open PRs, merge, publish, or run destructive git without an explicit gate.
    Each PR evidence field is an issue-specific query receipt carrying
    `repo`, `issue_ref`, `query_scope`, `complete`, `truncated`, and `rows`.
    Each field accepts one receipt object, not a list:
-   `numeric_pr_evidence.query_scope` is `issue_specific_all_states`, while
-   `semantic_pr_evidence.query_scope` is `issue_specific_current_revision`.
+   `numeric_pr_evidence.query_scope` is `issue_specific_all_states`,
+   `semantic_pr_evidence.query_scope` is `issue_specific_current_revision`,
+   and `maintainer_comment_evidence.query_scope` is
+   `issue_specific_comment_metadata`.
    Empty rows are valid only for complete, non-truncated receipts. Every
    returned row must be parseable and issue-scoped; malformed rows invalidate
    the receipt rather than disappearing into a false negative.
@@ -38,8 +40,9 @@ open PRs, merge, publish, or run destructive git without an explicit gate.
    Cross-references, closed PRs, and maintainer comments project typed
    successors instead of masquerading as final `comment_only`.
    `issue_fix_candidate_resolution_v0` is the single compact resolution input:
-   every row must match current source evidence, and PR resolution binds the
-   exact head revision. A changed head therefore invalidates stale resolution.
+   every row must match current source evidence. PR resolution binds the exact
+   head revision, and maintainer-comment resolution binds the comment
+   `updatedAt` revision. A changed source therefore invalidates stale resolution.
    Comment content remains behind the provider-content gate and only its
    compact disposition may enter the resolution receipt.
 2. **Metadata preview:** build `github_issue_metadata_preview_v0` from a public

@@ -40,7 +40,11 @@ def _source_receipts() -> dict[str, dict[str, object]]:
             "truncated": False,
             "raw_provider_payload_captured": False,
         }
-        for field in ("numeric_pr_evidence", "semantic_pr_evidence")
+        for field in (
+            "numeric_pr_evidence",
+            "semantic_pr_evidence",
+            "maintainer_comment_evidence",
+        )
     }
 
 
@@ -79,7 +83,15 @@ def _candidate_input(
             }
         ]
     comments = (
-        [{"authorAssociation": "OWNER", "url": comment_ref}] if comment_ref else []
+        [
+            {
+                "authorAssociation": "OWNER",
+                "url": comment_ref,
+                "updatedAt": GENERATED_AT,
+            }
+        ]
+        if comment_ref
+        else []
     )
     return build_public_github_candidate_preflight_input(
         repo=REPO,
@@ -177,7 +189,10 @@ def test_candidate_evidence_distinguishes_closing_refs_from_cross_refs() -> None
         preflight["evidence"]["semantic_pr_candidates_unverified"][0]["pr_ref"]
         == "#3582"
     )
-    assert preflight["evidence"]["source_receipt"]["provider"] == "github_graphql"
+    assert (
+        payload["maintainer_comment_evidence"]["source"]["provider"]
+        == "github_graphql"
+    )
 
 
 def test_maintainer_comment_requires_disposition_without_copying_body() -> None:
@@ -194,6 +209,7 @@ def test_maintainer_comment_requires_disposition_without_copying_body() -> None:
                     "https://github.com/volcengine/OpenViking/issues/1139"
                     "#issuecomment-1"
                 ),
+                "updatedAt": GENERATED_AT,
                 "body": "must not enter the receipt",
             }
         ],
@@ -228,6 +244,8 @@ def test_unverified_semantic_candidate_fails_closed() -> None:
         preflight["evidence"]["semantic_pr_candidates_unverified"][0]["pr_ref"]
         == "#3310"
     )
+    assert preflight["evidence"]["semantic_implementation_checked"] is False
+    assert preflight["evidence"]["maintainer_comments_checked"] is True
     assert preflight["admission"]["successors"][0]["action_kind"] == (
         "issue_fix_verify_pr_current_revision"
     )
@@ -267,6 +285,7 @@ def test_semantic_resolution_is_bound_to_the_current_pr_revision() -> None:
     assert (
         admitted["evidence"]["semantic_pr_matches"][0]["verified_revision"] == "a" * 40
     )
+    assert admitted["evidence"]["semantic_implementation_checked"] is True
 
     payload["semantic_pr_evidence"]["rows"][0]["revision"] = "b" * 40
     with pytest.raises(ValueError, match="current source revision"):
@@ -291,6 +310,7 @@ def test_non_implementation_and_non_blocking_comment_restore_admission() -> None
             {
                 "kind": "maintainer_comment",
                 "ref": COMMENT_REF,
+                "revision": GENERATED_AT,
                 "outcome": "non_blocking",
             },
         ],
@@ -312,6 +332,64 @@ def test_non_implementation_and_non_blocking_comment_restore_admission() -> None
         ("pr_revision", "not_implementation"),
         ("maintainer_comment", "non_blocking"),
     }
+
+
+def test_maintainer_resolution_is_bound_to_comment_revision() -> None:
+    payload = _candidate_input(comment_ref=COMMENT_REF)
+    payload["candidate_resolution"] = _resolution(
+        repo=REPO,
+        issue_ref=ISSUE,
+        rows=[
+            {
+                "kind": "maintainer_comment",
+                "ref": COMMENT_REF,
+                "revision": GENERATED_AT,
+                "outcome": "non_blocking",
+            }
+        ],
+    )
+
+    admitted = _preflight(payload)
+    assert admitted["decision"]["route"] == "proceed"
+
+    payload["maintainer_comment_evidence"]["rows"][0]["revision"] = (
+        "2026-07-30T01:00:00Z"
+    )
+    with pytest.raises(ValueError, match="current source comment revision"):
+        _preflight(payload)
+
+
+def test_maintainer_comment_blocks_reuse_until_disposition() -> None:
+    payload = build_public_github_candidate_preflight_input(
+        repo=REPO,
+        issue_ref=ISSUE,
+        issue_state="OPEN",
+        closing_pull_requests=[
+            {
+                "number": 3311,
+                "state": "OPEN",
+                "url": f"https://github.com/{REPO}/pull/3311",
+                "headRefOid": "c" * 40,
+            }
+        ],
+        cross_referenced_pull_requests=[],
+        maintainer_comments=[
+            {
+                "authorAssociation": "OWNER",
+                "url": COMMENT_REF,
+                "updatedAt": GENERATED_AT,
+            }
+        ],
+        generated_at=GENERATED_AT,
+        source_receipts=_source_receipts(),
+    )
+
+    preflight = _preflight(payload)
+    assert preflight["admission"]["state"] == "verification_required"
+    assert preflight["decision"]["route"] is None
+    assert [row["action_kind"] for row in preflight["admission"]["successors"]] == [
+        "issue_fix_read_maintainer_disposition"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -404,7 +482,10 @@ def test_public_collector_requires_complete_paginated_queries() -> None:
         )
 
     assert runner.call_count == 3
-    assert payload["source_receipt"]["external_reads_performed"] is True
+    assert payload["maintainer_comment_evidence"]["complete"] is True
+    assert payload["maintainer_comment_evidence"]["source"][
+        "query_fingerprint"
+    ].startswith("sha256:")
     assert payload["numeric_pr_evidence"]["rows"] == []
     assert payload["semantic_pr_evidence"]["rows"] == []
 
