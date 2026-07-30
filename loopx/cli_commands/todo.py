@@ -27,6 +27,7 @@ from .todo_argument_validation import (
     register_todo_successor_creation_arguments,
     validate_capability_gap_options,
     validate_shared_todo_options,
+    validate_todo_add_options,
     validate_todo_archive_completed_options,
     validate_todo_capture_followups_options,
     validate_todo_claim_options,
@@ -403,42 +404,7 @@ def handle_todo_command(
                 runtime_root_arg=runtime_root_arg,
             )
         elif args.todo_command == "add":
-            if args.decision_outcome:
-                raise ValueError(
-                    "todo add does not accept --decision-outcome; record it on completion"
-                )
-            if args.followups:
-                raise ValueError("todo add does not support --follow-up; use `todo capture-followups`")
-            if not args.role:
-                raise ValueError("todo add requires --role")
-            if not args.text:
-                raise ValueError("todo add requires --text")
-            if args.clear_claim:
-                raise ValueError("todo add accepts --claimed-by but not --clear-claim")
-            if args.clear_explore_result_node_refs:
-                raise ValueError(
-                    "todo add accepts --explore-result-node-ref but not --clear-explore-result-node-refs"
-                )
-            if args.next_claimed_by:
-                raise ValueError("todo add does not support --next-claimed-by")
-            if args.next_task_repository:
-                raise ValueError("todo add does not support --next-task-repository")
-            if args.next_required_capabilities:
-                raise ValueError("todo add does not support --next-required-capability")
-            if args.next_continuation_policy:
-                raise ValueError("todo add does not support --next-continuation-policy")
-            if args.next_excluded_agents:
-                raise ValueError("todo add does not support --next-excluded-agent")
-            if args.clear_excluded_agents:
-                raise ValueError("todo add does not support --clear-excluded-agents")
-            if args.clear_blocks_agent:
-                raise ValueError("todo add does not support --clear-blocks-agent")
-            if args.self_merged:
-                raise ValueError("todo add does not support --self-merged")
-            if args.no_follow_up:
-                raise ValueError("todo add does not support --no-follow-up")
-            if args.successor_todo_ids:
-                raise ValueError("todo add does not support --successor-todo-id; use todo update/complete to link existing successor work")
+            validate_todo_add_options(args)
             payload = add_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,

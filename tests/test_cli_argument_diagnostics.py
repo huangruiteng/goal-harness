@@ -7,6 +7,7 @@ import pytest
 from loopx.cli import build_parser, main, output_format, resolve_global_output_format
 from loopx.cli_commands.quota import _validate_quota_command_request
 from loopx.cli_commands.todo_argument_validation import (
+    validate_todo_add_options,
     validate_todo_archive_completed_options,
     validate_todo_capture_followups_options,
     validate_todo_claim_options,
@@ -130,6 +131,97 @@ def test_todo_list_validation_accepts_read_filters() -> None:
     )
 
     validate_todo_list_options(args)
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected"),
+    [
+        ([], "todo add requires --role"),
+        (["--role", "agent"], "todo add requires --text"),
+        (
+            [
+                "--role",
+                "agent",
+                "--text",
+                "Continue.",
+                "--decision-outcome",
+                "approve",
+                "--follow-up",
+                "Later.",
+            ],
+            "todo add does not accept --decision-outcome; record it on completion",
+        ),
+        (
+            [
+                "--role",
+                "agent",
+                "--text",
+                "Continue.",
+                "--clear-explore-result-node-refs",
+            ],
+            "todo add accepts --explore-result-node-ref but not "
+            "--clear-explore-result-node-refs",
+        ),
+        (
+            [
+                "--role",
+                "agent",
+                "--text",
+                "Continue.",
+                "--next-required-capability",
+                "network",
+            ],
+            "todo add does not support --next-required-capability",
+        ),
+        (
+            [
+                "--role",
+                "agent",
+                "--text",
+                "Continue.",
+                "--successor-todo-id",
+                "todo_successor",
+            ],
+            "todo add does not support --successor-todo-id; use todo update/complete "
+            "to link existing successor work",
+        ),
+    ],
+)
+def test_todo_add_validation_preserves_exact_diagnostics(
+    extra_args: list[str],
+    expected: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["todo", "add", "--goal-id", "example-goal", *extra_args]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_add_options(args)
+
+    assert str(exc_info.value) == expected
+
+
+def test_todo_add_validation_accepts_add_fields() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "add",
+            "--goal-id",
+            "example-goal",
+            "--role",
+            "agent",
+            "--text",
+            "Continue.",
+            "--claimed-by",
+            "codex-example",
+            "--required-capability",
+            "shell",
+            "--explore-result-node-ref",
+            "result_1",
+        ]
+    )
+
+    validate_todo_add_options(args)
 
 
 def test_deprecated_scheduler_detail_alias_is_hidden_from_help(

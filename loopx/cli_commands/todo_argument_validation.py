@@ -105,6 +105,26 @@ _TODO_UPDATE_UNSUPPORTED_FIELDS = (
     ("self_merged", "todo update does not support --self-merged"),
 )
 
+_TODO_ADD_INITIAL_RULES = (
+    ("decision_outcome", True, "does not accept --decision-outcome; record it on completion"),
+    ("followups", True, "does not support --follow-up; use `todo capture-followups`"),
+    ("role", False, "requires --role"),
+    ("text", False, "requires --text"),
+    ("clear_claim", True, "accepts --claimed-by but not --clear-claim"),
+    (
+        "clear_explore_result_node_refs",
+        True,
+        "accepts --explore-result-node-ref but not --clear-explore-result-node-refs",
+    ),
+)
+_TODO_ADD_UNSUPPORTED_FIELDS = (
+    "next_claimed_by", "next_task_repository", "next_required_capabilities",
+    "next_continuation_policy", "next_excluded_agents", "clear_excluded_agents",
+    "clear_blocks_agent", "self_merged", "no_follow_up",
+)
+_TODO_OPTION_FLAGS = {field: flag for flag, field in TODO_OPTION_FIELDS}
+
+
 def register_todo_linkage_arguments(
     todo_parser: argparse.ArgumentParser,
 ) -> None:
@@ -249,6 +269,17 @@ def validate_todo_list_options(args: argparse.Namespace) -> None:
         "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
         "--agent-id, --project, --state-file, --dry-run, and --format; unsupported: ",
     )
+
+
+def validate_todo_add_options(args: argparse.Namespace) -> None:
+    for field, reject_when_present, message in _TODO_ADD_INITIAL_RULES:
+        if bool(getattr(args, field)) is reject_when_present:
+            raise ValueError(f"todo add {message}")
+    for field in _TODO_ADD_UNSUPPORTED_FIELDS:
+        if getattr(args, field):
+            raise ValueError(f"todo add does not support {_TODO_OPTION_FLAGS[field]}")
+    if args.successor_todo_ids:
+        raise ValueError("todo add does not support --successor-todo-id; use todo update/complete to link existing successor work")
 
 
 def validate_todo_claim_options(args: argparse.Namespace) -> None:
