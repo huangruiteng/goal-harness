@@ -954,18 +954,18 @@ def build_loopx_bootstrap_command_pack(
             ),
             "issue_fix_workflow_plan_template": (
                 f"{shell_arg(cli_bin)} issue-fix workflow-plan "
-                "--url <github-issue-or-pr-url> "
-                "--repo-path <approved-repo> "
-                "--repository-context-json <compact-context.json> "
-                "--validation-label '<validation command>' "
+                "--url <url> "
+                "--repo-path <repo> "
+                "--repository-context-json <context.json> "
+                "--validation-label '<validation>' "
                 "--format json"
             ),
             "issue_fix_feasibility_template": (
                 f"{shell_arg(cli_bin)} issue-fix feasibility "
-                "--url <github-issue-url> "
+                "--url <url> "
                 "--reproduction-status <confirmed|planned|missing|blocked> "
                 "--scope-class <bounded|uncertain|oversized> "
-                "--repository-context-json <compact-context.json> "
+                "--repository-context-json <context.json> "
                 f"--goal-id {shell_arg(resolved_goal_id)} "
                 "--format json"
             ),
@@ -1394,6 +1394,8 @@ def build_start_goal_guided_packet(
             {
                 "id": "qualify_selected_capability",
                 "kind": "capability_guard",
+                "command_template": commands.get(entry_key),
+                "admission_command_template": commands.get(admission_key),
                 "command_source": f"#/command_pack/commands/{entry_key}",
                 "admission_command_source": (
                     f"#/command_pack/commands/{admission_key}"
@@ -1481,6 +1483,16 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
         if not isinstance(step, dict):
             continue
         command = step.get("command") or step.get("command_template") or step.get("command_source") or step.get("prompt")
+        admission_command = step.get("admission_command_template")
+        if admission_command:
+            step_lines.extend(
+                [
+                    f"{index}. `{step.get('id')}`",
+                    f"   - `{str(command).splitlines()[0]}`",
+                    f"   - `{str(admission_command).splitlines()[0]}`",
+                ]
+            )
+            continue
         step_lines.extend(
             [
                 f"{index}. `{step.get('id')}` ({step.get('kind')})",

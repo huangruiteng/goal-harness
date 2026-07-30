@@ -11,6 +11,7 @@ from typing import Any
 from loopx.bootstrap_command_pack import (
     GUIDED_COMMAND_PACK_PROJECTION_SCHEMA_VERSION,
     build_start_goal_guided_packet,
+    render_start_goal_guided_markdown,
 )
 from loopx.cli import main as cli_main
 
@@ -193,6 +194,14 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert guard["admission_command_source"].endswith(
         "/commands/issue_fix_feasibility_template"
     )
+    assert guard["command_template"].startswith("loopx issue-fix workflow-plan ")
+    assert guard["admission_command_template"].startswith(
+        "loopx issue-fix feasibility "
+    )
+    rendered = render_start_goal_guided_markdown(payload)
+    assert "loopx issue-fix workflow-plan " in rendered
+    assert "loopx issue-fix feasibility " in rendered
+    assert len(rendered.replace(str(project), "<project>")) <= 3_200
     todo_command = next(
         step["command_template"]
         for step in transaction["ordered_steps"]
