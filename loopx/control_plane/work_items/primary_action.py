@@ -148,6 +148,33 @@ def protocol_first_candidate_action(payload: dict[str, Any]) -> str | None:
     return protocol_action_text(payload.get("recommended_action"))
 
 
+def protocol_replan_requires_runnable_todo(payload: dict[str, Any]) -> bool:
+    replan_obligation = (
+        payload.get("autonomous_replan_obligation")
+        if isinstance(payload.get("autonomous_replan_obligation"), dict)
+        else {}
+    )
+    satisfying_delta_kinds = {
+        str(item or "").strip()
+        for item in (replan_obligation.get("satisfying_repair_delta_kinds") or [])
+        if str(item or "").strip()
+    }
+    return (
+        "runnable_todo_set" in satisfying_delta_kinds
+        or replan_obligation.get("agent_todo_writeback_required") is True
+    )
+
+
+def protocol_strict_replan_action(payload: dict[str, Any]) -> str | None:
+    if not protocol_replan_requires_runnable_todo(payload):
+        return None
+    replan_obligation = payload["autonomous_replan_obligation"]
+    return protocol_action_text(
+        replan_obligation.get("recommended_action"),
+        limit=320,
+    )
+
+
 def protocol_monitor_action(payload: dict[str, Any]) -> str | None:
     goal_id = str(payload.get("goal_id") or "")
     work_lane = (
@@ -197,6 +224,9 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
             "write a compact blocker when it is absent"
         )
     if mode == "autonomous_replan":
+        strict_replan_action = protocol_strict_replan_action(payload)
+        if strict_replan_action:
+            return strict_replan_action
         lane_action = protocol_first_candidate_action(payload)
         if lane_action:
             return f"run one bounded autonomous replan slice around {lane_action}"

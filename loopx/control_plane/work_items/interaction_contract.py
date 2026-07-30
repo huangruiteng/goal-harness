@@ -30,6 +30,8 @@ from .primary_action import (
     protocol_action_text,
     protocol_first_candidate_action as _protocol_first_candidate_action,
     protocol_monitor_action as _protocol_monitor_action,
+    protocol_replan_requires_runnable_todo as _protocol_replan_requires_runnable_todo,
+    protocol_strict_replan_action as _protocol_strict_replan_action,
 )
 from .runtime_capability_reentry import build_runtime_capability_reentry_packet
 
@@ -692,30 +694,32 @@ def interaction_next_cli_actions(
             typed_quota_guard,
         ]
     if mode == "autonomous_replan":
-        replan_obligation = (
-            payload.get("autonomous_replan_obligation")
-            if isinstance(payload.get("autonomous_replan_obligation"), dict)
-            else {}
+        runnable_todo_writeback_required = (
+            _protocol_replan_requires_runnable_todo(payload)
         )
-        agent_todo_writeback_required = (
-            replan_obligation.get("agent_todo_writeback_required") is True
-        )
+        strict_replan_action = _protocol_strict_replan_action(payload)
         lane_action = _protocol_first_candidate_action(payload)
-        first_action = (
-            "run one bounded autonomous replan slice around "
-            f"{lane_action}; write back the selected todo/frontier changes"
-            if lane_action
-            else "run one bounded autonomous replan slice and write back the selected next action/todo changes"
-        )
+        if strict_replan_action:
+            first_action = strict_replan_action
+        elif lane_action:
+            first_action = (
+                "run one bounded autonomous replan slice around "
+                f"{lane_action}; write back the selected todo/frontier changes"
+            )
+        else:
+            first_action = (
+                "run one bounded autonomous replan slice and write back the "
+                "selected next action/todo changes"
+            )
         actions = [
             first_action,
         ]
-        if agent_todo_writeback_required:
+        if runnable_todo_writeback_required:
             actor_id = str(agent_identity.get("agent_id") or "").strip()
             actor_args = (
-                f" --agent-id {shlex.quote(actor_id)} --claimed-by {shlex.quote(actor_id)}"
+                f" --claimed-by {shlex.quote(actor_id)}"
                 if actor_id
-                else " --agent-id <agent-id> --claimed-by <agent-id>"
+                else " --claimed-by <agent-id>"
             )
             actions.append(
                 f"loopx todo add --goal-id {goal_id} --role agent "
@@ -723,7 +727,9 @@ def interaction_next_cli_actions(
                 f"{actor_args}"
             )
         delta_kind = (
-            "runnable_todo_set" if agent_todo_writeback_required else "<delta_kind>"
+            "runnable_todo_set"
+            if runnable_todo_writeback_required
+            else "<delta_kind>"
         )
         actions.extend([
             f"loopx refresh-state --goal-id {goal_id} --classification autonomous_replan_recorded --autonomous-replan-recorded --repair-delta-kind {delta_kind} --delivery-batch-scale <scale> --delivery-outcome <outcome>{scoped_cli_args}",
