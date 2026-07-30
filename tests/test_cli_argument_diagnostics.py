@@ -8,6 +8,7 @@ from loopx.cli import build_parser, main, output_format, resolve_global_output_f
 from loopx.cli_commands.quota import _validate_quota_command_request
 from loopx.cli_commands.todo_argument_validation import (
     validate_todo_archive_completed_options,
+    validate_todo_capture_followups_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
     validate_todo_suggest_options,
@@ -603,6 +604,74 @@ def test_todo_suggest_validation_accepts_suggestion_scope_options() -> None:
     )
 
     validate_todo_suggest_options(args)
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected"),
+    [
+        (
+            ["--role", "agent"],
+            "todo capture-followups always records agent todos; do not pass --role",
+        ),
+        (
+            ["--claimed-by", "codex-example"],
+            "todo capture-followups writes unclaimed todos; do not pass --claimed-by",
+        ),
+        (
+            ["--todo-id", "todo_example", "--note", "not accepted"],
+            "todo capture-followups only accepts --goal-id, --follow-up, optional "
+            "--text shorthand, --evidence, routing metadata, --project, --state-file, "
+            "and --dry-run; unsupported: --todo-id, --note",
+        ),
+    ],
+)
+def test_todo_capture_followups_validation_preserves_exact_diagnostics(
+    extra_args: list[str],
+    expected: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["todo", "capture-followups", "--goal-id", "example-goal", *extra_args]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_capture_followups_options(args)
+
+    assert str(exc_info.value) == expected
+
+
+def test_todo_capture_followups_validation_accepts_routing_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "capture-followups",
+            "--goal-id",
+            "example-goal",
+            "--follow-up",
+            "Continue.",
+            "--text",
+            "Then validate.",
+            "--evidence",
+            "tests/test_cli_argument_diagnostics.py",
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "implement",
+            "--continuation-policy",
+            "same_agent_non_delivery",
+            "--required-write-scope",
+            "tests/**",
+            "--required-capability",
+            "shell",
+            "--target-capability",
+            "quality",
+            "--required-decision-scope",
+            "merge",
+            "--state-file",
+            "ACTIVE_GOAL_STATE.md",
+        ]
+    )
+
+    validate_todo_capture_followups_options(args)
 
 
 @pytest.mark.parametrize(

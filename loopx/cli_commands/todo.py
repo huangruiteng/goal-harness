@@ -29,6 +29,7 @@ from .todo_argument_validation import (
     validate_capability_gap_options,
     validate_shared_todo_options,
     validate_todo_archive_completed_options,
+    validate_todo_capture_followups_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
     validate_todo_suggest_options,
@@ -627,33 +628,7 @@ def handle_todo_command(
             )
             payload["dry_run"] = True
         elif args.todo_command == "capture-followups":
-            if args.role:
-                raise ValueError("todo capture-followups always records agent todos; do not pass --role")
-            if args.claimed_by:
-                raise ValueError("todo capture-followups writes unclaimed todos; do not pass --claimed-by")
-            unsupported = unsupported_todo_options(
-                args,
-                allowed_fields={
-                    "text",
-                    "followups",
-                    "evidence",
-                    "task_class",
-                    "action_kind",
-                    "continuation_policy",
-                    "required_write_scopes",
-                    "required_capabilities",
-                    "target_capabilities",
-                    "required_decision_scopes",
-                    "state_file",
-                },
-            )
-            if unsupported:
-                raise ValueError(
-                    "todo capture-followups only accepts --goal-id, --follow-up, optional "
-                    "--text shorthand, --evidence, routing metadata, --project, --state-file, "
-                    "and --dry-run; unsupported: "
-                    + ", ".join(unsupported)
-                )
+            validate_todo_capture_followups_options(args)
             followups = list(args.followups or [])
             if args.text:
                 followups.append(args.text)
