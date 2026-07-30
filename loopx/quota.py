@@ -173,6 +173,7 @@ from .control_plane.todos.quota_summary import (
     select_quota_todo_summary,
 )
 from .control_plane.todos.user_gate import (
+    apply_scoped_user_gate_fallback_projection as _apply_scoped_user_gate_fallback_projection,
     build_gate_prompt as _build_gate_prompt,
     build_user_todo_notification as _build_user_todo_notification,
     open_todo_count as _open_todo_count,
@@ -2070,41 +2071,11 @@ def build_quota_should_run(
                     repeat_notification_reason=heartbeat_recommendation.get("reason"),
                 )
             )
-        if scoped_user_gate_fallback and not replan_decision_allowed:
-            payload["scoped_user_gate_fallback"] = scoped_user_gate_fallback
-            payload["should_run"] = True
-            if payload.get("decision") == "skip":
-                payload["decision"] = "safe_bypass_user_gate_fallback"
-            if payload.get("effective_action") in {"skip", "monitor_quiet_skip", None}:
-                payload["effective_action"] = "scoped_user_gate_fallback"
-            execution_obligation_payload = (
-                dict(payload.get("execution_obligation"))
-                if isinstance(payload.get("execution_obligation"), dict)
-                else {}
-            )
-            execution_obligation_payload.update(
-                {
-                    "must_attempt_work": True,
-                    "kind": "scoped_user_gate_fallback",
-                    "minimum": "one_non_gated_fallback_segment_after_user_gate_notice",
-                    "delivery_allowed": True,
-                    "notify_is_execution_gate": False,
-                    "contract": "scoped_user_gate_fallback",
-                    "contract_obligation": scoped_user_gate_fallback.get(
-                        "recommended_action"
-                    ),
-                    "reason": scoped_user_gate_fallback.get("reason"),
-                }
-            )
-            payload["execution_obligation"] = execution_obligation_payload
-            payload["safe_bypass_allowed"] = True
-            payload["safe_bypass_kind"] = "scoped_user_gate_fallback"
-            payload["safe_bypass_policy"] = (
-                "The user gate blocks only the matched agent action scope. Surface "
-                "that gate, then advance the selected non-gated fallback; spend only "
-                "after validated writeback."
-            )
-            payload["actionable_by_codex"] = True
+        payload = _apply_scoped_user_gate_fallback_projection(
+            payload,
+            fallback=scoped_user_gate_fallback,
+            replan_decision_allowed=replan_decision_allowed,
+        )
         payload["requires_user_action"] = bool(
             state == "operator_gate"
             or payload.get("notify_user_on_gate") is True
