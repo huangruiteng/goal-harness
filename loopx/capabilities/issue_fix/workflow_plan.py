@@ -66,7 +66,7 @@ def build_issue_fix_goal_command_templates(
             "--url <github-issue-or-pr-url> "
             "--repo-path <approved-repo> "
             "--repository-context-json <compact-context.json> "
-            "--candidate-preflight-json <candidate-preflight.json> "
+            "--fetch-candidate-evidence "
             "--validation-label '<validation command>' "
             "--format json"
         ),
@@ -343,6 +343,11 @@ def build_issue_fix_workflow_plan_packet(
         issue_ref=issue_label,
         input_payload=candidate_preflight_input,
         generated_at=generated_at,
+    )
+    candidate_source_receipt = (
+        candidate_preflight.get("evidence", {}).get("source_receipt")
+        if isinstance(candidate_preflight.get("evidence"), Mapping)
+        else None
     )
     repository_context = build_issue_fix_repository_context_packet(
         repo=repo_label,
@@ -628,7 +633,13 @@ def build_issue_fix_workflow_plan_packet(
         "ordered_loopx_todo_writeback_preview": ordered_previews,
         "validation_plan": validation_plan,
         "review_packet_preview": review_packet_preview,
-        "external_reads_performed": bool(metadata_packet["external_reads_performed"]),
+        "external_reads_performed": bool(
+            metadata_packet["external_reads_performed"]
+            or (
+                isinstance(candidate_source_receipt, Mapping)
+                and candidate_source_receipt.get("external_reads_performed") is True
+            )
+        ),
         "external_writes_performed": False,
         "issue_body_captured": False,
         "comment_bodies_captured": False,

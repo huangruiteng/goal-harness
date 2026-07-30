@@ -126,6 +126,48 @@ def _matching_pr_rows(
     return matches
 
 
+def _unverified_semantic_rows(
+    rows: object,
+    *,
+    repo: str,
+    issue_ref: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        return []
+    candidates: list[dict[str, Any]] = []
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            continue
+        row_repo = str(raw.get("repo") or repo).strip()
+        if row_repo.casefold() != repo.casefold():
+            continue
+        refs = raw.get("related_issue_refs")
+        if not isinstance(refs, Sequence) or isinstance(refs, (str, bytes)):
+            continue
+        normalised_refs = {
+            ref
+            for ref in (_normalise_issue_ref(repo, value) for value in refs)
+            if ref
+        }
+        relation = str(raw.get("relation") or "").strip().casefold()
+        if (
+            issue_ref not in normalised_refs
+            or relation not in _IMPLEMENTATION_RELATIONS
+            or raw.get("current_revision_verified") is True
+        ):
+            continue
+        candidates.append(
+            {
+                "pr_ref": _safe_ref(raw.get("pr_ref"), field="pr_ref"),
+                "state": str(raw.get("state") or "UNKNOWN").strip().upper(),
+                "url": public_safe_compact_text(str(raw.get("url") or ""), limit=220),
+                "evidence_kind": "semantic_candidate_unverified",
+                "current_revision_verified": False,
+            }
+        )
+    return candidates
+
+
 def _evidence_rows(
     raw: object,
     *,
@@ -179,6 +221,42 @@ def _domain_projection(
     }
 
 
+def _source_receipt_projection(raw: object) -> dict[str, Any] | None:
+    if not isinstance(raw, Mapping):
+        return None
+    maintainer_refs = raw.get("maintainer_comment_refs")
+    refs = (
+        [
+            public_safe_compact_text(str(value or ""), limit=220)
+            for value in maintainer_refs
+        ]
+        if isinstance(maintainer_refs, Sequence)
+        and not isinstance(maintainer_refs, (str, bytes))
+        else []
+    )
+    return {
+        "schema_version": public_safe_compact_text(
+            str(raw.get("schema_version") or ""), limit=120
+        )
+        or None,
+        "provider": public_safe_compact_text(
+            str(raw.get("provider") or ""), limit=120
+        )
+        or None,
+        "observed_at": public_safe_compact_text(
+            str(raw.get("observed_at") or ""), limit=120
+        )
+        or None,
+        "maintainer_comment_refs": [ref for ref in refs if ref][:100],
+        "external_reads_performed": raw.get("external_reads_performed") is True,
+        "external_writes_performed": raw.get("external_writes_performed") is True,
+        "raw_provider_payload_captured": (
+            raw.get("raw_provider_payload_captured") is True
+        ),
+        "credentials_captured": raw.get("credentials_captured") is True,
+    }
+
+
 def build_issue_fix_candidate_preflight_packet(
     *,
     repo: str,
@@ -225,6 +303,7 @@ def build_issue_fix_candidate_preflight_packet(
     )
     numeric: list[dict[str, Any]] = []
     semantic: list[dict[str, Any]] = []
+    unverified_semantic: list[dict[str, Any]] = []
     if configured:
         numeric = _matching_pr_rows(
             _evidence_rows(
@@ -248,6 +327,11 @@ def build_issue_fix_candidate_preflight_packet(
             issue_ref=canonical_issue_ref,
             semantic=True,
         )
+        unverified_semantic = _unverified_semantic_rows(
+            payload.get("semantic_pr_evidence", {}).get("rows"),
+            repo=canonical_repo,
+            issue_ref=canonical_issue_ref,
+        )
     existing_prs = numeric + [
         row for row in semantic if row["pr_ref"] not in {item["pr_ref"] for item in numeric}
     ]
@@ -270,6 +354,19 @@ def build_issue_fix_candidate_preflight_packet(
         elif closed_prs:
             route = "comment_only"
             reason_codes.append("closed_implementation_pr_requires_disposition")
+        elif unverified_semantic:
+            route = "comment_only"
+            reason_codes.append(
+                "semantic_candidate_requires_current_revision_verification"
+            )
+        elif (
+            domain
+            and domain["route"] == "comment_only"
+            and isinstance(payload.get("source_receipt"), Mapping)
+            and payload["source_receipt"].get("maintainer_comment_refs")
+        ):
+            route = "comment_only"
+            reason_codes.append("maintainer_comment_requires_disposition")
         elif domain and domain["route"] == "comment_only":
             route = "comment_only"
             reason_codes.append("existing_comment_only_domain_route")
@@ -306,8 +403,12 @@ def build_issue_fix_candidate_preflight_packet(
             "domain_route": domain.get("route") if domain else None,
             "numeric_pr_matches": numeric,
             "semantic_pr_matches": semantic,
+            "semantic_pr_candidates_unverified": unverified_semantic,
             "all_state_numeric_checked": configured,
             "semantic_implementation_checked": configured,
+            "source_receipt": _source_receipt_projection(
+                payload.get("source_receipt")
+            ),
         },
         "agentic_recall": {
             "receipt_status": receipt_status or None,

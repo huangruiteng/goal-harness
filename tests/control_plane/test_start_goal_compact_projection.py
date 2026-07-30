@@ -222,7 +222,7 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert commands[route["entry_command_key"]].startswith(
         "loopx issue-fix workflow-plan "
     )
-    assert "--candidate-preflight-json <candidate-preflight.json>" in commands[
+    assert "--fetch-candidate-evidence" in commands[
         route["entry_command_key"]
     ]
     assert guard["candidate_preflight"]["required_before_implementation"] is True

@@ -23,6 +23,7 @@ from .acceptance_loop import (
     build_issue_fix_repo_branch_fixture_packet,
     render_issue_fix_acceptance_loop_markdown,
 )
+from .candidate_evidence import collect_public_github_candidate_preflight_input
 from .feasibility import (
     build_issue_fix_feasibility_packet,
     render_issue_fix_feasibility_markdown,
@@ -54,6 +55,7 @@ from .metrics_supplement_cli import (
     build_issue_fix_metrics_supplement_from_args,
     register_issue_fix_metrics_supplement_command,
 )
+from .metadata_preview import normalise_github_issue_reference
 from .pr_lifecycle import (
     build_issue_fix_pr_lifecycle_monitor_packet,
     render_issue_fix_pr_lifecycle_monitor_markdown,
@@ -363,6 +365,20 @@ def register_issue_fix_commands(
             "implementation candidates, and an existing recall receipt. The "
             "workflow performs no provider or memory calls."
         ),
+    )
+    workflow_parser.add_argument(
+        "--fetch-candidate-evidence",
+        action="store_true",
+        help=(
+            "Collect complete issue-specific GitHub closing-PR, cross-reference, "
+            "and maintainer-disposition receipts before planning."
+        ),
+    )
+    workflow_parser.add_argument(
+        "--candidate-evidence-timeout-seconds",
+        type=int,
+        default=30,
+        help="Timeout for --fetch-candidate-evidence.",
     )
     workflow_parser.add_argument(
         "--repository-memory-json",
@@ -934,6 +950,11 @@ def handle_issue_fix_command(
                 raise ValueError(
                     "--fetch-metadata cannot be combined with --metadata-json"
                 )
+            if args.fetch_candidate_evidence and args.candidate_preflight_json:
+                raise ValueError(
+                    "--fetch-candidate-evidence cannot be combined with "
+                    "--candidate-preflight-json"
+                )
             provider_path = args.repository_memory_provider_json or (
                 None
                 if args.repository_memory_json
@@ -957,11 +978,30 @@ def handle_issue_fix_command(
                 if args.repository_context_json
                 else None
             )
-            candidate_preflight_input = (
-                _load_json_object(args.candidate_preflight_json)
-                if args.candidate_preflight_json
-                else None
-            )
+            if args.fetch_candidate_evidence:
+                reference = normalise_github_issue_reference(
+                    repo=args.repo,
+                    issue_ref=args.issue_ref,
+                    url=args.url,
+                )
+                if reference["kind"] != "issue":
+                    raise ValueError(
+                        "--fetch-candidate-evidence requires a GitHub issue"
+                    )
+                candidate_preflight_input = (
+                    collect_public_github_candidate_preflight_input(
+                        repo=str(reference["repo"]),
+                        issue_ref=str(reference["issue_ref"]),
+                        generated_at=generated_at,
+                        timeout_seconds=args.candidate_evidence_timeout_seconds,
+                    )
+                )
+            else:
+                candidate_preflight_input = (
+                    _load_json_object(args.candidate_preflight_json)
+                    if args.candidate_preflight_json
+                    else None
+                )
             repository_memory_input = _configured_repository_memory_input(
                 provider_path=provider_path,
                 raw_memory_path=args.repository_memory_json,

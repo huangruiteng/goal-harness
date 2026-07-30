@@ -173,14 +173,21 @@ def main() -> int:
     unverified["semantic_pr_evidence"]["rows"][0][
         "current_revision_verified"
     ] = False
-    fail_open = build_issue_fix_candidate_preflight_packet(
+    unverified_candidate = build_issue_fix_candidate_preflight_packet(
         repo="volcengine/OpenViking",
         issue_ref="#3005",
         input_payload=unverified,
         generated_at=generated_at,
     )
-    assert fail_open["decision"]["route"] == "proceed", fail_open
-    assert fail_open["decision"]["candidate_runnable"] is True, fail_open
+    assert unverified_candidate["decision"]["route"] == "comment_only", (
+        unverified_candidate
+    )
+    assert unverified_candidate["decision"]["reason_codes"] == [
+        "semantic_candidate_requires_current_revision_verification"
+    ], unverified_candidate
+    assert unverified_candidate["decision"]["candidate_runnable"] is False, (
+        unverified_candidate
+    )
 
     terminal = fixture()
     terminal["domain_state"]["status"] = "resolved"
