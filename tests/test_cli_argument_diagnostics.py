@@ -7,6 +7,7 @@ import pytest
 from loopx.cli import build_parser, main, output_format, resolve_global_output_format
 from loopx.cli_commands.quota import _validate_quota_command_request
 from loopx.cli_commands.todo_argument_validation import (
+    validate_todo_archive_completed_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
     validate_todo_supersede_options,
@@ -480,6 +481,79 @@ def test_todo_supersede_validation_accepts_successor_creation() -> None:
     )
 
     validate_todo_supersede_options(args)
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected"),
+    [
+        (
+            ["--decision-outcome", "approve"],
+            "todo archive-completed does not support --decision-outcome",
+        ),
+        (
+            ["--claimed-by", "codex-example"],
+            "todo archive-completed does not support --claimed-by or --clear-claim",
+        ),
+        (
+            ["--excluded-agent", "codex-example"],
+            "todo archive-completed does not support executor exclusions",
+        ),
+        (
+            ["--next-claimed-by", "codex-example"],
+            "todo archive-completed does not support --next-claimed-by",
+        ),
+        (
+            ["--next-task-repository", "git:github.com/example/repo"],
+            "todo archive-completed does not support successor routing metadata",
+        ),
+        (
+            ["--self-merged"],
+            "todo archive-completed does not support --self-merged",
+        ),
+        (
+            ["--no-follow-up"],
+            "todo archive-completed does not support --no-follow-up",
+        ),
+        (
+            ["--follow-up", "Continue."],
+            "todo archive-completed does not support --follow-up; "
+            "use `todo capture-followups`",
+        ),
+        (
+            ["--successor-todo-id", "todo_successor"],
+            "todo archive-completed does not support --successor-todo-id",
+        ),
+    ],
+)
+def test_todo_archive_completed_validation_preserves_exact_diagnostics(
+    extra_args: list[str],
+    expected: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["todo", "archive-completed", "--goal-id", "example-goal", *extra_args]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_archive_completed_options(args)
+
+    assert str(exc_info.value) == expected
+
+
+def test_todo_archive_completed_validation_accepts_role_and_limit() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "archive-completed",
+            "--goal-id",
+            "example-goal",
+            "--role",
+            "user",
+            "--max-active-done",
+            "7",
+        ]
+    )
+
+    validate_todo_archive_completed_options(args)
 
 
 @pytest.mark.parametrize(

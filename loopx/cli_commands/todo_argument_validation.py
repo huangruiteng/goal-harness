@@ -332,6 +332,23 @@ def validate_todo_supersede_options(args: argparse.Namespace) -> None:
         raise ValueError("todo supersede does not update target or monitor schedule metadata; use todo update before supersede")
 
 
+def validate_todo_archive_completed_options(args: argparse.Namespace) -> None:
+    checks = (
+        (args.decision_outcome, "todo archive-completed does not support --decision-outcome"),
+        (args.claimed_by or args.clear_claim, "todo archive-completed does not support --claimed-by or --clear-claim"),
+        (any(getattr(args, field) for field in ("clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "next_excluded_agents")), "todo archive-completed does not support executor exclusions"),
+        (args.next_claimed_by, "todo archive-completed does not support --next-claimed-by"),
+        (args.next_task_repository or args.next_required_capabilities, "todo archive-completed does not support successor routing metadata"),
+        (args.self_merged, "todo archive-completed does not support --self-merged"),
+        (args.no_follow_up, "todo archive-completed does not support --no-follow-up"),
+        (args.followups, "todo archive-completed does not support --follow-up; use `todo capture-followups`"),
+        (args.successor_todo_ids, "todo archive-completed does not support --successor-todo-id"),
+    )
+    for triggered, message in checks:
+        if triggered:
+            raise ValueError(message)
+
+
 def validate_shared_todo_options(args: argparse.Namespace) -> None:
     agent_id_allowed_for_user_authoring = (
         args.todo_command == "add"

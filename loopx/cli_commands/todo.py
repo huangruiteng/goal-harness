@@ -28,6 +28,7 @@ from .todo_argument_validation import (
     unsupported_todo_options,
     validate_capability_gap_options,
     validate_shared_todo_options,
+    validate_todo_archive_completed_options,
     validate_todo_claim_options,
     validate_todo_complete_options,
     validate_todo_supersede_options,
@@ -603,28 +604,7 @@ def handle_todo_command(
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "archive-completed":
-            if args.decision_outcome:
-                raise ValueError(
-                    "todo archive-completed does not support --decision-outcome"
-                )
-            if args.claimed_by or args.clear_claim:
-                raise ValueError("todo archive-completed does not support --claimed-by or --clear-claim")
-            if args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.next_excluded_agents:
-                raise ValueError("todo archive-completed does not support executor exclusions")
-            if args.next_claimed_by:
-                raise ValueError("todo archive-completed does not support --next-claimed-by")
-            if args.next_task_repository or args.next_required_capabilities:
-                raise ValueError(
-                    "todo archive-completed does not support successor routing metadata"
-                )
-            if args.self_merged:
-                raise ValueError("todo archive-completed does not support --self-merged")
-            if args.no_follow_up:
-                raise ValueError("todo archive-completed does not support --no-follow-up")
-            if args.followups:
-                raise ValueError("todo archive-completed does not support --follow-up; use `todo capture-followups`")
-            if args.successor_todo_ids:
-                raise ValueError("todo archive-completed does not support --successor-todo-id")
+            validate_todo_archive_completed_options(args)
             payload = archive_completed_todos(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
