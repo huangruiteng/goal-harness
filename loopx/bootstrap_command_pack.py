@@ -1593,8 +1593,7 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
 - goal_id: `{payload.get("goal_id")}`
 - goal_text: `{payload.get("goal_text")}`
 
-This is a guided dry-run packet. It previews the transaction and keeps mutation
-behind explicit command execution by the host/agent.
+Dry-run preview; mutations require explicit host/agent commands.
 
 ## Ordered Transaction
 
