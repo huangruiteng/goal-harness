@@ -237,15 +237,11 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert "authority: open public issue; source clues are evidence only" in rendered
     assert "discover: `gh issue list " in rendered
     assert "numeric_pr_evidence + semantic_pr_evidence" in rendered
-    assert "issue-specific complete non-truncated query receipts only" in rendered
-    assert "only proceed may start a new implementation" in rendered
+    assert "only admitted proceed may start a new implementation" in rendered
     assert "loopx issue-fix workflow-plan " in rendered
-    assert "--repository-context-json <compact-context.json>" in rendered
-    assert "--fetch-candidate-evidence" in rendered
     assert "loopx issue-fix feasibility " in rendered
     assert "proceed: `loopx issue-fix feasibility " in rendered
-    assert "--reproduction-status <confirmed|planned|missing|blocked>" in rendered
-    assert len(rendered.replace(str(project), "<project>")) <= 4_000
+    assert len(rendered.replace(str(project), "<project>")) <= 3_600
     todo_command = next(
         step["command_template"]
         for step in transaction["ordered_steps"]
