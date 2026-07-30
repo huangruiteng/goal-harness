@@ -13,6 +13,44 @@ from ...control_plane.runtime.decision_freshness import (
 from ..markdown import as_dict, as_list, markdown_scalar
 
 
+def _append_fallback_projection_markdown(
+    lines: list[str],
+    fallback: dict[str, Any],
+    *,
+    label: str,
+    blocked_items_key: str,
+    blocked_item_label: str,
+    blocked_gate_key: str | None = None,
+) -> None:
+    if not fallback:
+        return
+    selected = as_dict(fallback.get("selected_executable"))
+    blocked_items = as_list(fallback.get(blocked_items_key))
+    lines.append(
+        f"- {label}_fallback: "
+        f"notify_user={fallback.get('notify_user')} "
+        f"blocked_count={len(blocked_items)} "
+        f"selected_index={selected.get('index')} "
+        f"reason={fallback.get('reason')}"
+    )
+    blocked_gate = as_dict(fallback.get(blocked_gate_key)) if blocked_gate_key else {}
+    if blocked_gate.get("text"):
+        lines.append(f"- {label}: {blocked_gate.get('text')}")
+    for blocked in blocked_items[:3]:
+        if not isinstance(blocked, dict):
+            continue
+        text = str(blocked.get("text") or "").strip()
+        if not text:
+            continue
+        index = blocked.get("index")
+        suffix = f"[{index}]" if index is not None else ""
+        lines.append(f"- {blocked_item_label}{suffix}: {text}")
+    if selected.get("text"):
+        lines.append(f"- {label}_selected: {selected.get('text')}")
+    if fallback.get("recommended_action"):
+        lines.append(f"- {label}_action: {fallback.get('recommended_action')}")
+
+
 def render_quota_markdown(payload: dict[str, Any]) -> str:
     title = "Quota Plan" if payload.get("mode") == "plan" else "Quota Status"
     lines = [
@@ -496,89 +534,21 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if projection_gap.get("recommended_action"):
             lines.append(f"- state_projection_gap_action: {projection_gap.get('recommended_action')}")
-    blocked_priority_fallback = (
-        payload.get("blocked_priority_fallback")
-        if isinstance(payload.get("blocked_priority_fallback"), dict)
-        else {}
+    _append_fallback_projection_markdown(
+        lines,
+        as_dict(payload.get("blocked_priority_fallback")),
+        label="blocked_priority",
+        blocked_items_key="blocked_items",
+        blocked_item_label="blocked_priority_item",
     )
-    if blocked_priority_fallback:
-        selected = (
-            blocked_priority_fallback.get("selected_executable")
-            if isinstance(blocked_priority_fallback.get("selected_executable"), dict)
-            else {}
-        )
-        blocked_items = (
-            blocked_priority_fallback.get("blocked_items")
-            if isinstance(blocked_priority_fallback.get("blocked_items"), list)
-            else []
-        )
-        lines.append(
-            "- blocked_priority_fallback: "
-            f"notify_user={blocked_priority_fallback.get('notify_user')} "
-            f"blocked_count={len(blocked_items)} "
-            f"selected_index={selected.get('index')} "
-            f"reason={blocked_priority_fallback.get('reason')}"
-        )
-        for blocked in blocked_items[:3]:
-            if not isinstance(blocked, dict):
-                continue
-            text = str(blocked.get("text") or "").strip()
-            if not text:
-                continue
-            index = blocked.get("index")
-            suffix = f"[{index}]" if index is not None else ""
-            lines.append(f"- blocked_priority_item{suffix}: {text}")
-        if selected.get("text"):
-            lines.append(f"- blocked_priority_selected: {selected.get('text')}")
-        if blocked_priority_fallback.get("recommended_action"):
-            lines.append(
-                f"- blocked_priority_action: {blocked_priority_fallback.get('recommended_action')}"
-            )
-    scoped_user_gate_fallback = (
-        payload.get("scoped_user_gate_fallback")
-        if isinstance(payload.get("scoped_user_gate_fallback"), dict)
-        else {}
+    _append_fallback_projection_markdown(
+        lines,
+        as_dict(payload.get("scoped_user_gate_fallback")),
+        label="scoped_user_gate",
+        blocked_items_key="blocked_agent_items",
+        blocked_item_label="scoped_user_gate_blocked_item",
+        blocked_gate_key="blocked_user_gate",
     )
-    if scoped_user_gate_fallback:
-        selected = (
-            scoped_user_gate_fallback.get("selected_executable")
-            if isinstance(scoped_user_gate_fallback.get("selected_executable"), dict)
-            else {}
-        )
-        blocked_gate = (
-            scoped_user_gate_fallback.get("blocked_user_gate")
-            if isinstance(scoped_user_gate_fallback.get("blocked_user_gate"), dict)
-            else {}
-        )
-        blocked_items = (
-            scoped_user_gate_fallback.get("blocked_agent_items")
-            if isinstance(scoped_user_gate_fallback.get("blocked_agent_items"), list)
-            else []
-        )
-        lines.append(
-            "- scoped_user_gate_fallback: "
-            f"notify_user={scoped_user_gate_fallback.get('notify_user')} "
-            f"blocked_count={len(blocked_items)} "
-            f"selected_index={selected.get('index')} "
-            f"reason={scoped_user_gate_fallback.get('reason')}"
-        )
-        if blocked_gate.get("text"):
-            lines.append(f"- scoped_user_gate: {blocked_gate.get('text')}")
-        for blocked in blocked_items[:3]:
-            if not isinstance(blocked, dict):
-                continue
-            text = str(blocked.get("text") or "").strip()
-            if not text:
-                continue
-            index = blocked.get("index")
-            suffix = f"[{index}]" if index is not None else ""
-            lines.append(f"- scoped_user_gate_blocked_item{suffix}: {text}")
-        if selected.get("text"):
-            lines.append(f"- scoped_user_gate_selected: {selected.get('text')}")
-        if scoped_user_gate_fallback.get("recommended_action"):
-            lines.append(
-                f"- scoped_user_gate_action: {scoped_user_gate_fallback.get('recommended_action')}"
-            )
     completed_todo_archive_warning = (
         payload.get("completed_todo_archive_warning")
         if isinstance(payload.get("completed_todo_archive_warning"), dict)
