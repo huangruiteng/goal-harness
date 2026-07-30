@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -367,6 +368,16 @@ def _successor(
     }
 
 
+def _comment_set_revision(
+    comment_revisions: Mapping[str, str],
+    refs: Sequence[str],
+) -> str:
+    canonical = "\n".join(
+        f"{ref}\0{comment_revisions[ref]}" for ref in sorted(refs)
+    )
+    return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:16]}"
+
+
 def build_issue_fix_candidate_preflight_packet(
     *,
     repo: str,
@@ -494,6 +505,10 @@ def build_issue_fix_candidate_preflight_packet(
                 repo=canonical_repo,
                 issue_ref=canonical_issue_ref,
                 reason_code="maintainer_comment_requires_disposition",
+                revision=_comment_set_revision(
+                    comment_revisions,
+                    unresolved_comments,
+                ),
                 comment_refs=unresolved_comments,
             )
         )

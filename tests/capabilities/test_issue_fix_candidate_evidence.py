@@ -642,4 +642,29 @@ def test_maintainer_comment_projects_read_gate_and_stable_successor(
         previews[0]["target_key"]
         == packets[1]["ordered_loopx_todo_writeback_preview"][0]["target_key"]
     )
+    assert "sha256:" in previews[0]["target_key"]
+    assert "at evidence revision sha256:" in previews[0]["text"]
     assert packets[0]["first_screen"]["top_gate"]["gated_fields"] == ["comments"]
+
+    changed = _candidate_input(comment_ref=COMMENT_REF)
+    changed["maintainer_comment_evidence"]["rows"][0]["revision"] = (
+        "2026-07-30T01:00:00Z"
+    )
+    changed_packet = _workflow_cli(
+        [
+            "--registry",
+            str(tmp_path / "registry.json"),
+            "--format",
+            "json",
+            "issue-fix",
+            "workflow-plan",
+            "--url",
+            "https://github.com/volcengine/OpenViking/issues/3305",
+            "--fetch-candidate-evidence",
+            "--no-write-domain-state",
+        ],
+        collected=changed,
+    )
+    changed_preview = changed_packet["ordered_loopx_todo_writeback_preview"][0]
+    assert changed_preview["target_key"] != previews[0]["target_key"]
+    assert changed_preview["text"] != previews[0]["text"]

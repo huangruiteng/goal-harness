@@ -433,8 +433,9 @@ def build_issue_fix_workflow_plan_packet(
             ),
             "issue_fix_read_maintainer_disposition": (
                 "[P0] After the provider-content gate, read the referenced maintainer "
-                f"comments for {repo_label} {issue_label}, retain only a compact "
-                "non-blocking, comment-only, or skip outcome, and rerun admission."
+                f"comments for {repo_label} {issue_label} at evidence revision "
+                "{revision}; retain only a compact non-blocking, comment-only, or "
+                "skip outcome, and rerun admission."
             ),
         }
         collect_command = (
