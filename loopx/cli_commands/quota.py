@@ -67,6 +67,29 @@ QUOTA_DETAIL_SECTIONS = (
 )
 
 
+def _validate_quota_command_request(args: argparse.Namespace) -> None:
+    command = args.quota_command
+    if command not in {"status", "plan"} and not args.goal_id:
+        raise ValueError(f"`loopx quota {command}` requires --goal-id")
+    scheduler_commands = {
+        "scheduler-ack",
+        "scheduler-ack-current",
+        "scheduler-fail-current",
+    }
+    if command in scheduler_commands and not args.agent_id:
+        raise ValueError(f"`loopx quota {command}` requires --agent-id")
+    if command == "void-slot" and not args.void_generated_at:
+        raise ValueError("`loopx quota void-slot` requires --void-generated-at")
+    if (
+        command not in {"status", "plan", "should-run"}
+        and args.dry_run
+        and args.execute
+    ):
+        raise ValueError(
+            f"`loopx quota {command}` accepts only one of --dry-run or --execute"
+        )
+
+
 def _quota_detail_sections_from_args(args: argparse.Namespace) -> frozenset[str]:
     sections = set(getattr(args, "include_details", None) or ())
     if bool(getattr(args, "include_scheduler_detail", False)):
@@ -515,9 +538,8 @@ def handle_quota_command(
             "scheduler-fail-current",
         }:
             scheduler_context = _scheduler_execution_context_from_args(args)
+        _validate_quota_command_request(args)
         if args.quota_command == "should-run":
-            if not args.goal_id:
-                raise ValueError("`loopx quota should-run` requires --goal-id")
             payload = build_live_quota_should_run_decision(
                 status_payload,
                 goal_id=args.goal_id,
@@ -610,10 +632,6 @@ def handle_quota_command(
                         heartbeat_stall_observation = "not_applicable"
                     heartbeat_receipt_ready = True
         elif args.quota_command == "monitor-poll":
-            if not args.goal_id:
-                raise ValueError("`loopx quota monitor-poll` requires --goal-id")
-            if args.dry_run and args.execute:
-                raise ValueError("`loopx quota monitor-poll` accepts only one of --dry-run or --execute")
             payload = record_quota_monitor_poll(
                 status_payload,
                 goal_id=args.goal_id,
@@ -645,12 +663,6 @@ def handle_quota_command(
                 ),
             )
         elif args.quota_command in {"scheduler-ack", "scheduler-ack-current"}:
-            if not args.goal_id:
-                raise ValueError(f"`loopx quota {args.quota_command}` requires --goal-id")
-            if not args.agent_id:
-                raise ValueError(f"`loopx quota {args.quota_command}` requires --agent-id")
-            if args.dry_run and args.execute:
-                raise ValueError(f"`loopx quota {args.quota_command}` accepts only one of --dry-run or --execute")
             payload = record_quota_scheduler_ack(
                 status_payload,
                 goal_id=args.goal_id,
@@ -669,12 +681,6 @@ def handle_quota_command(
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
             )
         elif args.quota_command == "scheduler-fail-current":
-            if not args.goal_id:
-                raise ValueError("`loopx quota scheduler-fail-current` requires --goal-id")
-            if not args.agent_id:
-                raise ValueError("`loopx quota scheduler-fail-current` requires --agent-id")
-            if args.dry_run and args.execute:
-                raise ValueError("`loopx quota scheduler-fail-current` accepts only one of --dry-run or --execute")
             observed_rrule = str(args.codex_app_current_rrule or "").strip()
             if not observed_rrule:
                 host_observation = resolve_codex_app_automation_rrule(
@@ -705,10 +711,6 @@ def handle_quota_command(
                 failure_kind=args.failure_kind,
             )
         elif args.quota_command == "spend-slot":
-            if not args.goal_id:
-                raise ValueError("`loopx quota spend-slot` requires --goal-id")
-            if args.dry_run and args.execute:
-                raise ValueError("`loopx quota spend-slot` accepts only one of --dry-run or --execute")
             payload = spend_quota_slot(
                 status_payload,
                 goal_id=args.goal_id,
@@ -720,12 +722,6 @@ def handle_quota_command(
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
             )
         elif args.quota_command == "void-slot":
-            if not args.goal_id:
-                raise ValueError("`loopx quota void-slot` requires --goal-id")
-            if not args.void_generated_at:
-                raise ValueError("`loopx quota void-slot` requires --void-generated-at")
-            if args.dry_run and args.execute:
-                raise ValueError("`loopx quota void-slot` accepts only one of --dry-run or --execute")
             payload = void_quota_slot(
                 status_payload,
                 goal_id=args.goal_id,
