@@ -68,12 +68,19 @@ DEFAULT_MULTI_SUBAGENT_MAX_CHILDREN = 2
 AGENT_MODEL_CHOICES = tuple(model.value for model in AgentRuntimeModel)
 
 
+def _control_plane(goal: dict[str, Any]) -> dict[str, Any]:
+    value = goal.get("control_plane")
+    return value if isinstance(value, dict) else {}
+
+
+def _mutable_control_plane(goal: dict[str, Any]) -> dict[str, Any]:
+    control_plane = _control_plane(goal)
+    goal["control_plane"] = control_plane
+    return control_plane
+
+
 def _reviewer_notification_config_summary(goal: dict[str, Any]) -> dict[str, bool]:
-    control_plane = (
-        goal.get("control_plane")
-        if isinstance(goal.get("control_plane"), dict)
-        else {}
-    )
+    control_plane = _control_plane(goal)
     issue_fix = (
         control_plane.get("issue_fix")
         if isinstance(control_plane.get("issue_fix"), dict)
@@ -91,11 +98,7 @@ def _reviewer_notification_config_summary(goal: dict[str, Any]) -> dict[str, boo
 
 
 def _lark_event_inbox_config_summary(goal: dict[str, Any]) -> dict[str, bool]:
-    control_plane = (
-        goal.get("control_plane")
-        if isinstance(goal.get("control_plane"), dict)
-        else {}
-    )
+    control_plane = _control_plane(goal)
     inbox = (
         control_plane.get("lark_event_inbox")
         if isinstance(control_plane.get("lark_event_inbox"), dict)
@@ -108,11 +111,7 @@ def _lark_event_inbox_config_summary(goal: dict[str, Any]) -> dict[str, bool]:
 
 
 def _lark_kanban_heartbeat_config_summary(goal: dict[str, Any]) -> dict[str, bool]:
-    control_plane = (
-        goal.get("control_plane")
-        if isinstance(goal.get("control_plane"), dict)
-        else {}
-    )
+    control_plane = _control_plane(goal)
     lark_kanban = (
         control_plane.get("lark_kanban")
         if isinstance(control_plane.get("lark_kanban"), dict)
@@ -729,7 +728,7 @@ def configure_goal(
         or self_repair_health is not None
         or self_repair_waiting_projection is not None
     ):
-        control_plane = goal.get("control_plane") if isinstance(goal.get("control_plane"), dict) else {}
+        control_plane = _mutable_control_plane(goal)
         self_repair = control_plane.get("self_repair") if isinstance(control_plane.get("self_repair"), dict) else {}
         if self_repair_enabled is not None:
             self_repair["enabled"] = self_repair_enabled
@@ -738,18 +737,13 @@ def configure_goal(
         if self_repair_waiting_projection is not None:
             self_repair["allow_waiting_projection_repair"] = self_repair_waiting_projection
         control_plane["self_repair"] = self_repair
-        goal["control_plane"] = control_plane
 
     if (
         change_quality_enabled is not None
         or change_quality_safe_fix is not None
         or change_quality_strict_receipt is not None
     ):
-        control_plane = (
-            goal.get("control_plane")
-            if isinstance(goal.get("control_plane"), dict)
-            else {}
-        )
+        control_plane = _mutable_control_plane(goal)
         current = change_quality_goal_policy_summary(goal)
         change_quality = {
             "schema_version": CHANGE_QUALITY_POLICY_SCHEMA_VERSION,
@@ -770,17 +764,12 @@ def configure_goal(
             ),
         }
         control_plane["change_quality_qualification"] = change_quality
-        goal["control_plane"] = control_plane
 
     if (
         issue_fix_reviewer_notification_config is not None
         or clear_issue_fix_reviewer_notification_config
     ):
-        control_plane = (
-            goal.get("control_plane")
-            if isinstance(goal.get("control_plane"), dict)
-            else {}
-        )
+        control_plane = _mutable_control_plane(goal)
         issue_fix = (
             control_plane.get("issue_fix")
             if isinstance(control_plane.get("issue_fix"), dict)
@@ -797,14 +786,9 @@ def configure_goal(
             control_plane["issue_fix"] = issue_fix
         else:
             control_plane.pop("issue_fix", None)
-        goal["control_plane"] = control_plane
 
     if lark_event_inbox_config is not None or clear_lark_event_inbox_config:
-        control_plane = (
-            goal.get("control_plane")
-            if isinstance(goal.get("control_plane"), dict)
-            else {}
-        )
+        control_plane = _mutable_control_plane(goal)
         if clear_lark_event_inbox_config:
             control_plane.pop("lark_event_inbox", None)
         else:
@@ -812,14 +796,9 @@ def configure_goal(
                 "enabled": True,
                 "config_path": lark_event_inbox_config,
             }
-        goal["control_plane"] = control_plane
 
     if lark_kanban_heartbeat_sync is not None:
-        control_plane = (
-            goal.get("control_plane")
-            if isinstance(goal.get("control_plane"), dict)
-            else {}
-        )
+        control_plane = _mutable_control_plane(goal)
         lark_kanban = (
             control_plane.get("lark_kanban")
             if isinstance(control_plane.get("lark_kanban"), dict)
@@ -827,18 +806,13 @@ def configure_goal(
         )
         lark_kanban["heartbeat_sync_enabled"] = lark_kanban_heartbeat_sync
         control_plane["lark_kanban"] = lark_kanban
-        goal["control_plane"] = control_plane
 
     if (
         reward_memory_config is not None
         or reward_memory_agents is not None
         or clear_reward_memory_config
     ):
-        control_plane = (
-            goal.get("control_plane")
-            if isinstance(goal.get("control_plane"), dict)
-            else {}
-        )
+        control_plane = _mutable_control_plane(goal)
         if clear_reward_memory_config:
             control_plane.pop("reward_memory", None)
         else:
@@ -851,7 +825,6 @@ def configure_goal(
                 ),
                 "enabled_agents": list(effective_reward_memory_agents),
             }
-        goal["control_plane"] = control_plane
 
     if explore_graph_enabled is not None:
         goal["explore_graph"] = {"enabled": explore_graph_enabled}
