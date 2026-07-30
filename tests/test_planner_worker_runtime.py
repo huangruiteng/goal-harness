@@ -49,7 +49,6 @@ def executable_plan() -> dict:
                 "done_criteria": ["verify.py exits zero"],
                 "escalation_policy": "Stop if result.txt is outside the workspace.",
                 "verification": "Run python3 verify.py.",
-                "status": "planned",
             }
         ],
     }
@@ -339,6 +338,133 @@ def test_runtime_rejects_unapproved_planner_validation_before_worker(
     assert "did not approve" in receipt["reason"]
 
 
+@pytest.mark.parametrize("symlink_kind", ["file", "directory"])
+def test_runtime_rejects_preexisting_symlink_escape_before_worker(
+    tmp_path: Path,
+    symlink_kind: str,
+) -> None:
+    import os
+    import subprocess
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_result = outside / "result.txt"
+    outside_result.write_text("outside\n", encoding="utf-8")
+    plan = executable_plan()
+    if symlink_kind == "file":
+        os.symlink(outside_result, workspace / "result.txt")
+    else:
+        os.symlink(outside, workspace / "linked")
+        plan["steps"][0]["target_files"] = ["linked/result.txt"]
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "add", "--", "."], cwd=workspace, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=workspace,
+        check=True,
+    )
+
+    class EscapingWorker:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(
+            self,
+            *,
+            prompt: str,
+            model_route: dict[str, str],
+            cwd: Path,
+        ) -> AdapterTurn:
+            self.calls += 1
+            target = "result.txt" if symlink_kind == "file" else "linked/result.txt"
+            (cwd / target).write_text("escaped\n", encoding="utf-8")
+            return AdapterTurn(output_text="wrote target", usage={}, usage_complete=False)
+
+    worker = EscapingWorker()
+    receipt = run_planner_worker_once(
+        objective="Update one fixture.",
+        task_instruction="Use the Planner result.",
+        cwd=workspace,
+        planner=FakePlanner(plan),
+        worker=worker,
+        validation_runner=lambda command, cwd: ValidationResult(
+            command=command,
+            passed=True,
+            exit_code=0,
+        ),
+        workspace_observer=GitWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
+        model_routes={
+            "planner": {"model": "gpt-5.5", "effort": "high"},
+            "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
+            "strong_worker": {"model": "gpt-5.5", "effort": "high"},
+        },
+    )
+
+    assert worker.calls == 0
+    assert outside_result.read_text(encoding="utf-8") == "outside\n"
+    assert receipt["status"] == "failed"
+    assert receipt["write_scope"]["passed"] is False
+    assert any(
+        violation.endswith(":resolved_outside_workspace")
+        for violation in receipt["write_scope"]["violations"]
+    )
+
+
+def test_runtime_revalidates_target_path_after_worker(tmp_path: Path) -> None:
+    import os
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+
+    class SymlinkWorker:
+        def execute(
+            self,
+            *,
+            prompt: str,
+            model_route: dict[str, str],
+            cwd: Path,
+        ) -> AdapterTurn:
+            os.symlink(outside, cwd / "result.txt")
+            return AdapterTurn(output_text="linked target", usage={}, usage_complete=False)
+
+    receipt = run_planner_worker_once(
+        objective="Create one fixture.",
+        task_instruction="Use the Planner result.",
+        cwd=tmp_path,
+        planner=FakePlanner(executable_plan()),
+        worker=SymlinkWorker(),
+        validation_runner=lambda command, cwd: ValidationResult(
+            command=command,
+            passed=True,
+            exit_code=0,
+        ),
+        workspace_observer=FixtureWorkspaceObserver(),
+        approved_validation_commands={"python3 verify.py"},
+        model_routes={
+            "planner": {"model": "gpt-5.5", "effort": "high"},
+            "cheap_worker": {"model": "deepseek-v4-flash", "effort": "medium"},
+            "strong_worker": {"model": "gpt-5.5", "effort": "high"},
+        },
+    )
+
+    assert receipt["status"] == "failed"
+    assert receipt["validation"] == []
+    assert receipt["write_scope"]["passed"] is False
+    assert "result.txt:resolved_outside_workspace" in receipt["write_scope"]["violations"]
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -549,39 +675,45 @@ def test_git_workspace_observer_detects_fifo_without_blocking(
     assert observer.changed_files(tmp_path) == {"worker.fifo": None}
 
 
-def test_git_workspace_observer_detects_unix_socket(tmp_path: Path) -> None:
+def test_git_workspace_observer_detects_unix_socket() -> None:
+    import errno
     import socket
     import subprocess
+    import tempfile
 
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    (tmp_path / "tracked.txt").write_text("fixture\n", encoding="utf-8")
-    subprocess.run(["git", "add", "--", "tracked.txt"], cwd=tmp_path, check=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=LoopX Fixture",
-            "-c",
-            "user.email=fixture@example.invalid",
-            "commit",
-            "-qm",
-            "fixture",
-        ],
-        cwd=tmp_path,
-        check=True,
-    )
-    observer = GitWorkspaceObserver()
-    observer.assert_clean(tmp_path)
+    with tempfile.TemporaryDirectory(prefix="lx-pw-", dir="/tmp") as tmp:
+        short_path = Path(tmp)
+        subprocess.run(["git", "init", "-q"], cwd=short_path, check=True)
+        (short_path / "tracked.txt").write_text("fixture\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "tracked.txt"], cwd=short_path, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=LoopX Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "fixture",
+            ],
+            cwd=short_path,
+            check=True,
+        )
+        observer = GitWorkspaceObserver()
+        observer.assert_clean(short_path)
 
-    worker_socket = socket.socket(socket.AF_UNIX)
-    try:
+        worker_socket = socket.socket(socket.AF_UNIX)
         try:
-            worker_socket.bind(str(tmp_path / "worker.sock"))
-        except PermissionError:
-            pytest.skip("sandbox does not permit creating Unix sockets")
-        assert observer.changed_files(tmp_path) == {"worker.sock": None}
-    finally:
-        worker_socket.close()
+            try:
+                worker_socket.bind(str(short_path / "worker.sock"))
+            except OSError as exc:
+                if exc.errno in {errno.EACCES, errno.EPERM}:
+                    pytest.skip("sandbox does not permit creating Unix sockets")
+                raise
+            assert observer.changed_files(short_path) == {"worker.sock": None}
+        finally:
+            worker_socket.close()
 
 
 def test_runtime_rejects_special_file_even_when_planner_targets_it(

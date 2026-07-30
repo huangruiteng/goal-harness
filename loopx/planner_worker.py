@@ -20,7 +20,6 @@ PLANNER_WORKER_AUTONOMY = frozenset({"narrow", "bounded", "open"})
 PLANNER_WORKER_ACTION_KINDS = frozenset(
     {"edit", "create", "delete", "validate", "research", "design", "investigate"}
 )
-PLANNER_WORKER_STEP_STATUSES = frozenset({"planned", "blocked"})
 
 _PLAN_FIELDS = frozenset({"schema_version", "plan_id", "objective", "steps"})
 _STEP_FIELDS = frozenset(
@@ -45,7 +44,6 @@ _STEP_FIELDS = frozenset(
         "done_criteria",
         "escalation_policy",
         "verification",
-        "status",
     }
 )
 _CONTEXT_BUDGET_FIELDS = frozenset(
@@ -309,11 +307,6 @@ def validate_planner_worker_plan(raw: Any) -> dict[str, Any]:
             step.get("verification"),
             field=f"steps[{index}].verification",
         )
-        _require_enum(
-            step.get("status"),
-            field=f"steps[{index}].status",
-            allowed=PLANNER_WORKER_STEP_STATUSES,
-        )
         validated_steps.append(copy.deepcopy(step))
 
     _validate_dependency_graph(validated_steps)
@@ -375,7 +368,6 @@ def planner_worker_plan_json_skeleton(*, max_steps: int = MAX_PLANNER_WORKER_STE
                 "done_criteria": ["focused validation passes"],
                 "escalation_policy": "stop when the declared scope is insufficient",
                 "verification": "run the declared validation commands",
-                "status": "planned",
             }
         ],
     }

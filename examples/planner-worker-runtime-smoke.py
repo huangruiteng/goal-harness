@@ -62,7 +62,6 @@ class FixturePlanner:
                 "done_criteria": ["verify.py exits zero"],
                 "escalation_policy": "Stop if result.txt is missing.",
                 "verification": "Run python3 verify.py.",
-                "status": "planned",
             }],
         }
         return AdapterTurn(

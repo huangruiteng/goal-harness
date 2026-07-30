@@ -67,8 +67,7 @@ if sandbox == "read-only":
             "validation_commands": ["python3 verify.py"],
             "done_criteria": ["verify.py exits zero"],
             "escalation_policy": "Stop if result.txt is outside the workspace.",
-            "verification": "Run python3 verify.py.",
-            "status": "planned"
+            "verification": "Run python3 verify.py."
         }]
     })
 else:
@@ -189,8 +188,7 @@ def main() -> int:
                 "validation_commands": [],
                 "done_criteria": [],
                 "escalation_policy": "Return to Planner.",
-                "verification": "No validation until unblocked.",
-                "status": "blocked"
+                "verification": "No validation until unblocked."
             }]
         }
         os.environ["FAKE_TRAEX_PLANNER_TEXT"] = json.dumps(blocked_plan)

@@ -49,7 +49,6 @@ def valid_plan(*, executor: str = "cheap_worker") -> dict:
                 "done_criteria": ["verify.py exits zero"],
                 "escalation_policy": "Stop if result.txt is outside the workspace.",
                 "verification": "Run python3 verify.py.",
-                "status": "planned",
             }
         ],
     }
@@ -121,6 +120,14 @@ def test_model_output_rejects_more_steps_than_declared_limit() -> None:
     ]
 
     with pytest.raises(ValueError, match="at most 8 steps"):
+        parse(plan)
+
+
+def test_model_output_rejects_redundant_step_status() -> None:
+    plan = valid_plan()
+    plan["steps"][0]["status"] = "blocked"
+
+    with pytest.raises(ValueError, match="unknown fields: status"):
         parse(plan)
 
 

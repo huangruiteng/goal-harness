@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -43,6 +44,48 @@ class WorkspaceObserver(Protocol):
 
 
 ValidationRunner = Callable[[str, Path], ValidationResult]
+
+
+def _is_within_workspace(path: Path, workspace: Path) -> bool:
+    try:
+        path.relative_to(workspace)
+    except ValueError:
+        return False
+    return True
+
+
+def _target_path_violations(
+    *,
+    workdir: Path,
+    step: dict,
+    after_worker: bool,
+) -> list[str]:
+    violations: list[str] = []
+    action_kind = str(step["action_kind"])
+    for relative in step["target_files"]:
+        target = workdir / relative
+        try:
+            resolved = target.resolve(strict=False)
+        except (OSError, RuntimeError):
+            violations.append(f"{relative}:path_resolution_failed")
+            continue
+        if not _is_within_workspace(resolved, workdir):
+            violations.append(f"{relative}:resolved_outside_workspace")
+            continue
+
+        target_exists = target.exists() or target.is_symlink()
+        if not target_exists:
+            if after_worker and action_kind != "delete":
+                violations.append(f"{relative}:target_missing_after_worker")
+            continue
+        try:
+            mode = resolved.stat().st_mode
+        except OSError:
+            violations.append(f"{relative}:path_resolution_failed")
+            continue
+        if not stat.S_ISREG(mode):
+            violations.append(f"{relative}:unsupported_file_type")
+    return violations
 
 
 def _usage_receipt(
@@ -200,6 +243,29 @@ def run_planner_worker_once(
             planner_turn=planner_turn,
             worker_turn=None,
         )
+    target_path_violations = _target_path_violations(
+        workdir=workdir,
+        step=step,
+        after_worker=False,
+    )
+    if target_path_violations:
+        return _receipt(
+            status="failed",
+            plan_id=str(plan["plan_id"]),
+            step_id=str(step["step_id"]),
+            reason="Planner target paths are not safe workspace files",
+            executor=None,
+            model_route=None,
+            validation=[],
+            write_scope={
+                "passed": False,
+                "changed_files": {},
+                "unsupported_paths": [],
+                "violations": target_path_violations,
+            },
+            planner_turn=planner_turn,
+            worker_turn=None,
+        )
     resolved = resolve_planner_worker_executor(step, model_routes=model_routes)
     worker_route = {
         "model": resolved["model"],
@@ -231,6 +297,14 @@ def run_planner_worker_once(
         and size > int(step["context_budget"]["max_bytes_per_file"])
     )
     violations.extend(f"{path}:max_bytes_per_file" for path in oversized)
+    violations.extend(
+        _target_path_violations(
+            workdir=workdir,
+            step=step,
+            after_worker=True,
+        )
+    )
+    violations = sorted(set(violations))
     write_scope = {
         "passed": not violations,
         "changed_files": changed_files,
