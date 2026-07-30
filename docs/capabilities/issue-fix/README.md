@@ -486,8 +486,8 @@ compatibility facade.
 | Semantic preference hook | `loopx semantic-preference recall`, stateless receipt | Optionally recall workspace-scoped user/reviewer preferences before a configured surface; the domain applies them, while LoopX retains only compact application evidence rather than raw memory. |
 | Reward-memory experiment | `loopx configure-goal --reward-memory-config ... --reward-memory-agent ...`, `loopx reward-memory experiment-status`, `run_issue_fix_patch_planning_reward_memory`, `run_issue_fix_reviewer_artifact_reward_memory`, `run_issue_fix_reviewer_notification_automatic_reward_memory` | Default off. Allow one registered fixer lane to use an ignored provider binding and exact reviewed surfaces such as `issue_fix.patch_planning`, `reviewer_artifact.summary`, and `reviewer_notification.before_send`; OpenViking is the current provider, not a global dependency. Planning stays fail-open. Reviewer-artifact application remains previewable with no sink and zero external writes. The pre-send surface accepts only a verified structured hard-policy receipt and reuses the existing send/queue/readback path; disabled, unavailable, or empty recall adds no time restriction. The canonical GitHub request remains unaffected. |
 | Generic inbound feedback | `loopx lark-inbox` collector/install/status/drain | Run a project-configured host collector independently of the agent process, durably project bounded inbound events, and require domain writeback before ACK; outbound messages remain a separate configured authority. |
-| Issue-fix domain state | `loopx/domain_packs/issue_fix.py`, `issue-fix outcome` | Retain feasibility, PR lifecycle, compact delivery evidence, and stable outcomes inside the existing goal rather than a parallel workflow ledger. |
-| Candidate preflight | `loopx issue-fix workflow-plan --fetch-candidate-evidence` | Before new patch planning, collect complete issue-specific GitHub closing-PR, cross-reference, and maintainer-comment receipts. Exact closing references can be reused directly; weak cross-references and maintainer comments stop for disposition instead of being guessed. `--candidate-preflight-json` remains the provider-neutral adapter/test seam. |
+| Issue-fix domain state | `loopx/domain_packs/issue_fix.py`, `issue-fix outcome` | Retain candidate preflight, feasibility, PR lifecycle, compact delivery evidence, and stable outcomes inside the existing goal rather than a parallel workflow ledger. |
+| Candidate preflight | `loopx issue-fix workflow-plan --fetch-candidate-evidence --goal-id <goal-id>` | Before new patch planning, collect and persist complete issue-specific GitHub closing-PR, cross-reference, and maintainer-comment receipts. Only `proceed` enters feasibility; exact closing references are reusable terminal receipts, while weak cross-references and maintainer comments stop for disposition instead of being guessed. `--candidate-preflight-json` remains the provider-neutral adapter/test seam. |
 | Workflow plan | `loopx issue-fix workflow-plan` | Compose body-free metadata, intake, branch plan, validation label, ordered todo previews, gates, and PR-readiness blockers. |
 | Repository context | `--repository-context-json` | Pin policy, architecture, change-scope, reproduction, and validation evidence with trust and freshness. |
 | Feasibility | `loopx issue-fix feasibility` | Select exactly one `fix_pr`, `comment_only`, or `triage_only` route and optionally persist compact domain state. |
@@ -1158,6 +1158,8 @@ loopx issue-fix workflow-plan \
   --repo-path /path/to/approved/repo \
   --repository-context-json context.json \
   --repository-memory-json compact-search-read-result.json \
+  --fetch-candidate-evidence \
+  --goal-id example-goal \
   --validation-label "focused unit test" \
   --format json
 
@@ -1170,6 +1172,8 @@ loopx issue-fix workflow-plan \
   --repo-path /path/to/approved/repo \
   --repository-context-json context.json \
   --repository-memory-query "affected module reproduction validation" \
+  --fetch-candidate-evidence \
+  --goal-id example-goal \
   --validation-label "focused unit test" \
   --format json
 

@@ -27,15 +27,18 @@ open PRs, merge, publish, or run destructive git without an explicit gate.
    `numeric_pr_evidence.query_scope` is `issue_specific_all_states`, while
    `semantic_pr_evidence.query_scope` is `issue_specific_current_revision`.
    Empty rows are valid only for complete, non-truncated receipts; capped
-   aggregate indexes may generate candidates but cannot prove absence. The
-   provider-neutral seam performs no searches itself. It returns
-   `proceed`, `reuse_existing_pr`, `comment_only`, or `skip`; non-proceed routes
-   suppress new classification/feasibility todos and preserve any existing
-   agentic-recall receipt instead of opening another recall window. Terminal
-   domain state or a matching merged implementation takes precedence over a
-   simultaneous open implementation. Non-proceed routes also suppress
-   unrelated body/comment read gates because no new candidate classification
-   will consume that provider content.
+   aggregate indexes may generate candidates but cannot prove absence.
+   `--fetch-candidate-evidence` invokes the bounded built-in public GitHub
+   collector; `--candidate-preflight-json` remains the provider-neutral
+   adapter/test seam. The result is `proceed`, `reuse_existing_pr`,
+   `comment_only`, or `skip`. With a goal id, workflow planning persists that
+   source-qualified result to `candidate-preflight.jsonl`. Non-proceed routes
+   suppress feasibility and preserve any existing agentic-recall receipt
+   instead of opening another recall window. Terminal domain state or a
+   matching merged implementation takes precedence over a simultaneous open
+   implementation. Non-proceed routes also suppress unrelated body/comment
+   read gates because no new candidate classification will consume that
+   provider content.
 2. **Metadata preview:** build `github_issue_metadata_preview_v0` from a public
    URL, compact reference, mocked metadata, or caller-approved metadata fetch.
    Allowed fields are repo, issue or PR number, state, title summary, labels,
@@ -54,19 +57,22 @@ open PRs, merge, publish, or run destructive git without an explicit gate.
 5. **Workflow plan:** build `issue_fix_workflow_plan_packet_v0` to compose the
    metadata preview, intake, branch dry-run, validation label, ordered LoopX
    todo writeback preview, resolution route candidates, gate preview, post-PR
-   lifecycle monitor plan, and PR-review readiness blockers. This stage is
-   preview-only and does not write todos.
+   lifecycle monitor plan, and PR-review readiness blockers. This stage does
+   not write todos. It writes only the candidate preflight receipt when a goal
+   id or explicit ledger path is present; `--no-write-domain-state` keeps that
+   receipt preview-only.
 6. **Feasibility checkpoint:** build `issue_fix_feasibility_v0` from compact
-   public-safe agent observations. The decision must select exactly one
+   public-safe agent observations only after candidate preflight returns
+   `proceed`. The decision must select exactly one
    `fix_pr`, `comment_only`, or `triage_only` route. `fix_pr` requires bounded
    scope plus named reproduction and validation surfaces; planned reproduction
    projects confirmation work before patch work. With a goal id, the compact
    decision writes issue-fix domain state by default.
-7. **LoopX todo writeback:** initially write only metadata classification and
-   the feasibility checkpoint. Then write the single route-specific successor
-   projected by feasibility, or record its structured no-follow-up. User todos
-   represent concrete external-write, private-material, merge, publish, or
-   repository-policy gates.
+7. **LoopX todo writeback:** for a non-proceed candidate, write only the
+   successor or no-follow-up projected by candidate preflight. For `proceed`,
+   write the single route-specific successor projected by feasibility. Preserve
+   priority and planner order. User todos represent concrete external-write,
+   private-material, merge, publish, or repository-policy gates.
 8. **Caller repo branch:** use `issue_fix_caller_repo_branch_packet_v0` only
    after the caller provides an approved local git repo, base branch, issue
    branch policy, and validation command. Dry-run mode must not inspect the
@@ -174,13 +180,16 @@ Issue-fix domain state is a project-local read model for compact decisions and
 long-running monitors:
 
 ```text
+.loopx/domain-state/<goal-id>/issue_fix/candidate-preflight.jsonl
 .loopx/domain-state/<goal-id>/issue_fix/feasibility.jsonl
 .loopx/domain-state/<goal-id>/issue_fix/pr-lifecycle.jsonl
 ```
 
-Feasibility rows are keyed by `repo` and `issue_ref`; PR lifecycle rows are keyed
-by `repo` and `pr_ref`. They may store compact observations, decisions, and
-fingerprints. A feasibility observation may include one compact
+Candidate preflight and feasibility rows are keyed by `repo` and `issue_ref`;
+PR lifecycle rows are keyed by `repo` and `pr_ref`. They may store compact
+observations, decisions, and fingerprints. Candidate preflight retains the
+source receipts and prior-work disposition that decide whether feasibility is
+legal. A feasibility observation may include one compact
 `issue_fix_repository_context_v0` projection so its repository revision,
 source refs, coverage, expert policy, and memory policy survive across turns.
 Domain state must not store issue bodies, comment bodies, raw
@@ -214,6 +223,8 @@ output shape.
 - `content_ops_issue_fix_intake_packet_v0`
 - `issue_fix_intake_v0`
 - `issue_fix_workflow_plan_packet_v0`
+- `issue_fix_candidate_preflight_v0`
+- `issue_fix_candidate_preflight_domain_state_projection_v0`
 - `issue_fix_repository_context_input_v0`
 - `issue_fix_repository_context_v0`
 - `issue_fix_repository_context_effect_v0`

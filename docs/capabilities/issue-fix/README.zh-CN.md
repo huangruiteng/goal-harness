@@ -444,8 +444,8 @@ Merged PR 不会直接执行任意 callback，rollout event 也不会授予新�
 | 语义偏好 hook | `loopx semantic-preference recall`、无状态 receipt | 在已配置 surface 前可选召回 workspace-scoped 用户/reviewer 偏好；领域模块决定如何应用，LoopX 只保留紧凑 application evidence，不复制 raw memory。 |
 | Reward Memory 实验 | `loopx configure-goal --reward-memory-config ... --reward-memory-agent ...`、`loopx reward-memory experiment-status`、`run_reward_memory_automatic_recall_hook`、`run_reward_memory_automatic_ingest_hook` | 默认关闭。v1 配置可为已注册 fixer lane 开启通用 automatic hook；hook 只在模块已接线边界运行，保留有界 query、精确读回、receipt 与 fail-open，不采集 raw stream。Issue Fix 已接入 `reviewer_artifact.summary` 和 `reviewer_notification.before_send`：前者约束 reviewer-facing 中文摘要，后者只接受已验证的结构化 hard-policy receipt 并复用现有 send/queue/readback 路径；关闭、不可用或空召回不会新增时间限制。OpenViking 是当前 provider，不是全局依赖，且不影响 GitHub 主链路。 |
 | 通用入站反馈 | `loopx lark-inbox` collector/install/status/drain | 让项目配置的 host collector 独立于 agent 进程持续运行，把有限入站事件持久投影，并要求领域写回后才 ACK；出站消息继续走独立配置与 authority。 |
-| LoopX Domain State / Issue-Fix | `loopx/domain_packs/issue_fix.py`、`issue-fix outcome` | 在现有 goal 内保存 feasibility、PR lifecycle 与紧凑 delivery evidence，并派生稳定 outcome；不建立平行 workflow ledger。 |
-| 候选 preflight | `loopx issue-fix workflow-plan --fetch-candidate-evidence` | 在新 patch planning 前采集完整、issue-specific 的 GitHub closing PR、cross-reference 与 maintainer comment receipt。精确 closing reference 可直接复用；弱 cross-reference 与 maintainer comment 会停下等待 disposition，不由模型猜测。`--candidate-preflight-json` 继续作为 provider-neutral adapter / 测试入口。 |
+| LoopX Domain State / Issue-Fix | `loopx/domain_packs/issue_fix.py`、`issue-fix outcome` | 在现有 goal 内保存 candidate preflight、feasibility、PR lifecycle 与紧凑 delivery evidence，并派生稳定 outcome；不建立平行 workflow ledger。 |
+| 候选 preflight | `loopx issue-fix workflow-plan --fetch-candidate-evidence --goal-id <goal-id>` | 在新 patch planning 前采集并持久化完整、issue-specific 的 GitHub closing PR、cross-reference 与 maintainer comment receipt。只有 `proceed` 才进入 feasibility；精确 closing reference 本身就是可复用的终局 receipt，弱 cross-reference 与 maintainer comment 则停下等待 disposition，不由模型猜测。`--candidate-preflight-json` 继续作为 provider-neutral adapter / 测试入口。 |
 | Workflow plan | `loopx issue-fix workflow-plan` | 组合 body-free metadata、intake、branch plan、validation label、todo preview、gate 和 PR-readiness blocker。 |
 | Repository context | `--repository-context-json` | 用 trust/freshness 固定 policy、architecture、change-scope、reproduction 和 validation 证据。 |
 | Feasibility | `loopx issue-fix feasibility` | 在 `fix_pr`、`comment_only`、`triage_only` 中只选一条，并可写入紧凑 domain state。 |
@@ -1015,6 +1015,8 @@ loopx issue-fix workflow-plan \
   --repo-path /path/to/approved/repo \
   --repository-context-json context.json \
   --repository-memory-json compact-search-read-result.json \
+  --fetch-candidate-evidence \
+  --goal-id example-goal \
   --validation-label "focused unit test" \
   --format json
 
@@ -1026,6 +1028,8 @@ loopx issue-fix workflow-plan \
   --repo-path /path/to/approved/repo \
   --repository-context-json context.json \
   --repository-memory-query "affected module reproduction validation" \
+  --fetch-candidate-evidence \
+  --goal-id example-goal \
   --validation-label "focused unit test" \
   --format json
 
