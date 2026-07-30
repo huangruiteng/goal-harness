@@ -6,7 +6,10 @@ import pytest
 
 from loopx.cli import build_parser, main, output_format, resolve_global_output_format
 from loopx.cli_commands.quota import _validate_quota_command_request
-from loopx.cli_commands.todo_argument_validation import validate_todo_claim_options
+from loopx.cli_commands.todo_argument_validation import (
+    validate_todo_claim_options,
+    validate_todo_update_options,
+)
 
 
 @pytest.mark.parametrize(
@@ -203,6 +206,96 @@ def test_todo_claim_validation_preserves_exact_diagnostics(
         validate_todo_claim_options(args)
 
     assert str(exc_info.value) == expected
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected"),
+    [
+        ([], "todo update requires --todo-id"),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--claimed-by",
+                "codex-example",
+                "--clear-claim",
+            ],
+            "todo update accepts either --claimed-by or --clear-claim, not both",
+        ),
+        (
+            ["--todo-id", "todo_example"],
+            "todo update requires at least one mutable todo field",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--no-follow-up",
+            ],
+            "--no-follow-up requires --note, --reason, or --evidence",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--note",
+                "validated",
+                "--decision-outcome",
+                "approve",
+            ],
+            "todo update does not accept --decision-outcome; use todo complete",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--next-required-capability",
+                "network",
+            ],
+            "todo update requires at least one mutable todo field",
+        ),
+        (
+            [
+                "--todo-id",
+                "todo_example",
+                "--note",
+                "validated",
+                "--next-required-capability",
+                "network",
+            ],
+            "todo update does not support --next-required-capability",
+        ),
+    ],
+)
+def test_todo_update_validation_preserves_exact_diagnostics(
+    extra_args: list[str],
+    expected: str,
+) -> None:
+    args = build_parser().parse_args(
+        ["todo", "update", "--goal-id", "example-goal", *extra_args]
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_todo_update_options(args)
+
+    assert str(exc_info.value) == expected
+
+
+def test_todo_update_validation_accepts_a_mutable_field() -> None:
+    args = build_parser().parse_args(
+        [
+            "todo",
+            "update",
+            "--goal-id",
+            "example-goal",
+            "--todo-id",
+            "todo_example",
+            "--note",
+            "validated",
+        ]
+    )
+
+    validate_todo_update_options(args)
 
 
 @pytest.mark.parametrize(

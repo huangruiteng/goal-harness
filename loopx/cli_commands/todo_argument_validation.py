@@ -67,6 +67,44 @@ TODO_OPTION_FIELDS = (
     ("--execute", "execute"),
 )
 
+_TODO_UPDATE_MUTABLE_FIELDS = (
+    "text", "followups", "status", "note", "evidence", "reason", "task_class",
+    "action_kind", "task_repository", "continuation_policy", "required_write_scopes",
+    "required_capabilities", "target_capabilities", "capability_gap_status",
+    "explore_result_node_refs", "clear_explore_result_node_refs", "decision_scope",
+    "required_decision_scopes", "claimed_by", "bound_agent", "goal_bound",
+    "blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents",
+    "global_gate", "clear_global_gate", "unblocks_todo_id", "successor_todo_ids",
+    "resume_when", "clear_resume_when", "no_follow_up", "monitor_target_key",
+    "cadence", "next_due_at", "expires_at", "clear_claim",
+)
+
+_TODO_UPDATE_UNSUPPORTED_FIELDS = (
+    (
+        "decision_outcome",
+        "todo update does not accept --decision-outcome; use todo complete",
+    ),
+    (
+        "followups",
+        "todo update does not support --follow-up; use `todo capture-followups`",
+    ),
+    ("next_claimed_by", "todo update does not support --next-claimed-by"),
+    (
+        "next_task_repository",
+        "todo update does not support --next-task-repository",
+    ),
+    (
+        "next_required_capabilities",
+        "todo update does not support --next-required-capability",
+    ),
+    (
+        "next_continuation_policy",
+        "todo update does not support --next-continuation-policy",
+    ),
+    ("next_excluded_agents", "todo update does not support --next-excluded-agent"),
+    ("self_merged", "todo update does not support --self-merged"),
+)
+
 
 def register_todo_linkage_arguments(
     todo_parser: argparse.ArgumentParser,
@@ -218,6 +256,27 @@ def validate_todo_claim_options(args: argparse.Namespace) -> None:
             "--project, --state-file, and --dry-run; unsupported: "
             + ", ".join(unsupported)
         )
+
+
+def validate_todo_update_options(args: argparse.Namespace) -> None:
+    if not args.todo_id:
+        raise ValueError("todo update requires --todo-id")
+    if args.claimed_by and args.clear_claim:
+        raise ValueError(
+            "todo update accepts either --claimed-by or --clear-claim, not both"
+        )
+    if args.explore_result_node_refs and args.clear_explore_result_node_refs:
+        raise ValueError(
+            "todo update accepts either --explore-result-node-ref or "
+            "--clear-explore-result-node-refs, not both"
+        )
+    if not any(getattr(args, field) for field in _TODO_UPDATE_MUTABLE_FIELDS):
+        raise ValueError("todo update requires at least one mutable todo field")
+    if args.no_follow_up and not (args.note or args.reason or args.evidence):
+        raise ValueError("--no-follow-up requires --note, --reason, or --evidence")
+    for field, message in _TODO_UPDATE_UNSUPPORTED_FIELDS:
+        if getattr(args, field):
+            raise ValueError(message)
 
 
 def validate_shared_todo_options(args: argparse.Namespace) -> None:

@@ -30,6 +30,7 @@ from .todo_argument_validation import (
     validate_shared_todo_options,
     validate_successor_routing_options,
     validate_todo_claim_options,
+    validate_todo_update_options,
 )
 from .todo_event import RolloutEventAppender, append_todo_rollout_event
 
@@ -493,75 +494,7 @@ def handle_todo_command(
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "update":
-            if not args.todo_id:
-                raise ValueError("todo update requires --todo-id")
-            if args.claimed_by and args.clear_claim:
-                raise ValueError("todo update accepts either --claimed-by or --clear-claim, not both")
-            if args.explore_result_node_refs and args.clear_explore_result_node_refs:
-                raise ValueError(
-                    "todo update accepts either --explore-result-node-ref or "
-                    "--clear-explore-result-node-refs, not both"
-                )
-            if not any([
-                args.text,
-                args.followups,
-                args.status,
-                args.note,
-                args.evidence,
-                args.reason,
-                args.task_class,
-                args.action_kind,
-                args.task_repository,
-                args.continuation_policy,
-                args.required_write_scopes,
-                args.required_capabilities,
-                args.target_capabilities,
-                args.capability_gap_status,
-                args.explore_result_node_refs,
-                args.clear_explore_result_node_refs,
-                args.decision_scope,
-                args.required_decision_scopes,
-                args.claimed_by,
-                args.bound_agent,
-                args.goal_bound,
-                args.blocks_agent,
-                args.clear_blocks_agent,
-                args.excluded_agents,
-                args.clear_excluded_agents,
-                args.global_gate,
-                args.clear_global_gate,
-                args.unblocks_todo_id,
-                args.successor_todo_ids,
-                args.resume_when,
-                args.clear_resume_when,
-                args.no_follow_up,
-                args.monitor_target_key,
-                args.cadence,
-                args.next_due_at,
-                args.expires_at,
-                args.clear_claim,
-            ]):
-                raise ValueError("todo update requires at least one mutable todo field")
-            if args.no_follow_up and not (args.note or args.reason or args.evidence):
-                raise ValueError("--no-follow-up requires --note, --reason, or --evidence")
-            if args.decision_outcome:
-                raise ValueError(
-                    "todo update does not accept --decision-outcome; use todo complete"
-                )
-            if args.followups:
-                raise ValueError("todo update does not support --follow-up; use `todo capture-followups`")
-            if args.next_claimed_by:
-                raise ValueError("todo update does not support --next-claimed-by")
-            if args.next_task_repository:
-                raise ValueError("todo update does not support --next-task-repository")
-            if args.next_required_capabilities:
-                raise ValueError("todo update does not support --next-required-capability")
-            if args.next_continuation_policy:
-                raise ValueError("todo update does not support --next-continuation-policy")
-            if args.next_excluded_agents:
-                raise ValueError("todo update does not support --next-excluded-agent")
-            if args.self_merged:
-                raise ValueError("todo update does not support --self-merged")
+            validate_todo_update_options(args)
             payload = update_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
