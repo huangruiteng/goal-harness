@@ -206,6 +206,42 @@ def test_owner_actor_update_returns_typed_receipt(tmp_path: Path) -> None:
     assert _agent_todo(state, todo["todo_id"])["note"] == "owner-attributed update"
 
 
+def test_advancement_todo_preserves_public_target_key(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Advance the admitted issue-fix route.",
+        task_class="advancement_task",
+        action_kind="issue_fix_branch_validation",
+        claimed_by=AUTHOR_AGENT,
+        monitor_metadata={"target_key": "issue-fix:owner/repo:issue_42"},
+    )
+
+    projected = _agent_todo(state, todo["todo_id"])
+    assert projected["action_kind"] == "issue_fix_branch_validation"
+    assert projected["target_key"] == "issue-fix:owner/repo:issue_42"
+
+
+def test_monitor_schedule_fields_remain_monitor_only(tmp_path: Path) -> None:
+    registry, _state = _write_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="monitor schedule metadata requires"):
+        add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="Do not attach cadence to advancement work.",
+            task_class="advancement_task",
+            monitor_metadata={
+                "target_key": "issue-fix:owner/repo:issue_42",
+                "cadence": "15m",
+            },
+        )
+
+
 def test_claim_actor_must_match_requested_owner(tmp_path: Path) -> None:
     registry, state = _write_fixture(tmp_path)
     todo = _add_agent_todo(registry, claimed_by=None)

@@ -23,6 +23,8 @@ def _decision() -> dict[str, Any]:
             index=1,
             title="Advance current peer work.",
             claimed_by=AGENT_ID,
+            action_kind="issue_fix_branch_validation",
+            target_key="issue-fix:owner/repo:issue_42",
             required_capabilities=["shell"],
         ),
         quota_todo_item(
@@ -73,6 +75,10 @@ def test_quota_projects_goal_scoped_read_and_execution_boundary() -> None:
         for item in decision["agent_todo_summary"]["claimed_by_others_items"]
     ] == ["todo_other"]
     assert decision["selected_todo"]["todo_id"] == "todo_current"
+    assert decision["selected_todo"]["action_kind"] == "issue_fix_branch_validation"
+    assert decision["selected_todo"]["target_key"] == (
+        "issue-fix:owner/repo:issue_42"
+    )
 
 
 def test_turn_envelope_retains_agent_task_visibility_contract() -> None:

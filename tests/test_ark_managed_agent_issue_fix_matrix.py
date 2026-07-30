@@ -9,6 +9,7 @@ from loopx.capabilities.issue_fix.acceptance_loop import (
 )
 from loopx.capabilities.issue_fix.feasibility import (
     build_issue_fix_feasibility_packet,
+    validate_issue_fix_feasibility_packet,
 )
 from loopx.heartbeat_prompt import build_heartbeat_prompt
 from loopx.host_loop_activation import build_host_loop_activation_packet
@@ -51,6 +52,25 @@ def test_representative_intake_routes_remain_public_safe_and_exclusive(
     assert packet["comment_bodies_captured"] is False
     assert packet["raw_logs_captured"] is False
     assert packet["local_paths_captured"] is False
+
+
+def test_runnable_route_requires_exact_durable_target_key() -> None:
+    packet = build_issue_fix_feasibility_packet(
+        repo="owner/repo",
+        issue_ref="issue_42",
+        reproduction_status="confirmed",
+        reproduction_label="focused unit repro",
+        scope_class="bounded",
+        validation_label="focused unit test",
+    )
+    packet["transition"]["projected_todo"]["target_key"] = "issue-fix:wrong"
+
+    validation = validate_issue_fix_feasibility_packet(packet)
+
+    assert validation["ok"] is False
+    assert validation["errors"] == [
+        "projected successor target_key must identify the admitted issue"
+    ]
 
 
 def test_validated_worker_artifact_does_not_claim_goal_host_closure() -> None:

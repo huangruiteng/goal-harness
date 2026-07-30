@@ -120,15 +120,25 @@ rank field.
 
 ## Issue-Fix Domain Route
 
-When `/loopx <goal text>` contains a public GitHub issue/PR URL or an explicit
-issue-fix intent, the planner should preview the dedicated capability route
-before writing todos:
+When `/loopx <goal text>` explicitly asks to fix or resolve a GitHub issue/PR,
+optionally by public URL, the planner should preview the dedicated capability
+route before writing todos. A URL alone identifies an object, not an action:
+review, merge, monitor, and summary requests stay on their own routes.
 
 `start-goal` projects that decision as a typed `selected_capability_route`.
-The route names the capability's entry and admission commands without changing
-the generic Todo schema: Todos continue to schedule work, while issue identity,
-prior-work checks, repository evidence, reproduction, scope, and validation
-remain owned by `issue_fix` state.
+This is a bootstrap-only selection, not later-turn authority. The guided
+transaction is complete only after feasibility persists capability-owned state
+and its exact successor is written as a generic Agent Todo. That Todo keeps
+only the scheduling route (`action_kind`) and stable public target
+(`target_key`); issue facts, prior-work checks, repository evidence,
+reproduction, scope, and validation remain owned by `issue_fix` state.
+
+Later turns re-enter through `quota should-run.selected_todo`, which preserves
+the successor's `action_kind` and `target_key`; they do not call `start-goal`
+again or infer admission from stale prompt context.
+
+The guided transaction's `command_cwd_source` points to the packet's resolved
+`project`; hosts execute its project-relative commands from that exact root.
 
 Before planning implementation, select a currently open public tracker issue.
 Repository TODO/FIXME entries, warnings, and incidental test failures may
@@ -162,7 +172,7 @@ select exactly one route:
 
 ```bash
 loopx issue-fix feasibility \
-  --url <github-issue-url> \
+  --url <github-issue-or-pr-url> \
   --reproduction-status <confirmed|planned|missing|blocked> \
   --scope-class <bounded|uncertain|oversized> \
   --repository-context-json <compact-context.json> \

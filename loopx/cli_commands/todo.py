@@ -274,11 +274,12 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
     )
     register_todo_linkage_arguments(todo_parser)
     todo_parser.add_argument(
+        "--target-key",
         "--monitor-target-key",
         dest="monitor_target_key",
         help=(
-            "For agent continuous_monitor add/update, declare the stable public-safe "
-            "watch target key, such as github-pr-123 or update-note-draft-pr."
+            "For agent todo add/update, declare a stable public-safe execution "
+            "target key. --monitor-target-key remains a compatibility alias."
         ),
     )
     todo_parser.add_argument(
@@ -514,7 +515,7 @@ def handle_todo_command(
                     ("--unblocks-todo-id", args.unblocks_todo_id),
                     ("--successor-todo-id", args.successor_todo_ids),
                     ("--resume-when", args.resume_when),
-                    ("--monitor-target-key", args.monitor_target_key),
+                    ("--target-key", args.monitor_target_key),
                     ("--cadence", args.cadence),
                     ("--next-due-at", args.next_due_at),
                     ("--expires-at", args.expires_at),
@@ -685,7 +686,10 @@ def handle_todo_command(
             if args.task_repository or args.bound_agent or args.goal_bound or args.blocks_agent or args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.clear_global_gate or args.unblocks_todo_id or args.resume_when:
                 raise ValueError("todo complete does not update current todo routing metadata; use todo update first")
             if args.monitor_target_key or args.cadence or args.next_due_at or args.expires_at:
-                raise ValueError("todo complete does not support monitor schedule metadata; use todo update before completion")
+                raise ValueError(
+                    "todo complete does not update target or monitor schedule metadata; "
+                    "use todo update before completion"
+                )
             if args.no_follow_up and (args.next_agent_todo or args.next_user_todo):
                 raise ValueError("--no-follow-up cannot be combined with successor todos")
             if args.no_follow_up and args.successor_todo_ids:
@@ -765,7 +769,10 @@ def handle_todo_command(
             if args.successor_todo_ids:
                 raise ValueError("todo supersede does not support --successor-todo-id; use --next-agent-todo or update the source todo before supersede")
             if args.monitor_target_key or args.cadence or args.next_due_at or args.expires_at:
-                raise ValueError("todo supersede does not support monitor schedule metadata; use todo update before supersede")
+                raise ValueError(
+                    "todo supersede does not update target or monitor schedule metadata; "
+                    "use todo update before supersede"
+                )
             payload = supersede_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,

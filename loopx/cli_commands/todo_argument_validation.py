@@ -41,7 +41,7 @@ TODO_OPTION_FIELDS = (
     ("--successor-todo-id", "successor_todo_ids"),
     ("--resume-when", "resume_when"),
     ("--clear-resume-when", "clear_resume_when"),
-    ("--monitor-target-key", "monitor_target_key"),
+    ("--target-key", "monitor_target_key"),
     ("--cadence", "cadence"),
     ("--next-due-at", "next_due_at"),
     ("--expires-at", "expires_at"),

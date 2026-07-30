@@ -80,6 +80,7 @@ def _project_transition(
     boundary_authority_scopes: Sequence[str],
     boundary_authority_resolved: bool,
 ) -> dict[str, Any]:
+    target_key = f"issue-fix:{repo}:{issue_ref}"
     base = {
         "schema_version": "issue_fix_feasibility_transition_v0",
         "route": route,
@@ -100,6 +101,7 @@ def _project_transition(
                 "priority": "P0",
                 "task_class": "advancement_task",
                 "action_kind": action_kind,
+                "target_key": target_key,
                 "text": (
                     f"[P0] Advance the selected fix_pr route for {repo} {issue_ref}; "
                     "confirm the named repro before patching, then run the named "
@@ -129,6 +131,7 @@ def _project_transition(
                 "priority": "P1",
                 "task_class": "advancement_task",
                 "action_kind": "issue_fix_external_comment_packet",
+                "target_key": target_key,
                 "text": (
                     f"[P1] Draft a compact public-safe maintainer comment for "
                     f"{repo} {issue_ref}; do not post it without an external-write gate."
@@ -411,6 +414,16 @@ def validate_issue_fix_feasibility_packet(packet: Mapping[str, Any]) -> dict[str
         errors.append("triage_only must project no_followup")
     gate = transition.get("external_write_gate")
     if route in {"fix_pr", "comment_only"}:
+        projected_todo = transition.get("projected_todo")
+        expected_target_key = (
+            f"issue-fix:{observation.get('repo')}:{observation.get('issue_ref')}"
+        )
+        if not isinstance(projected_todo, Mapping):
+            errors.append("runnable route requires a projected successor todo")
+        elif projected_todo.get("target_key") != expected_target_key:
+            errors.append(
+                "projected successor target_key must identify the admitted issue"
+            )
         if not isinstance(gate, Mapping):
             errors.append("runnable external-write route requires a gate projection")
         else:

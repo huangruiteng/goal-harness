@@ -22,6 +22,7 @@ SELECTED_TODO_COMPACT_FIELDS = (
     "blocks_agent",
     "excluded_agents",
     "unblocks_todo_id",
+    "target_key",
     "next_due_at",
     "expires_at",
 )

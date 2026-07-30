@@ -6,7 +6,11 @@ from typing import Any
 
 from .agent_registry import registered_agent_ids_from_registry
 from .bootstrap import default_goal_id
-from .capabilities.issue_fix.workflow_plan import match_issue_fix_goal_intent
+from .capabilities.issue_fix.workflow_plan import (
+    ISSUE_FIX_GOAL_CANDIDATE_DISCOVERY_COMMAND_TEMPLATE,
+    build_issue_fix_goal_command_templates,
+    match_issue_fix_goal_intent,
+)
 from .host_loop_activation import (
     agent_type_for_host_surface,
     build_host_loop_activation_packet,
@@ -576,6 +580,8 @@ def _selected_goal_capability_route(goal_text: str | None) -> dict[str, Any] | N
         "implementation_admission": {
             "status": "qualification_required",
             "state_owner": "issue_fix",
+            "route_scope": "start_goal_bootstrap_only",
+            "durable_reentry_fields": ["action_kind", "target_key"],
         },
         "activation_condition": (
             "after selecting a public issue candidate and before substantive "
@@ -585,7 +591,11 @@ def _selected_goal_capability_route(goal_text: str | None) -> dict[str, Any] | N
 
 
 def _goal_start_contract(
-    *, goal_text: str | None, connected: bool, agent_type: str
+    *,
+    goal_text: str | None,
+    connected: bool,
+    agent_type: str,
+    issue_fix_commands: dict[str, str],
 ) -> dict[str, Any]:
     return {
         "schema_version": GOAL_START_SCHEMA_VERSION,
@@ -674,28 +684,22 @@ def _goal_start_contract(
         },
         "domain_route_hints": {
             "issue_fix_workflow": {
-                "when": "goal text contains a public GitHub issue/PR URL or asks for an issue-fix workflow",
-                "preview_command": (
-                    "loopx issue-fix workflow-plan --url <github-issue-or-pr-url> "
-                    "--repo-path <approved-repo> --repository-context-json "
-                    "<compact-context.json> --validation-label '<validation command>' "
-                    "--format json"
+                "when": (
+                    "goal text explicitly asks to fix or resolve a GitHub issue/PR, "
+                    "optionally by public URL"
                 ),
-                "decision_command": (
-                    "loopx issue-fix feasibility --url <github-issue-url> "
-                    "--reproduction-status <state> --scope-class <scope> "
-                    "--repository-context-json <compact-context.json> "
-                    "--goal-id <goal-id> --format json"
-                ),
-                "post_pr_reviewer_request_command": (
-                    "loopx issue-fix reviewer-request --url <github-pr-url> "
-                    "--repo-path <approved-repo> --base-ref <base-ref> "
-                    "--execute --format json"
-                ),
-                "post_pr_monitor_command": (
-                    "loopx issue-fix pr-lifecycle --url <github-pr-url> "
-                    "--goal-id <goal-id> --format json"
-                ),
+                "preview_command": issue_fix_commands[
+                    "issue_fix_workflow_plan_template"
+                ],
+                "decision_command": issue_fix_commands[
+                    "issue_fix_feasibility_template"
+                ],
+                "post_pr_reviewer_request_command": issue_fix_commands[
+                    "issue_fix_reviewer_request_template"
+                ],
+                "post_pr_monitor_command": issue_fix_commands[
+                    "issue_fix_pr_lifecycle_template"
+                ],
                 "writeback": (
                     "write metadata classification plus the feasibility checkpoint first, then "
                     "write only its selected route successor or no-follow-up; "
@@ -738,7 +742,7 @@ Planning rules:
 4. If several todos share the same priority, their listed order is their relative priority. Preserve that exact order when writing them.
 5. Prefer executable Agent Todo items with `task_class=advancement_task`; use User Todo only for concrete owner decisions or private-material gates.
 6. After writing todos, run `loopx refresh-state --goal-id {goal_id}`, activate the host loop if it is missing, unknown, or stale (Codex App automation, Codex CLI `/goal <task_body>`, Claude Code `/loop`, OpenCode bridge, or a custom host-loop gate), then run its typed `quota_guard` and begin the first allowed bounded segment.
-7. If the goal is a GitHub issue/PR fix, preview `loopx issue-fix workflow-plan --url <github-issue-or-pr-url> --repo-path <approved-repo> --repository-context-json <compact-context.json> --validation-label '<validation command>' --format json`; keep only metadata classification plus the feasibility checkpoint. Repository context should pin current repo policy, architecture, change-scope, reproduction, and validation refs; memory and external experts remain advisory until verified against the pinned revision. After a compact public-safe observation, run `loopx issue-fix feasibility --url <github-issue-url> --reproduction-status <state> --scope-class <scope> --repository-context-json <compact-context.json> --goal-id {goal_id} --format json` and write only its selected route successor or no-follow-up. Keep private repro material, body/comment reads, arbitrary external comments, PR creation, merge, publish, destructive git, and production actions as explicit gates. After a PR exists and `external_review_request` or `publish` authority is active, call `loopx issue-fix reviewer-request --url <github-pr-url> --repo-path <approved-repo> --base-ref <base-ref> --execute --format json`; it should try the formal request first and, only on confirmed permission denial, post one reviewer-tagging fallback comment. Do not mark notification complete until the request or fallback comment is visible on the PR. Then call `loopx issue-fix pr-lifecycle --url <github-pr-url> --goal-id {goal_id} --format json`; use `grouped_monitor_projection` for one monitor per nonempty state bucket. Never create one monitor per PR. Keep PR actions one-shot and messages at one PR per message.
+7. If the goal is a GitHub issue/PR fix, use the command-pack templates for `loopx issue-fix workflow-plan` and `loopx issue-fix feasibility` before implementation; write only the selected successor or no-follow-up. Keep private repro material, body/comment reads, arbitrary external comments, PR creation, merge, publish, destructive git, and production actions as explicit gates. After a PR exists and review-request authority is active, use `loopx issue-fix reviewer-request`; only on confirmed permission denial allow fallback, and verify the request or fallback comment is visible. Then use `loopx issue-fix pr-lifecycle`. Never create one monitor per PR; keep one PR per message.
 """
 
 
@@ -764,6 +768,14 @@ def build_loopx_bootstrap_command_pack(
     mutation_confirmation_required = bool(inspection.get("mutation_confirmation_required"))
     normalized_goal_text = " ".join(goal_text.split()) if goal_text else None
     explicit_goal_start = bool(normalized_goal_text)
+    issue_fix_commands = build_issue_fix_goal_command_templates(
+        cli_bin=cli_bin,
+        goal_id=resolved_goal_id,
+    )
+    issue_fix_hint_commands = build_issue_fix_goal_command_templates(
+        cli_bin=cli_bin,
+        goal_id="<goal-id>",
+    )
     agent_type = agent_type_for_host_surface(host_surface)
     registry_path = Path(str(inspection["registry"]))
     registered_agents = registered_agent_ids_from_registry(
@@ -915,6 +927,7 @@ def build_loopx_bootstrap_command_pack(
             goal_text=normalized_goal_text,
             connected=connected,
             agent_type=agent_type,
+            issue_fix_commands=issue_fix_hint_commands,
         ),
         "commands": {
             "doctor": f"{shell_arg(cli_bin)} doctor",
@@ -952,36 +965,7 @@ def build_loopx_bootstrap_command_pack(
                 if isinstance(identity_selection_gate, dict)
                 else []
             ),
-            "issue_fix_workflow_plan_template": (
-                f"{shell_arg(cli_bin)} issue-fix workflow-plan "
-                "--url <url> "
-                "--repo-path <repo> "
-                "--repository-context-json <context.json> "
-                "--validation-label '<validation>' "
-                "--format json"
-            ),
-            "issue_fix_feasibility_template": (
-                f"{shell_arg(cli_bin)} issue-fix feasibility "
-                "--url <url> "
-                "--reproduction-status <confirmed|planned|missing|blocked> "
-                "--scope-class <bounded|uncertain|oversized> "
-                "--repository-context-json <context.json> "
-                f"--goal-id {shell_arg(resolved_goal_id)} "
-                "--format json"
-            ),
-            "issue_fix_pr_lifecycle_template": (
-                f"{shell_arg(cli_bin)} issue-fix pr-lifecycle "
-                "--url <github-pr-url> "
-                f"--goal-id {shell_arg(resolved_goal_id)} "
-                "--format json"
-            ),
-            "issue_fix_reviewer_request_template": (
-                f"{shell_arg(cli_bin)} issue-fix reviewer-request "
-                "--url <github-pr-url> "
-                "--repo-path <approved-repo> "
-                "--base-ref <base-ref> "
-                "--execute --format json"
-            ),
+            **issue_fix_commands,
         },
         "safety_contract": {
             "runs_bootstrap": False,
@@ -1037,6 +1021,10 @@ def _build_multi_goal_start_selection_packet(
 
     normalized_goal_text = " ".join(goal_text.split())
     resolved_project = str(inspection["project"])
+    issue_fix_commands = build_issue_fix_goal_command_templates(
+        cli_bin=cli_bin,
+        goal_id="<selected-goal-id>",
+    )
     choices: list[dict[str, Any]] = []
     for goal in goals:
         candidate_goal_id = str(goal.get("id") or "").strip()
@@ -1125,6 +1113,7 @@ def _build_multi_goal_start_selection_packet(
             goal_text=normalized_goal_text,
             connected=True,
             agent_type=agent_type_for_host_surface(host_surface),
+            issue_fix_commands=issue_fix_commands,
         ),
         "commands": {
             "doctor": f"{shell_arg(cli_bin)} doctor",
@@ -1163,6 +1152,7 @@ def _build_multi_goal_start_selection_packet(
         "mode": "dry_run_preview",
         "writes_now": False,
         "spends_quota_now": False,
+        "command_cwd_source": "#/project",
         "goal_text": normalized_goal_text,
         "blocked_by": "goal_selection",
         "goal_selection_gate": goal_selection_gate,
@@ -1316,6 +1306,7 @@ def build_start_goal_guided_packet(
         "mode": "dry_run_preview",
         "writes_now": False,
         "spends_quota_now": False,
+        "command_cwd_source": "#/project",
         "ordered_steps": [
             {
                 "id": "inspect_connection",
@@ -1343,9 +1334,13 @@ def build_start_goal_guided_packet(
                     f"{shell_arg(str(command_pack.get('goal_id') or ''))} "
                     "--project . "
                     "--role agent "
-                    "--task-class advancement_task --action-kind <action_kind> --text '<[P0/P1/P2] ...>'"
+                    "--task-class advancement_task --action-kind <action_kind> "
+                    "[--target-key <target_key>] --text '<[P0/P1/P2] ...>'"
                 ),
-                "purpose": "write todos in planner order so same-priority ordering stays deterministic",
+                "purpose": (
+                    "write todos in planner order; capability successors preserve "
+                    "the admitted action_kind and target_key for later quota re-entry"
+                ),
             },
             {
                 "id": "refresh_state",
@@ -1405,12 +1400,8 @@ def build_start_goal_guided_packet(
                 "id": "qualify_selected_capability",
                 "kind": "capability_guard",
                 "candidate_discovery_command_template": (
-                    "gh issue list --repo "
-                    '"$(gh repo view --json nameWithOwner --jq .nameWithOwner)" '
-                    "--state open --limit 20 --json number,title,url,labels"
+                    ISSUE_FIX_GOAL_CANDIDATE_DISCOVERY_COMMAND_TEMPLATE
                 ),
-                "command_template": commands.get(entry_key),
-                "admission_command_template": commands.get(admission_key),
                 "candidate_authority": selected_capability_route[
                     "candidate_authority"
                 ],
@@ -1421,6 +1412,13 @@ def build_start_goal_guided_packet(
                 "activation_condition": selected_capability_route[
                     "activation_condition"
                 ],
+                "durable_successor_source": (
+                    "admission_result.transition.projected_todo"
+                ),
+                "completion_condition": (
+                    "persist admission state and write its exact successor Todo "
+                    "with action_kind and target_key, or record no-follow-up"
+                ),
                 "when_condition_unmet": (
                     "keep candidate discovery or qualification as a normal Todo, "
                     "then re-enter this guard after selecting a public candidate"
@@ -1493,17 +1491,35 @@ def build_start_goal_guided_packet(
 
 
 def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
+    def command_summary(value: Any) -> str:
+        parts = str(value or "").split()
+        return " ".join(parts[:3]) + (" ..." if len(parts) > 3 else "")
+
     transaction = payload.get("guided_transaction")
     transaction = transaction if isinstance(transaction, dict) else {}
+    command_pack = payload.get("command_pack")
+    command_pack = command_pack if isinstance(command_pack, dict) else {}
+    commands = command_pack.get("commands")
+    commands = commands if isinstance(commands, dict) else {}
+    selected_route = transaction.get("selected_capability_route")
+    selected_route = selected_route if isinstance(selected_route, dict) else {}
     steps = transaction.get("ordered_steps")
     steps = steps if isinstance(steps, list) else []
     step_lines: list[str] = []
     for index, step in enumerate(steps, start=1):
         if not isinstance(step, dict):
             continue
-        command = step.get("command") or step.get("command_template") or step.get("command_source") or step.get("prompt")
-        admission_command = step.get("admission_command_template")
-        if admission_command:
+        command = (
+            step.get("command")
+            or step.get("command_template")
+            or step.get("command_source")
+            or step.get("prompt")
+        )
+        if step.get("kind") == "capability_guard":
+            entry_key = str(selected_route.get("entry_command_key") or "")
+            admission_key = str(selected_route.get("admission_command_key") or "")
+            entry_command = commands.get(entry_key)
+            admission_command = commands.get(admission_key)
             discovery_command = step.get("candidate_discovery_command_template")
             authority = (
                 "open public issue; source clues are evidence only"
@@ -1522,8 +1538,8 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
                 )
             step_lines.extend(
                 [
-                    f"   - qualify: `{str(command).splitlines()[0]}`",
-                    f"   - admit: `{str(admission_command).splitlines()[0]}`",
+                    f"   - qualify: `{command_summary(entry_command)}`",
+                    f"   - admit: `{command_summary(admission_command)}`",
                 ]
             )
             continue

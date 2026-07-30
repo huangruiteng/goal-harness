@@ -250,7 +250,9 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         assert "PR lifecycle monitor" in str(payload["message"])
         assert "default top requestable non-author reviewer" in str(payload["message"])
         domain_routes = goal_start["domain_route_hints"]
-        assert domain_routes["issue_fix_workflow"]["when"].startswith("goal text contains")
+        assert domain_routes["issue_fix_workflow"]["when"].startswith(
+            "goal text explicitly asks"
+        )
         assert "workflow-plan" in domain_routes["issue_fix_workflow"]["preview_command"]
         assert "feasibility" in domain_routes["issue_fix_workflow"]["decision_command"]
         assert "reviewer-request" in domain_routes["issue_fix_workflow"][

@@ -71,6 +71,7 @@ def _host_shadow_document(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": payload["schema_version"],
         "project": payload["project"],
+        "command_cwd_source": transaction["command_cwd_source"],
         "goal_id": payload["goal_id"],
         "agent_id": payload["agent_id"],
         "host_surface": payload["host_surface"],
@@ -172,6 +173,8 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     )
 
     transaction = payload["guided_transaction"]
+    assert transaction["command_cwd_source"] == "#/project"
+    assert payload["project"] == str(project)
     route = transaction["selected_capability_route"]
     assert route == {
         "schema_version": "loopx_goal_capability_route_v0",
@@ -184,6 +187,8 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
         "implementation_admission": {
             "status": "qualification_required",
             "state_owner": "issue_fix",
+            "route_scope": "start_goal_bootstrap_only",
+            "durable_reentry_fields": ["action_kind", "target_key"],
         },
         "activation_condition": (
             "after selecting a public issue candidate and before substantive "
@@ -201,8 +206,17 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert guard["admission_command_source"].endswith(
         "/commands/issue_fix_feasibility_template"
     )
-    assert guard["command_template"].startswith("loopx issue-fix workflow-plan ")
-    assert guard["admission_command_template"].startswith(
+    assert guard["durable_successor_source"] == (
+        "admission_result.transition.projected_todo"
+    )
+    assert "exact successor Todo" in guard["completion_condition"]
+    assert "command_template" not in guard
+    assert "admission_command_template" not in guard
+    commands = payload["command_pack"]["commands"]
+    assert commands[route["entry_command_key"]].startswith(
+        "loopx issue-fix workflow-plan "
+    )
+    assert commands[route["admission_command_key"]].startswith(
         "loopx issue-fix feasibility "
     )
     rendered = render_start_goal_guided_markdown(payload)
@@ -218,6 +232,7 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     )
     assert "--project ." in todo_command
     assert "--action-kind <action_kind>" in todo_command
+    assert "[--target-key <target_key>]" in todo_command
     refresh_command = next(
         step["command"]
         for step in transaction["ordered_steps"]
@@ -258,7 +273,7 @@ def test_non_issue_goal_does_not_select_capability_route(tmp_path: Path) -> None
         agent_id=AGENT_ID,
         cli_bin="loopx",
         host_surface="ark-managed-agent",
-        goal_text="Review https://github.com/owner/repo/pull/42.",
+        goal_text="Fix https://github.com/owner/repo/pull/42.",
     )
     assert (
         referenced["guided_transaction"]["selected_capability_route"][
@@ -266,6 +281,21 @@ def test_non_issue_goal_does_not_select_capability_route(tmp_path: Path) -> None
         ]
         == "public_issue_or_pr_reference"
     )
+    for goal_text in (
+        "Review https://github.com/owner/repo/pull/42.",
+        "Merge https://github.com/owner/repo/pull/42 after checks pass.",
+        "Monitor https://github.com/owner/repo/pull/42.",
+        "Summarize https://github.com/owner/repo/issues/42.",
+    ):
+        unrelated = build_start_goal_guided_packet(
+            project=project,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            cli_bin="loopx",
+            host_surface="ark-managed-agent",
+            goal_text=goal_text,
+        )
+        assert "selected_capability_route" not in unrelated["guided_transaction"]
 
 
 def test_explicit_cold_path_restores_the_complete_command_pack(tmp_path: Path) -> None:
