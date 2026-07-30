@@ -370,22 +370,14 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             f"peer_lanes={len(peer_lanes)} "
             f"writeback_owner={task_orchestration.get('writeback_owner')}"
         )
-    replan_decision = (
-        payload.get("autonomous_replan_decision")
-        if isinstance(payload.get("autonomous_replan_decision"), dict)
-        else {}
-    )
+    replan_decision = as_dict(payload.get("autonomous_replan_decision"))
     if replan_decision:
         lines.append(
             "- autonomous_replan_decision: "
             f"decision={replan_decision.get('decision')} "
             f"plane={replan_decision.get('decision_plane')}"
         )
-    automation_prompt_upgrade = (
-        payload.get("automation_prompt_upgrade")
-        if isinstance(payload.get("automation_prompt_upgrade"), dict)
-        else {}
-    )
+    automation_prompt_upgrade = as_dict(payload.get("automation_prompt_upgrade"))
     if automation_prompt_upgrade:
         lines.append(
             "- automation_prompt_upgrade: "
@@ -407,11 +399,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 "- automation_prompt_upgrade_complete: "
                 f"{automation_prompt_upgrade.get('completion_command')}"
             )
-    capability_gate = (
-        payload.get("capability_gate")
-        if isinstance(payload.get("capability_gate"), dict)
-        else {}
-    )
+    capability_gate = as_dict(payload.get("capability_gate"))
     if capability_gate:
         lines.append(
             "- capability_gate: "
@@ -435,11 +423,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if blocked_candidates:
             lines.append(f"- capability_gate_blocked_candidates: `{len(blocked_candidates)}`")
-    workspace_guard = (
-        payload.get("workspace_guard")
-        if isinstance(payload.get("workspace_guard"), dict)
-        else {}
-    )
+    workspace_guard = as_dict(payload.get("workspace_guard"))
     if workspace_guard:
         lines.append(
             "- workspace_guard: "
@@ -449,11 +433,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if workspace_guard.get("required_action"):
             lines.append(f"- workspace_guard_action: {workspace_guard.get('required_action')}")
-    stale_latest_run_warning = (
-        payload.get("stale_latest_run_warning")
-        if isinstance(payload.get("stale_latest_run_warning"), dict)
-        else {}
-    )
+    stale_latest_run_warning = as_dict(payload.get("stale_latest_run_warning"))
     if stale_latest_run_warning:
         lines.append(
             "- stale_latest_run_warning: "
@@ -464,11 +444,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if stale_latest_run_warning.get("recommended_action"):
             lines.append(f"- stale_latest_run_action: {stale_latest_run_warning.get('recommended_action')}")
-    state_action_projection_warning = (
-        payload.get("state_action_projection_warning")
-        if isinstance(payload.get("state_action_projection_warning"), dict)
-        else {}
-    )
+    state_action_projection_warning = as_dict(payload.get("state_action_projection_warning"))
     if state_action_projection_warning:
         lines.append(
             "- state_action_projection_warning: "
@@ -489,11 +465,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- state_action_projection_action: {state_action_projection_warning.get('recommended_action')}"
             )
-    next_action_projection = (
-        payload.get("next_action_projection_warning")
-        if isinstance(payload.get("next_action_projection_warning"), dict)
-        else {}
-    )
+    next_action_projection = as_dict(payload.get("next_action_projection_warning"))
     if next_action_projection:
         lines.append(
             "- next_action_projection_warning: "
@@ -505,11 +477,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 "- latest_run_projection_action: "
                 f"{next_action_projection.get('latest_run_recommended_action')}"
             )
-    backlog_hygiene_warning = (
-        payload.get("backlog_hygiene_warning")
-        if isinstance(payload.get("backlog_hygiene_warning"), dict)
-        else {}
-    )
+    backlog_hygiene_warning = as_dict(payload.get("backlog_hygiene_warning"))
     if backlog_hygiene_warning:
         lines.append(
             "- backlog_hygiene_warning: "
@@ -519,11 +487,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if backlog_hygiene_warning.get("recommended_action"):
             lines.append(f"- backlog_hygiene_action: {backlog_hygiene_warning.get('recommended_action')}")
-    projection_gap = (
-        payload.get("state_projection_gap")
-        if isinstance(payload.get("state_projection_gap"), dict)
-        else {}
-    )
+    projection_gap = as_dict(payload.get("state_projection_gap"))
     if projection_gap:
         lines.append(
             "- state_projection_gap: "
@@ -549,11 +513,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         blocked_item_label="scoped_user_gate_blocked_item",
         blocked_gate_key="blocked_user_gate",
     )
-    completed_todo_archive_warning = (
-        payload.get("completed_todo_archive_warning")
-        if isinstance(payload.get("completed_todo_archive_warning"), dict)
-        else {}
-    )
+    completed_todo_archive_warning = as_dict(payload.get("completed_todo_archive_warning"))
     if completed_todo_archive_warning:
         lines.append(
             "- completed_todo_archive_warning: "
@@ -568,11 +528,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- completed_todo_archive_action: {completed_todo_archive_warning.get('recommended_action')}"
             )
-    replan_obligation = (
-        payload.get("autonomous_replan_obligation")
-        if isinstance(payload.get("autonomous_replan_obligation"), dict)
-        else {}
-    )
+    replan_obligation = as_dict(payload.get("autonomous_replan_obligation"))
     if replan_obligation:
         trigger_kinds = [
             str(trigger.get("kind") or "")
@@ -585,7 +541,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             f"trigger_count={replan_obligation.get('trigger_count')} "
             f"triggers={','.join(trigger_kinds)}"
         )
-    required_reads = payload.get("required_reads") if isinstance(payload.get("required_reads"), list) else []
+    required_reads = as_list(payload.get("required_reads"))
     for read in required_reads[:3]:
         if not isinstance(read, dict):
             continue
@@ -598,11 +554,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 f"todo_id={read.get('todo_id') or ''} "
                 f"command=`{command}`"
             )
-    work_lane_contract = (
-        payload.get("work_lane_contract")
-        if isinstance(payload.get("work_lane_contract"), dict)
-        else {}
-    )
+    work_lane_contract = as_dict(payload.get("work_lane_contract"))
     if work_lane_contract:
         lines.append(
             "- work_lane_contract: "
@@ -650,11 +602,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 f"latest_kind={outcome_followthrough.get('latest_delivery_turn_kind')} "
                 f"obligation={outcome_followthrough.get('obligation')}"
             )
-    interface_budget_cadence = (
-        payload.get("interface_budget_cadence")
-        if isinstance(payload.get("interface_budget_cadence"), dict)
-        else {}
-    )
+    interface_budget_cadence = as_dict(payload.get("interface_budget_cadence"))
     if interface_budget_cadence:
         lines.append(
             "- interface_budget_cadence: "
@@ -667,24 +615,15 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             f"headroom={interface_budget_cadence.get('headroom_remaining')} "
             f"recommendation={interface_budget_cadence.get('recommendation')}"
         )
-    execution_profile = (
-        payload.get("execution_profile")
-        if isinstance(payload.get("execution_profile"), dict)
-        else {}
-    )
+    execution_profile = as_dict(payload.get("execution_profile"))
     if execution_profile:
         lines.append(f"- execution_profile: {execution_profile_summary(execution_profile)}")
-    long_task_cadence_hint = (
-        payload.get("long_task_cadence_hint")
-        if isinstance(payload.get("long_task_cadence_hint"), dict)
-        else {}
-    )
+    long_task_cadence_hint = as_dict(payload.get("long_task_cadence_hint"))
     if long_task_cadence_hint:
         lines.append(
             f"- long_task_cadence_hint: {long_task_cadence_hint_summary(long_task_cadence_hint)}"
         )
-    control_plane = payload.get("control_plane") if isinstance(payload.get("control_plane"), dict) else None
-    if control_plane:
+    if control_plane := as_dict(payload.get("control_plane")):
         lines.append(f"- control_plane: {control_plane_policy_summary(control_plane)}")
 
     def compact_todo_identity(todo: dict[str, Any]) -> str:
@@ -857,11 +796,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
     if payload.get("reason"):
         lines.append(f"- reason: {payload.get('reason')}")
-    handoff_readiness = (
-        payload.get("handoff_readiness")
-        if isinstance(payload.get("handoff_readiness"), dict)
-        else {}
-    )
+    handoff_readiness = as_dict(payload.get("handoff_readiness"))
     if handoff_readiness:
         lines.append(
             "- handoff_readiness: "
@@ -933,11 +868,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 f"{outcome_text}"
                 f"{gap_text}"
             )
-    heartbeat_recommendation = (
-        payload.get("heartbeat_recommendation")
-        if isinstance(payload.get("heartbeat_recommendation"), dict)
-        else {}
-    )
+    heartbeat_recommendation = as_dict(payload.get("heartbeat_recommendation"))
     if heartbeat_recommendation:
         lines.append(
             "- heartbeat_recommendation: "
@@ -954,11 +885,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- heartbeat_spend_policy: {heartbeat_recommendation.get('spend_policy')}")
         if heartbeat_recommendation.get("reason"):
             lines.append(f"- heartbeat_reason: {heartbeat_recommendation.get('reason')}")
-    execution_obligation = (
-        payload.get("execution_obligation")
-        if isinstance(payload.get("execution_obligation"), dict)
-        else {}
-    )
+    execution_obligation = as_dict(payload.get("execution_obligation"))
     if execution_obligation:
         lines.append(
             "- execution_obligation: "
@@ -970,11 +897,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- execution_contract_obligation: {execution_obligation.get('contract_obligation')}")
         if execution_obligation.get("reason"):
             lines.append(f"- execution_obligation_reason: {execution_obligation.get('reason')}")
-    interaction_contract = (
-        payload.get("interaction_contract")
-        if isinstance(payload.get("interaction_contract"), dict)
-        else {}
-    )
+    interaction_contract = as_dict(payload.get("interaction_contract"))
     if interaction_contract:
         user_channel = (
             interaction_contract.get("user_channel")
@@ -1011,11 +934,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- interaction_agent_resolution: {resolution_trace.get('summary')}"
             )
-    automation_liveness = (
-        payload.get("automation_liveness")
-        if isinstance(payload.get("automation_liveness"), dict)
-        else {}
-    )
+    automation_liveness = as_dict(payload.get("automation_liveness"))
     if automation_liveness:
         lines.append(
             "- automation_liveness: "
@@ -1027,11 +946,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"- automation_liveness_reason: {automation_liveness.get('reason')}")
         if automation_liveness.get("pause_policy"):
             lines.append(f"- automation_pause_policy: {automation_liveness.get('pause_policy')}")
-    scheduler_hint = (
-        payload.get("scheduler_hint")
-        if isinstance(payload.get("scheduler_hint"), dict)
-        else {}
-    )
+    scheduler_hint = as_dict(payload.get("scheduler_hint"))
     if scheduler_hint:
         codex_app = (
             scheduler_hint.get("codex_app")
@@ -1090,22 +1005,14 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 f"reset_generation={reset_policy.get('reset_token')} "
                 f"identity_signature={reset_policy.get('identity_signature')}"
             )
-    protocol_action_packet = (
-        payload.get("protocol_action_packet")
-        if isinstance(payload.get("protocol_action_packet"), dict)
-        else {}
-    )
+    protocol_action_packet = as_dict(payload.get("protocol_action_packet"))
     if protocol_action_packet:
         lines.append(
             "- protocol_action_packet: "
             f"schema={protocol_action_packet.get('schema_version')} "
             f"{protocol_action_packet.get('summary') or ''}"
         )
-    stall_self_repair = (
-        payload.get("stall_self_repair")
-        if isinstance(payload.get("stall_self_repair"), dict)
-        else {}
-    )
+    stall_self_repair = as_dict(payload.get("stall_self_repair"))
     if stall_self_repair:
         lines.append(
             "- stall_self_repair: "
@@ -1143,11 +1050,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- blocked_action_scope: `{payload.get('blocked_action_scope')}`")
     if payload.get("safe_bypass_policy"):
         lines.append(f"- safe_bypass_policy: {payload.get('safe_bypass_policy')}")
-    decision_freshness_warning = (
-        payload.get("decision_freshness_warning")
-        if isinstance(payload.get("decision_freshness_warning"), dict)
-        else {}
-    )
+    decision_freshness_warning = as_dict(payload.get("decision_freshness_warning"))
     if decision_freshness_warning:
         lines.append(
             "- decision_freshness_warning: "
@@ -1173,11 +1076,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 f"newer_7d={item.get('newer_event_count_7d')} "
                 f"at={item.get('decision_at')}"
             )
-    promotion_readiness_warning = (
-        payload.get("promotion_readiness_warning")
-        if isinstance(payload.get("promotion_readiness_warning"), dict)
-        else {}
-    )
+    promotion_readiness_warning = as_dict(payload.get("promotion_readiness_warning"))
     if promotion_readiness_warning:
         lines.append(
             "- promotion_readiness_warning: "
@@ -1197,11 +1096,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         )
         if promotion_readiness_warning.get("reason"):
             lines.append(f"- promotion_readiness_reason: {promotion_readiness_warning.get('reason')}")
-    reward_lesson_warning = (
-        payload.get("reward_lesson_projection_warning")
-        if isinstance(payload.get("reward_lesson_projection_warning"), dict)
-        else {}
-    )
+    reward_lesson_warning = as_dict(payload.get("reward_lesson_projection_warning"))
     if reward_lesson_warning:
         lines.append(
             "- reward_lesson_projection_warning: "
@@ -1220,7 +1115,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 f"avoid={match.get('avoid')} "
                 f"summary={match.get('summary')}"
             )
-    goal_boundary = payload.get("goal_boundary") if isinstance(payload.get("goal_boundary"), dict) else {}
+    goal_boundary = as_dict(payload.get("goal_boundary"))
     if goal_boundary:
         adapter = goal_boundary.get("adapter") if isinstance(goal_boundary.get("adapter"), dict) else {}
         if adapter:
@@ -1295,26 +1190,18 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- open_todo_notification_policy: {payload.get('open_todo_notification_policy')}")
     if payload.get("gate_prompt"):
         lines.extend(["", "## Gate Prompt", str(payload.get("gate_prompt"))])
-    user_todo_summary = (
-        payload.get("user_todo_summary") if isinstance(payload.get("user_todo_summary"), dict) else {}
-    )
+    user_todo_summary = as_dict(payload.get("user_todo_summary"))
     if user_todo_summary:
         append_todo_summary("user_todo", user_todo_summary)
-    agent_todo_summary = (
-        payload.get("agent_todo_summary") if isinstance(payload.get("agent_todo_summary"), dict) else {}
-    )
-    selected_todo = (
-        payload.get("selected_todo")
-        if isinstance(payload.get("selected_todo"), dict)
-        else {}
-    )
+    agent_todo_summary = as_dict(payload.get("agent_todo_summary"))
+    selected_todo = as_dict(payload.get("selected_todo"))
     selected_todo_id = str(selected_todo.get("todo_id") or "").strip()
     lane_todo_id = str(agent_lane_next_action.get("todo_id") or "").strip()
     if selected_todo and (not selected_todo_id or selected_todo_id != lane_todo_id):
         lines.append(f"- selected_todo: {compact_todo_identity(selected_todo)}")
     if agent_todo_summary:
         append_todo_summary("agent_todo", agent_todo_summary)
-    todo_write_hint = payload.get("todo_write_hint") if isinstance(payload.get("todo_write_hint"), dict) else {}
+    todo_write_hint = as_dict(payload.get("todo_write_hint"))
     if todo_write_hint:
         lines.append(f"- todo_write_hint: {todo_write_hint.get('rule')}")
         lines.append(f"- user_gate_command_template: `{todo_write_hint.get('user_gate_command_template')}`")
@@ -1326,7 +1213,7 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- agent_command: `{payload.get('agent_command')}`")
     if payload.get("next_handoff_condition"):
         lines.append(f"- next_handoff_condition: {payload.get('next_handoff_condition')}")
-    summary = payload.get("plan_summary") if isinstance(payload.get("plan_summary"), dict) else {}
+    summary = as_dict(payload.get("plan_summary"))
     states = summary.get("states") if isinstance(summary.get("states"), dict) else {}
     if summary:
         state_text = ", ".join(f"{state}={states.get(state, 0)}" for state in QUOTA_STATE_ORDER)
