@@ -115,6 +115,8 @@ def assert_workflow_shape(payload: dict[str, Any]) -> None:
     assert routes["comment_only"]["requires_user_gate_before_external_write"] is True
     feasibility = payload["feasibility_checkpoint_plan"]
     assert feasibility["selects_exactly_one_route"] is True, feasibility
+    assert feasibility["required_when_candidate_preflight_route"] == "proceed"
+    assert feasibility["non_proceed_receipt_stream"] == "candidate-preflight"
     assert feasibility["routes"] == ["fix_pr", "comment_only", "triage_only"]
     assert feasibility["writes_domain_state_by_default_with_goal_id"] is True
     assert feasibility["persists_repository_context_with_feasibility"] is True

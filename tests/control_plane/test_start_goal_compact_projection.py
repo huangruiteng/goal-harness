@@ -194,6 +194,8 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
             "status": "qualification_required",
             "state_owner": "issue_fix",
             "route_scope": "start_goal_bootstrap_only",
+            "candidate_receipt_stream": "candidate-preflight",
+            "feasibility_required_for_route": "proceed",
             "durable_reentry_fields": ["action_kind", "target_key"],
         },
         "activation_condition": (
@@ -212,10 +214,11 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert guard["admission_command_source"].endswith(
         "/commands/issue_fix_feasibility_template"
     )
-    assert guard["durable_successor_source"] == (
-        "admission_result.transition.projected_todo"
-    )
-    assert "exact successor Todo" in guard["completion_condition"]
+    assert guard["durable_successor_sources"] == {
+        "proceed": "admission_result.transition.projected_todo",
+        "non_proceed": "entry_result.ordered_loopx_todo_writeback_preview",
+    }
+    assert "for non-proceed" in guard["completion_condition"]
     assert "command_template" not in guard
     assert "admission_command_template" not in guard
     commands = payload["command_pack"]["commands"]
@@ -225,6 +228,7 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert "--fetch-candidate-evidence" in commands[
         route["entry_command_key"]
     ]
+    assert f"--goal-id {GOAL_ID}" in commands[route["entry_command_key"]]
     assert guard["candidate_preflight"]["required_before_implementation"] is True
     assert commands[route["admission_command_key"]].startswith(
         "loopx issue-fix feasibility "
@@ -239,6 +243,7 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert "--repository-context-json <compact-context.json>" in rendered
     assert "--fetch-candidate-evidence" in rendered
     assert "loopx issue-fix feasibility " in rendered
+    assert "proceed: `loopx issue-fix feasibility " in rendered
     assert "--reproduction-status <confirmed|planned|missing|blocked>" in rendered
     assert len(rendered.replace(str(project), "<project>")) <= 4_000
     todo_command = next(

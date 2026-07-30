@@ -227,6 +227,9 @@ def main() -> int:
     assert cli["ok"] is True, cli
     assert cli["candidate_fix_workflow_allowed"] is False, cli
     assert_reuse(cli["candidate_preflight"])
+    projection = cli["candidate_preflight"]["domain_state_projection"]
+    assert projection["write_performed"] is False, projection
+    assert projection["write_skipped_reason"] == "goal_id_or_ledger_path_missing"
     print("issue-fix-candidate-preflight-smoke: ok")
     return 0
 

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import contextlib
+import io
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 from loopx.capabilities.issue_fix.candidate_evidence import (
@@ -9,7 +13,10 @@ from loopx.capabilities.issue_fix.candidate_evidence import (
 from loopx.capabilities.issue_fix.candidate_preflight import (
     build_issue_fix_candidate_preflight_packet,
 )
-from loopx.cli import build_parser
+from loopx.cli import build_parser, main as cli_main
+from loopx.domain_packs.issue_fix import (
+    upsert_issue_fix_candidate_preflight_ledger_jsonl,
+)
 
 GENERATED_AT = "2026-07-30T12:00:00Z"
 
@@ -219,3 +226,77 @@ def test_workflow_cli_exposes_canonical_candidate_collector() -> None:
     )
     assert args.fetch_candidate_evidence is True
     assert args.candidate_evidence_timeout_seconds == 30
+
+
+def test_workflow_cli_persists_non_proceed_candidate_receipt(
+    tmp_path: Path,
+) -> None:
+    collected = build_public_github_candidate_preflight_input(
+        repo="volcengine/OpenViking",
+        issue_ref="#3274",
+        issue_state="OPEN",
+        closing_pull_requests=[
+            {
+                "number": 3281,
+                "state": "OPEN",
+                "url": "https://github.com/volcengine/OpenViking/pull/3281",
+                "headRefOid": "a" * 40,
+            }
+        ],
+        cross_referenced_pull_requests=[],
+        maintainer_comments=[],
+        generated_at=GENERATED_AT,
+        source_receipts=_source_receipts(),
+    )
+    output = io.StringIO()
+    with (
+        patch(
+            "loopx.capabilities.issue_fix.cli.collect_public_github_candidate_preflight_input",
+            return_value=collected,
+        ),
+        contextlib.redirect_stdout(output),
+    ):
+        exit_code = cli_main(
+            [
+                "--registry",
+                str(tmp_path / "registry.json"),
+                "--format",
+                "json",
+                "issue-fix",
+                "workflow-plan",
+                "--url",
+                "https://github.com/volcengine/OpenViking/issues/3274",
+                "--fetch-candidate-evidence",
+                "--goal-id",
+                "issue-fix-goal",
+                "--project",
+                str(tmp_path),
+            ]
+        )
+
+    assert exit_code == 0
+    packet = json.loads(output.getvalue())
+    preflight = packet["candidate_preflight"]
+    assert preflight["decision"]["route"] == "reuse_existing_pr"
+    assert preflight["domain_state_projection"]["write_performed"] is True
+    ledger = (
+        tmp_path
+        / ".loopx"
+        / "domain-state"
+        / "issue-fix-goal"
+        / "issue_fix"
+        / "candidate-preflight.jsonl"
+    )
+    rows = ledger.read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 1
+    durable = json.loads(rows[0])
+    assert durable["decision"]["route"] == "reuse_existing_pr"
+    assert durable["decision"]["existing_pr_refs"] == ["#3281"]
+    second_write = upsert_issue_fix_candidate_preflight_ledger_jsonl(
+        ledger,
+        durable,
+    )
+    assert second_write["status"] == "updated"
+    assert second_write["row_count"] == 1
+    assert len(ledger.read_text(encoding="utf-8").splitlines()) == 1
+    assert not ledger.with_name("feasibility.jsonl").exists()
