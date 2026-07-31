@@ -374,6 +374,13 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
     todo_parser.add_argument("--execute", action="store_true", help="For archive-completed, write the active-state edit.")
 
 
+def _todo_path_args(args: argparse.Namespace) -> dict[str, Path | None]:
+    return {
+        "project": Path(args.project).expanduser() if args.project else None,
+        "state_file": Path(args.state_file).expanduser() if args.state_file else None,
+    }
+
+
 def handle_todo_command(
     args: argparse.Namespace,
     *,
@@ -399,8 +406,7 @@ def handle_todo_command(
                 status=args.status,
                 todo_id=args.todo_id,
                 agent_id=args.agent_id,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 runtime_root_arg=runtime_root_arg,
             )
         elif args.todo_command == "add":
@@ -436,8 +442,7 @@ def handle_todo_command(
                     "next_due_at": args.next_due_at,
                     "expires_at": args.expires_at,
                 },
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "claim":
@@ -450,8 +455,7 @@ def handle_todo_command(
                 claimed_by=args.claimed_by,
                 agent_id=args.agent_id,
                 claim_only=True,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "update":
@@ -503,8 +507,7 @@ def handle_todo_command(
                     "expires_at": args.expires_at,
                 },
                 clear_claim=bool(args.clear_claim),
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "complete":
@@ -534,8 +537,7 @@ def handle_todo_command(
                 self_merged=bool(args.self_merged),
                 agent_id=args.agent_id,
                 authority_reason=args.authority_reason,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "supersede":
@@ -558,8 +560,7 @@ def handle_todo_command(
                 next_excluded_agents=args.next_excluded_agents,
                 agent_id=args.agent_id,
                 authority_reason=args.authority_reason,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "archive-completed":
@@ -569,8 +570,7 @@ def handle_todo_command(
                 goal_id=args.goal_id,
                 role=args.role or "agent",
                 max_active_done=args.max_active_done,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=not bool(args.execute),
             )
         elif args.todo_command == "suggest":
@@ -600,8 +600,7 @@ def handle_todo_command(
                 required_capabilities=args.required_capabilities,
                 target_capabilities=args.target_capabilities,
                 required_decision_scopes=args.required_decision_scopes,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         else:

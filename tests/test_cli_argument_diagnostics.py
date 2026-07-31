@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from loopx.cli import build_parser, main, output_format, resolve_global_output_format
+from loopx.cli_commands import todo as todo_command
 from loopx.cli_commands.quota import _validate_quota_command_request
 from loopx.cli_commands.todo_argument_validation import (
     validate_todo_add_options,
@@ -17,6 +19,66 @@ from loopx.cli_commands.todo_argument_validation import (
     validate_todo_supersede_options,
     validate_todo_update_options,
 )
+
+
+def test_todo_handler_expands_shared_paths_and_keeps_suggest_project_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    captured_list: dict[str, object] = {}
+    captured_suggest: dict[str, object] = {}
+
+    def fake_list_goal_todos(**kwargs: object) -> dict[str, object]:
+        captured_list.update(kwargs)
+        return {"ok": True, "dry_run": True}
+
+    def fake_suggestion_packet(**kwargs: object) -> dict[str, object]:
+        captured_suggest.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(todo_command, "list_goal_todos", fake_list_goal_todos)
+    monkeypatch.setattr(
+        todo_command,
+        "build_todo_suggestion_prompt_packet",
+        fake_suggestion_packet,
+    )
+    common = {
+        "registry_path": tmp_path / "registry.json",
+        "runtime_root_arg": None,
+        "print_payload": lambda *_args: None,
+        "append_cli_rollout_event": lambda *_args, **_kwargs: {},
+    }
+
+    list_args = build_parser().parse_args(
+        [
+            "todo",
+            "list",
+            "--goal-id",
+            "example-goal",
+            "--project",
+            "~/project",
+            "--state-file",
+            "~/ACTIVE_GOAL_STATE.md",
+        ]
+    )
+    assert todo_command.handle_todo_command(list_args, **common) == 0
+    assert captured_list["project"] == tmp_path / "project"
+    assert captured_list["state_file"] == tmp_path / "ACTIVE_GOAL_STATE.md"
+
+    suggest_args = build_parser().parse_args(
+        [
+            "todo",
+            "suggest",
+            "--goal-id",
+            "example-goal",
+            "--project",
+            "~/project",
+        ]
+    )
+    assert todo_command.handle_todo_command(suggest_args, **common) == 0
+    assert captured_suggest["project"] == tmp_path / "project"
+    assert "state_file" not in captured_suggest
 
 
 @pytest.mark.parametrize(
