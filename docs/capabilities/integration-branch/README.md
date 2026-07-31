@@ -28,6 +28,11 @@ Source order is significant. `configure` validates all refs but writes only
 `.loopx/integration-branch.json`. A different existing plan requires explicit
 `--replace`, which also clears its old sync receipt.
 
+An alternate `--plan-file` must still resolve below the repository's `.loopx/`
+state root. Paths outside that root, traversal, and symlink escapes fail closed.
+The selected path must also be untracked and covered by the repository's ignore
+rules so the reported local ignored-state boundary remains true.
+
 ## Detect review drift
 
 ```bash

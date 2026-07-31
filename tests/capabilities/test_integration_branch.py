@@ -40,6 +40,7 @@ def _repository(tmp_path: Path) -> Path:
     _git(repo, "init", "-b", "main")
     _git(repo, "config", "user.name", "LoopX Test")
     _git(repo, "config", "user.email", "loopx@example.invalid")
+    _commit(repo, ".gitignore", ".loopx/\n", "ignore LoopX state")
     _commit(repo, "shared.txt", "base\n", "base")
 
     _git(repo, "switch", "-c", "feature-a")
@@ -86,6 +87,67 @@ def test_configure_is_preview_first_and_idempotent(tmp_path: Path) -> None:
             repo_path=repo,
             base_ref="main",
             integration_branch="main",
+            source_refs=["feature-a"],
+        )
+
+
+def test_plan_file_must_remain_under_loopx_state_root(tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    outside_plan = tmp_path / "outside.json"
+
+    for plan_file in (outside_plan, Path(".loopx/../outside.json")):
+        with pytest.raises(IntegrationBranchError, match="must remain under"):
+            configure_integration_branch(
+                repo_path=repo,
+                base_ref="main",
+                integration_branch="codex/local-integration",
+                source_refs=["feature-a"],
+                plan_file=plan_file,
+                execute=True,
+            )
+    assert not outside_plan.exists()
+
+    configured = configure_integration_branch(
+        repo_path=repo,
+        base_ref="main",
+        integration_branch="codex/local-integration",
+        source_refs=["feature-a"],
+        plan_file=Path(".loopx/custom-integration.json"),
+        execute=True,
+    )
+    assert Path(configured["plan_file"]).is_file()
+
+
+def test_plan_file_rejects_symlink_escape(tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    state_root = repo / ".loopx"
+    state_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (state_root / "escape").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(IntegrationBranchError, match="must remain under"):
+        configure_integration_branch(
+            repo_path=repo,
+            base_ref="main",
+            integration_branch="codex/local-integration",
+            source_refs=["feature-a"],
+            plan_file=Path(".loopx/escape/integration.json"),
+            execute=True,
+        )
+    assert not (outside / "integration.json").exists()
+
+
+def test_plan_file_must_be_ignored_local_state(tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    _git(repo, "rm", ".gitignore")
+    _git(repo, "commit", "-m", "stop ignoring LoopX state")
+
+    with pytest.raises(IntegrationBranchError, match="must be ignored"):
+        configure_integration_branch(
+            repo_path=repo,
+            base_ref="main",
+            integration_branch="codex/local-integration",
             source_refs=["feature-a"],
         )
 
@@ -287,3 +349,38 @@ def test_cli_configure_and_status_json(tmp_path: Path, capsys) -> None:
     status = json.loads(capsys.readouterr().out)
     assert status["status"] == "drifted"
     assert status["drift_reasons"] == [{"kind": "never_synced"}]
+
+
+def test_cli_rejects_plan_file_outside_loopx_state_root(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = _repository(tmp_path)
+    outside_plan = tmp_path / "outside.json"
+
+    assert (
+        main(
+            [
+                "--format",
+                "json",
+                "integration-branch",
+                "configure",
+                "--repo-path",
+                str(repo),
+                "--base-ref",
+                "main",
+                "--integration-branch",
+                "codex/local-integration",
+                "--source-branch",
+                "feature-a",
+                "--plan-file",
+                str(outside_plan),
+                "--execute",
+            ]
+        )
+        == 2
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "invalid_state"
+    assert "must remain under" in payload["error"]
+    assert not outside_plan.exists()

@@ -44,12 +44,44 @@ def _repository_root(repo_path: str | Path) -> Path:
 
 
 def _plan_path(repo: Path, plan_file: str | Path | None) -> Path:
+    state_root = (repo / ".loopx").resolve()
+    if not state_root.is_relative_to(repo):
+        raise IntegrationBranchError(
+            "repository `.loopx` state root must not resolve outside the repository"
+        )
     if plan_file is None:
-        return repo / DEFAULT_PLAN_PATH
+        return state_root / DEFAULT_PLAN_PATH.name
     candidate = Path(plan_file).expanduser()
-    return (
+    resolved = (
         candidate.resolve() if candidate.is_absolute() else (repo / candidate).resolve()
     )
+    if resolved == state_root or not resolved.is_relative_to(state_root):
+        raise IntegrationBranchError(
+            "integration branch plan must remain under the repository `.loopx` "
+            "state root"
+        )
+    return resolved
+
+
+def _assert_ignored_plan(repo: Path, path: Path) -> None:
+    relative = path.relative_to(repo).as_posix()
+    tracked = _git(
+        repo,
+        "ls-files",
+        "--error-unmatch",
+        "--",
+        relative,
+        check=False,
+    )
+    if tracked.returncode == 0:
+        raise IntegrationBranchError(
+            "integration branch plan must be local ignored state, not a tracked file"
+        )
+    ignored = _git(repo, "check-ignore", "--quiet", "--", relative, check=False)
+    if ignored.returncode != 0:
+        raise IntegrationBranchError(
+            "integration branch plan must be ignored by the repository before use"
+        )
 
 
 def _resolve_commit(repo: Path, ref: str) -> str:
@@ -264,6 +296,7 @@ def configure_integration_branch(
 ) -> dict[str, Any]:
     repo = _repository_root(repo_path)
     path = _plan_path(repo, plan_file)
+    _assert_ignored_plan(repo, path)
     plan = _validate_plan(
         repo,
         {
@@ -316,6 +349,7 @@ def integration_branch_status(
 ) -> dict[str, Any]:
     repo = _repository_root(repo_path)
     path = _plan_path(repo, plan_file)
+    _assert_ignored_plan(repo, path)
     plan = _read_plan(repo, path)
     resolved = _resolved_state(repo, plan)
     reasons = _drift_reasons(plan, resolved)
@@ -551,6 +585,7 @@ def sync_integration_branch(
         plan=status["plan"],
         resolved=resolved,
     )
+    _assert_ignored_plan(repo, Path(status["plan_file"]))
     branch_updated = candidate_sha != resolved["integration"]["sha"]
     if branch_updated:
         _update_integration_branch(
