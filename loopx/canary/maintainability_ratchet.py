@@ -44,22 +44,6 @@ def _exception(
     }
 
 
-_EXISTING_DECISION_DEBT_REASON = (
-    "Existing multi-branch control-plane decision owner predates the ratchet."
-)
-_OVERSIZED_DECISION_RETIREMENT_PLANS = {
-    "loopx.quota:build_quota_should_run": (
-        "Continue decomposing the public quota facade into bounded decision stages."
-    ),
-}
-
-_OVERSIZED_DECISION_METRIC_CEILINGS = {
-    "loopx.quota:build_quota_should_run": {
-        "statements": 205,
-        "decision_points": 140,
-    },
-}
-
 REVIEWED_MAINTAINABILITY_EXCEPTIONS: dict[str, dict[str, Any]] = {
     "compatibility_facade:loopx.quota": _exception(
         "The public loopx.quota import surface remains a supported compatibility contract, "
@@ -72,14 +56,6 @@ REVIEWED_MAINTAINABILITY_EXCEPTIONS: dict[str, dict[str, Any]] = {
         "Keep internal consumers on canonical modules and shrink exports as callers migrate.",
         metric_ceilings={"package_reexport_count": 117, "source_module_count": 50},
     ),
-    **{
-        f"oversized_decision_function:{symbol}": _exception(
-            _EXISTING_DECISION_DEBT_REASON,
-            retirement_plan,
-            metric_ceilings=_OVERSIZED_DECISION_METRIC_CEILINGS[symbol],
-        )
-        for symbol, retirement_plan in _OVERSIZED_DECISION_RETIREMENT_PLANS.items()
-    },
 }
 
 
