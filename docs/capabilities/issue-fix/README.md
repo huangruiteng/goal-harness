@@ -504,6 +504,7 @@ compatibility facade.
 | Acceptance fixture | `loopx issue-fix acceptance-fixture` | Prove failure-before, minimal patch, and pass-after in a deterministic fixture. |
 | Git branch fixture | `loopx issue-fix repo-branch-fixture` | Exercise the same repair contract through a temporary git branch. |
 | Caller repo branch | `loopx issue-fix caller-repo-branch` | Inspect an approved local repo, create/claim an issue branch, and run caller-declared validation. |
+| Sequential portfolio | `loopx issue-fix portfolio-plan` | Compose an explicit issue list into chained advancement todos: issue 1 runs immediately, issues 2..N stay deferred behind `resume_when=todo_done:<previous issue todo id>` and resume after the previous issue reaches a PR-ready or terminal disposition. Reuses the single-issue workflow-plan builder per candidate and adds no second ledger. |
 | Content bridge | `loopx content-ops issue-fix-*` | Reuse body-free public metadata/intake boundaries. |
 | Visible projection | `status`, `lark-kanban`, dashboard | Derive human-visible issue work, outcomes, gates, and Monthly Impact from the same kernel/domain state without becoming a second source of truth. |
 | Projection source reconcile | `lark-kanban sync-projection --reconcile-source` | Keep normal sync non-destructive; only a caller-attested complete source snapshot may preview and explicitly retire remote orphan rows plus stale local record mappings within that exact namespace. |
@@ -827,6 +828,44 @@ loopx start-goal --guided --project . \
 The conversational entry does not bypass issue selection, authority, or
 validation. It creates the durable goal/todo/host-loop route from which the
 issue-fix commands below can be executed.
+
+## Sequential Portfolio
+
+`loopx issue-fix portfolio-plan` turns an explicit list of issues into a
+sequential portfolio so a long-running employee can work through them one at a
+time without an operator re-pointing the loop at each issue. It is the first
+slice of the longer-term multi-repository portfolio roadmap item: sequential,
+single-repository or mixed-repository, explicit issue list. Automatic issue
+ranking/selection and bounded concurrency remain future work and are not
+introduced here.
+
+```bash
+loopx issue-fix portfolio-plan \
+  --repo owner/repo --issues 5,7,12 \
+  --goal-id <goal-id> --agent-id <agent-id> \
+  --repo-path /path/to/approved/repo --base-branch origin/main \
+  --execute
+```
+
+Each candidate reuses the single-issue `workflow-plan` builder for body-free
+metadata intake and branch grounding; the portfolio emits only compact
+candidate rows plus a chained todo preview. With `--execute`, it writes one
+`issue_fix_portfolio_advancement` advancement todo per issue:
+
+- issue 1 is written `open` and claimed by `--agent-id`, so it is immediately
+  runnable;
+- issues 2..N are written `deferred` with
+  `resume_when=todo_done:<previous issue todo id>`.
+
+When the agent marks an issue's todo done (PR created, or `comment_only` /
+`triage_only` terminal disposition), the next issue's `todo_done` resume
+condition becomes satisfied and the existing deferred-resume frontier advances
+it on a later bounded turn. Each PR keeps its own `continuous_monitor` todo so
+unmerged PRs coexist quietly while the next issue advances; the heartbeat stays
+generic and discovers portfolio work through ordinary status/quota/todo
+projection. The portfolio adds no parallel ledger: feasibility rows remain
+keyed by `{repo, issue_ref}` in the existing issue-fix domain state and are
+written lazily by the agent as each issue advances.
 
 ## Feasibility Decision
 
