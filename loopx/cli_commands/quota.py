@@ -618,36 +618,36 @@ def _quota_failure_payload(
             "fix quota/status collection before spending automatic compute"
         ),
     }
-    command_fields = {
-        "monitor-poll": {
-            "source": args.source,
-            "agent_id": args.agent_id,
-            "todo_id": args.todo_id,
-            "target_key": args.target_key,
-            "result_hash": args.result_hash,
-            "material_change": bool(args.material_change),
-        },
-        "scheduler-ack": {
-            "agent_id": args.agent_id,
-            "surface": args.surface,
-            "state_key": args.state_key,
-            "applied_rrule": args.applied_rrule,
-        },
-        "scheduler-ack-current": {
-            "agent_id": args.agent_id,
-            "surface": args.surface,
-            "state_key": args.state_key,
-            "applied_rrule": args.applied_rrule,
-        },
-        "scheduler-fail-current": {
-            "agent_id": args.agent_id,
-            "surface": args.surface,
-            "state_key": args.state_key,
-            "failed_rrule": args.failed_rrule,
-            "failure_kind": args.failure_kind,
-        },
-    }
-    payload.update(command_fields.get(command, {}))
+    if command == "monitor-poll":
+        payload.update(
+            {
+                "source": args.source,
+                "agent_id": args.agent_id,
+                "todo_id": args.todo_id,
+                "target_key": args.target_key,
+                "result_hash": args.result_hash,
+                "material_change": bool(args.material_change),
+            }
+        )
+    elif command in {"scheduler-ack", "scheduler-ack-current"}:
+        payload.update(
+            {
+                "agent_id": args.agent_id,
+                "surface": args.surface,
+                "state_key": args.state_key,
+                "applied_rrule": args.applied_rrule,
+            }
+        )
+    elif command == "scheduler-fail-current":
+        payload.update(
+            {
+                "agent_id": args.agent_id,
+                "surface": args.surface,
+                "state_key": args.state_key,
+                "failed_rrule": args.failed_rrule,
+                "failure_kind": args.failure_kind,
+            }
+        )
     return payload
 
 
