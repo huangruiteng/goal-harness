@@ -152,7 +152,7 @@ def test_plan_file_must_be_ignored_local_state(tmp_path: Path) -> None:
         )
 
 
-def test_sync_detects_review_updates_and_rebuilds_exact_heads(
+def test_sync_detects_review_updates_and_reconciles_exact_heads(
     tmp_path: Path,
 ) -> None:
     repo = _repository(tmp_path)
@@ -196,6 +196,7 @@ def test_sync_detects_review_updates_and_rebuilds_exact_heads(
 
     resynced = sync_integration_branch(repo_path=repo, execute=True)
     assert resynced["status"] == "synced"
+    assert resynced["candidate_source"] == "incremental"
     assert resynced["candidate_sha"] != first_integration_head
     _git(
         repo,
@@ -206,6 +207,23 @@ def test_sync_detects_review_updates_and_rebuilds_exact_heads(
     )
     assert _git(repo, "rev-parse", "feature-a") == updated_source_head
     assert integration_branch_status(repo_path=repo)["status"] == "in_sync"
+
+    _git(repo, "switch", "feature-a")
+    (repo / "a.txt").write_text("a3\n", encoding="utf-8")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "--amend", "--no-edit")
+    rebased_source_head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "switch", "main")
+
+    rebuilt = sync_integration_branch(repo_path=repo, execute=True)
+    assert rebuilt["candidate_source"] == "built"
+    _git(
+        repo,
+        "merge-base",
+        "--is-ancestor",
+        rebased_source_head,
+        "codex/local-integration",
+    )
 
 
 def test_merge_conflict_keeps_previous_integration_head(tmp_path: Path) -> None:
@@ -256,8 +274,26 @@ def test_merge_conflict_keeps_previous_integration_head(tmp_path: Path) -> None:
     )
     assert synced["status"] == "synced"
     assert synced["candidate_sha"] == resolved_head
-    assert synced["status_packet"]["plan"]["last_sync"]["candidate_source"] == "supplied"
+    assert (
+        synced["status_packet"]["plan"]["last_sync"]["candidate_source"] == "supplied"
+    )
     assert integration_branch_status(repo_path=repo)["status"] == "in_sync"
+
+    _git(repo, "switch", "feature-a")
+    updated_source_head = _commit(repo, "a.txt", "a2\n", "review fix")
+    _git(repo, "switch", "main")
+
+    resynced = sync_integration_branch(repo_path=repo, execute=True)
+    assert resynced["status"] == "synced"
+    assert resynced["candidate_source"] == "incremental"
+    assert _git(repo, "show", "codex/local-integration:shared.txt") == "resolved"
+    _git(
+        repo,
+        "merge-base",
+        "--is-ancestor",
+        updated_source_head,
+        "codex/local-integration",
+    )
 
 
 def test_adopt_current_integration_head_without_touching_worktree(

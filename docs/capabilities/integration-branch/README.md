@@ -8,7 +8,7 @@ Long-running repository work often has two simultaneous truths:
 
 `integration-branch-reconcile` makes the second truth machine-readable. It
 stores an ordered plan under ignored `.loopx/` state, compares current refs
-with the last successful sync receipt, and rebuilds the integration branch
+with the last successful sync receipt, and reconciles the integration branch
 through a temporary detached worktree.
 
 ## Configure
@@ -51,10 +51,14 @@ loopx integration-branch sync --repo-path . --format json
 loopx integration-branch sync --repo-path . --execute --format json
 ```
 
-Both paths build the candidate by merging the resolved source SHAs in order
-from the resolved base SHA. Preview removes its temporary worktree without
-changing refs. Execute updates the local integration branch only after every
-merge succeeds, then writes and rereads the receipt.
+After the first sync, a source branch that only advances to a descendant is
+merged onto the last verified integration head. This preserves earlier merge
+and conflict-resolution decisions while incorporating the reviewed update. If
+the base, source set, integration head, or source ancestry no longer matches
+the receipt, LoopX rebuilds from the resolved base and all source SHAs in
+order. Preview removes its temporary worktree without changing refs. Execute
+updates the local integration branch only after every merge succeeds, then
+writes and rereads the receipt.
 
 Rebuilding merge commits can change `candidate_sha` timestamps between preview
 and execute. Compare `candidate_tree_sha` for stable content identity; execute

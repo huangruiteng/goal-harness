@@ -391,7 +391,9 @@ def _clean_worktree(path: Path) -> bool:
 
 def _build_candidate(
     repo: Path,
-    resolved: Mapping[str, Any],
+    *,
+    start_sha: str,
+    sources: Sequence[Mapping[str, Any]],
 ) -> tuple[str | None, dict[str, Any] | None]:
     temporary_root = Path(tempfile.mkdtemp(prefix="loopx-integration-branch-"))
     worktree = temporary_root / "candidate"
@@ -404,10 +406,10 @@ def _build_candidate(
             "--detach",
             "--quiet",
             str(worktree),
-            resolved["base"]["sha"],
+            start_sha,
         )
         added = True
-        for source in resolved["sources"]:
+        for source in sources:
             result = _git(
                 worktree,
                 "-c",
@@ -432,6 +434,60 @@ def _build_candidate(
         if added:
             _git(repo, "worktree", "remove", "--force", str(worktree), check=False)
         shutil.rmtree(temporary_root, ignore_errors=True)
+
+
+def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    return (
+        _git(
+            repo,
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+def _incremental_sources(
+    repo: Path,
+    *,
+    plan: Mapping[str, Any],
+    resolved: Mapping[str, Any],
+) -> list[Mapping[str, Any]] | None:
+    receipt = plan.get("last_sync")
+    if not isinstance(receipt, Mapping):
+        return None
+    integration_sha = resolved["integration"]["sha"]
+    if (
+        not isinstance(integration_sha, str)
+        or receipt.get("integration_sha") != integration_sha
+        or receipt.get("base_sha") != resolved["base"]["sha"]
+    ):
+        return None
+
+    receipt_sources = receipt.get("sources")
+    if not isinstance(receipt_sources, list) or len(receipt_sources) != len(
+        resolved["sources"]
+    ):
+        return None
+
+    moved: list[Mapping[str, Any]] = []
+    for previous, current in zip(receipt_sources, resolved["sources"], strict=True):
+        if not isinstance(previous, Mapping) or previous.get("ref") != current["ref"]:
+            return None
+        previous_sha = previous.get("sha")
+        if previous_sha == current["sha"]:
+            continue
+        if not isinstance(previous_sha, str) or not _is_ancestor(
+            repo,
+            previous_sha,
+            str(current["sha"]),
+        ):
+            return None
+        moved.append(current)
+    return moved or None
 
 
 def _update_integration_branch(
@@ -491,10 +547,7 @@ def _resolve_supplied_candidate(
     candidate_sha = _resolve_commit(repo, candidate_ref)
     required_inputs = [
         ("base", resolved["base"]["ref"], resolved["base"]["sha"]),
-        *[
-            ("source", source["ref"], source["sha"])
-            for source in resolved["sources"]
-        ],
+        *[("source", source["ref"], source["sha"]) for source in resolved["sources"]],
     ]
     for kind, ref, sha in required_inputs:
         result = _git(
@@ -550,7 +603,23 @@ def sync_integration_branch(
             resolved=resolved,
         )
     else:
-        candidate_sha, failure = _build_candidate(repo, resolved)
+        incremental_sources = _incremental_sources(
+            repo,
+            plan=status["plan"],
+            resolved=resolved,
+        )
+        if incremental_sources is not None:
+            candidate_source = "incremental"
+            start_sha = str(resolved["integration"]["sha"])
+            sources = incremental_sources
+        else:
+            start_sha = str(resolved["base"]["sha"])
+            sources = resolved["sources"]
+        candidate_sha, failure = _build_candidate(
+            repo,
+            start_sha=start_sha,
+            sources=sources,
+        )
         if failure is not None:
             return {
                 "ok": False,
