@@ -91,6 +91,11 @@ from .workflow_plan import (
     build_issue_fix_workflow_plan_packet,
     render_issue_fix_workflow_plan_markdown,
 )
+from .portfolio import (
+    apply_issue_fix_portfolio,
+    build_issue_fix_portfolio_packet,
+    render_issue_fix_portfolio_markdown,
+)
 
 
 PrintPayload = Callable[
@@ -919,6 +924,107 @@ def register_issue_fix_commands(
     )
     _add_generated_at_arg(caller_branch_parser, artifact="the artifact")
 
+    portfolio_parser = issue_fix_sub.add_parser(
+        "portfolio-plan",
+        help=(
+            "Plan a sequential portfolio of issues as chained advancement todos. "
+            "Issue 1 runs immediately; issues 2..N resume after the previous issue "
+            "reaches a PR-ready or terminal disposition."
+        ),
+    )
+    add_subcommand_format(portfolio_parser)
+    portfolio_parser.add_argument(
+        "--repo",
+        default=None,
+        help=(
+            "Public-safe repository label (owner/repo) used with --issues when no "
+            "--url is provided. Required with --issues."
+        ),
+    )
+    portfolio_parser.add_argument(
+        "--issues",
+        default=None,
+        help=(
+            "Comma-separated issue numbers to fix in --repo, e.g. 5,7,12. "
+            "Combined with --url entries; at least one source is required."
+        ),
+    )
+    portfolio_parser.add_argument(
+        "--url",
+        action="append",
+        default=None,
+        help=(
+            "Public https://github.com/owner/repo/issues/123 URL. Repeat for "
+            "multiple issues. Combined with --issues; at least one source is "
+            "required."
+        ),
+    )
+    portfolio_parser.add_argument(
+        "--fetch-metadata",
+        action="store_true",
+        help=(
+            "Fetch body-free public GitHub metadata for each candidate issue with "
+            "gh api --jq. Only body-free fields are captured."
+        ),
+    )
+    portfolio_parser.add_argument(
+        "--fetch-timeout-seconds",
+        type=int,
+        default=10,
+        help="Per-candidate timeout for --fetch-metadata.",
+    )
+    portfolio_parser.add_argument(
+        "--repo-path",
+        default=None,
+        help=(
+            "Optional caller-approved local git repository path shared by all "
+            "candidates. Planning keeps this as a dry-run and never records the path."
+        ),
+    )
+    portfolio_parser.add_argument(
+        "--base-branch",
+        default="main",
+        help="Approved local base branch for the eventual issue branches.",
+    )
+    portfolio_parser.add_argument(
+        "--validation-label",
+        default="caller-declared validation",
+        help="Public-safe validation label stored in each candidate workflow plan.",
+    )
+    portfolio_parser.add_argument(
+        "--required-write-scope",
+        action="append",
+        default=None,
+        help=(
+            "Optional write-scope glob attached to every advancement todo for "
+            "future bounded-concurrency boundaries. Repeat for multiple scopes."
+        ),
+    )
+    portfolio_parser.add_argument(
+        "--goal-id",
+        default=None,
+        help="Goal id required to write the chained todos with --execute.",
+    )
+    portfolio_parser.add_argument(
+        "--agent-id",
+        default=None,
+        help="Registered agent id that claims issue 1 with --execute.",
+    )
+    portfolio_parser.add_argument(
+        "--project",
+        default=".",
+        help="Project root used to resolve the goal todo state with --execute.",
+    )
+    portfolio_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help=(
+            "Write the chained advancement todos. Without this flag, return a "
+            "read-only portfolio plan."
+        ),
+    )
+    _add_generated_at_arg(portfolio_parser, artifact="the portfolio plan")
+
 
 def handle_issue_fix_command(
     args: argparse.Namespace,
@@ -1726,6 +1832,51 @@ def handle_issue_fix_command(
                 generated_at=generated_at,
             )
             renderer = render_issue_fix_acceptance_loop_markdown
+        elif args.issue_fix_command == "portfolio-plan":
+            candidate_inputs: list[dict[str, Any]] = []
+            if args.issues:
+                if not args.repo:
+                    raise ValueError("--issues requires an explicit --repo owner/repo")
+                for token in args.issues.split(","):
+                    number = token.strip()
+                    if not number:
+                        continue
+                    if not number.isdigit():
+                        raise ValueError(
+                            "--issues entries must be numeric issue numbers"
+                        )
+                    candidate_inputs.append({"repo": args.repo, "issue_number": number})
+            for url in args.url or []:
+                url = str(url).strip()
+                if url:
+                    candidate_inputs.append({"url": url})
+            if not candidate_inputs:
+                raise ValueError("portfolio-plan requires --issues or --url")
+            plan = build_issue_fix_portfolio_packet(
+                candidate_inputs=candidate_inputs,
+                fetch_metadata=args.fetch_metadata,
+                fetch_timeout_seconds=args.fetch_timeout_seconds,
+                repo_path=args.repo_path,
+                base_branch=args.base_branch,
+                validation_label=args.validation_label,
+                generated_at=generated_at,
+            )
+            if args.execute:
+                if not args.goal_id:
+                    raise ValueError("--execute requires --goal-id")
+                if not args.agent_id:
+                    raise ValueError("--execute requires --agent-id")
+                payload = apply_issue_fix_portfolio(
+                    registry_path=registry_path or Path.cwd(),
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    candidates=plan.get("candidates") or [],
+                    required_write_scopes=args.required_write_scope,
+                    project=Path(args.project) if args.project else None,
+                )
+            else:
+                payload = plan
+            renderer = render_issue_fix_portfolio_markdown
         else:
             raise ValueError(
                 "issue-fix requires `repository-memory-sync`, `promote-discovered-issue`, "
@@ -1734,7 +1885,7 @@ def handle_issue_fix_command(
                 "`metrics-supplement`, "
                 "`repository-snapshot`, `reviewer-plan`, "
                 "`reviewer-request`, `reviewer-notification-drain`, "
-                "`repo-branch-fixture`, or `caller-repo-branch`"
+                "`repo-branch-fixture`, `caller-repo-branch`, or `portfolio-plan`"
             )
     except Exception as exc:
         payload = {
