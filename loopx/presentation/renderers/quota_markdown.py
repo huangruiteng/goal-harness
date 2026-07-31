@@ -51,6 +51,131 @@ def _append_fallback_projection_markdown(
         lines.append(f"- {label}_action: {fallback.get('recommended_action')}")
 
 
+def _compact_todo_identity(todo: dict[str, Any]) -> str:
+    return " ".join(
+        f"{key}={value}"
+        for key in ("todo_id", "status", "priority", "task_class", "action_kind")
+        if (value := str(todo.get(key) or "").strip())
+    )
+
+
+def _render_todo_row(todo: Any, *, label: str, row_kind: str) -> tuple[tuple[str, Any, str], str] | None:
+    if not isinstance(todo, dict):
+        return None
+    text = str(todo.get("text") or "").strip()
+    if not text:
+        return None
+    index = todo.get("index")
+    suffix = f"[{index}]" if index is not None else ""
+    metadata = ""
+    if row_kind == "next" and label == "agent_todo" and todo.get("todo_id"):
+        metadata = f" todo_id={todo.get('todo_id')}"
+    elif todo.get("claimed_by"):
+        metadata = f" claimed_by={todo.get('claimed_by')}"
+    key = (str(todo.get("todo_id") or ""), todo.get("index"), text)
+    return key, f"- {label}_{row_kind}{suffix}: {text}{metadata}"
+
+
+def _append_todo_summary(lines: list[str], label: str, summary: dict[str, Any]) -> None:
+    summary_parts = [
+        f"open={summary.get('open_count')}",
+        f"total={summary.get('total_count')}",
+    ]
+    if summary.get("claimed_open_count"):
+        summary_parts[1:1] = [
+            f"claimed={summary.get('claimed_open_count')}",
+            f"unclaimed={summary.get('unclaimed_open_count', 0)}",
+        ]
+    for key, name in (
+        ("monitor_due_count", "monitor_due"),
+        ("monitor_schedule_gap_count", "monitor_schedule_gap"),
+        ("current_agent_blocker_count", "current_agent_blocker"),
+        ("completed_without_successor_count", "succession_warning"),
+    ):
+        if summary.get(key):
+            summary_parts.append(f"{name}={summary.get(key)}")
+    lines.append(f"- {label}_summary: {' '.join(summary_parts)}")
+
+    for lane, suffix, limit in (
+        ("unclaimed_priority_open_items", "unclaimed_candidates", 3),
+        ("monitor_due_items", "monitor_due", 1),
+        ("monitor_capability_blocked_due_items", "monitor_capability_blocked_due", 2),
+        ("monitor_schedule_gap_items", "monitor_schedule_gap", 1),
+        ("current_agent_blocker_items", "current_agent_blocker", 2),
+    ):
+        lane_items = as_list(summary.get(lane))
+        identities = [
+            (
+                f"{_compact_todo_identity(item)} "
+                f"reason={str(item.get('reason') or '').strip()[:120]}"
+                if lane == "current_agent_blocker_items"
+                and str(item.get("reason") or "").strip()
+                else _compact_todo_identity(item)
+            )
+            for item in lane_items[:limit]
+            if isinstance(item, dict) and item.get("todo_id")
+        ]
+        if identities:
+            lines.append(f"- {label}_{suffix}: {'; '.join(identities)}")
+
+    succession_warning = as_dict(summary.get("todo_succession_warning"))
+    if succession_warning:
+        projected_todo_ids = as_list(succession_warning.get("todo_ids"))
+        warning_items = as_list(succession_warning.get("items"))
+        todo_ids = [
+            str(todo_id)
+            for todo_id in projected_todo_ids[:3]
+            if str(todo_id or "").strip()
+        ] or [
+            str(item.get("todo_id"))
+            for item in warning_items[:3]
+            if isinstance(item, dict) and item.get("todo_id")
+        ]
+        todo_ids_text = ",".join(todo_ids) if todo_ids else "n/a"
+        lines.append(
+            f"- {label}_succession_warning: "
+            f"reason={succession_warning.get('reason_code')} "
+            f"count={succession_warning.get('count')} "
+            f"todo_ids={todo_ids_text}"
+        )
+
+    first_open_key = (
+        "first_executable_items"
+        if label == "agent_todo"
+        and isinstance(summary.get("first_executable_items"), list)
+        else "first_open_items"
+    )
+    first_open = list(as_list(summary.get(first_open_key)))
+    if label == "user_todo" and isinstance(summary.get("user_action_items"), list):
+        first_open.extend(
+            item
+            for item in summary.get("user_action_items", [])
+            if isinstance(item, dict)
+        )
+    for todo in first_open[:3]:
+        if row := _render_todo_row(todo, label=label, row_kind="next"):
+            lines.append(row[1])
+
+    first_keys = {
+        (
+            str(todo.get("todo_id") or ""),
+            todo.get("index"),
+            str(todo.get("text") or "").strip(),
+        )
+        for todo in first_open
+        if isinstance(todo, dict)
+    }
+    extra_count = 0
+    for todo in as_list(summary.get("backlog_items")):
+        row = _render_todo_row(todo, label=label, row_kind="backlog")
+        if row is None or row[0] in first_keys:
+            continue
+        lines.append(row[1])
+        extra_count += 1
+        if extra_count >= 5:
+            break
+
+
 def render_quota_markdown(payload: dict[str, Any]) -> str:
     title = "Quota Plan" if payload.get("mode") == "plan" else "Quota Status"
     lines = [
@@ -602,147 +727,6 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
     if control_plane := as_dict(payload.get("control_plane")):
         lines.append(f"- control_plane: {control_plane_policy_summary(control_plane)}")
 
-    def compact_todo_identity(todo: dict[str, Any]) -> str:
-        parts: list[str] = []
-        for key in ("todo_id", "status", "priority", "task_class", "action_kind"):
-            value = str(todo.get(key) or "").strip()
-            if value:
-                parts.append(f"{key}={value}")
-        return " ".join(parts)
-
-    def append_todo_summary(label: str, summary: dict[str, Any]) -> None:
-        summary_parts = [
-            f"open={summary.get('open_count')}",
-            f"total={summary.get('total_count')}",
-        ]
-        if summary.get("claimed_open_count"):
-            summary_parts.insert(1, f"claimed={summary.get('claimed_open_count')}")
-            summary_parts.insert(2, f"unclaimed={summary.get('unclaimed_open_count', 0)}")
-        if summary.get("monitor_due_count"):
-            summary_parts.append(f"monitor_due={summary.get('monitor_due_count')}")
-        if summary.get("monitor_schedule_gap_count"):
-            summary_parts.append(
-                f"monitor_schedule_gap={summary.get('monitor_schedule_gap_count')}"
-            )
-        if summary.get("current_agent_blocker_count"):
-            summary_parts.append(
-                f"current_agent_blocker={summary.get('current_agent_blocker_count')}"
-            )
-        if summary.get("completed_without_successor_count"):
-            summary_parts.append(
-                f"succession_warning={summary.get('completed_without_successor_count')}"
-            )
-        lines.append(f"- {label}_summary: {' '.join(summary_parts)}")
-        for lane, suffix, limit in (
-            ("unclaimed_priority_open_items", "unclaimed_candidates", 3),
-            ("monitor_due_items", "monitor_due", 1),
-            (
-                "monitor_capability_blocked_due_items",
-                "monitor_capability_blocked_due",
-                2,
-            ),
-            ("monitor_schedule_gap_items", "monitor_schedule_gap", 1),
-            ("current_agent_blocker_items", "current_agent_blocker", 2),
-        ):
-            lane_items = as_list(summary.get(lane))
-            identities = [
-                (
-                    f"{compact_todo_identity(item)} "
-                    f"reason={str(item.get('reason') or '').strip()[:120]}"
-                    if lane == "current_agent_blocker_items"
-                    and str(item.get("reason") or "").strip()
-                    else compact_todo_identity(item)
-                )
-                for item in lane_items[:limit]
-                if isinstance(item, dict) and item.get("todo_id")
-            ]
-            if identities:
-                lines.append(
-                    f"- {label}_{suffix}: {'; '.join(identities)}"
-                )
-        succession_warning = as_dict(summary.get("todo_succession_warning"))
-        if succession_warning:
-            projected_todo_ids = as_list(succession_warning.get("todo_ids"))
-            warning_items = as_list(succession_warning.get("items"))
-            todo_ids = [
-                str(todo_id)
-                for todo_id in projected_todo_ids[:3]
-                if str(todo_id or "").strip()
-            ] or [
-                str(item.get("todo_id"))
-                for item in warning_items[:3]
-                if isinstance(item, dict) and item.get("todo_id")
-            ]
-            todo_ids_text = ",".join(todo_ids) if todo_ids else "n/a"
-            lines.append(
-                f"- {label}_succession_warning: "
-                f"reason={succession_warning.get('reason_code')} "
-                f"count={succession_warning.get('count')} "
-                f"todo_ids={todo_ids_text}"
-            )
-        first_open_key = (
-            "first_executable_items"
-            if label == "agent_todo"
-            and isinstance(summary.get("first_executable_items"), list)
-            else "first_open_items"
-        )
-        first_open = list(as_list(summary.get(first_open_key)))
-        if label == "user_todo" and isinstance(summary.get("user_action_items"), list):
-            first_open.extend(
-                item
-                for item in summary.get("user_action_items", [])
-                if isinstance(item, dict)
-            )
-        for todo in first_open[:3]:
-            if not isinstance(todo, dict):
-                continue
-            text = str(todo.get("text") or "").strip()
-            if not text:
-                continue
-            index = todo.get("index")
-            suffix = f"[{index}]" if index is not None else ""
-            identity_suffix = (
-                f" todo_id={todo.get('todo_id')}"
-                if label == "agent_todo" and todo.get("todo_id")
-                else (
-                    f" claimed_by={todo.get('claimed_by')}"
-                    if todo.get("claimed_by")
-                    else ""
-                )
-            )
-            lines.append(f"- {label}_next{suffix}: {text}{identity_suffix}")
-        first_keys = {
-            (
-                str(todo.get("todo_id") or ""),
-                todo.get("index"),
-                str(todo.get("text") or "").strip(),
-            )
-            for todo in first_open
-            if isinstance(todo, dict)
-        }
-        backlog = as_list(summary.get("backlog_items"))
-        extra_count = 0
-        for todo in backlog:
-            if not isinstance(todo, dict):
-                continue
-            text = str(todo.get("text") or "").strip()
-            if not text:
-                continue
-            key = (str(todo.get("todo_id") or ""), todo.get("index"), text)
-            if key in first_keys:
-                continue
-            index = todo.get("index")
-            suffix = f"[{index}]" if index is not None else ""
-            claim_suffix = (
-                f" claimed_by={todo.get('claimed_by')}"
-                if todo.get("claimed_by")
-                else ""
-            )
-            lines.append(f"- {label}_backlog{suffix}: {text}{claim_suffix}")
-            extra_count += 1
-            if extra_count >= 5:
-                break
-
     if quota:
         lines.append(
             "- quota: "
@@ -1080,15 +1064,15 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
         lines.extend(["", "## Gate Prompt", str(payload.get("gate_prompt"))])
     user_todo_summary = as_dict(payload.get("user_todo_summary"))
     if user_todo_summary:
-        append_todo_summary("user_todo", user_todo_summary)
+        _append_todo_summary(lines, "user_todo", user_todo_summary)
     agent_todo_summary = as_dict(payload.get("agent_todo_summary"))
     selected_todo = as_dict(payload.get("selected_todo"))
     selected_todo_id = str(selected_todo.get("todo_id") or "").strip()
     lane_todo_id = str(agent_lane_next_action.get("todo_id") or "").strip()
     if selected_todo and (not selected_todo_id or selected_todo_id != lane_todo_id):
-        lines.append(f"- selected_todo: {compact_todo_identity(selected_todo)}")
+        lines.append(f"- selected_todo: {_compact_todo_identity(selected_todo)}")
     if agent_todo_summary:
-        append_todo_summary("agent_todo", agent_todo_summary)
+        _append_todo_summary(lines, "agent_todo", agent_todo_summary)
     todo_write_hint = as_dict(payload.get("todo_write_hint"))
     if todo_write_hint:
         lines.append(f"- todo_write_hint: {todo_write_hint.get('rule')}")
