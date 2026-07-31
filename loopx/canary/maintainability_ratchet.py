@@ -454,6 +454,9 @@ def collect_oversized_decision_functions(
         package_root / "quota.py",
         package_root / "status.py",
     ]
+    quota_cli_path = package_root / "cli_commands" / "quota.py"
+    if quota_cli_path.is_file():
+        paths.append(quota_cli_path)
     if tracked_paths is not None:
         paths = [path for path in paths if path in tracked_paths]
     findings: list[dict[str, Any]] = []
