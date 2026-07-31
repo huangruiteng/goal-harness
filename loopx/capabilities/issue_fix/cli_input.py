@@ -9,7 +9,7 @@ from typing import Any
 _MAX_INLINE_JSON_CHARS = 1_048_576
 
 
-def load_json_object(input_text: str) -> dict[str, Any]:
+def _read_json_text(input_text: str) -> tuple[str, Any]:
     stripped = input_text.lstrip()
     if input_text == "-":
         source = "stdin"
@@ -29,8 +29,21 @@ def load_json_object(input_text: str) -> dict[str, Any]:
         payload = json.loads(raw)
     except json.JSONDecodeError:
         raise ValueError("JSON input is invalid") from None
+    return source, payload
+
+
+def load_json_object(input_text: str) -> dict[str, Any]:
+    _source, payload = _read_json_text(input_text)
     if not isinstance(payload, dict):
         raise ValueError("JSON input must contain an object")
+    return payload
+
+
+def load_json_list(input_text: str) -> list[Any]:
+    source, payload = _read_json_text(input_text)
+    del source
+    if not isinstance(payload, list):
+        raise ValueError("JSON input must contain a list")
     return payload
 
 

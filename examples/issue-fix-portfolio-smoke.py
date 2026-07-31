@@ -211,6 +211,69 @@ def main() -> int:
             "state file must record all three advancement todos",
         )
 
+        # A list/repo URL must auto-enumerate into candidate issues, and with
+        # --execute but no --goal-id/--agent-id the single registered goal+agent
+        # must be auto-resolved so a user can type just the URL.
+        override_path = root / "enum-override.json"
+        override_path.write_text("[201,202]", encoding="utf-8")
+        enumerated = run_cli(
+            registry,
+            [
+                "issue-fix",
+                "portfolio-plan",
+                "--url",
+                "https://github.com/example-owner/example-repo/issues",
+                "--enumerated-issues-json",
+                str(override_path),
+                "--max-issues",
+                "8",
+            ],
+        )
+        _assert(bool(enumerated.get("ok")), "enumerated portfolio packet must be ok")
+        enum_log = (enumerated.get("enumeration") or {}).get("enumerated_repos") or []
+        _assert(len(enum_log) == 1, "enumeration log must record the one repo URL")
+        _assert(
+            enum_log[0]["source"] == "caller_override"
+            and enum_log[0]["numbers"] == [201, 202],
+            "enumeration override must record the curated numbers in order",
+        )
+        enum_candidates = enumerated.get("candidates") or []
+        _assert(
+            [c.get("number") for c in enum_candidates] == [201, 202],
+            "list URL must expand into one candidate per enumerated issue",
+        )
+
+        auto_applied = run_cli(
+            registry,
+            [
+                "issue-fix",
+                "portfolio-plan",
+                "--url",
+                "https://github.com/example-owner/example-repo/issues",
+                "--enumerated-issues-json",
+                str(override_path),
+                "--max-issues",
+                "8",
+                "--execute",
+                "--project",
+                str(project),
+            ],
+        )
+        _assert(bool(auto_applied.get("ok")), "auto-resolved apply must be ok")
+        auto_todos = auto_applied.get("applied_todos") or []
+        _assert(len(auto_todos) == 2, "auto-resolved apply must write 2 todos")
+        _assert(
+            auto_todos[0]["status"] == "open"
+            and auto_todos[0]["claimed_by"] == AGENT_ID,
+            "auto-resolved apply must claim issue 1 with the single registered agent",
+        )
+        _assert(
+            auto_todos[1]["status"] == "deferred"
+            and auto_todos[1]["resume_when"]
+            == f"todo_done:{auto_todos[0]['todo_id']}",
+            "auto-resolved apply must still chain issue 2 behind issue 1",
+        )
+
     print("issue-fix-portfolio-smoke: PASS")
     return 0
 

@@ -37,6 +37,7 @@ from .discovered_issue_promotion import (
 )
 from .cli_input import (
     _MAX_INLINE_JSON_CHARS as _MAX_INLINE_JSON_CHARS,
+    load_json_list as _load_json_list,
     load_json_object as _load_json_object,
     load_jsonl_row as _load_jsonl_row,
     load_jsonl_rows as _load_jsonl_rows,
@@ -237,6 +238,36 @@ def _goal_boundary_authority_projection(
         else []
     )
     return [str(scope) for scope in scopes], True
+
+
+def _resolve_default_goal_and_agent(
+    registry_path: Path | None,
+) -> tuple[str | None, str | None]:
+    """Resolve the single registered goal and its single registered agent.
+
+    Used so a user can run `portfolio-plan --url <issues-list> --execute`
+    without retyping the goal/agent when the project has exactly one of each.
+    Returns ``(goal_id, agent_id)`` or ``(None, None)`` when ambiguous.
+    """
+
+    from ...registry import read_json, registry_goals
+    from ...agent_registry import registered_agent_ids_for_goal
+
+    if registry_path is None or not registry_path.exists():
+        return None, None
+    try:
+        goals = registry_goals(read_json(registry_path))
+    except Exception:
+        return None, None
+    if len(goals) != 1:
+        return None, None
+    goal = goals[0]
+    goal_id = str(goal.get("id") or "").strip() or None
+    if not goal_id:
+        return None, None
+    agents = registered_agent_ids_for_goal(goal)
+    agent_id = agents[0] if len(agents) == 1 else None
+    return goal_id, agent_id
 
 
 def register_issue_fix_commands(
@@ -1001,14 +1032,39 @@ def register_issue_fix_commands(
         ),
     )
     portfolio_parser.add_argument(
+        "--max-issues",
+        type=int,
+        default=5,
+        help=(
+            "Cap on open issues auto-enumerated from a list/repo --url. Ignored "
+            "for explicit --issues numbers."
+        ),
+    )
+    portfolio_parser.add_argument(
+        "--enumerated-issues-json",
+        default=None,
+        help=(
+            "Path to a JSON list of issue numbers (or '-' for stdin) used instead "
+            "of `gh issue list` when --url is a list/repo URL. Lets a curated "
+            "list or offline preview drive enumeration without network."
+        ),
+    )
+    portfolio_parser.add_argument(
         "--goal-id",
         default=None,
-        help="Goal id required to write the chained todos with --execute.",
+        help=(
+            "Goal id required to write the chained todos with --execute. When "
+            "omitted with --execute, the single registered project goal is used "
+            "if exactly one exists."
+        ),
     )
     portfolio_parser.add_argument(
         "--agent-id",
         default=None,
-        help="Registered agent id that claims issue 1 with --execute.",
+        help=(
+            "Registered agent id that claims issue 1 with --execute. When omitted "
+            "with --execute, the single registered agent for the goal is used."
+        ),
     )
     portfolio_parser.add_argument(
         "--project",
@@ -1852,6 +1908,14 @@ def handle_issue_fix_command(
                     candidate_inputs.append({"url": url})
             if not candidate_inputs:
                 raise ValueError("portfolio-plan requires --issues or --url")
+            enumerated_override: list[int] | None = None
+            if args.enumerated_issues_json:
+                raw_override = _load_json_list(args.enumerated_issues_json)
+                enumerated_override = [
+                    int(value)
+                    for value in raw_override
+                    if isinstance(value, int) and not isinstance(value, bool)
+                ]
             plan = build_issue_fix_portfolio_packet(
                 candidate_inputs=candidate_inputs,
                 fetch_metadata=args.fetch_metadata,
@@ -1860,16 +1924,34 @@ def handle_issue_fix_command(
                 base_branch=args.base_branch,
                 validation_label=args.validation_label,
                 generated_at=generated_at,
+                enumerate_max_issues=args.max_issues,
+                enumerated_issues_override=enumerated_override,
+                enumerate_timeout_seconds=args.fetch_timeout_seconds,
             )
             if args.execute:
-                if not args.goal_id:
-                    raise ValueError("--execute requires --goal-id")
-                if not args.agent_id:
-                    raise ValueError("--execute requires --agent-id")
+                resolved_registry = registry_path or Path.cwd()
+                goal_id = args.goal_id
+                agent_id = args.agent_id
+                if not goal_id or not agent_id:
+                    default_goal, default_agent = _resolve_default_goal_and_agent(
+                        resolved_registry
+                    )
+                    goal_id = goal_id or default_goal
+                    agent_id = agent_id or default_agent
+                if not goal_id:
+                    raise ValueError(
+                        "--execute requires --goal-id, or a single registered "
+                        "project goal to auto-resolve"
+                    )
+                if not agent_id:
+                    raise ValueError(
+                        "--execute requires --agent-id, or a single registered "
+                        "agent for the goal to auto-resolve"
+                    )
                 payload = apply_issue_fix_portfolio(
-                    registry_path=registry_path or Path.cwd(),
-                    goal_id=args.goal_id,
-                    agent_id=args.agent_id,
+                    registry_path=resolved_registry,
+                    goal_id=goal_id,
+                    agent_id=agent_id,
                     candidates=plan.get("candidates") or [],
                     required_write_scopes=args.required_write_scope,
                     project=Path(args.project) if args.project else None,

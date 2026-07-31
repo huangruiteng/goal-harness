@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 from collections.abc import Sequence
+from urllib.parse import urlsplit, urlunsplit
 
 from ...repository_identity import normalize_repository_identity
 from ...control_plane.runtime.time import now_utc_iso
@@ -58,6 +60,149 @@ def _resolve_candidate_reference(candidate: Mapping[str, Any]) -> dict[str, Any]
     )
 
 
+def _classify_portfolio_url(url: str) -> dict[str, Any]:
+    """Classify a GitHub URL as a single issue or a repo/issues-list to enumerate.
+
+    Accepts ``/owner/repo/issues/N`` (single), ``/owner/repo/issues`` (list),
+    or ``/owner/repo`` (whole repo). List/repo URLs are enumerated into open
+    issues; query/fragment (e.g. ``?page=2``) is dropped because ``gh issue
+    list`` re-derives the open set.
+    """
+
+    parsed = urlsplit(url.strip())
+    if parsed.scheme != "https":
+        raise ValueError("portfolio URL must use https")
+    if (parsed.hostname or "").lower().rstrip(".") != "github.com":
+        raise ValueError("portfolio URL must use github.com")
+    if parsed.username or parsed.password:
+        raise ValueError("portfolio URL must not include credentials")
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) == 4 and parts[2] == "issues" and parts[3].isdigit():
+        return {
+            "kind": "single",
+            "url": urlunsplit(("https", "github.com", "/" + "/".join(parts), "", "")),
+        }
+    if len(parts) == 3 and parts[2] == "issues":
+        repo = f"{parts[0]}/{parts[1]}"
+        return {
+            "kind": "enumerate",
+            "repo": repo,
+            "repo_url": urlunsplit(("https", "github.com", f"/{parts[0]}/{parts[1]}", "", "")),
+        }
+    if len(parts) == 2:
+        repo = f"{parts[0]}/{parts[1]}"
+        return {
+            "kind": "enumerate",
+            "repo": repo,
+            "repo_url": urlunsplit(("https", "github.com", f"/{parts[0]}/{parts[1]}", "", "")),
+        }
+    raise ValueError(
+        "portfolio URL must be /owner/repo/issues/N, /owner/repo/issues, "
+        "or /owner/repo"
+    )
+
+
+def enumerate_open_issue_numbers(
+    repo: str,
+    *,
+    limit: int,
+    timeout: int = 10,
+) -> list[int]:
+    """Return open issue numbers for a repo via ``gh issue list`` (body-free)."""
+
+    if limit <= 0:
+        return []
+    result = subprocess.run(
+        [
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "open",
+            "--limit",
+            str(limit),
+            "--json",
+            "number",
+            "--jq",
+            ".[].number",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(
+            f"gh issue list failed for {repo}: "
+            f"{(result.stderr or '').strip() or 'no output'}"
+        )
+    numbers: list[int] = []
+    for line in result.stdout.splitlines():
+        token = line.strip()
+        if token.isdigit():
+            numbers.append(int(token))
+    return sorted(numbers)
+
+
+def _expand_candidate_inputs(
+    candidate_inputs: Sequence[Mapping[str, Any]],
+    *,
+    enumerate_max_issues: int,
+    enumerated_issues_override: Sequence[int] | None,
+    enumerate_timeout_seconds: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Expand list/repo URLs into single-issue candidate inputs.
+
+    Returns ``(expanded_inputs, enumeration_log)``. ``enumeration_log`` records
+    each enumerated repo and the numbers used, so the packet stays transparent
+    about where its candidates came from.
+    """
+
+    expanded: list[dict[str, Any]] = []
+    enumeration_log: list[dict[str, Any]] = []
+    for raw in candidate_inputs:
+        url = str(raw.get("url") or "").strip() or None
+        if url:
+            classified = _classify_portfolio_url(url)
+            if classified["kind"] == "single":
+                expanded.append({"url": classified["url"]})
+                continue
+            repo = str(classified["repo"])
+            if enumerated_issues_override is not None:
+                numbers = list(enumerated_issues_override)
+                source = "caller_override"
+            else:
+                numbers = enumerate_open_issue_numbers(
+                    repo,
+                    limit=enumerate_max_issues,
+                    timeout=enumerate_timeout_seconds,
+                )
+                source = "gh_issue_list"
+            numbers = sorted(set(int(n) for n in numbers if str(n).isdigit()))[
+                :enumerate_max_issues
+            ]
+            if not numbers:
+                raise ValueError(
+                    f"no open issues enumerated for {repo}; pass explicit "
+                    "--issues or check gh auth/repo access"
+                )
+            enumeration_log.append(
+                {
+                    "repo": repo,
+                    "source": source,
+                    "count": len(numbers),
+                    "numbers": numbers,
+                }
+            )
+            for number in numbers:
+                expanded.append({"repo": repo, "issue_number": str(number)})
+        else:
+            expanded.append(dict(raw))
+    return expanded, enumeration_log
+
+
 def _repo_url_from_reference(reference: Mapping[str, Any]) -> str | None:
     permalink = reference.get("permalink")
     if permalink:
@@ -93,6 +238,9 @@ def build_issue_fix_portfolio_packet(
     base_branch: str = "main",
     validation_label: str = "caller-declared validation",
     generated_at: str | None = None,
+    enumerate_max_issues: int = 5,
+    enumerated_issues_override: Sequence[int] | None = None,
+    enumerate_timeout_seconds: int = 10,
 ) -> dict[str, Any]:
     """Build a public-safe sequential portfolio plan without writing state.
 
@@ -102,11 +250,23 @@ def build_issue_fix_portfolio_packet(
     are deferred behind ``todo_done:<previous issue todo id>`` so the heartbeat
     advances them one at a time after the previous issue reaches a PR-ready (or
     terminal) disposition.
+
+    A candidate ``url`` may be a single issue (``/issues/N``), the issues list
+    page (``/issues``), or a repo (``/owner/repo``); list/repo URLs are
+    enumerated into open issues via ``gh issue list`` unless
+    ``enumerated_issues_override`` supplies a curated list.
     """
 
     timestamp = generated_at or now_utc_iso()
     if not candidate_inputs:
         raise ValueError("portfolio-plan requires at least one candidate issue")
+
+    candidate_inputs, enumeration_log = _expand_candidate_inputs(
+        candidate_inputs,
+        enumerate_max_issues=enumerate_max_issues,
+        enumerated_issues_override=enumerated_issues_override,
+        enumerate_timeout_seconds=enumerate_timeout_seconds,
+    )
 
     candidates: list[dict[str, Any]] = []
     chain: list[dict[str, Any]] = []
@@ -196,13 +356,18 @@ def build_issue_fix_portfolio_packet(
         "candidate_count": len(candidates),
         "candidates": candidates,
         "chain": chain,
+        "enumeration": {
+            "max_issues": enumerate_max_issues,
+            "override_used": enumerated_issues_override is not None,
+            "enumerated_repos": enumeration_log,
+        },
         "boundary_flags": merged_boundary,
         "external_reads_performed": bool(fetch_metadata),
         "external_writes_performed": False,
         "todo_write_performed": False,
         "next_safe_action": (
-            "Apply with --execute --goal-id --agent-id to write the chained "
-            "advancement todos; the heartbeat then advances one issue at a time."
+            "Apply with --execute to write the chained advancement todos; the "
+            "heartbeat then advances one issue at a time."
         ),
     }
 
@@ -349,6 +514,21 @@ def render_issue_fix_portfolio_markdown(payload: dict[str, Any]) -> str:
                 f"- order {entry.get('order')} `{entry.get('issue_ref')}`: "
                 f"status=`{entry.get('status')}`, "
                 f"resume_depends_on_order=`{entry.get('resume_depends_on_order')}`"
+            )
+
+    enumeration = payload.get("enumeration")
+    if isinstance(enumeration, Mapping) and enumeration.get("enumerated_repos"):
+        lines.append("")
+        lines.append("## Enumeration")
+        lines.append("")
+        lines.append(f"- max_issues: `{enumeration.get('max_issues')}`")
+        lines.append(f"- override_used: `{enumeration.get('override_used')}`")
+        for entry in enumeration.get("enumerated_repos") or []:
+            if not isinstance(entry, Mapping):
+                continue
+            lines.append(
+                f"- repo `{entry.get('repo')}`: source=`{entry.get('source')}`, "
+                f"count=`{entry.get('count')}`, numbers=`{entry.get('numbers')}`"
             )
 
     applied = payload.get("applied_todos")

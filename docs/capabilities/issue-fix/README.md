@@ -839,13 +839,25 @@ single-repository or mixed-repository, explicit issue list. Automatic issue
 ranking/selection and bounded concurrency remain future work and are not
 introduced here.
 
+The simplest input is the repository's issues list URL or repo URL; LoopX
+enumerates its open issues via `gh issue list`:
+
 ```bash
 loopx issue-fix portfolio-plan \
-  --repo owner/repo --issues 5,7,12 \
+  --url https://github.com/owner/repo/issues \
+  --max-issues 5 \
   --goal-id <goal-id> --agent-id <agent-id> \
   --repo-path /path/to/approved/repo --base-branch origin/main \
   --execute
 ```
+
+For an explicit list, use `--repo owner/repo --issues 5,7,12` (or repeat
+`--url` with single-issue URLs). `--max-issues` caps auto-enumeration (default
+5); `--enumerated-issues-json` swaps a curated JSON list of numbers for the
+`gh` call (offline preview or pre-screened backlog). When `--execute` is used
+without `--goal-id`/`--agent-id`, the single registered project goal and its
+single registered agent are auto-resolved, so a project with one goal+agent can
+run the command with just the URL.
 
 Each candidate reuses the single-issue `workflow-plan` builder for body-free
 metadata intake and branch grounding; the portfolio emits only compact
