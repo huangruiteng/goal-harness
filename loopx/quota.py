@@ -1385,6 +1385,59 @@ def _build_quota_plan_for_goal(
     )
 
 
+def _attach_truthy_fields(payload: dict[str, Any], **fields: Any) -> None:
+    payload.update({key: value for key, value in fields.items() if value})
+
+
+def _dict_field(payload: dict[str, Any], key: str) -> dict[str, Any] | None:
+    return payload.get(key) if isinstance(payload.get(key), dict) else None
+
+
+def _attach_quota_supporting_projections(
+    payload: dict[str, Any],
+    *,
+    status_payload: dict[str, Any],
+    item: dict[str, Any],
+    project_asset: dict[str, Any],
+    goal_id: str,
+    selected_recommended_action: Any,
+    state: str,
+    user_todo_summary: dict[str, Any] | None,
+    should_run: bool,
+    state_action_projection_warning: dict[str, Any] | None,
+    next_action_warning: dict[str, Any] | None,
+    replan_obligation: dict[str, Any] | None,
+) -> None:
+    _attach_truthy_fields(
+        payload,
+        stale_latest_run_warning=_dict_field(item, "stale_latest_run_warning"),
+        state_action_projection_warning=state_action_projection_warning,
+        next_action_projection_warning=next_action_warning,
+        backlog_hygiene_warning=_dict_field(item, "backlog_hygiene_warning"),
+        completed_todo_archive_warning=_dict_field(item, "completed_todo_archive_warning"),
+        autonomous_replan_obligation=replan_obligation,
+        dreaming_proposal=_dict_field(item, "dreaming_proposal"),
+        dreaming_lane_badge=_dict_field(item, "dreaming_lane_badge"),
+        interface_budget_cadence=_dict_field(project_asset, "interface_budget_cadence"),
+        decision_freshness_warning=_decision_freshness_warning(status_payload, goal_id=goal_id),
+        promotion_readiness_warning=_promotion_readiness_warning(status_payload),
+        reward_lesson_projection_warning=_reward_lesson_projection_warning(
+            status_payload,
+            goal_id=goal_id,
+            recommended_action=selected_recommended_action,
+        ),
+    )
+    if state == "operator_gate" and (
+        gate_prompt := _build_gate_prompt(item, user_todo_summary=user_todo_summary)
+    ):
+        payload["gate_prompt"] = gate_prompt
+        payload["notify_user_on_gate"] = True
+    _attach_truthy_fields(
+        payload, next_handoff_condition=item.get("next_handoff_condition"),
+        agent_command=item.get("agent_command") if should_run else None,
+    )
+
+
 def build_quota_should_run(
     status_payload: dict[str, Any],
     *,
@@ -2008,8 +2061,7 @@ def build_quota_should_run(
             payload=payload,
             agent_identity=agent_identity,
         )
-        if agent_lane_next_action:
-            payload["agent_lane_next_action"] = agent_lane_next_action
+        _attach_truthy_fields(payload, agent_lane_next_action=agent_lane_next_action)
         selected_todo_projection = _selected_todo_projection(
             agent_lane_next_action=agent_lane_next_action,
             work_lane_contract=payload_work_lane_contract,
@@ -2017,46 +2069,48 @@ def build_quota_should_run(
         )
         if selected_todo_projection:
             payload["selected_todo"] = selected_todo_projection
-        if agent_lane_frontier_hint:
-            payload["agent_lane_frontier_hint"] = agent_lane_frontier_hint
-        if goal_route_hint:
-            payload["goal_route_hint"] = goal_route_hint
-        if agent_scope_frontier:
-            payload["agent_scope_frontier"] = agent_scope_frontier
-        if workspace_guard:
-            payload["workspace_guard"] = workspace_guard
-        if automation_prompt_upgrade:
-            payload["automation_prompt_upgrade"] = automation_prompt_upgrade
+        _attach_truthy_fields(
+            payload,
+            agent_lane_frontier_hint=agent_lane_frontier_hint,
+            goal_route_hint=goal_route_hint,
+            agent_scope_frontier=agent_scope_frontier,
+            workspace_guard=workspace_guard,
+            automation_prompt_upgrade=automation_prompt_upgrade,
+        )
         if agent_scoped_user_todo_override:
             payload[str(agent_scoped_user_todo_override["kind"])] = agent_scoped_user_todo_override
-        if payload_work_lane_contract:
-            payload["work_lane_contract"] = payload_work_lane_contract
-        if monitor_debt_arbitration.get("active"):
-            payload["monitor_debt_arbitration"] = monitor_debt_arbitration
+        _attach_truthy_fields(
+            payload,
+            work_lane_contract=payload_work_lane_contract,
+            monitor_debt_arbitration=(
+                monitor_debt_arbitration
+                if monitor_debt_arbitration.get("active")
+                else None
+            ),
+        )
         if capability_gate:
             payload["capability_gate"] = capability_gate
             if capability_gate.get("owner_missing"):
                 payload["notify_user_on_capability_gate"] = True
-        if capability_monitor_fallback:
-            payload["capability_monitor_fallback"] = capability_monitor_fallback
-        if external_evidence_observation:
-            payload["external_evidence_observation"] = external_evidence_observation
-        if external_evidence_observation_recent:
-            payload["external_evidence_observation_recent"] = external_evidence_observation_recent
+        _attach_truthy_fields(
+            payload,
+            capability_monitor_fallback=capability_monitor_fallback,
+            external_evidence_observation=external_evidence_observation,
+            external_evidence_observation_recent=external_evidence_observation_recent,
+        )
         control_plane = compact_control_plane_policy(item.get("control_plane"))
         if control_plane:
             payload["control_plane"] = control_plane
         if stall_self_repair:
             payload["stall_self_repair"] = stall_self_repair
             payload.update(stall_repair_payload(stall_self_repair))
-        if projection_gap:
-            payload["state_projection_gap"] = projection_gap
-        if boundary_projection_repair:
-            payload["boundary_projection_gap"] = boundary_projection_repair
-        if item.get("operator_question"):
-            payload["operator_question"] = item.get("operator_question")
-        if item.get("missing_gates"):
-            payload["missing_gates"] = item.get("missing_gates")
+        _attach_truthy_fields(
+            payload,
+            state_projection_gap=projection_gap,
+            boundary_projection_gap=boundary_projection_repair,
+            operator_question=item.get("operator_question"),
+            missing_gates=item.get("missing_gates"),
+        )
         if user_todo_summary:
             payload["user_todo_summary"] = compact_quota_todo_summary_for_payload(user_todo_summary)
             payload.update(
@@ -2082,96 +2136,41 @@ def build_quota_should_run(
             or payload.get("notify_user_on_open_todo") is True
             or payload.get("notify_user_on_capability_gate") is True
         )
-        if agent_todo_summary:
-            payload["agent_todo_summary"] = compact_quota_todo_summary_for_payload(agent_todo_summary)
-        if blocked_priority_fallback:
-            payload["blocked_priority_fallback"] = blocked_priority_fallback
+        _attach_truthy_fields(
+            payload,
+            agent_todo_summary=(
+                compact_quota_todo_summary_for_payload(agent_todo_summary)
+                if agent_todo_summary
+                else None
+            ),
+            blocked_priority_fallback=blocked_priority_fallback,
+        )
         attention_queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
-        backlog_context = _compact_autonomous_candidate_context(
-            attention_queue.get("autonomous_backlog_candidates"),
+        _attach_truthy_fields(
+            payload,
+            autonomous_backlog_candidates=_compact_autonomous_candidate_context(
+                attention_queue.get("autonomous_backlog_candidates"),
+                goal_id=safe_goal_id,
+            ),
+            autonomous_monitor_candidates=_compact_autonomous_candidate_context(
+                attention_queue.get("autonomous_monitor_candidates"),
+                goal_id=safe_goal_id,
+            ),
+        )
+        _attach_quota_supporting_projections(
+            payload,
+            status_payload=status_payload,
+            item=item,
+            project_asset=project_asset,
             goal_id=safe_goal_id,
+            selected_recommended_action=selected_recommended_action,
+            state=state,
+            user_todo_summary=user_todo_summary,
+            should_run=should_run,
+            state_action_projection_warning=state_action_projection_warning,
+            next_action_warning=next_action_warning,
+            replan_obligation=replan_obligation,
         )
-        if backlog_context:
-            payload["autonomous_backlog_candidates"] = backlog_context
-        monitor_context = _compact_autonomous_candidate_context(
-            attention_queue.get("autonomous_monitor_candidates"),
-            goal_id=safe_goal_id,
-        )
-        if monitor_context:
-            payload["autonomous_monitor_candidates"] = monitor_context
-        projection_warning = (
-            item.get("stale_latest_run_warning")
-            if isinstance(item.get("stale_latest_run_warning"), dict)
-            else None
-        )
-        if projection_warning:
-            payload["stale_latest_run_warning"] = projection_warning
-        if state_action_projection_warning:
-            payload["state_action_projection_warning"] = state_action_projection_warning
-        if next_action_warning:
-            payload["next_action_projection_warning"] = next_action_warning
-        backlog_warning = (
-            item.get("backlog_hygiene_warning")
-            if isinstance(item.get("backlog_hygiene_warning"), dict)
-            else None
-        )
-        if backlog_warning:
-            payload["backlog_hygiene_warning"] = backlog_warning
-        archive_warning = (
-            item.get("completed_todo_archive_warning")
-            if isinstance(item.get("completed_todo_archive_warning"), dict)
-            else None
-        )
-        if archive_warning:
-            payload["completed_todo_archive_warning"] = archive_warning
-        if replan_obligation:
-            payload["autonomous_replan_obligation"] = replan_obligation
-        dreaming_proposal = (
-            item.get("dreaming_proposal")
-            if isinstance(item.get("dreaming_proposal"), dict)
-            else None
-        )
-        if dreaming_proposal:
-            payload["dreaming_proposal"] = dreaming_proposal
-        dreaming_lane_badge = (
-            item.get("dreaming_lane_badge")
-            if isinstance(item.get("dreaming_lane_badge"), dict)
-            else None
-        )
-        if dreaming_lane_badge:
-            payload["dreaming_lane_badge"] = dreaming_lane_badge
-        interface_budget_cadence = (
-            project_asset.get("interface_budget_cadence")
-            if isinstance(project_asset.get("interface_budget_cadence"), dict)
-            else None
-        )
-        if interface_budget_cadence:
-            payload["interface_budget_cadence"] = interface_budget_cadence
-        decision_warning = _decision_freshness_warning(status_payload, goal_id=safe_goal_id)
-        if decision_warning:
-            payload["decision_freshness_warning"] = decision_warning
-        promotion_warning = _promotion_readiness_warning(status_payload)
-        if promotion_warning:
-            payload["promotion_readiness_warning"] = promotion_warning
-        reward_lesson_warning = _reward_lesson_projection_warning(
-            status_payload,
-            goal_id=safe_goal_id,
-            recommended_action=selected_recommended_action,
-        )
-        if reward_lesson_warning:
-            payload["reward_lesson_projection_warning"] = reward_lesson_warning
-        gate_prompt = (
-            _build_gate_prompt(item, user_todo_summary=user_todo_summary)
-            if state == "operator_gate"
-            else None
-        )
-        if gate_prompt:
-            payload["gate_prompt"] = gate_prompt
-            payload["notify_user_on_gate"] = True
-        if item.get("next_handoff_condition"):
-            payload["next_handoff_condition"] = item.get("next_handoff_condition")
-        if should_run and item.get("agent_command"):
-            payload["agent_command"] = item.get("agent_command")
         _apply_agent_monitor_only_precedence(
             payload,
             monitor_only=agent_monitor_only,
