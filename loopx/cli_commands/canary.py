@@ -651,7 +651,9 @@ def handle_canary_command(
         )
         renderer = render_catalog_canary_coverage_audit_markdown
     elif args.canary_command == "quality-audit":
-        payload = build_quality_surface_catalog_audit()
+        payload = build_quality_surface_catalog_audit(
+            repo_root=_resolve_git_repo_root(Path.cwd())
+        )
         renderer = render_quality_surface_catalog_audit_markdown
     elif args.canary_command == "premerge":
         changed_files, git_diff_selector = _resolve_canary_changed_files(args)
