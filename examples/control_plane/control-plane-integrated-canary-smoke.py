@@ -456,7 +456,8 @@ def assert_event_todo_completion_successor_state_machine(
     assert routed["decision"] == "run", routed
     assert routed["effective_action"] == "normal_run", routed
     assert routed["agent_lane_next_action"]["todo_id"] == successor_id, routed
-    assert routed["agent_lane_next_action"]["title"] == SUCCESSOR_TODO_TITLE, routed
+    assert routed["agent_lane_next_action"]["text"] == f"[P1] {SUCCESSOR_TODO_TITLE}", routed
+    assert "title" not in routed["agent_lane_next_action"], routed
     assert routed["agent_lane_next_action"]["preserves_goal_next_action"] is True, routed
     assert routed["active_state_next_action"] == "Keep the fixture-only integrated canary under two minutes.", routed
     assert routed["interaction_contract"]["mode"] == "bounded_delivery", routed

@@ -39,6 +39,12 @@ def main() -> int:
         "scenario owner",
         "loopx-turn-codex-cli-e2e-smoke.py",
         "codex_cli_model_requires_newer_codex",
+        "--real-codex-cli",
+        "--turn-count 3",
+        "validation_status=passed",
+        "session_resumed=true",
+        "committed_turn_count=3",
+        "three quota spends",
     ]:
         assert required in compact_text, required
 
@@ -55,17 +61,8 @@ def main() -> int:
     link = "loopx-turn-codex-cli-quickstart.md"
     assert link in product_index, "product index link"
     assert f"product/{link}" in docs_index, "docs index link"
-    for required in [
-        "Try Governed Turns Locally",
-        "--real-codex-cli",
-        "--turn-count 3",
-        "status=committed",
-        "validation_status=passed",
-        "session_resumed=true",
-        "committed_turn_count=3",
-        "quota_slot_spend_count=3",
-    ]:
-        assert required in readme, f"README local Turn quickstart: {required}"
+    assert "docs/product/loopx-turn-codex-cli-quickstart.md" in readme
+    assert "LoopX Turn for Codex CLI" in readme
 
     print("loopx-turn-codex-cli-quickstart-smoke ok")
     return 0

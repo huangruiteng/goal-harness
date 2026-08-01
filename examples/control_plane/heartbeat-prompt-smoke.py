@@ -736,8 +736,7 @@ def main() -> int:
 
     getting_started = GETTING_STARTED.read_text(encoding="utf-8")
     assert "docs/guides/getting-started.md" in readme, readme
-    assert "loopx heartbeat-prompt --thin" in readme, readme
-    assert "heartbeat automation to start at 3 minutes" in readme, readme
+    assert "loopx heartbeat-prompt" in readme, readme
     assert "quota should-run.scheduler_hint" in readme, readme
     assert "loopx quota spend-slot" in readme, readme
     assert "Generate a guarded Codex App heartbeat body" in getting_started, getting_started
