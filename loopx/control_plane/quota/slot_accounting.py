@@ -114,6 +114,20 @@ def _load_goal_run_index_records(runtime_root: Path, goal_id: str) -> list[dict[
     return records
 
 
+def _is_quota_neutral_state_refresh(run: dict[str, Any]) -> bool:
+    """Recognize refresh-state provenance without relying on its classification."""
+
+    if str(run.get("delivery_outcome") or "").strip():
+        return False
+    if str(run.get("classification") or "").strip() == "state_refreshed":
+        return True
+    return (
+        isinstance(run.get("state"), dict)
+        and isinstance(run.get("runtime_projection_route"), dict)
+        and bool(str(run.get("recommended_action_source") or "").strip())
+    )
+
+
 def _latest_unspent_accountable_delivery_run(
     runtime_root: Path,
     goal_id: str,
@@ -146,9 +160,7 @@ def _latest_unspent_accountable_delivery_run(
             continue
         if classification == QUOTA_SCHEDULER_ACK_CLASSIFICATION:
             continue
-        if classification == "state_refreshed" and not str(
-            run.get("delivery_outcome") or ""
-        ).strip():
+        if _is_quota_neutral_state_refresh(run):
             continue
         delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
         if delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:

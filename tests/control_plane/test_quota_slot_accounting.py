@@ -98,6 +98,7 @@ def _run(
     classification: str,
     agent_id: str | None = None,
     delivery_outcome: str | None = None,
+    refresh_state: bool = False,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "generated_at": generated_at,
@@ -108,6 +109,14 @@ def _run(
         payload["agent_id"] = agent_id
     if delivery_outcome:
         payload["delivery_outcome"] = delivery_outcome
+    if refresh_state:
+        payload.update(
+            {
+                "recommended_action_source": "explicit_arg",
+                "runtime_projection_route": {"schema_version": "runtime_projection_route_v0"},
+                "state": {"sha256_16": "fixture"},
+            }
+        )
     return payload
 
 
@@ -229,6 +238,73 @@ def test_explicit_non_accountable_refresh_still_fails_closed(tmp_path: Path) -> 
                 agent_id=AGENT_A,
                 delivery_outcome="surface_only",
             ),
+        ],
+    )
+
+    assert _preview(runtime, agent_id=AGENT_A)["ok"] is False
+
+
+def test_custom_quota_neutral_refresh_does_not_hide_scoped_delivery(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime"
+    delivery = _poll(
+        "2026-01-01T00:01:00+00:00",
+        material=True,
+        agent_id=AGENT_A,
+    )
+    _write_run_index(
+        runtime,
+        [
+            delivery,
+            _run(
+                "2026-01-01T00:02:00+00:00",
+                classification="quality_qualification_vision_checkpoint_ack",
+                agent_id=AGENT_A,
+                refresh_state=True,
+            ),
+        ],
+    )
+
+    preview = _preview(runtime, agent_id=AGENT_A)
+
+    assert preview["ok"] is True
+    assert preview["delivery_run_generated_at"] == delivery["generated_at"]
+
+
+@pytest.mark.parametrize(
+    "later_run",
+    [
+        _run(
+            "2026-01-01T00:02:00+00:00",
+            classification="custom_refresh_with_surface_outcome",
+            agent_id=AGENT_A,
+            delivery_outcome="surface_only",
+            refresh_state=True,
+        ),
+        _run(
+            "2026-01-01T00:02:00+00:00",
+            classification="operator_note_with_partial_refresh_shape",
+            agent_id=AGENT_A,
+        )
+        | {"state": {"sha256_16": "fixture"}},
+    ],
+    ids=["explicit-non-accountable-outcome", "partial-refresh-shape"],
+)
+def test_custom_non_neutral_event_still_fails_closed(
+    tmp_path: Path,
+    later_run: dict[str, Any],
+) -> None:
+    runtime = tmp_path / "runtime"
+    _write_run_index(
+        runtime,
+        [
+            _poll(
+                "2026-01-01T00:01:00+00:00",
+                material=True,
+                agent_id=AGENT_A,
+            ),
+            later_run,
         ],
     )
 

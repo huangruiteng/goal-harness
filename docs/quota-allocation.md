@@ -1012,6 +1012,10 @@ Post-turn accounting protocol:
   account the latest unspent `outcome_progress` delivery run once; a later
   duplicate spend is rejected because the latest run is then the spend event,
   not the delivery run.
+- a quota-neutral `refresh-state` record may use a custom classification. Its
+  refresh provenance, rather than the literal `state_refreshed` classification,
+  keeps it from hiding the prior delivery. Explicit non-accountable delivery
+  outcomes and unrelated events remain fail-closed.
 - after spend, an optional plain state-only refresh may update dashboard or
   controller state. Do not append another accountable progress refresh after
   spend, because it would become a new unspent delivery record;

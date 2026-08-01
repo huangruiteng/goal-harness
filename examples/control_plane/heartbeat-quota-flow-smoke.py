@@ -861,6 +861,24 @@ def main() -> int:
         )
         assert post_refresh_guard.get("autonomous_replan_obligation") is None, post_refresh_guard
 
+        neutral_checkpoint = run_cli(
+            root,
+            "refresh-state",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            "codex-main-control",
+            "--classification",
+            "custom_vision_checkpoint_ack",
+            "--vision-unchanged-reason",
+            "validated delivery keeps the current agent vision unchanged",
+            "--no-global-sync",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert neutral_checkpoint["ok"] is True, neutral_checkpoint
+        assert neutral_checkpoint.get("delivery_outcome") is None, neutral_checkpoint
+
         spend = run_cli(
             root,
             "quota",

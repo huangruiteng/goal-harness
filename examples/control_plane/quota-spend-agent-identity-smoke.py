@@ -252,6 +252,16 @@ def assert_quota_neutral_events_do_not_hide_same_agent_delivery(agent_id: str) -
                 "classification": "quota_scheduler_ack",
                 "agent_id": agent_id,
             },
+            {
+                "generated_at": "2026-01-01T00:03:00+00:00",
+                "classification": "custom_vision_checkpoint_ack",
+                "recommended_action_source": "explicit_arg",
+                "runtime_projection_route": {
+                    "schema_version": "runtime_projection_route_v0"
+                },
+                "state": {"sha256_16": "fixture"},
+                "agent_id": agent_id,
+            },
         ]
         index_path.write_text(
             "".join(json.dumps(row) + "\n" for row in neutral_runs),
@@ -263,7 +273,7 @@ def assert_quota_neutral_events_do_not_hide_same_agent_delivery(agent_id: str) -
         assert selected == delivery, selected
 
         material_monitor = {
-            "generated_at": "2026-01-01T00:03:00+00:00",
+            "generated_at": "2026-01-01T00:04:00+00:00",
             "classification": "quota_monitor_poll",
             "delivery_outcome": "outcome_progress",
             "material_change": True,
@@ -280,7 +290,7 @@ def assert_quota_neutral_events_do_not_hide_same_agent_delivery(agent_id: str) -
             handle.write(
                 json.dumps(
                     {
-                        "generated_at": "2026-01-01T00:04:00+00:00",
+                        "generated_at": "2026-01-01T00:05:00+00:00",
                         "classification": "quota_slot_spent",
                         "agent_id": agent_id,
                     }
