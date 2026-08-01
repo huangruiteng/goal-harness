@@ -393,7 +393,7 @@ goals must stay out of the eligible lane even when they have a high
     "age_seconds": 120,
     "age_hours": 0.03,
     "sample_run_count": 1,
-    "proxy_note": "canary promotion-readiness projection from the runtime release ledger with legacy goal-history fallback; exact evidence stays in append-only artifacts"
+    "proxy_note": "canary readiness from release ledger or legacy goal history; exact evidence in append-only artifacts"
   },
   "promotion_gate": {
     "ok": true,

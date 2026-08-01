@@ -367,11 +367,11 @@ def test_blocker_delta_ack_clears_existing_vision_replan_obligation() -> None:
     ] == "current_agent_blocker"
 
 
-def _quota_with_replan_runs(
+def _status_payload_with_replan_runs(
     runs: list[dict],
     *,
     extra_agent_items: list[dict] | None = None,
-) -> dict:
+) -> tuple[dict, dict | None]:
     payload = _status_payload(
         latest_runs=runs,
         extra_agent_items=extra_agent_items,
@@ -381,9 +381,21 @@ def _quota_with_replan_runs(
         runs,
         agent_todos=item["agent_todos"],
     )
-    if obligation:
+    if obligation is not None:
         item["autonomous_replan_obligation"] = obligation
         item["project_asset"]["autonomous_replan_obligation"] = obligation
+    return payload, obligation
+
+
+def _quota_with_replan_runs(
+    runs: list[dict],
+    *,
+    extra_agent_items: list[dict] | None = None,
+) -> dict:
+    payload, _ = _status_payload_with_replan_runs(
+        runs,
+        extra_agent_items=extra_agent_items,
+    )
     return _quota(payload)
 
 
@@ -551,6 +563,79 @@ def test_two_identical_blocked_successor_waits_trigger_bounded_replan() -> None:
         "--repair-delta-kind runnable_todo_set" in action
         for action in cli_actions
     )
+
+
+def test_agent_status_mirrors_repeat_vision_replan_guidance_from_quota() -> None:
+    runs = [*_blocked_wait_polls(), _vision_run()]
+    payload, raw_obligation = _status_payload_with_replan_runs(runs)
+    assert raw_obligation is not None
+    assert "otherwise record a no-spend wait continuation" in raw_obligation[
+        "recommended_action"
+    ]
+
+    expected = _quota(payload)["autonomous_replan_obligation"]
+    attach_agent_lane_next_actions(payload, agent_id=AGENT_ID)
+
+    item = payload["attention_queue"]["items"][0]
+    assert item["autonomous_replan_obligation"] == expected
+    assert item["project_asset"]["autonomous_replan_obligation"] == expected
+    assert "watch-lane continuation alone does not satisfy" in expected[
+        "recommended_action"
+    ]
+    assert "otherwise record a no-spend wait continuation" not in expected[
+        "recommended_action"
+    ]
+
+
+def test_agent_status_preserves_as_needed_wait_guidance_from_quota() -> None:
+    runs = [
+        *_blocked_wait_polls(),
+        _vision_run(advancement_policy="as_needed"),
+    ]
+    payload, _ = _status_payload_with_replan_runs(runs)
+
+    expected = _quota(payload)["autonomous_replan_obligation"]
+    attach_agent_lane_next_actions(payload, agent_id=AGENT_ID)
+
+    item = payload["attention_queue"]["items"][0]
+    assert item["autonomous_replan_obligation"] == expected
+    assert item["project_asset"]["autonomous_replan_obligation"] == expected
+    assert "otherwise record a no-spend wait continuation" in expected[
+        "recommended_action"
+    ]
+    assert "watch-lane continuation alone does not satisfy" not in expected[
+        "recommended_action"
+    ]
+
+
+def test_agent_status_removes_obligation_cleared_by_actionable_ack() -> None:
+    polls = _blocked_wait_polls()
+    frontier_identity = polls[0]["monitor_target"]["frontier_identity"]
+    ack = {
+        "classification": "autonomous_replan_recorded",
+        "generated_at": "2026-07-16T00:03:00+00:00",
+        "agent_id": AGENT_ID,
+        "autonomous_replan_ack": {
+            "schema_version": "autonomous_replan_ack_v0",
+            "recorded": True,
+            "source": "fixture",
+            "frontier_identity": frontier_identity,
+            "delta_contract": {
+                "schema_version": "repair_delta_contract_v0",
+                "delta_present": True,
+                "delta_kinds": ["runnable_todo_set"],
+            },
+        },
+    }
+    runs = [*polls, ack, _vision_run()]
+    payload, _ = _status_payload_with_replan_runs(runs)
+    assert _quota(payload).get("autonomous_replan_obligation") is None
+
+    attach_agent_lane_next_actions(payload, agent_id=AGENT_ID)
+
+    item = payload["attention_queue"]["items"][0]
+    assert "autonomous_replan_obligation" not in item
+    assert "autonomous_replan_obligation" not in item["project_asset"]
 
 
 def test_as_needed_blocked_successor_guidance_keeps_wait_continuation() -> None:

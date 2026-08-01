@@ -694,6 +694,30 @@ def _mirror_agent_status_projections(
     return attached
 
 
+def _sync_agent_replan_obligation_from_guard(
+    item: dict[str, object],
+    project_asset: object,
+    *,
+    guard: dict[str, object],
+) -> None:
+    """Keep agent-scoped status guidance identical to the quota decision."""
+
+    targets = (item, project_asset)
+    if not any(
+        isinstance(target, dict) and "autonomous_replan_obligation" in target
+        for target in targets
+    ):
+        return
+    obligation = guard.get("autonomous_replan_obligation")
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        if isinstance(obligation, dict):
+            target["autonomous_replan_obligation"] = obligation
+        else:
+            target.pop("autonomous_replan_obligation", None)
+
+
 def _agent_reward_memory_projection(
     guard: dict[str, object],
     *,
@@ -781,6 +805,11 @@ def attach_agent_lane_next_actions(
         interaction_summary = _build_agent_interaction_summary(
             guard,
             agent_id=safe_agent_id,
+        )
+        _sync_agent_replan_obligation_from_guard(
+            item,
+            project_asset,
+            guard=guard,
         )
         reward_memory_projection = _agent_reward_memory_projection(
             guard,
