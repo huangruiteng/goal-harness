@@ -943,6 +943,12 @@ def test_wait_ack_covers_newer_same_frontier_stalls_for_as_needed_vision() -> No
     assert covered["goal_frontier_projection"]["replan_required"] is False
     assert covered.get("autonomous_replan_obligation") is None
 
+    older_ack["autonomous_replan_ack"]["frontier_identity"] = "changed-frontier"
+    changed = _quota_with_replan_runs(
+        [*polls, older_ack, _vision_run(advancement_policy="as_needed")]
+    )
+    assert changed["decision"] == "autonomous_replan_required"
+
 
 def test_refresh_ack_preserves_the_observed_blocked_successor_identity(
     tmp_path,
