@@ -52,7 +52,7 @@ def _render(payload: dict[str, object]) -> str:
 
 
 def register_agent_turn_recall_commands(
-    subparsers: argparse._SubParsersAction,
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     add_subcommand_format: Callable[[argparse.ArgumentParser], None],
 ) -> None:
     parser = subparsers.add_parser(
@@ -83,8 +83,11 @@ def register_agent_turn_recall_commands(
 
 def _goal_repo(registry_path: Path, goal_id: str) -> Path:
     goal = find_registry_goal(load_registry(registry_path), goal_id)
-    repo = goal_repo(goal) if goal else None
-    if repo is None or not repo.is_dir():
+    resolved = goal_repo(goal) if goal else None
+    if resolved is None:
+        raise ValueError(f"goal `{goal_id}` repository is unavailable")
+    repo = Path(resolved)
+    if not repo.is_dir():
         raise ValueError(f"goal `{goal_id}` repository is unavailable")
     return repo
 
@@ -107,6 +110,27 @@ def _quota_decision(path_value: str) -> dict[str, Any]:
     if not isinstance(payload, dict) or payload.get("mode") != "should-run":
         raise ValueError("quota decision must be one quota should-run object")
     return payload
+
+
+def _validate_quota_identity(
+    quota_decision: Mapping[str, Any],
+    *,
+    goal_id: str,
+    agent_id: str,
+    turn_instance_id: str,
+) -> None:
+    if quota_decision.get("goal_id") != goal_id:
+        raise ValueError("quota decision goal_id does not match --goal-id")
+    decision_agent = _mapping(quota_decision.get("agent_identity")).get("agent_id")
+    if decision_agent != agent_id:
+        raise ValueError("quota decision agent_id does not match --agent-id")
+    receipt = _mapping(quota_decision.get("heartbeat_receipt"))
+    if receipt.get("turn_instance_id") != turn_instance_id:
+        raise ValueError(
+            "quota decision turn_instance_id does not match --turn-instance-id"
+        )
+    if receipt.get("status") not in {"committed", "replayed"}:
+        raise ValueError("quota decision heartbeat receipt is not committed")
 
 
 def _load_receipt(path: Path) -> dict[str, Any] | None:
@@ -163,6 +187,16 @@ def _identity_scope(config: Mapping[str, Any]) -> dict[str, str | None]:
         identity = current
     assert identity is not None
     return identity
+
+
+def _resolve_session_ref(
+    identity: Mapping[str, str | None], requested: str | None
+) -> str | None:
+    configured = str(identity.get("session_ref") or "").strip() or None
+    requested = str(requested or "").strip() or None
+    if configured and requested and configured != requested:
+        raise ValueError("--session-ref does not match the configured corpus scope")
+    return configured or requested
 
 
 def _read_authority_checkpoints(
@@ -226,7 +260,7 @@ def handle_agent_turn_recall_command(
     *,
     registry_path: Path,
     output_format: Callable[..., str],
-    print_payload: Callable[[dict[str, object], str, Callable], None],
+    print_payload: Callable[..., None],
 ) -> int | None:
     if args.command != "agent-turn-recall":
         return None
@@ -254,13 +288,12 @@ def handle_agent_turn_recall_command(
         else:
             identity = _identity_scope(config)
             quota_decision = _quota_decision(args.quota_decision_json)
-            if quota_decision.get("goal_id") != args.goal_id:
-                raise ValueError("quota decision goal_id does not match --goal-id")
-            decision_agent = _mapping(quota_decision.get("agent_identity")).get(
-                "agent_id"
+            _validate_quota_identity(
+                quota_decision,
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                turn_instance_id=args.turn_instance_id,
             )
-            if decision_agent and decision_agent != args.agent_id:
-                raise ValueError("quota decision agent_id does not match --agent-id")
             situation = build_agent_turn_situation(
                 quota_decision,
                 goal_id=args.goal_id,
@@ -269,7 +302,7 @@ def handle_agent_turn_recall_command(
                 workspace_ref=str(identity["workspace_ref"] or ""),
                 project_ref=str(identity["project_ref"] or ""),
                 user_ref=identity["user_ref"],
-                session_ref=args.session_ref,
+                session_ref=_resolve_session_ref(identity, args.session_ref),
             )
             receipt_path = _receipt_path(goal_repo, args.agent_id)
             previous = None if args.force_refresh else _load_receipt(receipt_path)

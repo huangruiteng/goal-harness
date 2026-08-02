@@ -5,10 +5,26 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from loopx.capabilities.agent_turn_recall.cli import (
+    _deduplicated_payload,
+    _load_receipt,
+    _resolve_session_ref,
+    _validate_quota_identity,
+    _write_receipt,
+)
 from loopx.capabilities.agent_turn_recall.core import (
     build_agent_turn_recall_preview,
     build_agent_turn_situation,
     run_agent_turn_recall,
+)
+from loopx.capabilities.reward_memory.application import (
+    build_active_reward_memory_record,
+)
+from loopx.capabilities.reward_memory.candidate_review import (
+    build_reward_memory_candidate,
+    review_reward_memory_candidate,
 )
 from loopx.capabilities.context_providers.base import (
     ContextProviderItem,
@@ -27,7 +43,9 @@ SCOPE_REF = "viking://user/example/memories/preferences"
 class RecallProvider:
     provider_id = "openviking"
 
-    def __init__(self, content: str | None = None, *, unavailable: bool = False) -> None:
+    def __init__(
+        self, content: str | None = None, *, unavailable: bool = False
+    ) -> None:
         self.content = content
         self.unavailable = unavailable
         self.calls = 0
@@ -63,7 +81,9 @@ class RecallProvider:
         )
 
 
-def quota_decision(*, phase: str = "reviewing", target_key: str = "pr:123") -> dict[str, Any]:
+def quota_decision(
+    *, phase: str = "reviewing", target_key: str = "pr:123"
+) -> dict[str, Any]:
     return {
         "ok": True,
         "status_health_ok": True,
@@ -182,7 +202,9 @@ def raw_config(*, peer_ref: str = "agent:pilot") -> dict[str, Any]:
     }
 
 
-def normalized_config(tmp_path: Path, *, peer_ref: str = "agent:pilot") -> dict[str, Any]:
+def normalized_config(
+    tmp_path: Path, *, peer_ref: str = "agent:pilot"
+) -> dict[str, Any]:
     path = tmp_path / "config.json"
     path.write_text(json.dumps(raw_config(peer_ref=peer_ref)), encoding="utf-8")
     return load_reward_memory_experiment_config(
@@ -246,7 +268,9 @@ def test_situation_is_prompt_independent_and_fingerprints_material_changes() -> 
     assert preview["provider_call_count"] == 0
 
 
-def test_recall_injects_private_guidance_without_granting_authority(tmp_path: Path) -> None:
+def test_recall_injects_private_guidance_without_granting_authority(
+    tmp_path: Path,
+) -> None:
     config = normalized_config(tmp_path)
     provider = RecallProvider(
         active_record(config, expires_at="2026-08-03T00:00:00+00:00")
@@ -323,3 +347,128 @@ def test_provider_failure_fails_open_without_user_gate(tmp_path: Path) -> None:
     assert result["context"]["guidance"] == []
     assert result["provider_failure_is_user_gate"] is False
     assert result["grants_new_action_authority"] is False
+
+
+def test_quota_identity_requires_exact_agent_and_turn_receipt() -> None:
+    turn = "2026-08-02T10:00:00+00:00"
+    decision = quota_decision() | {
+        "goal_id": "goal",
+        "agent_identity": {"agent_id": "pilot"},
+        "heartbeat_receipt": {
+            "turn_instance_id": turn,
+            "status": "committed",
+        },
+    }
+
+    _validate_quota_identity(
+        decision,
+        goal_id="goal",
+        agent_id="pilot",
+        turn_instance_id=turn,
+    )
+    with pytest.raises(ValueError, match="agent_id"):
+        _validate_quota_identity(
+            decision,
+            goal_id="goal",
+            agent_id="other",
+            turn_instance_id=turn,
+        )
+    with pytest.raises(ValueError, match="turn_instance_id"):
+        _validate_quota_identity(
+            decision,
+            goal_id="goal",
+            agent_id="pilot",
+            turn_instance_id="2026-08-02T10:01:00+00:00",
+        )
+    with pytest.raises(ValueError, match="not committed"):
+        _validate_quota_identity(
+            decision
+            | {
+                "heartbeat_receipt": {
+                    "turn_instance_id": turn,
+                    "status": "write_failed",
+                }
+            },
+            goal_id="goal",
+            agent_id="pilot",
+            turn_instance_id=turn,
+        )
+
+
+def test_configured_session_scope_is_canonical() -> None:
+    identity = {"session_ref": "session:configured"}
+
+    assert _resolve_session_ref(identity, None) == "session:configured"
+    assert _resolve_session_ref(identity, "session:configured") == "session:configured"
+    with pytest.raises(ValueError, match="configured corpus scope"):
+        _resolve_session_ref(identity, "session:other")
+
+
+def test_same_turn_receipt_round_trip_reuses_private_context(tmp_path: Path) -> None:
+    receipt_path = tmp_path / "pilot.json"
+    receipt = {
+        "schema_version": "agent_turn_recall_receipt_v0",
+        "turn_recall_id": "sha256:turn",
+        "situation_fingerprint": "sha256:situation",
+        "source_status": "applied",
+        "context": {
+            "schema_version": "agent_turn_recall_context_v0",
+            "guidance": [{"content_summary": "Use the scoped workflow."}],
+        },
+    }
+
+    _write_receipt(receipt_path, receipt)
+    loaded = _load_receipt(receipt_path)
+    assert loaded == receipt
+    deduplicated = _deduplicated_payload(loaded or {}, goal_id="goal", agent_id="pilot")
+    assert deduplicated is not None
+    assert deduplicated["status"] == "deduplicated"
+    assert deduplicated["provider_call_count"] == 0
+    assert deduplicated["same_turn_receipt_reused"] is True
+
+
+def test_expiry_survives_candidate_review_and_activation(tmp_path: Path) -> None:
+    config = normalized_config(tmp_path)
+    corpus = resolve_reward_memory_surface_config(config, SURFACE)["corpus"]
+    expires_at = "2026-08-03T00:00:00+00:00"
+    candidate = build_reward_memory_candidate(
+        {
+            "target_class": "soft_preference",
+            "content_summary": "Use the scoped workflow for this temporary task.",
+            "expires_at": expires_at,
+            "source": {
+                "source_kind": "explicit_user_instruction",
+                "source_ref": "user:instruction",
+                "actor_ref": "user:example",
+                "actor_role": "verified_project_owner_or_operator",
+            },
+            "scope": corpus["scope"],
+            "reasoning": {
+                "summary": "Explicit temporary preference.",
+                "confidence": "high",
+            },
+            "guard_context": {
+                "source_freshness": "current",
+                "conflict_state": "clear",
+                "current_artifact_verified": True,
+            },
+            "requested_action_scopes": [],
+            "raw_content_captured": False,
+        }
+    )
+    reviewed = review_reward_memory_candidate(
+        candidate,
+        {
+            "decision": "accept",
+            "reviewer_ref": "agent:reviewer",
+            "review_ref": "review:temporary-preference",
+            "reasoning_summary": "The preference is explicit and bounded.",
+        },
+    )
+    active = build_active_reward_memory_record(
+        reviewed,
+        corpus,
+        activated_at="2026-08-02T10:00:00+00:00",
+    )
+
+    assert active["lifecycle"] == {"state": "active", "expires_at": expires_at}
