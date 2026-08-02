@@ -345,7 +345,8 @@ def assert_promotion_readiness_full_scan_fallback() -> None:
             queue={"items": []}, runtime_root=runtime, goal_id_filter=None, display_limit=1, todo_index_limit=1,
         )["promotion_readiness_summary"]
         assert summary["available"] is True, summary
-        assert summary["source"] == "run_history_full_scan", summary
+        assert summary["source"] == "goal_run_history_legacy", summary
+        assert summary["evidence_scope"] == "goal_run_history", summary
         assert summary["sample_run_count"] == 0, summary
         assert summary["classification"] == "canary_promotion_readiness_smoke_group", summary
         assert summary["delivery_outcome"] == "primary_goal_outcome", summary

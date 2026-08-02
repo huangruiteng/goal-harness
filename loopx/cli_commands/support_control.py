@@ -23,7 +23,12 @@ from ..control_plane.scheduler.execution_context import SchedulerRuntimeProfile
 from ..history import load_registry
 from ..paths import resolve_runtime_root
 from ..presentation.renderers.status_markdown import render_status_markdown
-from ..promotion_gate import build_promotion_gate, render_promotion_gate_markdown
+from ..promotion_gate import (
+    build_promotion_gate,
+    record_promotion_readiness,
+    render_promotion_gate_markdown,
+    render_promotion_readiness_record_markdown,
+)
 from ..registry import (
     inspect_registry,
     inspect_registry_boundary,
@@ -73,6 +78,7 @@ SUPPORT_CONTROL_COMMANDS = {
     "heartbeat-prequota",
     "heartbeat-prompt",
     "promotion-gate",
+    "promotion-readiness",
     "upgrade-plan",
     "update",
     "registry",
@@ -275,6 +281,31 @@ def register_support_control_commands(
         help="Emit a compact machine-readable canary promotion readiness gate result.",
     )
     add_subcommand_format(promotion_gate_parser)
+
+    promotion_readiness_parser = subparsers.add_parser(
+        "promotion-readiness",
+        help="Record release-scoped canary promotion-readiness evidence.",
+    )
+    promotion_readiness_subparsers = promotion_readiness_parser.add_subparsers(
+        dest="promotion_readiness_command",
+        required=True,
+    )
+    promotion_readiness_record_parser = promotion_readiness_subparsers.add_parser(
+        "record",
+        help="Append one runtime-level readiness event after the canary checks pass.",
+    )
+    add_subcommand_format(promotion_readiness_record_parser)
+    promotion_readiness_record_parser.add_argument(
+        "--dashboard-readiness",
+        choices=("passed", "skipped"),
+        required=True,
+        help="Whether dashboard readiness ran successfully or was explicitly skipped.",
+    )
+    promotion_readiness_record_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Append the evidence event. Without this flag, emit a dry-run plan.",
+    )
 
     upgrade_plan_parser = subparsers.add_parser(
         "upgrade-plan",
@@ -597,6 +628,31 @@ def handle_support_control_command(
                 "recommended_action": "fix promotion readiness gate collection before promotion",
             }
         print_payload(payload, output_format(args), render_promotion_gate_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "promotion-readiness":
+        try:
+            payload = record_promotion_readiness(
+                registry_path=registry_path,
+                runtime_root_override=args.runtime_root,
+                dashboard_readiness=args.dashboard_readiness,
+                execute=args.execute,
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "dry_run": not args.execute,
+                "appended": False,
+                "registry": str(registry_path),
+                "runtime_root": args.runtime_root,
+                "evidence_scope": "runtime_release",
+                "error": str(exc),
+            }
+        print_payload(
+            payload,
+            output_format(args),
+            render_promotion_readiness_record_markdown,
+        )
         return 0 if payload.get("ok") else 1
 
     if args.command == "upgrade-plan":

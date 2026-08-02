@@ -963,6 +963,11 @@ loopx promotion-gate --format json
 loopx upgrade-plan --format json
 ```
 
+When the dashboard source is present, the readiness smoke requires its npm
+dependencies so a dependency skip cannot be recorded as a pass. Use
+`--dashboard-mode=skip` only when intentionally qualifying a release boundary
+that omits dashboard validation; the runtime evidence records that skip.
+
 ## Documentation Map
 
 Start here:

@@ -160,7 +160,17 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     release_commands = [
         check["command"] for check in release_profiles["release-promotion"]["checks"]
     ]
+    assert "python3 examples/control_plane/promotion-readiness-readmodel-smoke.py" in release_commands
     assert "python3 examples/canary/canary-promotion-readiness-boundary-smoke.py" in release_commands
+    assert all("canary-promotion-readiness-smoke.py" not in command for command in release_commands)
+    assert release_profiles["release-promotion"]["deep_checks_available"] is True
+
+    deep_release_payload = build_catalog_canary_plan(
+        profiles=["release-promotion"],
+        include_deep_checks=True,
+        max_checks_per_profile=6,
+    )
+    assert "python3 examples/canary/canary-promotion-readiness-smoke.py" in deep_release_payload["commands"]
 
     install_payload = build_catalog_canary_plan(
         changed_files=["scripts/install-local.sh", "loopx/self_update.py"],

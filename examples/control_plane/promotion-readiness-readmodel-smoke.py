@@ -50,26 +50,34 @@ def direct_summary(
 def write_indexed_readiness_run(
     runtime_root: Path,
     *,
-    goal_id: str,
+    goal_id: str | None,
     generated_at: str,
     classification: str = "canary_promotion_readiness_smoke_group",
 ) -> None:
-    run_dir = runtime_root / "goals" / goal_id / "runs"
+    run_dir = (
+        runtime_root / "goals" / goal_id / "runs"
+        if goal_id
+        else runtime_root / "release" / "promotion-readiness" / "runs"
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     json_path = run_dir / "readiness.json"
     markdown_path = run_dir / "readiness.md"
     json_path.write_text("{}\n", encoding="utf-8")
     markdown_path.write_text("# readiness\n", encoding="utf-8")
     record = {
-        "goal_id": goal_id,
         "generated_at": generated_at,
         "classification": classification,
+        "evidence_scope": "goal_run_history" if goal_id else "runtime_release",
         "delivery_batch_scale": "multi_surface",
         "delivery_outcome": "primary_goal_outcome",
         "recommended_action": "promotion readiness smoke passed",
         "json_path": str(json_path),
         "markdown_path": str(markdown_path),
     }
+    if goal_id:
+        record["goal_id"] = goal_id
+    else:
+        record["dashboard_readiness"] = "passed"
     with (run_dir / "index.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, sort_keys=True) + "\n")
 
@@ -166,11 +174,54 @@ def main() -> None:
         write_indexed_readiness_run(runtime_root, goal_id="project-c", generated_at=generated_at)
         fallback = assert_parity({"runs": []}, runtime_root=runtime_root, goal_id_filter="project-c")
         assert fallback["available"] is True, fallback
-        assert fallback["source"] == "run_history_full_scan", fallback
+        assert fallback["source"] == "goal_run_history_legacy", fallback
         assert fallback["goal_id"] == "project-c", fallback
         assert fallback["sample_run_count"] == 0, fallback
         assert fallback["json_exists"] is True, fallback
         assert fallback["markdown_exists"] is True, fallback
+
+        runtime_generated_at = (now - timedelta(minutes=5)).isoformat()
+        write_indexed_readiness_run(
+            runtime_root,
+            goal_id=None,
+            generated_at=runtime_generated_at,
+        )
+        global_release = assert_parity(
+            sampled_history,
+            runtime_root=runtime_root,
+            goal_id_filter="project-a",
+        )
+        assert global_release["source"] == "runtime_release_ledger", global_release
+        assert global_release["goal_id"] is None, global_release
+        assert global_release["evidence_scope"] == "runtime_release", global_release
+        assert global_release["dashboard_readiness"] == "passed", global_release
+        assert global_release["generated_at"] == runtime_generated_at, global_release
+
+        newer_legacy_at = now.isoformat()
+        write_indexed_readiness_run(
+            runtime_root,
+            goal_id="project-a",
+            generated_at=newer_legacy_at,
+        )
+        newer_sampled_history = {
+            "runs": [
+                {
+                    **sampled_history["runs"][0],
+                    "generated_at": newer_legacy_at,
+                }
+            ]
+        }
+        runtime_authoritative = assert_parity(
+            newer_sampled_history,
+            runtime_root=runtime_root,
+            goal_id_filter="project-a",
+        )
+        assert runtime_authoritative["source"] == "runtime_release_ledger", (
+            runtime_authoritative
+        )
+        assert runtime_authoritative["generated_at"] == runtime_generated_at, (
+            runtime_authoritative
+        )
 
         missing = assert_parity({"runs": []}, runtime_root=runtime_root / "empty", goal_id_filter="missing")
         assert missing["available"] is False, missing

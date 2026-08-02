@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Smoke-test canary promotion-readiness evidence writeback isolation.
+"""Smoke-test runtime-level promotion-readiness evidence writeback.
 
 The same temporary HOME/runtime is used by the readiness writeback and
 `install-local.sh`, so this also verifies the installer promotion gate consumes
-the event written by the canary readiness path.
+the event written by the canary readiness path without requiring a project Goal.
 """
 
 from __future__ import annotations
@@ -16,10 +16,21 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from loopx.promotion_gate import (  # noqa: E402
+    PROMOTION_READINESS_CLASSIFICATION,
+    PROMOTION_READINESS_DELIVERY_BATCH_SCALE,
+    PROMOTION_READINESS_DELIVERY_OUTCOME,
+    PROMOTION_READINESS_RECOMMENDED_ACTION,
+    PROMOTION_READINESS_RUNTIME_DIR,
+    build_promotion_gate,
+    record_promotion_readiness,
+)
+
 INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-local.sh"
-GOAL_ID = "loopx-product"
 
 
 def load_canary_smoke_module():
@@ -64,29 +75,13 @@ def run_promotion_gate(env: dict[str, str], runtime: Path) -> dict:
     return json.loads(result.stdout)
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
+def write_fixture(root: Path) -> tuple[Path, Path, Path]:
     home = root / "home"
     project = root / "project"
     runtime = home / ".codex" / "loopx"
-    state_file = f"goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
-    state_path = project / state_file
     registry_path = project / ".loopx" / "registry.json"
 
     home.mkdir(parents=True, exist_ok=True)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        "---\n"
-        "status: active-read-only\n"
-        "owner_mode: goal\n"
-        'objective: "Exercise canary promotion readiness writeback."\n'
-        "updated_at: 2026-01-01T00:00:00+00:00\n"
-        "---\n\n"
-        "# Canary Promotion Writeback Fixture\n\n"
-        "## Next Action\n\n"
-        "- Keep promotion readiness evidence public-safe and ledger-backed.\n",
-        encoding="utf-8",
-    )
-
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     registry_path.write_text(
         json.dumps(
@@ -94,27 +89,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
                 "schema_version": 1,
                 "updated_at": "2026-01-01T00:00:00+00:00",
                 "common_runtime_root": str(runtime),
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "domain": "loopx-meta",
-                        "status": "active-read-only",
-                        "repo": str(project),
-                        "state_file": state_file,
-                        "coordination": {
-                            "agent_model": "peer_v1",
-                            "registered_agents": [
-                                "codex-main-control",
-                                "codex-product-capability",
-                            ],
-                        },
-                        "adapter": {
-                            "kind": "harness_self_improvement",
-                            "status": "connected-read-only",
-                        },
-                        "authority_sources": [],
-                    }
-                ],
+                "goals": [],
             },
             ensure_ascii=False,
             indent=2,
@@ -123,14 +98,14 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path]:
         + "\n",
         encoding="utf-8",
     )
-    return registry_path, runtime, state_path, home
+    return registry_path, runtime, home
 
 
 def main() -> int:
     module = load_canary_smoke_module()
     with tempfile.TemporaryDirectory(prefix="loopx-canary-writeback-smoke-") as raw_tmp:
         root = Path(raw_tmp)
-        registry_path, runtime, state_path, home = write_fixture(root)
+        registry_path, runtime, home = write_fixture(root)
         env = {
             **os.environ,
             "HOME": str(home),
@@ -162,10 +137,9 @@ def main() -> int:
         module.write_readiness_evidence(
             env,
             dashboard_skipped=False,
-            goal_id=GOAL_ID,
         )
 
-        index_path = runtime / "goals" / GOAL_ID / "runs" / "index.jsonl"
+        index_path = runtime / PROMOTION_READINESS_RUNTIME_DIR / "index.jsonl"
         assert index_path.is_file(), index_path
         records = [
             json.loads(line)
@@ -174,16 +148,12 @@ def main() -> int:
         ]
         assert len(records) == 1, records
         record = records[0]
-        assert record["classification"] == module.READINESS_CLASSIFICATION, record
-        assert record["goal_id"] == GOAL_ID, record
-        assert record["delivery_batch_scale"] == "multi_surface", record
-        assert record["delivery_outcome"] == module.READINESS_DELIVERY_OUTCOME, record
-        assert record["recommended_action"] == module.READINESS_RECOMMENDED_ACTION, record
-        assert record["progress_scope"] == "agent_lane", record
-        assert record["agent_id"] == module.DEFAULT_READINESS_AGENT_ID, record
-        assert record["agent_lane"] == module.DEFAULT_READINESS_AGENT_LANE, record
-        assert record["vision_checkpoint"]["required"] is False, record
-        assert record["vision_checkpoint"]["decision"] == "not_required", record
+        assert record["classification"] == PROMOTION_READINESS_CLASSIFICATION, record
+        assert record["evidence_scope"] == "runtime_release", record
+        assert "goal_id" not in record, record
+        assert record["delivery_batch_scale"] == PROMOTION_READINESS_DELIVERY_BATCH_SCALE, record
+        assert record["delivery_outcome"] == PROMOTION_READINESS_DELIVERY_OUTCOME, record
+        assert record["recommended_action"] == PROMOTION_READINESS_RECOMMENDED_ACTION, record
 
         json_path = Path(record["json_path"])
         markdown_path = Path(record["markdown_path"])
@@ -193,22 +163,11 @@ def main() -> int:
         assert runtime in markdown_path.parents, markdown_path
 
         payload = json.loads(json_path.read_text(encoding="utf-8"))
-        assert payload["classification"] == module.READINESS_CLASSIFICATION, payload
-        assert payload["delivery_batch_scale"] == "multi_surface", payload
-        assert payload["delivery_outcome"] == module.READINESS_DELIVERY_OUTCOME, payload
-        assert payload["progress_scope"] == "agent_lane", payload
-        assert payload["agent_id"] == module.DEFAULT_READINESS_AGENT_ID, payload
-        assert payload["agent_lane"] == module.DEFAULT_READINESS_AGENT_LANE, payload
-        assert payload["vision_checkpoint"]["required"] is False, payload
-        assert payload["vision_checkpoint"]["decision"] == "not_required", payload
-        assert payload["state"]["path"] == str(state_path), payload
-
-        global_registry = runtime / "registry.global.json"
-        assert global_registry.is_file(), global_registry
-        global_payload = json.loads(global_registry.read_text(encoding="utf-8"))
-        projected_runtime = Path(global_payload["common_runtime_root"])
-        assert projected_runtime.resolve() == runtime.resolve(), global_payload
-        assert any(goal.get("id") == GOAL_ID for goal in global_payload.get("goals") or []), global_payload
+        assert payload["classification"] == PROMOTION_READINESS_CLASSIFICATION, payload
+        assert payload["evidence_scope"] == "runtime_release", payload
+        assert payload["delivery_batch_scale"] == PROMOTION_READINESS_DELIVERY_BATCH_SCALE, payload
+        assert payload["delivery_outcome"] == PROMOTION_READINESS_DELIVERY_OUTCOME, payload
+        assert "goal_id" not in payload, payload
 
         ready_gate = run_promotion_gate(env, runtime)
         assert ready_gate["ok"] is True, ready_gate
@@ -218,7 +177,9 @@ def main() -> int:
         assert "warning_message" not in ready_gate, ready_gate
         assert ready_gate["readiness"]["freshness_status"] == "fresh", ready_gate
         assert ready_gate["readiness"]["requires_readiness_run"] is False, ready_gate
-        assert ready_gate["readiness"]["classification"] == module.READINESS_CLASSIFICATION, ready_gate
+        assert ready_gate["readiness"]["classification"] == PROMOTION_READINESS_CLASSIFICATION, ready_gate
+        assert ready_gate["readiness"]["source"] == "runtime_release_ledger", ready_gate
+        assert ready_gate["readiness"]["dashboard_readiness"] == "passed", ready_gate
 
         post_install = run_install(env, "after-readiness-evidence")
         assert "loopx installed locally" in post_install.stdout, post_install.stdout
@@ -239,7 +200,45 @@ def main() -> int:
         assert readiness["available"] is True, readiness
         assert readiness["freshness_status"] == "fresh", readiness
         assert readiness["requires_readiness_run"] is False, readiness
-        assert readiness["classification"] == module.READINESS_CLASSIFICATION, readiness
+        assert readiness["classification"] == PROMOTION_READINESS_CLASSIFICATION, readiness
+        assert readiness["source"] == "runtime_release_ledger", readiness
+        assert readiness["evidence_scope"] == "runtime_release", readiness
+        assert readiness["dashboard_readiness"] == "passed", readiness
+
+        relative_project = root / "relative-project"
+        relative_registry = relative_project / ".loopx" / "registry.json"
+        relative_registry.parent.mkdir(parents=True)
+        relative_registry.write_text(
+            json.dumps(
+                {
+                    "common_runtime_root": ".runtime",
+                    "goals": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        relative_write = record_promotion_readiness(
+            registry_path=relative_registry,
+            runtime_root_override=None,
+            dashboard_readiness="passed",
+            execute=True,
+        )
+        expected_relative_runtime = (relative_project / ".runtime").resolve()
+        assert Path(relative_write["runtime_root"]) == expected_relative_runtime, (
+            relative_write
+        )
+        relative_gate = build_promotion_gate(
+            registry_path=relative_registry,
+            runtime_root_override=None,
+        )
+        assert Path(relative_gate["runtime_root"]) == expected_relative_runtime, (
+            relative_gate
+        )
+        assert relative_gate["gate_state"] == "ready", relative_gate
+        assert relative_gate["readiness"]["source"] == "runtime_release_ledger", (
+            relative_gate
+        )
 
     print("canary-promotion-readiness-writeback-smoke ok")
     return 0

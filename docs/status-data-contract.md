@@ -376,8 +376,10 @@ goals must stay out of the eligible lane even when they have a high
   },
   "promotion_readiness_summary": {
     "available": true,
-    "source": "run_history",
-    "goal_id": "loopx-meta",
+    "source": "runtime_release_ledger",
+    "evidence_scope": "runtime_release",
+    "goal_id": null,
+    "dashboard_readiness": "passed",
     "generated_at": "2026-06-01T00:08:00+00:00",
     "classification": "canary_promotion_readiness_smoke_group",
     "delivery_batch_scale": "multi_surface",
@@ -391,7 +393,7 @@ goals must stay out of the eligible lane even when they have a high
     "age_seconds": 120,
     "age_hours": 0.03,
     "sample_run_count": 1,
-    "proxy_note": "canary promotion-readiness projection from append-only run history; exact evidence stays in run artifacts"
+    "proxy_note": "canary promotion-readiness projection from the runtime release ledger with legacy goal-history fallback; exact evidence stays in append-only artifacts"
   },
   "promotion_gate": {
     "ok": true,
@@ -527,6 +529,18 @@ the stable fields.
 consume one state contract instead of re-deriving release-readiness state
 separately.
 
+After the release checks pass, the canary uses the explicit write boundary:
+
+```bash
+loopx promotion-readiness record \
+  --dashboard-readiness passed \
+  --execute
+```
+
+Without `--execute`, this command only previews the runtime-level append. The
+canary supplies `skipped` only for an explicit dashboard omission; dependency
+failures on a present dashboard source must not be recorded as `passed`.
+
 Fresh shape:
 
 ```json
@@ -542,7 +556,10 @@ Fresh shape:
   "recommended_action": "promotion readiness is fresh",
   "readiness": {
     "available": true,
-    "goal_id": "loopx-meta",
+    "source": "runtime_release_ledger",
+    "evidence_scope": "runtime_release",
+    "goal_id": null,
+    "dashboard_readiness": "passed",
     "classification": "canary_promotion_readiness_smoke_group",
     "freshness_status": "fresh",
     "requires_readiness_run": false,
@@ -2170,10 +2187,14 @@ leaderboard claim.
 ## Promotion Readiness Summary
 
 `promotion_readiness_summary` is an optional release-control projection over the
-same sampled run history. It finds the latest
+runtime release ledger, with legacy Goal run-history events retained as a
+read-compatible fallback only when the runtime ledger has no valid readiness
+event. It finds the latest
 `canary_promotion_readiness_smoke_group` event and reports whether that evidence
 is fresh enough to trust before promoting a live checkout into the default local
-release snapshot.
+release snapshot. New evidence is runtime-scoped because release readiness is
+shared by every Goal using that local installation; it does not require or
+mutate a project Goal.
 
 The summary reports:
 
@@ -2185,8 +2206,11 @@ The summary reports:
   parseable.
 - `json_exists` / `markdown_exists`: whether the latest evidence artifacts still
   exist.
+- `dashboard_readiness`: `passed` or `skipped` for runtime-level evidence, so a
+  deliberate omission is never indistinguishable from a successful check.
 
-This projection does not promote anything and does not replace the run artifact.
+This projection does not promote anything and does not replace the append-only
+release artifact under the LoopX runtime root.
 `scripts/install-local.sh` consumes the same readiness fact only to print a
 non-blocking warning; operators should still run `loopx doctor` or the
 canary-promotion readiness smoke for exact local release evidence.
@@ -2234,8 +2258,8 @@ not rolling the repository or project back to the old chat context.
 evidence is missing, stale, or unknown. The warning is a release-readiness guard
 surface, not a scheduling decision: it does not flip `should_run`, but it lets a
 heartbeat worker report that the release snapshot should not be promoted until
-fresh canary promotion-readiness evidence is written back to the shared
-run-history projection. This keeps release readiness in queryable control-plane
+fresh canary promotion-readiness evidence is written to the shared runtime
+release ledger. This keeps release readiness in queryable control-plane
 state instead of relying on dashboard prose, `doctor` output, or a chat thread.
 The warning message names the writeback command,
 `python3 examples/canary/canary-promotion-readiness-smoke.py`. A run with

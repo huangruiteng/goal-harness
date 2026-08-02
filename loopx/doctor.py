@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .control_plane.runtime.promotion_readiness import (
+    PROMOTION_READINESS_CLASSIFICATION,
+    PROMOTION_READINESS_RUNTIME_INDEX,
+)
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path
 from .project_skill_delivery import discover_project_scoped_skill_ids
 from .registry_writability import probe_registry_write_path
@@ -25,7 +29,7 @@ from .skill_install_readback import (
 
 
 PROMOTION_READINESS_CLASSIFICATIONS = {
-    "canary_promotion_readiness_smoke_group",
+    PROMOTION_READINESS_CLASSIFICATION,
 }
 PROMOTION_READINESS_FRESHNESS_HOURS = 24
 INSTALL_FRESHNESS_STALE_HOURS = 168
@@ -642,17 +646,26 @@ def installed_skill_check(
 
 def latest_promotion_readiness_event(runtime_root: Path, goal_id: str | None = None) -> dict[str, Any]:
     goals_dir = runtime_root / "goals"
-    if not goals_dir.exists():
+    runtime_index = runtime_root / PROMOTION_READINESS_RUNTIME_INDEX
+    if not goals_dir.exists() and not runtime_index.is_file():
         return {
             "available": False,
             "runtime_root": str(runtime_root),
-            "reason": "runtime goals directory does not exist",
+            "reason": "promotion readiness ledger does not exist",
         }
 
-    matches: list[dict[str, Any]] = []
-    index_glob = f"{goal_id}/runs/index.jsonl" if goal_id else "*/runs/index.jsonl"
-    for index_path in goals_dir.glob(index_glob):
-        current_goal_id = index_path.parent.parent.name
+    runtime_matches: list[dict[str, Any]] = []
+    legacy_matches: list[dict[str, Any]] = []
+    indexes: list[tuple[Path, str | None, str]] = []
+    if runtime_index.is_file():
+        indexes.append((runtime_index, None, "runtime_release_ledger"))
+    if goals_dir.exists():
+        index_glob = f"{goal_id}/runs/index.jsonl" if goal_id else "*/runs/index.jsonl"
+        indexes.extend(
+            (path, path.parent.parent.name, "goal_run_history_legacy")
+            for path in goals_dir.glob(index_glob)
+        )
+    for index_path, current_goal_id, source in indexes:
         try:
             lines = index_path.read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -671,12 +684,20 @@ def latest_promotion_readiness_event(runtime_root: Path, goal_id: str | None = N
                 continue
             json_path = Path(str(item.get("json_path") or ""))
             markdown_path = Path(str(item.get("markdown_path") or ""))
-            matches.append(
+            target_matches = (
+                runtime_matches if source == "runtime_release_ledger" else legacy_matches
+            )
+            target_matches.append(
                 {
                     "available": True,
-                    "goal_id": str(item.get("goal_id") or current_goal_id),
+                    "source": source,
+                    "goal_id": str(item.get("goal_id") or current_goal_id or "") or None,
                     "generated_at": item.get("generated_at"),
                     "classification": classification,
+                    "evidence_scope": item.get("evidence_scope") or (
+                        "goal_run_history" if current_goal_id else "runtime_release"
+                    ),
+                    "dashboard_readiness": item.get("dashboard_readiness"),
                     "delivery_batch_scale": item.get("delivery_batch_scale"),
                     "delivery_outcome": item.get("delivery_outcome"),
                     "recommended_action": item.get("recommended_action"),
@@ -685,6 +706,7 @@ def latest_promotion_readiness_event(runtime_root: Path, goal_id: str | None = N
                 }
             )
 
+    matches = runtime_matches or legacy_matches
     if not matches:
         return {
             "available": False,

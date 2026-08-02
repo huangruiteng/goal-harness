@@ -799,8 +799,9 @@ When the status payload has missing, stale, or unknown canary promotion
 readiness evidence, `quota should-run` also includes
 `promotion_readiness_warning`. This warning is additive: it does not change
 `should_run`, but it lets heartbeat workers and dashboards report release
-readiness blockers from the shared run-history projection without parsing
-`doctor`, dashboard copy, or chat reports. Before promoting the local release
+readiness blockers from the shared runtime release ledger without parsing
+`doctor`, dashboard copy, or chat reports. New evidence is stored there rather
+than in a project Goal. Before promoting the local release
 snapshot, run `python3 examples/canary/canary-promotion-readiness-smoke.py` and
 confirm fresh evidence in status or doctor output. The
 `--no-write-evidence` form remains the non-mutating validation path and therefore

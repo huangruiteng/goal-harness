@@ -42,7 +42,10 @@ def assert_preview_does_not_execute_or_write() -> None:
     assert payload["selected_check_count"] == 1, payload
     selected = payload["selected_checks"][0]
     assert selected["normalized"]["ok"] is True, selected
-    assert "--no-write-evidence" in selected["normalized"]["argv"], selected
+    assert selected["normalized"]["script"] == (
+        "examples/control_plane/promotion-readiness-readmodel-smoke.py"
+    ), selected
+    assert selected["normalized"]["injected_args"] == [], selected
 
 
 def assert_profile_fixture_executes() -> None:
