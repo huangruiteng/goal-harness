@@ -15,6 +15,7 @@ ISSUE_FIX_FEASIBILITY_OBSERVATION_SCHEMA_VERSION = (
     "issue_fix_feasibility_observation_v0"
 )
 ISSUE_FIX_FEASIBILITY_DECISION_SCHEMA_VERSION = "issue_fix_feasibility_decision_v0"
+CAPABILITY_EXECUTION_BINDING_SCHEMA_VERSION = "capability_execution_binding_v0"
 
 REPRODUCTION_STATES = {"confirmed", "planned", "missing", "blocked"}
 SCOPE_CLASSES = {"bounded", "uncertain", "oversized"}
@@ -188,6 +189,51 @@ def _project_external_write_gate(
     }
 
 
+def _issue_fix_execution_binding(
+    *,
+    route: str,
+    observation_fingerprint: str,
+    projected_todo: Mapping[str, Any],
+) -> dict[str, Any]:
+    binding_ref = f"issue-fix:feasibility-{observation_fingerprint}"
+    return {
+        "schema_version": CAPABILITY_EXECUTION_BINDING_SCHEMA_VERSION,
+        "binding_ref": binding_ref,
+        "capability_id": "issue-fix",
+        "authority": {
+            "domain_pack": "issue_fix",
+            "stream": "feasibility",
+            "packet_schema_version": ISSUE_FIX_FEASIBILITY_PACKET_SCHEMA_VERSION,
+            "observation_fingerprint": observation_fingerprint,
+            "route": route,
+        },
+        "todo_contract": {
+            "action_kind": projected_todo.get("action_kind"),
+            "target_key": projected_todo.get("target_key"),
+        },
+    }
+
+
+def refresh_issue_fix_execution_binding(packet: dict[str, Any]) -> None:
+    """Bind a runnable successor to the persisted feasibility authority row."""
+
+    decision = packet.get("decision")
+    transition = packet.get("transition")
+    decision = decision if isinstance(decision, Mapping) else {}
+    transition = transition if isinstance(transition, Mapping) else {}
+    projected_todo = transition.get("projected_todo")
+    if not isinstance(projected_todo, dict):
+        packet.pop("capability_execution_binding", None)
+        return
+    binding = _issue_fix_execution_binding(
+        route=str(decision.get("route") or ""),
+        observation_fingerprint=str(decision.get("observation_fingerprint") or ""),
+        projected_todo=projected_todo,
+    )
+    packet["capability_execution_binding"] = binding
+    projected_todo["capability_binding_ref"] = binding["binding_ref"]
+
+
 def _repository_context_effect(context: Mapping[str, Any]) -> dict[str, Any]:
     coverage = context.get("coverage") if isinstance(context.get("coverage"), Mapping) else {}
 
@@ -339,6 +385,7 @@ def build_issue_fix_feasibility_packet(
         "local_paths_captured": False,
         "destructive_git_used": False,
     }
+    refresh_issue_fix_execution_binding(packet)
     validation = validate_issue_fix_feasibility_packet(packet)
     packet["ok"] = validation["ok"]
     packet["validation"] = validation
@@ -424,6 +471,27 @@ def validate_issue_fix_feasibility_packet(packet: Mapping[str, Any]) -> dict[str
             errors.append(
                 "projected successor target_key must identify the admitted issue"
             )
+        if isinstance(projected_todo, Mapping):
+            expected_binding = _issue_fix_execution_binding(
+                route=str(route),
+                observation_fingerprint=str(
+                    decision.get("observation_fingerprint") or ""
+                ),
+                projected_todo=projected_todo,
+            )
+            if packet.get("capability_execution_binding") != expected_binding:
+                errors.append(
+                    "capability execution binding must match the admitted "
+                    "feasibility transition"
+                )
+            if (
+                projected_todo.get("capability_binding_ref")
+                != expected_binding["binding_ref"]
+            ):
+                errors.append(
+                    "projected successor capability_binding_ref must match the "
+                    "feasibility authority"
+                )
         if not isinstance(gate, Mapping):
             errors.append("runnable external-write route requires a gate projection")
         else:
@@ -440,6 +508,8 @@ def validate_issue_fix_feasibility_packet(packet: Mapping[str, Any]) -> dict[str
                 errors.append("external-write gate must partition required actions")
             if gate.get("satisfied") is not (not blocked):
                 errors.append("external-write gate satisfied must match blocked actions")
+    elif packet.get("capability_execution_binding") is not None:
+        errors.append("no-followup route must not publish a capability execution binding")
 
     return {
         "ok": not errors,

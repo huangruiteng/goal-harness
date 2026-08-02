@@ -20,8 +20,8 @@ PROMOTION_READINESS_RECOMMENDED_ACTION_DASHBOARD_SKIPPED = (
 )
 
 PROMOTION_READINESS_PROXY_NOTE = (
-    "canary promotion-readiness projection from the runtime release ledger with legacy goal-history fallback; "
-    "exact evidence stays in append-only artifacts"
+    "canary readiness from runtime ledger or legacy goal history; exact evidence stays "
+    "in append-only artifacts"
 )
 PROMOTION_READINESS_WRITEBACK_COMMAND = (
     "python3 examples/canary/canary-promotion-readiness-smoke.py"

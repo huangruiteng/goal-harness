@@ -18,6 +18,7 @@ TODO_OPTION_FIELDS = (
     ("--authority-reason", "authority_reason"),
     ("--task-class", "task_class"),
     ("--action-kind", "action_kind"),
+    ("--capability-binding-ref", "capability_binding_ref"),
     ("--task-repository", "task_repository"),
     ("--continuation-policy", "continuation_policy"),
     ("--required-write-scope", "required_write_scopes"),
@@ -441,6 +442,10 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
         "complete",
         "supersede",
     }
+    if args.capability_binding_ref and args.todo_command != "add":
+        raise ValueError(
+            "--capability-binding-ref is immutable and supported only by todo add"
+        )
     if args.authority_reason and not authority_reason_allowed:
         raise ValueError(
             "--authority-reason is supported only by todo update/complete/supersede"

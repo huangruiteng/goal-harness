@@ -119,6 +119,13 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     todo_parser.add_argument(
+        "--capability-binding-ref",
+        help=(
+            "For agent todo add, persist the opaque capability admission binding "
+            "projected by a validated capability packet."
+        ),
+    )
+    todo_parser.add_argument(
         "--task-repository",
         help=(
             "For agent todo add/update, declare the credential-free Git repository "
@@ -419,6 +426,7 @@ def handle_todo_command(
                 status=args.status,
                 task_class=args.task_class,
                 action_kind=args.action_kind,
+                capability_binding_ref=args.capability_binding_ref,
                 task_repository=args.task_repository,
                 continuation_policy=args.continuation_policy,
                 required_write_scopes=args.required_write_scopes,

@@ -27,6 +27,7 @@ from .contract import (
     build_todo_id,
     merge_todo_id_lists,
     normalize_required_capabilities,
+    normalize_todo_capability_binding_ref,
     normalize_todo_claimed_by,
     normalize_todo_bound_agent,
     normalize_todo_continuation_policy,
@@ -146,6 +147,7 @@ def _append_event_projected_successor(
     fields: dict[str, Any],
     task_class: str | None,
     action_kind: str | None,
+    capability_binding_ref: str | None,
     task_repository: str | None,
     required_capabilities: list[str] | None,
     continuation_policy: str | None,
@@ -180,6 +182,15 @@ def _append_event_projected_successor(
         payload["task_class"] = task_class
     if action_kind:
         payload["action_kind"] = action_kind
+    normalized_capability_binding_ref = normalize_todo_capability_binding_ref(
+        capability_binding_ref
+    )
+    if capability_binding_ref and not normalized_capability_binding_ref:
+        raise ValueError(
+            "capability_binding_ref must be a public-safe namespaced token"
+        )
+    if normalized_capability_binding_ref:
+        payload["capability_binding_ref"] = normalized_capability_binding_ref
     normalized_task_repository = normalize_todo_task_repository(task_repository)
     if task_repository and not normalized_task_repository:
         raise ValueError(
@@ -269,6 +280,7 @@ def _append_event_projected_successor(
         "todo_id": todo_id,
         "task_class": task_class,
         "action_kind": action_kind,
+        "capability_binding_ref": normalized_capability_binding_ref,
         "task_repository": normalized_task_repository,
         "required_capabilities": normalized_required_capabilities,
         "continuation_policy": effective_continuation_policy,
@@ -339,6 +351,7 @@ def complete_event_projected_goal_todo(
                 fields=context["fields"],
                 task_class=next_task_class or "advancement_task",
                 action_kind=next_action_kind,
+                capability_binding_ref=item.get("capability_binding_ref"),
                 task_repository=next_task_repository,
                 required_capabilities=next_required_capabilities,
                 continuation_policy=next_continuation_policy,
@@ -361,6 +374,7 @@ def complete_event_projected_goal_todo(
                 action_kind=(
                     "gate" if next_user_task_class == TODO_TASK_CLASS_USER_GATE else None
                 ),
+                capability_binding_ref=None,
                 task_repository=None,
                 required_capabilities=None,
                 continuation_policy=None,
@@ -427,6 +441,7 @@ def complete_event_projected_goal_todo(
         "claimed_by": normalize_todo_claimed_by(effective_claimed_by),
         "task_class": item.get("task_class"),
         "action_kind": item.get("action_kind"),
+        "capability_binding_ref": item.get("capability_binding_ref"),
         "continuation_policy": item.get("continuation_policy"),
         "successor_todo_ids": normalized_successor_todo_ids,
         "next_todos": next_results,

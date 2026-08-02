@@ -5,8 +5,17 @@ from pathlib import Path
 
 import pytest
 
+from loopx.control_plane.todos.event_writeback import (
+    complete_event_projected_goal_todo,
+)
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     write_monitor_poll_todo_state,
+)
+from loopx.event_sourced_state import (
+    AppendOnlyStateEventStore,
+    TODO_ADDED,
+    build_state_projection,
+    make_state_event,
 )
 from loopx.status import parse_active_state_todos
 from loopx.todos import (
@@ -223,6 +232,131 @@ def test_advancement_todo_preserves_public_target_key(tmp_path: Path) -> None:
     projected = _agent_todo(state, todo["todo_id"])
     assert projected["action_kind"] == "issue_fix_branch_validation"
     assert projected["target_key"] == "issue-fix:owner/repo:issue_42"
+
+
+def test_capability_binding_follows_generated_agent_successor(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Advance the admitted issue-fix route.",
+        task_class="advancement_task",
+        action_kind="issue_fix_branch_validation",
+        capability_binding_ref="issue-fix:feasibility-a1b2c3d4",
+        claimed_by=AUTHOR_AGENT,
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AUTHOR_AGENT,
+        evidence="bounded validation passed",
+        next_agent_todo="Open the validated issue-fix review packet.",
+        next_action_kind="issue_fix_reviewer_request",
+        next_claimed_by=AUTHOR_AGENT,
+        next_continuation_policy="same_agent_non_delivery",
+    )
+
+    successor = _agent_todo(state, result["next_todos"][0]["todo_id"])
+    assert successor["capability_binding_ref"] == (
+        "issue-fix:feasibility-a1b2c3d4"
+    )
+
+
+def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Advance the admitted issue-fix route.",
+        task_class="advancement_task",
+        capability_binding_ref="issue-fix:feasibility-a1b2c3d4",
+    )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="immutable once set"):
+        add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="Advance the admitted issue-fix route.",
+            task_class="advancement_task",
+            capability_binding_ref="issue-fix:feasibility-e5f6a7b8",
+        )
+
+    assert state.read_text(encoding="utf-8") == before
+
+
+def test_capability_binding_follows_event_projected_successor(tmp_path: Path) -> None:
+    event_log = tmp_path / "todo-events.jsonl"
+    store = AppendOnlyStateEventStore(event_log)
+    store.append(
+        make_state_event(
+            event_id="evt-binding-parent",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": "todo_binding_parent"},
+            payload={
+                "role": "agent",
+                "title": "Advance the admitted issue-fix route.",
+                "task_class": "advancement_task",
+                "action_kind": "issue_fix_branch_validation",
+                "capability_binding_ref": "issue-fix:feasibility-a1b2c3d4",
+                "claimed_by": AUTHOR_AGENT,
+            },
+            recorded_at="2026-07-18T00:00:00+00:00",
+        )
+    )
+    projection = build_state_projection(store.load())
+    parent = projection["agent_todos"]["items"][0]
+
+    result = complete_event_projected_goal_todo(
+        goal_id=GOAL_ID,
+        context={
+            "item": parent,
+            "role": "agent",
+            "event_log_path": event_log,
+            "fields": {"agent_todos": projection["agent_todos"]},
+        },
+        evidence="bounded validation passed",
+        note=None,
+        no_followup=False,
+        successor_todo_ids=[],
+        claimed_by=AUTHOR_AGENT,
+        clear_claim=False,
+        next_agent_todo="Open the validated issue-fix review packet.",
+        next_user_todo=None,
+        next_user_task_class="user_gate",
+        next_claimed_by=AUTHOR_AGENT,
+        next_task_class="advancement_task",
+        next_action_kind="issue_fix_reviewer_request",
+        next_task_repository=None,
+        next_required_capabilities=None,
+        next_continuation_policy="same_agent_non_delivery",
+        self_merged=False,
+        next_excluded_agents=[],
+        registered_agents=[AUTHOR_AGENT],
+        updated_at="2026-07-18T00:01:00+00:00",
+        dry_run=False,
+    )
+
+    successor_id = result["next_todos"][0]["todo_id"]
+    replayed = build_state_projection(AppendOnlyStateEventStore(event_log).load())
+    replayed_agent_todos = {
+        item["todo_id"]: item for item in replayed["agent_todos"]["items"]
+    }
+    assert successor_id in replayed_agent_todos, (result, replayed)
+    successor = next(
+        item
+        for item in replayed["agent_todos"]["items"]
+        if item["todo_id"] == successor_id
+    )
+    assert successor["capability_binding_ref"] == (
+        "issue-fix:feasibility-a1b2c3d4"
+    )
 
 
 def test_monitor_schedule_fields_remain_monitor_only(tmp_path: Path) -> None:

@@ -18,7 +18,10 @@ from ...domain_packs.issue_fix import (
     promote_issue_fix_feasibility_ledger_jsonl,
     upsert_issue_fix_pr_lifecycle_ledger_jsonl,
 )
-from .feasibility import validate_issue_fix_feasibility_packet
+from .feasibility import (
+    refresh_issue_fix_execution_binding,
+    validate_issue_fix_feasibility_packet,
+)
 from .metadata_preview import (
     normalise_github_issue_link_reference,
     normalise_github_issue_reference,
@@ -637,6 +640,7 @@ def promote_issue_fix_feasibility_packet(
     projection["write_performed"] = False
     projection.pop("write_result", None)
     projection.pop("write_skipped_reason", None)
+    refresh_issue_fix_execution_binding(promoted)
     promoted["promotion_lineage"] = _promotion_lineage(
         source_issue_ref=source_issue_ref,
         canonical_issue_ref=canonical_ref,

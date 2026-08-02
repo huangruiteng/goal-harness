@@ -196,7 +196,20 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
             "route_scope": "start_goal_bootstrap_only",
             "candidate_receipt_stream": "candidate-preflight",
             "feasibility_required_for_route": "proceed",
-            "durable_reentry_fields": ["action_kind", "target_key"],
+            "durable_execution_binding": {
+                "schema_version": "capability_execution_binding_v0",
+                "capability_id": "issue-fix",
+                "todo_binding_ref_field": "capability_binding_ref",
+                "authority_source": "admission_result.capability_execution_binding",
+                "authority_stream": "feasibility",
+                "authority_packet_schema_version": "issue_fix_feasibility_v0",
+                "bound_todo_fields": ["action_kind", "target_key"],
+                "legacy_unbound_todo_fallback": {
+                    "authority": "current_feasibility_row",
+                    "match": "exact_action_kind_and_target_key",
+                    "prefix_match_allowed": False,
+                },
+            },
         },
         "activation_condition": (
             "after selecting a public issue candidate and before substantive "
