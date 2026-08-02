@@ -10,6 +10,10 @@ from .capabilities.content_ops.cli import (
     handle_content_ops_command,
     register_content_ops_commands,
 )
+from .capabilities.agent_turn_recall.cli import (
+    handle_agent_turn_recall_command,
+    register_agent_turn_recall_commands,
+)
 from .capabilities.change_quality.cli import (
     handle_change_quality_command,
     register_change_quality_commands,
@@ -233,6 +237,8 @@ def build_parser() -> LoopXArgumentParser:
     register_issue_fix_commands(sub, add_subcommand_format)
 
     register_reward_memory_commands(sub, add_subcommand_format)
+
+    register_agent_turn_recall_commands(sub, add_subcommand_format)
 
     register_review_batch_commands(sub, add_subcommand_format)
 
@@ -514,6 +520,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     if reward_memory_result is not None:
         return reward_memory_result
+
+    agent_turn_recall_result = handle_agent_turn_recall_command(
+        args,
+        registry_path=registry_path,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if agent_turn_recall_result is not None:
+        return agent_turn_recall_result
 
     decision_context_result = handle_decision_context_command(
         args,

@@ -177,6 +177,10 @@ def build_active_reward_memory_record(
             json.dumps(identity, sort_keys=True).encode("utf-8")
         ).hexdigest()[:20]
     )
+    active_lifecycle: dict[str, Any] = {"state": "active"}
+    expires_at = record["lifecycle"].get("expires_at")
+    if expires_at:
+        active_lifecycle["expires_at"] = expires_at
     return {
         "schema_version": REWARD_MEMORY_ACTIVE_RECORD_SCHEMA_VERSION,
         "activation_ref": activation_ref,
@@ -195,7 +199,7 @@ def build_active_reward_memory_record(
             "guard_passed": True,
             "review_ref": reviewed_candidate["review"]["review_ref"],
         },
-        "lifecycle": {"state": "active"},
+        "lifecycle": active_lifecycle,
         "privacy": {"raw_content_captured": False},
         "provider_write_performed": False,
         "external_writes_performed": False,
@@ -472,6 +476,7 @@ def _active_item(
     corpus: Mapping[str, Any],
     *,
     surface_id: str,
+    observed_at: str,
 ) -> RewardMemoryRecallItem | None:
     try:
         envelope = json.loads(item.content)
@@ -492,6 +497,15 @@ def _active_item(
         or lifecycle.get("state") != "active"
     ):
         return None
+    expires_at = lifecycle.get("expires_at")
+    if expires_at:
+        try:
+            expires = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+            observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if expires.tzinfo is None or observed.tzinfo is None or observed >= expires:
+            return None
     return RewardMemoryRecallItem(
         memory_ref=item.resource_ref,
         candidate_ref=_token(envelope.get("candidate_ref"), "candidate_ref"),
@@ -597,6 +611,7 @@ def execute_reward_memory_recall(
                 provider_item,
                 corpus,
                 surface_id=request["surface_id"],
+                observed_at=request["observed_at"],
             )
             if active is None:
                 continue

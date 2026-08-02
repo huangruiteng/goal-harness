@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
 from ...control_plane.runtime.public_safety import public_safe_compact_text
@@ -60,6 +61,19 @@ def _boolean(mapping: Mapping[str, Any], key: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{key} must be a boolean")
     return value
+
+
+def _optional_timestamp(value: object, label: str) -> str | None:
+    if value in (None, ""):
+        return None
+    result = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(result.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} must be an ISO timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must include a timezone")
+    return result
 
 
 def _tokens(value: object, label: str, *, maximum: int) -> list[str]:
@@ -247,6 +261,10 @@ def build_reward_memory_candidate(
     target_class = str(proposal.get("target_class") or "").strip()
     if target_class not in TARGET_CLASS_IDS:
         raise ValueError("target_class must be a durable reusable memory class")
+    lifecycle: dict[str, Any] = {"state": "candidate", "supersedes_refs": []}
+    expires_at = _optional_timestamp(proposal.get("expires_at"), "expires_at")
+    if expires_at:
+        lifecycle["expires_at"] = expires_at
     candidate: dict[str, Any] = {
         "schema_version": REWARD_MEMORY_CANDIDATE_SCHEMA_VERSION,
         "target_class": target_class,
@@ -262,7 +280,7 @@ def build_reward_memory_candidate(
             "requested_action_scopes",
             maximum=MAX_ACTION_SCOPES,
         ),
-        "lifecycle": {"state": "candidate", "supersedes_refs": []},
+        "lifecycle": lifecycle,
         "privacy": {"raw_content_captured": False},
     }
     candidate["candidate_ref"] = _candidate_ref(candidate)
@@ -321,6 +339,9 @@ def review_reward_memory_candidate(
         if isinstance(lifecycle, Mapping)
         else []
     )
+    expires_at = (
+        lifecycle.get("expires_at") if isinstance(lifecycle, Mapping) else None
+    )
     if decision == "retire" and state != "active":
         raise ValueError("retire requires an active reviewed record")
     if decision != "retire" and state != "candidate":
@@ -336,6 +357,8 @@ def review_reward_memory_candidate(
             "state": "active",
             "supersedes_refs": supersedes_refs,
         }
+        if expires_at:
+            record["lifecycle"]["expires_at"] = expires_at
         status = "active"
     elif decision == "edit":
         old_ref = str(record.get("candidate_ref") or "")
@@ -349,6 +372,8 @@ def review_reward_memory_candidate(
             "state": "candidate",
             "supersedes_refs": [old_ref],
         }
+        if expires_at:
+            record["lifecycle"]["expires_at"] = expires_at
         status = "review_ready"
     elif decision == "reject":
         record["lifecycle"] = {
