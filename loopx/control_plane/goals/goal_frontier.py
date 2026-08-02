@@ -434,6 +434,41 @@ def _watch_lane_ack_covers_dead_monitor_repeat(
     )
 
 
+def _watch_lane_ack_covers_blocked_successor_repeat(
+    ack: dict[str, Any] | None,
+    *,
+    replan_obligation: dict[str, Any] | None,
+    acceptance_gaps: list[dict[str, Any]],
+) -> bool:
+    """Keep an as-needed blocked-successor ACK valid for the same frontier."""
+
+    if not isinstance(replan_obligation, dict):
+        return False
+    trigger_kinds = {
+        str(trigger.get("kind") or "").strip()
+        for trigger in (replan_obligation.get("triggers") or [])
+        if isinstance(trigger, dict)
+    }
+    if trigger_kinds != {"blocked_successor_no_progress_repeat"}:
+        return False
+    if not _autonomous_replan_ack_has_delta_kind(
+        ack,
+        delta_kind="watch_lane_continuation",
+    ):
+        return False
+    if not acceptance_gaps or any(
+        gap.get("kind") != "vision_acceptance_gap"
+        or goal_vision_repeats_advancement_until_closed(
+            gap.get("advancement_policy")
+        )
+        for gap in acceptance_gaps
+    ):
+        return False
+    return str(ack.get("frontier_identity") or "").strip() == str(
+        replan_obligation.get("frontier_identity") or ""
+    ).strip()
+
+
 def autonomous_replan_decision_allowed(
     *,
     replan_obligation: dict[str, Any] | None,
@@ -1973,6 +2008,13 @@ def build_goal_frontier_projection_context_from_status(
             acceptance_gaps=acceptance_gaps,
         )
     )
+    watch_lane_ack_covers_blocked_successor_repeat = (
+        _watch_lane_ack_covers_blocked_successor_repeat(
+            effective_replan_ack,
+            replan_obligation=replan_obligation,
+            acceptance_gaps=source_acceptance_gaps,
+        )
+    )
     if (
         autonomous_replan_is_required(replan_obligation)
         and autonomous_replan_ack_satisfies_obligation(
@@ -1980,9 +2022,12 @@ def build_goal_frontier_projection_context_from_status(
             replan_obligation=replan_obligation,
             acceptance_gaps=source_acceptance_gaps,
         )
-        and autonomous_replan_ack_matches_frontier(
-            effective_replan_ack,
-            replan_obligation,
+        and (
+            autonomous_replan_ack_matches_frontier(
+                effective_replan_ack,
+                replan_obligation,
+            )
+            or watch_lane_ack_covers_blocked_successor_repeat
         )
         and (
             not acceptance_gaps

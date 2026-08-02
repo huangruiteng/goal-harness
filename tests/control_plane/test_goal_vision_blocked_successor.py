@@ -915,7 +915,7 @@ def test_wait_only_ack_can_cover_non_repeating_blocked_successor() -> None:
     assert covered.get("autonomous_replan_obligation") is None
 
 
-def test_replan_ack_does_not_cover_newer_same_frontier_stalls() -> None:
+def test_wait_ack_covers_newer_same_frontier_stalls_for_as_needed_vision() -> None:
     polls = _blocked_wait_polls()
     frontier_identity = polls[0]["monitor_target"]["frontier_identity"]
     older_ack = {
@@ -935,13 +935,13 @@ def test_replan_ack_does_not_cover_newer_same_frontier_stalls() -> None:
         },
     }
 
-    replanned = _quota_with_replan_runs([*polls, older_ack, _vision_run()])
-
-    assert replanned["decision"] == "autonomous_replan_required"
-    assert replanned["goal_frontier_projection"]["replan_required"] is True
-    assert replanned["autonomous_replan_obligation"]["frontier_identity"] == (
-        frontier_identity
+    covered = _quota_with_replan_runs(
+        [*polls, older_ack, _vision_run(advancement_policy="as_needed")]
     )
+
+    assert covered["decision"] == "agent_scope_wait"
+    assert covered["goal_frontier_projection"]["replan_required"] is False
+    assert covered.get("autonomous_replan_obligation") is None
 
 
 def test_refresh_ack_preserves_the_observed_blocked_successor_identity(
