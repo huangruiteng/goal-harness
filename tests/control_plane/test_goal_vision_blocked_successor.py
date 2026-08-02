@@ -12,6 +12,7 @@ from examples.control_plane.quota_plan_fixtures import (
 from loopx.cli_commands.status import attach_agent_lane_next_actions
 from loopx.control_plane.goals.goal_frontier import (
     build_goal_frontier_projection_context_from_status,
+    select_autonomous_replan_obligation,
 )
 from loopx.control_plane.quota.monitor_poll import build_quota_monitor_poll_event
 from loopx.control_plane.scheduler.execution_context import (
@@ -399,6 +400,24 @@ def _quota_with_replan_runs(
     return _quota(payload)
 
 
+def _set_two_agent_replan_obligations(
+    payload: dict,
+    obligation: dict,
+) -> tuple[dict, dict]:
+    item = payload["attention_queue"]["items"][0]
+    peer_obligation = {
+        **obligation,
+        "agent_id": PRIMARY_AGENT,
+        "recommended_action": "Keep the peer lane unchanged.",
+    }
+    by_agent = {AGENT_ID: obligation, PRIMARY_AGENT: peer_obligation}
+    item["autonomous_replan_obligations_by_agent"] = deepcopy(by_agent)
+    item["project_asset"]["autonomous_replan_obligations_by_agent"] = deepcopy(
+        by_agent
+    )
+    return item, peer_obligation
+
+
 def _monitor_blocked_advancement_items(
     *,
     next_due_at: str | None,
@@ -565,7 +584,7 @@ def test_two_identical_blocked_successor_waits_trigger_bounded_replan() -> None:
     )
 
 
-def test_agent_status_mirrors_repeat_vision_replan_guidance_from_quota() -> None:
+def test_agent_status_mirrors_quota_guidance_without_changing_peer() -> None:
     runs = [*_blocked_wait_polls(), _vision_run()]
     payload, raw_obligation = _status_payload_with_replan_runs(runs)
     assert raw_obligation is not None
@@ -573,12 +592,29 @@ def test_agent_status_mirrors_repeat_vision_replan_guidance_from_quota() -> None
         "recommended_action"
     ]
 
+    item, peer_obligation = _set_two_agent_replan_obligations(
+        payload,
+        raw_obligation,
+    )
+
     expected = _quota(payload)["autonomous_replan_obligation"]
     attach_agent_lane_next_actions(payload, agent_id=AGENT_ID)
 
-    item = payload["attention_queue"]["items"][0]
     assert item["autonomous_replan_obligation"] == expected
     assert item["project_asset"]["autonomous_replan_obligation"] == expected
+    assert (
+        select_autonomous_replan_obligation(
+            item,
+            item["project_asset"],
+            agent_id=AGENT_ID,
+        )
+        == expected
+    )
+    assert _quota(payload)["autonomous_replan_obligation"] == expected
+    for target in (item, item["project_asset"]):
+        obligations_by_agent = target["autonomous_replan_obligations_by_agent"]
+        assert obligations_by_agent[AGENT_ID] == expected
+        assert obligations_by_agent[PRIMARY_AGENT] == peer_obligation
     assert "watch-lane continuation alone does not satisfy" in expected[
         "recommended_action"
     ]
@@ -628,14 +664,22 @@ def test_agent_status_removes_obligation_cleared_by_actionable_ack() -> None:
         },
     }
     runs = [*polls, ack, _vision_run()]
-    payload, _ = _status_payload_with_replan_runs(runs)
+    payload, raw_obligation = _status_payload_with_replan_runs(runs)
+    assert raw_obligation is not None
+    item, peer_obligation = _set_two_agent_replan_obligations(
+        payload,
+        raw_obligation,
+    )
     assert _quota(payload).get("autonomous_replan_obligation") is None
 
     attach_agent_lane_next_actions(payload, agent_id=AGENT_ID)
 
-    item = payload["attention_queue"]["items"][0]
     assert "autonomous_replan_obligation" not in item
     assert "autonomous_replan_obligation" not in item["project_asset"]
+    for target in (item, item["project_asset"]):
+        assert target["autonomous_replan_obligations_by_agent"] == {
+            PRIMARY_AGENT: peer_obligation
+        }
 
 
 def test_as_needed_blocked_successor_guidance_keeps_wait_continuation() -> None:

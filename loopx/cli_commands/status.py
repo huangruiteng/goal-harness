@@ -699,12 +699,23 @@ def _sync_agent_replan_obligation_from_guard(
     project_asset: object,
     *,
     guard: dict[str, object],
+    agent_id: str,
 ) -> None:
     """Keep agent-scoped status guidance identical to the quota decision."""
 
     targets = (item, project_asset)
     if not any(
-        isinstance(target, dict) and "autonomous_replan_obligation" in target
+        isinstance(target, dict)
+        and (
+            "autonomous_replan_obligation" in target
+            or (
+                isinstance(
+                    target.get("autonomous_replan_obligations_by_agent"), dict
+                )
+                and agent_id
+                in target["autonomous_replan_obligations_by_agent"]
+            )
+        )
         for target in targets
     ):
         return
@@ -712,6 +723,17 @@ def _sync_agent_replan_obligation_from_guard(
     for target in targets:
         if not isinstance(target, dict):
             continue
+        obligations_by_agent = target.get("autonomous_replan_obligations_by_agent")
+        if isinstance(obligations_by_agent, dict):
+            obligations_by_agent = dict(obligations_by_agent)
+            if isinstance(obligation, dict):
+                obligations_by_agent[agent_id] = obligation
+            else:
+                obligations_by_agent.pop(agent_id, None)
+            if obligations_by_agent:
+                target["autonomous_replan_obligations_by_agent"] = obligations_by_agent
+            else:
+                target.pop("autonomous_replan_obligations_by_agent", None)
         if isinstance(obligation, dict):
             target["autonomous_replan_obligation"] = obligation
         else:
@@ -810,6 +832,7 @@ def attach_agent_lane_next_actions(
             item,
             project_asset,
             guard=guard,
+            agent_id=safe_agent_id,
         )
         reward_memory_projection = _agent_reward_memory_projection(
             guard,
