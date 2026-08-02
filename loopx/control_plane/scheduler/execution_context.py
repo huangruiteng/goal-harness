@@ -50,6 +50,19 @@ class GoalRuntimeContinuationDisposition(str, Enum):
     COMPLETE = "complete"
 
 
+GOAL_RUNTIME_DEFER_ACTIONS = frozenset(
+    {
+        "backoff_agent_monitor_only",
+        "backoff_until_fresh_evidence",
+        "backoff_until_material_transition",
+        "backoff_until_reassigned",
+        "backoff_until_state_change",
+        "backoff_waiting_for_user",
+        "repair_interaction_contract_projection",
+    }
+)
+
+
 NATIVE_GOAL_RUNTIME_PROFILES = frozenset(
     {
         SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL,
@@ -414,29 +427,25 @@ def build_goal_runtime_continuation(
         disposition = GoalRuntimeContinuationDisposition.CONTINUE_NOW
     elif action == "stop_until_explicit_resume":
         disposition = GoalRuntimeContinuationDisposition.COMPLETE
-    else:
+    elif action in GOAL_RUNTIME_DEFER_ACTIONS:
         disposition = GoalRuntimeContinuationDisposition.DEFER
+    else:
+        raise ValueError(f"unsupported Goal runtime scheduler action: {action or 'missing'}")
 
-    reset_policy = scheduler_hint.get("reset_policy")
-    reset_policy = reset_policy if isinstance(reset_policy, Mapping) else {}
     continuation = {
         "schema_version": GOAL_RUNTIME_CONTINUATION_SCHEMA_VERSION,
-        "source": "quota.should-run.scheduler_hint",
         "disposition": disposition.value,
-        "reason_code": scheduler_hint.get("reason_code"),
-        "state_identity": {
-            key: reset_policy[key]
-            for key in ("reset_token", "identity_signature")
-            if reset_policy.get(key) is not None
-        },
     }
     if disposition is GoalRuntimeContinuationDisposition.DEFER:
         host_cadence = scheduler_hint.get("codex_app")
         host_cadence = host_cadence if isinstance(host_cadence, Mapping) else {}
         recommended_interval = host_cadence.get("recommended_interval_minutes")
-        if isinstance(recommended_interval, int) and recommended_interval > 0:
-            continuation["recheck_after_seconds"] = recommended_interval * 60
-            continuation["wake_policy"] = "state_change_or_deadline"
+        if not isinstance(recommended_interval, int) or recommended_interval <= 0:
+            raise ValueError(
+                "deferred Goal runtime continuation requires a positive recheck interval"
+            )
+        continuation["recheck_after_seconds"] = recommended_interval * 60
+        continuation["wake_policy"] = "state_change_or_deadline"
     return continuation
 
 

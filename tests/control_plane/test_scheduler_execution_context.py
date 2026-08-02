@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from itertools import product
 
 import pytest
 
 from loopx.control_plane.scheduler.execution_context import (
+    build_goal_runtime_continuation,
     GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
     ExecutionMode,
     HostSurface,
@@ -256,13 +258,7 @@ def test_goal_runtime_projects_typed_immediate_continuation() -> None:
 
     assert hint["goal_runtime_continuation"] == {
         "schema_version": "goal_runtime_continuation_v0",
-        "source": "quota.should-run.scheduler_hint",
         "disposition": "continue_now",
-        "reason_code": "interaction_agent_attempt_required",
-        "state_identity": {
-            "reset_token": hint["reset_policy"]["reset_token"],
-            "identity_signature": hint["reset_policy"]["identity_signature"],
-        },
     }
 
 
@@ -280,8 +276,106 @@ def test_goal_runtime_projects_typed_defer_with_recheck_delay() -> None:
     assert continuation["disposition"] == "defer"
     assert continuation["recheck_after_seconds"] == 15 * 60
     assert continuation["wake_policy"] == "state_change_or_deadline"
-    assert continuation["state_identity"]["reset_token"]
+    assert hint["reset_policy"]["reset_token"]
     assert hint["execution_phase"]["disposition"] == "goal_runtime_owned"
+
+
+def test_goal_runtime_continuation_rejects_unknown_scheduler_action() -> None:
+    with pytest.raises(ValueError, match="unsupported Goal runtime scheduler action"):
+        build_goal_runtime_continuation({"action": "future_unmapped_action"})
+
+
+def test_goal_runtime_defer_requires_bounded_recheck_interval() -> None:
+    with pytest.raises(ValueError, match="positive recheck interval"):
+        build_goal_runtime_continuation(
+            {
+                "action": "backoff_until_state_change",
+                "codex_app": {"recommended_interval_minutes": None},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    (
+        ("todo_id", "todo_frontier002"),
+        ("action_kind", "issue_fix_reviewer_request"),
+        ("target_key", "issue-fix:owner/repo:issue_43"),
+        ("claimed_by", "codex-review"),
+        ("capability_binding_ref", "issue-fix:feasibility-e5f6a7b8"),
+    ),
+)
+@pytest.mark.parametrize("waiting", (False, True), ids=("continue_now", "defer"))
+def test_goal_runtime_identity_rotates_on_selected_todo_contract_change(
+    field: str,
+    changed_value: str,
+    waiting: bool,
+) -> None:
+    context = scheduler_execution_context_for_runtime_profile(
+        SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL
+    )
+    first_payload = _monitor_wait_payload() if waiting else _active_payload()
+    first_payload["selected_todo"] = {
+        "todo_id": "todo_frontier001",
+        "action_kind": "issue_fix_branch_validation",
+        "target_key": "issue-fix:owner/repo:issue_42",
+        "claimed_by": "codex-fixture",
+        "capability_binding_ref": "issue-fix:feasibility-a1b2c3d4",
+    }
+    second_payload = deepcopy(first_payload)
+    second_payload["selected_todo"][field] = changed_value
+
+    first = build_scheduler_hint(
+        first_payload,
+        scheduler_execution_context=context,
+    )
+    second = build_scheduler_hint(
+        second_payload,
+        scheduler_execution_context=context,
+    )
+
+    expected_disposition = "defer" if waiting else "continue_now"
+    assert first["goal_runtime_continuation"]["disposition"] == expected_disposition
+    assert second["goal_runtime_continuation"]["disposition"] == expected_disposition
+    assert first["reset_policy"]["reset_token"] != second["reset_policy"][
+        "reset_token"
+    ]
+    assert first["reset_policy"]["identity_signature"] != second[
+        "reset_policy"
+    ]["identity_signature"]
+
+
+def test_goal_runtime_identity_ignores_non_contract_selected_todo_detail() -> None:
+    context = scheduler_execution_context_for_runtime_profile(
+        SchedulerRuntimeProfile.ARK_MANAGED_AGENT_GOAL
+    )
+    first_payload = _active_payload()
+    first_payload["selected_todo"] = {
+        "todo_id": "todo_frontier001",
+        "action_kind": "issue_fix_branch_validation",
+        "target_key": "issue-fix:owner/repo:issue_42",
+        "claimed_by": "codex-fixture",
+        "capability_binding_ref": "issue-fix:feasibility-a1b2c3d4",
+        "note": "first diagnostic note",
+    }
+    second_payload = deepcopy(first_payload)
+    second_payload["selected_todo"]["note"] = "unrelated diagnostic refresh"
+
+    first = build_scheduler_hint(
+        first_payload,
+        scheduler_execution_context=context,
+    )
+    second = build_scheduler_hint(
+        second_payload,
+        scheduler_execution_context=context,
+    )
+
+    assert first["reset_policy"]["reset_token"] == second["reset_policy"][
+        "reset_token"
+    ]
+    assert first["goal_runtime_continuation"] == second[
+        "goal_runtime_continuation"
+    ]
 
 
 def test_goal_runtime_mixed_frontier_continues_runnable_advancement() -> None:

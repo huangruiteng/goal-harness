@@ -114,6 +114,10 @@ def test_goal_prompt_projects_goal_only_host_contract() -> None:
             "packet_schema_version": "goal_runtime_continuation_v0",
             "dispositions": ["continue_now", "defer", "complete"],
             "defer_wake_policy": "state_change_or_deadline",
+            "reason_source_ref": "quota_should_run.scheduler_hint.reason_code",
+            "state_identity_source_ref": (
+                "quota_should_run.scheduler_hint.reset_policy"
+            ),
             "goal_prompt_mutated": False,
         },
         "runtime_capability_reentry": {
