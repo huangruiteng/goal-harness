@@ -9,10 +9,12 @@ from ...agent_registry import load_goal_from_registry
 from ...boundary_authority import checkpointed_boundary_authority_summary
 from ...control_plane.runtime.time import now_utc_iso
 from ...domain_packs.issue_fix import (
+    default_issue_fix_candidate_preflight_ledger_path,
     default_issue_fix_domain_state_ledger_path,
     default_issue_fix_feasibility_ledger_path,
     default_issue_fix_repository_snapshot_ledger_path,
     retain_issue_fix_repository_snapshot_jsonl,
+    upsert_issue_fix_candidate_preflight_ledger_jsonl,
     upsert_issue_fix_feasibility_ledger_jsonl,
     upsert_issue_fix_pr_lifecycle_ledger_jsonl,
 )
@@ -23,6 +25,7 @@ from .acceptance_loop import (
     build_issue_fix_repo_branch_fixture_packet,
     render_issue_fix_acceptance_loop_markdown,
 )
+from .candidate_evidence import collect_public_github_candidate_preflight_input
 from .feasibility import (
     build_issue_fix_feasibility_packet,
     render_issue_fix_feasibility_markdown,
@@ -54,12 +57,17 @@ from .metrics_supplement_cli import (
     build_issue_fix_metrics_supplement_from_args,
     register_issue_fix_metrics_supplement_command,
 )
+from .metadata_preview import normalise_github_issue_reference
 from .pr_lifecycle import (
     build_issue_fix_pr_lifecycle_monitor_packet,
     render_issue_fix_pr_lifecycle_monitor_markdown,
     validate_issue_fix_pr_lifecycle_monitor_packet,
 )
 from .pr_lifecycle_rollout import append_pr_merge_rollout_event
+from .pr_monitor_materialization import (
+    DEFAULT_ISSUE_FIX_MONITOR_CADENCE,
+    materialize_issue_fix_grouped_monitors,
+)
 from .provider_hooks import IssueFixReviewerProviderHooksFactory
 from . import pr_gate_reconcile_cli
 from .reviewer_cli import (
@@ -365,6 +373,55 @@ def register_issue_fix_commands(
         ),
     )
     workflow_parser.add_argument(
+        "--fetch-candidate-evidence",
+        action="store_true",
+        help=(
+            "Collect complete issue-specific GitHub closing-PR, cross-reference, "
+            "and maintainer-disposition receipts before planning."
+        ),
+    )
+    workflow_parser.add_argument(
+        "--candidate-evidence-timeout-seconds",
+        type=int,
+        default=30,
+        help="Timeout for --fetch-candidate-evidence.",
+    )
+    workflow_parser.add_argument(
+        "--candidate-resolution-json",
+        default=None,
+        help=(
+            "Optional issue_fix_candidate_resolution_v0 that resolves source-backed "
+            "PR revisions, closed PRs, or maintainer comments. Requires "
+            "--fetch-candidate-evidence so stale source bindings fail closed."
+        ),
+    )
+    workflow_parser.add_argument(
+        "--goal-id",
+        default=None,
+        help=(
+            "Goal id used to persist the source-qualified candidate admission "
+            "receipt before any feasibility or implementation decision."
+        ),
+    )
+    workflow_parser.add_argument(
+        "--project",
+        default=".",
+        help="Project root for the default issue_fix candidate preflight ledger.",
+    )
+    workflow_parser.add_argument(
+        "--candidate-preflight-ledger-path",
+        default=None,
+        help="Optional candidate preflight JSONL path. Overrides the default path.",
+    )
+    workflow_parser.add_argument(
+        "--no-write-domain-state",
+        action="store_true",
+        help=(
+            "Keep candidate preflight preview-only even when --goal-id or an "
+            "explicit ledger path is present."
+        ),
+    )
+    workflow_parser.add_argument(
         "--repository-memory-json",
         default=None,
         help=(
@@ -567,8 +624,9 @@ def register_issue_fix_commands(
         "--execute-transition",
         action="store_true",
         help=(
-            "Write the correction transition into the existing LoopX todo state. "
-            "Requires --goal-id, --claimed-by, --maintainer-correction-json, and a registry."
+            "Write the lifecycle transition and reconcile grouped monitors in "
+            "the existing LoopX todo state. Requires --goal-id, --claimed-by, "
+            "and a registry."
         ),
     )
     pr_lifecycle_parser.add_argument(
@@ -577,6 +635,14 @@ def register_issue_fix_commands(
         help=(
             "Registered agent that claims an actionable patch successor or is blocked "
             "by the generated concrete user gate."
+        ),
+    )
+    pr_lifecycle_parser.add_argument(
+        "--monitor-cadence",
+        default=DEFAULT_ISSUE_FIX_MONITOR_CADENCE,
+        help=(
+            "Cadence for grouped PR lifecycle continuous monitors materialized "
+            "by --execute-transition (default: 30m)."
         ),
     )
     pr_gate_reconcile_cli.register_pr_gate_reconciliation_command(issue_fix_sub)
@@ -934,6 +1000,15 @@ def handle_issue_fix_command(
                 raise ValueError(
                     "--fetch-metadata cannot be combined with --metadata-json"
                 )
+            if args.fetch_candidate_evidence and args.candidate_preflight_json:
+                raise ValueError(
+                    "--fetch-candidate-evidence cannot be combined with "
+                    "--candidate-preflight-json"
+                )
+            if args.candidate_resolution_json and not args.fetch_candidate_evidence:
+                raise ValueError(
+                    "--candidate-resolution-json requires --fetch-candidate-evidence"
+                )
             provider_path = args.repository_memory_provider_json or (
                 None
                 if args.repository_memory_json
@@ -946,6 +1021,7 @@ def handle_issue_fix_command(
                     args.repository_context_json,
                     args.repository_memory_json,
                     args.candidate_preflight_json,
+                    args.candidate_resolution_json,
                     provider_path,
                 )
                 if value == "-"
@@ -957,11 +1033,34 @@ def handle_issue_fix_command(
                 if args.repository_context_json
                 else None
             )
-            candidate_preflight_input = (
-                _load_json_object(args.candidate_preflight_json)
-                if args.candidate_preflight_json
-                else None
-            )
+            if args.fetch_candidate_evidence:
+                reference = normalise_github_issue_reference(
+                    repo=args.repo,
+                    issue_ref=args.issue_ref,
+                    url=args.url,
+                )
+                if reference["kind"] != "issue":
+                    raise ValueError(
+                        "--fetch-candidate-evidence requires a GitHub issue"
+                    )
+                candidate_preflight_input = (
+                    collect_public_github_candidate_preflight_input(
+                        repo=str(reference["repo"]),
+                        issue_ref=str(reference["issue_ref"]),
+                        generated_at=generated_at,
+                        timeout_seconds=args.candidate_evidence_timeout_seconds,
+                    )
+                )
+                if args.candidate_resolution_json:
+                    candidate_preflight_input["candidate_resolution"] = (
+                        _load_json_object(args.candidate_resolution_json)
+                    )
+            else:
+                candidate_preflight_input = (
+                    _load_json_object(args.candidate_preflight_json)
+                    if args.candidate_preflight_json
+                    else None
+                )
             repository_memory_input = _configured_repository_memory_input(
                 provider_path=provider_path,
                 raw_memory_path=args.repository_memory_json,
@@ -992,6 +1091,36 @@ def handle_issue_fix_command(
                 candidate_preflight_input=candidate_preflight_input,
                 generated_at=generated_at,
             )
+            candidate_preflight = payload.get("candidate_preflight")
+            should_write_candidate_preflight = bool(
+                not args.no_write_domain_state
+                and (args.goal_id or args.candidate_preflight_ledger_path)
+            )
+            if should_write_candidate_preflight:
+                if not isinstance(candidate_preflight, dict):
+                    raise ValueError(
+                        "workflow plan omitted the candidate preflight receipt"
+                    )
+                candidate_preflight_ledger_path = (
+                    Path(args.candidate_preflight_ledger_path).expanduser()
+                    if args.candidate_preflight_ledger_path
+                    else default_issue_fix_candidate_preflight_ledger_path(
+                        project=args.project,
+                        goal_id=args.goal_id,
+                    )
+                )
+                upsert_issue_fix_candidate_preflight_ledger_jsonl(
+                    candidate_preflight_ledger_path,
+                    candidate_preflight,
+                )
+            elif isinstance(candidate_preflight, dict):
+                domain_state = candidate_preflight.get("domain_state_projection")
+                if isinstance(domain_state, dict):
+                    domain_state["write_skipped_reason"] = (
+                        "explicitly_disabled"
+                        if args.no_write_domain_state
+                        else "goal_id_or_ledger_path_missing"
+                    )
             renderer = render_issue_fix_workflow_plan_markdown
         elif args.issue_fix_command == "feasibility":
             provider_path = args.repository_memory_provider_json or (
@@ -1115,10 +1244,20 @@ def handle_issue_fix_command(
                 raise ValueError(
                     "--fetch-metadata cannot be combined with --metadata-json"
                 )
-            if args.execute_transition and not args.maintainer_correction_json:
+            fetch_metadata = bool(
+                args.fetch_metadata
+                or (args.execute_transition and args.url and not args.metadata_json)
+            )
+            if args.execute_transition and args.no_write_domain_state:
                 raise ValueError(
-                    "--execute-transition requires --maintainer-correction-json"
+                    "--execute-transition cannot be combined with --no-write-domain-state"
                 )
+            if args.execute_transition and registry_path is None:
+                raise ValueError("--execute-transition requires a LoopX registry")
+            if args.execute_transition and not args.goal_id:
+                raise ValueError("--execute-transition requires --goal-id")
+            if args.execute_transition and not args.claimed_by:
+                raise ValueError("--execute-transition requires --claimed-by")
             payload = build_issue_fix_pr_lifecycle_monitor_packet(
                 repo=args.repo,
                 pr_ref=args.pr_ref,
@@ -1127,7 +1266,7 @@ def handle_issue_fix_command(
                 provider_payload=_load_json_object(args.metadata_json)
                 if args.metadata_json
                 else None,
-                fetch_metadata=args.fetch_metadata,
+                fetch_metadata=fetch_metadata,
                 fetch_timeout_seconds=args.fetch_timeout_seconds,
                 maintainer_correction_input=(
                     _load_json_object(args.maintainer_correction_json)
@@ -1172,14 +1311,23 @@ def handle_issue_fix_command(
                     )
             transition = payload.get("transition")
             if args.execute_transition:
-                if registry_path is None:
-                    raise ValueError("--execute-transition requires a LoopX registry")
-                if not args.goal_id:
-                    raise ValueError("--execute-transition requires --goal-id")
-                if not args.claimed_by:
-                    raise ValueError("--execute-transition requires --claimed-by")
                 if not isinstance(transition, dict):
                     raise ValueError("PR lifecycle transition is missing")
+                grouped_monitor_writeback = materialize_issue_fix_grouped_monitors(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    project=Path(args.project).expanduser(),
+                    ledger_path=ledger_path,
+                    claimed_by=args.claimed_by,
+                    cadence=args.monitor_cadence,
+                    generated_at=str(payload.get("generated_at") or generated_at),
+                )
+                payload["grouped_monitor_writeback"] = grouped_monitor_writeback
+                grouped_monitor_projection = payload.get("grouped_monitor_projection")
+                if isinstance(grouped_monitor_projection, dict):
+                    grouped_monitor_projection["todo_write_performed"] = bool(
+                        grouped_monitor_writeback.get("write_performed")
+                    )
                 decision = str(transition.get("decision") or "")
                 if decision in {"runnable_successor", "user_gate"}:
                     role = str(transition.get("role") or "agent")
@@ -1232,6 +1380,26 @@ def handle_issue_fix_command(
                         ),
                         "path_recorded": False,
                     }
+                grouped_write_performed = bool(
+                    grouped_monitor_writeback.get("write_performed")
+                )
+                transition_write_performed = bool(payload.get("todo_write_performed"))
+                payload["todo_write_performed"] = bool(
+                    grouped_write_performed or transition_write_performed
+                )
+                if grouped_write_performed and not transition_write_performed:
+                    payload["todo_write"] = {
+                        "schema_version": "issue_fix_pr_lifecycle_todo_write_v1",
+                        "write_performed": True,
+                        "grouped_monitor_write_performed": True,
+                        "transition_write_performed": False,
+                        "path_recorded": False,
+                    }
+                writeback_contract = payload.get("writeback_contract")
+                if isinstance(writeback_contract, dict):
+                    writeback_contract["todo_write_performed"] = bool(
+                        payload["todo_write_performed"]
+                    )
                 validation = validate_issue_fix_pr_lifecycle_monitor_packet(payload)
                 payload["validation"] = validation
                 payload["ok"] = bool(validation["ok"])

@@ -43,6 +43,9 @@ MOVED_PATHS = {
         "docs/research/long-horizon-agent-benchmarks/"
         "codex-cli-long-run-regression.md"
     ),
+    "docs/project-skill-delivery.md": (
+        "docs/reference/project-skill-delivery.md"
+    ),
 }
 
 

@@ -1,4 +1,4 @@
-.TH LOOPX 1 "" "LoopX 0.2.13" "User Commands"
+.TH LOOPX 1 "" "LoopX 0.4.0" "User Commands"
 .SH NAME
 loopx \- control-plane helper for long-running agent work
 .SH SYNOPSIS
@@ -136,10 +136,19 @@ Plan default heartbeat upgrade propagation.
 .TP
 \fBloopx update\fR
 Check, dry\-run, or execute the no\-clone update path.
+.TP
+\fBloopx project\-skill \-\-help\fR
+Install, inspect, or remove release\-owned skills in selected project agent hosts.
 .SH MAINTAINER AND ADAPTER COMMANDS
 .TP
 \fBloopx check\fR
 Run contract and public/private boundary checks.
+.TP
+\fBloopx change\-quality \-\-help\fR
+Qualify one exact final diff against an enabled project policy and receipt contract.
+.TP
+\fBloopx integration\-branch \-\-help\fR
+Detect reviewed source\-branch drift and rebuild one local integration branch.
 .TP
 \fBloopx registry\fR
 Inspect registered goals and adapters.

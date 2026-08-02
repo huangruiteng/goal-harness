@@ -625,6 +625,21 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
     user = _user_channel(interaction, payload)
     scheduler = _scheduler(payload)
+    writeback = {
+        "next_cli_actions": _text_list(
+            cli_channel.get("next_cli_actions"),
+            limit=5,
+            item_limit=420,
+        ),
+        "spend_allowed_now": bool(cli_channel.get("spend_allowed_now")),
+        "spend_after_validation": bool(cli_channel.get("spend_after_validation")),
+        "spend_policy": _text(cli_channel.get("spend_policy"), limit=280),
+    }
+    delivery_workspace_causality = _mapping(
+        cli_channel.get("delivery_workspace_causality")
+    )
+    if delivery_workspace_causality:
+        writeback["delivery_workspace_causality"] = delivery_workspace_causality
     projection = {
         "agent_id": agent_id,
         "decision": payload.get("decision"),
@@ -636,16 +651,7 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
         "required_reads": _required_reads(interaction, payload),
         "boundary": _boundary(payload),
         "execution_policy": _execution_policy(payload),
-        "writeback": {
-            "next_cli_actions": _text_list(
-                cli_channel.get("next_cli_actions"),
-                limit=5,
-                item_limit=420,
-            ),
-            "spend_allowed_now": bool(cli_channel.get("spend_allowed_now")),
-            "spend_after_validation": bool(cli_channel.get("spend_after_validation")),
-            "spend_policy": _text(cli_channel.get("spend_policy"), limit=280),
-        },
+        "writeback": writeback,
         "scheduler": scheduler,
         "contract_capsule": _contract_capsule(
             payload,

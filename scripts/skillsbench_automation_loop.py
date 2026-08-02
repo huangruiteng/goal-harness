@@ -183,7 +183,13 @@ from loopx.benchmarks.read_models.goal_start_control_score import (
     goal_start_public_text_list as _goal_start_public_text_list,
     goal_start_public_todo_id_list as _goal_start_public_todo_id_list,
 )
-from loopx.control_plane.turn_driver import loopx_turn_execution_committed
+from loopx.benchmarks.read_models.skillsbench_verifier_attribution import (
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution,
+)
+from loopx.control_plane.turn_driver import (
+    loopx_turn_execution_committed,
+    loopx_turn_execution_has_durable_effects,
+)
 
 
 class SkillsBenchRunnerInterrupted(RuntimeError):
@@ -192,6 +198,10 @@ class SkillsBenchRunnerInterrupted(RuntimeError):
 
 class SkillsBenchProductModeNoLifecycleRequests(RuntimeError):
     """Product-mode agent made no required case-local LoopX lifecycle request."""
+
+
+class SkillsBenchLoopXTurnTerminalFailureStall(RuntimeError):
+    """A terminal failed Turn did not let BenchFlow close the case."""
 
 
 from scripts import skillsbench_runner_constants as _runner_constants
@@ -357,6 +367,15 @@ def _benchflow_rollout_planes_class(module: Any) -> type[Any] | None:
         return None
     klass = instance.__class__
     return klass if isinstance(klass, type) else None
+
+
+def _benchflow_environment_name(
+    call_args: tuple[Any, ...],
+    call_kwargs: dict[str, Any],
+) -> str:
+    if call_args:
+        return str(call_args[0])
+    return str(call_kwargs.get("environment") or "")
 
 
 DOCKER_APP_SKILLS_MOUNT_BEGIN = "# BEGIN LOOPX_SKILLSBENCH_APP_SKILLS_MOUNT"
@@ -1151,15 +1170,18 @@ def _effective_local_codex_exec_timeout_sec(args: argparse.Namespace) -> int:
         configured_raw is None
         and bool(getattr(args, "host_local_acp_launch", False))
     ):
+        outer_timeout = max(0, int(getattr(args, "outer_timeout_sec", 0) or 0))
         if getattr(args, "route", "") == "codex-app-server-goal-baseline":
-            outer_timeout = max(0, int(getattr(args, "outer_timeout_sec", 0) or 0))
             return max(configured, outer_timeout)
         bridge_idle_timeout = _effective_local_codex_bridge_idle_timeout_sec(args)
         if bridge_idle_timeout > 0:
             return max(
                 1,
+                outer_timeout,
                 bridge_idle_timeout + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC,
             )
+        if outer_timeout > 0:
+            return outer_timeout
     if configured_raw is None and idle_timeout > 0:
         return min(configured, idle_timeout)
     return configured
@@ -2039,9 +2061,19 @@ def install_benchflow_docker_exec_output_capture(
 
     prerequisites = plan.setdefault("runner_prerequisites", {})
     existing = getattr(env, "_loopx_output_capture_original_exec", None)
-    if existing is not None:
+    installed_exec = getattr(env, "_loopx_output_capture_exec", None)
+    current_exec = getattr(env, "exec", None)
+    if (
+        existing is not None
+        and installed_exec is not None
+        and current_exec is installed_exec
+    ):
+        prerequisites["host_local_acp_docker_exec_capture_status"] = (
+            "already_installed"
+        )
         return existing
-    original_exec = getattr(env, "exec", None)
+    reinstalling_after_rebind = existing is not None
+    original_exec = current_exec
     compose_fn = getattr(env, "_run_docker_compose_command", None)
     if not callable(original_exec) or not callable(compose_fn):
         prerequisites["host_local_acp_docker_exec_capture_status"] = "unsupported"
@@ -2083,8 +2115,16 @@ def install_benchflow_docker_exec_output_capture(
         )
 
     setattr(env, "_loopx_output_capture_original_exec", original_exec)
+    setattr(env, "_loopx_output_capture_exec", exec_with_output_capture)
     setattr(env, "exec", exec_with_output_capture)
-    prerequisites["host_local_acp_docker_exec_capture_status"] = "installed"
+    prerequisites["host_local_acp_docker_exec_capture_status"] = (
+        "reinstalled_after_exec_rebind"
+        if reinstalling_after_rebind
+        else "installed"
+    )
+    prerequisites["host_local_acp_docker_exec_capture_rebound"] = (
+        reinstalling_after_rebind
+    )
     prerequisites["host_local_acp_docker_exec_capture_required"] = True
     prerequisites["host_local_acp_docker_exec_capture_compose_copy"] = True
     prerequisites["host_local_acp_docker_exec_capture_raw_output_recorded"] = False
@@ -2364,6 +2404,22 @@ def _host_local_acp_codex_exec_preflight_bridge_success_observed(
     return action_count > 0 and successful_action_count > 0
 
 
+def _host_local_acp_codex_exec_preflight_retry_allowed(
+    *,
+    category: str,
+    bridge_summary: dict[str, Any],
+) -> bool:
+    if category == "codex_reverse_channel_unavailable":
+        return True
+    return bool(
+        category == "codex_exec_first_action_timeout"
+        and int(bridge_summary.get("request_count") or 0) == 0
+        and int(bridge_summary.get("preflight_operation_count") or 0) == 0
+        and int(bridge_summary.get("task_facing_operation_count") or 0) == 0
+        and bridge_summary.get("raw_material_recorded") is False
+    )
+
+
 def _first_bridge_failure_category(bridge_summary: dict[str, Any]) -> str:
     counts = bridge_summary.get("failure_category_counts")
     if isinstance(counts, dict):
@@ -2450,6 +2506,7 @@ def _run_host_local_acp_codex_exec_preflight(
     )
     for attempt in range(1, attempts + 1):
         prerequisites["host_local_acp_codex_exec_preflight_attempt_count"] = attempt
+        prerequisites.pop("host_local_acp_codex_exec_failure_category", None)
         if preflight_trace_dir:
             preflight_trace_dir.mkdir(parents=True, exist_ok=True)
             for trace_file in preflight_trace_dir.glob("*.compact.json"):
@@ -2578,9 +2635,9 @@ def _run_host_local_acp_codex_exec_preflight(
         category = str(
             prerequisites.get("host_local_acp_codex_exec_failure_category") or ""
         )
-        if (
-            category == "codex_reverse_channel_unavailable"
-            and attempt < attempts
+        if attempt < attempts and _host_local_acp_codex_exec_preflight_retry_allowed(
+            category=category,
+            bridge_summary=bridge_summary,
         ):
             time.sleep(2.0)
             continue
@@ -2745,6 +2802,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_launch_status",
         "host_local_acp_install_stage",
         "host_local_acp_install_failed_stage",
+        "host_local_acp_install_failure_exception_type",
         "codex_acp_runtime_launch_preflight_stage",
         "codex_acp_runtime_launch_preflight_status",
         "benchflow_agent_runtime_layer_status",
@@ -2767,12 +2825,15 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_intermediate_soft_verify_orphan_cleanup_status",
         "host_local_acp_attempt_cleanup_status",
         "benchflow_setup_stall_cleanup_status",
+        "benchflow_loopx_turn_terminal_failure_status",
+        "benchflow_loopx_turn_terminal_failure_category",
         "remote_command_file_bridge_consumption_status",
         "remote_command_file_bridge_agent_operation_trace_status",
         "remote_command_file_bridge_agent_transport_mode",
         "host_local_acp_sandbox_bridge_mode",
         "host_local_acp_session_adapter_status",
         "host_local_acp_docker_exec_capture_status",
+        "host_local_acp_docker_exec_capture_lifecycle_guard",
         "host_local_acp_pwd_probe_status",
         "host_local_acp_pwd_probe_exception_type",
         "host_local_acp_pwd_probe_stdout_type",
@@ -2823,6 +2884,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "host_local_acp_docker_exec_capture_required",
         "host_local_acp_docker_exec_capture_compose_copy",
         "host_local_acp_docker_exec_capture_raw_output_recorded",
+        "host_local_acp_docker_exec_capture_rebound",
         "host_local_acp_docker_exec_capture_preflight",
         "host_local_acp_sandbox_bridge_configured",
         "host_local_acp_sandbox_bridge_path_recorded",
@@ -2942,6 +3004,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_final_verifier_timeout_triggered",
         "benchflow_final_verifier_timeout_raw_command_recorded",
         "benchflow_final_verifier_timeout_raw_output_recorded",
+        "benchflow_final_verifier_started",
         "benchflow_verifier_completion_poll_enabled",
         "benchflow_verifier_completion_poll_timeout_triggered",
         "benchflow_verifier_completion_poll_raw_command_recorded",
@@ -2957,6 +3020,13 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_setup_stall_task_cancel_timeout",
         "benchflow_setup_stall_cleanup_requested",
         "benchflow_setup_stall_cleanup_raw_logs_read",
+        "benchflow_loopx_turn_terminal_failure_watchdog_enabled",
+        "benchflow_loopx_turn_terminal_failure_observed",
+        "benchflow_loopx_turn_terminal_failure_triggered",
+        "benchflow_loopx_turn_terminal_failure_raw_material_recorded",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_requested",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged",
+        "benchflow_loopx_turn_terminal_failure_task_cancel_timeout",
         "runner_interrupted_before_official_result",
         "runner_interruption_compact_closeout_expected",
         "runner_interruption_raw_material_recorded",
@@ -3026,6 +3096,7 @@ def _public_runner_prerequisites(value: Any) -> dict[str, Any]:
         "benchflow_setup_stall_cleanup_term_sent_count",
         "benchflow_setup_stall_cleanup_kill_sent_count",
         "benchflow_setup_stall_cleanup_alive_after_count",
+        "benchflow_loopx_turn_terminal_failure_grace_sec",
         "verifier_dependency_cache_env_key_count",
         "goal_start_planned_todo_count_expected",
         "remote_command_file_bridge_solver_trace_count",
@@ -3931,6 +4002,10 @@ def install_benchflow_verifier_prep_timeout_override(
         return "/verifier/test.sh" in command
 
     async def _run_with_override(self: Any, phase: str, original: Any) -> Any:
+        if phase == "verify":
+            prerequisites["benchflow_final_verifier_started"] = True
+            if isinstance(trace, dict):
+                trace["benchflow_final_verifier_started"] = True
         if not enabled and not final_timeout_enabled and not soft_timeout_enabled:
             return await original(self)
 
@@ -4703,6 +4778,19 @@ def _runner_prerequisite_failure_attribution(
             label = f"{label}_{category}"
         return label, label, [label, "skillsbench_runner_setup_error"]
 
+    if value.get("host_local_acp_launch_status") == "sandbox_install_failed":
+        label = "skillsbench_host_local_acp_sandbox_install_failed"
+        labels = [label]
+        failed_stage = re.sub(
+            r"[^a-z0-9]+",
+            "_",
+            str(value.get("host_local_acp_install_failed_stage") or "").lower(),
+        ).strip("_")
+        if failed_stage:
+            labels.append(f"{label}_{failed_stage[:80]}")
+        labels.append("skillsbench_runner_setup_error")
+        return label, label, labels
+
     if (
         value.get("remote_command_file_bridge_agent_operation_trace_required") is True
         and not orchestrated_driver_counts_as_product_mode
@@ -4791,10 +4879,6 @@ def _runner_prerequisite_failure_attribution(
                 "skillsbench_runner_setup_error",
             ],
         )
-
-    if value.get("host_local_acp_launch_status") == "sandbox_install_failed":
-        label = "skillsbench_host_local_acp_sandbox_install_failed"
-        return label, label, [label, "skillsbench_runner_setup_error"]
 
     if value.get("host_local_acp_launch_status") == "installing_sandbox":
         label = "skillsbench_host_local_acp_sandbox_install_incomplete"
@@ -8084,6 +8168,12 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
     )
     block = (
         f"{DOCKER_CODEX_ACP_RUNTIME_TOOLS_BEGIN}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_UBUNTU_APT_MIRROR_BASE}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_APT_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_DEBIAN_APT_MIRROR_BASE}\n"
+        "ARG LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR="
+        f"{dockerfile_runtime.DEFAULT_DEBIAN_SECURITY_MIRROR_BASE}\n"
         "RUN set -eux; \\\n"
         "    if command -v curl >/dev/null 2>&1 && \\\n"
         "       command -v tar >/dev/null 2>&1 && \\\n"
@@ -8102,7 +8192,19 @@ def patch_dockerfile_codex_acp_runtime_tools(dockerfile: Path) -> bool:
         "        'Acquire::https::No-Cache \"true\";' \\\n"
         "        'Acquire::Check-Valid-Until \"false\";' \\\n"
         "        > /etc/apt/apt.conf.d/80-loopx-retry; \\\n"
-        "      apt-get update -qq; \\\n"
+        "      if ! apt-get update -qq; then \\\n"
+        "        find /etc/apt -type f \\\n"
+        "          \\( -name '*.list' -o -name '*.sources' \\) \\\n"
+        "          -exec sed -i \\\n"
+        '            -e "s#https\\?://archive.ubuntu.com/ubuntu#${LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://security.ubuntu.com/ubuntu#${LOOPX_SKILLSBENCH_RUNTIME_UBUNTU_APT_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://deb.debian.org/debian-security#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://security.debian.org/debian-security#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_SECURITY_MIRROR}#g" \\\n'
+        '            -e "s#https\\?://deb.debian.org/debian#${LOOPX_SKILLSBENCH_RUNTIME_DEBIAN_APT_MIRROR}#g" \\\n'
+        "            {} +; \\\n"
+        "        rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
+        "        apt-get update -qq; \\\n"
+        "      fi; \\\n"
         "      apt-get install -y -qq --no-install-recommends ca-certificates curl tar xz-utils; \\\n"
         "      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb; \\\n"
         "    elif command -v apk >/dev/null 2>&1; then \\\n"
@@ -8609,10 +8711,6 @@ def stage_task_for_sandbox(
                 staged_path / "environment" / "Dockerfile"
             )
         )
-    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
-        staged_path / "environment" / "Dockerfile",
-        proxy_env=benchmark_egress_proxy_env,
-    )
     apt_retry_patched = patch_dockerfile_apt_retry(
         staged_path / "environment" / "Dockerfile",
         transport_mode=docker_apt_transport_mode,
@@ -8661,6 +8759,10 @@ def stage_task_for_sandbox(
     )
     runtime_tools_patched = patch_dockerfile_codex_acp_runtime_tools(
         staged_path / "environment" / "Dockerfile"
+    )
+    dockerfile_proxy_metadata = patch_dockerfile_benchmark_egress_proxy_env(
+        staged_path / "environment" / "Dockerfile",
+        proxy_env=benchmark_egress_proxy_env,
     )
     staged_verifier_script = proxy_runtime.skillsbench_verifier_script(staged_path)
     uv_mirror_metadata = verifier_bootstrap.patch_verifier_uv_bootstrap_mirror(
@@ -9140,6 +9242,15 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "compact_benchmark_run_json": str(compact_path),
         "setup_only_public_preflight": bool(
             getattr(args, "setup_only_public_preflight", False)
+        ),
+        "setup_only_agent_install_canary": bool(
+            getattr(args, "setup_only_agent_install_canary", False)
+        ),
+        "setup_only_scored_lifecycle_canary": bool(
+            getattr(args, "setup_only_scored_lifecycle_canary", False)
+        ),
+        "scored_lifecycle_canary_timeout_sec": int(
+            getattr(args, "scored_lifecycle_canary_timeout_sec", 180) or 180
         ),
         "setup_only_stage_timeout_sec": (
             _effective_setup_only_stage_timeout_sec(args)
@@ -9678,6 +9789,7 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "build_stall_timeout_requested_sec",
         "build_stall_timeout_sec",
         "setup_only_stage_timeout_sec",
+        "scored_lifecycle_canary_timeout_sec",
         "local_codex_task_output_quiet_timeout_sec",
     )
     for field in int_fields:
@@ -9697,6 +9809,8 @@ def _public_runner_config(plan: dict[str, Any]) -> dict[str, Any]:
         "verifier_bootstrap_fail_fast_defaulted",
         "bootstrap_light_fail_fast_defaulted",
         "setup_only_public_preflight",
+        "setup_only_agent_install_canary",
+        "setup_only_scored_lifecycle_canary",
         "global_ledger_sync_enabled",
         "ledger_inherit_enabled",
     ):
@@ -11951,6 +12065,177 @@ def _merge_host_local_acp_relay_trace_summary(
     elif prerequisites.get("remote_command_file_bridge_solver_wiring_configured"):
         prerequisites["remote_command_file_bridge_consumption_status"] = (
             "solver_trace_missing"
+        )
+
+
+def _loopx_turn_terminal_failure_checkpoint(
+    plan: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read the public trace needed to identify a stranded failed Turn."""
+
+    if plan.get("route") != LOOPX_TURN_AGENT_CLI_ROUTE:
+        return None
+    trace: dict[str, Any] = {}
+    _merge_host_local_acp_relay_trace_summary(plan, trace)
+    executions = trace.get("loopx_turn_executions")
+    latest = (
+        executions[-1]
+        if isinstance(executions, list)
+        and executions
+        and isinstance(executions[-1], Mapping)
+        else None
+    )
+    if latest is None or loopx_turn_execution_committed(latest):
+        return None
+    receipt = latest.get("receipt")
+    receipt = receipt if isinstance(receipt, Mapping) else {}
+    validation = latest.get("validation")
+    validation = validation if isinstance(validation, Mapping) else {}
+    result_kind = receipt.get("result_kind") or latest.get("result_kind")
+    failed_phase = receipt.get("failed_phase")
+    terminal_failure = bool(
+        latest.get("status") in {"failed", "validation_failed"}
+        or receipt.get("status") == "failed"
+        or failed_phase
+    )
+    validation_terminal_failure = bool(
+        failed_phase == "validation"
+        or result_kind == "validation_failed"
+        or validation.get("status") == "failed"
+    )
+    if (
+        not terminal_failure
+        or loopx_turn_execution_has_durable_effects(latest)
+        or (
+            trace.get("host_local_acp_codex_exec_failure_trace_present") is not True
+            and not validation_terminal_failure
+        )
+    ):
+        return None
+
+    def safe_label(value: Any, *, default: str) -> str:
+        text = str(value or "")
+        if re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", text):
+            return text
+        return default
+
+    return {
+        "schema_version": "skillsbench_loopx_turn_terminal_failure_checkpoint_v0",
+        "status": safe_label(latest.get("status"), default="failed"),
+        "result_kind": safe_label(
+            result_kind,
+            default="unknown",
+        ),
+        "failed_phase": safe_label(
+            failed_phase,
+            default="unknown",
+        ),
+        "failure_category": safe_label(
+            trace.get("host_local_acp_codex_exec_failure_category")
+            or (
+                "loopx_turn_validation_failed"
+                if validation_terminal_failure
+                else None
+            ),
+            default="unknown",
+        ),
+        "durable_effects_observed": False,
+        "raw_material_recorded": False,
+    }
+
+
+async def _await_benchflow_task_with_loopx_turn_closeout_watchdog(
+    task: asyncio.Task[Any],
+    plan: dict[str, Any],
+    *,
+    grace_seconds: float = DEFAULT_LOOPX_TURN_TERMINAL_FAILURE_GRACE_SEC,
+    poll_interval_seconds: float = LOOPX_TURN_TERMINAL_FAILURE_POLL_SEC,
+    cancel_timeout_seconds: float = 5.0,
+) -> Any:
+    """Let BenchFlow close normally, but fail closed when a failed Turn strands it."""
+
+    prerequisites = plan.setdefault("runner_prerequisites", {})
+    enabled = bool(
+        plan.get("route") == LOOPX_TURN_AGENT_CLI_ROUTE
+        and (
+            prerequisites.get("host_local_acp_launch") is True
+            or prerequisites.get("agent_execution_mode") == "host_local_acp"
+        )
+    )
+    prerequisites["benchflow_loopx_turn_terminal_failure_watchdog_enabled"] = enabled
+    prerequisites["benchflow_loopx_turn_terminal_failure_grace_sec"] = max(
+        0,
+        int(grace_seconds),
+    )
+    prerequisites["benchflow_loopx_turn_terminal_failure_raw_material_recorded"] = (
+        False
+    )
+    if not enabled:
+        return await task
+
+    failure_observed_at: float | None = None
+    while True:
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=max(0.01, poll_interval_seconds),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if done:
+            return await task
+        if prerequisites.get("benchflow_final_verifier_started") is True:
+            return await task
+        checkpoint = _loopx_turn_terminal_failure_checkpoint(plan)
+        if checkpoint is None:
+            continue
+        if failure_observed_at is None:
+            failure_observed_at = asyncio.get_running_loop().time()
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_observed"
+            ] = True
+            prerequisites["benchflow_loopx_turn_terminal_failure_status"] = str(
+                checkpoint["status"]
+            )
+            prerequisites["benchflow_loopx_turn_terminal_failure_category"] = str(
+                checkpoint["failure_category"]
+            )
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="loopx_turn_terminal_failure_waiting_for_closeout",
+                worker_status="agent_active",
+            )
+        if (
+            asyncio.get_running_loop().time() - failure_observed_at
+            < max(0.0, grace_seconds)
+        ):
+            continue
+
+        prerequisites["benchflow_loopx_turn_terminal_failure_triggered"] = True
+        prerequisites[
+            "benchflow_loopx_turn_terminal_failure_task_cancel_requested"
+        ] = True
+        _write_public_runner_lifecycle_receipt(
+            plan,
+            run_stage="loopx_turn_terminal_failure_closeout_stalled",
+            worker_status="agent_active",
+        )
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=max(0.01, cancel_timeout_seconds))
+        except asyncio.CancelledError:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged"
+            ] = True
+        except asyncio.TimeoutError:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_timeout"
+            ] = True
+        except Exception:
+            prerequisites[
+                "benchflow_loopx_turn_terminal_failure_task_cancel_acknowledged"
+            ] = True
+        cleanup_host_local_acp_attempt_children(plan)
+        raise SkillsBenchLoopXTurnTerminalFailureStall(
+            "SkillsBench LoopX Turn terminal failure did not close BenchFlow"
         )
 
 
@@ -14594,7 +14879,7 @@ async def run_benchflow_case(
         if original_create_environment is None:
             raise RuntimeError("BenchFlow rollout planes create_environment missing")
         env = original_create_environment(self, *call_args, **call_kwargs)
-        environment = str(call_args[0]) if call_args else ""
+        environment = _benchflow_environment_name(call_args, call_kwargs)
         return _record_container_mount_injection(env, environment)
 
     def _record_container_mount_injection(env: Any, environment: str) -> Any:
@@ -14671,6 +14956,10 @@ async def run_benchflow_case(
             host_local_acp_status="installing_sandbox",
         )
         try:
+            prerequisites["host_local_acp_docker_exec_capture_lifecycle_guard"] = (
+                "install_agent_boundary"
+            )
+            install_benchflow_docker_exec_output_capture(self._env, plan=plan)
             prerequisites["host_local_acp_install_stage"] = (
                 "docker_exec_capture_preflight"
             )
@@ -14822,10 +15111,13 @@ async def run_benchflow_case(
                         "host_local_acp_after_sandbox_install"
                     )
                 await seed_product_mode_case_state(self._env)
-        except Exception:
+        except Exception as exc:
             prerequisites["host_local_acp_install_failed_stage"] = str(
                 prerequisites.get("host_local_acp_install_stage") or "unknown"
             )
+            prerequisites["host_local_acp_install_failure_exception_type"] = type(
+                exc
+            ).__name__
             _write_public_runner_lifecycle_receipt(
                 plan,
                 worker_status="sandbox_install_failed",
@@ -14893,6 +15185,9 @@ async def run_benchflow_case(
     setup_only_public_preflight = bool(
         getattr(args, "setup_only_public_preflight", False)
     )
+    setup_only_scored_lifecycle_canary = bool(
+        getattr(args, "setup_only_scored_lifecycle_canary", False)
+    )
     controller_user = None
     controller_trace: dict[str, Any] | None = None
     product_mode_case_payload: dict[str, Any] | None = None
@@ -14905,6 +15200,11 @@ async def run_benchflow_case(
             max_rounds=args.max_rounds,
             case_loopx_source_path=_loopx_case_source_path_for_container(args),
             goal_start_product_mode=_is_goal_start_product_mode_route(args.route),
+        )
+    if setup_only_scored_lifecycle_canary:
+        controller_trace = _new_controller_trace(args.route, max_rounds=args.max_rounds)
+        controller_trace["last_decision"] = (
+            "task_free_scored_lifecycle_canary_selected"
         )
     if not setup_only_public_preflight and args.route in {
         CODEX_ACP_BLIND_LOOP_BASELINE_ROUTE,
@@ -15011,6 +15311,95 @@ async def run_benchflow_case(
     config = RolloutConfig(
         **_filter_kwargs_for_signature(RolloutConfig, rollout_config_kwargs)
     )
+
+    async def run_task_free_scored_lifecycle_canary(
+        rollout: Any,
+    ) -> Mapping[str, Any]:
+        env = getattr(rollout, "env", None)
+        if env is None:
+            raise RuntimeError("scored lifecycle canary rollout env missing")
+        payload = benchmark_case_loopx_install_payload(
+            benchmark_id="skillsbench",
+            case_id=args.task_id,
+            arm_id=_loopx_case_arm_id_for_route(args.route),
+            route=args.route,
+            max_rounds=args.max_rounds,
+            case_loopx_source_path=_loopx_case_source_path_for_container(args),
+            goal_start_product_mode=_is_goal_start_product_mode_route(args.route),
+        )
+        goal_id = str(payload["benchmark_case_goal_id"])
+        cli_prefix = benchmark_case_loopx_command_prefix(
+            case_cli_path=str(payload["case_cli_path"]),
+            case_registry_path=str(payload["case_registry_path"]),
+            case_runtime_root=str(payload["case_runtime_root"]),
+        )
+        connected = await connect_host_local_acp(
+            env,
+            "codex-acp",
+            "",
+            agent_env,
+            args.sandbox_user,
+            args.model,
+            Path(getattr(rollout, "_rollout_dir", None) or plan["jobs_dir"]),
+            args.sandbox,
+            str(getattr(rollout, "_agent_cwd", None) or "/app"),
+            reasoning_effort=_effective_reasoning_effort(args),
+            mcp_servers=None,
+        )
+        client = connected[0]
+        try:
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="task_free_scored_lifecycle_canary_active",
+                worker_status="agent_active",
+            )
+            read_result = await env.exec(
+                f"{cli_prefix} status --goal-id {shlex.quote(goal_id)} --limit 5",
+                timeout_sec=60,
+            )
+            if int(read_result.return_code) != 0:
+                raise RuntimeError("scored lifecycle canary state read failed")
+            write_result = await env.exec(
+                f"{cli_prefix} refresh-state "
+                f"--goal-id {shlex.quote(goal_id)} "
+                "--classification benchmark_case_scored_lifecycle_canary "
+                "--delivery-batch-scale single_surface "
+                "--delivery-outcome surface_only "
+                "--no-global-sync",
+                timeout_sec=60,
+            )
+            if int(write_result.return_code) != 0:
+                raise RuntimeError("scored lifecycle canary state write failed")
+        finally:
+            with contextlib.suppress(Exception):
+                await client.close()
+
+        source = plan.get("loopx_runner_source_fingerprint")
+        if not isinstance(source, Mapping):
+            source = {}
+        return {
+            "case_goal_state_initialized_before_agent": bool(
+                isinstance(controller_trace, dict)
+                and controller_trace.get(
+                    "case_goal_state_initialized_before_agent"
+                )
+                is True
+            ),
+            "acp_session_initialized": True,
+            "agent_active_observed": True,
+            "loopx_state_read_count": 1,
+            "loopx_state_write_count": 1,
+            "task_prompt_sent": False,
+            "benchmark_task_launched": False,
+            "loopx_runner_source_git_head": str(source.get("git_head") or ""),
+            "loopx_runner_source_expected_git_head": str(
+                source.get("expected_git_head") or ""
+            ),
+            "loopx_runner_source_matches_expected": (
+                source.get("matches_expected") is True
+            ),
+        }
+
     result_path: Path | None = None
     prerequisites = plan.setdefault("runner_prerequisites", {})
     requested_build_stall_timeout_sec = _requested_build_stall_timeout_sec(args)
@@ -15053,32 +15442,36 @@ async def run_benchflow_case(
         return False
 
     async def run_benchflow_with_setup_stall_watchdog() -> None:
+        async def await_task_completion(monitored_task: asyncio.Task[Any]) -> None:
+            await monitored_task
+            _write_public_runner_lifecycle_receipt(
+                plan,
+                run_stage="benchflow_run_completed",
+                worker_status="worker_completed",
+            )
+
         _write_public_runner_lifecycle_receipt(
             plan,
             run_stage="benchflow_run_started",
             worker_status="worker_running",
         )
         task = asyncio.create_task(benchflow_run(config))
-        if build_stall_timeout_sec <= 0:
-            await task
-            _write_public_runner_lifecycle_receipt(
+        monitored_task = asyncio.create_task(
+            _await_benchflow_task_with_loopx_turn_closeout_watchdog(
+                task,
                 plan,
-                run_stage="benchflow_run_completed",
-                worker_status="worker_completed",
             )
+        )
+        if build_stall_timeout_sec <= 0:
+            await await_task_completion(monitored_task)
             return
         done, _pending = await asyncio.wait(
-            {task},
+            {monitored_task},
             timeout=build_stall_timeout_sec,
             return_when=asyncio.FIRST_COMPLETED,
         )
         if done:
-            await task
-            _write_public_runner_lifecycle_receipt(
-                plan,
-                run_stage="benchflow_run_completed",
-                worker_status="worker_completed",
-            )
+            await await_task_completion(monitored_task)
             return
         if agent_lifecycle_started():
             _write_public_runner_lifecycle_receipt(
@@ -15086,12 +15479,7 @@ async def run_benchflow_case(
                 run_stage="benchflow_run_continues_after_agent_lifecycle_started",
                 worker_status="agent_active",
             )
-            await task
-            _write_public_runner_lifecycle_receipt(
-                plan,
-                run_stage="benchflow_run_completed",
-                worker_status="worker_completed",
-            )
+            await await_task_completion(monitored_task)
             return
         prerequisites["benchflow_setup_stall_timeout_triggered"] = True
         prerequisites["benchflow_setup_stall_before_agent_lifecycle"] = True
@@ -15102,12 +15490,15 @@ async def run_benchflow_case(
         )
         prerequisites["benchflow_setup_stall_task_cancel_requested"] = True
         task.cancel()
+        monitored_task.cancel()
         try:
             await asyncio.wait_for(task, timeout=5)
         except asyncio.CancelledError:
             prerequisites["benchflow_setup_stall_task_cancel_acknowledged"] = True
         except asyncio.TimeoutError:
             prerequisites["benchflow_setup_stall_task_cancel_timeout"] = True
+        with contextlib.suppress(asyncio.CancelledError):
+            await monitored_task
         cleanup_benchflow_setup_stall_children(plan)
         raise asyncio.TimeoutError(
             "skillsbench docker compose build/setup stall timeout before agent lifecycle"
@@ -15157,6 +15548,18 @@ async def run_benchflow_case(
                     run_host_local_acp_codex_exec_preflight_after_environment
                     if _host_local_acp_codex_exec_preflight_should_run(args)
                     else None
+                ),
+                agent_install_canary=bool(
+                    getattr(args, "setup_only_agent_install_canary", False)
+                ),
+                scored_lifecycle_canary=(
+                    run_task_free_scored_lifecycle_canary
+                    if setup_only_scored_lifecycle_canary
+                    else None
+                ),
+                scored_lifecycle_timeout_sec=float(
+                    getattr(args, "scored_lifecycle_canary_timeout_sec", 180)
+                    or 180
                 ),
             )
             plan["setup_only_public_preflight_result"] = setup_only_result
@@ -15322,7 +15725,7 @@ def reduce_result(
                         if item not in existing_labels:
                             existing_labels.append(item)
                     compact["failure_attribution_labels"] = existing_labels
-    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
         compact,
         task_staging=task_staging,
         setup_preflight=_public_task_setup_preflight(
@@ -16080,6 +16483,72 @@ def _recover_runner_failure_score_from_verifier_artifact(
     return True
 
 
+def _apply_runner_failure_attempt_accounting_from_public_activity(
+    compact: dict[str, Any],
+    runner_prerequisites: Mapping[str, Any],
+) -> None:
+    """Count a solver attempt when public bridge evidence proves task work."""
+
+    task_operation_count = _nonbool_int(
+        runner_prerequisites.get(
+            "remote_command_file_bridge_agent_task_facing_operation_count"
+        )
+    )
+    raw_task_success_count = runner_prerequisites.get(
+        "remote_command_file_bridge_agent_task_facing_success_count"
+    )
+    if isinstance(raw_task_success_count, int) and not isinstance(
+        raw_task_success_count, bool
+    ):
+        task_success_count = max(0, raw_task_success_count)
+    else:
+        raw_request_count = runner_prerequisites.get(
+            "remote_command_file_bridge_agent_request_count"
+        )
+        raw_success_count = runner_prerequisites.get(
+            "remote_command_file_bridge_agent_success_count"
+        )
+        if (
+            isinstance(raw_request_count, int)
+            and not isinstance(raw_request_count, bool)
+            and raw_request_count >= task_operation_count
+            and isinstance(raw_success_count, int)
+            and not isinstance(raw_success_count, bool)
+            and 0 <= raw_success_count <= raw_request_count
+        ):
+            non_task_operation_count = raw_request_count - task_operation_count
+            task_success_count = max(
+                0,
+                raw_success_count - non_task_operation_count,
+            )
+        else:
+            task_success_count = 0
+    if task_operation_count <= 0 or task_success_count <= 0:
+        return
+
+    from loopx.benchmark_core import (
+        BenchmarkFailureClass,
+        build_benchmark_attempt_accounting,
+        canonical_lifecycle,
+    )
+
+    failure_label = str(compact.get("score_failure_attribution") or "")
+    compact["attempt_accounting"] = build_benchmark_attempt_accounting(
+        lifecycle=canonical_lifecycle(
+            process_started=True,
+            runner_accepted_args=True,
+            job_root_materialized=True,
+            trial_started=True,
+            worker_started=True,
+        ),
+        failure_label=failure_label,
+        failure_class=BenchmarkFailureClass.SOLVER_FAILED,
+        solver_attempted=True,
+        verifier_attempted=False,
+        official_score_attempted=False,
+    )
+
+
 def build_runner_failure_compact(
     args: argparse.Namespace,
     plan: dict[str, Any],
@@ -16222,6 +16691,11 @@ def build_runner_failure_compact(
         "no_raw_trajectory_read": True,
         "no_leaderboard_upload_requested": True,
     }
+    if runner_prerequisites:
+        _apply_runner_failure_attempt_accounting_from_public_activity(
+            compact,
+            runner_prerequisites,
+        )
     reduced = compact_benchmark_run(compact)
     if reduced is None:
         raise RuntimeError("SkillsBench runner failure reducer produced non-compact run")
@@ -16250,7 +16724,7 @@ def build_runner_failure_compact(
     if not recovered:
         _recover_runner_failure_score_from_verifier_artifact(reduced, plan)
     _apply_codex_cli_goal_countability_guard_attribution(reduced)
-    verifier_bootstrap.apply_skillsbench_verifier_bootstrap_missing_score_attribution(
+    apply_skillsbench_verifier_bootstrap_missing_score_attribution(
         reduced,
         task_staging=_effective_public_task_staging(plan),
         setup_preflight=_public_task_setup_preflight(
@@ -16811,9 +17285,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Materialize the BenchFlow job root and environment, then stop "
-            "before agent install, agent execution, and verification. Emit only "
-            "a compact public-safe setup classification."
+            "before agent execution and verification. By default this also "
+            "stops before agent install. Emit only a compact public-safe setup "
+            "classification."
         ),
+    )
+    parser.add_argument(
+        "--setup-only-agent-install-canary",
+        action="store_true",
+        help=(
+            "With --setup-only-public-preflight, exercise the configured agent "
+            "install path and stop before agent execution and verification."
+        ),
+    )
+    parser.add_argument(
+        "--setup-only-scored-lifecycle-canary",
+        action="store_true",
+        help=(
+            "With setup-only agent install, initialize a task-free ACP session "
+            "and prove one case-local LoopX state read/write lifecycle before "
+            "allowing later scored launches."
+        ),
+    )
+    parser.add_argument(
+        "--scored-lifecycle-canary-timeout-sec",
+        type=int,
+        default=180,
+        help="Strict terminal budget for the task-free scored lifecycle canary.",
     )
     parser.add_argument(
         "--reduce-only",
@@ -17258,6 +17756,38 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error(
             "--setup-only-public-preflight is incompatible with --plan-only "
             "and --reduce-only"
+        )
+    if (
+        args.setup_only_agent_install_canary
+        and not args.setup_only_public_preflight
+    ):
+        parser.error(
+            "--setup-only-agent-install-canary requires "
+            "--setup-only-public-preflight"
+        )
+    if (
+        args.setup_only_scored_lifecycle_canary
+        and not args.setup_only_agent_install_canary
+    ):
+        parser.error(
+            "--setup-only-scored-lifecycle-canary requires "
+            "--setup-only-agent-install-canary"
+        )
+    if args.setup_only_scored_lifecycle_canary and not args.host_local_acp_launch:
+        parser.error(
+            "--setup-only-scored-lifecycle-canary requires "
+            "--host-local-acp-launch"
+        )
+    if args.setup_only_scored_lifecycle_canary and not _is_case_loopx_route(
+        args.route
+    ):
+        parser.error(
+            "--setup-only-scored-lifecycle-canary requires a case-local "
+            "LoopX route"
+        )
+    if not 1 <= args.scored_lifecycle_canary_timeout_sec <= 300:
+        parser.error(
+            "--scored-lifecycle-canary-timeout-sec must be between 1 and 300"
         )
     if args.setup_only_public_preflight and (args.append_history or args.update_ledger):
         parser.error(

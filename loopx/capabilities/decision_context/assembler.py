@@ -28,6 +28,7 @@ from .sources import (
 
 DECISION_CONTEXT_ASSEMBLY_SCHEMA_VERSION = "decision_context_assembly_v0"
 DECISION_CURSOR_CHECKPOINT_SCHEMA_VERSION = "decision_cursor_checkpoint_v0"
+DECISION_SOURCE_COVERAGE_SCHEMA_VERSION = "decision_source_coverage_v0"
 
 
 def _packet_ref(prefix: str, packet: Mapping[str, Any]) -> str:
@@ -140,6 +141,67 @@ class _CollectedSource:
     exact_reads: tuple[DecisionSourceExactRead, ...]
     exact_read_failed: bool
     receipt: Mapping[str, Any]
+
+
+def _source_coverage(
+    collected_sources: Sequence[_CollectedSource],
+) -> dict[str, Any]:
+    """Project whether every P0 source was scanned and exactly read when needed."""
+
+    priority_rows: list[dict[str, Any]] = []
+    incomplete_required_source_ids: list[str] = []
+    for priority in ("p0", "p1", "p2"):
+        sources = [
+            collected
+            for collected in collected_sources
+            if collected.source.priority == priority
+        ]
+        status_counts = {
+            status: sum(
+                1 for collected in sources if collected.scan.status == status
+            )
+            for status in ("completed", "no_change", "failed", "unavailable")
+        }
+        exact_read_incomplete_count = sum(
+            1 for collected in sources if collected.exact_read_failed
+        )
+        complete_count = sum(
+            1
+            for collected in sources
+            if collected.scan.status in {"completed", "no_change"}
+            and not collected.exact_read_failed
+        )
+        priority_rows.append(
+            {
+                "priority": priority,
+                "source_count": len(sources),
+                "complete_count": complete_count,
+                "exact_read_incomplete_count": exact_read_incomplete_count,
+                "status_counts": status_counts,
+            }
+        )
+        if priority == "p0":
+            incomplete_required_source_ids.extend(
+                collected.source.source_id
+                for collected in sources
+                if collected.scan.status not in {"completed", "no_change"}
+                or collected.exact_read_failed
+            )
+
+    incomplete_required_source_ids.sort()
+    return {
+        "schema_version": DECISION_SOURCE_COVERAGE_SCHEMA_VERSION,
+        "required_priority": "p0",
+        "status": (
+            "complete" if not incomplete_required_source_ids else "incomplete"
+        ),
+        "complete": not incomplete_required_source_ids,
+        "incomplete_required_source_ids": incomplete_required_source_ids,
+        "priority_rows": priority_rows,
+        "fail_open_preserved": True,
+        "raw_context_captured": False,
+        "private_locators_captured": False,
+    }
 
 
 def _unavailable_source_scan(
@@ -724,6 +786,7 @@ def assemble_decision_evidence(
         "visibility": "public_safe",
         "source_manifest": manifest,
         "source_scan_receipts": source_scan_receipts,
+        "source_coverage": _source_coverage(collected_sources),
         "context_retrieval_receipt": retrieval_receipt,
         "evidence_packet": evidence,
         "cursor_checkpoint": checkpoint,

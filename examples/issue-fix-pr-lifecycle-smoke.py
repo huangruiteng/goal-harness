@@ -196,7 +196,7 @@ def main() -> int:
     )
     assert blocked_pending["transition"]["material_change"] is False
     assert blocked_pending["grouped_monitor_projection"]["target_key"] == (
-        "github-pr-state-checks-pending"
+        "github-pr-state-huangruiteng--loopx-checks-pending"
     )
 
     stale = build_issue_fix_pr_lifecycle_monitor_packet(
@@ -239,7 +239,7 @@ def main() -> int:
         quiet["grouped_monitor_projection"]
         | {
             "state_bucket": "review_required",
-            "target_key": "github-pr-state-review-required",
+            "target_key": "github-pr-state-huangruiteng--loopx-review-required",
             "action_kind": "issue_fix_pr_state_review_required_monitor",
             "member_key": "huangruiteng/loopx#1715",
             "member_operation": "upsert",
@@ -275,7 +275,7 @@ def main() -> int:
     assert_packet_shape(approved)
     assert approved["grouped_monitor_projection"]["state_bucket"] == "ready_to_merge"
     assert approved["grouped_monitor_projection"]["target_key"] == (
-        "github-pr-state-ready-to-merge"
+        "github-pr-state-huangruiteng--loopx-ready-to-merge"
     )
     for alias in ("#1700", "issue_1700", "issues/1700", "issue 1700"):
         alias_packet = build_issue_fix_pr_lifecycle_monitor_packet(

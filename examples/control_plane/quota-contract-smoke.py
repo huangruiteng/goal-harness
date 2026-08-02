@@ -234,76 +234,25 @@ def main() -> int:
         label="quota doc",
     )
 
+    normalized_readme = " ".join(readme.split())
+    assert_contains(readme, "loopx quota should-run", label="README")
+    assert_contains(readme, "loopx quota spend-slot", label="README")
     assert_contains(
-        readme,
-        "The `next_automatic_turn` reported by `quota plan` is only an advisory scheduling hint",
+        normalized_readme,
+        "Automatic turns must check quota first and append spend only after validated writeback.",
+        label="README",
+    )
+    assert_contains(
+        normalized_readme,
+        "Quiet skips, preflight failures, and dry-run previews do not spend.",
         label="README",
     )
     assert_contains(
         readme,
-        "it chooses the highest-compute eligible goal",
+        "Scheduler cadence follows `quota should-run.scheduler_hint`",
         label="README",
     )
-    assert_contains(
-        readme,
-        "operator-gated, focus-waiting, waiting, throttled, paused, and health-blocked goals stay out of the eligible lane",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "`control_plane.self_repair.enabled=true` lets `quota should-run` return a bounded `decision=self_repair` contract",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "missing policy defaults off",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "`gate_prompt` or `operator_question`, the target heartbeat should proactively ask that concrete user/operator gate",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "do not call the turn \"no new user action\" while they remain open",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "its report still has to list existing open user todos",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "`notify_user_on_open_todo=true`",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "skip delivery work and quota spend for that blocker-push turn",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "`safe_bypass_allowed=true`, the heartbeat may still do one bounded read-only steering or analysis step",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "See `docs/quota-allocation.md` for the full allocation contract",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "After an automatic turn actually spends delivery compute, append one spend event",
-        label="README",
-    )
-    assert_contains(
-        readme,
-        "Do not append spend for quiet `should_run=false` skips, preflight failures, or pure dry-run previews",
-        label="README",
-    )
+    assert_contains(readme, "[Quota Allocation](docs/quota-allocation.md)", label="README")
     assert_contains(
         status_contract,
         "`loopx quota status` and `loopx quota plan` derive an agent-facing grouping from this same status payload",

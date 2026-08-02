@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from collections.abc import Mapping
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
 
@@ -12,6 +14,7 @@ from loopx.control_plane.testing.doubao_model_behavior_actor import (
     MODEL_BEHAVIOR_PROVIDER_INPUT_SCHEMA_VERSION,
     DoubaoActorTransportError,
     DoubaoModelBehaviorActor,
+    _direct_ark_transport,
     _decision_instruction,
     _provider_input,
 )
@@ -255,6 +258,54 @@ def test_actor_sanitizes_unexpected_transport_errors() -> None:
 
     assert str(exc_info.value) == "Doubao actor provider transport failed"
     assert exc_info.value.error_code == "provider_transport_failed"
+
+
+@pytest.mark.parametrize(
+    ("status", "error_code", "message"),
+    [
+        (
+            401,
+            "provider_authentication_failed",
+            "Doubao actor authentication failed; refresh ARK_API_KEY before retrying",
+        ),
+        (403, "provider_http_error", "Doubao actor request failed with HTTP status 403"),
+        (429, "provider_http_error", "Doubao actor request failed with HTTP status 429"),
+    ],
+)
+def test_direct_transport_classifies_http_errors_without_exposing_response(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    error_code: str,
+    message: str,
+) -> None:
+    private_response = b'{"error":"provider detail must remain private"}'
+
+    class UnauthorizedOpener:
+        def open(self, *_: Any, **__: Any) -> Any:
+            raise HTTPError(
+                DOUBAO_CHAT_COMPLETIONS_ENDPOINT,
+                status,
+                "provider detail must remain private",
+                hdrs=None,
+                fp=BytesIO(private_response),
+            )
+
+    monkeypatch.setattr(
+        "loopx.control_plane.testing.doubao_model_behavior_actor.build_opener",
+        lambda *_: UnauthorizedOpener(),
+    )
+
+    with pytest.raises(DoubaoActorTransportError) as exc_info:
+        _direct_ark_transport(
+            endpoint=DOUBAO_CHAT_COMPLETIONS_ENDPOINT,
+            headers={},
+            body=b"{}",
+            timeout_seconds=1.0,
+        )
+
+    assert exc_info.value.error_code == error_code
+    assert str(exc_info.value) == message
+    assert "provider detail" not in str(exc_info.value)
 
 
 def test_actor_rejects_noncanonical_request_before_transport() -> None:

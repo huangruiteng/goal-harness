@@ -18,6 +18,7 @@ from ..domain_state import default_domain_state_file_path, upsert_domain_state_j
 
 ISSUE_FIX_DOMAIN_STATE_LEDGER_FILENAME = "pr-lifecycle.jsonl"
 ISSUE_FIX_FEASIBILITY_LEDGER_FILENAME = "feasibility.jsonl"
+ISSUE_FIX_CANDIDATE_PREFLIGHT_LEDGER_FILENAME = "candidate-preflight.jsonl"
 ISSUE_FIX_REPOSITORY_SNAPSHOT_LEDGER_FILENAME = "repository-snapshots.jsonl"
 REVIEWER_NOTIFICATION_RECEIPT_PATTERN = re.compile(r"sha256:[a-f0-9]{64}")
 REVIEWER_NOTIFICATION_QUEUE_RECEIPT_SCHEMA_VERSION = (
@@ -103,6 +104,48 @@ def upsert_issue_fix_feasibility_ledger_jsonl(
         payload,
         key=issue_fix_feasibility_ledger_key(payload),
         existing_key_fn=issue_fix_feasibility_ledger_key,
+    )
+
+
+def issue_fix_candidate_preflight_ledger_key(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    repo = str(payload.get("repo") or "").strip()
+    issue_ref = str(payload.get("issue_ref") or "").strip()
+    if not repo or not issue_ref:
+        raise ValueError(
+            "issue-fix candidate preflight payload must include repo and issue_ref"
+        )
+    return {"repo": repo, "issue_ref": issue_ref}
+
+
+def upsert_issue_fix_candidate_preflight_ledger_jsonl(
+    ledger_path: str | Path,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Upsert one source-qualified candidate admission receipt."""
+
+    if payload.get("ok") is not True:
+        raise ValueError(
+            "only successful issue-fix candidate preflight payloads can be written"
+        )
+    if payload.get("schema_version") != "issue_fix_candidate_preflight_v0":
+        raise ValueError(
+            "issue-fix candidate preflight payload has an unsupported schema"
+        )
+    if payload.get("external_writes_performed") is not False:
+        raise ValueError(
+            "issue-fix candidate preflight payload must not perform external writes"
+        )
+    if payload.get("raw_provider_payload_captured") is not False:
+        raise ValueError(
+            "issue-fix candidate preflight payload must not capture raw provider data"
+        )
+    return _upsert_issue_fix_payload(
+        ledger_path,
+        payload,
+        key=issue_fix_candidate_preflight_ledger_key(payload),
+        existing_key_fn=issue_fix_candidate_preflight_ledger_key,
     )
 
 
@@ -463,6 +506,21 @@ def default_issue_fix_feasibility_ledger_path(
         goal_id=goal_id,
         domain_pack="issue_fix",
         filename=ISSUE_FIX_FEASIBILITY_LEDGER_FILENAME,
+    )
+
+
+def default_issue_fix_candidate_preflight_ledger_path(
+    *,
+    project: str | Path = ".",
+    goal_id: str,
+) -> Path:
+    """Return the project-local issue candidate admission ledger path."""
+
+    return default_domain_state_file_path(
+        project=project,
+        goal_id=goal_id,
+        domain_pack="issue_fix",
+        filename=ISSUE_FIX_CANDIDATE_PREFLIGHT_LEDGER_FILENAME,
     )
 
 

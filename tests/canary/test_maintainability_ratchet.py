@@ -25,11 +25,8 @@ def test_current_repository_debt_is_reviewed_without_line_count_pins() -> None:
     )
     assert report["unreviewed_count"] == 0
     assert report["stale_exception_count"] == 0
-    assert set(report["category_counts"]) == {
-        "compatibility_facade",
-        "dependency_debt",
-        "oversized_decision_function",
-    }
+    assert set(report["category_counts"]) == {"compatibility_facade"}
+    assert report["category_counts"].get("oversized_decision_function", 0) == 0
     assert report["reviewed_exception_count"] == report["finding_count"]
 
 
@@ -185,3 +182,45 @@ def test_decision_ratchet_measures_function_ast_not_file_length(tmp_path: Path) 
     assert all(
         finding["path"] != "loopx/control_plane/large_file.py" for finding in findings
     )
+
+
+def test_decision_ratchet_covers_quota_cli_orchestration(tmp_path: Path) -> None:
+    package_root = tmp_path / "loopx"
+    cli_commands = package_root / "cli_commands"
+    cli_commands.mkdir(parents=True)
+    (package_root / "quota.py").write_text("", encoding="utf-8")
+    (package_root / "status.py").write_text("", encoding="utf-8")
+    (cli_commands / "quota.py").write_text(
+        "def handle_quota_command(value):\n"
+        "    if value > 0:\n"
+        "        return 'run'\n"
+        "    if value < 0:\n"
+        "        return 'skip'\n"
+        "    return 'wait'\n",
+        encoding="utf-8",
+    )
+
+    findings = collect_oversized_decision_functions(
+        tmp_path,
+        statement_limit=100,
+        decision_point_limit=1,
+    )
+
+    assert findings == [
+        {
+            "id": (
+                "oversized_decision_function:"
+                "loopx.cli_commands.quota:handle_quota_command"
+            ),
+            "category": "oversized_decision_function",
+            "path": "loopx/cli_commands/quota.py",
+            "module": "loopx.cli_commands.quota",
+            "symbol": "handle_quota_command",
+            "line": 1,
+            "metrics": {"statements": 5, "decision_points": 2},
+            "thresholds": {
+                "max_statements": 100,
+                "max_decision_points": 1,
+            },
+        }
+    ]

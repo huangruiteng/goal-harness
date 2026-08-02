@@ -7,6 +7,9 @@ from ...control_plane.runtime.public_safety import (
     public_safe_compact_list,
     public_safe_compact_text,
 )
+from ...control_plane.runtime.run_ingest_health import (
+    compact_environment_setup_failure_context,
+)
 
 
 BENCHMARK_RUN_TEXT_FIELDS = (
@@ -157,6 +160,132 @@ BENCHMARK_RUN_INT_FIELDS = (
     "max_rounds_budget",
     "round_reward_count",
 )
+BENCHMARK_VALIDATION_NEUTRAL_FALSE_FIELDS = {
+    "case_success_claimed",
+    "case_solution_not_required_for_probe",
+    "official_case_success",
+    "official_verifier_validation_present",
+    "native_goal_worker_route",
+    "native_goal_worker_connected",
+    "native_goal_worker_trace_dir_present",
+    "native_goal_worker_public_trace_read",
+    "native_goal_worker_trace_observed",
+    "remote_command_file_bridge_consumed_by_solver",
+    "remote_command_file_bridge_solver_public_trace_read",
+    "loopx_controller_trace_present",
+    "leaderboard_claim_allowed",
+    "official_score_claim_allowed",
+    "probe_contract_result_present",
+    "assisted_collaboration_claim_allowed",
+}
+BENCHMARK_VALIDATION_TEXT_FIELDS = (
+    "validation_scope",
+    "case_success_claim_kind",
+    "official_verifier_status",
+    "native_goal_worker_trace_status",
+    "native_goal_worker_failure_category",
+    "native_goal_worker_first_blocker",
+)
+BENCHMARK_VALIDATION_INT_FIELDS = (
+    "native_goal_worker_trace_count",
+    "native_goal_worker_lifecycle_trace_count",
+    "native_goal_worker_prompt_received_count",
+    "native_goal_worker_first_action_observed_count",
+    "native_goal_worker_effective_action_observed_count",
+)
+BENCHMARK_VALIDATION_BOOL_FIELDS = (
+    "active_user_assisted_treatment_preflight",
+    "bridge_connected",
+    "bridge_connectivity_claim_allowed",
+    "case_success_claimed",
+    "official_verifier_validation_present",
+    "official_case_success",
+    "active_user_simulator_contract_checked",
+    "simulator_to_worker_injection_channel_checked",
+    "simulator_to_worker_injection_channel_probe_checked",
+    "missing_simulator_to_worker_injection_channel_recorded",
+    "simulator_to_worker_external_update_loop_available",
+    "real_assisted_worker_observation_missing",
+    "active_user_observation_fixture",
+    "worker_observation_proof",
+    "scripted_active_user_intervention_observed",
+    "no_real_user_message_injected",
+    "no_model_backed_simulator_invoked",
+    "no_oracle_audit_required",
+    "assisted_score_kept_separate_from_official",
+    "real_result_reducer_materialized",
+    "compact_run_read",
+    "compact_result_read",
+    "selected_tag_checked",
+    "selected_image_only",
+    "single_tag_only",
+    "buggy_source_extracted",
+    "fixed_source_not_extracted_to_host",
+    "host_codex_cli_invoked",
+    "patch_exported_from_buggy_source_git_diff",
+    "patch_applied_in_container",
+    "patch_hash_recorded",
+    "patched_eval_exit_zero",
+    "patched_eval_success_marker",
+    "private_runner_script_materialized",
+    "private_runner_manifest_materialized",
+    "script_executable_bit_set",
+    "script_content_not_public",
+    "script_path_relative_only",
+    "phase_order_rendered",
+    "script_renders_source_extraction",
+    "script_renders_observed_image_source_path",
+    "script_renders_precheck_only",
+    "script_handles_gitkeep_placeholder",
+    "script_renders_git_baseline",
+    "script_renders_host_codex",
+    "script_renders_patch_export",
+    "script_renders_selected_tag_eval",
+    "script_renders_entrypoint_eval_commands",
+    "script_renders_compact_evidence",
+    "script_renders_real_result_reducer",
+    "no_generator_codex_execution",
+    "no_generator_docker_execution",
+    "no_generator_model_api_invoked",
+    "no_generator_upload",
+    "no_generator_submit",
+    "no_generator_public_ranking_path",
+    "no_auth_material_sync",
+    "no_upload",
+    "no_submit",
+    "no_public_ranking_path",
+    "no_raw_logs_public",
+    "no_patch_content_public",
+    "no_absolute_paths_public",
+    "no_codex_auth_sync",
+    "no_credential_values_recorded",
+    "no_reducer_codex_execution",
+    "no_reducer_docker_execution",
+    "worker_bridge_materialized_when_required",
+    "worker_bridge_repeat_ready",
+    "worker_startup_blocker_recorded",
+    "loopx_controller_trace_present",
+    "loopx_controller_trace_public_safe",
+    "native_goal_worker_route",
+    "native_goal_worker_connected",
+    "native_goal_worker_trace_dir_present",
+    "native_goal_worker_public_trace_read",
+    "native_goal_worker_trace_observed",
+    "native_goal_worker_countable_baseline",
+    "runner_failure_compact_recorded",
+    "no_raw_logs_read",
+    "no_raw_task_text_read",
+    "no_raw_trajectory_read",
+    "no_leaderboard_upload_requested",
+)
+NATIVE_GOAL_WORKER_MISSING_TRACE_STATUSES = {
+    "worker_connected_trace_dir_missing",
+    "worker_connected_no_public_trace",
+    "worker_connected_no_prompt_trace",
+    "worker_prompt_received_no_turn_trace",
+    "worker_connected_no_turn_trace",
+    "worker_route_selected_not_connected",
+}
 
 
 def _solution_quality_number(value: Any) -> float | int | None:
@@ -256,7 +385,9 @@ def build_benchmark_solution_quality_signals(
     )
     tool_call_count = _solution_quality_positive_int(
         activity_event.get("acp_protocol_tool_call_count")
-    ) or _solution_quality_positive_int(counters.get("private_trajectory_tool_call_count"))
+    ) or _solution_quality_positive_int(
+        counters.get("private_trajectory_tool_call_count")
+    )
     activity_status = (
         _solution_quality_compact_text(activity_event.get("status"), limit=120)
         or _solution_quality_compact_text(
@@ -386,7 +517,9 @@ def compact_benchmark_run_core(
 
     trials = source.get("trials") if isinstance(source.get("trials"), list) else []
     first_trial = trials[0] if trials and isinstance(trials[0], dict) else {}
-    case_ids_source = source.get("case_ids") if isinstance(source.get("case_ids"), list) else []
+    case_ids_source = (
+        source.get("case_ids") if isinstance(source.get("case_ids"), list) else []
+    )
     case_id = (
         public_safe_compact_text(source.get("case_id"), limit=120)
         or public_safe_compact_text(source.get("task_id"), limit=120)
@@ -410,7 +543,9 @@ def compact_benchmark_run_core(
         if isinstance(source.get(field), bool):
             compact[field] = source[field]
     for field in BENCHMARK_RUN_INT_FIELDS:
-        if isinstance(source.get(field), int) and not isinstance(source.get(field), bool):
+        if isinstance(source.get(field), int) and not isinstance(
+            source.get(field), bool
+        ):
             compact[field] = source[field]
 
     round_timeout = source.get("controller_round_timeout_sec")
@@ -426,3 +561,163 @@ def compact_benchmark_run_core(
     if event_counts:
         compact["loopx_prompt_driven_event_counts"] = event_counts
     return compact
+
+
+def compact_benchmark_run_validation(
+    value: Any,
+    *,
+    pre_agent_setup_materialization_blocked: bool,
+    max_list_items: int,
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or not value:
+        return {}
+
+    failed_checks = [
+        key
+        for key, field_value in value.items()
+        if isinstance(key, str)
+        and key not in BENCHMARK_VALIDATION_NEUTRAL_FALSE_FIELDS
+        and isinstance(field_value, bool)
+        and not field_value
+    ][:max_list_items]
+    trace_status = public_safe_compact_text(
+        value.get("native_goal_worker_trace_status"),
+        limit=140,
+    )
+    native_goal_worker_trace_missing = (
+        value.get("native_goal_worker_route") is True
+        and trace_status in NATIVE_GOAL_WORKER_MISSING_TRACE_STATUSES
+    )
+    if (
+        native_goal_worker_trace_missing
+        and not pre_agent_setup_materialization_blocked
+        and "native_goal_worker_public_trace_missing" not in failed_checks
+        and len(failed_checks) < max_list_items
+    ):
+        failed_checks.append("native_goal_worker_public_trace_missing")
+    if (
+        pre_agent_setup_materialization_blocked
+        and "pre_agent_setup_materialization_blocked" not in failed_checks
+        and len(failed_checks) < max_list_items
+    ):
+        failed_checks.append("pre_agent_setup_materialization_blocked")
+
+    compact: dict[str, Any] = {
+        "all_passed": not failed_checks
+        and all(
+            bool(field_value)
+            for key, field_value in value.items()
+            if isinstance(key, str)
+            and key not in BENCHMARK_VALIDATION_NEUTRAL_FALSE_FIELDS
+            and isinstance(field_value, bool)
+        ),
+        "failed_checks": failed_checks,
+    }
+    for field in BENCHMARK_VALIDATION_TEXT_FIELDS:
+        text = public_safe_compact_text(value.get(field), limit=140)
+        if text:
+            compact[field] = text
+    for field in BENCHMARK_VALIDATION_INT_FIELDS:
+        field_value = value.get(field)
+        if isinstance(field_value, int) and not isinstance(field_value, bool):
+            compact[field] = field_value
+    for field in BENCHMARK_VALIDATION_BOOL_FIELDS:
+        if isinstance(value.get(field), bool):
+            compact[field] = value[field]
+    return compact
+
+
+def compact_benchmark_run_trials(
+    value: Any,
+    *,
+    max_trials: int,
+    max_list_items: int,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    trials: list[dict[str, Any]] = []
+    for trial in value:
+        if not isinstance(trial, dict):
+            continue
+        compact_trial: dict[str, Any] = {}
+        for field in (
+            "task_id",
+            "trial_name",
+            "source",
+            "exception_type",
+            "worker_start_status",
+            "verifier_failure_attribution",
+        ):
+            text = public_safe_compact_text(trial.get(field), limit=140)
+            if text:
+                compact_trial[field] = text
+        for source_field, target_field in (
+            (
+                "verifier_failure_attribution_labels",
+                "verifier_failure_attribution_labels",
+            ),
+            ("agent_failure_attribution_labels", "agent_failure_attribution_labels"),
+        ):
+            labels = public_safe_compact_list(
+                trial.get(source_field),
+                limit=max_list_items,
+            )
+            if labels:
+                compact_trial[target_field] = labels
+        reward = compact_numeric_map(trial.get("reward"))
+        if reward:
+            compact_trial["reward"] = reward
+        metrics = compact_numeric_map(
+            trial.get("metrics"),
+            keys=("input_tokens", "cache_tokens", "output_tokens", "cost_usd"),
+        )
+        if metrics:
+            compact_trial["metrics"] = metrics
+        for field in (
+            "trajectory_present",
+            "verifier_reward_present",
+            "artifact_manifest_present",
+            "trial_result_present",
+        ):
+            if isinstance(trial.get(field), bool):
+                compact_trial[field] = trial[field]
+        environment_context = compact_environment_setup_failure_context(
+            trial.get("environment_setup_failure_context")
+        )
+        if environment_context:
+            compact_trial["environment_setup_failure_context"] = environment_context
+        official_zero = trial.get("official_zero_observation")
+        if isinstance(official_zero, dict):
+            compact_zero: dict[str, Any] = {}
+            for field in ("schema_version", "reward_value"):
+                field_value = official_zero.get(field)
+                if isinstance(field_value, (int, float)) and not isinstance(
+                    field_value,
+                    bool,
+                ):
+                    compact_zero[field] = field_value
+                elif isinstance(field_value, str):
+                    text = public_safe_compact_text(field_value, limit=80)
+                    if text:
+                        compact_zero[field] = text
+            for field in (
+                "detected",
+                "exception_present",
+                "environment_setup_completed",
+                "agent_setup_completed",
+                "agent_execution_completed",
+                "verifier_completed",
+                "raw_logs_read",
+                "raw_trace_recorded",
+                "task_text_read",
+            ):
+                if isinstance(official_zero.get(field), bool):
+                    compact_zero[field] = official_zero[field]
+            if compact_zero:
+                compact_trial["official_zero_observation"] = compact_zero
+        if compact_trial:
+            trials.append(compact_trial)
+            if len(trials) >= max_trials:
+                break
+    return trials

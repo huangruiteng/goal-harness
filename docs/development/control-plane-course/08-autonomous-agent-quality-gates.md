@@ -5,6 +5,9 @@
 
 建议时长：120 分钟。质量模型 30 分钟、分层门禁 35 分钟、组合案例 35 分钟、实验与 review 20 分钟。
 
+一小时专题[长程任务如何收敛](topic-long-horizon-convergence.md)先解释独立 oracle 为什么是
+防止长程系统自证正确的必要边界；本讲继续展开不同风险 surface 的具体 qualification。
+
 ## 学习目标
 
 完成本讲后，开发者应该能够：

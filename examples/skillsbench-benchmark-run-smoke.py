@@ -7447,10 +7447,7 @@ def test_host_local_product_mode_auto_bridge_keeps_lifecycle_checkpoint_args() -
     assert "--loopx-case-goal-id" in command
     assert "--loopx-case-cli-path" in command
     assert "--remote-command-file-bridge-command" not in command
-    assert command[command.index("--timeout-sec") + 1] == str(
-        DEFAULT_HOST_LOCAL_CODEX_BRIDGE_IDLE_TIMEOUT_SEC
-        + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC
-    )
+    assert command[command.index("--timeout-sec") + 1] == str(args.outer_timeout_sec)
     assert command[command.index("--bridge-idle-timeout-sec") + 1] == str(
         DEFAULT_HOST_LOCAL_CODEX_BRIDGE_IDLE_TIMEOUT_SEC
     )

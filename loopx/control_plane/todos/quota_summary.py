@@ -48,6 +48,12 @@ QUOTA_PAYLOAD_VISIBILITY_LANE_LIMIT = 2
 QUOTA_PAYLOAD_USER_ACTION_ITEM_LIMIT = 3
 QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT = 2
 QUOTA_PAYLOAD_COMPACTION_SCHEMA_VERSION = "quota_todo_summary_payload_compaction_v0"
+AGENT_LANE_STATUS_TODO_COMPACTION_SCHEMA_VERSION = (
+    "agent_lane_status_todo_summary_compaction_v1"
+)
+AGENT_LANE_STATUS_TODO_REFERENCE_SCHEMA_VERSION = (
+    "agent_lane_status_todo_reference_v0"
+)
 QUOTA_PAYLOAD_ITEM_FIELDS = (
     "schema_version",
     "index",
@@ -123,6 +129,42 @@ QUOTA_PAYLOAD_LANE_LIMITS = {
     "current_agent_handoff_gates": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
     "current_agent_cleared_without_successor_handoff_gates": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
 }
+AGENT_LANE_STATUS_TODO_ITEM_FIELDS = (
+    "schema_version",
+    "index",
+    "todo_id",
+    "text",
+    "title",
+    "status",
+    "priority",
+    "task_class",
+    "action_kind",
+    "claimed_by",
+    "bound_agent",
+    "blocks_agent",
+    "global_gate",
+    "unblocks_todo_id",
+    "required_capabilities",
+    "missing_capabilities",
+    "resume_ready",
+    "next_due_at",
+)
+AGENT_LANE_STATUS_TODO_LANES = {
+    "agent": (
+        "items",
+        "current_agent_blocker_items",
+    ),
+    "user": (
+        "items",
+        "gate_open_items",
+        "user_action_items",
+        "current_agent_blocker_items",
+    ),
+}
+AGENT_LANE_STATUS_TODO_LANE_LIMITS = {
+    "gate_open_items": 3,
+    "user_action_items": 3,
+}
 
 
 @dataclass(frozen=True)
@@ -161,10 +203,22 @@ def _terminal_closure_proof_is_valid(
 ) -> bool:
     proof = value.get("terminal_closure_proof")
     items = value.get("items")
+    total_count = counts["total_count"]
+    displayed_items_cover_source = bool(
+        isinstance(total_count, int)
+        and (
+            (total_count == 0 and items == [])
+            or (
+                total_count > 0
+                and isinstance(items, list)
+                and 0 < len(items) <= total_count
+            )
+        )
+    )
     return bool(
         value.get("schema_version") == "todo_summary_v0"
         and isinstance(items, list)
-        and 0 < len(items) <= counts["total_count"]
+        and displayed_items_cover_source
         and all(
             isinstance(item, dict)
             and item.get("status") == "done"
@@ -183,7 +237,7 @@ def _terminal_closure_proof_is_valid(
         and proof.get("schema_version") == "todo_terminal_closure_proof_v0"
         and proof.get("role") == source_proof.get("role")
         and proof.get("source_section") == value.get("source_section")
-        and proof.get("item_count") == counts["total_count"]
+        and proof.get("item_count") == total_count
         and proof.get("all_todos_done") is True
         and _strict_non_negative_int(proof.get("monitor_open_count")) == 0
         and _strict_non_negative_int(proof.get("successor_gap_count")) == 0
@@ -193,7 +247,7 @@ def _terminal_closure_proof_is_valid(
     )
 
 
-def _validated_todo_source_contract(
+def validate_todo_source_contract(
     value: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     proof = value.get("source_proof")
@@ -203,7 +257,6 @@ def _validated_todo_source_contract(
     }
     valid_counts = (
         all(count is not None for count in counts.values())
-        and bool(counts["total_count"])
         and counts["total_count"]
         == counts["open_count"] + counts["done_count"] + counts["deferred_count"]
     )
@@ -392,7 +445,7 @@ def summarize_user_todos_for_quota(
 ) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    source_completeness, closure_intent = _validated_todo_source_contract(value)
+    source_completeness, closure_intent = validate_todo_source_contract(value)
     all_open_items = sorted(
         todo_summary_source_items(value),
         key=todo_projection_sort_key,
@@ -655,6 +708,100 @@ def compact_quota_todo_summary_for_payload(summary: dict[str, Any]) -> dict[str,
     return compact
 
 
+def _compact_agent_lane_status_todo_item(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+    compact: dict[str, Any] = {}
+    for key in AGENT_LANE_STATUS_TODO_ITEM_FIELDS:
+        value = item.get(key)
+        if value is None:
+            continue
+        if key in {"text", "title"}:
+            value = _truncate_quota_payload_text(
+                value,
+                limit=QUOTA_PAYLOAD_ITEM_TEXT_LIMIT,
+            )
+        compact[key] = value
+    return compact
+
+
+def _compact_agent_lane_status_todo_summary(
+    summary: dict[str, Any],
+    *,
+    role: str,
+) -> dict[str, Any]:
+    retained_lanes = set(AGENT_LANE_STATUS_TODO_LANES[role])
+    compact: dict[str, Any] = {}
+    omitted_lanes: list[str] = []
+    compacted_lanes: dict[str, dict[str, int]] = {}
+    for key, value in summary.items():
+        if key == "payload_compaction":
+            continue
+        if isinstance(value, list):
+            if key not in retained_lanes:
+                if value:
+                    omitted_lanes.append(key)
+                continue
+            limit = AGENT_LANE_STATUS_TODO_LANE_LIMITS.get(key, 1)
+            compact[key] = [
+                _compact_agent_lane_status_todo_item(item)
+                for item in value[:limit]
+            ]
+            if len(value) > limit:
+                compacted_lanes[key] = {
+                    "shown": limit,
+                    "total": len(value),
+                }
+            continue
+        if isinstance(value, dict):
+            if key == "monitor_writeback":
+                compact[key] = _compact_quota_payload_nested_warning(value)
+            continue
+        compact[key] = value
+    compact["payload_compaction"] = {
+        "schema_version": AGENT_LANE_STATUS_TODO_COMPACTION_SCHEMA_VERSION,
+        "item_text_limit": QUOTA_PAYLOAD_ITEM_TEXT_LIMIT,
+        "retained_lanes": sorted(retained_lanes),
+        "omitted_nonempty_lane_count": len(omitted_lanes),
+        "compacted_lanes": compacted_lanes,
+        "full_detail_cold_path": (
+            "status without --agent-id, todo list, or active state"
+        ),
+    }
+    return compact
+
+
+def _agent_lane_status_project_asset_todo_reference(
+    summary: dict[str, Any],
+    *,
+    role: str,
+) -> dict[str, Any]:
+    reference: dict[str, Any] = {}
+    for key in (
+        "schema_version",
+        "source_section",
+        "open",
+        "done",
+        "total",
+        "deferred_count",
+        "claimed_open_count",
+        "unclaimed_open_count",
+        "projection_view",
+        "detail_pointer",
+    ):
+        value = summary.get(key)
+        if value is not None:
+            reference[key] = value
+    reference["payload_reference"] = {
+        "schema_version": AGENT_LANE_STATUS_TODO_REFERENCE_SCHEMA_VERSION,
+        "canonical_path": f"attention_queue.items[].{role}_todos",
+        "full_detail_cold_path": (
+            "status without --agent-id, todo list, or active state"
+        ),
+    }
+    return reference
+
+
 def compact_agent_lane_todos_for_status_display(payload: dict[str, object]) -> None:
     queue = payload.get("attention_queue")
     if not isinstance(queue, dict):
@@ -663,28 +810,39 @@ def compact_agent_lane_todos_for_status_display(payload: dict[str, object]) -> N
     if not isinstance(items, list):
         return
     compacted = 0
+    references = 0
     for item in items:
         if not isinstance(item, dict):
             continue
-        for key in ("user_todos", "agent_todos"):
+        for key, role in (("user_todos", "user"), ("agent_todos", "agent")):
             summary = item.get(key)
             if not isinstance(summary, dict):
                 continue
-            compact = compact_quota_todo_summary_for_payload(summary)
-            compaction = compact.get("payload_compaction")
-            if isinstance(compaction, dict):
-                compaction["full_detail_cold_path"] = (
-                    "status without --agent-id, todo list, or active state"
-                )
-            item[key] = compact
+            item[key] = _compact_agent_lane_status_todo_summary(
+                summary,
+                role=role,
+            )
             compacted += 1
+        project_asset = item.get("project_asset")
+        if not isinstance(project_asset, dict):
+            continue
+        for key, role in (("user_todos", "user"), ("agent_todos", "agent")):
+            summary = project_asset.get(key)
+            if not isinstance(summary, dict):
+                continue
+            project_asset[key] = _agent_lane_status_project_asset_todo_reference(
+                summary,
+                role=role,
+            )
+            references += 1
     if compacted:
         payload["agent_lane_todo_summary_compaction"] = {
-            "schema_version": "agent_lane_status_todo_summary_compaction_v0",
+            "schema_version": AGENT_LANE_STATUS_TODO_COMPACTION_SCHEMA_VERSION,
             "compacted_summary_count": compacted,
+            "project_asset_reference_count": references,
             "reason": (
-                "status --agent-id keeps agent-lane display payloads bounded; "
-                "full todo detail remains on cold paths"
+                "status --agent-id keeps one compact todo summary per role and "
+                "replaces nested project-asset duplicates with references"
             ),
         }
 

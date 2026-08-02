@@ -4,15 +4,198 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .registry import CapabilityRegistry
-
 from ..extensions.runtime import extension_catalog_entries
+from .issue_fix.workflow_plan import build_issue_fix_pr_lifecycle_command
+from .registry import CapabilityRegistry
 
 CAPABILITY_CATALOG_SCHEMA_VERSION = "loopx_capability_catalog_v0"
 CAPABILITY_DETAIL_SCHEMA_VERSION = "loopx_capability_detail_v0"
 
 
 BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "integration-branch-reconcile",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Local integration branch reconciliation",
+        "status": "active-preview",
+        "real_world_anchor": (
+            "long-running repository work with independently reviewed feature branches"
+        ),
+        "user_value": (
+            "Keep one local integration branch aligned with the latest ordered "
+            "feature and fix heads without mutating or pushing those source branches."
+        ),
+        "entry_command": (
+            "loopx integration-branch status --repo-path <repo> --format json"
+        ),
+        "commands": [
+            {
+                "command": (
+                    "loopx integration-branch configure --repo-path <repo> "
+                    "--base-ref <base> --integration-branch <branch> "
+                    "--source-branch <branch>... --execute --format json"
+                ),
+                "purpose": "Write one ordered project-local branch plan with no sync receipt.",
+                "write_boundary": "ignored local plan only; no git ref or remote write",
+            },
+            {
+                "command": (
+                    "loopx integration-branch status --repo-path <repo> "
+                    "[--refresh-remotes] --format json"
+                ),
+                "purpose": "Optionally refresh remote-tracking refs, then compare exact base, source, and integration heads with the last successful sync.",
+                "write_boundary": "remote-read-only inputs; optional fetch updates configured local remote-tracking refs only",
+            },
+            {
+                "command": (
+                    "loopx integration-branch sync --repo-path <repo> "
+                    "[--refresh-remotes] [--execute] --format json"
+                ),
+                "purpose": "Preview or atomically publish an ordered merge candidate to the local integration branch.",
+                "write_boundary": "local integration branch, ignored receipt, and optional configured remote-tracking refs only; no source-branch or remote-repository write",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "loopx_integration_branch_plan_v0",
+                "module": "loopx.capabilities.integration_branch.core",
+                "doc": "docs/capabilities/integration-branch/README.md",
+            },
+            {
+                "schema_version": "loopx_integration_branch_status_v0",
+                "module": "loopx.capabilities.integration_branch.core",
+                "doc": "docs/capabilities/integration-branch/README.md",
+            },
+            {
+                "schema_version": "loopx_integration_branch_sync_v0",
+                "module": "loopx.capabilities.integration_branch.core",
+                "doc": "docs/capabilities/integration-branch/README.md",
+            },
+        ],
+        "smokes": ["python -m pytest tests/capabilities/test_integration_branch.py -q"],
+        "docs": ["docs/capabilities/integration-branch/README.md"],
+        "boundaries": [
+            "The plan is project-local and ignored; it records refs and sync receipts, not credentials, review bodies, or private evidence.",
+            "Sync uses exact resolved source heads and updates only the configured local integration branch after every ordered merge succeeds.",
+            "Dirty checked-out integration worktrees, merge conflicts, missing refs, and concurrent plan/input/integration movement fail closed before publication.",
+            "Remote refresh is explicit and remote-read-only; it updates only configured local remote-tracking refs and never pushes, force-pushes, retargets PRs, merges protected branches, or changes source branches.",
+            "v0 uses ordered merge commits; it does not rewrite or squash source history.",
+        ],
+        "next_real_step": (
+            "Configure one local feature stack, change a source head after review, "
+            "and verify status reports drift before sync restores an exact readback."
+        ),
+    },
+    {
+        "id": "change-quality-qualification",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Exact-scope change quality qualification",
+        "status": "active-preview",
+        "default_enabled": False,
+        "real_world_anchor": (
+            "provider-neutral final-diff review with bounded repair and merge evidence"
+        ),
+        "user_value": (
+            "Give every managed project the same compact engineering-quality "
+            "contract without assuming its language, framework, or agent host."
+        ),
+        "entry_command": (
+            "loopx change-quality prepare --goal-id <goal-id> "
+            "--repo-path <repo> --format json"
+        ),
+        "workflow_skill": {
+            "name": "loopx-change-quality",
+            "delivery": "project_managed_copy",
+            "activation": "explicit_project_install_plus_goal_policy",
+            "project_copy_required": True,
+            "install_command": (
+                "loopx project-skill install --project . --skill "
+                "loopx-change-quality --surface codex --execute"
+            ),
+        },
+        "commands": [
+            {
+                "command": (
+                    "loopx change-quality prepare --goal-id <goal-id> "
+                    "--repo-path <repo> --format json"
+                ),
+                "purpose": "Build a self-contained review contract for the exact final diff.",
+                "write_boundary": "read-only git and registry projection; no code or receipt write",
+            },
+            {
+                "command": (
+                    "loopx change-quality record --goal-id <goal-id> "
+                    "--repo-path <repo> --result-json <result.json> --execute --format json"
+                ),
+                "purpose": "Validate a provider result against the exact diff and store its receipt.",
+                "write_boundary": "atomic goal-runtime receipt only; no repository or external write",
+            },
+            {
+                "command": (
+                    "loopx change-quality verify --goal-id <goal-id> "
+                    "--repo-path <repo> --format json"
+                ),
+                "purpose": "Verify goal policy and the current exact-diff receipt.",
+                "write_boundary": "read-only registry, git, and runtime receipt verification",
+            },
+            {
+                "command": (
+                    "loopx canary premerge --from-git-diff --goal-id <goal-id>"
+                ),
+                "purpose": "Apply strict receipt policy inside the authoritative premerge gate.",
+                "write_boundary": "validation only; no merge, push, or external action",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "change_quality_scope_v0",
+                "module": "loopx.capabilities.change_quality.scope",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_prepare_packet_v2",
+                "module": "loopx.capabilities.change_quality.receipt",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_agent_result_v2",
+                "module": "loopx.capabilities.change_quality.result",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_receipt_v2",
+                "module": "loopx.capabilities.change_quality.receipt",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+            {
+                "schema_version": "change_quality_receipt_verification_v2",
+                "module": "loopx.capabilities.change_quality.receipt",
+                "doc": "docs/capabilities/change-quality/README.md",
+            },
+        ],
+        "smokes": ["python3 examples/change-quality-qualification-smoke.py"],
+        "docs": ["docs/capabilities/change-quality/README.md"],
+        "boundaries": [
+            "The capability is default-off and activates only through explicit per-goal policy; managed skill discovery is a separate project-level choice.",
+            "safe_fix permits at most one bounded repair pass; it grants no destructive git, permission expansion, or unrelated refactor authority.",
+            "strict_receipt is an exact-diff premerge evidence gate and does not itself permit code mutation.",
+            "Subjective style advice stays nonblocking; only concrete correctness, security, privacy, contract, or required-validation failures may block.",
+            "Turn may transport a packet or receipt reference, but premerge remains the enforcement authority.",
+            "The canonical workflow skill is release-owned and project-delivered; the global installer does not publish it into every agent configuration.",
+            "Receipts stay in local runtime state; raw model transcripts, private context, and credentials are not persisted.",
+            "Agents write only grounded reuse and simplification conclusions, sparse triggered risks, and validation evidence; LoopX derives guardrail states.",
+            "Existing v1 receipts remain verifiable read-only for their exact scope; new receipts use v2.",
+            "The first version is single-level: it qualifies one final diff and does not recursively review reviews.",
+        ],
+        "next_real_step": (
+            "Enable it on an explicit goal, qualify one final diff, and verify "
+            "that safe-fix and strict-receipt policies remain independently enforced."
+        ),
+    },
     {
         "id": "issue-fix",
         "origin": "builtin",
@@ -73,9 +256,14 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "write_boundary": "verified configured secondary sends plus compact receipt or stale-queue state writeback; no per-PR continuous monitor, arbitrary comment, push, merge, or publish",
             },
             {
-                "command": "loopx issue-fix pr-lifecycle --url <github-pr-url> --goal-id <goal-id> --format json",
-                "purpose": "Project public PR lifecycle state into a successor, monitor continuation, user gate, or no-follow-up transition.",
-                "write_boundary": "writes compact project-local domain state when goal or ledger context is provided; no external comment, PR creation, merge, raw logs, or body/comment capture",
+                "command": build_issue_fix_pr_lifecycle_command(
+                    cli_bin="loopx",
+                    goal_id="<goal-id>",
+                    agent_id="<agent-id>",
+                    project="<repo>",
+                ),
+                "purpose": "Project public PR lifecycle state and reconcile its grouped monitor, successor, user gate, or no-follow-up transition.",
+                "write_boundary": "reads compact public PR metadata and writes compact project-local domain state plus generic LoopX todos; no external comment, PR creation, merge, raw logs, or body/comment capture",
             },
             {
                 "command": "loopx issue-fix outcome --goal-id <goal-id> --repo <owner/repo> --issue-ref <issue-ref> --pr-ref <pr-ref> --format json",
@@ -403,11 +591,81 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         ),
     },
     {
+        "id": "project-skill-delivery",
+        "origin": "builtin",
+        "visibility": "public",
+        "provider_id": "loopx-core",
+        "title": "Managed project skill delivery",
+        "status": "active-preview",
+        "real_world_anchor": (
+            "one release-owned skill delivered into selected projects for "
+            "Codex, Claude Code, or OpenCode"
+        ),
+        "user_value": (
+            "Keep capability skills out of global agent configuration while "
+            "installing, upgrading, and removing verified project-local copies "
+            "through one host-neutral lifecycle."
+        ),
+        "entry_command": (
+            "loopx project-skill status --project . --skill <skill-id> "
+            "--surface codex --format json"
+        ),
+        "commands": [
+            {
+                "command": (
+                    "loopx project-skill status --project . --skill "
+                    "<skill-id> --surface <surface> --format json"
+                ),
+                "purpose": "Inspect source and managed-copy digests without writing the project.",
+                "write_boundary": "read-only project and release inspection",
+            },
+            {
+                "command": (
+                    "loopx project-skill install --project . --skill "
+                    "<skill-id> --surface <surface> --execute --format json"
+                ),
+                "purpose": "Transactionally install or upgrade one release-owned project skill for one or more agent hosts.",
+                "write_boundary": "managed host-native project skill directories only; unmanaged or locally modified targets fail closed",
+            },
+            {
+                "command": (
+                    "loopx project-skill uninstall --project . --skill "
+                    "<skill-id> --surface <surface> --execute --format json"
+                ),
+                "purpose": "Transactionally remove verified managed copies while preserving user-owned targets.",
+                "write_boundary": "verified managed host-native project skill directories only",
+            },
+        ],
+        "implemented_protocols": [
+            {
+                "schema_version": "loopx_project_skill_status_v0",
+                "module": "loopx.project_skill_delivery",
+                "doc": "docs/reference/project-skill-delivery.md",
+            },
+            {
+                "schema_version": "loopx_managed_project_skill_v0",
+                "module": "loopx.project_skill_delivery",
+                "doc": "docs/reference/project-skill-delivery.md",
+            },
+        ],
+        "docs": ["docs/reference/project-skill-delivery.md"],
+        "boundaries": [
+            "Only skills marked project-scoped in the LoopX release can be delivered.",
+            "Project connection, preview-first mutation, digest readback, symlink containment, and rollback are mandatory.",
+            "Skill discovery never creates a goal, todo, write scope, domain authority, credential, or external permission.",
+            "Public delivery metadata contains no private project content, locators, provider payloads, or credentials.",
+        ],
+        "next_real_step": (
+            "Dogfood a second project-scoped skill or host combination before "
+            "considering higher-level automatic installation."
+        ),
+    },
+    {
         "id": "material-lifecycle",
         "origin": "builtin",
         "visibility": "public",
         "provider_id": "loopx-core",
-        "title": "Backup-safe material inventory, archive, and bounded rerank contract",
+        "title": "Backup-safe material inventory, ranked-entry rebuild, and rerank",
         "status": "experimental",
         "default_enabled": False,
         "real_world_anchor": (
@@ -416,9 +674,20 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         ),
         "user_value": (
             "Preserve raw source authority and stable material references while "
-            "making migration, archive transitions, and small reranks auditable."
+            "making migration, archive transitions, structural entry rebuilds, "
+            "and small reranks auditable."
         ),
         "entry_command": "loopx material-lifecycle architecture --format json",
+        "workflow_skill": {
+            "name": "loopx-material",
+            "delivery": "project_managed_copy",
+            "activation": "explicit_project_install_plus_goal_authority",
+            "project_copy_required": True,
+            "install_command": (
+                "loopx project-skill install --project . --skill "
+                "loopx-material --surface codex --execute"
+            ),
+        },
         "commands": [
             {
                 "command": "loopx material-lifecycle architecture --format json",
@@ -457,6 +726,16 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "module": "loopx.capabilities.material_lifecycle.ranking",
                 "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
             },
+            {
+                "schema_version": "material_ranked_entry_rebuild_plan_v0",
+                "module": "loopx.capabilities.material_lifecycle.rebuild",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
+            {
+                "schema_version": "material_ranked_entry_rebuild_apply_receipt_v0",
+                "module": "loopx.capabilities.material_lifecycle.rebuild",
+                "doc": "docs/reference/protocols/material-lifecycle-architecture-v0.md",
+            },
         ],
         "smokes": ["python3 examples/material-lifecycle-contract-smoke.py"],
         "docs": [
@@ -468,11 +747,14 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
             "Raw material, private locations, provider payloads, credentials, and source-store formats stay outside public packets.",
             "Snapshot and verified backup precede dual-read reconciliation; cutover and rollback remain owner-gated.",
             "Decision Context may supply revisioned evidence, but Material Lifecycle owns candidate, archive, and rerank receipts.",
+            "Oversized ranked entries are rebuilt into independently sortable entries; overflow cannot be hidden outside the ranked set.",
+            "LoopX ships the canonical loopx-material source, but discovery uses an explicit managed project copy rather than a global skill install.",
+            "A project-local skill makes the workflow discoverable; it does not replace explicit goal-scoped Material Lifecycle authority.",
             "Concrete legacy adapters, exploration providers, source profiles, and material-store writes remain deferred to private dogfood.",
         ],
         "next_real_step": (
-            "Build one read-only legacy inventory and migration planner, then "
-            "validate a decision-driven bounded rerank without mutating raw sources."
+            "Dogfood one exact-read semantic rebuild through owner-gated apply "
+            "while preserving complete source bytes and canonical records."
         ),
     },
     {

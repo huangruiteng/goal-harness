@@ -25,10 +25,17 @@ from ..todos import (
 from .todo_argument_validation import (
     register_todo_linkage_arguments,
     register_todo_successor_creation_arguments,
-    unsupported_todo_options,
     validate_capability_gap_options,
     validate_shared_todo_options,
-    validate_successor_routing_options,
+    validate_todo_add_options,
+    validate_todo_archive_completed_options,
+    validate_todo_capture_followups_options,
+    validate_todo_claim_options,
+    validate_todo_complete_options,
+    validate_todo_list_options,
+    validate_todo_suggest_options,
+    validate_todo_supersede_options,
+    validate_todo_update_options,
 )
 from .todo_event import RolloutEventAppender, append_todo_rollout_event
 
@@ -112,6 +119,13 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     todo_parser.add_argument(
+        "--capability-binding-ref",
+        help=(
+            "For agent todo add, persist the opaque capability admission binding "
+            "projected by a validated capability packet."
+        ),
+    )
+    todo_parser.add_argument(
         "--task-repository",
         help=(
             "For agent todo add/update, declare the credential-free Git repository "
@@ -152,16 +166,18 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
         action="append",
         help=(
             "For todo add/update, declare a capability this todo is building, "
-            "repairing, materializing, or parity-checking. This is not a hard "
-            "execution prerequisite."
+            "repairing, materializing, or parity-checking. On complete, pair it "
+            "with --capability-gap-status to close that lifecycle. This is not a "
+            "hard execution prerequisite."
         ),
     )
     todo_parser.add_argument(
         "--capability-gap-status",
         choices=["found", "fixed", "real_callsite_verified"],
         help=(
-            "For agent todo add/update, append an auditable capability-gap lifecycle "
-            "event. Requires --target-capability; the todo_id is the stable gap id."
+            "For agent todo add/update/complete, append an auditable capability-gap "
+            "lifecycle event. Requires --target-capability; the todo_id is the "
+            "stable gap id."
         ),
     )
     todo_parser.add_argument(
@@ -272,11 +288,12 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
     )
     register_todo_linkage_arguments(todo_parser)
     todo_parser.add_argument(
+        "--target-key",
         "--monitor-target-key",
         dest="monitor_target_key",
         help=(
-            "For agent continuous_monitor add/update, declare the stable public-safe "
-            "watch target key, such as github-pr-123 or update-note-draft-pr."
+            "For agent todo add/update, declare a stable public-safe execution "
+            "target key. --monitor-target-key remains a compatibility alias."
         ),
     )
     todo_parser.add_argument(
@@ -364,6 +381,13 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
     todo_parser.add_argument("--execute", action="store_true", help="For archive-completed, write the active-state edit.")
 
 
+def _todo_path_args(args: argparse.Namespace) -> dict[str, Path | None]:
+    return {
+        "project": Path(args.project).expanduser() if args.project else None,
+        "state_file": Path(args.state_file).expanduser() if args.state_file else None,
+    }
+
+
 def handle_todo_command(
     args: argparse.Namespace,
     *,
@@ -381,16 +405,7 @@ def handle_todo_command(
         validate_shared_todo_options(args)
         validate_capability_gap_options(args)
         if args.todo_command == "list":
-            unsupported = unsupported_todo_options(
-                args,
-                allowed_fields={"role", "todo_id", "status", "agent_id", "state_file"},
-            )
-            if unsupported:
-                raise ValueError(
-                    "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
-                    "--agent-id, --project, --state-file, --dry-run, and --format; unsupported: "
-                    + ", ".join(unsupported)
-                )
+            validate_todo_list_options(args)
             payload = list_goal_todos(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -398,47 +413,11 @@ def handle_todo_command(
                 status=args.status,
                 todo_id=args.todo_id,
                 agent_id=args.agent_id,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 runtime_root_arg=runtime_root_arg,
             )
         elif args.todo_command == "add":
-            if args.decision_outcome:
-                raise ValueError(
-                    "todo add does not accept --decision-outcome; record it on completion"
-                )
-            if args.followups:
-                raise ValueError("todo add does not support --follow-up; use `todo capture-followups`")
-            if not args.role:
-                raise ValueError("todo add requires --role")
-            if not args.text:
-                raise ValueError("todo add requires --text")
-            if args.clear_claim:
-                raise ValueError("todo add accepts --claimed-by but not --clear-claim")
-            if args.clear_explore_result_node_refs:
-                raise ValueError(
-                    "todo add accepts --explore-result-node-ref but not --clear-explore-result-node-refs"
-                )
-            if args.next_claimed_by:
-                raise ValueError("todo add does not support --next-claimed-by")
-            if args.next_task_repository:
-                raise ValueError("todo add does not support --next-task-repository")
-            if args.next_required_capabilities:
-                raise ValueError("todo add does not support --next-required-capability")
-            if args.next_continuation_policy:
-                raise ValueError("todo add does not support --next-continuation-policy")
-            if args.next_excluded_agents:
-                raise ValueError("todo add does not support --next-excluded-agent")
-            if args.clear_excluded_agents:
-                raise ValueError("todo add does not support --clear-excluded-agents")
-            if args.clear_blocks_agent:
-                raise ValueError("todo add does not support --clear-blocks-agent")
-            if args.self_merged:
-                raise ValueError("todo add does not support --self-merged")
-            if args.no_follow_up:
-                raise ValueError("todo add does not support --no-follow-up")
-            if args.successor_todo_ids:
-                raise ValueError("todo add does not support --successor-todo-id; use todo update/complete to link existing successor work")
+            validate_todo_add_options(args)
             payload = add_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -447,6 +426,7 @@ def handle_todo_command(
                 status=args.status,
                 task_class=args.task_class,
                 action_kind=args.action_kind,
+                capability_binding_ref=args.capability_binding_ref,
                 task_repository=args.task_repository,
                 continuation_policy=args.continuation_policy,
                 required_write_scopes=args.required_write_scopes,
@@ -470,74 +450,11 @@ def handle_todo_command(
                     "next_due_at": args.next_due_at,
                     "expires_at": args.expires_at,
                 },
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "claim":
-            if not args.todo_id:
-                raise ValueError("todo claim requires --todo-id")
-            if not args.claimed_by:
-                raise ValueError("todo claim requires --claimed-by")
-            if args.clear_claim:
-                raise ValueError("todo claim requires --claimed-by and does not support --clear-claim")
-            unsupported = [
-                flag
-                for flag, value in (
-                    ("--text", args.text),
-                    ("--status", args.status),
-                    ("--note", args.note),
-                    ("--evidence", args.evidence),
-                    ("--reason", args.reason),
-                    ("--task-class", args.task_class),
-                    ("--action-kind", args.action_kind),
-                    ("--task-repository", args.task_repository),
-                    ("--continuation-policy", args.continuation_policy),
-                    ("--required-write-scope", args.required_write_scopes),
-                    ("--required-capability", args.required_capabilities),
-                    ("--target-capability", args.target_capabilities),
-                    ("--explore-result-node-ref", args.explore_result_node_refs),
-                    ("--clear-explore-result-node-refs", args.clear_explore_result_node_refs),
-                    ("--decision-scope", args.decision_scope),
-                    ("--required-decision-scope", args.required_decision_scopes),
-                    ("--decision-outcome", args.decision_outcome),
-                    ("--bound-agent", args.bound_agent),
-                    ("--goal-bound", args.goal_bound),
-                    ("--blocks-agent", args.blocks_agent),
-                    ("--clear-blocks-agent", args.clear_blocks_agent),
-                    ("--excluded-agent", args.excluded_agents),
-                    ("--clear-excluded-agents", args.clear_excluded_agents),
-                    ("--global-gate", args.global_gate),
-                    ("--clear-global-gate", args.clear_global_gate),
-                    ("--unblocks-todo-id", args.unblocks_todo_id),
-                    ("--successor-todo-id", args.successor_todo_ids),
-                    ("--resume-when", args.resume_when),
-                    ("--monitor-target-key", args.monitor_target_key),
-                    ("--cadence", args.cadence),
-                    ("--next-due-at", args.next_due_at),
-                    ("--expires-at", args.expires_at),
-                    ("--no-follow-up", args.no_follow_up),
-                    ("--next-agent-todo", args.next_agent_todo),
-                    ("--next-user-todo", args.next_user_todo),
-                    ("--next-user-task-class", args.next_user_task_class),
-                    ("--next-claimed-by", args.next_claimed_by),
-                    ("--next-task-class", args.next_task_class),
-                    ("--next-action-kind", args.next_action_kind),
-                    ("--next-task-repository", args.next_task_repository),
-                    ("--next-required-capability", args.next_required_capabilities),
-                    ("--next-continuation-policy", args.next_continuation_policy),
-                    ("--next-excluded-agent", args.next_excluded_agents),
-                    ("--self-merged", args.self_merged),
-                    ("--follow-up", args.followups),
-                )
-                if value
-            ]
-            if unsupported:
-                raise ValueError(
-                    "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
-                    "--project, --state-file, and --dry-run; unsupported: "
-                    + ", ".join(unsupported)
-                )
+            validate_todo_claim_options(args)
             payload = update_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -546,80 +463,11 @@ def handle_todo_command(
                 claimed_by=args.claimed_by,
                 agent_id=args.agent_id,
                 claim_only=True,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "update":
-            if not args.todo_id:
-                raise ValueError("todo update requires --todo-id")
-            if args.claimed_by and args.clear_claim:
-                raise ValueError("todo update accepts either --claimed-by or --clear-claim, not both")
-            if args.explore_result_node_refs and args.clear_explore_result_node_refs:
-                raise ValueError(
-                    "todo update accepts either --explore-result-node-ref or "
-                    "--clear-explore-result-node-refs, not both"
-                )
-            if not any([
-                args.text,
-                args.followups,
-                args.status,
-                args.note,
-                args.evidence,
-                args.reason,
-                args.task_class,
-                args.action_kind,
-                args.task_repository,
-                args.continuation_policy,
-                args.required_write_scopes,
-                args.required_capabilities,
-                args.target_capabilities,
-                args.capability_gap_status,
-                args.explore_result_node_refs,
-                args.clear_explore_result_node_refs,
-                args.decision_scope,
-                args.required_decision_scopes,
-                args.claimed_by,
-                args.bound_agent,
-                args.goal_bound,
-                args.blocks_agent,
-                args.clear_blocks_agent,
-                args.excluded_agents,
-                args.clear_excluded_agents,
-                args.global_gate,
-                args.clear_global_gate,
-                args.unblocks_todo_id,
-                args.successor_todo_ids,
-                args.resume_when,
-                args.clear_resume_when,
-                args.no_follow_up,
-                args.monitor_target_key,
-                args.cadence,
-                args.next_due_at,
-                args.expires_at,
-                args.clear_claim,
-            ]):
-                raise ValueError("todo update requires at least one mutable todo field")
-            if args.no_follow_up and not (args.note or args.reason or args.evidence):
-                raise ValueError("--no-follow-up requires --note, --reason, or --evidence")
-            if args.decision_outcome:
-                raise ValueError(
-                    "todo update does not accept --decision-outcome; use todo complete"
-                )
-            if args.followups:
-                raise ValueError("todo update does not support --follow-up; use `todo capture-followups`")
-            if args.next_claimed_by:
-                raise ValueError("todo update does not support --next-claimed-by")
-            if args.next_task_repository:
-                raise ValueError("todo update does not support --next-task-repository")
-            if args.next_required_capabilities:
-                raise ValueError("todo update does not support --next-required-capability")
-            if args.next_continuation_policy:
-                raise ValueError("todo update does not support --next-continuation-policy")
-            if args.next_excluded_agents:
-                raise ValueError("todo update does not support --next-excluded-agent")
-            if args.self_merged:
-                raise ValueError("todo update does not support --self-merged")
+            validate_todo_update_options(args)
             payload = update_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -667,38 +515,11 @@ def handle_todo_command(
                     "expires_at": args.expires_at,
                 },
                 clear_claim=bool(args.clear_claim),
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "complete":
-            if not args.todo_id:
-                raise ValueError("todo complete requires --todo-id")
-            if args.explore_result_node_refs or args.clear_explore_result_node_refs:
-                raise ValueError(
-                    "todo complete does not update --explore-result-node-ref; use todo update first"
-                )
-            if args.claimed_by and args.clear_claim:
-                raise ValueError("todo complete accepts either --claimed-by or --clear-claim, not both")
-            if args.task_repository or args.bound_agent or args.goal_bound or args.blocks_agent or args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.clear_global_gate or args.unblocks_todo_id or args.resume_when:
-                raise ValueError("todo complete does not update current todo routing metadata; use todo update first")
-            if args.monitor_target_key or args.cadence or args.next_due_at or args.expires_at:
-                raise ValueError("todo complete does not support monitor schedule metadata; use todo update before completion")
-            if args.no_follow_up and (args.next_agent_todo or args.next_user_todo):
-                raise ValueError("--no-follow-up cannot be combined with successor todos")
-            if args.no_follow_up and args.successor_todo_ids:
-                raise ValueError("--no-follow-up cannot be combined with successor todos")
-            if args.successor_todo_ids and (args.next_agent_todo or args.next_user_todo):
-                raise ValueError("--successor-todo-id links existing work and cannot be combined with --next-agent-todo or --next-user-todo")
-            if args.no_follow_up and not (args.note or args.evidence):
-                raise ValueError("--no-follow-up requires --note or --evidence")
-            if args.followups:
-                raise ValueError("todo complete does not support --follow-up; use `todo capture-followups`")
-            if args.continuation_policy:
-                raise ValueError(
-                    "todo complete does not update --continuation-policy; use todo update first"
-                )
-            validate_successor_routing_options(args)
+            validate_todo_complete_options(args)
             payload = complete_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -724,46 +545,11 @@ def handle_todo_command(
                 self_merged=bool(args.self_merged),
                 agent_id=args.agent_id,
                 authority_reason=args.authority_reason,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "supersede":
-            if not args.todo_id:
-                raise ValueError("todo supersede requires --todo-id")
-            if args.explore_result_node_refs or args.clear_explore_result_node_refs:
-                raise ValueError(
-                    "todo supersede does not update --explore-result-node-ref; use todo update first"
-                )
-            if args.decision_outcome:
-                raise ValueError(
-                    "todo supersede does not accept --decision-outcome; use todo complete"
-                )
-            if args.claimed_by:
-                raise ValueError(
-                    "todo supersede does not support --claimed-by; use --next-claimed-by "
-                    "to assign the successor, or omit it to inherit the superseded todo "
-                    "owner when present"
-                )
-            if args.clear_claim:
-                raise ValueError("todo supersede does not support --clear-claim")
-            if args.self_merged:
-                raise ValueError("todo supersede does not support --self-merged")
-            if args.no_follow_up:
-                raise ValueError("todo supersede does not support --no-follow-up")
-            if args.followups:
-                raise ValueError("todo supersede does not support --follow-up; use `todo capture-followups`")
-            if args.continuation_policy:
-                raise ValueError(
-                    "todo supersede does not update --continuation-policy; use todo update first"
-                )
-            validate_successor_routing_options(args)
-            if args.blocks_agent or args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.global_gate or args.clear_global_gate or args.unblocks_todo_id or args.resume_when:
-                raise ValueError("todo supersede does not update current todo routing metadata; use todo update first")
-            if args.successor_todo_ids:
-                raise ValueError("todo supersede does not support --successor-todo-id; use --next-agent-todo or update the source todo before supersede")
-            if args.monitor_target_key or args.cadence or args.next_due_at or args.expires_at:
-                raise ValueError("todo supersede does not support monitor schedule metadata; use todo update before supersede")
+            validate_todo_supersede_options(args)
             payload = supersede_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -782,58 +568,21 @@ def handle_todo_command(
                 next_excluded_agents=args.next_excluded_agents,
                 agent_id=args.agent_id,
                 authority_reason=args.authority_reason,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         elif args.todo_command == "archive-completed":
-            if args.decision_outcome:
-                raise ValueError(
-                    "todo archive-completed does not support --decision-outcome"
-                )
-            if args.claimed_by or args.clear_claim:
-                raise ValueError("todo archive-completed does not support --claimed-by or --clear-claim")
-            if args.clear_blocks_agent or args.excluded_agents or args.clear_excluded_agents or args.next_excluded_agents:
-                raise ValueError("todo archive-completed does not support executor exclusions")
-            if args.next_claimed_by:
-                raise ValueError("todo archive-completed does not support --next-claimed-by")
-            if args.next_task_repository or args.next_required_capabilities:
-                raise ValueError(
-                    "todo archive-completed does not support successor routing metadata"
-                )
-            if args.self_merged:
-                raise ValueError("todo archive-completed does not support --self-merged")
-            if args.no_follow_up:
-                raise ValueError("todo archive-completed does not support --no-follow-up")
-            if args.followups:
-                raise ValueError("todo archive-completed does not support --follow-up; use `todo capture-followups`")
-            if args.successor_todo_ids:
-                raise ValueError("todo archive-completed does not support --successor-todo-id")
+            validate_todo_archive_completed_options(args)
             payload = archive_completed_todos(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
                 role=args.role or "agent",
                 max_active_done=args.max_active_done,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=not bool(args.execute),
             )
         elif args.todo_command == "suggest":
-            unsupported = unsupported_todo_options(
-                args,
-                allowed_fields={
-                    "agent_id",
-                    "suggestion_sources",
-                    "suggestion_limit",
-                    "suggestion_trigger",
-                },
-            )
-            if unsupported:
-                raise ValueError(
-                    "todo suggest only accepts --goal-id, optional --project, --agent-id, "
-                    "--from, --limit, --trigger, --dry-run, and --format; unsupported: "
-                    + ", ".join(unsupported)
-                )
+            validate_todo_suggest_options(args)
             payload = build_todo_suggestion_prompt_packet(
                 goal_id=args.goal_id,
                 project=Path(args.project).expanduser() if args.project else None,
@@ -844,33 +593,7 @@ def handle_todo_command(
             )
             payload["dry_run"] = True
         elif args.todo_command == "capture-followups":
-            if args.role:
-                raise ValueError("todo capture-followups always records agent todos; do not pass --role")
-            if args.claimed_by:
-                raise ValueError("todo capture-followups writes unclaimed todos; do not pass --claimed-by")
-            unsupported = unsupported_todo_options(
-                args,
-                allowed_fields={
-                    "text",
-                    "followups",
-                    "evidence",
-                    "task_class",
-                    "action_kind",
-                    "continuation_policy",
-                    "required_write_scopes",
-                    "required_capabilities",
-                    "target_capabilities",
-                    "required_decision_scopes",
-                    "state_file",
-                },
-            )
-            if unsupported:
-                raise ValueError(
-                    "todo capture-followups only accepts --goal-id, --follow-up, optional "
-                    "--text shorthand, --evidence, routing metadata, --project, --state-file, "
-                    "and --dry-run; unsupported: "
-                    + ", ".join(unsupported)
-                )
+            validate_todo_capture_followups_options(args)
             followups = list(args.followups or [])
             if args.text:
                 followups.append(args.text)
@@ -885,8 +608,7 @@ def handle_todo_command(
                 required_capabilities=args.required_capabilities,
                 target_capabilities=args.target_capabilities,
                 required_decision_scopes=args.required_decision_scopes,
-                project=Path(args.project).expanduser() if args.project else None,
-                state_file=Path(args.state_file).expanduser() if args.state_file else None,
+                **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
         else:

@@ -135,7 +135,11 @@ producer remains unchanged for rows without a frontier.
 The implementation includes the pure frontier builder, a bounded material
 handoff projector, and an optional agent-management cold-path consumer. The
 consumer reads prebuilt packets from `status.agent_material_frontiers`; it does
-not load canonical authority or material bodies by itself.
+not load canonical authority or material bodies by itself. The consumer emits
+material fields only when its current execution envelope declares the
+goal-scoped `material_lifecycle` capability. Missing capability silently keeps
+the material frontier off the agent projection; it does not become a user
+gate.
 
 The implementation intentionally does not add:
 

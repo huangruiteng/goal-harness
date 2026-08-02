@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CANARY_SMOKE = REPO_ROOT / "examples" / "canary" / "canary-promotion-readiness-smoke.py"
 DASHBOARD_DEMO_SMOKE = REPO_ROOT / "examples" / "dashboard-demo-readiness-smoke.py"
@@ -30,12 +29,13 @@ def main() -> int:
     dashboard_source = DASHBOARD_DEMO_SMOKE.read_text(encoding="utf-8")
 
     assert_contains(canary_source, "--no-write-evidence", "canary no-write flag")
-    assert_contains(canary_source, "--goal-id", "canary refresh-state goal id flag")
-    assert_contains(canary_source, "DEFAULT_READINESS_GOAL_ID", "canary default writeback goal")
-    assert_contains(canary_source, "--agent-id", "canary refresh-state agent id flag")
-    assert_contains(canary_source, "DEFAULT_READINESS_AGENT_ID", "canary default writeback agent")
-    assert_contains(canary_source, "DEFAULT_READINESS_AGENT_LANE", "canary default writeback lane")
+    assert_contains(canary_source, '"promotion-readiness"', "runtime release evidence command")
+    assert_contains(canary_source, '"record"', "promotion-readiness record action")
+    assert_contains(canary_source, '"--execute"', "explicit evidence write flag")
+    if "refresh-state" in canary_source or "--goal-id" in canary_source:
+        raise AssertionError("promotion readiness evidence must not require a project Goal")
     assert_contains(canary_source, "dashboard-demo-readiness-smoke.py", "canary dashboard demo-readiness command")
+    assert_contains(canary_source, "--require-dependencies", "dashboard dependency fail-closed flag")
     assert_contains(canary_source, 'commands.append(("dashboard demo readiness", dashboard_command))', "canary grouped path append")
     assert_before(
         canary_source,

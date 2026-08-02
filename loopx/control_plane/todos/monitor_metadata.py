@@ -49,8 +49,11 @@ def require_monitor_metadata_scope(
     normalized = normalize_monitor_metadata(monitor_metadata)
     if not normalized:
         return {}
-    if role != "agent" or task_class != "continuous_monitor":
+    schedule_fields = set(normalized) - {"target_key"}
+    if schedule_fields and (role != "agent" or task_class != "continuous_monitor"):
         raise ValueError(
             "monitor schedule metadata requires --role agent --task-class continuous_monitor"
         )
+    if "target_key" in normalized and role != "agent":
+        raise ValueError("target_key requires --role agent")
     return normalized

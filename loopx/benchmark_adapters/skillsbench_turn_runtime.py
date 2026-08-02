@@ -41,6 +41,9 @@ SKILLSBENCH_TURN_SEQUENCE_BASELINE_ENV = "LOOPX_TURN_SEQUENCE_BASELINE_FILE"
 SKILLSBENCH_LOOPX_TURN_TERMINAL_POLICIES = frozenset(
     {"validator", "fixed-n", "stability"}
 )
+SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE = (
+    "bounded task-facing progress awaits independent scored-workspace validation"
+)
 
 
 @dataclass(frozen=True)
@@ -274,18 +277,29 @@ def _host_result(request: Mapping[str, Any], response: str) -> dict[str, Any]:
     recoverable_failure = response.startswith(RECOVERABLE_CODEX_TURN_FAILURE_PREFIX)
     if recoverable_failure:
         raise SkillsBenchTurnAgentFailure("agent CLI execution requires repair")
+    validation_handoff = (
+        response == SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE
+    )
     return {
         "schema_version": "loopx_turn_result_v0",
         "turn_key": turn_key,
         "result_kind": "validated_progress",
         "completed_phases": ["host_execute", "typed_result"],
-        "classification": "skillsbench_loopx_turn_agent_cli_progress",
+        "classification": (
+            "skillsbench_loopx_turn_agent_cli_validation_handoff"
+            if validation_handoff
+            else "skillsbench_loopx_turn_agent_cli_progress"
+        ),
         "recommended_action": "continue from the case-local LoopX frontier if work remains",
         "next_action": "use the next typed Turn rather than an ungoverned prompt poll",
         "delivery_batch_scale": "single_surface",
         "delivery_outcome": "outcome_progress",
         "vision_unchanged_reason": "the benchmark case objective is unchanged",
-        "summary": "agent CLI completed one bounded scored-workspace turn",
+        "summary": (
+            "agent CLI yielded bounded task-facing progress for independent validation"
+            if validation_handoff
+            else "agent CLI completed one bounded scored-workspace turn"
+        ),
     }
 
 

@@ -212,7 +212,10 @@ def assert_status_read_path(
     assert item["project_asset"]["active_state_next_action"] == GOAL_NEXT_ACTION, item
     assert item["project_asset"]["latest_validation"]["classification"] == POST_HANDOFF_CLASSIFICATION, item
     assert item["project_asset"]["latest_validation"]["summary"] == POST_HANDOFF_ACTION, item
-    assert item["project_asset"]["agent_todos"]["items"][0]["todo_id"] == TODO_ID, item
+    assert item["agent_todos"]["items"][0]["todo_id"] == TODO_ID, item
+    assert item["project_asset"]["agent_todos"]["payload_reference"]["canonical_path"] == (
+        "attention_queue.items[].agent_todos"
+    ), item
     assert_handoff_readiness(item["handoff_readiness"])
     assert str(project) not in json.dumps(item, sort_keys=True), item
     assert str(runtime_root) not in json.dumps(item, sort_keys=True), item

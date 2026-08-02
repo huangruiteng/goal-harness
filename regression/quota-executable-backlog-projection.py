@@ -217,6 +217,8 @@ def main() -> int:
             "should-run",
             "--goal-id",
             GOAL_ID,
+            "--include-detail",
+            "agent-todos",
             registry=registry,
             runtime=runtime,
         )

@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -31,7 +30,6 @@ from loopx.domain_packs.issue_fix import (  # noqa: E402
     upsert_issue_fix_feasibility_ledger_jsonl,
     upsert_issue_fix_pr_lifecycle_ledger_jsonl,
 )
-
 
 PRIVATE_PATTERNS = [
     re.compile(r"/Users/[A-Za-z0-9._-]+/"),
@@ -320,6 +318,12 @@ def main() -> int:
         observation = feasibility_rows[0]["observation"]
         assert observation["issue_ref"] == "issues_42"
         assert observation["repository_context"]["repository_revision"] == "a" * 40
+        projected_todo = feasibility_rows[0]["transition"]["projected_todo"]
+        assert projected_todo["target_key"] == (
+            "issue-fix:example/public-repo:issues_42"
+        )
+        assert "issues_42" in projected_todo["text"]
+        assert "discovered-vector-input" not in projected_todo["text"]
         assert feasibility_rows[0]["generated_at"] == source["generated_at"]
         assert feasibility_rows[0]["promotion_lineage"]["source_issue_ref"] == (
             "discovered-vector-input"

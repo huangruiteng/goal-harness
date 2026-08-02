@@ -165,6 +165,13 @@ fields can rerun the advertised command or pass
 `--include-command-pack-detail`. Both modes must produce the same host-action
 projection before a compact default is promoted.
 
+`start-goal --project <path>` keeps that exact project route. In particular, a
+fresh linked worktree must not silently inherit a goal registered by another
+worktree that shares its Git common directory. The lower-level
+`bootstrap-command-pack` remains allowed to resolve a linked worktree to its
+canonical registered source when inspecting or repairing an existing
+connection.
+
 `start-goal` does not guess among Codex App automation, Codex App over SSH, the
 Codex IDE plugin, Codex CLI TUI, or OpenCode. Callers should pass
 `--host-surface codex-app`, `codex-app-ssh`, `codex-ide-plugin`,

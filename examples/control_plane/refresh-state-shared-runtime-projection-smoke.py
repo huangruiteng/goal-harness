@@ -548,6 +548,8 @@ def main() -> None:
             AGENT_ID,
             "--available-capability",
             "shell",
+            "--include-detail",
+            "vision",
             cwd=project,
             shared_runtime=shared_runtime,
         )

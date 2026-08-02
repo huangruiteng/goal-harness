@@ -618,6 +618,10 @@ rules 和 writeback；这样比从一个大文件逐行阅读更容易辨认真�
 
 ## 课程导航
 
+如果你需要在一小时内先建立“长程任务为什么会跑偏、怎样识别局部循环、何时 retry、
+replan 或 self-repair”的整体心智模型，可以先读
+[长程任务如何收敛](topic-long-horizon-convergence.md)，再按下面的代码课程深入各层。
+
 | 后续讲次 | Issue-Fix | Single-Agent Auto ML | Auto Research |
 | --- | --- | --- | --- |
 | 第 1 讲 | 从目标到第一个 fix todo | 从候选到一次 bounded experiment Turn | 从 research question 到初始 role todo |

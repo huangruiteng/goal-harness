@@ -299,6 +299,7 @@ def handle_turn_command(
             scan_roots=scan_roots,
             limit=max(max(0, args.limit), AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK),
             goal_id=args.goal_id,
+            available_capabilities=args.available_capabilities,
         )
         scheduler_context = scheduler_execution_context_for_turn(
             host=args.host,
@@ -424,6 +425,18 @@ def handle_turn_command(
             envelope = payload.get("turn_envelope") if isinstance(payload.get("turn_envelope"), dict) else {}
             action = envelope.get("action") if isinstance(envelope.get("action"), dict) else {}
             selected_todo = action.get("selected_todo") if isinstance(action.get("selected_todo"), dict) else {}
+            writeback_contract = (
+                envelope.get("writeback")
+                if isinstance(envelope.get("writeback"), dict)
+                else {}
+            )
+            delivery_workspace_path = (
+                project
+                if isinstance(
+                    writeback_contract.get("delivery_workspace_causality"), dict
+                )
+                else None
+            )
 
             def writeback(result: dict[str, object]) -> dict[str, object]:
                 # The host workspace is execution context, not state authority.
@@ -455,6 +468,7 @@ def handle_turn_command(
                     next_action=str(result["next_action"]),
                     delivery_batch_scale=str(result["delivery_batch_scale"]),
                     delivery_outcome=str(result["delivery_outcome"]),
+                    delivery_workspace_path=delivery_workspace_path,
                     agent_id=args.agent_id,
                     progress_scope="goal",
                     autonomous_replan_recorded=result_kind == "replan_required",
@@ -477,6 +491,7 @@ def handle_turn_command(
                     scan_roots=scan_roots,
                     limit=max(max(0, args.limit), AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK),
                     goal_id=args.goal_id,
+                    available_capabilities=args.available_capabilities,
                 )
 
             def spend() -> dict[str, object]:
@@ -487,6 +502,7 @@ def handle_turn_command(
                     execute=True,
                     source="adapter",
                     agent_id=args.agent_id,
+                    workspace_path=delivery_workspace_path,
                     available_capabilities=args.available_capabilities,
                     operator_inbox_urgency_projector=operator_inbox_urgency_projector,
                 )

@@ -85,6 +85,11 @@ def _direct_ark_transport(
         with opener.open(request, timeout=timeout_seconds) as response:
             payload = response.read(_MAX_PROVIDER_RESPONSE_BYTES + 1)
     except HTTPError as exc:
+        if exc.code == 401:
+            raise DoubaoActorTransportError(
+                "Doubao actor authentication failed; refresh ARK_API_KEY before retrying",
+                error_code="provider_authentication_failed",
+            ) from None
         raise DoubaoActorTransportError(
             f"Doubao actor request failed with HTTP status {exc.code}",
             error_code="provider_http_error",

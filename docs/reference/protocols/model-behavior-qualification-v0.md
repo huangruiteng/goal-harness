@@ -276,6 +276,23 @@ and scheduler paths and deliberately contains competing signals:
     monitor schedule remains repairable, so the selected and primary action is
     monitor-schedule repair rather than wait or the blocked task.
 
+Three compaction scenarios exercise the actual default CLI projection:
+
+13. an over-budget packet preserves its selected todo and execute route after
+    repeated candidate, warning, and peer diagnostics move to cold paths;
+14. the same selected-work contract is presented once cleanly and once with
+    over-budget omitted diagnostics, and both must produce the same hard
+    behavior fields;
+15. the same blocking user gate is presented cleanly and with over-budget
+    omitted diagnostics, and both must still select `ask_user`.
+
+The portfolio evaluates four bounded contrast groups over those scenario
+receipts. Two invariance groups require clean and noisy packets to match. Two
+sensitivity groups require blocking gate versus non-blocking notice, and
+selected work versus required vision replan, to differ only on their declared
+hard behavior dimensions. Contrast expectations are derived from source
+contracts before projection or provider spend.
+
 Every scenario declares its own deterministic source oracle and runs exactly
 twice. The oracle validates exact packet fields before provider spend. The live
 turn actor then reads the default full `quota should-run` packet directly and
@@ -287,7 +304,8 @@ action-signature tests; explicit pair/corpus mode retains TurnEnvelope and
 semantic-contract extraction when a packet differential is the thing under
 test. All attempts must align. Actor or transport errors are not retried
 automatically; the portfolio fails closed and stops further calls. The maximum
-regular run is therefore 24 provider calls. Pair mode remains available only
+regular run is therefore 30 provider calls. Generic full-versus-candidate pair
+mode remains available only
 for temporary sensitive differentials or explicit stable-versus-candidate
 outcome claims, not as a permanent regular-behavior baseline.
 
@@ -308,8 +326,9 @@ The blocking human-gate packet is generated through the shipped
 `build_interaction_contract` path; qualification does not hand-author the
 expected response plan into a separate test-only packet.
 
-The portfolio keeps only scenario ids, expected and observed route names,
-bounded failure codes, repeat counts, and receipt digests. It never retains
+The portfolio keeps only scenario and contrast ids, declared relation fields,
+expected and observed route names, bounded failure codes, repeat counts, and
+receipt or observation digests. It never retains
 packets, prompts, raw responses, local paths, or credentials, and it always
 sets `automatic_release_promotion_allowed=false`.
 

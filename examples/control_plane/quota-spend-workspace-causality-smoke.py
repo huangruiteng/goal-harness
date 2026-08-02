@@ -27,6 +27,10 @@ GOAL_ID = "quota-spend-workspace-causality"
 AGENT_ID = "codex-peer"
 DELIVERY_REPOSITORY = "git:example.invalid/loopx/delivery"
 
+# Keep fixture repositories isolated from user-global Git integrations that
+# may write into .git asynchronously during temporary-directory cleanup.
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+
 
 def run_git(cwd: Path, *args: str) -> None:
     subprocess.run(
@@ -156,7 +160,12 @@ def quota_decision(*, workspace_repair: bool) -> dict:
     }
 
 
-def preview(runtime: Path, before: dict) -> dict:
+def preview(
+    runtime: Path,
+    before: dict,
+    *,
+    workspace_path: Path | None = None,
+) -> dict:
     after = {
         **before,
         "quota": {**before["quota"], "spent_slots": 1},
@@ -169,6 +178,7 @@ def preview(runtime: Path, before: dict) -> dict:
         quota_status_builder=lambda goal, **_kwargs: goal["quota"],
         self_repair_spend_actions=frozenset(),
         agent_id=AGENT_ID,
+        workspace_path=workspace_path,
     )
 
 
@@ -241,6 +251,20 @@ def main() -> None:
         assert split_preview["ok"] is True, split_preview
         assert split_preview["delivery_workspace"] == split_workspace, split_preview
         assert split_preview["delivery_workspace_validated"] is True, split_preview
+
+        # In-process hosts may execute the adapter in the delivery worktree
+        # while the LoopX controller keeps another cwd. The explicit path must
+        # preserve the same spend guard without changing process-global cwd.
+        with working_directory(delivery):
+            explicit_preview = preview(
+                split_runtime,
+                quota_decision(workspace_repair=True),
+                workspace_path=delivery_peer,
+            )
+        assert explicit_preview["ok"] is True, explicit_preview
+        assert explicit_preview["delivery_workspace_validated"] is True, (
+            explicit_preview
+        )
 
         # An explicit canonical path cannot bless a peer delivery. Omitting the
         # override retains the existing fail-closed recorded-history behavior.

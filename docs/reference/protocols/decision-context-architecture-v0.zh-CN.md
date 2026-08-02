@@ -111,6 +111,14 @@ receipt 可由既有 event/run history 承载。只有
 `verification_status=verified` 且有 outcome evidence 时，才可成为 Reward Memory
 candidate；candidate 仍需经过 Reward Memory 自己的 review/activation 流程。
 
+`decision_outcome_feedback_v0` 只接收 canonical、未被篡改的 evidence/outcome
+packet，并输出聚合后的 retrieval telemetry。只有 exact read 提升的 claim 与同一
+evidence packet 下的 verified outcome 直接关联时，才可生成一个
+`procedural_experience` candidate。被拒绝的召回只进入 telemetry，不进入记忆；
+适配层不会自动 ingest、review、persist 或 activate candidate。调用方可额外传入
+canonical 的公开 retrieval receipt，以区分聚合后的 rejection record 数和被 exact
+read 拒绝的真实 provider result 数。
+
 ## 增量信源层
 
 Decision Context 不应依赖某个领域专用的 automation prompt，来记住应该读哪些群聊、

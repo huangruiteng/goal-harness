@@ -61,6 +61,9 @@ def main() -> int:
     assert fix["transition"]["projected_todo"]["action_kind"] == (
         "issue_fix_branch_validation"
     ), fix
+    assert fix["transition"]["projected_todo"]["target_key"] == (
+        "issue-fix:owner/repo:issues_123"
+    ), fix
     default_gate = fix["transition"]["external_write_gate"]
     assert default_gate["authorized_before"] == [], default_gate
     assert default_gate["blocked_before"] == [
@@ -92,6 +95,9 @@ def main() -> int:
     assert comment["decision"]["route"] == "comment_only", comment
     assert comment["transition"]["projected_todo"]["action_kind"] == (
         "issue_fix_external_comment_packet"
+    ), comment
+    assert comment["transition"]["projected_todo"]["target_key"] == (
+        "issue-fix:owner/repo:issues_123"
     ), comment
     assert comment["transition"]["external_write_gate"]["satisfied"] is False
     assert_boundary(comment)

@@ -610,6 +610,43 @@ Every public release note or update note should also answer:
   language. Keep each group shorter than its English counterpart while
   preserving direct PR attribution and compatibility boundaries.
 
+### Final Release Body Usage Gate
+
+The release-note PR is not sufficient evidence. Before publishing, save the
+complete final GitHub release body to an ignored or temporary Markdown file and
+validate that exact file:
+
+```bash
+python3 examples/release/release-readiness-doc-smoke.py \
+  --release-notes <final-release-body.md> \
+  --surface "<new-or-materially-changed-surface>" \
+  --surface "<another-surface>"
+```
+
+Derive the repeated `--surface` values from the tag diff, merged PR inventory,
+and release claims. Each named surface must have a dedicated English
+`### <surface>` entry under `## Optional Capability Activation & Use` and a
+matching Chinese `#### <surface>` entry under `### 可选能力启用与使用`. Both
+entries must include these explicit fields:
+
+| English | Chinese | Required content |
+| --- | --- | --- |
+| `**Activation:**` | `**启用：**` | Exact install/enable command, or the exact per-command/profile opt-in when no persistent switch exists. |
+| `**Validation:**` | `**验证：**` | Minimum runnable status, readback, or verification command. |
+| `**Disable / rollback:**` | `**停用 / 回退：**` | Exact disable, uninstall, envelope removal, or rollback path. |
+| `**Authority boundary:**` | `**权限边界：**` | Write, merge, provider, privacy, and host limits that activation does not grant. |
+| `**Docs:**` | `**文档：**` | Canonical versioned documentation link. |
+
+Every entry needs at least one runnable `bash` block. A release with no new or
+materially changed optional capability, workflow, or host surface must instead
+run the gate with `--expect-no-optional-capability-changes` and include the
+exact bilingual declarations required by the validator. Omitting both a
+surface list and the explicit no-change decision fails closed.
+
+After publishing, read the complete remote body back with `jq -rj`, compare its
+hash with the reviewed local file, and run the same validator against the
+readback. Do not validate a draft and then publish a different body.
+
 ### Capability Narrative Gate
 
 For every new or materially changed capability, write the release claim in

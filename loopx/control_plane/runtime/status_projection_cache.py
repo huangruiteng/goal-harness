@@ -10,12 +10,17 @@ from typing import Any
 
 from ...history import load_registry
 from ...paths import resolve_runtime_root
+from ..todos.contract import normalize_required_capabilities
 from .time import now_utc as runtime_now_utc
 from .time import now_utc_iso as runtime_now_utc_iso
 from .time import parse_timestamp
 
 
 STATUS_PROJECTION_CACHE_SCHEMA_VERSION = "status_projection_cache_v0"
+
+
+def _normalized_available_capabilities(value: Any) -> list[str]:
+    return sorted(normalize_required_capabilities(value))
 
 
 def now_utc() -> datetime:
@@ -51,6 +56,7 @@ def status_projection_cache_key(
     limit: int,
     include_task_graph: bool,
     goal_id: str | None,
+    available_capabilities: Any = None,
 ) -> str:
     request = {
         "schema_version": STATUS_PROJECTION_CACHE_SCHEMA_VERSION,
@@ -61,6 +67,9 @@ def status_projection_cache_key(
         "limit": max(0, int(limit)),
         "include_task_graph": bool(include_task_graph),
         "goal_id": str(goal_id or "").strip() or None,
+        "available_capabilities": _normalized_available_capabilities(
+            available_capabilities
+        ),
     }
     encoded = json.dumps(
         request,
@@ -84,6 +93,7 @@ def status_projection_cache_metadata(
     include_task_graph: bool,
     goal_id: str | None,
     max_age_seconds: int,
+    available_capabilities: Any = None,
 ) -> dict[str, Any]:
     key = status_projection_cache_key(
         registry_path=registry_path,
@@ -92,6 +102,10 @@ def status_projection_cache_metadata(
         limit=limit,
         include_task_graph=include_task_graph,
         goal_id=goal_id,
+        available_capabilities=available_capabilities,
+    )
+    normalized_capabilities = _normalized_available_capabilities(
+        available_capabilities
     )
     return {
         "schema_version": STATUS_PROJECTION_CACHE_SCHEMA_VERSION,
@@ -102,6 +116,7 @@ def status_projection_cache_metadata(
         "limit": max(0, int(limit)),
         "include_task_graph": bool(include_task_graph),
         "scan_roots": [str(path.expanduser()) for path in scan_roots],
+        "available_capabilities": normalized_capabilities,
     }
 
 
@@ -114,6 +129,7 @@ def load_status_projection_cache(
     include_task_graph: bool,
     goal_id: str | None,
     max_age_seconds: int,
+    available_capabilities: Any = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     metadata = status_projection_cache_metadata(
         registry_path=registry_path,
@@ -123,6 +139,7 @@ def load_status_projection_cache(
         include_task_graph=include_task_graph,
         goal_id=goal_id,
         max_age_seconds=max_age_seconds,
+        available_capabilities=available_capabilities,
     )
     path = Path(str(metadata["path"]))
     metadata["hit"] = False
@@ -175,6 +192,7 @@ def write_status_projection_cache(
     goal_id: str | None,
     payload: dict[str, Any],
     max_age_seconds: int,
+    available_capabilities: Any = None,
 ) -> dict[str, Any]:
     metadata = status_projection_cache_metadata(
         registry_path=registry_path,
@@ -184,6 +202,7 @@ def write_status_projection_cache(
         include_task_graph=include_task_graph,
         goal_id=goal_id,
         max_age_seconds=max_age_seconds,
+        available_capabilities=available_capabilities,
     )
     path = Path(str(metadata["path"]))
     path.parent.mkdir(parents=True, exist_ok=True)

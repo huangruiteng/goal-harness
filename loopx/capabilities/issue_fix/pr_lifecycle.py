@@ -570,6 +570,19 @@ def _observation_fingerprint(observation: Mapping[str, Any]) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+def issue_fix_grouped_monitor_identity(
+    *, repository: str, state_bucket: str
+) -> tuple[str, str]:
+    """Return stable repository-scoped monitor target and action identities."""
+
+    repository_key = repository.casefold().replace("/", "--")
+    bucket_key = state_bucket.replace("_", "-")
+    return (
+        f"github-pr-state-{repository_key}-{bucket_key}",
+        f"issue_fix_pr_state_{state_bucket}_monitor",
+    )
+
+
 def _grouped_monitor_projection(
     observation: Mapping[str, Any], transition: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -608,17 +621,18 @@ def _grouped_monitor_projection(
 
     terminal = state_bucket == "terminal"
     member_key = f"{observation.get('repo')}#{observation.get('number')}"
-    target_key = (
-        None if terminal else f"github-pr-state-{state_bucket.replace('_', '-')}"
+    repository = str(observation.get("repo") or "unknown")
+    target_key, action_kind = issue_fix_grouped_monitor_identity(
+        repository=repository,
+        state_bucket=state_bucket,
     )
     return {
         "schema_version": ISSUE_FIX_PR_GROUPED_MONITOR_PROJECTION_SCHEMA_VERSION,
         "scope": "repository_pr_lifecycle_state",
+        "repository": repository,
         "state_bucket": state_bucket,
-        "target_key": target_key,
-        "action_kind": (
-            None if terminal else f"issue_fix_pr_state_{state_bucket}_monitor"
-        ),
+        "target_key": None if terminal else target_key,
+        "action_kind": None if terminal else action_kind,
         "member_key": member_key,
         "member_operation": "remove" if terminal else "upsert",
         "materialize_nonempty_bucket_monitor": not terminal,
@@ -988,7 +1002,9 @@ def build_issue_fix_pr_lifecycle_monitor_packet(
         "first_screen": {
             "waiting_on": transition["role"],
             "user_action_required": transition["role"] == "user",
-            "agent_can_continue": transition["decision"] == "runnable_successor",
+            "agent_can_continue": transition["decision"] != "user_gate",
+            "current_pr_actionable": transition["decision"] == "runnable_successor",
+            "immediate_repoll_required": False,
             "next_safe_action": transition["reason"],
         },
         "writeback_contract": {

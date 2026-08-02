@@ -13,13 +13,23 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .control_plane.runtime.promotion_readiness import (
+    PROMOTION_READINESS_CLASSIFICATION,
+    PROMOTION_READINESS_RUNTIME_INDEX,
+)
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path
+from .project_skill_delivery import discover_project_scoped_skill_ids
 from .registry_writability import probe_registry_write_path
 from .release_manifest import load_release_manifest, release_version_tag
+from .skill_install_readback import (
+    ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+    configured_host_skills_dir,
+    inspect_skill_install_readback,
+)
 
 
 PROMOTION_READINESS_CLASSIFICATIONS = {
-    "canary_promotion_readiness_smoke_group",
+    PROMOTION_READINESS_CLASSIFICATION,
 }
 PROMOTION_READINESS_FRESHNESS_HOURS = 24
 INSTALL_FRESHNESS_STALE_HOURS = 168
@@ -28,8 +38,8 @@ RELEASE_ID_TIMESTAMP_RE = re.compile(r"^\d{8}T\d{6}Z$")
 REQUIRED_INSTALLED_SKILL_PHRASES = {
     "loopx-project": (
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
-        "--delivery-batch-scale multi_surface",
-        "--delivery-outcome outcome_progress",
+        "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>",
+        "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>",
     ),
     "loopx-pr-review": (
         "loopx --format json pr-review --state all",
@@ -629,24 +639,33 @@ def installed_skill_check(
         "detail": (
             detail
             if applicable
-            else "not applicable: other-agent skill delivery is owned by the custom host"
+            else "not applicable: skill delivery is owned by the selected host integration"
         ),
     }
 
 
 def latest_promotion_readiness_event(runtime_root: Path, goal_id: str | None = None) -> dict[str, Any]:
     goals_dir = runtime_root / "goals"
-    if not goals_dir.exists():
+    runtime_index = runtime_root / PROMOTION_READINESS_RUNTIME_INDEX
+    if not goals_dir.exists() and not runtime_index.is_file():
         return {
             "available": False,
             "runtime_root": str(runtime_root),
-            "reason": "runtime goals directory does not exist",
+            "reason": "promotion readiness ledger does not exist",
         }
 
-    matches: list[dict[str, Any]] = []
-    index_glob = f"{goal_id}/runs/index.jsonl" if goal_id else "*/runs/index.jsonl"
-    for index_path in goals_dir.glob(index_glob):
-        current_goal_id = index_path.parent.parent.name
+    runtime_matches: list[dict[str, Any]] = []
+    legacy_matches: list[dict[str, Any]] = []
+    indexes: list[tuple[Path, str | None, str]] = []
+    if runtime_index.is_file():
+        indexes.append((runtime_index, None, "runtime_release_ledger"))
+    if goals_dir.exists():
+        index_glob = f"{goal_id}/runs/index.jsonl" if goal_id else "*/runs/index.jsonl"
+        indexes.extend(
+            (path, path.parent.parent.name, "goal_run_history_legacy")
+            for path in goals_dir.glob(index_glob)
+        )
+    for index_path, current_goal_id, source in indexes:
         try:
             lines = index_path.read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -665,12 +684,20 @@ def latest_promotion_readiness_event(runtime_root: Path, goal_id: str | None = N
                 continue
             json_path = Path(str(item.get("json_path") or ""))
             markdown_path = Path(str(item.get("markdown_path") or ""))
-            matches.append(
+            target_matches = (
+                runtime_matches if source == "runtime_release_ledger" else legacy_matches
+            )
+            target_matches.append(
                 {
                     "available": True,
-                    "goal_id": str(item.get("goal_id") or current_goal_id),
+                    "source": source,
+                    "goal_id": str(item.get("goal_id") or current_goal_id or "") or None,
                     "generated_at": item.get("generated_at"),
                     "classification": classification,
+                    "evidence_scope": item.get("evidence_scope") or (
+                        "goal_run_history" if current_goal_id else "runtime_release"
+                    ),
+                    "dashboard_readiness": item.get("dashboard_readiness"),
                     "delivery_batch_scale": item.get("delivery_batch_scale"),
                     "delivery_outcome": item.get("delivery_outcome"),
                     "recommended_action": item.get("recommended_action"),
@@ -679,6 +706,7 @@ def latest_promotion_readiness_event(runtime_root: Path, goal_id: str | None = N
                 }
             )
 
+    matches = runtime_matches or legacy_matches
     if not matches:
         return {
             "available": False,
@@ -705,10 +733,26 @@ def collect_doctor(
         collect_runtime_projection_route_diagnostics,
     )
 
-    from .host_loop_activation import normalize_agent_type
+    from .host_loop_activation import (
+        agent_type_uses_host_managed_skills,
+        normalize_agent_type,
+    )
 
     canonical_agent_type = normalize_agent_type(agent_type) if agent_type else None
-    installed_skills_required = canonical_agent_type != "other-agent"
+    host_managed_skill_delivery = bool(
+        canonical_agent_type
+        and agent_type_uses_host_managed_skills(canonical_agent_type)
+    )
+    installed_skills_required = not host_managed_skill_delivery
+    host_skill_install_readback = (
+        inspect_skill_install_readback(
+            skills_dir=configured_host_skills_dir(os.environ),
+            required_skill_ids=ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
+            source_root=Path(__file__).resolve().parents[1],
+        )
+        if canonical_agent_type == "ark-managed-agent"
+        else None
+    )
     loopx_path = resolve_command_path("loopx")
     invocation_path = current_script_invocation_path()
     loopx_canary_path = resolve_command_path("loopx-canary")
@@ -735,6 +779,14 @@ def collect_doctor(
     skills_root = codex_home() / "skills"
     skill_path = skills_root / "loopx-project" / "SKILL.md"
     skills = installed_skill_summary(skills_root)
+    project_scoped_skill_ids = discover_project_scoped_skill_ids(
+        repo_root / "skills"
+    )
+    globally_visible_project_skills = [
+        skill_name
+        for skill_name in project_scoped_skill_ids
+        if (skills_root / skill_name).exists()
+    ]
     default_release = command_root_summary(command_path, command_realpath)
     default_release["release_manifest_available"] = release_manifest.get("available")
     default_release["release_manifest_path"] = release_manifest.get("path")
@@ -796,22 +848,38 @@ def collect_doctor(
         require_installed_skills=installed_skills_required,
         doctor_agent_type=canonical_agent_type,
     )
-    skill_delivery = {
-        "agent_type": canonical_agent_type,
-        "owner": "loopx_surface_installer" if installed_skills_required else "custom_agent_host",
-        "mode": "surface_managed" if installed_skills_required else "host_managed",
-        "codex_skills_root_applicable": installed_skills_required,
-        "installed_skills_required_for_freshness": installed_skills_required,
-        "status": (
+    if installed_skills_required:
+        skill_delivery_status = (
             "ready"
-            if installed_skills_required
-            and all(
+            if all(
                 skill.get("exists") and skill.get("required_phrases")
                 for skill in skills.values()
             )
             else "repair_recommended"
+        )
+    elif host_skill_install_readback:
+        skill_delivery_status = str(host_skill_install_readback["status"])
+    else:
+        skill_delivery_status = "external_readback_required"
+    skill_delivery = {
+        "agent_type": canonical_agent_type,
+        "owner": (
+            "loopx_surface_installer"
             if installed_skills_required
-            else "external_readback_required"
+            else (
+                "loopx_install_script"
+                if canonical_agent_type == "ark-managed-agent"
+                else "custom_agent_host"
+            )
+        ),
+        "mode": "surface_managed" if installed_skills_required else "host_managed",
+        "codex_skills_root_applicable": installed_skills_required,
+        "installed_skills_required_for_freshness": installed_skills_required,
+        "status": skill_delivery_status,
+        **(
+            {"filesystem_readback": host_skill_install_readback}
+            if host_skill_install_readback
+            else {}
         ),
     }
     default_global_registry = global_registry_path(DEFAULT_RUNTIME_ROOT)
@@ -941,6 +1009,29 @@ def collect_doctor(
             applicable=installed_skills_required,
         ),
         {
+            "id": "project_scoped_skills_absent_globally",
+            "required": False,
+            "ok": not globally_visible_project_skills,
+            "detail": (
+                "none"
+                if not globally_visible_project_skills
+                else ",".join(globally_visible_project_skills)
+            ),
+        },
+        *(
+            [
+                {
+                    "id": "host_skill_installation_readback",
+                    "required": False,
+                    "ok": bool(host_skill_install_readback.get("ready")),
+                    "applicable": True,
+                    "detail": str(host_skill_install_readback.get("reason")),
+                }
+            ]
+            if host_skill_install_readback
+            else []
+        ),
+        {
             "id": "global_registry_writable",
             "required": True,
             "ok": bool(global_registry_writability.get("ok")),
@@ -1001,11 +1092,21 @@ def collect_doctor(
         },
         "skill_delivery": skill_delivery,
         "skills": skills,
+        "project_scoped_skill_ids": list(project_scoped_skill_ids),
+        "globally_visible_project_skills": globally_visible_project_skills,
         "checks": checks,
         "fix": (
-            "Do not infer custom-host skill delivery from `~/.codex/skills`; "
-            "verify the host-managed loaded-skill readback from `loopx agent-onboard`."
-            if canonical_agent_type == "other-agent"
+            "Set `LOOPX_SKILLS_DIR=<PROJECT_WORKSPACE>/.agents/skills` and rerun "
+            f"`{repo_root / 'scripts' / 'install-local.sh'}`; then rerun doctor "
+            "with the same environment. Filesystem readback proves materialization; "
+            "the host must still report its runtime loaded-skill readback."
+            if canonical_agent_type == "ark-managed-agent"
+            else (
+                "Do not infer custom-host skill delivery from `~/.codex/skills`; "
+                "verify the host-managed loaded-skill readback from `loopx agent-onboard`."
+            )
+            if canonical_agent_type
+            and agent_type_uses_host_managed_skills(canonical_agent_type)
             else (
                 f"Run `{repo_root / 'scripts' / 'install-local.sh'}` and start a new shell, "
                 f"or export PATH=\"{local_bin}:$PATH\". For no-clone repair, run "

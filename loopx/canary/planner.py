@@ -1340,12 +1340,25 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
 )
 
 
-def build_quality_surface_catalog_audit() -> dict[str, Any]:
+def _quality_audit_source_root(candidate: Path | None) -> Path | None:
+    source_root = (candidate or REPO_ROOT).resolve()
+    required_paths = (
+        source_root / "pyproject.toml",
+        source_root / "loopx" / "canary" / "quality_surface_catalog.py",
+        source_root / "tests" / "canary" / "test_quality_surface_catalog.py",
+    )
+    return source_root if all(path.is_file() for path in required_paths) else None
+
+
+def build_quality_surface_catalog_audit(
+    *,
+    repo_root: Path | None = None,
+) -> dict[str, Any]:
     """Audit quality-layer ownership for every high-risk canary profile."""
 
     return _build_quality_surface_catalog_audit(
         CURRENT_REPO_PROFILES,
-        repo_root=REPO_ROOT if (REPO_ROOT / "pyproject.toml").is_file() else None,
+        repo_root=_quality_audit_source_root(repo_root),
     )
 
 

@@ -226,7 +226,13 @@ metadata；CI pending 只继续 monitor，CI failure 和未处理的 changes req
 
 多个同类 PR 不需要一 PR 一 monitor。`issue_fix_pr_grouped_monitor_projection_v1` 按仓库和
 lifecycle bucket 聚合，Kernel 只调度非空 bucket 的一个 monitor；真正的 patch 仍是独立的一次性
-advancement todo。
+advancement todo。`pr-lifecycle --execute-transition --goal-id <goal> --claimed-by <agent>`
+通过通用 Todo API 完成这笔物化事务；`--monitor-cadence` 控制调度周期，缺省为 `30m`。
+相同 bucket membership 的安静重放保持幂等，后续 cadence 推进由 monitor poll lane 负责，而不是
+反复执行 PR lifecycle transition。创建该 monitor 的 issue-fix Agent 会跨 turn 保持为
+`claimed_by` owner；其他 peer 未获得显式 Todo lifecycle authority 时不能更新、retire、重开或
+poll 该 monitor。给出公开 PR URL 时，`--execute-transition` 会自动读取紧凑的
+公开 metadata；只有确定性 fixture 才需要显式传 `--metadata-json`。
 
 ### 6. Terminal closeout 与继续运行
 

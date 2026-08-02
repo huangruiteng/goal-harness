@@ -6,6 +6,7 @@ from loopx.control_plane.quota.cli_projection import (
     QUOTA_CLI_GOAL_BOUNDARY_DETAIL_COMMAND,
     QUOTA_CLI_TODO_SUMMARY_DETAIL_COMMAND,
     QUOTA_CLI_USER_TODO_SUMMARY_DETAIL_COMMAND,
+    QUOTA_CLI_VISION_DETAIL_COMMAND,
     compact_quota_should_run_cli_payload,
 )
 from loopx.presentation.renderers.quota_markdown import (
@@ -336,6 +337,187 @@ def test_compact_quota_should_run_cli_payload_bounds_boundary_authority_entries(
         include_goal_boundary_detail=True,
     )
     assert full == payload
+
+
+def test_compact_quota_should_run_cli_payload_bounds_repeated_vision_detail() -> None:
+    judge = {
+        "schema_version": "vision_gap_judge_v0",
+        "done": False,
+        "decision": "continue",
+        "reason": "The public qualification acceptance gap remains open.",
+        "agent_judge_instruction": "Judge closure from authoritative evidence. " * 12,
+        "evidence_read_instruction": "Read the agent-scoped evidence log.",
+        "registry_read_instruction": "Inspect permitted registered materials. " * 8,
+        "external_research_instruction": "Use bounded public research. " * 8,
+        "done_only_when": ["authoritative_evidence_satisfies_acceptance"],
+        "continue_when": ["evidence_is_missing_weak_or_stale"],
+        "otherwise": "continue",
+    }
+    audit = {
+        "schema_version": "vision_continuation_audit_v0",
+        "required": True,
+        "agent_id": "quality-agent",
+        "decision": "acceptance_gap_open",
+        "selected_todo_is_goal_completion": False,
+        "closeout_allowed_without_evidence": False,
+        "trigger_count": 1,
+        "trigger_kinds": ["vision_acceptance_gap"],
+        "acceptance_gaps": [{"kind": "vision_acceptance_gap", "detail": "x" * 900}],
+        "vision_gap_judge": judge,
+        "authoritative_evidence_kinds": ["changed_files", "evaluation_outputs"],
+        "not_satisfied_by": ["todo_completion_alone"],
+        "required_before_closeout": [
+            "derive_requirements_from_active_vision_and_current_todo",
+            "name_authoritative_evidence_for_each_requirement",
+        ],
+        "recommended_action": "Keep the vision active until evidence closes it.",
+        "acceptance_requirements": ["Public qualification remains attributable."],
+    }
+    selected = _items(1, prefix="selected")[0]
+    payload = {
+        "ok": True,
+        "goal_id": "mature-goal-fixture",
+        "recommended_action": selected["text"],
+        "selected_todo": selected,
+        "agent_lane_next_action": {**selected, "text": f"[P1] {selected['title']}"},
+        "capability_gate": {
+            "schema_version": "capability_gate_v0",
+            "required": ["shell", "filesystem_write"],
+            "available": ["shell", "filesystem_read", "filesystem_write"],
+            "missing": [],
+            "action": "run",
+            "decision_owner": "agent",
+            "candidate_order_policy": "claim_then_profile_then_priority",
+            "runnable_count": 12,
+            "runnable_candidates": _items(12, prefix="candidate"),
+            "blocked_candidates": _items(8, prefix="blocked"),
+            "resolution_bindings": _items(8, prefix="binding"),
+        },
+        "vision_continuation_audit": audit,
+        "goal_frontier_projection": {
+            "replan_required": True,
+            "acceptance_gaps": audit["acceptance_gaps"],
+            "vision_continuation_audit": audit,
+        },
+        "interaction_contract": {
+            "mode": "bounded_delivery",
+            "agent_channel": {"must_attempt": True, "vision_continuation_audit": audit},
+            "cli_channel": {"vision_continuation_audit": audit},
+        },
+        "next_action_projection_warning": {
+            "schema_version": "next_action_projection_warning_v0",
+            "kind": "next_action_projection_mismatch",
+            "severity": "info",
+            "requires_state_writeback": False,
+            "active_state_next_action": "Preserve the durable route.",
+            "latest_run_recommended_action": "Continue the current quality lane.",
+            "agent_lane_next_action": selected["text"],
+            "reason": "The agent lane differs from the durable route.",
+            "recommended_action": "Run the agent lane without mutating the durable route.",
+        },
+        "active_state_next_action": "Preserve the durable route.",
+        "latest_run_recommended_action": "Continue the current quality lane.",
+        "goal_route_hint": {
+            "route_decision": "run_current_agent_lane",
+            "counts": {"other_agent_claimed_advancement_count": 8},
+            "other_agent_next_actions": _items(8, prefix="peer"),
+        },
+        "completed_todo_archive_warning": {
+            "kind": "completed_agent_todo_archive_required",
+            "requires_archive": True,
+            "archive_section": "Completed Work Archive",
+            "active_done_count": 778,
+            "active_open_count": 58,
+            "max_active_done_count": 12,
+            "default_archive_keep_count": 10,
+            "archive_command_template": (
+                "loopx todo archive-completed --goal-id <goal-id> "
+                "--max-active-done 10 --execute"
+            ),
+            "recommended_action": "Archive old completed todo entries.",
+        },
+        "stable_control_plane_context": "s" * 24_000,
+    }
+
+    compact = compact_quota_should_run_cli_payload(payload)
+    detailed = compact_quota_should_run_cli_payload(
+        payload,
+        include_todo_summary_detail=True,
+        include_vision_detail=True,
+    )
+
+    assert len(json.dumps(payload, indent=2)) > 40_000
+    assert len(json.dumps(compact, indent=2)) <= 40_000
+    assert compact["selected_todo"] == payload["selected_todo"]
+    assert compact["interaction_contract"]["mode"] == "bounded_delivery"
+    assert compact["vision_continuation_audit"]["vision_gap_judge"]["decision"] == (
+        "continue"
+    )
+    assert compact["vision_continuation_audit"]["payload_compaction"][
+        "full_detail_cold_path"
+    ] == QUOTA_CLI_VISION_DETAIL_COMMAND
+    assert compact["goal_frontier_projection"]["vision_continuation_audit"][
+        "projection_ref"
+    ] == "$.vision_continuation_audit"
+    assert compact["interaction_contract"]["agent_channel"][
+        "vision_continuation_audit"
+    ]["vision_gap_judge"]["decision"] == "continue"
+    assert "runnable_candidates" not in compact["capability_gate"]
+    assert compact["next_action_projection_warning"]["projection_refs"][
+        "active_state_next_action"
+    ] == "$.active_state_next_action"
+    assert "title" not in compact["agent_lane_next_action"]
+    assert "other_agent_next_actions" not in compact["goal_route_hint"]
+    assert compact["goal_route_hint"]["other_agent_next_action_count"] == 8
+    assert compact["completed_todo_archive_warning"] == (
+        payload["completed_todo_archive_warning"]
+    )
+    assert detailed["vision_continuation_audit"] == audit
+    assert detailed["capability_gate"] == payload["capability_gate"]
+    assert detailed["goal_route_hint"] == payload["goal_route_hint"]
+    assert detailed["completed_todo_archive_warning"] == (
+        payload["completed_todo_archive_warning"]
+    )
+
+
+def test_compaction_preserves_nonidentical_diagnostics_instead_of_referencing_them() -> (
+    None
+):
+    canonical_audit = {
+        "schema_version": "vision_continuation_audit_v0",
+        "required": True,
+        "decision": "acceptance_gap_open",
+    }
+    channel_audit = {
+        **canonical_audit,
+        "decision": "channel_specific_diagnostic",
+    }
+    payload = {
+        "vision_continuation_audit": canonical_audit,
+        "goal_frontier_projection": {
+            "vision_continuation_audit": channel_audit,
+        },
+        "interaction_contract": {
+            "agent_channel": {"vision_continuation_audit": channel_audit},
+        },
+        "active_state_next_action": "Current durable action.",
+        "next_action_projection_warning": {
+            "active_state_next_action": "Older diagnostic action.",
+        },
+    }
+
+    compact = compact_quota_should_run_cli_payload(payload)
+
+    assert compact["goal_frontier_projection"]["vision_continuation_audit"] == (
+        channel_audit
+    )
+    assert compact["interaction_contract"]["agent_channel"][
+        "vision_continuation_audit"
+    ] == channel_audit
+    assert compact["next_action_projection_warning"][
+        "active_state_next_action"
+    ] == "Older diagnostic action."
+    assert "projection_refs" not in compact["next_action_projection_warning"]
 
 
 def test_compact_quota_should_run_cli_payload_keeps_succession_warning_identity_in_markdown() -> None:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -102,6 +103,7 @@ def main() -> None:
                 "LOOPX_SHELL_PROFILE": str(home / ".profile"),
                 "LOOPX_ARCHIVE_URL": f"file://{archive}",
                 "LOOPX_INSTALL_CANARY": "0",
+                "LOOPX_PYTHON": sys.executable,
                 "CODEX_CALLED_MARKER": str(codex_called_marker),
                 "PATH": f"{fake_bin}:{host_path_without_loopx}",
             }
@@ -139,6 +141,10 @@ def main() -> None:
         assert "quota should-run" in bundle["quota_guard_command"], bundle
         assert "--agent-id codex-side-bypass" in bundle["quota_guard_command"], bundle
         assert "refresh-state --goal-id public-fresh-codex-cli-goal" in bundle["refresh_command"], bundle
+        assert "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>" in bundle["progress_refresh_command"], bundle
+        assert "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>" in bundle["progress_refresh_command"], bundle
+        assert "--delivery-outcome outcome_progress" not in bundle["progress_refresh_command"], bundle
+        assert "--agent-id codex-side-bypass" in bundle["progress_refresh_command"], bundle
         assert "quota spend-slot" in bundle["quota_spend_command"], bundle
         assert "--source heartbeat --execute --agent-id codex-side-bypass" in bundle["quota_spend_command"], bundle
         assert any("message-only command" in item for item in bundle["validation_checklist"]), bundle

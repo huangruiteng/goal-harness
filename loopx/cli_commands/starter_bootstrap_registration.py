@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from ..bootstrap_command_pack import START_GOAL_HOST_SURFACES
 from ..codex_cli_probe import DEFAULT_CODEX_BIN
 from ..project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_KIND,
@@ -65,8 +66,8 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
     )
     bootstrap_command_pack_parser.add_argument(
         "--host-surface",
-        default="chat-box",
-        choices=["chat-box", "codex-app", "codex-app-ssh", "codex-ide-plugin", "codex-ide", "codex-cli-tui", "claude-code", "opencode", "shell", "http", "worker-bridge"],
+        default="codex-app",
+        choices=START_GOAL_HOST_SURFACES,
         help="Host surface where the slash command pack will be exposed.",
     )
     bootstrap_command_pack_parser.add_argument(
@@ -112,7 +113,7 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
     )
     start_goal_parser.add_argument(
         "--host-surface",
-        choices=["chat-box", "codex-app", "codex-app-ssh", "codex-ide-plugin", "codex-ide", "codex-cli-tui", "claude-code", "opencode", "shell", "http", "worker-bridge"],
+        choices=START_GOAL_HOST_SURFACES,
         help=(
             "Exact host surface that will own loop activation after todo writeback. "
             "When omitted, start-goal returns a read-only host selection gate."

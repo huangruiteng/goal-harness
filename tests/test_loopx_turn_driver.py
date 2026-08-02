@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -1011,7 +1012,56 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
     monkeypatch: pytest.MonkeyPatch,
     result_kind: str,
 ) -> None:
+    from loopx.cli_commands.turn import (
+        refresh_state_run as real_refresh_state_run,
+        spend_quota_slot as real_spend_quota_slot,
+    )
+
     project, runtime, registry = _write_live_fixture(tmp_path)
+    state_path = (
+        project
+        / ".codex"
+        / "goals"
+        / "loopx-turn-fixture"
+        / "ACTIVE_GOAL_STATE.md"
+    )
+    state_path.write_text(
+        state_path.read_text(encoding="utf-8").replace(
+            "priority=P0 -->",
+            "task_repository=git:example.invalid/loopx/turn-fixture priority=P0 -->",
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "init", "--initial-branch", "main", str(project)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/loopx/turn-fixture.git",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    refresh_workspace_paths: list[Path | None] = []
+    spend_workspace_paths: list[Path | None] = []
+
+    def recording_refresh_state_run(*args: object, **kwargs: object) -> dict[str, object]:
+        refresh_workspace_paths.append(kwargs.get("delivery_workspace_path"))
+        return real_refresh_state_run(*args, **kwargs)
+
+    def recording_spend_quota_slot(*args: object, **kwargs: object) -> dict[str, object]:
+        spend_workspace_paths.append(kwargs.get("workspace_path"))
+        return real_spend_quota_slot(*args, **kwargs)
 
     def fake_codex_host(request: dict[str, object], **_kwargs: object) -> dict[str, object]:
         return {
@@ -1029,6 +1079,14 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
         }
 
     monkeypatch.setattr("loopx.cli_commands.turn.run_codex_cli_host", fake_codex_host)
+    monkeypatch.setattr(
+        "loopx.cli_commands.turn.refresh_state_run",
+        recording_refresh_state_run,
+    )
+    monkeypatch.setattr(
+        "loopx.cli_commands.turn.spend_quota_slot",
+        recording_spend_quota_slot,
+    )
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
         exit_code = cli_main(
@@ -1069,6 +1127,8 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
     assert payload["host"] == {"executable": "built-in", "kind": "codex-cli"}
     assert payload["effects"]["state_written"] is True
     assert payload["effects"]["quota_spent"] is True
+    assert refresh_workspace_paths == [project]
+    assert spend_workspace_paths == [project]
     state = (
         project
         / ".codex"

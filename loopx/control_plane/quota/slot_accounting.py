@@ -114,6 +114,20 @@ def _load_goal_run_index_records(runtime_root: Path, goal_id: str) -> list[dict[
     return records
 
 
+def _is_quota_neutral_state_refresh(run: dict[str, Any]) -> bool:
+    """Recognize refresh-state provenance without relying on its classification."""
+
+    if str(run.get("delivery_outcome") or "").strip():
+        return False
+    if str(run.get("classification") or "").strip() == "state_refreshed":
+        return True
+    return (
+        isinstance(run.get("state"), dict)
+        and isinstance(run.get("runtime_projection_route"), dict)
+        and bool(str(run.get("recommended_action_source") or "").strip())
+    )
+
+
 def _latest_unspent_accountable_delivery_run(
     runtime_root: Path,
     goal_id: str,
@@ -146,9 +160,7 @@ def _latest_unspent_accountable_delivery_run(
             continue
         if classification == QUOTA_SCHEDULER_ACK_CLASSIFICATION:
             continue
-        if classification == "state_refreshed" and not str(
-            run.get("delivery_outcome") or ""
-        ).strip():
+        if _is_quota_neutral_state_refresh(run):
             continue
         delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
         if delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:
@@ -167,11 +179,12 @@ def build_quota_slot_preview_for_decision(
     self_repair_spend_actions: set[str] | frozenset[str],
     slots: int = 1,
     agent_id: str | None = None,
+    workspace_path: Path | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
     safe_slots = max(1, _int_number(slots, default=1))
     safe_requested_agent_id = normalize_todo_claimed_by(agent_id)
-    safe_bypass_spend = (
+    safe_bypass_requested = (
         (
             before.get("state") == "operator_gate"
             or before.get("recovery_delivery_allowed") is True
@@ -194,6 +207,27 @@ def build_quota_slot_preview_for_decision(
         if raw_runtime_root
         else None
     )
+    safe_bypass_without_delivery = (
+        safe_bypass_requested and delivery_completion_run is None
+    )
+    if safe_bypass_without_delivery:
+        return {
+            "ok": False,
+            "mode": "spend-slot",
+            "dry_run": True,
+            "goal_id": safe_goal_id,
+            "slots": safe_slots,
+            "agent_id": safe_requested_agent_id,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": (
+                "safe-bypass quota spend requires a latest "
+                "unspent accountable delivery writeback"
+            ),
+            "before": before,
+            "after": None,
+        }
+    safe_bypass_spend = safe_bypass_requested
     raw_delivery_workspace = (
         delivery_completion_run.get("delivery_workspace")
         if isinstance(delivery_completion_run, dict)
@@ -209,6 +243,7 @@ def build_quota_slot_preview_for_decision(
         build_delivery_workspace_guard(
             delivery_completion_run,
             agent_id=safe_requested_agent_id,
+            current_path=workspace_path,
         )
         if delivery_completion_run and delivery_workspace
         else None
@@ -413,7 +448,7 @@ def build_quota_slot_spend_event(
         and not capability_repair_spend
         and before_compact["workspace_repair_allowed"] is not True
     )
-    safe_bypass_spend = (
+    safe_bypass_spend = bool(preview.get("safe_bypass_spend")) and (
         (
             before_compact["state"] == "operator_gate"
             or before_compact["recovery_delivery_allowed"] is True
@@ -458,7 +493,7 @@ def build_quota_slot_spend_event(
                         else (
                             "quota validated delivery completion; quota slot spend event public-safe"
                             if delivery_completion_spend
-                            else "quota safe-bypass operator gate; quota slot spend event public-safe"
+                            else "quota safe-bypass delivery; quota slot spend event public-safe"
                         )
                     )
                 )
@@ -484,7 +519,7 @@ def build_quota_slot_spend_event(
                                 f"{slots} automatic agent slot(s) accounted after validated delivery "
                                 f"{preview.get('delivery_run_classification')}"
                                 if delivery_completion_spend
-                                else f"{slots} automatic agent slot(s) completed as safe-bypass work under an operator gate"
+                                else f"{slots} automatic agent slot(s) completed as safe-bypass work"
                             )
                         )
                     )

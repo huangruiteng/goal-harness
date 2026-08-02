@@ -51,6 +51,139 @@ copyable bootstrap message, but it must not silently switch to hidden
 `codex exec`, read session transcripts, or claim same-TUI automation without
 the visible proof and idle-detection contracts.
 
+## Ark Managed Agent host
+
+`ark-managed-agent` is a one-shot goal host, not a LoopX Turn driver. LoopX
+generates one short, transport-neutral goal prompt; the Managed Agent goal
+runtime owns all inner iteration and continuation.
+
+The prompt uses the same 4,000-character interface budget and the same guarded
+goal policy as the Codex App/CLI visible-goal hosts; only the host ownership
+preamble differs.
+
+Generate the prompt with:
+
+```bash
+loopx heartbeat-prompt --thin --goal-id <GOAL_ID> --agent-id <AGENT_ID> \
+  --runtime-profile ark_managed_agent_goal
+```
+
+The same contract is visible through first-class onboarding with
+`--agent-type ark-managed-agent`. Onboarding is a read-only verifier, not an
+installer or an installation prerequisite. Because this host does not use a
+Codex-specific skill directory, the fixed installer shared with Codex writes
+the LoopX workflow skills into a host-native target root. The packaged
+no-clone path is:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh \
+  | env LOOPX_SKILLS_DIR=<PROJECT_WORKSPACE>/.agents/skills \
+      LOOPX_ENTRY_HOST_SURFACE=ark-managed-agent \
+      LOOPX_INSTALL_SLASH_COMMANDS=0 bash
+```
+
+For a contributor checkout, the equivalent command is:
+
+```bash
+LOOPX_SKILLS_DIR=<PROJECT_WORKSPACE>/.agents/skills \
+  LOOPX_ENTRY_HOST_SURFACE=ark-managed-agent \
+  LOOPX_INSTALL_SLASH_COMMANDS=0 \
+  <LOOPX_CHECKOUT>/scripts/install-local.sh
+```
+
+This is also the supported canary path for an untrusted or dirty checkout.
+With an explicit `LOOPX_SKILLS_DIR`, the script materializes the release-owned
+workflow skills, including the generated `$loopx` task-entry skill, and writes
+`.loopx-skill-install.json` without promoting the checkout as the default
+`loopx` executable. The Managed Agent's ordinary task turn starts with
+`$loopx <task>`; that skill writes the business todo before the host submits the
+generated Goal task body exactly once. The controller must not pre-seed that
+business todo. The generated entry skill binds the exact Managed Agent host at
+install time, and its start-goal transaction preserves that host, task text,
+and declared capabilities across bootstrap inspection. Without an explicit
+target, a canary-only install leaves the existing default skill root unchanged.
+
+The installer is the sole owner of filesystem mutation for both Codex and Ark
+Managed Agent. Its default target is the Codex skill root; Ark Managed Agent
+supplies a host-native `LOOPX_SKILLS_DIR` and binds the generated entry with
+`LOOPX_ENTRY_HOST_SURFACE`. The manifest records the materialized skill ids,
+source revision, and per-skill content digests so `doctor` and onboarding can
+verify delivery read-only without becoming second installers. Running either
+check is optional for installation. Run a check with the same
+`LOOPX_SKILLS_DIR` to report the filesystem readback status and source
+revision. Filesystem materialization is distinct from the host's runtime
+loaded-skill readback; the latter is still required before claiming that the
+skills were injected into an active agent context.
+
+Local-development and cloud transports must send the exact same `task_body` as
+their goal prompt. They may differ in endpoint, authentication, session id, or
+wire envelope, but those fields do not change the prompt or become LoopX
+policy. The host has no automation mode, and it must not wrap every inner goal
+iteration in `loopx turn run-once`.
+
+The generated `host_contract` states that activation happens once, the goal
+runtime owns continuation, the lifecycle scope is the registered Goal until
+terminal, phase handoff is not allowed, host session state is
+non-authoritative, and the LoopX Turn driver is not required. A bounded
+delivery segment is progress inside that Goal, not permission to replace it
+with a successor host Goal after screening, implementation, review, or another
+ordinary phase transition. Durable policy remains in current `quota
+should-run.interaction_contract`, active state, todos, vision, and writeback.
+
+For `--runtime-profile ark_managed_agent_goal`, the same quota read also emits
+`scheduler_hint.goal_runtime_continuation` with schema
+`goal_runtime_continuation_v0`. Its disposition is `continue_now`, `defer`, or
+`complete`. A deferred result includes a bounded `recheck_after_seconds` and a
+typed `wake_policy=state_change_or_deadline`: the host reruns quota when a
+durable frontier write changes the sibling `scheduler_hint.reset_policy`
+identity, or no later than the recheck deadline. The continuation packet does
+not duplicate that identity or `scheduler_hint.reason_code`; their source refs
+are declared by the Host contract. The deadline makes a due monitor runnable
+even without a push signal; provider-specific CI/review observation remains
+owned by its capability connector. This is the machine continuation contract.
+The Goal prompt is not rewritten to teach waiting policy, and the model is not
+used as a mechanical polling loop.
+
+The state identity includes the selected Todo id, action, target, claim owner,
+and capability binding ref. Switching work or admission authority therefore
+wakes the Goal even when the rendered recommendation is unchanged; diagnostic
+notes and other non-contract detail do not create a wakeup.
+
+`defer` is a whole-frontier decision, not a per-PR wait. A quiet CI/review
+monitor remains auxiliary context while any independent advancement todo is
+runnable, so that mixed frontier projects `continue_now`. Only a frontier with
+no executable advancement or due monitor may enter the deferred wake policy.
+
+A dependent work step may begin only after material upstream results have
+crossed the durable boundary: update the current todo evidence and the next
+executable todo with any scope, acceptance, or non-goal delta, then refresh
+state and read back quota. Chat/model summaries are not durable state.
+
+Runtime capabilities discovered after activation do not regenerate the Goal
+prompt. `quota should-run` returns the existing
+`runtime_capability_reentry_v0` packet in
+`interaction_contract.cli_channel.runtime_capability_reentry` and projects the
+same packet near the beginning of JSON output as
+`runtime_capability_reentry`. The early copy prevents bounded tool-result
+capture from hiding the canonical packet behind large diagnostics.
+
+Every candidate still requires a successful real-callsite observation before
+the generated re-entry command may declare the capability. Follow-up
+`next_cli_actions` inherit verified session capabilities; LoopX does not
+persist the observation as a durable permission grant.
+
+Issue-fix qualification on this host uses a staged evidence contract. A
+validated patch proves the worker path, while Goal satisfaction must be read
+from the host separately. See
+[`ark-managed-agent-issue-fix-qualification-v0`](ark-managed-agent-issue-fix-qualification-v0.md).
+
+Pause, replacement-session, and ambiguous-failure qualification is defined in
+[`ark-managed-agent-goal-continuity-qualification-v0`](ark-managed-agent-goal-continuity-qualification-v0.md).
+In particular, a surviving session id or a present Goal journal is not enough
+to claim recovery; the replacement host must reconstruct the LoopX frontier
+and the Goal runtime must prove journal rehydration without duplicate effects.
+
 ## Lifecycle Reads
 
 Host integrations should expose read methods that map directly to CLI reads:

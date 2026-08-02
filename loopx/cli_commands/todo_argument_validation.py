@@ -18,6 +18,7 @@ TODO_OPTION_FIELDS = (
     ("--authority-reason", "authority_reason"),
     ("--task-class", "task_class"),
     ("--action-kind", "action_kind"),
+    ("--capability-binding-ref", "capability_binding_ref"),
     ("--task-repository", "task_repository"),
     ("--continuation-policy", "continuation_policy"),
     ("--required-write-scope", "required_write_scopes"),
@@ -28,6 +29,7 @@ TODO_OPTION_FIELDS = (
     ("--clear-explore-result-node-refs", "clear_explore_result_node_refs"),
     ("--decision-scope", "decision_scope"),
     ("--required-decision-scope", "required_decision_scopes"),
+    ("--decision-outcome", "decision_outcome"),
     ("--claimed-by", "claimed_by"),
     ("--bound-agent", "bound_agent"),
     ("--goal-bound", "goal_bound"),
@@ -41,7 +43,7 @@ TODO_OPTION_FIELDS = (
     ("--successor-todo-id", "successor_todo_ids"),
     ("--resume-when", "resume_when"),
     ("--clear-resume-when", "clear_resume_when"),
-    ("--monitor-target-key", "monitor_target_key"),
+    ("--target-key", "monitor_target_key"),
     ("--cadence", "cadence"),
     ("--next-due-at", "next_due_at"),
     ("--expires-at", "expires_at"),
@@ -65,6 +67,63 @@ TODO_OPTION_FIELDS = (
     ("--state-file", "state_file"),
     ("--execute", "execute"),
 )
+
+_TODO_UPDATE_MUTABLE_FIELDS = (
+    "text", "followups", "status", "note", "evidence", "reason", "task_class",
+    "action_kind", "task_repository", "continuation_policy", "required_write_scopes",
+    "required_capabilities", "target_capabilities", "capability_gap_status",
+    "explore_result_node_refs", "clear_explore_result_node_refs", "decision_scope",
+    "required_decision_scopes", "claimed_by", "bound_agent", "goal_bound",
+    "blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents",
+    "global_gate", "clear_global_gate", "unblocks_todo_id", "successor_todo_ids",
+    "resume_when", "clear_resume_when", "no_follow_up", "monitor_target_key",
+    "cadence", "next_due_at", "expires_at", "clear_claim",
+)
+
+_TODO_UPDATE_UNSUPPORTED_FIELDS = (
+    (
+        "decision_outcome",
+        "todo update does not accept --decision-outcome; use todo complete",
+    ),
+    (
+        "followups",
+        "todo update does not support --follow-up; use `todo capture-followups`",
+    ),
+    ("next_claimed_by", "todo update does not support --next-claimed-by"),
+    (
+        "next_task_repository",
+        "todo update does not support --next-task-repository",
+    ),
+    (
+        "next_required_capabilities",
+        "todo update does not support --next-required-capability",
+    ),
+    (
+        "next_continuation_policy",
+        "todo update does not support --next-continuation-policy",
+    ),
+    ("next_excluded_agents", "todo update does not support --next-excluded-agent"),
+    ("self_merged", "todo update does not support --self-merged"),
+)
+
+_TODO_ADD_INITIAL_RULES = (
+    ("decision_outcome", True, "does not accept --decision-outcome; record it on completion"),
+    ("followups", True, "does not support --follow-up; use `todo capture-followups`"),
+    ("role", False, "requires --role"),
+    ("text", False, "requires --text"),
+    ("clear_claim", True, "accepts --claimed-by but not --clear-claim"),
+    (
+        "clear_explore_result_node_refs",
+        True,
+        "accepts --explore-result-node-ref but not --clear-explore-result-node-refs",
+    ),
+)
+_TODO_ADD_UNSUPPORTED_FIELDS = (
+    "next_claimed_by", "next_task_repository", "next_required_capabilities",
+    "next_continuation_policy", "next_excluded_agents", "clear_excluded_agents",
+    "clear_blocks_agent", "self_merged", "no_follow_up",
+)
+_TODO_OPTION_FLAGS = {field: flag for flag, field in TODO_OPTION_FIELDS}
 
 
 def register_todo_linkage_arguments(
@@ -198,6 +257,171 @@ def unsupported_todo_options(
     ]
 
 
+def _validate_todo_option_subset(args: argparse.Namespace, allowed_fields: Iterable[str], error_prefix: str) -> None:
+    unsupported = unsupported_todo_options(args, allowed_fields=allowed_fields)
+    if unsupported:
+        raise ValueError(error_prefix + ", ".join(unsupported))
+
+
+def validate_todo_list_options(args: argparse.Namespace) -> None:
+    _validate_todo_option_subset(
+        args,
+        {"role", "todo_id", "status", "agent_id", "state_file"},
+        "todo list only accepts --goal-id, optional --role, --status, --todo-id, "
+        "--agent-id, --project, --state-file, --dry-run, and --format; unsupported: ",
+    )
+
+
+def validate_todo_add_options(args: argparse.Namespace) -> None:
+    for field, reject_when_present, message in _TODO_ADD_INITIAL_RULES:
+        if bool(getattr(args, field)) is reject_when_present:
+            raise ValueError(f"todo add {message}")
+    for field in _TODO_ADD_UNSUPPORTED_FIELDS:
+        if getattr(args, field):
+            raise ValueError(f"todo add does not support {_TODO_OPTION_FLAGS[field]}")
+    if args.successor_todo_ids:
+        raise ValueError("todo add does not support --successor-todo-id; use todo update/complete to link existing successor work")
+
+
+def validate_todo_claim_options(args: argparse.Namespace) -> None:
+    if not args.todo_id:
+        raise ValueError("todo claim requires --todo-id")
+    if not args.claimed_by:
+        raise ValueError("todo claim requires --claimed-by")
+    if args.clear_claim:
+        raise ValueError(
+            "todo claim requires --claimed-by and does not support --clear-claim"
+        )
+    _validate_todo_option_subset(
+        args,
+        {"role", "todo_id", "claimed_by", "agent_id", "state_file"},
+        "todo claim only accepts --todo-id, --claimed-by, --agent-id, optional --role, "
+        "--project, --state-file, and --dry-run; unsupported: ",
+    )
+
+
+def validate_todo_update_options(args: argparse.Namespace) -> None:
+    if not args.todo_id:
+        raise ValueError("todo update requires --todo-id")
+    if args.claimed_by and args.clear_claim:
+        raise ValueError(
+            "todo update accepts either --claimed-by or --clear-claim, not both"
+        )
+    if args.explore_result_node_refs and args.clear_explore_result_node_refs:
+        raise ValueError(
+            "todo update accepts either --explore-result-node-ref or "
+            "--clear-explore-result-node-refs, not both"
+        )
+    if not any(getattr(args, field) for field in _TODO_UPDATE_MUTABLE_FIELDS):
+        raise ValueError("todo update requires at least one mutable todo field")
+    if args.no_follow_up and not (args.note or args.reason or args.evidence):
+        raise ValueError("--no-follow-up requires --note, --reason, or --evidence")
+    for field, message in _TODO_UPDATE_UNSUPPORTED_FIELDS:
+        if getattr(args, field):
+            raise ValueError(message)
+
+
+def validate_todo_complete_options(args: argparse.Namespace) -> None:
+    if not args.todo_id:
+        raise ValueError("todo complete requires --todo-id")
+    if args.explore_result_node_refs or args.clear_explore_result_node_refs:
+        raise ValueError("todo complete does not update --explore-result-node-ref; use todo update first")
+    if args.claimed_by and args.clear_claim:
+        raise ValueError("todo complete accepts either --claimed-by or --clear-claim, not both")
+    if any(getattr(args, field) for field in ("task_repository", "bound_agent", "goal_bound", "blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "global_gate", "clear_global_gate", "unblocks_todo_id", "resume_when")):
+        raise ValueError("todo complete does not update current todo routing metadata; use todo update first")
+    if any(getattr(args, field) for field in ("monitor_target_key", "cadence", "next_due_at", "expires_at")):
+        raise ValueError("todo complete does not update target or monitor schedule metadata; use todo update before completion")
+    if args.no_follow_up and (args.next_agent_todo or args.next_user_todo):
+        raise ValueError("--no-follow-up cannot be combined with successor todos")
+    if args.no_follow_up and args.successor_todo_ids:
+        raise ValueError("--no-follow-up cannot be combined with successor todos")
+    if args.successor_todo_ids and (args.next_agent_todo or args.next_user_todo):
+        raise ValueError("--successor-todo-id links existing work and cannot be combined with --next-agent-todo or --next-user-todo")
+    if args.no_follow_up and not (args.note or args.evidence):
+        raise ValueError("--no-follow-up requires --note or --evidence")
+    if args.followups:
+        raise ValueError("todo complete does not support --follow-up; use `todo capture-followups`")
+    if args.continuation_policy:
+        raise ValueError("todo complete does not update --continuation-policy; use todo update first")
+    validate_successor_routing_options(args)
+
+
+def validate_todo_supersede_options(args: argparse.Namespace) -> None:
+    if not args.todo_id:
+        raise ValueError("todo supersede requires --todo-id")
+    if args.explore_result_node_refs or args.clear_explore_result_node_refs:
+        raise ValueError("todo supersede does not update --explore-result-node-ref; use todo update first")
+    if args.decision_outcome:
+        raise ValueError("todo supersede does not accept --decision-outcome; use todo complete")
+    if args.claimed_by:
+        raise ValueError("todo supersede does not support --claimed-by; use --next-claimed-by to assign the successor, or omit it to inherit the superseded todo owner when present")
+    if args.clear_claim:
+        raise ValueError("todo supersede does not support --clear-claim")
+    if args.self_merged:
+        raise ValueError("todo supersede does not support --self-merged")
+    if args.no_follow_up:
+        raise ValueError("todo supersede does not support --no-follow-up")
+    if args.followups:
+        raise ValueError("todo supersede does not support --follow-up; use `todo capture-followups`")
+    if args.continuation_policy:
+        raise ValueError("todo supersede does not update --continuation-policy; use todo update first")
+    validate_successor_routing_options(args)
+    if any(getattr(args, field) for field in ("blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "global_gate", "clear_global_gate", "unblocks_todo_id", "resume_when")):
+        raise ValueError("todo supersede does not update current todo routing metadata; use todo update first")
+    if args.successor_todo_ids:
+        raise ValueError("todo supersede does not support --successor-todo-id; use --next-agent-todo or update the source todo before supersede")
+    if any(getattr(args, field) for field in ("monitor_target_key", "cadence", "next_due_at", "expires_at")):
+        raise ValueError("todo supersede does not update target or monitor schedule metadata; use todo update before supersede")
+
+
+def validate_todo_archive_completed_options(args: argparse.Namespace) -> None:
+    checks = (
+        (args.decision_outcome, "todo archive-completed does not support --decision-outcome"),
+        (args.claimed_by or args.clear_claim, "todo archive-completed does not support --claimed-by or --clear-claim"),
+        (any(getattr(args, field) for field in ("clear_blocks_agent", "excluded_agents", "clear_excluded_agents", "next_excluded_agents")), "todo archive-completed does not support executor exclusions"),
+        (args.next_claimed_by, "todo archive-completed does not support --next-claimed-by"),
+        (args.next_task_repository or args.next_required_capabilities, "todo archive-completed does not support successor routing metadata"),
+        (args.self_merged, "todo archive-completed does not support --self-merged"),
+        (args.no_follow_up, "todo archive-completed does not support --no-follow-up"),
+        (args.followups, "todo archive-completed does not support --follow-up; use `todo capture-followups`"),
+        (args.successor_todo_ids, "todo archive-completed does not support --successor-todo-id"),
+    )
+    for triggered, message in checks:
+        if triggered:
+            raise ValueError(message)
+
+
+def validate_todo_suggest_options(args: argparse.Namespace) -> None:
+    _validate_todo_option_subset(
+        args,
+        {"agent_id", "suggestion_sources", "suggestion_limit", "suggestion_trigger"},
+        "todo suggest only accepts --goal-id, optional --project, --agent-id, "
+        "--from, --limit, --trigger, --dry-run, and --format; unsupported: ",
+    )
+
+
+def validate_todo_capture_followups_options(args: argparse.Namespace) -> None:
+    checks = (
+        (args.role, "todo capture-followups always records agent todos; do not pass --role"),
+        (args.claimed_by, "todo capture-followups writes unclaimed todos; do not pass --claimed-by"),
+    )
+    for triggered, message in checks:
+        if triggered:
+            raise ValueError(message)
+    _validate_todo_option_subset(
+        args,
+        {
+            "text", "followups", "evidence", "task_class", "action_kind",
+            "continuation_policy", "required_write_scopes", "required_capabilities",
+            "target_capabilities", "required_decision_scopes", "state_file",
+        },
+        "todo capture-followups only accepts --goal-id, --follow-up, optional "
+        "--text shorthand, --evidence, routing metadata, --project, --state-file, "
+        "and --dry-run; unsupported: ",
+    )
+
+
 def validate_shared_todo_options(args: argparse.Namespace) -> None:
     agent_id_allowed_for_user_authoring = (
         args.todo_command == "add"
@@ -218,6 +442,10 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
         "complete",
         "supersede",
     }
+    if args.capability_binding_ref and args.todo_command != "add":
+        raise ValueError(
+            "--capability-binding-ref is immutable and supported only by todo add"
+        )
     if args.authority_reason and not authority_reason_allowed:
         raise ValueError(
             "--authority-reason is supported only by todo update/complete/supersede"
@@ -271,8 +499,10 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
 def validate_capability_gap_options(args: argparse.Namespace) -> None:
     if not args.capability_gap_status:
         return
-    if args.todo_command not in {"add", "update"}:
-        raise ValueError("--capability-gap-status is supported only by todo add/update")
+    if args.todo_command not in {"add", "update", "complete"}:
+        raise ValueError(
+            "--capability-gap-status is supported only by todo add/update/complete"
+        )
     if args.role != "agent":
         raise ValueError("--capability-gap-status requires --role agent")
     if not args.target_capabilities:

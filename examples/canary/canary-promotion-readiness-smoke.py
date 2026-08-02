@@ -5,9 +5,9 @@ This command is a preflight for promoting the live checkout into the default
 local release snapshot. It validates the public boundary, status projections,
 installer wrappers, and dashboard demo-readiness path without mutating the
 installed release. By default, a successful run appends one public-safe
-promotion-readiness evidence event to the LoopX run history so status,
-doctor, and quota guards can clear stale or missing readiness warnings from the
-append-only ledger.
+promotion-readiness evidence event to the runtime release ledger so status,
+doctor, and quota guards can clear stale or missing readiness warnings without
+requiring a project Goal.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DASHBOARD_DIR = REPO_ROOT / "apps" / "presentation" / "dashboard"
 
@@ -26,19 +25,6 @@ COMMON_NODE_PATHS = [
     "/opt/homebrew/bin",
     "/usr/local/bin",
 ]
-DEFAULT_READINESS_GOAL_ID = "loopx-meta"
-DEFAULT_READINESS_AGENT_ID = "codex-product-capability"
-DEFAULT_READINESS_AGENT_LANE = "product_capability_catalog_canary"
-READINESS_CLASSIFICATION = "canary_promotion_readiness_smoke_group"
-READINESS_DELIVERY_OUTCOME = "surface_only"
-READINESS_RECOMMENDED_ACTION = (
-    "Canary promotion-readiness smoke passed; promotion may proceed after doctor/status reports fresh evidence."
-)
-READINESS_RECOMMENDED_ACTION_DASHBOARD_SKIPPED = (
-    "Canary promotion-readiness smoke passed for the installed release boundary; "
-    "dashboard readiness was skipped because apps/presentation/dashboard is not shipped in the release snapshot."
-)
-
 BASE_COMMANDS = [
     (
         "public boundary contract",
@@ -71,30 +57,6 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run checks only; do not append the promotion-readiness evidence event.",
     )
-    parser.add_argument(
-        "--goal-id",
-        default=os.environ.get("LOOPX_GOAL_ID") or DEFAULT_READINESS_GOAL_ID,
-        help=(
-            "Registered goal id used for the readiness evidence writeback. "
-            "Defaults to LOOPX_GOAL_ID or loopx-meta."
-        ),
-    )
-    parser.add_argument(
-        "--agent-id",
-        default=os.environ.get("LOOPX_AGENT_ID") or DEFAULT_READINESS_AGENT_ID,
-        help=(
-            "Registered agent id used for the readiness evidence writeback. "
-            "Defaults to LOOPX_AGENT_ID or codex-product-capability."
-        ),
-    )
-    parser.add_argument(
-        "--agent-lane",
-        default=os.environ.get("LOOPX_AGENT_LANE") or DEFAULT_READINESS_AGENT_LANE,
-        help=(
-            "Public-safe agent lane label used for the readiness evidence writeback. "
-            "Defaults to LOOPX_AGENT_LANE or product_capability_catalog_canary."
-        ),
-    )
     return parser.parse_args()
 
 
@@ -117,44 +79,17 @@ def write_readiness_evidence(
     env: dict[str, str],
     *,
     dashboard_skipped: bool,
-    goal_id: str | None = None,
-    agent_id: str | None = None,
-    agent_lane: str | None = None,
 ) -> None:
-    recommended_action = (
-        READINESS_RECOMMENDED_ACTION_DASHBOARD_SKIPPED
-        if dashboard_skipped
-        else READINESS_RECOMMENDED_ACTION
-    )
-    resolved_agent_id = (
-        agent_id or os.environ.get("LOOPX_AGENT_ID") or DEFAULT_READINESS_AGENT_ID
-    ).strip()
-    resolved_goal_id = (
-        goal_id or os.environ.get("LOOPX_GOAL_ID") or DEFAULT_READINESS_GOAL_ID
-    ).strip()
-    resolved_agent_lane = (
-        agent_lane or os.environ.get("LOOPX_AGENT_LANE") or DEFAULT_READINESS_AGENT_LANE
-    ).strip()
     command = [
         sys.executable,
         "-m",
         "loopx.cli",
-        "refresh-state",
-        "--goal-id",
-        resolved_goal_id,
-        "--classification",
-        READINESS_CLASSIFICATION,
-        "--recommended-action",
-        recommended_action,
-        "--delivery-batch-scale",
-        "multi_surface",
-        "--delivery-outcome",
-        READINESS_DELIVERY_OUTCOME,
+        "promotion-readiness",
+        "record",
+        "--dashboard-readiness",
+        "skipped" if dashboard_skipped else "passed",
+        "--execute",
     ]
-    if resolved_agent_id:
-        command.extend(["--agent-id", resolved_agent_id])
-    if resolved_agent_lane:
-        command.extend(["--agent-lane", resolved_agent_lane])
     run_command(
         "promotion readiness evidence writeback",
         command,
@@ -176,7 +111,11 @@ def dashboard_readiness_plan(
             "command": None,
         }
     if has_dashboard:
-        command = [sys.executable, "examples/dashboard-demo-readiness-smoke.py"]
+        command = [
+            sys.executable,
+            "examples/dashboard-demo-readiness-smoke.py",
+            "--require-dependencies",
+        ]
         if not include_browser:
             command.append("--skip-browser")
         return {
@@ -229,9 +168,6 @@ def main() -> int:
         write_readiness_evidence(
             env,
             dashboard_skipped=dashboard_plan["status"] == "skip",
-            goal_id=args.goal_id,
-            agent_id=args.agent_id,
-            agent_lane=args.agent_lane,
         )
         evidence_suffix = " with evidence writeback"
 

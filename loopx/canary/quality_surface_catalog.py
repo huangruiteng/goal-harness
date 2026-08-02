@@ -46,6 +46,44 @@ def _deferred(*, owner: str, rationale: str) -> dict[str, Any]:
 
 QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
     {
+        "surface_id": "change-quality-exact-receipt",
+        "title": "Change-quality exact-scope receipt integrity",
+        "risk": "high",
+        "canary_profile_id": "change-quality-exact-receipt",
+        "owner_paths": [
+            "loopx/capabilities/change_quality/policy.py",
+            "loopx/capabilities/change_quality/receipt.py",
+            "loopx/capabilities/change_quality/scope.py",
+        ],
+        "semantic_oracle": {
+            "source_kind": "specification",
+            "refs": ["docs/capabilities/change-quality/README.md"],
+            "independence_rationale": (
+                "The public policy defines independent safe-fix and strict-receipt "
+                "controls plus exact final-diff identity before implementation hashing "
+                "and receipt validation are exercised."
+            ),
+        },
+        "layers": {
+            "unit_contract": _covered(
+                "tests/capabilities/test_change_quality.py"
+            ),
+            "durable_smoke": _covered(
+                "examples/change-quality-qualification-smoke.py"
+            ),
+            "catalog_canary": _covered("change-quality-exact-receipt"),
+            "host_upgrade": _covered("examples/install-local-smoke.py"),
+            "model_behavior": _not_applicable(
+                "This catalogued surface proves deterministic scope and receipt integrity; "
+                "reviewer competence remains a provider responsibility and a receipt is "
+                "not proof that every defect was found."
+            ),
+            "release_gate": _covered(
+                "loopx canary premerge --profile change-quality-exact-receipt"
+            ),
+        },
+    },
+    {
         "surface_id": "interaction-scheduler-authority",
         "title": "Interaction contract and scheduler authority",
         "risk": "high",
@@ -423,6 +461,226 @@ def _repo_path_ref(value: str) -> str | None:
     return value.split("#", 1)[0]
 
 
+def _finding(code: str, *surface_id: str, **details: Any) -> dict[str, Any]:
+    if surface_id:
+        details = {"surface_id": surface_id[0], **details}
+    return {"code": code, **details}
+
+
+def _missing_repository_references(
+    refs: Iterable[str],
+    repo_root: Path | None,
+    surface_id: str,
+    ref_role: str,
+    *,
+    raw_paths: bool = False,
+) -> list[dict[str, Any]]:
+    if repo_root is None:
+        return []
+    return [
+        _finding("missing_repository_reference", surface_id, ref=ref, ref_role=ref_role)
+        for ref in refs
+        if (repo_ref := ref if raw_paths else _repo_path_ref(ref))
+        and not (repo_root / repo_ref).exists()
+    ]
+
+
+def _catalog_identity_drift(
+    entry_ids: Iterable[str],
+    entry_profile_ids: Iterable[str],
+    high_risk_profile_ids: Iterable[str],
+) -> list[dict[str, Any]]:
+    identity_fields = (
+        (entry_ids, "surface_id"),
+        (entry_profile_ids, "canary_profile_id"),
+    )
+    drift = [
+        _finding(
+            f"duplicate_or_missing_{field}",
+            **{field: value or None, "count": count},
+        )
+        for values, field in identity_fields
+        for value, count in Counter(values).items()
+        if not value or count > 1
+    ]
+    classified_profile_ids = set(entry_profile_ids)
+    drift.extend(
+        _finding("unclassified_high_risk_profile", canary_profile_id=profile_id)
+        for profile_id in high_risk_profile_ids
+        if profile_id not in classified_profile_ids
+    )
+    return drift
+
+
+def _audit_quality_layer(
+    raw_layer: Any,
+    *,
+    layer_id: str,
+    surface_id: str,
+    repo_root: Path | None,
+    layer_counts: dict[str, Counter[str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    layer = dict(raw_layer) if isinstance(raw_layer, Mapping) else {}
+    status = str(layer.get("status") or "")
+    layer_counts[layer_id][status or "missing"] += 1
+    if status not in _LAYER_STATUSES:
+        finding = _finding(
+            "missing_or_invalid_layer_status", surface_id, layer=layer_id
+        )
+        return [finding], [], []
+
+    refs = _text_list(layer.get("refs"))
+    rationale = str(layer.get("rationale") or "").strip()
+    owner = str(layer.get("owner") or "").strip()
+    drift: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+    evidence_refs: list[str] = []
+
+    def add_drift(code: str, **details: Any) -> None:
+        drift.append(_finding(code, surface_id, **details))
+
+    if status == "covered":
+        if not refs:
+            add_drift("covered_layer_has_no_evidence", layer=layer_id)
+        evidence_refs = refs
+        drift.extend(
+            _missing_repository_references(
+                refs,
+                repo_root,
+                surface_id,
+                layer_id,
+            )
+        )
+    elif status == "not_applicable" and not rationale:
+        add_drift("not_applicable_without_rationale", layer=layer_id)
+    elif status == "deferred":
+        if not rationale or not owner:
+            add_drift("deferred_without_owner_or_rationale", layer=layer_id)
+        else:
+            gaps.append(
+                _finding(
+                    "deferred_quality_layer",
+                    surface_id,
+                    layer=layer_id,
+                    owner=owner,
+                    rationale=rationale,
+                )
+            )
+    return drift, gaps, evidence_refs
+
+
+def _audit_quality_surface(
+    entry: Mapping[str, Any],
+    *,
+    profile_ids: set[str],
+    high_risk_profile_ids: set[str],
+    repo_root: Path | None,
+    layer_counts: dict[str, Counter[str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    surface_id = str(entry.get("surface_id") or "")
+    profile_id = str(entry.get("canary_profile_id") or "")
+    drift: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+
+    def add_drift(code: str, **details: Any) -> None:
+        drift.append(_finding(code, surface_id, **details))
+
+    if profile_id not in profile_ids:
+        add_drift("unknown_canary_profile", canary_profile_id=profile_id)
+    elif profile_id not in high_risk_profile_ids:
+        add_drift(
+            "catalog_profile_not_marked_high_risk",
+            canary_profile_id=profile_id,
+        )
+
+    owner_paths = _text_list(entry.get("owner_paths"))
+    if not owner_paths:
+        add_drift("missing_owner_paths")
+    drift.extend(
+        _missing_repository_references(
+            owner_paths,
+            repo_root,
+            surface_id,
+            "owner_path",
+            raw_paths=True,
+        )
+    )
+
+    oracle = entry.get("semantic_oracle")
+    oracle_map = dict(oracle) if isinstance(oracle, Mapping) else {}
+    oracle_kind = str(oracle_map.get("source_kind") or "")
+    oracle_refs = _text_list(oracle_map.get("refs"))
+    if oracle_kind not in _ORACLE_SOURCE_KINDS:
+        add_drift(
+            "invalid_or_implementation_derived_oracle",
+            source_kind=oracle_kind or None,
+        )
+    if (
+        not oracle_refs
+        or not str(oracle_map.get("independence_rationale") or "").strip()
+    ):
+        add_drift("incomplete_semantic_oracle")
+    overlap = sorted(set(owner_paths) & set(oracle_refs))
+    if overlap:
+        add_drift("circular_oracle_uses_product_source", refs=overlap)
+    drift.extend(
+        _missing_repository_references(
+            oracle_refs,
+            repo_root,
+            surface_id,
+            "semantic_oracle",
+        )
+    )
+
+    raw_layers = entry.get("layers")
+    layers = dict(raw_layers) if isinstance(raw_layers, Mapping) else {}
+    unknown_layers = sorted(set(layers) - set(QUALITY_LAYER_IDS))
+    if unknown_layers:
+        add_drift("unknown_quality_layers", layers=unknown_layers)
+
+    evidence_layers: defaultdict[str, list[str]] = defaultdict(list)
+    for layer_id in QUALITY_LAYER_IDS:
+        layer_drift, layer_gaps, evidence_refs = _audit_quality_layer(
+            layers.get(layer_id),
+            layer_id=layer_id,
+            surface_id=surface_id,
+            repo_root=repo_root,
+            layer_counts=layer_counts,
+        )
+        drift.extend(layer_drift)
+        gaps.extend(layer_gaps)
+        for ref in evidence_refs:
+            evidence_layers[ref].append(layer_id)
+
+    for required_layer in DETERMINISTIC_MINIMUM_LAYERS:
+        required_layer_value = layers.get(required_layer)
+        required_status = (
+            required_layer_value.get("status")
+            if isinstance(required_layer_value, Mapping)
+            else None
+        )
+        if required_status != "covered":
+            add_drift(
+                "high_risk_deterministic_minimum_missing",
+                layer=required_layer,
+            )
+    canary_layer = layers.get("catalog_canary")
+    canary_refs = (
+        _text_list(canary_layer.get("refs"))
+        if isinstance(canary_layer, Mapping)
+        else []
+    )
+    if profile_id and profile_id not in canary_refs:
+        add_drift(
+            "catalog_canary_profile_mismatch",
+            canary_profile_id=profile_id,
+        )
+    for ref, layer_ids in sorted(evidence_layers.items()):
+        if len(layer_ids) > 1:
+            add_drift("duplicate_evidence_across_layers", ref=ref, layers=layer_ids)
+    return drift, gaps
+
+
 def build_quality_surface_catalog_audit(
     domain_profiles: Iterable[Mapping[str, Any]],
     *,
@@ -439,239 +697,26 @@ def build_quality_surface_catalog_audit(
     profile_ids = {str(profile.get("id") or "") for profile in profiles}
     entry_ids = [str(entry.get("surface_id") or "") for entry in entries]
     entry_profile_ids = [str(entry.get("canary_profile_id") or "") for entry in entries]
-
-    drift: list[dict[str, Any]] = []
+    drift = _catalog_identity_drift(
+        entry_ids,
+        entry_profile_ids,
+        high_risk_profile_ids,
+    )
     gaps: list[dict[str, Any]] = []
     layer_counts: dict[str, Counter[str]] = {
         layer_id: Counter() for layer_id in QUALITY_LAYER_IDS
     }
-
-    for surface_id, count in Counter(entry_ids).items():
-        if not surface_id or count > 1:
-            drift.append(
-                {
-                    "code": "duplicate_or_missing_surface_id",
-                    "surface_id": surface_id or None,
-                    "count": count,
-                }
-            )
-    for profile_id, count in Counter(entry_profile_ids).items():
-        if not profile_id or count > 1:
-            drift.append(
-                {
-                    "code": "duplicate_or_missing_canary_profile_id",
-                    "canary_profile_id": profile_id or None,
-                    "count": count,
-                }
-            )
-
-    classified_profile_ids = set(entry_profile_ids)
-    for profile_id in high_risk_profile_ids:
-        if profile_id not in classified_profile_ids:
-            drift.append(
-                {
-                    "code": "unclassified_high_risk_profile",
-                    "canary_profile_id": profile_id,
-                }
-            )
-
     high_risk_set = set(high_risk_profile_ids)
     for entry in entries:
-        surface_id = str(entry.get("surface_id") or "")
-        profile_id = str(entry.get("canary_profile_id") or "")
-        if profile_id not in profile_ids:
-            drift.append(
-                {
-                    "code": "unknown_canary_profile",
-                    "surface_id": surface_id,
-                    "canary_profile_id": profile_id,
-                }
-            )
-        elif profile_id not in high_risk_set:
-            drift.append(
-                {
-                    "code": "catalog_profile_not_marked_high_risk",
-                    "surface_id": surface_id,
-                    "canary_profile_id": profile_id,
-                }
-            )
-
-        owner_paths = _text_list(entry.get("owner_paths"))
-        if not owner_paths:
-            drift.append({"code": "missing_owner_paths", "surface_id": surface_id})
-        if repo_root is not None:
-            for owner_path in owner_paths:
-                if not (repo_root / owner_path).exists():
-                    drift.append(
-                        {
-                            "code": "missing_repository_reference",
-                            "surface_id": surface_id,
-                            "ref": owner_path,
-                            "ref_role": "owner_path",
-                        }
-                    )
-
-        oracle = entry.get("semantic_oracle")
-        oracle_map = dict(oracle) if isinstance(oracle, Mapping) else {}
-        oracle_kind = str(oracle_map.get("source_kind") or "")
-        oracle_refs = _text_list(oracle_map.get("refs"))
-        if oracle_kind not in _ORACLE_SOURCE_KINDS:
-            drift.append(
-                {
-                    "code": "invalid_or_implementation_derived_oracle",
-                    "surface_id": surface_id,
-                    "source_kind": oracle_kind or None,
-                }
-            )
-        if not oracle_refs or not str(
-            oracle_map.get("independence_rationale") or ""
-        ).strip():
-            drift.append(
-                {"code": "incomplete_semantic_oracle", "surface_id": surface_id}
-            )
-        overlap = sorted(set(owner_paths) & set(oracle_refs))
-        if overlap:
-            drift.append(
-                {
-                    "code": "circular_oracle_uses_product_source",
-                    "surface_id": surface_id,
-                    "refs": overlap,
-                }
-            )
-        if repo_root is not None:
-            for oracle_ref in oracle_refs:
-                repo_ref = _repo_path_ref(oracle_ref)
-                if repo_ref and not (repo_root / repo_ref).exists():
-                    drift.append(
-                        {
-                            "code": "missing_repository_reference",
-                            "surface_id": surface_id,
-                            "ref": oracle_ref,
-                            "ref_role": "semantic_oracle",
-                        }
-                    )
-
-        raw_layers = entry.get("layers")
-        layers = dict(raw_layers) if isinstance(raw_layers, Mapping) else {}
-        unknown_layers = sorted(set(layers) - set(QUALITY_LAYER_IDS))
-        if unknown_layers:
-            drift.append(
-                {
-                    "code": "unknown_quality_layers",
-                    "surface_id": surface_id,
-                    "layers": unknown_layers,
-                }
-            )
-        evidence_layers: defaultdict[str, list[str]] = defaultdict(list)
-        for layer_id in QUALITY_LAYER_IDS:
-            raw_layer = layers.get(layer_id)
-            layer = dict(raw_layer) if isinstance(raw_layer, Mapping) else {}
-            status = str(layer.get("status") or "")
-            layer_counts[layer_id][status or "missing"] += 1
-            if status not in _LAYER_STATUSES:
-                drift.append(
-                    {
-                        "code": "missing_or_invalid_layer_status",
-                        "surface_id": surface_id,
-                        "layer": layer_id,
-                    }
-                )
-                continue
-            refs = _text_list(layer.get("refs"))
-            rationale = str(layer.get("rationale") or "").strip()
-            owner = str(layer.get("owner") or "").strip()
-            if status == "covered":
-                if not refs:
-                    drift.append(
-                        {
-                            "code": "covered_layer_has_no_evidence",
-                            "surface_id": surface_id,
-                            "layer": layer_id,
-                        }
-                    )
-                for ref in refs:
-                    evidence_layers[ref].append(layer_id)
-                    repo_ref = _repo_path_ref(ref)
-                    if (
-                        repo_root is not None
-                        and repo_ref
-                        and not (repo_root / repo_ref).exists()
-                    ):
-                        drift.append(
-                            {
-                                "code": "missing_repository_reference",
-                                "surface_id": surface_id,
-                                "ref": ref,
-                                "ref_role": layer_id,
-                            }
-                        )
-            elif status == "not_applicable" and not rationale:
-                drift.append(
-                    {
-                        "code": "not_applicable_without_rationale",
-                        "surface_id": surface_id,
-                        "layer": layer_id,
-                    }
-                )
-            elif status == "deferred":
-                if not rationale or not owner:
-                    drift.append(
-                        {
-                            "code": "deferred_without_owner_or_rationale",
-                            "surface_id": surface_id,
-                            "layer": layer_id,
-                        }
-                    )
-                else:
-                    gaps.append(
-                        {
-                            "code": "deferred_quality_layer",
-                            "surface_id": surface_id,
-                            "layer": layer_id,
-                            "owner": owner,
-                            "rationale": rationale,
-                        }
-                    )
-
-        for required_layer in DETERMINISTIC_MINIMUM_LAYERS:
-            required_layer_value = layers.get(required_layer)
-            required_status = (
-                required_layer_value.get("status")
-                if isinstance(required_layer_value, Mapping)
-                else None
-            )
-            if required_status != "covered":
-                drift.append(
-                    {
-                        "code": "high_risk_deterministic_minimum_missing",
-                        "surface_id": surface_id,
-                        "layer": required_layer,
-                    }
-                )
-        canary_layer = layers.get("catalog_canary")
-        canary_refs = (
-            _text_list(canary_layer.get("refs"))
-            if isinstance(canary_layer, Mapping)
-            else []
+        entry_drift, entry_gaps = _audit_quality_surface(
+            entry,
+            profile_ids=profile_ids,
+            high_risk_profile_ids=high_risk_set,
+            repo_root=repo_root,
+            layer_counts=layer_counts,
         )
-        if profile_id and profile_id not in canary_refs:
-            drift.append(
-                {
-                    "code": "catalog_canary_profile_mismatch",
-                    "surface_id": surface_id,
-                    "canary_profile_id": profile_id,
-                }
-            )
-        for ref, layer_ids in sorted(evidence_layers.items()):
-            if len(layer_ids) > 1:
-                drift.append(
-                    {
-                        "code": "duplicate_evidence_across_layers",
-                        "surface_id": surface_id,
-                        "ref": ref,
-                        "layers": layer_ids,
-                    }
-                )
+        drift.extend(entry_drift)
+        gaps.extend(entry_gaps)
 
     normalized_layer_counts = {
         layer_id: dict(sorted(counts.items()))

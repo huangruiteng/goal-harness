@@ -4,10 +4,9 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .benchmark_adapters.skillsbench_verifier_bootstrap import (
+from .benchmarks.read_models.skillsbench_verifier_attribution import (
     apply_skillsbench_verifier_bootstrap_missing_score_attribution,
 )
-from .benchmark_core import lifecycle as _benchmark_lifecycle
 from .control_plane import compact_control_plane_policy
 from .control_plane.status_collection import (
     StatusCollectionContext,
@@ -169,9 +168,8 @@ from .benchmarks.read_models.benchmark_projection import (
     benchmark_run_source as _benchmark_run_source_read_model,
     build_benchmark_solution_quality_signals,
     compact_benchmark_run_core as _compact_benchmark_run_core_read_model,
-)
-from .benchmarks.read_models.benchmark_event_timeline import (
-    compact_benchmark_case_event_timeline,
+    compact_benchmark_run_trials as _compact_benchmark_run_trials_read_model,
+    compact_benchmark_run_validation as _compact_benchmark_run_validation_read_model,
 )
 from .benchmarks.read_models.benchmark_comparison import (
     benchmark_comparison_decision_note as _benchmark_comparison_decision_note_read_model,
@@ -189,17 +187,15 @@ from .benchmarks.read_models.benchmark_learning_ledger import (
     compact_benchmark_learning_ledger,
 )
 from .benchmarks.read_models.benchmark_result import compact_benchmark_result
-from .benchmarks.read_models.benchmark_lifecycle_contracts import (
-    compact_app_server_goal_round_semantics as _compact_app_server_goal_round_semantics,
-    compact_native_goal_worker_contract as _compact_native_goal_worker_contract,
-    compact_product_mode_lifecycle_contract as _compact_product_mode_lifecycle_contract,
+from .benchmarks.read_models.benchmark_run_execution_contract import (
+    compact_benchmark_run_execution_contract as _compact_benchmark_run_execution_contract,
 )
-from .benchmarks.read_models.benchmark_run_metrics import (
-    compact_benchmark_overhead_attribution_counters as _compact_benchmark_overhead_attribution_counters,
-    compact_benchmark_round_reward_trace as _compact_benchmark_round_reward_trace,
+from .benchmarks.read_models.benchmark_run_post_execution import (
+    compact_benchmark_run_post_execution_metadata as _compact_benchmark_run_post_execution_metadata,
+    repair_product_mode_lifecycle_missing_attribution as _repair_product_mode_lifecycle_missing_attribution_read_model,
 )
-from .benchmarks.read_models.goal_start_control_score import (
-    compact_goal_start_product_mode_control_score,
+from .benchmarks.read_models.benchmark_run_pre_execution import (
+    compact_benchmark_run_pre_execution_metadata as _compact_benchmark_run_pre_execution_metadata,
 )
 from .control_plane.runtime.public_safety import (
     compact_loopx_command_records as _compact_loopx_command_records,
@@ -207,9 +203,10 @@ from .control_plane.runtime.public_safety import (
     public_safe_compact_list,
     public_safe_compact_text,
 )
+from .control_plane.runtime.active_user_assisted_pilot import (
+    compact_active_user_assisted_pilot as _compact_active_user_assisted_pilot_read_model,
+)
 from .control_plane.runtime.run_ingest_health import (
-    compact_environment_setup_failure_context,
-    compact_worker_bridge_outcome,
     worker_bridge_ingest_health_note,
 )
 from .control_plane.runtime.time import parse_timestamp
@@ -408,27 +405,7 @@ MONITOR_DISPLAY_FALLBACK_ACTION = (
 BLOCKING_CLASSIFICATIONS = {
     "blocked_by_safety",
 }
-BENCHMARK_VALIDATION_NEUTRAL_FALSE_FIELDS = {
-    "case_success_claimed",
-    "case_solution_not_required_for_probe",
-    "official_case_success",
-    "official_verifier_validation_present",
-    "native_goal_worker_route",
-    "native_goal_worker_connected",
-    "native_goal_worker_trace_dir_present",
-    "native_goal_worker_public_trace_read",
-    "native_goal_worker_trace_observed",
-    "remote_command_file_bridge_consumed_by_solver",
-    "remote_command_file_bridge_solver_public_trace_read",
-    "loopx_controller_trace_present",
-    "leaderboard_claim_allowed",
-    "official_score_claim_allowed",
-    "probe_contract_result_present",
-    "assisted_collaboration_claim_allowed",
-}
 BENCHMARK_RUN_SCHEMA_VERSION = "benchmark_run_v0"
-ACTIVE_USER_ASSISTED_PILOT_SCHEMA_VERSION = "active_user_assisted_pilot_v0"
-OPERATOR_SIMULATOR_RUN_SCHEMA_VERSION = "operator_simulator_run_v0"
 MAX_BENCHMARK_RUN_TRIALS = 3
 MAX_BENCHMARK_RUN_LIST_ITEMS = 5
 STATUS_CONTRACT_SCHEMA_VERSION = 2
@@ -961,95 +938,6 @@ def _compact_benchmark_interaction_counters(value: Any) -> dict[str, Any]:
     return compact
 
 
-def _repair_product_mode_lifecycle_missing_attribution(
-    compact: dict[str, Any],
-) -> None:
-    contract = compact.get("product_mode_lifecycle_contract")
-    if not isinstance(contract, dict):
-        return
-    if not (
-        contract.get("required") is True
-        and contract.get("satisfied") is True
-        and contract.get("countable_treatment") is True
-    ):
-        return
-    if compact.get("score_failure_attribution") != (
-        "skillsbench_product_mode_lifecycle_missing"
-    ):
-        return
-
-    labels = public_safe_compact_list(
-        compact.get("failure_attribution_labels"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-    )
-    stale_labels = {
-        "skillsbench_product_mode_lifecycle_missing",
-        "skillsbench_product_mode_uncountable_treatment",
-        "skillsbench_case_local_loopx_state_not_observed",
-        "skillsbench_remote_bridge_agent_no_requests",
-        "skillsbench_remote_bridge_agent_operation_trace_missing",
-    }
-    labels = [label for label in labels if label not in stale_labels]
-
-    official_score = compact.get("official_score")
-    counters = compact.get("interaction_counters")
-    if not isinstance(counters, dict):
-        counters = {}
-
-    def positive_counter(field: str) -> int:
-        value = counters.get(field)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-        return 0
-
-    def zero_counter_observed(field: str) -> bool:
-        if field not in counters:
-            return False
-        value = counters.get(field)
-        return isinstance(value, int) and not isinstance(value, bool) and value == 0
-
-    solver_activity_gap = bool(
-        counters.get("product_mode_solver_activity_gap") is True
-        and (
-            counters.get("product_mode_solver_activity_missing_reason")
-            == "missing_task_facing_activity_or_agent_closeout_before_declared_done"
-            or positive_counter("product_mode_solver_activity_gap_count") > 0
-            or zero_counter_observed(
-                "remote_command_file_bridge_agent_task_facing_operation_count"
-            )
-            or zero_counter_observed(
-                "remote_command_file_bridge_agent_todo_closeout_count"
-            )
-        )
-    )
-    if solver_activity_gap:
-        replacement = "skillsbench_product_mode_solver_activity_gap"
-        labels = [
-            label
-            for label in labels
-            if label
-            not in {
-                "official_verifier_solution_failure",
-                "official_score_zero_case_failure",
-            }
-        ]
-    elif isinstance(official_score, (int, float)) and not isinstance(
-        official_score,
-        bool,
-    ) and official_score == 0:
-        replacement = "official_verifier_solution_failure"
-    else:
-        replacement = "none"
-
-    compact["score_failure_attribution"] = replacement
-    if replacement != "none" and replacement not in labels:
-        labels.insert(0, replacement)
-    if labels:
-        compact["failure_attribution_labels"] = labels[:MAX_BENCHMARK_RUN_LIST_ITEMS]
-    else:
-        compact.pop("failure_attribution_labels", None)
-
-
 def _compact_benchmark_preflight_guard(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -1117,413 +1005,6 @@ def _compact_benchmark_preflight_guard(value: Any) -> dict[str, Any]:
     for field in ("required_worker_loopx_cli_call_total_min",):
         if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
             compact[field] = value[field]
-    return compact
-
-
-def _compact_benchmark_runner_prerequisites(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    for field in (
-        "schema_version",
-        "codex_acp_runtime_launch_preflight_stage",
-        "codex_acp_runtime_launch_preflight_status",
-        "agent_execution_mode",
-        "benchflow_run_stage",
-        "benchflow_agent_runtime_layer_status",
-        "benchflow_agent_runtime_layer_mount_target",
-        "loopx_source_mount_status",
-        "loopx_source_mount_target",
-        "codex_app_server_goal_worker_plan_schema",
-        "benchflow_user_loop_recovery_exception_type",
-        "benchflow_user_loop_recovery_stage",
-        "benchflow_intermediate_soft_verify_policy",
-        "benchflow_intermediate_soft_verify_timeout_stage",
-        "benchflow_intermediate_soft_verify_timeout_cleanup_status",
-        "benchflow_intermediate_soft_verify_orphan_cleanup_status",
-        "benchflow_setup_stall_cleanup_status",
-        "codex_api_egress_preflight_status",
-        "codex_api_egress_preflight_error_kind",
-        "codex_api_egress_mode_requested",
-        "codex_api_egress_mode_resolved",
-        "codex_api_reverse_tunnel_proxy_source",
-        "codex_api_reverse_tunnel_proxy_scheme",
-        "codex_api_reverse_tunnel_proxy_endpoint_kind",
-        "loopx_runner_source_fingerprint_status",
-        "loopx_runner_source_first_blocker",
-        "loopx_runner_source_git_head",
-        "loopx_runner_source_expected_git_head",
-        "loopx_runner_source_error_kind",
-        "remote_command_file_bridge_consumption_status",
-        "remote_command_file_bridge_agent_operation_trace_status",
-        "remote_command_file_bridge_driver_lifecycle_execution_style",
-        "runner_interruption_kind",
-        "runner_interruption_status",
-    ):
-        text = public_safe_compact_text(value.get(field), limit=180)
-        if text:
-            compact[field] = text
-    for field in (
-        "codex_acp_runtime_container_bootstrap",
-        "codex_acp_runtime_dependency_preflight",
-        "codex_acp_runtime_dependency_setup_skipped",
-        "codex_acp_runtime_launch_preflight",
-        "codex_acp_runtime_launch_preflight_raw_logs_read",
-        "container_codex_acp_install_skipped",
-        "benchflow_agent_install_skipped_by_runtime_layer",
-        "preinstalled_benchflow_agent_runtime_required",
-        "benchflow_agent_runtime_layer_ready",
-        "benchflow_agent_runtime_mount_injected",
-        "benchflow_agent_runtime_mount_read_only",
-        "benchflow_agent_runtime_mount_source_recorded",
-        "host_local_acp_launch",
-        "remote_command_file_bridge_materialized",
-        "remote_command_file_bridge_command_configured",
-        "remote_command_file_bridge_agent_command_configured",
-        "remote_command_file_bridge_agent_command_instrumented",
-        "remote_command_file_bridge_probe_command_configured",
-        "remote_command_file_bridge_solver_wiring_configured",
-        "remote_command_file_bridge_consumed_by_solver",
-        "remote_command_file_bridge_solver_trace_dir_present",
-        "remote_command_file_bridge_solver_public_trace_read",
-        "remote_command_file_bridge_solver_raw_material_recorded",
-        "remote_command_file_bridge_agent_operation_trace_required",
-        "remote_command_file_bridge_agent_operation_trace_satisfied",
-        "remote_command_file_bridge_agent_operation_trace_present",
-        "remote_command_file_bridge_driver_lifecycle_trace_present",
-        "remote_command_file_bridge_driver_lifecycle_raw_material_recorded",
-        "codex_app_server_goal_worker_adapter_present",
-        "codex_app_server_goal_worker_turn_start_required",
-        "codex_app_server_goal_worker_goal_get_required",
-        "codex_app_server_goal_worker_runner_integration_ready",
-        "benchflow_user_loop_final_verify_recovery_enabled",
-        "benchflow_user_loop_final_verify_recovery_triggered",
-        "benchflow_user_loop_recovery_after_agent_activity",
-        "benchflow_user_loop_recovery_raw_error_recorded",
-        "benchflow_user_loop_recovery_preserved_final_verify",
-        "benchflow_intermediate_soft_verify_final_only",
-        "benchflow_intermediate_soft_verify_raw_output_recorded",
-        "benchflow_intermediate_soft_verify_timeout_enabled",
-        "benchflow_intermediate_soft_verify_timeout_triggered",
-        "benchflow_intermediate_soft_verify_timeout_raw_output_recorded",
-        "benchflow_intermediate_soft_verify_timeout_cleanup_requested",
-        "benchflow_intermediate_soft_verify_timeout_cleanup_raw_logs_read",
-        "benchflow_intermediate_soft_verify_orphan_cleanup_requested",
-        "benchflow_intermediate_soft_verify_orphan_cleanup_raw_logs_read",
-        "goal_start_product_mode",
-        "goal_start_plan_required",
-        "goal_start_guided_command_required",
-        "goal_start_agent_authored_plan_required",
-        "goal_start_host_preseed_forbidden",
-        "goal_start_selected_p0_lifecycle_required",
-        "verifier_failure_feedback_todo_route",
-        "verifier_failure_feedback_forwarded_to_agent",
-        "verifier_failure_todo_required",
-        "benchflow_verifier_prep_timeout_override_enabled",
-        "benchflow_verifier_prep_timeout_raw_command_recorded",
-        "benchflow_final_verifier_timeout_enabled",
-        "benchflow_final_verifier_timeout_triggered",
-        "benchflow_final_verifier_timeout_raw_command_recorded",
-        "benchflow_final_verifier_timeout_raw_output_recorded",
-        "loopx_source_mount_requested",
-        "loopx_source_mount_ready",
-        "loopx_source_mount_injected",
-        "loopx_source_mount_read_only",
-        "loopx_source_mount_source_recorded",
-        "benchflow_setup_stall_timeout_enabled",
-        "benchflow_setup_stall_timeout_triggered",
-        "benchflow_setup_stall_raw_logs_read",
-        "benchflow_setup_stall_before_agent_lifecycle",
-        "benchflow_agent_install_started",
-        "codex_api_egress_preflight_required",
-        "codex_api_egress_preflight_ready",
-        "codex_api_reverse_tunnel_required",
-        "codex_api_reverse_tunnel_proxy_configured",
-        "codex_api_reverse_tunnel_proxy_url_recorded",
-        "benchflow_setup_stall_task_cancel_requested",
-        "benchflow_setup_stall_task_cancel_acknowledged",
-        "benchflow_setup_stall_task_cancel_timeout",
-        "benchflow_setup_stall_cleanup_requested",
-        "benchflow_setup_stall_cleanup_raw_logs_read",
-        "runner_interrupted_before_official_result",
-        "runner_interruption_compact_closeout_expected",
-        "runner_interruption_raw_material_recorded",
-        "loopx_runner_source_git_head_recorded",
-        "loopx_runner_source_expected_git_head_recorded",
-        "loopx_runner_source_matches_expected",
-        "loopx_runner_source_path_recorded",
-        "loopx_runner_source_raw_git_output_recorded",
-    ):
-        if isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    lifecycle = _benchmark_lifecycle.compact_benchmark_canonical_lifecycle(
-        value.get("benchmark_canonical_lifecycle")
-    )
-    if lifecycle:
-        compact["benchmark_canonical_lifecycle"] = lifecycle
-    for field in (
-        "codex_acp_runtime_launch_preflight_rc",
-        "benchflow_user_loop_recovery_round",
-        "benchflow_user_loop_recovery_delta_events",
-        "benchflow_user_loop_recovery_delta_tool_calls",
-        "benchflow_intermediate_soft_verify_call_count",
-        "benchflow_intermediate_soft_verify_skipped_count",
-        "benchflow_intermediate_soft_verify_timeout_sec",
-        "benchflow_intermediate_soft_verify_timeout_override_count",
-        "benchflow_intermediate_soft_verify_timeout_cleanup_container_count",
-        "benchflow_intermediate_soft_verify_timeout_cleanup_match_count",
-        "benchflow_intermediate_soft_verify_timeout_cleanup_term_sent_count",
-        "benchflow_intermediate_soft_verify_timeout_cleanup_kill_sent_count",
-        "benchflow_intermediate_soft_verify_timeout_cleanup_alive_after_count",
-        "benchflow_intermediate_soft_verify_orphan_cleanup_container_count",
-        "benchflow_intermediate_soft_verify_orphan_cleanup_match_count",
-        "benchflow_intermediate_soft_verify_orphan_cleanup_term_sent_count",
-        "benchflow_intermediate_soft_verify_orphan_cleanup_kill_sent_count",
-        "benchflow_intermediate_soft_verify_orphan_cleanup_alive_after_count",
-        "benchflow_verifier_prep_timeout_sec",
-        "benchflow_final_verifier_timeout_sec",
-        "benchflow_final_verifier_timeout_override_count",
-        "benchflow_final_verifier_outer_timeout_override_count",
-        "benchflow_verifier_prep_timeout_override_count",
-        "benchflow_verify_prep_timeout_override_count",
-        "benchflow_soft_verify_prep_timeout_override_count",
-        "benchflow_setup_stall_timeout_requested_sec",
-        "benchflow_setup_stall_timeout_sec",
-        "codex_api_reverse_tunnel_proxy_endpoint_port",
-        "benchflow_setup_stall_cleanup_match_count",
-        "benchflow_setup_stall_cleanup_term_sent_count",
-        "benchflow_setup_stall_cleanup_kill_sent_count",
-        "benchflow_setup_stall_cleanup_alive_after_count",
-        "goal_start_planned_todo_count_expected",
-        "remote_command_file_bridge_solver_trace_count",
-        "remote_command_file_bridge_solver_probe_ready_count",
-        "remote_command_file_bridge_solver_operation_count",
-        "remote_command_file_bridge_agent_operation_trace_count",
-        "remote_command_file_bridge_agent_request_count",
-        "remote_command_file_bridge_agent_success_count",
-        "remote_command_file_bridge_agent_failure_count",
-        "remote_command_file_bridge_agent_loopx_cli_call_count",
-        "remote_command_file_bridge_agent_loopx_state_read_count",
-        "remote_command_file_bridge_agent_loopx_state_write_count",
-        "remote_command_file_bridge_agent_task_facing_operation_count",
-        "remote_command_file_bridge_agent_todo_closeout_count",
-        "remote_command_file_bridge_agent_refresh_state_count",
-        "remote_command_file_bridge_agent_quota_spend_slot_count",
-        "remote_command_file_bridge_driver_lifecycle_trace_count",
-        "remote_command_file_bridge_driver_lifecycle_checkpoint_count",
-        "remote_command_file_bridge_driver_lifecycle_request_count",
-        "remote_command_file_bridge_driver_lifecycle_success_count",
-        "remote_command_file_bridge_driver_lifecycle_failure_count",
-        "remote_command_file_bridge_driver_lifecycle_loopx_cli_call_count",
-        "remote_command_file_bridge_driver_lifecycle_loopx_state_read_count",
-        "remote_command_file_bridge_driver_lifecycle_loopx_state_write_count",
-    ):
-        if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    for field in (
-        "remote_command_file_bridge_agent_operation_counts",
-        "remote_command_file_bridge_agent_loopx_subcommand_counts",
-        "remote_command_file_bridge_agent_successful_loopx_subcommand_counts",
-        "remote_command_file_bridge_driver_lifecycle_command_counts",
-        "remote_command_file_bridge_driver_lifecycle_returncode_counts",
-    ):
-        calls = _compact_numeric_map(value.get(field))
-        if calls:
-            compact[field] = calls
-    planned_todo_ids = public_safe_compact_list(value.get("planned_todo_ids"), limit=8)
-    if planned_todo_ids:
-        compact["planned_todo_ids"] = planned_todo_ids
-    planned_todo_texts = public_safe_compact_list(
-        value.get("planned_todo_texts_public_safe"),
-        limit=8,
-    )
-    if planned_todo_texts:
-        compact["planned_todo_texts_public_safe"] = planned_todo_texts
-    command_records = _compact_loopx_command_records(
-        value.get("remote_command_file_bridge_agent_successful_loopx_command_records")
-    )
-    if command_records:
-        compact[
-            "remote_command_file_bridge_agent_successful_loopx_command_records"
-        ] = command_records
-    return compact
-
-
-def _project_benchmark_runner_prerequisites(
-    compact: dict[str, Any],
-    source: dict[str, Any],
-) -> None:
-    runner_prerequisites = _compact_benchmark_runner_prerequisites(
-        source.get("runner_prerequisites")
-    )
-    if runner_prerequisites:
-        compact["runner_prerequisites"] = runner_prerequisites
-    live_worker_phase = _benchmark_lifecycle.compact_benchmark_live_worker_phase_from_run(
-        source
-    )
-    if live_worker_phase:
-        compact["benchmark_live_worker_phase"] = live_worker_phase
-
-
-def _compact_benchmark_task_staging(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    for field in ("schema_version",):
-        text = public_safe_compact_text(value.get(field), limit=180)
-        if text:
-            compact[field] = text
-    for field in (
-        "staged",
-        "include_task_skills",
-        "apt_setup_risk_detected",
-        "apt_retry_patch_required",
-        "dockerfile_pip_install_risk_detected",
-        "dockerfile_pip_bootstrap_patch_required",
-        "dockerfile_pip_bootstrap_patch_applied",
-        "dockerfile_package_bootstrap_risk_preflight_blocked",
-        "dockerfile_uv_bootstrap_risk_detected",
-        "dockerfile_uv_bootstrap_mirror_patch_required",
-        "dockerfile_uv_bootstrap_mirror_patch_applied",
-        "dockerfile_uv_bootstrap_pip_fallback_patch_applied",
-        "apt_retry_patch_applied",
-        "apt_risk_preflight_blocked",
-        "bootstrap_light_preflight_blocked",
-        "bootstrap_light_fail_fast_defaulted",
-        "verifier_bootstrap_risk_detected",
-        "verifier_uv_bootstrap_risk_detected",
-        "verifier_uv_bootstrap_mirror_patch_required",
-        "verifier_uv_bootstrap_mirror_patch_applied",
-        "dockerfile_apache_archive_mirror_patch_required",
-        "dockerfile_apache_archive_mirror_patch_applied",
-        "dockerfile_apache_archive_raw_url_recorded",
-        "dockerfile_maven_mirror_patch_required",
-        "dockerfile_maven_mirror_patch_applied",
-        "dockerfile_maven_mirror_raw_url_recorded",
-        "benchmark_egress_proxy_dockerfile_env_patch_required",
-        "benchmark_egress_proxy_dockerfile_env_patch_applied",
-        "benchmark_egress_proxy_dockerfile_java_opts_patch_applied",
-        "benchmark_egress_proxy_dockerfile_env_raw_proxy_recorded",
-        "verifier_bootstrap_risk_preflight_blocked",
-        "verifier_bootstrap_fail_fast_defaulted",
-        "app_skills_mount_patch_applied",
-        "codex_acp_runtime_tools_patch_applied",
-        "task_skills_removed",
-        "original_task_mutated",
-    ):
-        if isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    for field in (
-        "dockerfile_pip_index_host",
-        "bootstrap_light_blocker_kind",
-        "dockerfile_uv_bootstrap_version",
-        "dockerfile_uv_bootstrap_mirror_host",
-        "verifier_uv_bootstrap_version",
-        "verifier_uv_bootstrap_mirror_host",
-        "dockerfile_apache_archive_mirror_host",
-        "dockerfile_maven_mirror_host",
-    ):
-        text = public_safe_compact_text(value.get(field), limit=180)
-        if text:
-            compact[field] = text
-    count = value.get("bootstrap_light_blocking_field_count")
-    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
-        compact["bootstrap_light_blocking_field_count"] = count
-    count = value.get("benchmark_egress_proxy_dockerfile_env_key_count")
-    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
-        compact["benchmark_egress_proxy_dockerfile_env_key_count"] = count
-
-    resource_cap = value.get("resource_cap_patch")
-    if isinstance(resource_cap, dict):
-        compact_resource_cap: dict[str, Any] = {}
-        for field in ("schema_version", "reason"):
-            text = public_safe_compact_text(resource_cap.get(field), limit=180)
-            if text:
-                compact_resource_cap[field] = text
-        for field in ("applied", "original_task_mutated"):
-            if isinstance(resource_cap.get(field), bool):
-                compact_resource_cap[field] = resource_cap[field]
-        for field in ("host_cpus", "requested_cpus", "effective_cpus"):
-            raw = resource_cap.get(field)
-            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-                compact_resource_cap[field] = raw
-        if compact_resource_cap:
-            compact["resource_cap_patch"] = compact_resource_cap
-    return compact
-
-
-def _compact_benchmark_task_setup_preflight(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    for field in (
-        "schema_version",
-        "status",
-        "sandbox",
-        "task_id",
-        "first_blocker",
-        "alternate_source_kind",
-        "canonical_equivalent_status",
-        "registry_source_kind",
-        "registry_source_status",
-        "registry_task_path",
-        "selection_recommendation",
-    ):
-        text = public_safe_compact_text(value.get(field), limit=180)
-        if text:
-            compact[field] = text
-    for field in (
-        "raw_task_text_read",
-        "raw_logs_read",
-        "raw_trajectory_read",
-        "apt_setup_risk_detected",
-        "apt_retry_patch_required",
-        "dockerfile_pip_install_risk_detected",
-        "dockerfile_pip_bootstrap_patch_required",
-        "verifier_present",
-        "verifier_bootstrap_risk_detected",
-        "verifier_uv_bootstrap_risk_detected",
-        "verifier_external_download_risk_detected",
-        "verifier_package_install_risk_detected",
-        "dockerfile_present",
-        "canonical_task_present",
-        "alternate_source_supported_by_runner",
-        "registry_task_present",
-        "registry_task_path_recorded",
-        "registry_excluded",
-        "task_source_path_recorded",
-        "task_source_content_recorded",
-        "bootstrap_light_candidate_eligible",
-    ):
-        if isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    text = public_safe_compact_text(
-        value.get("verifier_uv_bootstrap_version"),
-        limit=180,
-    )
-    if text:
-        compact["verifier_uv_bootstrap_version"] = text
-    nearest_task_ids = public_safe_compact_list(
-        value.get("nearest_canonical_task_ids"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-    )
-    if nearest_task_ids:
-        compact["nearest_canonical_task_ids"] = nearest_task_ids
-    verifier_risk_categories = public_safe_compact_list(
-        value.get("verifier_bootstrap_risk_categories"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-    )
-    if verifier_risk_categories:
-        compact["verifier_bootstrap_risk_categories"] = verifier_risk_categories
-    bootstrap_light_blocking_fields = public_safe_compact_list(
-        value.get("bootstrap_light_blocking_fields"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-    )
-    if bootstrap_light_blocking_fields:
-        compact["bootstrap_light_blocking_fields"] = bootstrap_light_blocking_fields
     return compact
 
 
@@ -2075,311 +1556,6 @@ def _apply_skillsbench_runner_source_fingerprint_compact_projection(
         compose_setup_diagnostic["case_attempt_budget_should_count"] = False
 
 
-def _compact_benchmark_result_discovery(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    for field in (
-        "schema_version",
-        "status",
-        "selection_policy",
-        "tie_breaker",
-        "selected_relative_to_root",
-        "selected_relative_to_job",
-    ):
-        text = public_safe_compact_text(value.get(field), limit=180)
-        if text:
-            compact[field] = text
-    for field in (
-        "candidate_count",
-        "matched_candidate_count",
-        "top_score_candidate_count",
-    ):
-        if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    for field in ("raw_logs_read", "raw_task_text_read", "raw_trajectory_read"):
-        if isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    reasons = public_safe_compact_list(
-        value.get("selection_reasons"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-    )
-    if reasons:
-        compact["selection_reasons"] = reasons
-    return compact
-
-
-def _compact_active_user_assisted_treatment_preflight(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    for field in (
-        "schema_version",
-        "pilot_schema_version",
-        "active_injection_schema_version",
-        "operator_simulator_run_schema_version",
-        "simulator_setting",
-        "next_step",
-    ):
-        text = public_safe_compact_text(value.get(field), limit=140)
-        if text:
-            compact[field] = text
-    for field in (
-        "proactive_intervention_allowed",
-        "directive_feedback_allowed",
-        "artificial_mildness_required",
-        "frequency_budget_required",
-        "visibility_policy_required",
-        "no_oracle_audit_required",
-        "assisted_collaboration_claim_allowed",
-        "official_score_claim_allowed",
-        "leaderboard_claim_allowed",
-    ):
-        if isinstance(value.get(field), bool):
-            compact[field] = value[field]
-
-    channel = (
-        value.get("simulator_to_worker_injection_channel")
-        if isinstance(value.get("simulator_to_worker_injection_channel"), dict)
-        else {}
-    )
-    compact_channel: dict[str, Any] = {}
-    for field in (
-        "schema_version",
-        "first_blocker",
-        "required_capability",
-        "current_agent_surface",
-        "active_user_feed_jsonl",
-        "active_user_observation_json",
-        "next_channel_requirement",
-        "minimum_next_implementation",
-        "required_missing_channel",
-    ):
-        text = public_safe_compact_text(channel.get(field), limit=140)
-        if text:
-            compact_channel[field] = text
-    if isinstance(channel.get("checked_channel_count"), int) and not isinstance(
-        channel.get("checked_channel_count"), bool
-    ):
-        compact_channel["checked_channel_count"] = channel["checked_channel_count"]
-    checked_channels = (
-        channel.get("checked_channels")
-        if isinstance(channel.get("checked_channels"), list)
-        else []
-    )
-    existing_channel_names = (
-        channel.get("checked_channel_names")
-        if isinstance(channel.get("checked_channel_names"), list)
-        else []
-    )
-    channel_names: list[str] = [
-        name
-        for name in (
-            public_safe_compact_text(item, limit=80)
-            for item in existing_channel_names
-        )
-        if name
-    ]
-    required_missing_channel = ""
-    for item in checked_channels:
-        if not isinstance(item, dict):
-            continue
-        name = public_safe_compact_text(item.get("channel"), limit=80)
-        verdict = public_safe_compact_text(item.get("verdict"), limit=80)
-        if name:
-            channel_names.append(name)
-        if verdict == "required_missing" and name and not required_missing_channel:
-            required_missing_channel = name
-    if channel_names:
-        compact_channel["checked_channel_names"] = channel_names[:5]
-    if required_missing_channel:
-        compact_channel["required_missing_channel"] = required_missing_channel
-    for field in (
-        "channel_available",
-        "initial_prompt_only_is_not_active_intervention",
-        "direct_codex_chat_injection_available",
-        "audited_external_update_loop_available",
-        "no_user_message_injected",
-        "model_api_invoked",
-        "raw_transcript_recorded",
-    ):
-        if isinstance(channel.get(field), bool):
-            compact_channel[field] = channel[field]
-    if compact_channel:
-        compact["simulator_to_worker_injection_channel"] = compact_channel
-
-    launcher_plan = _compact_active_user_private_launcher_plan(
-        value.get("private_launcher_plan")
-    )
-    if launcher_plan:
-        compact["private_launcher_plan"] = launcher_plan
-
-    return compact
-
-
-def _compact_active_user_private_launcher_plan(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    for field in (
-        "schema_version",
-        "launch_surface",
-        "first_blocker",
-        "required_capability",
-        "worker_start_marker",
-        "active_user_feed_jsonl",
-        "active_user_observation_json",
-        "simulator_setting",
-    ):
-        text = public_safe_compact_text(value.get(field), limit=140)
-        if text:
-            compact[field] = text
-    contract = (
-        value.get("codex_simulator_contract")
-        if isinstance(value.get("codex_simulator_contract"), dict)
-        else {}
-    )
-    compact_contract: dict[str, Any] = {}
-    for field in (
-        "schema_version",
-        "simulator_kind",
-        "codex_exec_command",
-        "append_validated_output_command",
-        "simulator_output_schema_version",
-    ):
-        text = public_safe_compact_text(contract.get(field), limit=500)
-        if text:
-            compact_contract[field] = text
-    for field in (
-        "manual_controller_feed_allowed",
-        "formal_treatment_requires_model_backed_simulator",
-        "controller_authored_feed_allowed",
-    ):
-        if isinstance(contract.get(field), bool):
-            compact_contract[field] = contract[field]
-    if compact_contract:
-        compact["codex_simulator_contract"] = compact_contract
-    if isinstance(value.get("ready"), bool):
-        compact["ready"] = value["ready"]
-    for field in ("sequence_steps", "required_evidence", "stop_conditions"):
-        items = public_safe_compact_list(value.get(field), limit=8)
-        if items:
-            compact[field] = items
-    for nested_name in ("claim_boundary", "public_boundary"):
-        nested = value.get(nested_name) if isinstance(value.get(nested_name), dict) else {}
-        compact_nested: dict[str, Any] = {}
-        for key, nested_value in nested.items():
-            safe_key = public_safe_compact_text(key, limit=80)
-            if not safe_key:
-                continue
-            if isinstance(nested_value, bool):
-                compact_nested[safe_key] = nested_value
-            else:
-                text = public_safe_compact_text(nested_value, limit=120)
-                if text:
-                    compact_nested[safe_key] = text
-        if compact_nested:
-            compact[nested_name] = compact_nested
-    return compact
-
-
-def _compact_active_user_observation(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    for field in ("schema_version", "bridge_surface", "channel_surface", "next_action"):
-        text = public_safe_compact_text(value.get(field), limit=140)
-        if text:
-            compact[field] = text
-    for field in (
-        "feed_present",
-        "feed_path_recorded",
-        "observed_after_worker_start",
-        "worker_observation_proof",
-    ):
-        if isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    for field in (
-        "worker_start_seq",
-        "valid_intervention_count",
-        "invalid_line_count",
-        "observed_intervention_count",
-    ):
-        if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
-            compact[field] = value[field]
-
-    latest = (
-        value.get("latest_intervention")
-        if isinstance(value.get("latest_intervention"), dict)
-        else {}
-    )
-    compact_latest: dict[str, Any] = {}
-    for field in ("channel", "type", "trigger", "message"):
-        text = public_safe_compact_text(latest.get(field), limit=160)
-        if text:
-            compact_latest[field] = text
-    if isinstance(latest.get("seq"), int) and not isinstance(latest.get("seq"), bool):
-        compact_latest["seq"] = latest["seq"]
-    for field in (
-        "oracle_free",
-        "hidden_tests_visible",
-        "expected_solution_visible",
-        "credential_values_visible",
-        "private_material_visible",
-    ):
-        if isinstance(latest.get(field), bool):
-            compact_latest[field] = latest[field]
-    if compact_latest:
-        compact["latest_intervention"] = compact_latest
-
-    for source_field, compact_field in (
-        ("claim_boundary", "claim_boundary"),
-        ("public_boundary", "public_boundary"),
-    ):
-        source = (
-            value.get(source_field)
-            if isinstance(value.get(source_field), dict)
-            else {}
-        )
-        compact_boundary: dict[str, Any] = {}
-        for key, boundary_value in source.items():
-            if isinstance(key, str) and isinstance(boundary_value, bool):
-                safe_key = public_safe_compact_text(key, limit=80)
-                if safe_key:
-                    compact_boundary[safe_key] = boundary_value
-        if compact_boundary:
-            compact[compact_field] = compact_boundary
-    return compact
-
-
-def _compact_benchmark_claim_gate(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    schema = public_safe_compact_text(value.get("schema_version"), limit=100)
-    if schema:
-        compact["schema_version"] = schema
-    for field in (
-        "requires_private_no_upload",
-        "requires_worker_loopx_cli_calls",
-        "reject_runner_bridge_calls_as_in_case_evidence",
-        "reject_codex_runtime_goal_tool_calls_as_loopx_evidence",
-        "uplift_claim_allowed",
-        "leaderboard_claim_allowed",
-    ):
-        if isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    for field in ("required_worker_loopx_cli_call_total_min",):
-        if isinstance(value.get(field), int) and not isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    return compact
-
-
 def _compact_benchmark_private_runner_launch(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -2734,42 +1910,6 @@ def compact_benchmark_post_launch_materialization(value: Any) -> dict[str, Any] 
     return compact or None
 
 
-def _compact_benchmark_episode_policy(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-
-    compact: dict[str, Any] = {}
-    for field in (
-        "schema_version",
-        "mode",
-        "worker_topology",
-        "loopx_role",
-        "runner_role",
-        "checkpoint_surface",
-        "resumable_episode_style",
-    ):
-        text = public_safe_compact_text(value.get(field), limit=140)
-        if text:
-            compact[field] = text
-    for field in (
-        "runner_side_guaranteed_writeback",
-        "does_not_spawn_additional_agents",
-        "does_not_split_task_prompt",
-        "does_not_change_task_solution_actor",
-        "raw_trace_recorded",
-        "product_mode",
-        "blind_loop",
-        "official_feedback_blinded",
-        "reward_feedback_forwarded",
-    ):
-        if isinstance(value.get(field), bool):
-            compact[field] = value[field]
-    interval = value.get("checkpoint_interval_seconds")
-    if isinstance(interval, int) and not isinstance(interval, bool):
-        compact["checkpoint_interval_seconds"] = interval
-    return compact
-
-
 def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
     source = _benchmark_run_source_read_model(
         run,
@@ -2786,307 +1926,33 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         schema_version=BENCHMARK_RUN_SCHEMA_VERSION,
         max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
     )
-    loop_contract = source.get("benchmark_loop_contract")
-    if isinstance(loop_contract, dict):
-        compact_loop_contract: dict[str, Any] = {}
-        for field in (
-            "schema_version",
-            "route",
-            "protocol_id",
-            "claim_blocker",
-        ):
-            value = public_safe_compact_text(loop_contract.get(field), limit=120)
-            if value:
-                compact_loop_contract[field] = value
-        for field in (
-            "official_feedback_forwarded",
-            "official_feedback_blinded",
-            "blind_loop",
-            "product_mode",
-            "strict_treatment_claim_allowed",
-        ):
-            if isinstance(loop_contract.get(field), bool):
-                compact_loop_contract[field] = loop_contract[field]
-        if isinstance(loop_contract.get("max_rounds_budget"), int) and not isinstance(
-            loop_contract.get("max_rounds_budget"),
-            bool,
-        ):
-            compact_loop_contract["max_rounds_budget"] = loop_contract[
-                "max_rounds_budget"
-            ]
-        if compact_loop_contract:
-            compact["benchmark_loop_contract"] = compact_loop_contract
-    if isinstance(source.get("official_score"), (int, float)) and not isinstance(
-        source.get("official_score"),
-        bool,
-    ):
-        compact["official_score"] = source.get("official_score")
-
-    labels = public_safe_compact_list(
-        source.get("failure_attribution_labels"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
+    execution_contract = _compact_benchmark_run_execution_contract(
+        source,
+        max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
     )
-    if labels:
-        compact["failure_attribution_labels"] = labels
-    worker_startup_blockers = public_safe_compact_list(
-        source.get("worker_startup_blockers"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-    )
-    if worker_startup_blockers:
-        compact["worker_startup_blockers"] = worker_startup_blockers
-    worker_setup_diagnostic_blockers = public_safe_compact_list(
-        source.get("worker_setup_diagnostic_blockers"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-    )
-    if worker_setup_diagnostic_blockers:
-        compact["worker_setup_diagnostic_blockers"] = (
-            worker_setup_diagnostic_blockers
+    loop_contract = execution_contract.get("benchmark_loop_contract")
+    if loop_contract:
+        compact["benchmark_loop_contract"] = loop_contract
+    compact.update(
+        _compact_benchmark_run_pre_execution_metadata(
+            source,
+            max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
         )
-    runner_warning_labels = public_safe_compact_list(
-        source.get("runner_warning_labels"),
-        limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
     )
-    if runner_warning_labels:
-        compact["runner_warning_labels"] = runner_warning_labels
-    _project_benchmark_runner_prerequisites(compact, source)
-    result_discovery = _compact_benchmark_result_discovery(
-        source.get("result_discovery")
+
+    compact.update(
+        {
+            field: execution_contract[field]
+            for field in ("claim_boundary", "agent", "model_control")
+            if field in execution_contract
+        }
     )
-    if result_discovery:
-        compact["result_discovery"] = result_discovery
-    task_setup_preflight = _compact_benchmark_task_setup_preflight(
-        source.get("task_setup_preflight")
+
+    post_execution = _compact_benchmark_run_post_execution_metadata(
+        source,
+        max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
     )
-    if task_setup_preflight:
-        compact["task_setup_preflight"] = task_setup_preflight
-    task_staging = _compact_benchmark_task_staging(source.get("task_staging"))
-    if task_staging:
-        compact["task_staging"] = task_staging
-    attempt_accounting = _compact_benchmark_attempt_accounting(
-        source.get("attempt_accounting")
-    )
-    if attempt_accounting:
-        compact["attempt_accounting"] = attempt_accounting
-
-    official = source.get("official_task_score") if isinstance(source.get("official_task_score"), dict) else {}
-    if official:
-        compact_official: dict[str, Any] = {}
-        kind = public_safe_compact_text(official.get("kind"), limit=80)
-        if kind:
-            compact_official["kind"] = kind
-        for field in ("value", "passed"):
-            if isinstance(official.get(field), (bool, int, float)):
-                compact_official[field] = official.get(field)
-        if compact_official:
-            compact["official_task_score"] = compact_official
-
-    claim_boundary = source.get("claim_boundary")
-    if isinstance(claim_boundary, dict):
-        compact_claim_boundary: dict[str, Any] = {}
-        allowed = public_safe_compact_text(
-            claim_boundary.get("public_claim_allowed"),
-            limit=180,
-        )
-        if allowed:
-            compact_claim_boundary["public_claim_allowed"] = allowed
-        for field in (
-            "bridge_connectivity_claim_allowed",
-            "case_success_claim_allowed",
-            "official_score_claim_allowed",
-            "leaderboard_claim_allowed",
-        ):
-            if isinstance(claim_boundary.get(field), bool):
-                compact_claim_boundary[field] = claim_boundary[field]
-        forbidden = public_safe_compact_list(
-            claim_boundary.get("forbidden_claims"),
-            limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-        )
-        if forbidden:
-            compact_claim_boundary["forbidden_claims"] = forbidden
-        if compact_claim_boundary:
-            compact["claim_boundary"] = compact_claim_boundary
-
-    agent = source.get("agent") if isinstance(source.get("agent"), dict) else {}
-    compact_agent: dict[str, Any] = {}
-    for field in ("name", "import_path", "model"):
-        value = public_safe_compact_text(agent.get(field), limit=120)
-        if value:
-            compact_agent[field] = value
-    kwargs_keys = public_safe_compact_list(agent.get("kwargs_keys"), limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
-    if kwargs_keys:
-        compact_agent["kwargs_keys"] = kwargs_keys
-    if compact_agent:
-        compact["agent"] = compact_agent
-
-    model_control = source.get("model_control")
-    if isinstance(model_control, dict):
-        compact_model_control: dict[str, Any] = {}
-        for field in (
-            "schema_version",
-            "requested_model",
-            "reported_model",
-            "control_method",
-            "control_status",
-            "actual_model_source",
-        ):
-            value = public_safe_compact_text(model_control.get(field), limit=140)
-            if value:
-                compact_model_control[field] = value
-        if isinstance(model_control.get("actual_model_verified"), bool):
-            compact_model_control["actual_model_verified"] = model_control[
-                "actual_model_verified"
-            ]
-        warning_labels = public_safe_compact_list(
-            model_control.get("warning_labels"),
-            limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-        )
-        if warning_labels:
-            compact_model_control["warning_labels"] = warning_labels
-        if compact_model_control:
-            compact["model_control"] = compact_model_control
-
-    runner_failure = source.get("runner_failure")
-    if isinstance(runner_failure, dict):
-        compact_runner_failure: dict[str, Any] = {}
-        for field in ("schema_version", "exception_type", "failure_class"):
-            value = public_safe_compact_text(runner_failure.get(field), limit=140)
-            if value:
-                compact_runner_failure[field] = value
-        for field in (
-            "raw_error_recorded",
-            "raw_logs_read",
-            "raw_task_text_read",
-            "raw_trajectory_read",
-        ):
-            if isinstance(runner_failure.get(field), bool):
-                compact_runner_failure[field] = runner_failure[field]
-        controller_cutoff = runner_failure.get("controller_cutoff")
-        if isinstance(controller_cutoff, dict):
-            compact_cutoff: dict[str, Any] = {}
-            for field in ("schema_version", "reason"):
-                value = public_safe_compact_text(
-                    controller_cutoff.get(field),
-                    limit=140,
-                )
-                if value:
-                    compact_cutoff[field] = value
-            if isinstance(controller_cutoff.get("cutoff_before_followup"), bool):
-                compact_cutoff["cutoff_before_followup"] = controller_cutoff[
-                    "cutoff_before_followup"
-                ]
-            for field in (
-                "max_rounds_budget",
-                "initial_prompt_count",
-                "followup_prompt_count",
-                "stop_decision_count",
-            ):
-                if isinstance(controller_cutoff.get(field), int) and not isinstance(
-                    controller_cutoff.get(field),
-                    bool,
-                ):
-                    compact_cutoff[field] = controller_cutoff[field]
-            if compact_cutoff:
-                compact_runner_failure["controller_cutoff"] = compact_cutoff
-        user_loop_recovery = runner_failure.get("user_loop_recovery")
-        if isinstance(user_loop_recovery, dict):
-            compact_recovery: dict[str, Any] = {}
-            for field in ("schema_version", "stage", "exception_type"):
-                value = public_safe_compact_text(
-                    user_loop_recovery.get(field),
-                    limit=140,
-                )
-                if value:
-                    compact_recovery[field] = value
-            for field in ("preserved_final_verify", "raw_error_recorded"):
-                if isinstance(user_loop_recovery.get(field), bool):
-                    compact_recovery[field] = user_loop_recovery[field]
-            for field in ("round", "delta_events", "delta_tool_calls"):
-                if isinstance(user_loop_recovery.get(field), int) and not isinstance(
-                    user_loop_recovery.get(field),
-                    bool,
-                ):
-                    compact_recovery[field] = user_loop_recovery[field]
-            if compact_recovery:
-                compact_runner_failure["user_loop_recovery"] = compact_recovery
-        native_goal_worker = runner_failure.get("native_goal_worker")
-        if isinstance(native_goal_worker, dict):
-            compact_native_worker: dict[str, Any] = {}
-            for field in (
-                "schema_version",
-                "trace_status",
-                "failure_label",
-                "failure_category",
-                "first_blocker",
-            ):
-                value = public_safe_compact_text(
-                    native_goal_worker.get(field),
-                    limit=140,
-                )
-                if value:
-                    compact_native_worker[field] = value
-            for field in (
-                "trace_count",
-            ):
-                value = native_goal_worker.get(field)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    compact_native_worker[field] = value
-            for field in (
-                "raw_transcript_recorded",
-                "raw_assistant_message_recorded",
-            ):
-                if isinstance(native_goal_worker.get(field), bool):
-                    compact_native_worker[field] = native_goal_worker[field]
-            if compact_native_worker:
-                compact_runner_failure["native_goal_worker"] = compact_native_worker
-        if compact_runner_failure:
-            compact["runner_failure"] = compact_runner_failure
-
-    fingerprint = source.get("runner_failure_fingerprint")
-    if isinstance(fingerprint, dict):
-        compact_fingerprint: dict[str, Any] = {}
-        for field in (
-            "schema_version",
-            "error_len_bucket",
-            "fingerprint_confidence",
-            "apt_failure_subtype",
-            "pip_failure_subtype",
-            "retryability",
-        ):
-            value = public_safe_compact_text(fingerprint.get(field), limit=100)
-            if value:
-                compact_fingerprint[field] = value
-        line_count = fingerprint.get("line_count")
-        if isinstance(line_count, int) and not isinstance(line_count, bool):
-            compact_fingerprint["line_count"] = line_count
-        for field, limit in (
-            ("matched_patterns", MAX_BENCHMARK_RUN_LIST_ITEMS * 4),
-            ("failure_line_dependency_classes", MAX_BENCHMARK_RUN_LIST_ITEMS * 2),
-            ("failure_reason_codes", MAX_BENCHMARK_RUN_LIST_ITEMS * 2),
-            (
-                "terminal_failure_dependency_classes",
-                MAX_BENCHMARK_RUN_LIST_ITEMS * 2,
-            ),
-            ("terminal_failure_reason_codes", MAX_BENCHMARK_RUN_LIST_ITEMS * 2),
-            ("failure_dependency_endpoints", MAX_BENCHMARK_RUN_LIST_ITEMS * 2),
-            (
-                "terminal_failure_dependency_endpoints",
-                MAX_BENCHMARK_RUN_LIST_ITEMS * 2,
-            ),
-        ):
-            values = public_safe_compact_list(fingerprint.get(field), limit=limit)
-            if values:
-                compact_fingerprint[field] = values
-        for field in (
-            "error_present",
-            "has_host_paths",
-            "has_urls",
-            "has_secret_like_tokens",
-            "raw_error_recorded",
-        ):
-            if isinstance(fingerprint.get(field), bool):
-                compact_fingerprint[field] = fingerprint[field]
-        if compact_fingerprint:
-            compact["runner_failure_fingerprint"] = compact_fingerprint
+    compact.update(post_execution.failure)
 
     compose_setup_diagnostic = _compact_benchmark_compose_setup_diagnostic(
         source.get("compose_setup_diagnostic")
@@ -3095,27 +1961,7 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
         compact["compose_setup_diagnostic"] = compose_setup_diagnostic
         _apply_skillsbench_pre_agent_setup_compact_projection(compact)
 
-    progress = _compact_numeric_map(
-        source.get("progress"),
-        keys=(
-            "n_total_trials",
-            "n_completed_trials",
-            "n_errored_trials",
-            "n_running_trials",
-            "n_pending_trials",
-            "n_cancelled_trials",
-            "n_retries",
-        ),
-    )
-    if progress:
-        compact["progress"] = progress
-
-    metrics = _compact_numeric_map(
-        source.get("metrics"),
-        keys=("input_tokens", "cache_tokens", "output_tokens", "cost_usd"),
-    )
-    if metrics:
-        compact["metrics"] = metrics
+    compact.update(post_execution.progress_metrics)
 
     interaction_counters = _compact_benchmark_interaction_counters(
         source.get("interaction_counters")
@@ -3123,79 +1969,17 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
     if interaction_counters:
         compact["interaction_counters"] = interaction_counters
 
-    goal_start_control_score = compact_goal_start_product_mode_control_score(
-        source.get("goal_start_product_mode_control_score")
+    compact.update(post_execution.lifecycle)
+    _repair_product_mode_lifecycle_missing_attribution_read_model(
+        compact,
+        max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
     )
-    if goal_start_control_score:
-        compact["goal_start_product_mode_control_score"] = goal_start_control_score
-
-    round_reward_trace = _compact_benchmark_round_reward_trace(
-        source.get("round_reward_trace")
-    )
-    if round_reward_trace:
-        compact["round_reward_trace"] = round_reward_trace
-
-    overhead_attribution_counters = (
-        _compact_benchmark_overhead_attribution_counters(
-            source.get("overhead_attribution_counters")
-        )
-    )
-    if overhead_attribution_counters:
-        compact["overhead_attribution_counters"] = overhead_attribution_counters
-
-    episode_policy = _compact_benchmark_episode_policy(source.get("episode_policy"))
-    if episode_policy:
-        compact["episode_policy"] = episode_policy
-
-    product_mode_lifecycle_contract = _compact_product_mode_lifecycle_contract(
-        source.get("product_mode_lifecycle_contract")
-    )
-    if product_mode_lifecycle_contract:
-        compact["product_mode_lifecycle_contract"] = product_mode_lifecycle_contract
-        _repair_product_mode_lifecycle_missing_attribution(compact)
-
-    native_goal_worker_contract = _compact_native_goal_worker_contract(
-        source.get("native_goal_worker_contract")
-    )
-    if native_goal_worker_contract:
-        compact["native_goal_worker_contract"] = native_goal_worker_contract
-    app_server_goal_round_semantics = _compact_app_server_goal_round_semantics(
-        source.get("app_server_goal_round_semantics")
-    )
-    if app_server_goal_round_semantics:
-        compact["app_server_goal_round_semantics"] = app_server_goal_round_semantics
-
-    case_event_timeline = compact_benchmark_case_event_timeline(
-        source.get("case_event_timeline")
-    )
-    if case_event_timeline:
-        compact["case_event_timeline"] = case_event_timeline
 
     preflight_guard = _compact_benchmark_preflight_guard(source.get("preflight_guard"))
     if preflight_guard:
         compact["preflight_guard"] = preflight_guard
 
-    active_user_preflight = _compact_active_user_assisted_treatment_preflight(
-        source.get("active_user_assisted_treatment_preflight")
-    )
-    if active_user_preflight:
-        compact["active_user_assisted_treatment_preflight"] = active_user_preflight
-
-    active_user_launcher_plan = _compact_active_user_private_launcher_plan(
-        source.get("active_user_private_launcher_plan")
-    )
-    if active_user_launcher_plan:
-        compact["active_user_private_launcher_plan"] = active_user_launcher_plan
-
-    active_user_observation = _compact_active_user_observation(
-        source.get("active_user_observation")
-    )
-    if active_user_observation:
-        compact["active_user_observation"] = active_user_observation
-
-    claim_gate = _compact_benchmark_claim_gate(source.get("claim_gate"))
-    if claim_gate:
-        compact["claim_gate"] = claim_gate
+    compact.update(post_execution.active_user_and_claim)
 
     private_runner_launch = _compact_benchmark_private_runner_launch(
         source.get("private_runner_launch_summary")
@@ -3209,175 +1993,16 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
     if setup_timeout_repair_profile:
         compact["setup_timeout_repair_profile"] = setup_timeout_repair_profile
 
-    env_context = compact_environment_setup_failure_context(
-        source.get("environment_setup_failure_context")
-    )
-    if env_context:
-        compact["environment_setup_failure_context"] = env_context
+    compact.update(post_execution.worker_outcome)
 
-    worker_bridge_outcome = compact_worker_bridge_outcome(
-        source.get("worker_bridge_outcome")
-    )
-    if worker_bridge_outcome:
-        compact["worker_bridge_outcome"] = worker_bridge_outcome
-
-    validation = source.get("validation") if isinstance(source.get("validation"), dict) else {}
-    if validation:
-        failed = [
-            str(key)
-            for key, value in validation.items()
-            if isinstance(key, str)
-            and key not in BENCHMARK_VALIDATION_NEUTRAL_FALSE_FIELDS
-            and isinstance(value, bool)
-            and not value
-        ][:MAX_BENCHMARK_RUN_LIST_ITEMS]
-        native_goal_worker_trace_missing = (
-            validation.get("native_goal_worker_route") is True
-            and public_safe_compact_text(
-                validation.get("native_goal_worker_trace_status"),
-                limit=140,
-            )
-            in {
-                "worker_connected_trace_dir_missing",
-                "worker_connected_no_public_trace",
-                "worker_connected_no_prompt_trace",
-                "worker_prompt_received_no_turn_trace",
-                "worker_connected_no_turn_trace",
-                "worker_route_selected_not_connected",
-            }
-        )
-        if (
-            native_goal_worker_trace_missing
-            and compact.get("pre_agent_setup_materialization_blocked") is not True
-            and "native_goal_worker_public_trace_missing" not in failed
-            and len(failed) < MAX_BENCHMARK_RUN_LIST_ITEMS
-        ):
-            failed.append("native_goal_worker_public_trace_missing")
-        if (
+    compact_validation = _compact_benchmark_run_validation_read_model(
+        source.get("validation"),
+        pre_agent_setup_materialization_blocked=(
             compact.get("pre_agent_setup_materialization_blocked") is True
-            and "pre_agent_setup_materialization_blocked" not in failed
-            and len(failed) < MAX_BENCHMARK_RUN_LIST_ITEMS
-        ):
-            failed.append("pre_agent_setup_materialization_blocked")
-        compact_validation: dict[str, Any] = {
-            "all_passed": not failed
-            and all(
-                bool(value)
-                for key, value in validation.items()
-                if isinstance(key, str)
-                and key not in BENCHMARK_VALIDATION_NEUTRAL_FALSE_FIELDS
-                and isinstance(value, bool)
-            ),
-            "failed_checks": failed,
-        }
-        for field in (
-            "validation_scope",
-            "case_success_claim_kind",
-            "official_verifier_status",
-            "native_goal_worker_trace_status",
-            "native_goal_worker_failure_category",
-            "native_goal_worker_first_blocker",
-        ):
-            text = public_safe_compact_text(validation.get(field), limit=140)
-            if text:
-                compact_validation[field] = text
-        for field in (
-            "native_goal_worker_trace_count",
-            "native_goal_worker_lifecycle_trace_count",
-            "native_goal_worker_prompt_received_count",
-            "native_goal_worker_first_action_observed_count",
-            "native_goal_worker_effective_action_observed_count",
-        ):
-            value = validation.get(field)
-            if isinstance(value, int) and not isinstance(value, bool):
-                compact_validation[field] = value
-        for field in (
-            "active_user_assisted_treatment_preflight",
-            "bridge_connected",
-            "bridge_connectivity_claim_allowed",
-            "case_success_claimed",
-            "official_verifier_validation_present",
-            "official_case_success",
-            "active_user_simulator_contract_checked",
-            "simulator_to_worker_injection_channel_checked",
-            "simulator_to_worker_injection_channel_probe_checked",
-            "missing_simulator_to_worker_injection_channel_recorded",
-            "simulator_to_worker_external_update_loop_available",
-            "real_assisted_worker_observation_missing",
-            "active_user_observation_fixture",
-            "worker_observation_proof",
-            "scripted_active_user_intervention_observed",
-            "no_real_user_message_injected",
-            "no_model_backed_simulator_invoked",
-            "no_oracle_audit_required",
-            "assisted_score_kept_separate_from_official",
-            "real_result_reducer_materialized",
-            "compact_run_read",
-            "compact_result_read",
-            "selected_tag_checked",
-            "selected_image_only",
-            "single_tag_only",
-            "buggy_source_extracted",
-            "fixed_source_not_extracted_to_host",
-            "host_codex_cli_invoked",
-            "patch_exported_from_buggy_source_git_diff",
-            "patch_applied_in_container",
-            "patch_hash_recorded",
-            "patched_eval_exit_zero",
-            "patched_eval_success_marker",
-            "private_runner_script_materialized",
-            "private_runner_manifest_materialized",
-            "script_executable_bit_set",
-            "script_content_not_public",
-            "script_path_relative_only",
-            "phase_order_rendered",
-            "script_renders_source_extraction",
-            "script_renders_observed_image_source_path",
-            "script_renders_precheck_only",
-            "script_handles_gitkeep_placeholder",
-            "script_renders_git_baseline",
-            "script_renders_host_codex",
-            "script_renders_patch_export",
-            "script_renders_selected_tag_eval",
-            "script_renders_entrypoint_eval_commands",
-            "script_renders_compact_evidence",
-            "script_renders_real_result_reducer",
-            "no_generator_codex_execution",
-            "no_generator_docker_execution",
-            "no_generator_model_api_invoked",
-            "no_generator_upload",
-            "no_generator_submit",
-            "no_generator_public_ranking_path",
-            "no_auth_material_sync",
-            "no_upload",
-            "no_submit",
-            "no_public_ranking_path",
-            "no_raw_logs_public",
-            "no_patch_content_public",
-            "no_absolute_paths_public",
-            "no_codex_auth_sync",
-            "no_credential_values_recorded",
-            "no_reducer_codex_execution",
-            "no_reducer_docker_execution",
-            "worker_bridge_materialized_when_required",
-            "worker_bridge_repeat_ready",
-            "worker_startup_blocker_recorded",
-            "loopx_controller_trace_present",
-            "loopx_controller_trace_public_safe",
-            "native_goal_worker_route",
-            "native_goal_worker_connected",
-            "native_goal_worker_trace_dir_present",
-            "native_goal_worker_public_trace_read",
-            "native_goal_worker_trace_observed",
-            "native_goal_worker_countable_baseline",
-            "runner_failure_compact_recorded",
-            "no_raw_logs_read",
-            "no_raw_task_text_read",
-            "no_raw_trajectory_read",
-            "no_leaderboard_upload_requested",
-        ):
-            if isinstance(validation.get(field), bool):
-                compact_validation[field] = validation[field]
+        ),
+        max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
+    )
+    if compact_validation:
         compact["validation"] = compact_validation
         _apply_skillsbench_pre_agent_setup_compact_projection(compact)
 
@@ -3404,84 +2029,11 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
     if post_run_debug_gate:
         compact["post_run_debug_gate"] = post_run_debug_gate
 
-    trials: list[dict[str, Any]] = []
-    for trial in trials_source or []:
-        if not isinstance(trial, dict):
-            continue
-        compact_trial: dict[str, Any] = {}
-        for field in (
-            "task_id",
-            "trial_name",
-            "source",
-            "exception_type",
-            "worker_start_status",
-            "verifier_failure_attribution",
-        ):
-            value = public_safe_compact_text(trial.get(field), limit=140)
-            if value:
-                compact_trial[field] = value
-        labels = public_safe_compact_list(
-            trial.get("verifier_failure_attribution_labels"),
-            limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-        )
-        if labels:
-            compact_trial["verifier_failure_attribution_labels"] = labels
-        agent_labels = public_safe_compact_list(
-            trial.get("agent_failure_attribution_labels"),
-            limit=MAX_BENCHMARK_RUN_LIST_ITEMS,
-        )
-        if agent_labels:
-            compact_trial["agent_failure_attribution_labels"] = agent_labels
-        reward = _compact_numeric_map(trial.get("reward"))
-        if reward:
-            compact_trial["reward"] = reward
-        trial_metrics = _compact_numeric_map(
-            trial.get("metrics"),
-            keys=("input_tokens", "cache_tokens", "output_tokens", "cost_usd"),
-        )
-        if trial_metrics:
-            compact_trial["metrics"] = trial_metrics
-        for field in ("trajectory_present", "verifier_reward_present", "artifact_manifest_present", "trial_result_present"):
-            if isinstance(trial.get(field), bool):
-                compact_trial[field] = trial.get(field)
-        env_context = compact_environment_setup_failure_context(
-            trial.get("environment_setup_failure_context")
-        )
-        if env_context:
-            compact_trial["environment_setup_failure_context"] = env_context
-        official_zero = trial.get("official_zero_observation")
-        if isinstance(official_zero, dict):
-            compact_zero: dict[str, Any] = {}
-            for field in (
-                "schema_version",
-                "reward_value",
-            ):
-                value = official_zero.get(field)
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    compact_zero[field] = value
-                elif isinstance(value, str):
-                    text = public_safe_compact_text(value, limit=80)
-                    if text:
-                        compact_zero[field] = text
-            for field in (
-                "detected",
-                "exception_present",
-                "environment_setup_completed",
-                "agent_setup_completed",
-                "agent_execution_completed",
-                "verifier_completed",
-                "raw_logs_read",
-                "raw_trace_recorded",
-                "task_text_read",
-            ):
-                if isinstance(official_zero.get(field), bool):
-                    compact_zero[field] = official_zero[field]
-            if compact_zero:
-                compact_trial["official_zero_observation"] = compact_zero
-        if compact_trial:
-            trials.append(compact_trial)
-            if len(trials) >= MAX_BENCHMARK_RUN_TRIALS:
-                break
+    trials = _compact_benchmark_run_trials_read_model(
+        trials_source,
+        max_trials=MAX_BENCHMARK_RUN_TRIALS,
+        max_list_items=MAX_BENCHMARK_RUN_LIST_ITEMS,
+    )
     if trials:
         compact["trials"] = trials
         raw_trials = source.get("trials")
@@ -3511,186 +2063,6 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
                 compact_boundary[field] = read_boundary[field]
         if compact_boundary:
             compact["read_boundary"] = compact_boundary
-
-    if set(compact.keys()) == {"schema_version"}:
-        return None
-    return compact
-
-
-def _active_user_assisted_pilot_source(run: dict[str, Any]) -> dict[str, Any] | None:
-    nested = run.get("active_user_assisted_pilot")
-    if isinstance(nested, dict) and nested.get("schema_version") == ACTIVE_USER_ASSISTED_PILOT_SCHEMA_VERSION:
-        return nested
-    if run.get("schema_version") == ACTIVE_USER_ASSISTED_PILOT_SCHEMA_VERSION:
-        return run
-    return None
-
-
-def compact_active_user_assisted_pilot(run: dict[str, Any]) -> dict[str, Any] | None:
-    source = _active_user_assisted_pilot_source(run)
-    if not source:
-        return None
-
-    compact: dict[str, Any] = {"schema_version": ACTIVE_USER_ASSISTED_PILOT_SCHEMA_VERSION}
-    for field in ("pilot_id", "benchmark_id", "task_id"):
-        value = public_safe_compact_text(source.get(field), limit=140)
-        if value:
-            compact[field] = value
-
-    trigger = source.get("trigger") if isinstance(source.get("trigger"), dict) else {}
-    compact_trigger: dict[str, Any] = {}
-    for field in ("kind", "assisted_score_kind"):
-        value = public_safe_compact_text(trigger.get(field), limit=120)
-        if value:
-            compact_trigger[field] = value
-    if isinstance(trigger.get("both_autonomous_modes_failed"), bool):
-        compact_trigger["both_autonomous_modes_failed"] = trigger.get("both_autonomous_modes_failed")
-    failed_modes = trigger.get("failed_autonomous_modes") if isinstance(trigger.get("failed_autonomous_modes"), list) else []
-    if failed_modes:
-        compact_trigger["failed_autonomous_mode_count"] = len(failed_modes)
-        mode_names = []
-        for item in failed_modes:
-            if isinstance(item, str):
-                mode = public_safe_compact_text(item, limit=100)
-            elif isinstance(item, dict):
-                mode = public_safe_compact_text(item.get("mode"), limit=100)
-            else:
-                continue
-            if mode:
-                mode_names.append(mode)
-            if len(mode_names) >= MAX_BENCHMARK_RUN_LIST_ITEMS:
-                break
-        if mode_names:
-            compact_trigger["failed_autonomous_modes"] = mode_names
-    if compact_trigger:
-        compact["trigger"] = compact_trigger
-
-    active = source.get("active_injection_contract") if isinstance(source.get("active_injection_contract"), dict) else {}
-    compact_active: dict[str, Any] = {}
-    for field in ("schema_version", "simulator_setting"):
-        value = public_safe_compact_text(active.get(field), limit=120)
-        if value:
-            compact_active[field] = value
-    for field in ("proactive_intervention_allowed", "directive_feedback_allowed", "artificial_mildness_required"):
-        if isinstance(active.get(field), bool):
-            compact_active[field] = active.get(field)
-    if compact_active:
-        compact["active_injection_contract"] = compact_active
-
-    budget = source.get("frequency_budget") if isinstance(source.get("frequency_budget"), dict) else {}
-    compact_budget = _compact_numeric_map(
-        budget,
-        keys=(
-            "max_interventions",
-            "max_proactive_interventions",
-            "min_worker_events_between_proactive",
-            "max_chars_per_intervention",
-        ),
-    )
-    if compact_budget:
-        compact["frequency_budget"] = compact_budget
-
-    visibility = source.get("visibility_policy") if isinstance(source.get("visibility_policy"), dict) else {}
-    compact_visibility: dict[str, Any] = {}
-    policy_id = public_safe_compact_text(visibility.get("policy_id"), limit=140)
-    if policy_id:
-        compact_visibility["policy_id"] = policy_id
-    visibility_allowed_source = visibility.get("allowed")
-    if visibility_allowed_source is None:
-        visibility_allowed_source = visibility.get("allowed_visibility")
-    allowed_visibility = public_safe_compact_list(visibility_allowed_source, limit=MAX_BENCHMARK_RUN_LIST_ITEMS)
-    if allowed_visibility:
-        compact_visibility["allowed_visibility"] = allowed_visibility
-    if compact_visibility:
-        compact["visibility_policy"] = compact_visibility
-
-    operator_run = source.get("operator_simulator_run") if isinstance(source.get("operator_simulator_run"), dict) else {}
-    compact_operator: dict[str, Any] = {}
-    if operator_run.get("schema_version") == OPERATOR_SIMULATOR_RUN_SCHEMA_VERSION:
-        compact_operator["schema_version"] = OPERATOR_SIMULATOR_RUN_SCHEMA_VERSION
-    simulator_identity = (
-        operator_run.get("simulator_identity")
-        if isinstance(operator_run.get("simulator_identity"), dict)
-        else operator_run
-    )
-    for field in ("setting", "model_family", "seed"):
-        value = public_safe_compact_text(simulator_identity.get(field), limit=140)
-        if value:
-            compact_operator[field] = value
-    interventions = operator_run.get("interventions") if isinstance(operator_run.get("interventions"), list) else []
-    if interventions:
-        compact_operator["intervention_count"] = len(interventions)
-        compact_operator["proactive_intervention_count"] = sum(
-            1 for item in interventions if isinstance(item, dict) and item.get("proactive") is True
-        )
-        compact_operator["no_oracle_audit_passed"] = all(
-            isinstance(item, dict)
-            and isinstance(item.get("no_oracle_audit"), dict)
-            and not any(bool(value) for value in item["no_oracle_audit"].values())
-            for item in interventions
-        )
-    else:
-        for field in ("intervention_count", "proactive_intervention_count"):
-            if isinstance(operator_run.get(field), int):
-                compact_operator[field] = operator_run.get(field)
-        if isinstance(operator_run.get("no_oracle_audit_passed"), bool):
-            compact_operator["no_oracle_audit_passed"] = operator_run.get("no_oracle_audit_passed")
-    official = (
-        operator_run.get("official_task_score_reference")
-        if isinstance(operator_run.get("official_task_score_reference"), dict)
-        else {}
-    )
-    official_kind = public_safe_compact_text(official.get("kind"), limit=100)
-    if not official_kind:
-        official_kind = public_safe_compact_text(operator_run.get("official_task_score_kind"), limit=100)
-    if official_kind:
-        compact_operator["official_task_score_kind"] = official_kind
-    if isinstance(operator_run.get("simulator_induced_error_count"), int):
-        compact_operator["simulator_induced_error_count"] = operator_run.get("simulator_induced_error_count")
-    frequency_audit = (
-        operator_run.get("frequency_budget_audit")
-        if isinstance(operator_run.get("frequency_budget_audit"), dict)
-        else {}
-    )
-    if isinstance(frequency_audit.get("min_worker_events_between_proactive_satisfied"), bool):
-        compact_operator["frequency_budget_satisfied"] = frequency_audit.get(
-            "min_worker_events_between_proactive_satisfied"
-        )
-    elif isinstance(operator_run.get("frequency_budget_satisfied"), bool):
-        compact_operator["frequency_budget_satisfied"] = operator_run.get("frequency_budget_satisfied")
-    side_effect_audit = (
-        operator_run.get("side_effect_audit")
-        if isinstance(operator_run.get("side_effect_audit"), dict)
-        else {}
-    )
-    if side_effect_audit:
-        compact_operator["side_effect_audit_passed"] = not any(bool(value) for value in side_effect_audit.values())
-    elif isinstance(operator_run.get("side_effect_audit_passed"), bool):
-        compact_operator["side_effect_audit_passed"] = operator_run.get("side_effect_audit_passed")
-    if compact_operator:
-        compact["operator_simulator_run"] = compact_operator
-
-    claim_boundary = source.get("claim_boundary") if isinstance(source.get("claim_boundary"), dict) else {}
-    compact_boundary: dict[str, Any] = {}
-    for field in ("official_score_claim_allowed", "assisted_collaboration_claim_allowed", "leaderboard_claim_allowed"):
-        if isinstance(claim_boundary.get(field), bool):
-            compact_boundary[field] = claim_boundary.get(field)
-    if compact_boundary:
-        compact["claim_boundary"] = compact_boundary
-
-    next_decision = source.get("next_run_decision") if isinstance(source.get("next_run_decision"), dict) else {}
-    if not next_decision and isinstance(operator_run.get("next_run_decision"), dict):
-        next_decision = operator_run.get("next_run_decision")  # type: ignore[assignment]
-    compact_next: dict[str, Any] = {}
-    for field in ("decision", "minimum_next_evidence"):
-        value = public_safe_compact_text(next_decision.get(field), limit=180)
-        if value:
-            compact_next[field] = value
-    for field in ("requires_real_runner_approval", "keep_official_scores_separate"):
-        if isinstance(next_decision.get(field), bool):
-            compact_next[field] = next_decision.get(field)
-    if compact_next:
-        compact["next_run_decision"] = compact_next
 
     if set(compact.keys()) == {"schema_version"}:
         return None
@@ -4030,7 +2402,7 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
         benchmark_experiment_report_replay_decision=(
             benchmark_experiment_report_replay_decision
         ),
-        compact_active_user_assisted_pilot=compact_active_user_assisted_pilot,
+        compact_active_user_assisted_pilot=_compact_active_user_assisted_pilot_read_model,
         compact_session_runtime_projection_from_run=(
             compact_session_runtime_projection_from_run
         ),
@@ -4592,7 +2964,7 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
         compact_benchmark_experiment_report=compact_benchmark_experiment_report,
         benchmark_experiment_report_readiness_note=benchmark_experiment_report_readiness_note,
         benchmark_experiment_report_replay_decision=benchmark_experiment_report_replay_decision,
-        compact_active_user_assisted_pilot=compact_active_user_assisted_pilot,
+        compact_active_user_assisted_pilot=_compact_active_user_assisted_pilot_read_model,
         compact_session_runtime_projection_from_run=compact_session_runtime_projection_from_run,
     )
 
@@ -4625,7 +2997,7 @@ def build_status_runtime_summary_context() -> StatusRuntimeSummaryContext:
         compact_benchmark_comparison=_compact_benchmark_comparison_read_model,
         compact_benchmark_learning_ledger=compact_benchmark_learning_ledger,
         compact_benchmark_experiment_report=compact_benchmark_experiment_report,
-        compact_active_user_assisted_pilot=compact_active_user_assisted_pilot,
+        compact_active_user_assisted_pilot=_compact_active_user_assisted_pilot_read_model,
         run_has_external_evidence_watch_signal=run_has_external_evidence_watch_signal,
         decision_classifications=EVENT_LEDGER_DECISION_CLASSIFICATIONS,
         evidence_classifications=EVENT_LEDGER_EVIDENCE_CLASSIFICATIONS,
@@ -4690,6 +3062,7 @@ def collect_status(
     limit: int,
     include_task_graph: bool = False,
     goal_id: str | None = None,
+    available_capabilities: Any = None,
 ) -> dict[str, Any]:
     return _collect_status_read_model(
         registry_path=registry_path,
@@ -4698,5 +3071,6 @@ def collect_status(
         limit=limit,
         include_task_graph=include_task_graph,
         goal_id=goal_id,
+        available_capabilities=available_capabilities,
         context=build_status_collection_context(),
     )

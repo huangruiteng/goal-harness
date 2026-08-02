@@ -345,7 +345,8 @@ def assert_promotion_readiness_full_scan_fallback() -> None:
             queue={"items": []}, runtime_root=runtime, goal_id_filter=None, display_limit=1, todo_index_limit=1,
         )["promotion_readiness_summary"]
         assert summary["available"] is True, summary
-        assert summary["source"] == "run_history_full_scan", summary
+        assert summary["source"] == "goal_run_history_legacy", summary
+        assert summary["evidence_scope"] == "goal_run_history", summary
         assert summary["sample_run_count"] == 0, summary
         assert summary["classification"] == "canary_promotion_readiness_smoke_group", summary
         assert summary["delivery_outcome"] == "primary_goal_outcome", summary
@@ -423,7 +424,11 @@ def assert_promotion_readiness_warning_in_quota_guard() -> None:
     assert stale_warning["age_hours"] == 25.0, stale_warning
     stale_markdown = render_quota_should_run_markdown(stale_payload)
     assert "promotion_readiness_warning: status=stale requires_readiness_run=True" in stale_markdown, stale_markdown
-    assert "promotion_readiness_action: promotion readiness evidence is missing, stale, or unknown" in stale_markdown, stale_markdown
+    assert (
+        "promotion_readiness_action: python3 examples/canary/canary-promotion-readiness-smoke.py"
+        in stale_markdown
+    ), stale_markdown
+    assert "promotion-readiness-smoke.py --no-write-evidence" not in stale_markdown, stale_markdown
     assert "promotion_readiness_evidence: goal=loopx-meta" in stale_markdown, stale_markdown
     assert "age_hours=25.0" in stale_markdown, stale_markdown
     assert "artifacts=True/True" in stale_markdown, stale_markdown
@@ -449,6 +454,11 @@ def assert_promotion_readiness_warning_in_quota_guard() -> None:
     assert missing_warning["available"] is False, missing_warning
     missing_markdown = render_quota_should_run_markdown(missing_payload)
     assert "promotion_readiness_warning: status=missing requires_readiness_run=True" in missing_markdown, missing_markdown
+    assert (
+        "promotion_readiness_action: python3 examples/canary/canary-promotion-readiness-smoke.py"
+        in missing_markdown
+    ), missing_markdown
+    assert "promotion-readiness-smoke.py --no-write-evidence" not in missing_markdown, missing_markdown
     assert "promotion_readiness_reason: no canary promotion readiness run found in sampled history" in missing_markdown, missing_markdown
 
     fresh_payload = build_quota_should_run(

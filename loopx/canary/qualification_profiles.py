@@ -5,6 +5,39 @@ from typing import Any
 
 CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
     {
+        "id": "change-quality-exact-receipt",
+        "title": "Change-quality exact-scope receipt integrity",
+        "quality_risk": "high",
+        "purpose": (
+            "Qualify default-off policy, exact diff identity, bounded safe-fix "
+            "authority, stale receipt rejection, and strict premerge enforcement."
+        ),
+        "catalog_families": [
+            "State And Boundary",
+            "Planning Governance",
+        ],
+        "trigger_hints": (
+            "change quality",
+            "change-quality",
+            "change_quality_qualification",
+            "loopx/capabilities/change_quality/",
+            "skills/loopx-change-quality/",
+            "tests/capabilities/test_change_quality.py",
+            "examples/change-quality-qualification-smoke.py",
+            "docs/capabilities/change-quality/",
+        ),
+        "checks": [
+            {
+                "command": "python3 examples/change-quality-qualification-smoke.py",
+                "tier": "default",
+                "reason": (
+                    "guards default-off activation, exact-scope receipt readback, "
+                    "and stale-diff rejection through the public capability contract"
+                ),
+            },
+        ],
+    },
+    {
         "id": "control-plane-state-machine",
         "title": "Control-plane state-machine composition",
         "quality_risk": "high",

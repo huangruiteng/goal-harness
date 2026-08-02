@@ -96,6 +96,101 @@ def should_notify_user_on_open_todo(
     return waiting_on in {"user_or_controller", "controller", "external_evidence"}
 
 
+def open_todo_notify_reason(*, state: str, waiting_on: str) -> str:
+    if state == "focus_wait":
+        return "open user todo can unblock focus_wait after owner evidence, external eval, or a clean baseline changes"
+    if waiting_on == "external_evidence":
+        return "open user todo can provide or defer the external-evidence checkpoint"
+    if waiting_on in {"user_or_controller", "controller"}:
+        return "open user todo can resolve the user/controller blocker"
+    return "open user todo can resolve the current waiting lane"
+
+
+def build_user_todo_notification(
+    summary: dict[str, Any] | None,
+    *,
+    state: str,
+    waiting_on: str,
+    repeat_notification_required: bool = False,
+    repeat_notification_reason: Any = None,
+) -> dict[str, Any]:
+    if not isinstance(summary, dict):
+        return {}
+    if has_open_user_gate_todo(summary):
+        return {
+            "notify_user_on_gate": True,
+            "open_todo_notify_reason": user_gate_todo_notify_reason(summary),
+            "open_todo_notification_policy": "repeat_until_resolved",
+        }
+    if not repeat_notification_required and not should_notify_user_on_open_todo(
+        state=state,
+        waiting_on=waiting_on,
+        user_todo_summary=summary,
+    ):
+        return {}
+    reason = open_todo_notify_reason(state=state, waiting_on=waiting_on)
+    if repeat_notification_required:
+        reason = (
+            repeat_notification_reason
+            or "no-work polling should ask the current open user todo"
+        )
+    return {
+        "notify_user_on_open_todo": True,
+        "open_todo_notify_reason": reason,
+        **(
+            {"open_todo_notification_policy": "repeat_until_resolved"}
+            if repeat_notification_required
+            else {}
+        ),
+    }
+
+
+def apply_scoped_user_gate_fallback_projection(
+    payload: dict[str, Any],
+    *,
+    fallback: dict[str, Any] | None,
+    replan_decision_allowed: bool,
+) -> dict[str, Any]:
+    if not fallback or replan_decision_allowed:
+        return payload
+
+    projected = dict(payload)
+    projected["scoped_user_gate_fallback"] = fallback
+    projected["should_run"] = True
+    if projected.get("decision") == "skip":
+        projected["decision"] = "safe_bypass_user_gate_fallback"
+    if projected.get("effective_action") in {"skip", "monitor_quiet_skip", None}:
+        projected["effective_action"] = "scoped_user_gate_fallback"
+
+    execution_obligation = (
+        dict(projected.get("execution_obligation"))
+        if isinstance(projected.get("execution_obligation"), dict)
+        else {}
+    )
+    execution_obligation.update(
+        {
+            "must_attempt_work": True,
+            "kind": "scoped_user_gate_fallback",
+            "minimum": "one_non_gated_fallback_segment_after_user_gate_notice",
+            "delivery_allowed": True,
+            "notify_is_execution_gate": False,
+            "contract": "scoped_user_gate_fallback",
+            "contract_obligation": fallback.get("recommended_action"),
+            "reason": fallback.get("reason"),
+        }
+    )
+    projected["execution_obligation"] = execution_obligation
+    projected["safe_bypass_allowed"] = True
+    projected["safe_bypass_kind"] = "scoped_user_gate_fallback"
+    projected["safe_bypass_policy"] = (
+        "The user gate blocks only the matched agent action scope. Surface "
+        "that gate, then advance the selected non-gated fallback; spend only "
+        "after validated writeback."
+    )
+    projected["actionable_by_codex"] = True
+    return projected
+
+
 def build_gate_prompt(
     item: dict[str, Any],
     *,

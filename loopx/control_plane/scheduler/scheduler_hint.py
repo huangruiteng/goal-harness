@@ -5,17 +5,21 @@ import json
 import math
 import re
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 from ..runtime.time import now_utc, utc_isoformat
 from . import ack as scheduler_ack
 from .arbitration import (
+    SchedulerArbitration,
     SchedulerDisposition,
     build_scheduler_arbitration,
 )
 from .execution_context import (
+    SchedulerOwner,
     SchedulerExecutionContextResolution,
+    SchedulerRuntimeProfile,
     apply_scheduler_execution_context,
     resolve_scheduler_execution_context,
 )
@@ -54,10 +58,68 @@ MONITOR_WAIT_PHASE_RANK = {
     "cadence_only": 2,
     "far_window": 3,
 }
+SCHEDULER_BASE_IDENTITY_KEYS = (
+    "goal_id",
+    "agent_identity.agent_id",
+    "effective_action",
+    "heartbeat_recommendation.recommended_mode",
+    "interaction_contract.mode",
+)
+SCHEDULER_FRONTIER_IDENTITY_KEYS = (
+    "selected_todo.todo_id",
+    "selected_todo.action_kind",
+    "selected_todo.target_key",
+    "selected_todo.claimed_by",
+    "selected_todo.capability_binding_ref",
+)
+SCHEDULER_IDENTITY_KEYS = (
+    *SCHEDULER_BASE_IDENTITY_KEYS,
+    "recommended_action",
+)
+MONITOR_WAIT_IDENTITY_KEYS = SCHEDULER_BASE_IDENTITY_KEYS
+CODEX_APP_SSH_GOAL_RUNTIME_KEY = SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE.value
+CODEX_NATIVE_GOAL_BLOCK_ACTION = "update_goal_blocked_keep_loopx_active"
+CODEX_NATIVE_GOAL_RESUME_TRIGGER = "explicit_codex_goal_resume"
 
 build_codex_app_scheduler_ack_event = scheduler_ack.build_codex_app_scheduler_ack_event
 build_scheduler_ack_plan = scheduler_ack.build_scheduler_ack_plan
 scheduler_backoff_packet = scheduler_ack.scheduler_backoff_packet
+
+
+def _stable_digest(value: Any, *, length: int) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:length]
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _scheduler_identity_keys(
+    *,
+    cadence_class: str,
+    execution_context: SchedulerExecutionContextResolution,
+) -> tuple[str, ...]:
+    base_keys = (
+        MONITOR_WAIT_IDENTITY_KEYS
+        if cadence_class == "monitor_wait"
+        else SCHEDULER_IDENTITY_KEYS
+    )
+    context = execution_context.context if execution_context.ok else None
+    if context is None or context.scheduler_owner is not SchedulerOwner.GOAL_RUNTIME:
+        return base_keys
+    if cadence_class == "monitor_wait":
+        return (*base_keys, *SCHEDULER_FRONTIER_IDENTITY_KEYS)
+    return (
+        *base_keys[:-1],
+        *SCHEDULER_FRONTIER_IDENTITY_KEYS,
+        base_keys[-1],
+    )
 
 
 def _scheduler_progression_interval_elapsed(
@@ -455,167 +517,27 @@ def _monitor_wait_cadence_plan(payload: dict[str, Any]) -> dict[str, Any] | None
     }
 
 
-def build_scheduler_hint(
-    payload: dict[str, Any],
-    *,
-    user_action_required: bool = False,
-    agent_scope_frontier_actions: Collection[str] = (),
-    include_detail: bool = False,
-    codex_app_scheduler_state: dict[str, Any] | None = None,
-    available_capabilities: Any = None,
-    codex_app_current_rrule: Any = None,
-    scheduler_execution_context: (
-        Mapping[str, Any] | SchedulerExecutionContextResolution | None
-    ) = None,
-) -> dict[str, Any]:
-    """Project host-runtime cadence/backoff policy from a quota decision.
+@dataclass(frozen=True)
+class _SchedulerHintBuilder:
+    payload: dict[str, Any]
+    execution_context: SchedulerExecutionContextResolution
+    arbitration: SchedulerArbitration
+    spend_policy: Any
+    scheduler_ack_capabilities: Any
+    codex_app_scheduler_state: dict[str, Any] | None
+    codex_app_current_rrule: Any
+    include_detail: bool
 
-    This helper is intentionally pure: callers provide the few quota-local
-    classification facts it needs, and it returns the public scheduler contract
-    without reading files, mutating state, or depending on the full quota module.
-    """
-
-    execution_context = resolve_scheduler_execution_context(
-        scheduler_execution_context
-    )
-    if not execution_context.ok:
-        return {
-            "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
-            "source": "quota.should-run",
-            "action": "repair_scheduler_execution_context",
-            "cadence_class": "control_plane_repair",
-            "reason_code": "invalid_scheduler_execution_context",
-            "reason": (
-                "scheduler ownership is missing or contradictory; repair the "
-                "typed execution context before applying cadence"
-            ),
-            "spend_policy": "no quota spend for scheduler context repair",
-            "execution_context": execution_context.projection(),
-            "execution_phase": {
-                "schema_version": "scheduler_execution_phase_v0",
-                "disposition": "contract_error",
-                "completed": False,
-                "apply_needed": False,
-                "ack_needed": False,
-                "acknowledged": False,
-            },
-            "codex_app": {
-                "applicability": "blocked_invalid_context",
-                "apply": "none",
-                "host_action": "none",
-                "ack_required": False,
-            },
-            "unchanged_poll": {
-                "local_scheduler": "stop_until_context_repaired",
-                "codex_cli_tui": "stop_until_context_repaired",
-                "claude_code_loop": "stop_until_context_repaired",
-                "final_quota_replan_check_enabled": False,
-                "spend_policy": "no quota spend for scheduler context repair",
-            },
-            "consistency_error": {
-                "source": "scheduler_execution_context",
-                "errors": list(execution_context.errors),
-            },
-        }
-
-    def contextualize(result: dict[str, Any]) -> dict[str, Any]:
-        return apply_scheduler_execution_context(result, execution_context)
-
-    heartbeat_recommendation = (
-        payload.get("heartbeat_recommendation")
-        if isinstance(payload.get("heartbeat_recommendation"), dict)
-        else {}
-    )
-    execution_obligation = (
-        payload.get("execution_obligation")
-        if isinstance(payload.get("execution_obligation"), dict)
-        else {}
-    )
-    automation_liveness = (
-        payload.get("automation_liveness")
-        if isinstance(payload.get("automation_liveness"), dict)
-        else {}
-    )
-    spend_policy = (
-        automation_liveness.get("spend_policy")
-        or execution_obligation.get("spend_policy")
-        or heartbeat_recommendation.get("spend_policy")
-    )
-    capability_gate = (
-        payload.get("capability_gate")
-        if isinstance(payload.get("capability_gate"), dict)
-        else {}
-    )
-    scheduler_ack_capabilities = (
-        available_capabilities
-        if available_capabilities is not None
-        else capability_gate.get("available")
-        if isinstance(capability_gate.get("available"), list)
-        else []
-    )
-    base_identity_keys = [
-        "goal_id",
-        "agent_identity.agent_id",
-        "effective_action",
-        "heartbeat_recommendation.recommended_mode",
-        "interaction_contract.mode",
-        "recommended_action",
-    ]
-    monitor_wait_identity_keys = [
-        "goal_id",
-        "agent_identity.agent_id",
-        "effective_action",
-        "heartbeat_recommendation.recommended_mode",
-        "interaction_contract.mode",
-    ]
-    agent_scope_action_set = {str(value) for value in agent_scope_frontier_actions}
-    arbitration = build_scheduler_arbitration(
-        payload,
-        agent_scope_frontier_actions=agent_scope_action_set,
-    )
-
-    def identity_value(path: str) -> Any:
-        current: Any = payload
+    def _identity_value(self, path: str) -> Any:
+        current: Any = self.payload
         for part in path.split("."):
             if not isinstance(current, dict):
                 return None
             current = current.get(part)
         return current
 
-    if arbitration.disposition == SchedulerDisposition.TERMINAL_STOP:
-        return contextualize({
-            "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
-            "source": "quota.should-run",
-            "action": "stop_until_explicit_resume",
-            "cadence_class": "terminal_no_followup",
-            "reason_code": arbitration.reason_code,
-            "reason": (
-                "validated closure evidence derives no-follow-up and confirms no "
-                "remaining frontier; recurring polling must stop until resume"
-            ),
-            "spend_policy": "no quota spend for terminal automation shutdown",
-            "codex_app": {
-                "apply": "pause_or_delete_current_heartbeat_if_possible",
-                "host_tool": "automation_update",
-                "host_action": "pause_or_delete_current_heartbeat",
-                "host_action_required": True,
-                "attempt_limit": 1,
-                "verify_host_result": True,
-                "ack_required": False,
-                "resume_trigger": "explicit goal resume or newly projected work",
-                "no_spend_for_host_action": True,
-            },
-            "unchanged_poll": {
-                "local_scheduler": "stop",
-                "codex_cli_tui": "exit",
-                "claude_code_loop": "stop",
-                "final_quota_replan_check_enabled": False,
-                "spend_policy": "no quota spend for terminal loop stop",
-            },
-            "unchanged_identity_keys": base_identity_keys,
-        })
-
-    def hint(
+    def build(
+        self,
         *,
         action: str,
         cadence_class: str,
@@ -631,8 +553,7 @@ def build_scheduler_hint(
         advance_same_identity: bool = True,
     ) -> dict[str, Any]:
         local_cadence_progression = cadence_progression_override or [
-            min(codex_interval * (multiplier**step), codex_max)
-            for step in range(3)
+            min(codex_interval * (multiplier**step), codex_max) for step in range(3)
         ]
         codex_host_max = min(max(1, codex_max), CODEX_APP_MAX_INTERVAL_MINUTES)
         codex_cadence_progression: list[int] = []
@@ -643,16 +564,8 @@ def build_scheduler_hint(
                 or codex_cadence_progression[-1] != bounded_interval
             ):
                 codex_cadence_progression.append(bounded_interval)
-        codex_initial_interval = (
-            codex_cadence_progression[0]
-            if codex_cadence_progression
-            else min(codex_interval, codex_host_max)
-        )
-        local_initial_interval = (
-            local_cadence_progression[0]
-            if local_cadence_progression
-            else codex_interval
-        )
+        codex_initial_interval = codex_cadence_progression[0]
+        local_initial_interval = local_cadence_progression[0]
         final_replan_check = {
             "enabled": cli_limit is not None or claude_limit is not None,
             "trigger": "before_unchanged_poll_after_limit",
@@ -662,12 +575,13 @@ def build_scheduler_hint(
             "if_unchanged": "apply_after_limit_without_spend",
             "spend_policy": "no quota spend for final replan check or loop stop",
         }
-        identity_keys = (
-            monitor_wait_identity_keys
-            if cadence_class == "monitor_wait"
-            else base_identity_keys
+        identity_keys = list(
+            _scheduler_identity_keys(
+                cadence_class=cadence_class,
+                execution_context=self.execution_context,
+            )
         )
-        identity_snapshot = {key: identity_value(key) for key in identity_keys}
+        identity_snapshot = {key: self._identity_value(key) for key in identity_keys}
         codex_rrule = rrule_for_minutes(codex_initial_interval)
         profile_snapshot = {
             "cadence_class": cadence_class,
@@ -680,43 +594,17 @@ def build_scheduler_hint(
             "claude_code_loop_unchanged_poll_limit": claude_limit,
         }
         reset_profile_snapshot = reset_profile_snapshot_override or profile_snapshot
-        reset_token_payload = {
-            "action": action,
-            "identity_snapshot": identity_snapshot,
-            "profile_snapshot": reset_profile_snapshot,
-        }
-        reset_token = hashlib.sha256(
-            json.dumps(
-                reset_token_payload,
-                ensure_ascii=True,
-                sort_keys=True,
-                default=str,
-            ).encode("utf-8")
-        ).hexdigest()[:16]
-        identity_signature = hashlib.sha256(
-            json.dumps(
-                identity_snapshot,
-                ensure_ascii=True,
-                sort_keys=True,
-                default=str,
-            ).encode("utf-8")
-        ).hexdigest()[:12]
-        profile_signature = hashlib.sha256(
-            json.dumps(
-                profile_snapshot,
-                ensure_ascii=True,
-                sort_keys=True,
-                default=str,
-            ).encode("utf-8")
-        ).hexdigest()[:12]
-        reset_profile_signature = hashlib.sha256(
-            json.dumps(
-                reset_profile_snapshot,
-                ensure_ascii=True,
-                sort_keys=True,
-                default=str,
-            ).encode("utf-8")
-        ).hexdigest()[:12]
+        reset_token = _stable_digest(
+            {
+                "action": action,
+                "identity_snapshot": identity_snapshot,
+                "profile_snapshot": reset_profile_snapshot,
+            },
+            length=16,
+        )
+        identity_signature = _stable_digest(identity_snapshot, length=12)
+        profile_signature = _stable_digest(profile_snapshot, length=12)
+        reset_profile_signature = _stable_digest(reset_profile_snapshot, length=12)
         reset_policy_detail = {
             "schema_version": SCHEDULER_RESET_POLICY_SCHEMA_VERSION,
             "source": "quota.should-run",
@@ -755,23 +643,30 @@ def build_scheduler_hint(
             "final_quota_replan_check": final_replan_check,
             "no_spend_for_cadence_change": True,
         }
-        codex_cli_tui = {
+        codex_goal_loop = {
             "unchanged_poll_limit": cli_limit,
-            "after_limit": "exit_goal_loop" if cli_limit is not None else "continue",
+            "after_limit": (
+                CODEX_NATIVE_GOAL_BLOCK_ACTION
+                if cli_limit is not None
+                else "continue"
+            ),
             "final_quota_replan_check": final_replan_check,
+            "loopx_goal_state": "remains_active",
+            "resume_trigger": CODEX_NATIVE_GOAL_RESUME_TRIGGER,
+            "no_spend_for_block": True,
+        }
+        codex_cli_tui = {
+            **codex_goal_loop,
             "no_spend_for_exit": True,
         }
+        codex_app_ssh_goal = dict(codex_goal_loop)
         claude_code_loop = {
             "unchanged_poll_limit": claude_limit,
             "after_limit": "stop_loop" if claude_limit is not None else "continue",
             "final_quota_replan_check": final_replan_check,
             "no_spend_for_stop": True,
         }
-        scheduler_state = (
-            codex_app_scheduler_state
-            if isinstance(codex_app_scheduler_state, dict)
-            else {}
-        )
+        scheduler_state = _dict_or_empty(self.codex_app_scheduler_state)
         scheduler_now = now_utc()
         all_host_update_failures = retained_scheduler_host_update_failures(
             normalize_scheduler_host_update_failures(
@@ -796,8 +691,10 @@ def build_scheduler_hint(
         state_status = cadence_decision.state_status
         current_interval = codex_cadence_progression[current_index]
         current_rrule = rrule_for_minutes(current_interval)
-        last_applied_rrule = str(scheduler_state.get("last_applied_rrule") or "").strip()
-        observed_host_rrule = normalize_scheduler_rrule(codex_app_current_rrule)
+        last_applied_rrule = str(
+            scheduler_state.get("last_applied_rrule") or ""
+        ).strip()
+        observed_host_rrule = normalize_scheduler_rrule(self.codex_app_current_rrule)
         effective_host_rrule = observed_host_rrule or last_applied_rrule
         host_update_failures = retained_scheduler_host_update_failures(
             all_host_update_failures,
@@ -819,10 +716,12 @@ def build_scheduler_hint(
             and not observed_host_rrule
             and state_status == "same_identity"
         ):
-            current_rrule_already_applied = _monitor_rrule_applied_within_stale_tolerance(
-                cadence_class=cadence_class,
-                last_applied_rrule=effective_host_rrule,
-                current_rrule=current_rrule,
+            current_rrule_already_applied = (
+                _monitor_rrule_applied_within_stale_tolerance(
+                    cadence_class=cadence_class,
+                    last_applied_rrule=effective_host_rrule,
+                    current_rrule=current_rrule,
+                )
             )
         host_decision = decide_scheduler_host_transition(
             state_status=state_status,
@@ -881,8 +780,7 @@ def build_scheduler_hint(
                 else (
                     "none_recorded_host_failure"
                     if host_failure_suppressed
-                    else
-                    "ack_observed_rrule_without_update"
+                    else "ack_observed_rrule_without_update"
                     if host_match_ack_needed
                     else "none"
                 )
@@ -893,16 +791,13 @@ def build_scheduler_hint(
                 else (
                     "skip_automation_update_for_recorded_host_failure"
                     if host_failure_suppressed
-                    else
-                    "quota_scheduler_ack_from_matching_host_observation"
+                    else "quota_scheduler_ack_from_matching_host_observation"
                     if host_match_ack_needed
                     else "skip_automation_update_when_apply_needed_false"
                 )
             ),
             "rrule_source": (
-                "scheduler_hint.codex_app.recommended_rrule"
-                if apply_needed
-                else None
+                "scheduler_hint.codex_app.recommended_rrule" if apply_needed else None
             ),
             "stateful_backoff": {
                 "schema_version": CODEX_APP_STATEFUL_BACKOFF_SCHEMA_VERSION,
@@ -917,16 +812,15 @@ def build_scheduler_hint(
             },
             "no_spend_for_cadence_change": True,
         }
+        stateful_backoff = codex_app["stateful_backoff"]
         if host_update_failures:
-            codex_app["stateful_backoff"]["host_update_failures"] = [
+            stateful_backoff["host_update_failures"] = [
                 dict(failure) for failure in host_update_failures
             ]
         if recorded_host_failure:
-            codex_app["stateful_backoff"]["host_update_failure"] = dict(
-                recorded_host_failure
-            )
+            stateful_backoff["host_update_failure"] = dict(recorded_host_failure)
         if observed_host_rrule:
-            codex_app["stateful_backoff"]["host_observation"] = {
+            stateful_backoff["host_observation"] = {
                 "source": "quota_should_run_host_observation",
                 "current_rrule": observed_host_rrule,
                 "status": (
@@ -935,59 +829,75 @@ def build_scheduler_hint(
                     else "drift_detected"
                 ),
             }
+        goal_id = self.payload.get("goal_id")
+        agent_id = self._identity_value("agent_identity.agent_id")
         if apply_needed:
             codex_app["recommended_rrule"] = current_rrule
-            if payload.get("goal_id") and identity_value("agent_identity.agent_id"):
+            if goal_id and agent_id:
                 codex_app["failure_hint"] = build_codex_app_scheduler_failure_hint(
-                    goal_id=payload.get("goal_id"),
-                    agent_id=identity_value("agent_identity.agent_id"),
+                    goal_id=goal_id,
+                    agent_id=agent_id,
                     failed_rrule=current_rrule,
                     observed_host_rrule=effective_host_rrule,
-                    available_capabilities=scheduler_ack_capabilities,
+                    available_capabilities=self.scheduler_ack_capabilities,
                 )
-        if ack_needed:
-            if payload.get("goal_id") and identity_value("agent_identity.agent_id"):
-                codex_app["ack_hint"] = build_codex_app_scheduler_ack_hint(
-                    goal_id=payload.get("goal_id"),
-                    agent_id=identity_value("agent_identity.agent_id"),
-                    applied_rrule=current_rrule,
-                    reset_token=reset_token,
-                    identity_signature=identity_signature,
-                    available_capabilities=scheduler_ack_capabilities,
-                    after=(
-                        "automation_update_rrule_success"
-                        if apply_needed
-                        else "matching_host_rrule_observed"
-                    ),
-                    # An ACK hint is executable only after either a successful
-                    # host update or a matching host readback. Carry that proof
-                    # and the originating identity so scheduler-ack-current
-                    # cannot recompute an unbound hint and silently no-op.
-                    host_match_observed=True,
-                )
+        if ack_needed and goal_id and agent_id:
+            codex_app["ack_hint"] = build_codex_app_scheduler_ack_hint(
+                goal_id=goal_id,
+                agent_id=agent_id,
+                applied_rrule=current_rrule,
+                reset_token=reset_token,
+                identity_signature=identity_signature,
+                available_capabilities=self.scheduler_ack_capabilities,
+                after=(
+                    "automation_update_rrule_success"
+                    if apply_needed
+                    else "matching_host_rrule_observed"
+                ),
+                # Bind the host proof to the originating identity.
+                host_match_observed=True,
+            )
+        unchanged_poll_limits = {
+            "local_scheduler": cli_limit,
+            "codex_cli_tui": cli_limit,
+            "claude_code_loop": claude_limit,
+        }
+        unchanged_poll_after_limits = {
+            "local_scheduler": local_scheduler["after_limit"],
+            "codex_cli_tui": codex_cli_tui["after_limit"],
+            "claude_code_loop": claude_code_loop["after_limit"],
+        }
+        detail_contains = [
+            "local_scheduler",
+            "codex_cli_tui",
+            "claude_code_loop",
+            "final_quota_replan_check",
+            "reset_policy_detail",
+            "stateful_backoff_detail",
+        ]
+        if cli_limit is not None:
+            unchanged_poll_limits[CODEX_APP_SSH_GOAL_RUNTIME_KEY] = cli_limit
+            unchanged_poll_after_limits[CODEX_APP_SSH_GOAL_RUNTIME_KEY] = (
+                codex_app_ssh_goal["after_limit"]
+            )
+            detail_contains.insert(2, CODEX_APP_SSH_GOAL_RUNTIME_KEY)
         scheduler_hint = {
             "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
             "source": "quota.should-run",
             "action": action,
             "cadence_class": cadence_class,
-            "reason_code": arbitration.reason_code,
+            "reason_code": self.arbitration.reason_code,
             "reason": reason,
-            "spend_policy": spend_policy,
+            "spend_policy": self.spend_policy,
             "codex_app": codex_app,
             "unchanged_poll": {
-                "limits": {
-                    "local_scheduler": cli_limit,
-                    "codex_cli_tui": cli_limit,
-                    "claude_code_loop": claude_limit,
-                },
-                "after_limits": {
-                    "local_scheduler": local_scheduler["after_limit"],
-                    "codex_cli_tui": codex_cli_tui["after_limit"],
-                    "claude_code_loop": claude_code_loop["after_limit"],
-                },
+                "limits": unchanged_poll_limits,
+                "after_limits": unchanged_poll_after_limits,
                 "final_quota_replan_check_enabled": final_replan_check["enabled"],
                 "final_quota_replan_check_action": (
-                    final_replan_check["action"] if final_replan_check["enabled"] else None
+                    final_replan_check["action"]
+                    if final_replan_check["enabled"]
+                    else None
                 ),
                 "spend_policy": final_replan_check["spend_policy"],
             },
@@ -1003,14 +913,7 @@ def build_scheduler_hint(
                     "unchanged_poll",
                     "reset_policy",
                 ],
-                "contains": [
-                    "local_scheduler",
-                    "codex_cli_tui",
-                    "claude_code_loop",
-                    "final_quota_replan_check",
-                    "reset_policy_detail",
-                    "stateful_backoff_detail",
-                ],
+                "contains": detail_contains,
             },
         }
         notification_cooldown = _user_gate_notification_cooldown(
@@ -1022,23 +925,163 @@ def build_scheduler_hint(
         )
         if notification_cooldown:
             scheduler_hint["user_gate_notification_cooldown"] = notification_cooldown
-        if include_detail:
+        if self.include_detail:
             scheduler_hint["cold_path_detail"] = {
                 "schema_version": SCHEDULER_HINT_DETAIL_SCHEMA_VERSION,
                 "source": "quota.should-run",
                 "local_scheduler": local_scheduler,
                 "codex_cli_tui": codex_cli_tui,
+                CODEX_APP_SSH_GOAL_RUNTIME_KEY: codex_app_ssh_goal,
                 "claude_code_loop": claude_code_loop,
                 "final_quota_replan_check": final_replan_check,
                 "reset_policy_detail": reset_policy_detail,
                 "stateful_backoff_detail": stateful_backoff_detail,
             }
             if cadence_context_detail:
-                scheduler_hint["cold_path_detail"]["cadence_context"] = cadence_context_detail
-        return contextualize(scheduler_hint)
+                scheduler_hint["cold_path_detail"]["cadence_context"] = (
+                    cadence_context_detail
+                )
+        return apply_scheduler_execution_context(scheduler_hint, self.execution_context)
 
+
+def build_scheduler_hint(
+    payload: dict[str, Any],
+    *,
+    user_action_required: bool = False,
+    agent_scope_frontier_actions: Collection[str] = (),
+    include_detail: bool = False,
+    codex_app_scheduler_state: dict[str, Any] | None = None,
+    available_capabilities: Any = None,
+    codex_app_current_rrule: Any = None,
+    scheduler_execution_context: (
+        Mapping[str, Any] | SchedulerExecutionContextResolution | None
+    ) = None,
+) -> dict[str, Any]:
+    """Project host-runtime cadence/backoff policy from a quota decision.
+
+    This helper is intentionally pure: callers provide the few quota-local
+    classification facts it needs, and it returns the public scheduler contract
+    without reading files, mutating state, or depending on the full quota module.
+    """
+
+    execution_context = resolve_scheduler_execution_context(scheduler_execution_context)
+    if not execution_context.ok:
+        return {
+            "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
+            "source": "quota.should-run",
+            "action": "repair_scheduler_execution_context",
+            "cadence_class": "control_plane_repair",
+            "reason_code": "invalid_scheduler_execution_context",
+            "reason": (
+                "scheduler ownership is missing or contradictory; repair the "
+                "typed execution context before applying cadence"
+            ),
+            "spend_policy": "no quota spend for scheduler context repair",
+            "execution_context": execution_context.projection(),
+            "execution_phase": {
+                "schema_version": "scheduler_execution_phase_v0",
+                "disposition": "contract_error",
+                "completed": False,
+                "apply_needed": False,
+                "ack_needed": False,
+                "acknowledged": False,
+            },
+            "codex_app": {
+                "applicability": "blocked_invalid_context",
+                "apply": "none",
+                "host_action": "none",
+                "ack_required": False,
+            },
+            "unchanged_poll": {
+                "local_scheduler": "stop_until_context_repaired",
+                "codex_cli_tui": "stop_until_context_repaired",
+                CODEX_APP_SSH_GOAL_RUNTIME_KEY: "stop_until_context_repaired",
+                "claude_code_loop": "stop_until_context_repaired",
+                "final_quota_replan_check_enabled": False,
+                "spend_policy": "no quota spend for scheduler context repair",
+            },
+            "consistency_error": {
+                "source": "scheduler_execution_context",
+                "errors": list(execution_context.errors),
+            },
+        }
+
+    heartbeat_recommendation = _dict_or_empty(payload.get("heartbeat_recommendation"))
+    execution_obligation = _dict_or_empty(payload.get("execution_obligation"))
+    automation_liveness = _dict_or_empty(payload.get("automation_liveness"))
+    spend_policy = (
+        automation_liveness.get("spend_policy")
+        or execution_obligation.get("spend_policy")
+        or heartbeat_recommendation.get("spend_policy")
+    )
+    capability_gate = _dict_or_empty(payload.get("capability_gate"))
+    scheduler_ack_capabilities = (
+        available_capabilities
+        if available_capabilities is not None
+        else capability_gate.get("available")
+        if isinstance(capability_gate.get("available"), list)
+        else []
+    )
+    agent_scope_action_set = {str(value) for value in agent_scope_frontier_actions}
+    arbitration = build_scheduler_arbitration(
+        payload,
+        agent_scope_frontier_actions=agent_scope_action_set,
+    )
+
+    if arbitration.disposition == SchedulerDisposition.TERMINAL_STOP:
+        return apply_scheduler_execution_context(
+            {
+                "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
+                "source": "quota.should-run",
+                "action": "stop_until_explicit_resume",
+                "cadence_class": "terminal_no_followup",
+                "reason_code": arbitration.reason_code,
+                "reason": (
+                    "validated closure evidence derives no-follow-up and confirms no "
+                    "remaining frontier; recurring polling must stop until resume"
+                ),
+                "spend_policy": "no quota spend for terminal automation shutdown",
+                "codex_app": {
+                    "apply": "pause_or_delete_current_heartbeat_if_possible",
+                    "host_tool": "automation_update",
+                    "host_action": "pause_or_delete_current_heartbeat",
+                    "host_action_required": True,
+                    "attempt_limit": 1,
+                    "verify_host_result": True,
+                    "ack_required": False,
+                    "resume_trigger": "explicit goal resume or newly projected work",
+                    "no_spend_for_host_action": True,
+                },
+                "unchanged_poll": {
+                    "local_scheduler": "stop",
+                    "codex_cli_tui": "exit",
+                    CODEX_APP_SSH_GOAL_RUNTIME_KEY: "complete_host_goal",
+                    "claude_code_loop": "stop",
+                    "final_quota_replan_check_enabled": False,
+                    "spend_policy": "no quota spend for terminal loop stop",
+                },
+                "unchanged_identity_keys": list(
+                    _scheduler_identity_keys(
+                        cadence_class="terminal_no_followup",
+                        execution_context=execution_context,
+                    )
+                ),
+            },
+            execution_context,
+        )
+
+    builder = _SchedulerHintBuilder(
+        payload=payload,
+        execution_context=execution_context,
+        arbitration=arbitration,
+        spend_policy=spend_policy,
+        scheduler_ack_capabilities=scheduler_ack_capabilities,
+        codex_app_scheduler_state=codex_app_scheduler_state,
+        codex_app_current_rrule=codex_app_current_rrule,
+        include_detail=include_detail,
+    )
     if arbitration.disposition == SchedulerDisposition.AGENT_MONITOR_ONLY_WAIT:
-        return hint(
+        return builder.build(
             action="backoff_agent_monitor_only",
             cadence_class="agent_monitor_only",
             reason=(
@@ -1052,7 +1095,7 @@ def build_scheduler_hint(
         )
 
     if arbitration.disposition == SchedulerDisposition.CONSISTENCY_REPAIR:
-        result = hint(
+        result = builder.build(
             action="repair_interaction_contract_projection",
             cadence_class="control_plane_repair",
             reason=(
@@ -1069,7 +1112,7 @@ def build_scheduler_hint(
         return result
 
     if arbitration.disposition == SchedulerDisposition.HUMAN_GATE:
-        return hint(
+        return builder.build(
             action="backoff_waiting_for_user",
             cadence_class="human_gate",
             reason=(
@@ -1094,7 +1137,7 @@ def build_scheduler_hint(
             and isinstance(agent_channel, Mapping)
             and agent_channel.get("delivery_allowed") is False
         )
-        return hint(
+        return builder.build(
             action="run_now",
             cadence_class="active_work",
             reason=(
@@ -1109,7 +1152,7 @@ def build_scheduler_hint(
         )
 
     if arbitration.disposition == SchedulerDisposition.UNCHANGED_WAIT:
-        return hint(
+        return builder.build(
             action="backoff_until_fresh_evidence",
             cadence_class="unchanged_noop",
             reason=(
@@ -1123,7 +1166,7 @@ def build_scheduler_hint(
         )
 
     if arbitration.disposition == SchedulerDisposition.AGENT_SCOPE_WAIT:
-        return hint(
+        return builder.build(
             action="backoff_until_reassigned",
             cadence_class="agent_scope_wait",
             reason=(
@@ -1161,7 +1204,7 @@ def build_scheduler_hint(
             and isinstance(monitor_plan.get("reset_profile"), dict)
             else None
         )
-        return hint(
+        return builder.build(
             action="backoff_until_material_transition",
             cadence_class="monitor_wait",
             reason=(
@@ -1180,7 +1223,7 @@ def build_scheduler_hint(
         )
 
     if arbitration.disposition == SchedulerDisposition.QUIET_WAIT:
-        return hint(
+        return builder.build(
             action="backoff_until_state_change",
             cadence_class="quiet_wait",
             reason=(

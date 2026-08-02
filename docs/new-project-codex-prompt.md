@@ -213,9 +213,9 @@ loopx new-project-prompt \
    loopx read-only-map --goal-id <STABLE_GOAL_ID>
    ```
 8. 如果本轮只更新了 active state、ledger 或外部规划文档，没有产生新的
-   adapter run，或者 dashboard 仍显示旧 run，追加一个 state-only refresh
-   run；若本轮实际消耗了 automatic delivery compute，则把这个 refresh 放到
-   quota spend 之后，避免 state refresh 先关闭 active delivery lane：
+   adapter run，追加一个 state-only refresh run，然后停止且不记 quota spend。
+   如果本轮实际消耗了 automatic delivery compute，先不要运行这个 state-only
+   refresh；把它留到第 10 步记账之后：
 
    ```bash
    loopx refresh-state --goal-id <STABLE_GOAL_ID>
@@ -227,14 +227,29 @@ loopx new-project-prompt \
    - `loopx registry`
    - `loopx status`（在没有项目局部 registry 的目录里也应自动读共享全局 registry）
    - `loopx check --scan-path <PUBLIC_SAFE_FILE_OR_DIR>`
-10. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter tick、
-   实现推进或验证推进），在 validation / writeback 完成后、任何可能关闭 active delivery
-   lane 的 state-only `refresh-state` 之前，只 append 一次 quota spend；需要 dashboard
-   或 controller 看到新状态时，再在 spend 后 refresh：
+10. 如果本轮实际花了 automatic delivery compute（例如 read-only map、adapter
+   tick、实现推进或验证推进），在 validation / writeback 完成后，先记录本轮
+   accountable delivery：
+
+   ```bash
+   loopx refresh-state --goal-id <STABLE_GOAL_ID> \
+     --classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION> \
+     --delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE> \
+     --delivery-outcome <ACTUAL_DELIVERY_OUTCOME>
+   ```
+
+   三个 placeholder 都必须替换为本轮实际验证过的值；不要把较小或仅准备性的
+   turn 默认、拔高成 `multi_surface` / `outcome_progress`。
+   这是 `spend-slot` 将消费的因果记录；普通 state-only refresh 不能替代它。
+   然后只 append 一次 quota spend：
 
    ```bash
    loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <STABLE_GOAL_ID> --slots 1 --source adapter --execute
    ```
+
+   如果 dashboard 或 controller 在 spend 后仍需状态更新，再运行第 8 步不带
+   delivery outcome 的 state-only refresh。不要在 spend 后追加另一个
+   accountable progress refresh，否则它会成为新的未记账 delivery。
 
    不要为 quiet `should_run=false` skip、preflight 失败、或纯 dry-run preview 记账；
    如果 `should_run=false` 但实际完成了 `safe_bypass_allowed=true` 的 bounded

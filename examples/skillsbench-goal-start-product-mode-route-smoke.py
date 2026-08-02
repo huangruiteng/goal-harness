@@ -473,9 +473,11 @@ def _assert_control_score_surface() -> None:
     from loopx.benchmark_adapters.skillsbench import (
         _skillsbench_controller_trace_counters,
     )
+    from loopx.benchmarks.read_models.benchmark_run_pre_execution import (
+        compact_benchmark_run_pre_execution_metadata,
+    )
     from loopx.status import (
         _compact_benchmark_interaction_counters,
-        _compact_benchmark_runner_prerequisites,
     )
     planned_todo_ids = [
         "todo_agent_ranked_solver",
@@ -692,9 +694,10 @@ def _assert_control_score_surface() -> None:
         ]["todo complete"]
         == 1
     )
-    compacted_prerequisites = _compact_benchmark_runner_prerequisites(
-        plan["runner_prerequisites"]
-    )
+    compacted_prerequisites = compact_benchmark_run_pre_execution_metadata(
+        {"runner_prerequisites": plan["runner_prerequisites"]},
+        max_list_items=8,
+    )["runner_prerequisites"]
     assert compacted_prerequisites["goal_start_plan_required"] is True
     assert compacted_prerequisites["goal_start_guided_command_required"] is True
     assert compacted_prerequisites["goal_start_agent_authored_plan_required"] is True
@@ -766,7 +769,7 @@ def _assert_host_local_acp_return_arity_compat() -> None:
     assert _benchflow_connect_acp_return_arity(unannotated_shape) == 3
     assert _tuple_annotation_arity("tuple[object, ...]") is None
 
-    async def connect_as_shape():
+    async def connect_as_shape(self):
         (
             self._acp_client,
             self._session,

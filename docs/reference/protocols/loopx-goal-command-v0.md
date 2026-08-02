@@ -25,8 +25,16 @@ When the user provides text after `/loopx`, the host should:
      generated `heartbeat-prompt` task body.
    - `codex-app-ssh`: when Codex App is attached to a remote workspace over SSH
      and host automation tools are unavailable, set the current visible task to
-     `/goal <task_body>` using the generated `codex_app_ssh_goal` profile.
+     `/goal <task_body>` using the generated `codex_app_ssh_goal` profile. After
+     its typed unchanged-poll limit and final quota check, use native
+     `update_goal(status=blocked)` to block only that host Goal; keep the
+     registered LoopX goal active and resume the host with `/goal resume`.
    - `codex-cli`: set the visible Codex CLI TUI to `/goal <task_body>`.
+   - `codex-ide-plugin`: set the visible IDE composer task to
+     `/goal <task_body>` through the same `codex_cli` runtime profile.
+   - `ark-managed-agent`: submit the generated `<task_body>` once as a native
+     Goal. The Goal runtime owns continuation and terminal evaluation; do not
+     wrap its inner iterations in LoopX Turn or resubmit at phase boundaries.
    - `claude-code`: arm LoopX with `/loopx <task>`, then run native `/loop`.
    - `opencode`: call `loopx_goal_activate` from the installed LoopX OpenCode
      bridge; the bridge gates idle continuation and timer wakes through
@@ -48,10 +56,40 @@ Ambiguous values such as `codex` must fail closed because Codex App automation,
 Codex App over SSH, the IDE plugin, and Codex CLI use different host-loop
 activation paths.
 
+Codex App SSH, Codex CLI/IDE, and Ark Managed Agent form one native Goal host
+family. They share the stable `loopx_goal_prompt_v0` body, the 4,000-character
+host budget, per-continuation `quota should-run` packets, durable LoopX
+writeback, and non-heartbeat quota accounting. Their continuation owner remains
+an explicit host contract:
+
+| Native Goal host | Activation | Continuation and blocked-state owner |
+| --- | --- | --- |
+| Codex App SSH / Codex CLI / Codex IDE | Set a visible `/goal <task_body>`. | Native Codex Goal; after the unchanged limit it may call `update_goal(status=blocked)`, and only user `/goal resume` reactivates it. |
+| Ark Managed Agent | Submit the same prompt family once. | Managed Agent Goal runtime and its durable journal; LoopX must not emulate `/goal resume` or blindly resubmit. |
+
+This family is a prompt, quota, and state-boundary abstraction, not a claim that
+all hosts have the same transport or lifecycle API.
+
 The `codex-app-ssh` task body is an interactive Goal contract, not a scheduled
 heartbeat. It must fit the Codex `/goal` text limit, call `quota should-run`
 without a heartbeat turn receipt, and must not instruct the host to invoke
 `automation_update`, apply an RRULE, or synthesize `LOOPX_TURN`.
+
+Visible Goal activation captures the capabilities observed when the task body
+is generated, but that initial list is not exhaustive for a long-running
+session. Dynamic capability guidance therefore belongs to the CLI decision
+packet, not the stable Goal prompt. When `quota should-run` finds a repairable
+runtime capability gap, `interaction_contract.cli_channel` returns a typed
+`runtime_capability_reentry_v0` packet. Each candidate requires a successful
+real-callsite observation before its exact re-entry command may declare
+`--available-capability`.
+
+The verified re-entry invocation becomes the capability envelope for that
+decision. LoopX then projects the same session-scoped capability flags into
+follow-up refresh, spend, monitor, and quota commands. It never persists those
+observations as durable grants, and owner-held capabilities such as credentials
+remain user gates. This contract is shared by local visible Goal hosts and Ark
+Managed Agent Goal mode without requiring prompt regeneration.
 
 Agent identity follows the same fail-closed rule. A goal with one registered
 agent may select that identity automatically. A goal with multiple registered
@@ -104,15 +142,57 @@ rank field.
 
 ## Issue-Fix Domain Route
 
-When `/loopx <goal text>` contains a public GitHub issue/PR URL or an explicit
-issue-fix intent, the planner should preview the dedicated capability route
-before writing todos:
+When `/loopx <goal text>` explicitly asks to fix or resolve a GitHub issue/PR,
+optionally by public URL, the planner should preview the dedicated capability
+route before writing todos. A URL alone identifies an object, not an action:
+review, merge, monitor, and summary requests stay on their own routes.
+
+`start-goal` projects that decision as a typed `selected_capability_route`.
+This is a bootstrap-only selection, not later-turn authority. The guided
+transaction first persists candidate admission in capability-owned state.
+Missing evidence projects `evidence_required`; unresolved cross-references,
+closed PRs, or maintainer comments project `verification_required`. Only an
+`admitted` `proceed` candidate enters feasibility. Final reuse and terminal
+routes are distinct from pending verification. The Todo keeps only the
+scheduling route (`action_kind`) and stable public target
+(`target_key`); issue facts, prior-work checks, repository evidence,
+reproduction, scope, and validation remain owned by `issue_fix` state.
+
+Later turns continue through `quota should-run.selected_todo`; they do not call
+`start-goal` again or infer admission from stale prompt context. A runnable
+feasibility result binds its projected successor to the persisted feasibility
+row with `capability_binding_ref`. The route's typed
+`implementation_admission.durable_execution_binding` contract tells a Host how
+to resolve that ref and compare the Todo's exact `action_kind` and `target_key`
+with the admitted projection.
+
+For pre-binding Todos, a Host may compare the exact action and target against
+the current feasibility row. Prefix-only matching is never admission authority.
+This keeps capability selection, durable Todo execution ownership, and Goal
+continuation as separate contracts.
+
+The guided transaction's `command_cwd_source` points to the packet's resolved
+`project`; hosts execute its project-relative commands from that exact root.
+
+Before planning implementation, select a currently open public tracker issue.
+Repository TODO/FIXME entries, warnings, and incidental test failures may
+support later reproduction, but they are not issue identity:
+
+```bash
+gh issue list \
+  --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+  --state open \
+  --limit 20 \
+  --json number,title,url,labels
+```
 
 ```bash
 loopx issue-fix workflow-plan \
   --url <github-issue-or-pr-url> \
   --repo-path <approved-repo> \
   --repository-context-json <compact-context.json> \
+  --fetch-candidate-evidence \
+  --goal-id <goal-id> \
   --validation-label "<validation command>" \
   --format json
 ```
@@ -122,13 +202,25 @@ branch planning, validation labels, the feasibility checkpoint, and PR review
 readiness blockers into `/loopx <goal text>`. Repository context pins compact
 policy, architecture, change-scope, reproduction, and validation refs to a
 revision; memory and external experts stay advisory until repository-verified.
-Initially write only metadata classification and the feasibility checkpoint in
-priority and planner order. Then record a compact observation and let LoopX
-select exactly one route:
+The built-in public GitHub collector produces issue-specific, complete,
+non-truncated receipts for closing PR references, cross-references, and
+maintainer comment metadata without retaining bodies. Exact closing
+references may be reused directly. Cross-references remain
+`verification_required` until their exact current revision is inspected;
+maintainer comments project a content-read gate plus disposition successor.
+The optional `--candidate-resolution-json` binds those compact outcomes to the
+current PR head or maintainer-comment `updatedAt` revision before they feed back
+to current source rows, so a changed source revision fails closed. A capped aggregate
+PR index may generate candidates but cannot prove that prior work is absent.
+The command persists the preflight receipt when `--goal-id` is present. Only
+an `admitted` `proceed` decision may start a new implementation and enter
+feasibility. Pending verification, final reuse, and terminal routes must not invoke feasibility. For a
+`proceed` candidate, record a compact observation and let LoopX select exactly
+one implementation route. Write projected successors in priority and planner order:
 
 ```bash
 loopx issue-fix feasibility \
-  --url <github-issue-url> \
+  --url <github-issue-or-pr-url> \
   --reproduction-status <confirmed|planned|missing|blocked> \
   --scope-class <bounded|uncertain|oversized> \
   --repository-context-json <compact-context.json> \

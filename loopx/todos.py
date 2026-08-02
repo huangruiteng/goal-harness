@@ -32,6 +32,7 @@ from .control_plane.todos.contract import (
     normalize_target_capabilities,
     normalize_todo_blocks_agent,
     normalize_todo_bound_agent,
+    normalize_todo_capability_binding_ref,
     normalize_todo_claimed_by,
     normalize_todo_continuation_policy,
     normalize_todo_decision_scope,
@@ -75,6 +76,11 @@ from .control_plane.todos.event_writeback import (
 from .control_plane.todos.line_update import (
     apply_todo_update_to_lines,
     upsert_todo_metadata,
+)
+from .control_plane.todos.list_projection import (
+    compact_agent_lane_todo_summary,
+    compact_todo_projection_overlay,
+    todo_list_projection_contract,
 )
 from .control_plane.todos.monitor_metadata import require_monitor_metadata_scope
 from .control_plane.todos.mutation_authority import authorize_todo_lifecycle_mutation, todo_update_authority_action
@@ -188,6 +194,18 @@ def empty_todo_summary(*, role: str) -> dict[str, Any]:
     }
 
 
+def _user_todo_visible_to_agent(item: dict[str, Any], agent_id: str) -> bool:
+    if bool(item.get("global_gate")):
+        return True
+    blocks_agent = normalize_todo_blocks_agent(item.get("blocks_agent"))
+    if blocks_agent:
+        return blocks_agent == agent_id
+    bound_agent = normalize_todo_bound_agent(item.get("bound_agent"))
+    if bound_agent:
+        return bound_agent == agent_id
+    return True
+
+
 def filtered_todo_summary(
     summary: dict[str, Any] | None,
     *,
@@ -227,9 +245,7 @@ def filtered_todo_summary(
             items = [
                 item
                 for item in items
-                if bool(item.get("global_gate"))
-                or not normalize_todo_blocks_agent(item.get("blocks_agent"))
-                or normalize_todo_blocks_agent(item.get("blocks_agent")) == normalized_agent_id
+                if _user_todo_visible_to_agent(item, normalized_agent_id)
             ]
     source_section = str((summary or {}).get("source_section") or TODO_SECTION_HEADINGS[role])
     return (
@@ -453,6 +469,28 @@ def list_goal_todos(
         summaries[key] = summary
         todos.extend(summary.get("items") or [])
 
+    matched_todo_count = len(todos)
+    agent_lane_hot_path = bool(
+        normalized_agent_id
+        and role is None
+        and status is None
+        and normalized_todo_id is None
+    )
+    if agent_lane_hot_path:
+        summaries = {
+            key: compact_agent_lane_todo_summary(
+                summary,
+                role=key.removesuffix("_todos"),
+            )
+            for key, summary in summaries.items()
+        }
+        todos = [
+            item
+            for key in ("user_todos", "agent_todos")
+            for item in summaries.get(key, {}).get("items") or []
+            if isinstance(item, dict)
+        ]
+
     matched_todo = todos[0] if len(todos) == 1 else None
     payload: dict[str, Any] = {
         "ok": True,
@@ -463,7 +501,7 @@ def list_goal_todos(
         "role": role or "all",
         "status_filter": normalize_todo_status(status) if status else None,
         "source": source,
-        "todo_count": len(todos),
+        "todo_count": matched_todo_count,
         "todos": todos,
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
@@ -473,7 +511,14 @@ def list_goal_todos(
         payload["unfiltered_todo_count"] = unfiltered_count
         payload["filter_semantics"] = (
             "agent todos include unclaimed items plus claimed_by=<agent>; "
-            "user todos include global, unscoped legacy, and blocks_agent=<agent> gates"
+            "user todos include global, unscoped legacy, blocks_agent=<agent> gates, "
+            "and bound_agent=<agent> actions"
+        )
+    if agent_lane_hot_path:
+        payload["returned_todo_count"] = len(todos)
+        payload["todo_list_projection"] = todo_list_projection_contract(
+            matched_todo_count=matched_todo_count,
+            returned_todo_count=len(todos),
         )
     if normalized_todo_id:
         payload["todo_id_filter"] = normalized_todo_id
@@ -490,7 +535,11 @@ def list_goal_todos(
     if source == "event_projection_with_markdown_overlay":
         if projection_fields.get("state_event_projection"):
             payload["state_event_projection"] = projection_fields["state_event_projection"]
-        payload["projection_overlay"] = projection_overlay
+        payload["projection_overlay"] = (
+            compact_todo_projection_overlay(projection_overlay)
+            if agent_lane_hot_path
+            else projection_overlay
+        )
     if projection_fields.get("state_event_projection_warning"):
         payload["state_event_projection_warning"] = projection_fields["state_event_projection_warning"]
     return payload
@@ -554,6 +603,7 @@ def add_todo_to_lines(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    capability_binding_ref: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
     required_write_scopes: list[str] | None = None,
@@ -581,6 +631,8 @@ def add_todo_to_lines(
         )
     if role != "agent" and excluded_agents:
         raise ValueError("excluded_agents is only valid for agent todos")
+    if role != "agent" and capability_binding_ref:
+        raise ValueError("capability_binding_ref is only valid for agent todos")
     require_user_todo_task_class(
         role=role,
         task_class=task_class,
@@ -628,6 +680,7 @@ def add_todo_to_lines(
             status=normalized_status,
             task_class=task_class,
             action_kind=action_kind,
+            capability_binding_ref=capability_binding_ref,
             task_repository=task_repository,
             continuation_policy=continuation_policy,
             required_write_scopes=required_write_scopes,
@@ -666,6 +719,25 @@ def add_todo_to_lines(
             updates["task_class"] = task_class
         if action_kind:
             updates["action_kind"] = action_kind
+        if capability_binding_ref:
+            requested_binding_ref = normalize_todo_capability_binding_ref(
+                capability_binding_ref
+            )
+            if not requested_binding_ref:
+                raise ValueError(
+                    "capability_binding_ref must be a public-safe namespaced token"
+                )
+            existing_binding_ref = normalize_todo_capability_binding_ref(
+                block.get("capability_binding_ref")
+            )
+            if (
+                existing_binding_ref
+                and existing_binding_ref != requested_binding_ref
+            ):
+                raise ValueError(
+                    "capability_binding_ref is immutable once set"
+                )
+            updates["capability_binding_ref"] = requested_binding_ref
         if task_repository:
             updates["task_repository"] = task_repository
         if continuation_policy:
@@ -723,6 +795,8 @@ def add_todo_to_lines(
         "status": normalize_todo_status(effective_metadata.get("status")) or normalized_status,
         "task_class": effective_metadata.get("task_class") or task_class,
         "action_kind": effective_metadata.get("action_kind") or action_kind,
+        "capability_binding_ref": effective_metadata.get("capability_binding_ref")
+        or capability_binding_ref,
         "task_repository": normalize_todo_task_repository(
             effective_metadata.get("task_repository") or task_repository
         ),
@@ -775,6 +849,7 @@ def add_goal_todo(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    capability_binding_ref: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
     required_write_scopes: list[str] | None = None,
@@ -819,6 +894,8 @@ def add_goal_todo(
         )
     if task_repository and role != "agent":
         raise ValueError("task_repository is only valid for agent todos")
+    if capability_binding_ref and role != "agent":
+        raise ValueError("capability_binding_ref is only valid for agent todos")
     normalized_status = normalize_todo_status(status) if status else TODO_STATUS_OPEN
     if status and not normalized_status:
         raise ValueError("todo status must be one of: open, done, blocked, deferred")
@@ -941,6 +1018,7 @@ def add_goal_todo(
             status=normalized_status,
             task_class=task_class,
             action_kind=action_kind,
+            capability_binding_ref=capability_binding_ref,
             task_repository=task_repository,
             continuation_policy=continuation_policy,
             required_write_scopes=required_write_scopes,
@@ -987,6 +1065,7 @@ def add_goal_todo(
         "status": add_result.get("status"),
         "task_class": add_result.get("task_class"),
         "action_kind": add_result.get("action_kind"),
+        "capability_binding_ref": add_result.get("capability_binding_ref"),
         "task_repository": add_result.get("task_repository"),
         "continuation_policy": add_result.get("continuation_policy"),
         "required_write_scopes": add_result.get("required_write_scopes"),
@@ -1629,6 +1708,9 @@ def complete_goal_todo(
                     ),
                     task_class=next_task_class or "advancement_task",
                     action_kind=next_action_kind,
+                    capability_binding_ref=completion_todo.get(
+                        "capability_binding_ref"
+                    ),
                     task_repository=next_task_repository,
                     required_capabilities=next_required_capabilities,
                     continuation_policy=next_continuation_policy,
@@ -1838,6 +1920,9 @@ def supersede_goal_todo(
                     ),
                     task_class=next_task_class or "advancement_task",
                     action_kind=next_action_kind,
+                    capability_binding_ref=current_block.get(
+                        "capability_binding_ref"
+                    ),
                     task_repository=next_task_repository,
                     required_capabilities=next_required_capabilities,
                     continuation_policy=next_continuation_policy,

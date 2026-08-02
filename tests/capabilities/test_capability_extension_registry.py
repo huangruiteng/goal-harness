@@ -23,8 +23,11 @@ from loopx.extensions.runtime import (
 )
 
 BUILTIN_IDS = [
+    "integration-branch-reconcile",
+    "change-quality-qualification",
     "issue-fix",
     "decision-context",
+    "project-skill-delivery",
     "material-lifecycle",
     "semantic-preference",
     "reward-memory",
@@ -110,6 +113,64 @@ def test_builtin_catalog_preserves_order_and_marks_provider() -> None:
             "ready": True,
         }
     ]
+
+
+def test_material_lifecycle_catalog_exposes_managed_project_skill() -> None:
+    capability = build_capability_detail_packet("material-lifecycle")["capability"]
+
+    assert capability["default_enabled"] is False
+    assert capability["workflow_skill"] == {
+        "name": "loopx-material",
+        "delivery": "project_managed_copy",
+        "activation": "explicit_project_install_plus_goal_authority",
+        "project_copy_required": True,
+        "install_command": (
+            "loopx project-skill install --project . --skill "
+            "loopx-material --surface codex --execute"
+        ),
+    }
+
+
+def test_change_quality_catalog_exposes_default_off_managed_workflow() -> None:
+    capability = build_capability_detail_packet("change-quality-qualification")[
+        "capability"
+    ]
+
+    assert capability["default_enabled"] is False
+    assert capability["workflow_skill"] == {
+        "name": "loopx-change-quality",
+        "delivery": "project_managed_copy",
+        "activation": "explicit_project_install_plus_goal_policy",
+        "project_copy_required": True,
+        "install_command": (
+            "loopx project-skill install --project . --skill "
+            "loopx-change-quality --surface codex --execute"
+        ),
+    }
+    assert "safe_fix permits at most one bounded repair pass" in "\n".join(
+        capability["boundaries"]
+    )
+
+
+def test_project_skill_delivery_catalog_is_host_neutral() -> None:
+    capability = build_capability_detail_packet("project-skill-delivery")[
+        "capability"
+    ]
+
+    assert capability["status"] == "active-preview"
+    assert capability["entry_command"].startswith("loopx project-skill status")
+    command_text = "\n".join(
+        str(item["command"]) for item in capability["commands"]
+    )
+    assert "project-skill install" in command_text
+    assert "project-skill uninstall" in command_text
+    assert {
+        protocol["schema_version"]
+        for protocol in capability["implemented_protocols"]
+    } == {
+        "loopx_project_skill_status_v0",
+        "loopx_managed_project_skill_v0",
+    }
 
 
 def test_periodic_report_catalog_exposes_extension_boundary_contracts() -> None:

@@ -102,6 +102,14 @@ def _callbacks(calls: dict[str, int]):
     return writeback, spend, scheduler
 
 
+def _journal(runtime_root: Path) -> dict[str, object]:
+    journal_paths = list(
+        (runtime_root / "goals" / "fixture-goal" / "turns").glob("*.json")
+    )
+    assert len(journal_paths) == 1
+    return json.loads(journal_paths[0].read_text(encoding="utf-8"))
+
+
 def _passing_validator(
     _plan: dict[str, object],
     _result: dict[str, object],
@@ -201,6 +209,9 @@ def test_run_once_explicitly_retries_failed_host_without_duplicate_effects(tmp_p
     recovered = run_loopx_turn_once(plan, retry_failed=True, **kwargs)
 
     assert failed["reason"] == "codex_cli_model_requires_newer_codex"
+    assert failed["result_kind"] == "host_failure"
+    assert failed["receipt"]["result_kind"] == "host_failure"
+    assert failed["receipt"]["failed_phase"] == "host_execute"
     assert replayed["replayed"] is True
     assert recovered["status"] == "committed"
     assert calls == {"host": 2, "writeback": 1, "spend": 1, "scheduler": 1}
@@ -266,6 +277,15 @@ def test_run_once_recovers_after_process_exit_before_writeback(tmp_path: Path) -
     with pytest.raises(SystemExit):
         run_loopx_turn_once(plan, writeback=interrupted_writeback, **common)
 
+    interrupted = _journal(tmp_path / "runtime")
+    assert interrupted["completed_phases"] == [
+        "host_execute",
+        "typed_result",
+        "validation",
+    ]
+    assert interrupted["task_validation"]["status"] == "passed"
+    assert "writeback" not in interrupted
+
     recovered = run_loopx_turn_once(plan, writeback=healthy_writeback, **common)
 
     assert recovered["status"] == "committed"
@@ -297,6 +317,16 @@ def test_run_once_resumes_after_writeback_without_duplicate_effects(tmp_path: Pa
     }
     with pytest.raises(SystemExit):
         run_loopx_turn_once(plan, spend=interrupted_spend, **common)
+
+    interrupted = _journal(tmp_path / "runtime")
+    assert interrupted["completed_phases"] == [
+        "host_execute",
+        "typed_result",
+        "validation",
+        "durable_writeback",
+    ]
+    assert interrupted["writeback"]["appended"] is True
+    assert "quota_spend" not in interrupted
 
     transaction = plan["transaction"]
     assert isinstance(transaction, dict)

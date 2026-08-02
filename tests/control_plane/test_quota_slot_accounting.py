@@ -15,6 +15,23 @@ from loopx.control_plane.quota.slot_accounting import (
 GOAL_ID = "quota-slot-accounting-fixture"
 AGENT_A = "codex-monitor-a"
 AGENT_B = "codex-monitor-b"
+SAFE_BYPASS_CASES = (
+    pytest.param(
+        {"state": "operator_gate", "safe_bypass_allowed": True},
+        id="operator-gate",
+    ),
+    pytest.param(
+        {"recovery_delivery_allowed": True, "safe_bypass_allowed": True},
+        id="recovery-delivery",
+    ),
+    pytest.param(
+        {
+            "effective_action": "outcome_floor_recovery",
+            "safe_bypass_allowed": True,
+        },
+        id="outcome-floor-recovery",
+    ),
+)
 
 
 def _write_run_index(runtime: Path, records: list[dict[str, Any]]) -> None:
@@ -26,7 +43,12 @@ def _write_run_index(runtime: Path, records: list[dict[str, Any]]) -> None:
     )
 
 
-def _preview(runtime: Path, *, agent_id: str | None = None) -> dict[str, Any]:
+def _preview(
+    runtime: Path,
+    *,
+    agent_id: str | None = None,
+    before_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     quota = {
         "compute": 1.0,
         "window_hours": 24,
@@ -43,6 +65,7 @@ def _preview(runtime: Path, *, agent_id: str | None = None) -> dict[str, Any]:
         "safe_bypass_allowed": False,
         "quota": quota,
     }
+    before.update(before_overrides or {})
     status = {
         "runtime_root": str(runtime),
         "attention_queue": {"items": [{"goal_id": GOAL_ID}]},
@@ -98,6 +121,7 @@ def _run(
     classification: str,
     agent_id: str | None = None,
     delivery_outcome: str | None = None,
+    refresh_state: bool = False,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "generated_at": generated_at,
@@ -108,6 +132,14 @@ def _run(
         payload["agent_id"] = agent_id
     if delivery_outcome:
         payload["delivery_outcome"] = delivery_outcome
+    if refresh_state:
+        payload.update(
+            {
+                "recommended_action_source": "explicit_arg",
+                "runtime_projection_route": {"schema_version": "runtime_projection_route_v0"},
+                "state": {"sha256_16": "fixture"},
+            }
+        )
     return payload
 
 
@@ -116,6 +148,67 @@ def test_unchanged_monitor_poll_is_not_accountable_delivery(tmp_path: Path) -> N
     _write_run_index(runtime, [_poll("2026-01-01T00:00:00+00:00", material=False)])
 
     assert _preview(runtime)["ok"] is False
+
+
+@pytest.mark.parametrize("before_overrides", SAFE_BYPASS_CASES)
+def test_safe_bypass_rejects_no_accountable_writeback(
+    tmp_path: Path,
+    before_overrides: dict[str, Any],
+) -> None:
+    runtime = tmp_path / "runtime"
+
+    preview = _preview(runtime, before_overrides=before_overrides)
+
+    assert preview["ok"] is False
+    assert "requires a latest unspent accountable delivery writeback" in preview[
+        "reason"
+    ]
+
+
+@pytest.mark.parametrize("before_overrides", SAFE_BYPASS_CASES)
+def test_safe_bypass_consumes_accountable_writeback_once_across_neutral_refresh(
+    tmp_path: Path,
+    before_overrides: dict[str, Any],
+) -> None:
+    runtime = tmp_path / "runtime"
+    delivery = _run(
+        "2026-01-01T00:01:00+00:00",
+        classification="validated_fallback",
+        delivery_outcome="outcome_progress",
+    )
+    neutral_refresh = _run(
+        "2026-01-01T00:02:00+00:00",
+        classification="quality_qualification_vision_checkpoint_ack",
+        refresh_state=True,
+    )
+    _write_run_index(runtime, [delivery, neutral_refresh])
+
+    preview = _preview(runtime, before_overrides=before_overrides)
+
+    assert preview["ok"] is True
+    assert preview["safe_bypass_spend"] is True
+    assert preview["delivery_run_classification"] == "validated_fallback"
+    event = build_quota_slot_spend_event(
+        preview,
+        self_repair_spend_actions=frozenset(),
+    )
+    assert "safe-bypass" in event["health_check"]
+
+    with pytest.raises(ValueError, match="requires an eligible"):
+        build_quota_slot_spend_event(
+            {**preview, "safe_bypass_spend": False},
+            self_repair_spend_actions=frozenset(),
+        )
+
+    _write_run_index(
+        runtime,
+        [
+            delivery,
+            neutral_refresh,
+            _spent("2026-01-01T00:03:00+00:00"),
+        ],
+    )
+    assert _preview(runtime, before_overrides=before_overrides)["ok"] is False
 
 
 def test_material_monitor_poll_builds_attributed_spend_event(tmp_path: Path) -> None:
@@ -229,6 +322,45 @@ def test_explicit_non_accountable_refresh_still_fails_closed(tmp_path: Path) -> 
                 agent_id=AGENT_A,
                 delivery_outcome="surface_only",
             ),
+        ],
+    )
+
+    assert _preview(runtime, agent_id=AGENT_A)["ok"] is False
+
+
+@pytest.mark.parametrize(
+    "later_run",
+    [
+        _run(
+            "2026-01-01T00:02:00+00:00",
+            classification="custom_refresh_with_surface_outcome",
+            agent_id=AGENT_A,
+            delivery_outcome="surface_only",
+            refresh_state=True,
+        ),
+        _run(
+            "2026-01-01T00:02:00+00:00",
+            classification="operator_note_with_partial_refresh_shape",
+            agent_id=AGENT_A,
+        )
+        | {"state": {"sha256_16": "fixture"}},
+    ],
+    ids=["explicit-non-accountable-outcome", "partial-refresh-shape"],
+)
+def test_custom_non_neutral_event_still_fails_closed(
+    tmp_path: Path,
+    later_run: dict[str, Any],
+) -> None:
+    runtime = tmp_path / "runtime"
+    _write_run_index(
+        runtime,
+        [
+            _poll(
+                "2026-01-01T00:01:00+00:00",
+                material=True,
+                agent_id=AGENT_A,
+            ),
+            later_run,
         ],
     )
 

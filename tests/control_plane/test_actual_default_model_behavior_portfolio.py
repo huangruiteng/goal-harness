@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from loopx.bootstrap_command_pack import build_start_goal_guided_packet
+from loopx.control_plane.quota.cli_projection import (
+    compact_quota_should_run_cli_payload,
+)
 from loopx.control_plane.quota.turn_envelope import quota_action_signature_document
 from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (
+    ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET,
     actual_default_model_behavior_scenario_catalog,
-    build_actual_default_model_behavior_scenario_packets,
+    build_actual_default_model_behavior_scenario_inputs,
+    build_quota_hot_path_compaction_regression_source,
     run_actual_default_model_behavior_portfolio,
+)
+from loopx.control_plane.testing.doubao_model_behavior_actor import (
+    DoubaoActorTransportError,
 )
 from loopx.control_plane.testing.model_behavior_qualification import (
     FULL_QUOTA_DECISION_PACKET_SCHEMA_VERSION,
@@ -204,12 +213,14 @@ def _turn_source(
     }
 
 
-def _scenario_packets(tmp_path: Path) -> dict[str, dict[str, Any]]:
-    packets = _entry_packets(tmp_path)
-    production_packets = build_actual_default_model_behavior_scenario_packets(
+def _scenario_inputs(
+    tmp_path: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    sources = _entry_packets(tmp_path)
+    production_sources, _ = build_actual_default_model_behavior_scenario_inputs(
         tmp_path / "required-vision"
     )
-    packets.update(
+    sources.update(
         {
             "turn_selected_todo": _turn_source(human_gate=False),
             "turn_peer_agent_identity": _turn_source(
@@ -221,14 +232,23 @@ def _scenario_packets(tmp_path: Path) -> dict[str, dict[str, Any]]:
                 continuation_policy="same_agent_non_delivery",
             ),
             "turn_human_gate": _turn_source(human_gate=True),
-            "turn_required_vision_replan": production_packets[
+            "turn_required_vision_replan": production_sources[
                 "turn_required_vision_replan"
             ],
-            "turn_scoped_gate_successor_replan": production_packets[
+            "turn_scoped_gate_successor_replan": production_sources[
                 "turn_scoped_gate_successor_replan"
             ],
-            "turn_capability_monitor_repair": production_packets[
+            "turn_capability_monitor_repair": production_sources[
                 "turn_capability_monitor_repair"
+            ],
+            "turn_quota_hot_path_compaction_regression": production_sources[
+                "turn_quota_hot_path_compaction_regression"
+            ],
+            "turn_quota_hot_path_selected_todo_invariance": production_sources[
+                "turn_quota_hot_path_selected_todo_invariance"
+            ],
+            "turn_quota_hot_path_human_gate_invariance": production_sources[
+                "turn_quota_hot_path_human_gate_invariance"
             ],
             "onboarding_healthy_continue": build_onboarding_postcondition_observation(
                 check_warning_codes=[],
@@ -248,7 +268,15 @@ def _scenario_packets(tmp_path: Path) -> dict[str, dict[str, Any]]:
             ),
         }
     )
-    return packets
+    packets = {
+        scenario_id: (
+            compact_quota_should_run_cli_payload(deepcopy(source))
+            if source.get("mode") == "should-run"
+            else deepcopy(source)
+        )
+        for scenario_id, source in sources.items()
+    }
+    return sources, packets
 
 
 def _turn_decision(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -326,7 +354,7 @@ def _onboarding_actor(request: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) -> None:
-    packets = build_actual_default_model_behavior_scenario_packets(tmp_path)
+    sources, packets = build_actual_default_model_behavior_scenario_inputs(tmp_path)
 
     selection_commands = packets["onboarding_goal_selection_gate"]["command_pack"][
         "commands"
@@ -336,6 +364,17 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
         "status",
         "goal_selection_choices",
     }
+    selection_activation = packets["onboarding_goal_selection_gate"][
+        "command_pack"
+    ]["host_loop_activation"]
+    assert selection_activation == {
+        "activation_state": "goal_selection_required",
+        "activation_allowed": False,
+        "activation_required_after_todo_write": False,
+    }
+    assert onboarding_entry_semantic_contract(
+        packets["onboarding_goal_selection_gate"]
+    )["host_loop_activation_after_todo_write"] is False
     gate = packets["turn_human_gate"]
     assert gate["mode"] == "should-run"
     gate_signature = quota_action_signature_document(gate)
@@ -348,6 +387,23 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
     }
     replan = packets["turn_required_vision_replan"]
     assert replan["mode"] == "should-run"
+    assert replan["vision_continuation_audit"]["payload_compaction"] == {
+        "schema_version": "quota_cli_vision_continuation_compaction_v0",
+        "mode": "compact_hot_path",
+        "omitted_fields": [
+            "acceptance_gaps",
+            "acceptance_requirements",
+            "authoritative_evidence_kinds",
+            "not_satisfied_by",
+        ],
+        "full_detail_cold_path": "quota should-run --include-detail vision",
+    }
+    assert (
+        replan["goal_frontier_projection"]["vision_continuation_audit"][
+            "projection_ref"
+        ]
+        == "$.vision_continuation_audit"
+    )
     replan_signature = quota_action_signature_document(replan)
     assert replan_signature["action"]["selected_todo"] is None
     assert replan_signature["action"]["must_attempt"] is True
@@ -382,6 +438,91 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
         capability_signature["contract_capsule"]["capability_monitor_fallback"]["mode"]
         == "monitor_schedule_metadata_repair"
     )
+    regression_source = build_quota_hot_path_compaction_regression_source()
+    regression = packets["turn_quota_hot_path_compaction_regression"]
+    assert (
+        len(
+            json.dumps(
+                regression_source,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            ).encode("utf-8")
+        )
+        > ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET
+    )
+    assert (
+        len(
+            json.dumps(
+                regression,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            ).encode("utf-8")
+        )
+        <= ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET
+    )
+    assert model_behavior_semantic_contract_from_packet(
+        regression_source,
+        arm="full_packet",
+    ) == model_behavior_semantic_contract_from_packet(
+        regression,
+        arm="full_packet",
+    )
+    regression_signature = quota_action_signature_document(regression)
+    assert regression_signature["action"]["selected_todo"]["todo_id"] == (
+        "todo_c0ffee123456"
+    )
+    assert regression["capability_gate"]["payload_compaction"][
+        "omitted_candidate_counts"
+    ] == {"runnable": 24, "blocked": 16, "resolution_bindings": 16}
+    assert set(regression["next_action_projection_warning"]["projection_refs"]) == {
+        "active_state_next_action",
+        "latest_run_recommended_action",
+        "agent_lane_next_action",
+    }
+    assert "title" not in regression["agent_lane_next_action"]
+    assert regression["goal_route_hint"]["other_agent_next_action_count"] == 24
+    invariant_pairs = (
+        (
+            "turn_selected_todo",
+            "turn_quota_hot_path_selected_todo_invariance",
+        ),
+        (
+            "turn_human_gate",
+            "turn_quota_hot_path_human_gate_invariance",
+        ),
+    )
+    hard_fields = (
+        "decision",
+        "selected_todo_id",
+        "user_action_required",
+        "must_attempt_work",
+        "delivery_allowed",
+        "quiet_noop_allowed",
+        "external_write_requested",
+    )
+    for clean_id, noisy_id in invariant_pairs:
+        assert len(
+            json.dumps(sources[noisy_id], ensure_ascii=False, indent=2).encode("utf-8")
+        ) > ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET
+        assert len(
+            json.dumps(packets[noisy_id], ensure_ascii=False, indent=2).encode("utf-8")
+        ) <= ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET
+        clean_decision = _turn_decision({"packet": packets[clean_id]})
+        noisy_decision = _turn_decision({"packet": packets[noisy_id]})
+        assert {
+            field: clean_decision[field] for field in hard_fields
+        } == {
+            field: noisy_decision[field] for field in hard_fields
+        }
+        assert model_behavior_semantic_contract_from_packet(
+            sources[noisy_id],
+            arm="full_packet",
+        ) == model_behavior_semantic_contract_from_packet(
+            packets[noisy_id],
+            arm="full_packet",
+        )
     assert set(packets) == {
         item["scenario_id"]
         for item in actual_default_model_behavior_scenario_catalog()["scenarios"]
@@ -399,8 +540,10 @@ def test_portfolio_oracle_catches_wrong_selected_todo(tmp_path: Path) -> None:
             }
         return result
 
+    sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
-        _scenario_packets(tmp_path),
+        packets,
+        scenario_sources=sources,
         qualification_id="actual-default-portfolio-wrong-todo",
         turn_actor=wrong_actor,
         onboarding_actor=_onboarding_actor,
@@ -417,11 +560,41 @@ def test_portfolio_oracle_catches_wrong_selected_todo(tmp_path: Path) -> None:
     assert selected["failure_codes"] == ["source_mismatch:selected_todo_id"]
 
 
+def test_portfolio_source_oracle_rejects_mutated_compact_user_action(
+    tmp_path: Path,
+) -> None:
+    sources, packets = _scenario_inputs(tmp_path)
+    packets["turn_quota_hot_path_compaction_regression"]["interaction_contract"][
+        "user_channel"
+    ]["action_required"] = True
+    calls = 0
+
+    def turn_actor(request: Mapping[str, Any]) -> Mapping[str, Any]:
+        nonlocal calls
+        calls += 1
+        return _turn_actor(request)
+
+    with pytest.raises(
+        ValueError,
+        match="actor packet diverges from source (action|semantic) contract",
+    ):
+        run_actual_default_model_behavior_portfolio(
+            packets,
+            scenario_sources=sources,
+            qualification_id="actual-default-portfolio-mutated-compact-user-action",
+            turn_actor=turn_actor,
+            onboarding_actor=_onboarding_actor,
+        )
+
+    assert calls == 0
+
+
 def test_portfolio_rejects_mutated_blocking_gate_response_plan(tmp_path: Path) -> None:
-    packets = _scenario_packets(tmp_path)
+    sources, packets = _scenario_inputs(tmp_path)
     source = _turn_source(human_gate=True)
     source["interaction_contract"]["response_plan"]["action_sequence"] = ["wait"]
-    packets["turn_human_gate"] = source
+    sources["turn_human_gate"] = source
+    packets["turn_human_gate"] = compact_quota_should_run_cli_payload(source)
 
     with pytest.raises(
         ValueError,
@@ -429,6 +602,7 @@ def test_portfolio_rejects_mutated_blocking_gate_response_plan(tmp_path: Path) -
     ):
         run_actual_default_model_behavior_portfolio(
             packets,
+            scenario_sources=sources,
             qualification_id="actual-default-portfolio-mutated-gate-plan",
             turn_actor=_turn_actor,
             onboarding_actor=_onboarding_actor,
@@ -447,8 +621,10 @@ def test_portfolio_oracle_rejects_silent_wait_for_user_gate(tmp_path: Path) -> N
             }
         return result
 
+    sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
-        _scenario_packets(tmp_path),
+        packets,
+        scenario_sources=sources,
         qualification_id="actual-default-portfolio-silent-gate-wait",
         turn_actor=silent_wait_actor,
         onboarding_actor=_onboarding_actor,
@@ -471,7 +647,7 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
     catalog = actual_default_model_behavior_scenario_catalog()
 
     assert catalog["topology"] == "actual_default_one_arm"
-    assert len(catalog["scenarios"]) == 12
+    assert len(catalog["scenarios"]) == 15
     assert all(
         scenario["packet_view"]
         == (
@@ -481,6 +657,18 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
         )
         for scenario in catalog["scenarios"]
     )
+    assert {
+        contrast["contrast_id"] for contrast in catalog["contrasts"]
+    } == {
+        "selected_todo_survives_omitted_diagnostics",
+        "blocking_gate_survives_omitted_diagnostics",
+        "blocking_gate_vs_non_blocking_notice",
+        "selected_work_vs_required_vision_replan",
+    }
+    assert {contrast["contrast_kind"] for contrast in catalog["contrasts"]} == {
+        "invariance",
+        "sensitivity",
+    }
     composed = [
         scenario
         for scenario in catalog["scenarios"]
@@ -500,7 +688,7 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
 
 
 def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) -> None:
-    packets = _scenario_packets(tmp_path)
+    sources, packets = _scenario_inputs(tmp_path)
     packets["onboarding_projection_repair"] = {
         **packets["onboarding_projection_repair"],
         "derived_route": "continue_validation",
@@ -523,6 +711,7 @@ def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) 
     ):
         run_actual_default_model_behavior_portfolio(
             packets,
+            scenario_sources=sources,
             qualification_id="actual-default-portfolio-preflight",
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
@@ -531,14 +720,47 @@ def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) 
     assert calls == 0
 
 
+def test_portfolio_aborts_on_authentication_failure_with_bounded_receipt(
+    tmp_path: Path,
+) -> None:
+    sources, packets = _scenario_inputs(tmp_path)
+    calls = 0
+
+    def turn_actor(_: Mapping[str, Any]) -> Mapping[str, Any]:
+        nonlocal calls
+        calls += 1
+        raise DoubaoActorTransportError(
+            "sensitive provider response must not be persisted",
+            error_code="provider_authentication_failed",
+        )
+
+    result = run_actual_default_model_behavior_portfolio(
+        packets,
+        scenario_sources=sources,
+        qualification_id="actual-default-portfolio-auth-failure",
+        turn_actor=turn_actor,
+        onboarding_actor=_onboarding_actor,
+    )
+
+    assert calls == 1
+    assert result["qualification_passed"] is False
+    assert result["actor_call_count"] < result["actor_call_budget"]
+    failed = next(item for item in result["scenarios"] if item["status"] == "failed")
+    assert failed["failure_codes"] == ["provider_authentication_failed"]
+    assert "sensitive provider response" not in json.dumps(result)
+
+
 def test_portfolio_preflight_rejects_wrong_same_agent_route(tmp_path: Path) -> None:
-    packets = _scenario_packets(tmp_path)
+    sources, packets = _scenario_inputs(tmp_path)
     source = _turn_source(
         human_gate=False,
         continuation_policy="same_agent_non_delivery",
     )
     source["selected_todo"]["claimed_by"] = "codex-wrong-peer"
-    packets["turn_same_agent_continuation"] = source
+    sources["turn_same_agent_continuation"] = source
+    packets["turn_same_agent_continuation"] = compact_quota_should_run_cli_payload(
+        source
+    )
     calls = 0
 
     def turn_actor(request: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -552,6 +774,7 @@ def test_portfolio_preflight_rejects_wrong_same_agent_route(tmp_path: Path) -> N
     ):
         run_actual_default_model_behavior_portfolio(
             packets,
+            scenario_sources=sources,
             qualification_id="actual-default-portfolio-wrong-peer",
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
@@ -571,14 +794,24 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
         result["decision"].pop("semantic_contract", None)
         return result
 
+    sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
-        _scenario_packets(tmp_path),
+        packets,
+        scenario_sources=sources,
         qualification_id="actual-default-portfolio-runtime-shaped",
         turn_actor=turn_actor,
         onboarding_actor=_onboarding_actor,
     )
 
     assert result["qualification_passed"] is True
+    assert result["scenario_count"] == 15
+    assert result["contrast_count"] == 4
+    assert result["actor_call_budget"] == 30
+    assert result["actor_call_count"] == 30
+    assert result["failure_count"] == 0
+    assert result["skip_count"] == 0
+    assert result["contrast_failure_count"] == 0
+    assert all(contrast["status"] == "passed" for contrast in result["contrasts"])
     assert requests
     assert all(request["arm"] == "full_packet" for request in requests)
     assert all(request["packet"]["mode"] == "should-run" for request in requests)
@@ -587,6 +820,79 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
         for request in requests
     )
     assert all(request["semantic_contract_required"] is False for request in requests)
+
+
+def test_portfolio_preflight_rejects_invalid_contrast_before_actor_spend(
+    tmp_path: Path,
+) -> None:
+    sources, packets = _scenario_inputs(tmp_path)
+    source = _turn_source(human_gate=False)
+    source["interaction_contract"]["user_channel"]["action_required"] = True
+    source["action_required"] = True
+    sources["turn_selected_todo"] = source
+    packets["turn_selected_todo"] = compact_quota_should_run_cli_payload(source)
+    calls = 0
+
+    def turn_actor(request: Mapping[str, Any]) -> Mapping[str, Any]:
+        nonlocal calls
+        calls += 1
+        return _turn_actor(request)
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "contrast selected_todo_survives_omitted_diagnostics "
+            "source relation is invalid"
+        ),
+    ):
+        run_actual_default_model_behavior_portfolio(
+            packets,
+            scenario_sources=sources,
+            qualification_id="actual-default-portfolio-invalid-contrast",
+            turn_actor=turn_actor,
+            onboarding_actor=_onboarding_actor,
+        )
+
+    assert calls == 0
+
+
+def test_portfolio_contrast_rejects_noisy_gate_semantic_collapse(
+    tmp_path: Path,
+) -> None:
+    def collapsed_actor(request: Mapping[str, Any]) -> dict[str, Any]:
+        result = _turn_actor(request)
+        packet = request["packet"]
+        capability_gate = packet.get("capability_gate") or {}
+        if (
+            capability_gate.get("action") == "operator_gate"
+            and "payload_compaction" in capability_gate
+        ):
+            result["decision"] = {
+                **result["decision"],
+                "must_attempt_work": True,
+            }
+        return result
+
+    sources, packets = _scenario_inputs(tmp_path)
+    result = run_actual_default_model_behavior_portfolio(
+        packets,
+        scenario_sources=sources,
+        qualification_id="actual-default-portfolio-noisy-gate-collapse",
+        turn_actor=collapsed_actor,
+        onboarding_actor=_onboarding_actor,
+    )
+
+    contrast = next(
+        item
+        for item in result["contrasts"]
+        if item["contrast_id"] == "blocking_gate_survives_omitted_diagnostics"
+    )
+    assert result["qualification_passed"] is False
+    assert result["failure_count"] == 2
+    assert result["contrast_failure_count"] == 1
+    assert contrast["status"] == "failed"
+    assert contrast["failure_codes"] == ["expected_match:must_attempt_work"]
+    assert contrast["repeats_compared"] == 2
 
 
 def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
@@ -604,8 +910,10 @@ def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
             }
         return result
 
+    sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
-        _scenario_packets(tmp_path),
+        packets,
+        scenario_sources=sources,
         qualification_id="actual-default-portfolio-required-vision-wait",
         turn_actor=quiet_wait_actor,
         onboarding_actor=_onboarding_actor,
@@ -615,6 +923,41 @@ def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
         item
         for item in result["scenarios"]
         if item["scenario_id"] == "turn_required_vision_replan"
+    )
+    assert result["qualification_passed"] is False
+    assert scenario["status"] == "failed"
+    assert scenario["repeats_completed"] == 2
+    assert "source_mismatch:decision" in scenario["failure_codes"]
+
+
+def test_portfolio_oracle_rejects_waiting_on_hot_path_compaction_refs(
+    tmp_path: Path,
+) -> None:
+    def waiting_actor(request: Mapping[str, Any]) -> dict[str, Any]:
+        result = _turn_actor(request)
+        signature = quota_action_signature_document(request["packet"])
+        selected = signature["action"].get("selected_todo") or {}
+        if selected.get("todo_id") == "todo_c0ffee123456":
+            result["decision"] = {
+                **result["decision"],
+                "decision": "wait",
+                "intended_action_kinds": ["wait"],
+            }
+        return result
+
+    sources, packets = _scenario_inputs(tmp_path)
+    result = run_actual_default_model_behavior_portfolio(
+        packets,
+        scenario_sources=sources,
+        qualification_id="actual-default-portfolio-compaction-regression-wait",
+        turn_actor=waiting_actor,
+        onboarding_actor=_onboarding_actor,
+    )
+
+    scenario = next(
+        item
+        for item in result["scenarios"]
+        if item["scenario_id"] == "turn_quota_hot_path_compaction_regression"
     )
     assert result["qualification_passed"] is False
     assert scenario["status"] == "failed"
@@ -639,8 +982,10 @@ def test_portfolio_oracle_rejects_treating_non_blocking_notice_as_gate(
             }
         return result
 
+    sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
-        _scenario_packets(tmp_path),
+        packets,
+        scenario_sources=sources,
         qualification_id="actual-default-portfolio-non-blocking-notice",
         turn_actor=blocking_actor,
         onboarding_actor=_onboarding_actor,
@@ -672,8 +1017,10 @@ def test_portfolio_oracle_rejects_waiting_on_capability_monitor_repair(
             }
         return result
 
+    sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
-        _scenario_packets(tmp_path),
+        packets,
+        scenario_sources=sources,
         qualification_id="actual-default-portfolio-capability-monitor-repair",
         turn_actor=waiting_actor,
         onboarding_actor=_onboarding_actor,

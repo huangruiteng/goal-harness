@@ -20,6 +20,9 @@ from .control_plane.agents.workspace_guard import capture_delivery_workspace
 from .control_plane.work_items.repair_delta import (
     REPAIR_DELTA_KIND_CHOICES as REPAIR_DELTA_KIND_CHOICES,
     normalize_repair_delta_kinds,
+    repair_delta_kinds_have_accountable_progress,
+    repair_delta_kinds_have_frontier_delta,
+    validate_repair_delta_claims,
 )
 from .control_plane.work_items.autonomous_replan_ack import (
     latest_blocked_successor_frontier_identity,
@@ -48,6 +51,7 @@ from .control_plane.goals.goal_frontier import latest_agent_vision_from_runs
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
 from .state_projection import state_projection_gap_warning
+from .control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from .control_plane.todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
@@ -191,11 +195,31 @@ def build_repair_delta_contract(
     requested_delta_kinds: list[str],
     active_state_next_action_update: dict[str, Any] | None,
     agent_vision: dict[str, Any] | None,
+    existing_agent_vision: dict[str, Any] | None,
+    state_text: str,
+    agent_id: str | None,
     dry_run: bool,
 ) -> dict[str, Any]:
-    delta_kinds = list(requested_delta_kinds)
-    evidence: list[dict[str, Any]] = []
     update = active_state_next_action_update or {}
+    todo_fields = parse_active_state_todos(state_text, item_limit=None)
+    effective_vision = agent_vision or existing_agent_vision or {}
+    vision_patch = (
+        effective_vision.get("vision_patch")
+        if isinstance(effective_vision.get("vision_patch"), dict)
+        else {}
+    )
+    delta_kinds, evidence, rejected_claims = validate_repair_delta_claims(
+        requested_delta_kinds,
+        agent_todo_summary=(
+            todo_fields.get("agent_todos")
+            if isinstance(todo_fields.get("agent_todos"), dict)
+            else None
+        ),
+        agent_id=agent_id,
+        advancement_policy=str(vision_patch.get("advancement_policy") or "").strip(),
+        next_action_changed=bool(update.get("would_update")),
+        vision_patch_written=agent_vision is not None,
+    )
     if update.get("updated") is True:
         if "active_state_next_action" not in delta_kinds:
             delta_kinds.append("active_state_next_action")
@@ -232,14 +256,17 @@ def build_repair_delta_contract(
             }
         )
 
-    return {
+    contract = {
         "schema_version": REPAIR_DELTA_CONTRACT_SCHEMA_VERSION,
         "required": True,
-        "delta_present": bool(delta_kinds),
+        "delta_present": repair_delta_kinds_have_frontier_delta(delta_kinds),
         "delta_kinds": delta_kinds,
         "auto_evidence": evidence,
         "accepted_without_delta": False,
     }
+    if rejected_claims:
+        contract["rejected_claims"] = rejected_claims
+    return contract
 
 
 def build_vision_checkpoint(
@@ -625,6 +652,96 @@ def build_state_refresh_record(
     return record
 
 
+def _build_state_refresh_output_projections(
+    *,
+    record: dict[str, Any],
+    registry_path: Path,
+    runtime_root: Path,
+    project: Path | None,
+    json_path: Path,
+    markdown_path: Path,
+    index_path: Path,
+    dry_run: bool,
+    autonomous_replan_recorded_requested: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Project one refresh record into its compact index and CLI response."""
+
+    record_state = record.get("state") if isinstance(record.get("state"), dict) else {}
+    record_frontmatter = record_state.get("frontmatter") or {}
+    index_record = {
+        field: record[field]
+        for field in (
+            "generated_at", "goal_id", "classification", "recommended_action",
+            "recommended_action_source", "health_check",
+        )
+    }
+    index_record.update({
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+        "state": {
+            "sha256_16": record_state.get("sha256_16"),
+            "frontmatter": {"updated_at": record_frontmatter.get("updated_at")},
+        },
+        "runtime_projection_route": record["runtime_projection_route"],
+    })
+    for field in ("delivery_batch_scale", "delivery_outcome", "delivery_workspace"):
+        if field in record:
+            index_record[field] = record[field]
+
+    replan_ack = record.get("autonomous_replan_ack") or {}
+    if autonomous_replan_recorded_requested:
+        index_record["autonomous_replan_ack"] = replan_ack
+        if replan_ack.get("requested_classification"):
+            index_record["requested_classification"] = replan_ack["requested_classification"]
+
+    agent_vision = record.get("agent_vision")
+    if isinstance(agent_vision, dict):
+        index_record["agent_vision"] = {
+            field: agent_vision.get(field)
+            for field in (
+                "schema_version", "agent_id", "state", "vision_patch",
+                "todo_delta", "vision_budget",
+            )
+        }
+        if isinstance(agent_vision.get("path_delta"), dict):
+            index_record["agent_vision"]["path_delta"] = agent_vision["path_delta"]
+
+    for field in ("vision_checkpoint", "progress_scope", "agent_id", "agent_lane"):
+        if field in record:
+            index_record[field] = record[field]
+
+    payload: dict[str, Any] = {
+        "ok": True,
+        "dry_run": dry_run,
+        "appended": not dry_run,
+        "registry": str(registry_path),
+        "runtime_root": str(runtime_root),
+        "project": str(project) if project else None,
+    }
+    payload.update({
+        field: record.get(field)
+        for field in ("goal_id", "classification", "progress_scope", "agent_id", "agent_lane")
+    })
+    payload.update({
+        "autonomous_replan_recorded": bool(replan_ack.get("recorded")),
+        "autonomous_replan_recorded_requested": autonomous_replan_recorded_requested,
+        "repair_delta_contract": replan_ack.get("delta_contract"),
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path),
+        "index_path": str(index_path),
+    })
+    payload.update({
+        field: record.get(field)
+        for field in (
+            "agent_vision", "vision_checkpoint", "recommended_action",
+            "recommended_action_source", "active_state_next_action_update",
+            "generated_at", "health_check",
+        )
+    })
+    payload.update(record)
+    return index_record, payload
+
+
 def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
     state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
     frontmatter = state.get("frontmatter") if isinstance(state.get("frontmatter"), dict) else {}
@@ -928,7 +1045,6 @@ def refresh_state_run(
     agent_vision: dict[str, Any] | None = None
     existing_agent_vision: dict[str, Any] | None = None
     autonomous_replan_frontier_identity: str | None = None
-    existing_runs: list[dict[str, Any]] = []
     if normalized_agent_id and (
         agent_vision_packet is not None
         or normalized_vision_unchanged_reason
@@ -950,6 +1066,13 @@ def refresh_state_run(
             goal_id=safe_goal_id,
             agent_id=normalized_agent_id,
         )
+        if autonomous_replan_recorded:
+            autonomous_replan_frontier_identity = (
+                latest_blocked_successor_frontier_identity(
+                    newest_first_runs,
+                    agent_id=normalized_agent_id,
+                )
+            )
     if agent_vision_packet is not None:
         agent_vision = normalize_goal_vision_update(
             agent_vision_packet,
@@ -958,21 +1081,6 @@ def refresh_state_run(
             existing_agent_vision=existing_agent_vision,
             merge_patch=merge_agent_vision_patch,
             require_path_delta_for_durable_change=autonomous_replan_recorded,
-        )
-    if autonomous_replan_recorded:
-        newest_first_runs = [
-            run
-            for _, run in sorted(
-                enumerate(existing_runs),
-                key=lambda item: (str(item[1].get("generated_at") or ""), item[0]),
-                reverse=True,
-            )
-        ]
-        autonomous_replan_frontier_identity = (
-            latest_blocked_successor_frontier_identity(
-                newest_first_runs,
-                agent_id=normalized_agent_id or None,
-            )
         )
     generated_at = now_local()
     active_state_next_action_update: dict[str, Any] | None = None
@@ -1005,6 +1113,7 @@ def refresh_state_run(
         action, recommended_action_source = derive_recommended_action_with_source(state_text)
     validate_local_control_text("recommended_action", action)
     repair_delta_contract: dict[str, Any] | None = None
+    validated_repair_delta_kinds: list[str] = []
     requested_classification = classification
     effective_autonomous_replan_recorded = bool(autonomous_replan_recorded)
     if autonomous_replan_recorded:
@@ -1012,13 +1121,26 @@ def refresh_state_run(
             requested_delta_kinds=normalized_repair_delta_kinds,
             active_state_next_action_update=active_state_next_action_update,
             agent_vision=agent_vision,
+            existing_agent_vision=existing_agent_vision,
+            state_text=state_text,
+            agent_id=normalized_agent_id or None,
             dry_run=dry_run,
+        )
+        validated_repair_delta_kinds = list(
+            repair_delta_contract.get("delta_kinds") or []
         )
         if not repair_delta_contract["delta_present"]:
             classification = _noop_classification_for(classification)
             effective_autonomous_replan_recorded = False
             if normalized_delivery_outcome in {"outcome_progress", "primary_goal_outcome"}:
                 normalized_delivery_outcome = "outcome_gap"
+        elif (
+            normalized_delivery_outcome in {"outcome_progress", "primary_goal_outcome"}
+            and not repair_delta_kinds_have_accountable_progress(
+                validated_repair_delta_kinds
+            )
+        ):
+            normalized_delivery_outcome = "outcome_gap"
     vision_checkpoint = build_vision_checkpoint(
         agent_id=normalized_agent_id or None,
         agent_vision=agent_vision,
@@ -1027,7 +1149,7 @@ def refresh_state_run(
         delivery_outcome=normalized_delivery_outcome,
         autonomous_replan_recorded=bool(autonomous_replan_recorded),
         active_state_next_action_update=active_state_next_action_update,
-        repair_delta_kinds=normalized_repair_delta_kinds,
+        repair_delta_kinds=validated_repair_delta_kinds,
     )
     delivery_workspace = None
     if normalized_delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:
@@ -1097,10 +1219,6 @@ def refresh_state_run(
             }
     if active_state_next_action_update:
         record["active_state_next_action_update"] = active_state_next_action_update
-    if agent_vision:
-        record["agent_vision"] = agent_vision
-    if vision_checkpoint:
-        record["vision_checkpoint"] = vision_checkpoint
     compact_route = compact_runtime_projection_route(runtime_projection_route)
     compact_route["projection_enabled"] = bool(sync_global)
     compact_route["projection_marker_field"] = "shared_runtime_projection"
@@ -1109,90 +1227,17 @@ def refresh_state_run(
     runs_dir = runtime_root / "goals" / safe_goal_id / "runs"
     json_path, markdown_path = unique_run_paths(runs_dir, generated_at)
     index_path = runs_dir / "index.jsonl"
-    index_record = {
-        "generated_at": generated_at,
-        "goal_id": safe_goal_id,
-        "classification": classification,
-        "recommended_action": action,
-        "recommended_action_source": recommended_action_source,
-        "health_check": record["health_check"],
-        "json_path": str(json_path),
-        "markdown_path": str(markdown_path),
-    }
-    record_state = record.get("state") if isinstance(record.get("state"), dict) else {}
-    record_frontmatter = (
-        record_state.get("frontmatter")
-        if isinstance(record_state.get("frontmatter"), dict)
-        else {}
+    index_record, payload = _build_state_refresh_output_projections(
+        record=record,
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        project=resolved_project,
+        json_path=json_path,
+        markdown_path=markdown_path,
+        index_path=index_path,
+        dry_run=dry_run,
+        autonomous_replan_recorded_requested=bool(autonomous_replan_recorded),
     )
-    index_record["state"] = {
-        "sha256_16": record_state.get("sha256_16"),
-        "frontmatter": {
-            "updated_at": record_frontmatter.get("updated_at"),
-        },
-    }
-    index_record["runtime_projection_route"] = compact_route
-    if normalized_delivery_batch_scale:
-        index_record["delivery_batch_scale"] = normalized_delivery_batch_scale
-    if normalized_delivery_outcome:
-        index_record["delivery_outcome"] = normalized_delivery_outcome
-    if delivery_workspace:
-        index_record["delivery_workspace"] = delivery_workspace
-    if autonomous_replan_recorded:
-        index_record["autonomous_replan_ack"] = record["autonomous_replan_ack"]
-        if requested_classification != classification:
-            index_record["requested_classification"] = requested_classification
-    if agent_vision:
-        indexed_agent_vision = {
-            "schema_version": agent_vision.get("schema_version"),
-            "agent_id": agent_vision.get("agent_id"),
-            "state": agent_vision.get("state"),
-            "vision_patch": agent_vision.get("vision_patch")
-            if isinstance(agent_vision.get("vision_patch"), dict)
-            else {},
-            "todo_delta": agent_vision.get("todo_delta")
-            if isinstance(agent_vision.get("todo_delta"), list)
-            else [],
-            "vision_budget": agent_vision.get("vision_budget"),
-        }
-        if isinstance(agent_vision.get("path_delta"), dict):
-            indexed_agent_vision["path_delta"] = agent_vision["path_delta"]
-        index_record["agent_vision"] = indexed_agent_vision
-    if vision_checkpoint:
-        index_record["vision_checkpoint"] = vision_checkpoint
-    if normalized_progress_scope:
-        index_record["progress_scope"] = normalized_progress_scope
-    if normalized_agent_id:
-        index_record["agent_id"] = normalized_agent_id
-    if normalized_progress_scope == AGENT_LANE_PROGRESS_SCOPE and normalized_agent_id:
-        index_record["agent_lane"] = normalized_agent_lane or normalized_agent_id
-    payload = {
-        "ok": True,
-        "dry_run": dry_run,
-        "appended": not dry_run,
-        "registry": str(registry_path),
-        "runtime_root": str(runtime_root),
-        "project": str(resolved_project) if resolved_project else None,
-        "goal_id": safe_goal_id,
-        "classification": classification,
-        "progress_scope": record.get("progress_scope"),
-        "agent_id": record.get("agent_id"),
-        "agent_lane": record.get("agent_lane"),
-        "autonomous_replan_recorded": effective_autonomous_replan_recorded,
-        "autonomous_replan_recorded_requested": bool(autonomous_replan_recorded),
-        "repair_delta_contract": repair_delta_contract,
-        "agent_vision": agent_vision,
-        "vision_checkpoint": vision_checkpoint,
-        "recommended_action": action,
-        "recommended_action_source": recommended_action_source,
-        "active_state_next_action_update": active_state_next_action_update,
-        "generated_at": generated_at,
-        "health_check": record["health_check"],
-        "json_path": str(json_path),
-        "markdown_path": str(markdown_path),
-        "index_path": str(index_path),
-        **record,
-    }
     if dry_run:
         expected_write_scopes = ["runtime_history"]
         if active_state_next_action_update and active_state_next_action_update.get("would_update"):

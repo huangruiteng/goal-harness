@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from loopx.benchmark_adapters import skillsbench_verifier_cache as cache
-from loopx.benchmark_adapters.skillsbench_verifier_bootstrap import (
+from loopx.benchmarks.read_models.skillsbench_verifier_attribution import (
     apply_skillsbench_verifier_bootstrap_missing_score_attribution,
 )
 from scripts.skillsbench_automation_loop import parse_args, stage_task_for_sandbox

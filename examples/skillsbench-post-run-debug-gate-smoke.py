@@ -347,10 +347,109 @@ def test_fatal_provider_turn_has_complete_capacity_blocked_closeout() -> None:
     assert transaction["quota_spent_count"] == 0, transaction
 
 
+def test_exhausted_typed_repair_opens_case_rotation_with_exclusion() -> None:
+    failed_turn = {
+        "schema_version": "loopx_turn_execution_v0",
+        "mode": "run_once",
+        "status": "failed",
+        "result_kind": "validation_failed",
+        "validation": {
+            "status": "failed",
+            "recovery_kind": "repair_required",
+        },
+        "receipt": {
+            "status": "failed",
+            "failed_phase": "validation",
+        },
+        "effects": {
+            "host_invoked": True,
+            "state_written": False,
+            "quota_spent": False,
+            "scheduler_acknowledged": False,
+        },
+    }
+    compact = {
+        "benchmark_id": "skillsbench@1.1",
+        "product_mode": True,
+        "official_score_status": "missing",
+        "official_task_score": {"passed": False},
+        "score_failure_attribution": "verifier_infrastructure_failure",
+        "product_mode_lifecycle_contract": {
+            "required": False,
+            "satisfied": True,
+            "closeout_satisfied": False,
+            "state_read_count": 0,
+            "state_write_count": 0,
+        },
+        "loopx_turn_executions": [failed_turn, dict(failed_turn)],
+        "interaction_counters": {
+            "product_mode_typed_repair_terminal": True,
+            "product_mode_typed_repair_terminal_receipt_consistent": True,
+            "product_mode_typed_repair_terminal_reason": (
+                "turn_repair_round_without_todo_or_committed_validation_delta"
+            ),
+        },
+        "case_event_timeline": {
+            "schema_version": "skillsbench_case_event_timeline_v0",
+            "source": "compact_public_signals",
+            "raw_material_recorded": False,
+            "events": [
+                {
+                    "phase": "goal_init",
+                    "event": "case_goal_state_init",
+                    "status": "passed",
+                },
+                {
+                    "phase": "lifecycle",
+                    "event": "orchestrated_loopx_lifecycle",
+                    "status": "not_observed",
+                },
+                {
+                    "phase": "bridge",
+                    "event": "remote_command_bridge_consumption",
+                    "status": "consumed",
+                },
+                {
+                    "phase": "activity",
+                    "event": "task_facing_activity",
+                    "status": "task_activity_observed",
+                },
+                {
+                    "phase": "controller",
+                    "event": "controller_decision_loop",
+                    "status": "typed_repair_terminal",
+                },
+                {
+                    "phase": "scoring",
+                    "event": "official_score_closeout",
+                    "status": "missing",
+                    "official_score_passed": False,
+                },
+                {
+                    "phase": "closeout",
+                    "event": "agent_bridge_closeout",
+                    "status": "missing",
+                },
+            ],
+        },
+    }
+
+    gate = build_skillsbench_post_run_debug_gate(compact)
+
+    assert gate["normal_progress_allowed"] is True, gate
+    assert gate["next_case_gate"] == "open_with_exclusion", gate
+    assert gate["loopx_lifecycle"]["satisfied"] is False, gate
+    transaction = gate["loopx_turn_transaction"]
+    assert transaction["progress_blocked"] is True, transaction
+    assert transaction["next_case_blocked"] is False, transaction
+    assert transaction["case_exclusion_required"] is True, transaction
+
+
 def main() -> None:
     test_countable_zero_keeps_solution_attribution()
     test_failed_turn_receipts_qualify_direct_lifecycle_success()
     test_fatal_provider_turn_has_complete_capacity_blocked_closeout()
+    test_exhausted_typed_repair_opens_case_rotation_with_exclusion()
     print("skillsbench-post-run-debug-gate-smoke: ok")
 
 

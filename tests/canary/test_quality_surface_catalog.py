@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
+import loopx.canary.planner as canary_planner
+import loopx.cli_commands.canary as canary_command
 from loopx.canary.planner import CURRENT_REPO_PROFILES
 from loopx.canary.quality_surface_catalog import (
     QUALITY_SURFACE_CATALOG,
@@ -28,6 +31,65 @@ def test_packaged_audit_keeps_classification_without_source_checkout() -> None:
 
     assert audit["ok"] is True
     assert audit["repository_reference_validation"] == "source_checkout_unavailable"
+
+
+def test_planner_quality_audit_prefers_explicit_source_checkout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    packaged_root = tmp_path / "release"
+    (packaged_root / "loopx" / "canary").mkdir(parents=True)
+    (packaged_root / "pyproject.toml").write_text("", encoding="utf-8")
+    (packaged_root / "loopx" / "canary" / "quality_surface_catalog.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(canary_planner, "REPO_ROOT", packaged_root)
+
+    packaged_audit = canary_planner.build_quality_surface_catalog_audit()
+    checkout_audit = canary_planner.build_quality_surface_catalog_audit(
+        repo_root=Path(__file__).resolve().parents[2]
+    )
+
+    assert packaged_audit["ok"] is True
+    assert (
+        packaged_audit["repository_reference_validation"]
+        == "source_checkout_unavailable"
+    )
+    assert checkout_audit["ok"] is True
+    assert checkout_audit["drift_count"] == 0
+    assert checkout_audit["repository_reference_validation"] == "performed"
+
+
+def test_quality_audit_cli_passes_invoking_checkout_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured: dict[str, Path] = {}
+
+    def build_audit(*, repo_root: Path) -> dict[str, bool]:
+        captured["repo_root"] = repo_root
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        canary_command,
+        "_resolve_git_repo_root",
+        lambda candidate: tmp_path,
+    )
+    monkeypatch.setattr(
+        canary_command,
+        "build_quality_surface_catalog_audit",
+        build_audit,
+    )
+
+    result = canary_command.handle_canary_command(
+        SimpleNamespace(command="canary", canary_command="quality-audit"),
+        output_format=lambda args: "json",
+        print_payload=lambda payload, output_format, renderer: None,
+    )
+
+    assert result == 0
+    assert captured["repo_root"] == tmp_path
 
 
 def test_unclassified_high_risk_profile_is_drift() -> None:

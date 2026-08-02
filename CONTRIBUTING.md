@@ -78,6 +78,15 @@ Choose focused smokes and broader canaries by change risk; do not run every
 public smoke or a live model call for every patch. The quality guide explains
 the CI, local/manual, and release-only boundaries.
 
+## Experimental Features
+
+Use `loopx/experiments/<experiment-id>/` for an opt-in prototype that does not
+yet have a stable caller contract or participate in LoopX's default lifecycle.
+Keep its tests, examples, and scripts under matching `experiments/` paths so
+the prototype can be evaluated or removed as one unit. Core modules must not
+import experimental packages. See the
+[experiment placement and promotion policy](loopx/experiments/README.md).
+
 ## Host Loops And LoopX Turn
 
 Treat LoopX Turn and a long-running host loop as separate layers:

@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -18,16 +17,15 @@ from loopx.capabilities.issue_fix.acceptance_loop import (  # noqa: E402
     build_issue_fix_acceptance_fixture_packet,
     build_issue_fix_repo_branch_fixture_packet,
 )
-from loopx.capabilities.issue_fix.intake_surface import (  # noqa: E402
-    build_content_ops_issue_fix_metadata_preview_packet,
-)
 from loopx.capabilities.issue_fix.feasibility import (  # noqa: E402
     build_issue_fix_feasibility_packet,
+)
+from loopx.capabilities.issue_fix.intake_surface import (  # noqa: E402
+    build_content_ops_issue_fix_metadata_preview_packet,
 )
 from loopx.capabilities.issue_fix.workflow_plan import (  # noqa: E402
     build_issue_fix_workflow_plan_packet,
 )
-
 
 PRIVATE_PATTERNS = [
     re.compile(r"/Users/[A-Za-z0-9._-]+/"),
@@ -125,20 +123,19 @@ def test_metadata_to_ordered_todos_and_gates() -> None:
     assert plan["todo_write_performed"] is False, plan
     assert [todo["planner_order"] for todo in plan["ordered_loopx_todo_writeback_preview"]] == [
         1,
-        2,
-        3,
     ], plan
-    assert todo_by_action(plan, "issue_fix_public_metadata_classification")["role"] == "agent"
-    assert todo_by_action(plan, "issue_fix_feasibility_decision")["priority"] == "P0"
-    gated_read = todo_by_action(plan, "approve_github_issue_body_or_comment_read")
-    assert gated_read["role"] == "user", gated_read
-    assert gated_read["priority"] == "P0", gated_read
-    assert gated_read["would_write"] is False, gated_read
+    collect_evidence = todo_by_action(plan, "issue_fix_collect_candidate_evidence")
+    assert collect_evidence["role"] == "agent", collect_evidence
+    assert collect_evidence["priority"] == "P0", collect_evidence
+    assert collect_evidence["would_write"] is False, collect_evidence
+    assert plan["candidate_preflight"]["admission"]["state"] == "evidence_required"
+    assert plan["first_screen"]["user_action_required"] is False, plan
     action_kinds = {
         todo["action_kind"] for todo in plan["ordered_loopx_todo_writeback_preview"]
     }
     assert "issue_fix_branch_validation" not in action_kinds, action_kinds
     assert "issue_fix_pr_lifecycle_monitor" not in action_kinds, action_kinds
+    assert "approve_github_issue_body_or_comment_read" not in action_kinds, action_kinds
     routes = {route["route"]: route for route in plan["resolution_route_candidates"]}
     assert set(routes) == {"fix_pr", "comment_only", "triage_only"}, routes
     assert routes["fix_pr"]["next_action_kind"] == "issue_fix_branch_validation"

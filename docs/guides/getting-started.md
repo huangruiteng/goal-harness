@@ -387,11 +387,14 @@ The checkout installer creates:
 - `~/.local/bin/loopx-canary`, pointing at the live checkout;
 - `~/.local/share/man/man1/loopx.1.gz`, so `man loopx` opens the short
   operator manual after the shell profile reloads;
-- the LoopX Codex skills under `~/.codex/skills`.
+- reusable global LoopX Codex skills under `~/.codex/skills`;
+- canonical sources for project-scoped skills, which are not installed globally.
 
 Those global skills are the intended product surface for reusable LoopX
-agent behavior; project-specific state and private decisions stay in the local
-registry and active goal files.
+connection and control-plane behavior. Capability workflows that should only
+exist in selected repositories use managed project skills instead.
+Project-specific state and private decisions stay in the local registry and
+active goal files.
 
 Use the canary wrapper for one or two selected controllers before promoting a
 checkout to the default local release.
@@ -455,6 +458,8 @@ The reusable skills have intentionally narrow jobs:
 | `loopx-project` | Connecting projects, reading status/quota/history, diagnosing LoopX, generating heartbeat/review packets, and refreshing state. | Reading private project documents by default or replacing the CLI as source of truth. |
 | `loopx-pr-review` | Running `/loopx-pr-review`, preserving the `loopx pr-review` packet, and guiding per-PR five-block reviews. | Approving, commenting on, merging, self-merging, or admin-bypassing a PR. |
 | `loopx-doc-registry` | Registering durable project material and redacted authority-source metadata. | Copying raw doc bodies, internal URLs, or private comments into public repo docs. |
+| `loopx-material` | Operating an explicitly activated project's lossless material inventory, lifecycle, ranked-entry rebuild, bounded rerank, owner-gated apply, and rollback. | Ordinary one-off reading, project-specific source discovery, or mutating a material store merely because the project skill is discoverable. |
+| `loopx-change-quality` | Reviewing one exact final diff, optionally applying one bounded safe fix, and recording a policy-enforced receipt. | Acting when the goal policy is disabled, recursively reviewing reviewers, or replacing project-native validators. |
 | `loopx-self-repair` | Repairing surprising control-plane behavior, stale projection, tiny turns, or contradictory guard payloads. | Lowering gates, guessing around missing authority, or committing private runtime state. |
 
 Auto-research role guidance is worker-local: the visible worker launcher owns
@@ -471,6 +476,52 @@ Keep three layers separate:
 - **Repository rules** belong in `AGENTS.md`, `CONTRIBUTING.md`, and public
   docs. They can constrain contributors and agents in this repository, but they
   should not silently become global skill policy for every project.
+
+`loopx-material` and `loopx-change-quality` follow **release-owned source,
+project-managed delivery, and goal-scoped activation**. The global installer
+keeps their canonical source in the LoopX release but does not publish either
+skill under `~/.codex/skills`. The generic lifecycle and host-surface contract is documented in
+[Project Skill Delivery](../reference/project-skill-delivery.md). Enable discovery only
+for a connected project:
+
+```bash
+loopx project-skill install \
+  --project . \
+  --skill loopx-material \
+  --surface codex \
+  --execute
+loopx project-skill status \
+  --project . \
+  --skill loopx-material \
+  --surface codex
+
+# Install only when the goal enables change_quality_qualification.
+loopx project-skill install \
+  --project . \
+  --skill loopx-change-quality \
+  --surface codex \
+  --execute
+```
+
+Host-native project roots are:
+
+| Surface | Managed project root |
+| --- | --- |
+| Codex | `.agents/skills/` |
+| Claude Code | `.claude/skills/` |
+| OpenCode | `.opencode/skills/` |
+
+Repeat `--surface` to install the same skill for multiple hosts in one
+transaction. The locations follow the host discovery contracts documented by
+[Codex](https://developers.openai.com/codex/skills),
+[Claude Code](https://code.claude.com/docs/en/slash-commands#where-skills-live),
+and [OpenCode](https://opencode.ai/docs/skills/#place-files).
+
+Installing a project skill does not grant domain write authority; the current
+goal/profile/todo must still activate the capability. Use
+`loopx project-skill uninstall --project . --skill <skill-id> --surface codex
+--execute` to remove a managed copy. Unmanaged or locally modified copies fail
+closed.
 
 To disconnect only the current project from LoopX, use the project-local
 uninstall command from that project root. It defaults to a dry-run preview and
@@ -670,6 +721,26 @@ loopx reward \
   --reward positive \
   --reason-summary "validation improved and the route is worth extending"
 ```
+
+### Recover History Index Collisions
+
+History writers reserve their JSON/Markdown artifact pair atomically. If an
+older runtime reports legacy index identity collisions, review a complete
+rebuild plan before changing the index:
+
+```bash
+loopx --format json history rebuild-index-collisions \
+  --goal-id your-project-goal | jq '.review_plan' > reviewed-plan.json
+loopx history rebuild-index-collisions \
+  --goal-id your-project-goal \
+  --review-plan-json reviewed-plan.json \
+  --execute
+```
+
+The execute path requires the exact reviewed plan, keeps a pre-rebuild index
+backup, and preserves ambiguous legacy artifacts rather than guessing their
+owner. Truncated plans are not executable; raise `--limit` and review the
+complete digest first.
 
 ## Heartbeats And Quota
 
@@ -891,6 +962,11 @@ python3 examples/canary/canary-promotion-readiness-smoke.py
 loopx promotion-gate --format json
 loopx upgrade-plan --format json
 ```
+
+When the dashboard source is present, the readiness smoke requires its npm
+dependencies so a dependency skip cannot be recorded as a pass. Use
+`--dashboard-mode=skip` only when intentionally qualifying a release boundary
+that omits dashboard validation; the runtime evidence records that skip.
 
 ## Documentation Map
 

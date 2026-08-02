@@ -11,6 +11,9 @@ from ..control_plane.runtime.status_projection_cache import (
     resolve_status_projection_cache_runtime_root,
     write_status_projection_cache,
 )
+from ..control_plane.status_agent_lane_projection import (
+    compact_agent_lane_status_payload_for_display,
+)
 from ..control_plane.todos.contract import normalize_todo_claimed_by
 from ..control_plane.todos.quota_summary import (
     compact_agent_lane_todos_for_status_display,
@@ -23,10 +26,7 @@ from ..handoff_budget import build_handoff_interface_budget
 from ..presentation.renderers.status_markdown import render_status_markdown
 from ..quota import build_quota_should_run
 from ..review_packet import build_review_packet, render_review_packet_markdown
-from ..status import (
-    AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK,
-    collect_status,
-)
+from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -130,6 +130,16 @@ def register_status_commands(
         help=(
             "Registered agent id for adding agent-lane next-action projection "
             "to matching status queue items."
+        ),
+    )
+    status_parser.add_argument(
+        "--available-capability",
+        dest="available_capabilities",
+        action="append",
+        help=(
+            "Declare a capability available in the current execution envelope. "
+            "Repeat for multiple capabilities; capability-gated status fields "
+            "remain absent by default."
         ),
     )
     status_parser.add_argument(
@@ -237,6 +247,16 @@ def register_status_commands(
     review_packet_parser.add_argument(
         "--agent-id",
         help="Registered agent id for adding read-only agent-member status to the review packet.",
+    )
+    review_packet_parser.add_argument(
+        "--available-capability",
+        dest="available_capabilities",
+        action="append",
+        help=(
+            "Declare a capability available in the current execution envelope. "
+            "Repeat for multiple capabilities; capability-gated review fields "
+            "remain absent by default."
+        ),
     )
     review_packet_parser.add_argument("--limit", type=int, default=5)
 
@@ -347,6 +367,7 @@ def handle_status_command(
                 include_task_graph=args.include_task_graph,
                 goal_id=args.goal_id,
                 max_age_seconds=args.projection_cache_ttl_seconds,
+                available_capabilities=args.available_capabilities,
             )
         if payload is None:
             payload = collect_status(
@@ -356,6 +377,7 @@ def handle_status_command(
                 limit=collection_limit,
                 include_task_graph=args.include_task_graph,
                 goal_id=args.goal_id,
+                available_capabilities=args.available_capabilities,
             )
             if args.write_projection_cache:
                 cache_metadata = write_status_projection_cache(
@@ -367,6 +389,7 @@ def handle_status_command(
                     goal_id=args.goal_id,
                     payload=payload,
                     max_age_seconds=args.projection_cache_ttl_seconds,
+                    available_capabilities=args.available_capabilities,
                 )
                 payload["projection_cache"] = cache_metadata
             elif cache_metadata:
@@ -379,6 +402,10 @@ def handle_status_command(
                 collection_limit=collection_limit,
             )
             compact_agent_lane_todos_for_status_display(payload)
+            compact_agent_lane_status_payload_for_display(
+                payload,
+                agent_id=args.agent_id,
+            )
             compact_agent_lane_todo_index_for_status_display(payload)
     except Exception as exc:
         payload = {
@@ -650,6 +677,69 @@ def _sync_next_action_projection_warning_from_guard(
             target.pop("next_action_projection_warning", None)
 
 
+def _mirror_agent_status_projections(
+    item: dict[str, object],
+    project_asset: object,
+    *,
+    projections: dict[str, object],
+) -> set[str]:
+    attached: set[str] = set()
+    for field, projection in projections.items():
+        if not isinstance(projection, dict):
+            continue
+        item[field] = projection
+        if isinstance(project_asset, dict):
+            project_asset[field] = projection
+        attached.add(field)
+    return attached
+
+
+def _sync_agent_replan_obligation_from_guard(
+    item: dict[str, object],
+    project_asset: object,
+    *,
+    guard: dict[str, object],
+    agent_id: str,
+) -> None:
+    """Keep agent-scoped status guidance identical to the quota decision."""
+
+    targets = (item, project_asset)
+    if not any(
+        isinstance(target, dict)
+        and (
+            "autonomous_replan_obligation" in target
+            or (
+                isinstance(
+                    target.get("autonomous_replan_obligations_by_agent"), dict
+                )
+                and agent_id
+                in target["autonomous_replan_obligations_by_agent"]
+            )
+        )
+        for target in targets
+    ):
+        return
+    obligation = guard.get("autonomous_replan_obligation")
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        obligations_by_agent = target.get("autonomous_replan_obligations_by_agent")
+        if isinstance(obligations_by_agent, dict):
+            obligations_by_agent = dict(obligations_by_agent)
+            if isinstance(obligation, dict):
+                obligations_by_agent[agent_id] = obligation
+            else:
+                obligations_by_agent.pop(agent_id, None)
+            if obligations_by_agent:
+                target["autonomous_replan_obligations_by_agent"] = obligations_by_agent
+            else:
+                target.pop("autonomous_replan_obligations_by_agent", None)
+        if isinstance(obligation, dict):
+            target["autonomous_replan_obligation"] = obligation
+        else:
+            target.pop("autonomous_replan_obligation", None)
+
+
 def _agent_reward_memory_projection(
     guard: dict[str, object],
     *,
@@ -688,7 +778,9 @@ def _agent_reward_memory_projection(
     return compact
 
 
-def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str) -> dict[str, object]:
+def attach_agent_lane_next_actions(
+    payload: dict[str, object], *, agent_id: str
+) -> dict[str, object]:
     safe_agent_id = str(agent_id or "").strip()
     if not safe_agent_id:
         return payload
@@ -698,13 +790,18 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
     items = queue.get("items")
     if not isinstance(items, list):
         return payload
-    attached = 0
-    frontier_attached = 0
-    hint_attached = 0
-    goal_frontier_attached = 0
-    member_attached = 0
-    interaction_attached = 0
-    reward_memory_attached = 0
+    projection_counts = dict.fromkeys(
+        (
+            "agent_lane_next_action",
+            "agent_scope_frontier",
+            "agent_lane_frontier_hint",
+            "goal_frontier_projection",
+            "agent_member",
+            "agent_interaction_summary",
+            "agent_reward_memory",
+        ),
+        0,
+    )
     current_agent_next_action: dict[str, Any] | None = None
     for item in items:
         if not isinstance(item, dict):
@@ -722,73 +819,49 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
             continue
         next_action = guard.get("agent_lane_next_action")
         project_asset = item.get("project_asset")
-        changed = False
+        agent_member = _build_agent_member_projection(
+            item,
+            guard=guard,
+            agent_id=safe_agent_id,
+        )
+        interaction_summary = _build_agent_interaction_summary(
+            guard,
+            agent_id=safe_agent_id,
+        )
+        _sync_agent_replan_obligation_from_guard(
+            item,
+            project_asset,
+            guard=guard,
+            agent_id=safe_agent_id,
+        )
+        reward_memory_projection = _agent_reward_memory_projection(
+            guard,
+            agent_id=safe_agent_id,
+        )
+        attached_fields = _mirror_agent_status_projections(
+            item,
+            project_asset,
+            projections={
+                "agent_lane_next_action": next_action,
+                "agent_scope_frontier": guard.get("agent_scope_frontier"),
+                "agent_lane_frontier_hint": guard.get("agent_lane_frontier_hint"),
+                "goal_frontier_projection": guard.get("goal_frontier_projection"),
+                "agent_member": agent_member,
+                "agent_interaction_summary": interaction_summary,
+                "agent_reward_memory": reward_memory_projection,
+            },
+        )
+        for field in attached_fields:
+            projection_counts[field] += 1
         if isinstance(next_action, dict):
             if current_agent_next_action is None:
                 current_agent_next_action = next_action
-            item["agent_lane_next_action"] = next_action
-            if isinstance(project_asset, dict):
-                project_asset["agent_lane_next_action"] = next_action
             _sync_next_action_projection_warning_from_guard(item, guard=guard)
             _sync_status_item_next_action_from_agent_lane(
                 item,
                 next_action=next_action,
                 guard=guard,
             )
-            attached += 1
-            changed = True
-        frontier = guard.get("agent_scope_frontier")
-        if isinstance(frontier, dict):
-            item["agent_scope_frontier"] = frontier
-            if isinstance(project_asset, dict):
-                project_asset["agent_scope_frontier"] = frontier
-            frontier_attached += 1
-            changed = True
-        frontier_hint = guard.get("agent_lane_frontier_hint")
-        if isinstance(frontier_hint, dict):
-            item["agent_lane_frontier_hint"] = frontier_hint
-            if isinstance(project_asset, dict):
-                project_asset["agent_lane_frontier_hint"] = frontier_hint
-            hint_attached += 1
-            changed = True
-        goal_frontier = guard.get("goal_frontier_projection")
-        if isinstance(goal_frontier, dict):
-            item["goal_frontier_projection"] = goal_frontier
-            if isinstance(project_asset, dict):
-                project_asset["goal_frontier_projection"] = goal_frontier
-            goal_frontier_attached += 1
-            changed = True
-        agent_member = _build_agent_member_projection(
-            item,
-            guard=guard,
-            agent_id=safe_agent_id,
-        )
-        if isinstance(agent_member, dict):
-            item["agent_member"] = agent_member
-            if isinstance(project_asset, dict):
-                project_asset["agent_member"] = agent_member
-            member_attached += 1
-            changed = True
-        interaction_summary = _build_agent_interaction_summary(
-            guard,
-            agent_id=safe_agent_id,
-        )
-        if isinstance(interaction_summary, dict):
-            item["agent_interaction_summary"] = interaction_summary
-            if isinstance(project_asset, dict):
-                project_asset["agent_interaction_summary"] = interaction_summary
-            interaction_attached += 1
-            changed = True
-        reward_memory_projection = _agent_reward_memory_projection(
-            guard,
-            agent_id=safe_agent_id,
-        )
-        if isinstance(reward_memory_projection, dict):
-            item["agent_reward_memory"] = reward_memory_projection
-            if isinstance(project_asset, dict):
-                project_asset["agent_reward_memory"] = reward_memory_projection
-            reward_memory_attached += 1
-            changed = True
         latest_action = guard.get("latest_run_recommended_action")
         for target in (item, project_asset):
             if not isinstance(target, dict):
@@ -812,9 +885,7 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
                     target["agent_lane_recommendation"] = existing_recommendation
                 elif latest_action:
                     target["agent_lane_recommendation"] = {
-                        "schema_version": existing_recommendation.get(
-                            "schema_version"
-                        )
+                        "schema_version": existing_recommendation.get("schema_version")
                         or "agent_lane_recommendation_v0",
                         "progress_scope": "agent_lane",
                         "agent_id": safe_agent_id,
@@ -825,28 +896,23 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
                 target["latest_run_recommended_action_source"] = (
                     "agent_lane_recommendation"
                 )
-        changed = True
-        if not changed:
-            continue
-    if (
-        attached
-        or frontier_attached
-        or hint_attached
-        or goal_frontier_attached
-        or member_attached
-        or interaction_attached
-        or reward_memory_attached
-    ):
+    if any(projection_counts.values()):
         projection: dict[str, object] = {
             "schema_version": "agent_lane_next_action_projection_v0",
             "agent_id": safe_agent_id,
-            "attached_count": attached,
-            "frontier_attached_count": frontier_attached,
-            "frontier_hint_attached_count": hint_attached,
-            "goal_frontier_attached_count": goal_frontier_attached,
-            "agent_member_attached_count": member_attached,
-            "agent_interaction_attached_count": interaction_attached,
-            "reward_memory_attached_count": reward_memory_attached,
+            "attached_count": projection_counts["agent_lane_next_action"],
+            "frontier_attached_count": projection_counts["agent_scope_frontier"],
+            "frontier_hint_attached_count": projection_counts[
+                "agent_lane_frontier_hint"
+            ],
+            "goal_frontier_attached_count": projection_counts[
+                "goal_frontier_projection"
+            ],
+            "agent_member_attached_count": projection_counts["agent_member"],
+            "agent_interaction_attached_count": projection_counts[
+                "agent_interaction_summary"
+            ],
+            "reward_memory_attached_count": projection_counts["agent_reward_memory"],
             "preserves_goal_next_action": True,
         }
         if isinstance(current_agent_next_action, dict):
@@ -854,31 +920,35 @@ def attach_agent_lane_next_actions(payload: dict[str, object], *, agent_id: str)
                 _agent_lane_text(current_agent_next_action),
                 limit=240,
             )
-            current_todo_id = str(current_agent_next_action.get("todo_id") or "").strip()
+            current_todo_id = str(
+                current_agent_next_action.get("todo_id") or ""
+            ).strip()
             if current_todo_id:
                 projection["current_agent_todo_id"] = current_todo_id
             if current_action_text:
                 projection["current_agent_action"] = current_action_text
-            selected_by = str(current_agent_next_action.get("selected_by") or "").strip()
+            selected_by = str(
+                current_agent_next_action.get("selected_by") or ""
+            ).strip()
             if selected_by:
                 projection["selected_by"] = selected_by
             confidence = str(current_agent_next_action.get("confidence") or "").strip()
             if confidence:
                 projection["confidence"] = confidence
         payload["agent_lane_next_action_projection"] = projection
-    if member_attached:
+    if projection_counts["agent_member"]:
         payload["agent_member_projection"] = {
             "schema_version": "agent_member_projection_v0",
             "agent_id": safe_agent_id,
-            "attached_count": member_attached,
+            "attached_count": projection_counts["agent_member"],
             "source": "registry+quota_should_run+todo_projection",
             "projection_is_authoritative": False,
         }
-    if reward_memory_attached:
+    if projection_counts["agent_reward_memory"]:
         payload["agent_reward_memory_projection"] = {
             "schema_version": "agent_reward_memory_projection_summary_v1",
             "agent_id": safe_agent_id,
-            "attached_count": reward_memory_attached,
+            "attached_count": projection_counts["agent_reward_memory"],
             "source": "quota.goal_boundary.capabilities.reward_memory",
         }
     return payload
@@ -946,6 +1016,7 @@ def handle_review_packet_command(
             limit=max(0, args.limit),
             include_task_graph=not args.handoff_only,
             goal_id=args.goal_id,
+            available_capabilities=args.available_capabilities,
         )
         if args.agent_id:
             attach_agent_lane_next_actions(status_payload, agent_id=args.agent_id)

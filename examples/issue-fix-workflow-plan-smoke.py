@@ -68,6 +68,18 @@ def assert_workflow_shape(payload: dict[str, Any]) -> None:
     assert payload["ok"] is True, payload
     assert payload["schema_version"] == ISSUE_FIX_WORKFLOW_PLAN_PACKET_SCHEMA_VERSION
     assert payload["mode"] == "issue-fix-workflow-plan"
+    context_contract = payload["repository_context_input_contract"]
+    assert context_contract["schema_version"] == "issue_fix_repository_context_input_v0"
+    assert context_contract["allowed_fields"] == [
+        "repository_revision",
+        "schema_version",
+        "sources",
+    ]
+    assert context_contract["minimal_example"]["sources"][0]["supports"] == [
+        "change_scope",
+        "reproduction",
+        "validation",
+    ]
     assert payload["external_writes_performed"] is False
     assert payload["todo_write_performed"] is False
     assert payload["local_paths_captured"] is False
@@ -82,18 +94,18 @@ def assert_workflow_shape(payload: dict[str, Any]) -> None:
     assert first_screen["agent_can_continue"] is True, first_screen
 
     todos = payload["ordered_loopx_todo_writeback_preview"]
-    assert len(todos) >= 2, todos
+    assert len(todos) >= 1, todos
     assert [todo["planner_order"] for todo in todos] == sorted(
         todo["planner_order"] for todo in todos
     )
-    assert [todo["action_kind"] for todo in todos[:2]] == [
-        "issue_fix_public_metadata_classification",
-        "issue_fix_feasibility_decision",
+    assert payload["candidate_preflight"]["admission"]["state"] == ("evidence_required")
+    assert [todo["action_kind"] for todo in todos[:1]] == [
+        "issue_fix_collect_candidate_evidence"
     ]
     assert not any(
         todo["action_kind"] == "issue_fix_branch_validation" for todo in todos
     ), todos
-    assert [todo["priority"] for todo in todos[:2]] == ["P0", "P0"]
+    assert [todo["priority"] for todo in todos[:1]] == ["P0"]
     assert all(todo["would_write"] is False for todo in todos)
     assert all(todo["requires_execute_flag"] is True for todo in todos)
 
@@ -103,6 +115,8 @@ def assert_workflow_shape(payload: dict[str, Any]) -> None:
     assert routes["comment_only"]["requires_user_gate_before_external_write"] is True
     feasibility = payload["feasibility_checkpoint_plan"]
     assert feasibility["selects_exactly_one_route"] is True, feasibility
+    assert feasibility["required_when_candidate_preflight_route"] == "proceed"
+    assert feasibility["non_proceed_receipt_stream"] == "candidate-preflight"
     assert feasibility["routes"] == ["fix_pr", "comment_only", "triage_only"]
     assert feasibility["writes_domain_state_by_default_with_goal_id"] is True
     assert feasibility["persists_repository_context_with_feasibility"] is True
@@ -110,6 +124,10 @@ def assert_workflow_shape(payload: dict[str, Any]) -> None:
     assert feasibility["writes_loopx_todo"] is False
     post_pr = payload["post_pr_lifecycle_monitor_plan"]
     assert post_pr["schema_version"] == "issue_fix_post_pr_lifecycle_monitor_plan_v1"
+    assert "--goal-id <goal-id>" in post_pr["command_preview"]
+    assert "--claimed-by <agent-id>" in post_pr["command_preview"]
+    assert "--execute-transition" in post_pr["command_preview"]
+    assert "--fetch-metadata" not in post_pr["command_preview"]
     assert post_pr["creates_per_pr_continuous_monitor_todo"] is False, post_pr
     assert post_pr["monitor_scope"] == "lifecycle_state_bucket", post_pr
     assert post_pr["materializes_nonempty_buckets_only"] is True, post_pr
@@ -230,10 +248,7 @@ def main() -> int:
         for todo in cli_packet["ordered_loopx_todo_writeback_preview"]
         if todo["action_kind"] == "approve_github_issue_body_or_comment_read"
     ]
-    assert len(gated) == 1, cli_packet
-    assert gated[0]["role"] == "user", gated
-    assert gated[0]["priority"] == "P0", gated
-    assert gated[0]["would_write"] is False, gated
+    assert gated == [], cli_packet
     assert_public_safe(result.stdout)
 
     markdown = subprocess.run(

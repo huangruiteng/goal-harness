@@ -15,9 +15,13 @@ from ...control_plane.runtime.public_safety import (
 from ...control_plane.turn_driver.transaction import (
     loopx_turn_execution_committed,
     loopx_turn_execution_has_durable_effects,
+    loopx_turn_execution_recovery_required,
 )
 from ...benchmark_adapters.skillsbench_acp_failure_policy import (
     nonrecoverable_codex_turn_failure_category,
+)
+from ...benchmark_adapters.skillsbench_typed_repair import (
+    SKILLSBENCH_TYPED_REPAIR_EXHAUSTED_REASONS,
 )
 
 MAX_SKILLSBENCH_DEBUG_LIST_ITEMS = 5
@@ -54,6 +58,7 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
 
     committed_count = 0
     validation_failed_count = 0
+    recovery_required_count = 0
     repair_required_count = 0
     replan_required_count = 0
     state_written_count = 0
@@ -89,17 +94,22 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
             and receipt.get("failed_phase") == "host_execute"
         )
         recovery_kind = public_safe_compact_text(
-            validation.get("recovery_kind"),
+            validation.get("recovery_kind")
+            or receipt.get("result_kind")
+            or execution.get("result_kind"),
             limit=80,
         )
+        recovery_required = loopx_turn_execution_recovery_required(execution)
         committed_count += int(committed)
         validation_failed_count += int(validation_failed)
+        recovery_required_count += int(recovery_required)
         repair_required_count += int(recovery_kind == "repair_required")
         replan_required_count += int(recovery_kind == "replan_required")
         state_written_count += int(state_written)
         quota_spent_count += int(quota_spent)
         failed_transaction_with_durable_effect_count += int(
-            validation_failed and loopx_turn_execution_has_durable_effects(execution)
+            (validation_failed or recovery_required)
+            and loopx_turn_execution_has_durable_effects(execution)
         )
         host_failure_count += int(host_failure)
 
@@ -111,6 +121,25 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
     )
     nonrecoverable_failure_category = (
         nonrecoverable_codex_turn_failure_category(counters)
+    )
+    typed_repair_terminal_reason = public_safe_compact_text(
+        counters.get("product_mode_typed_repair_terminal_reason"),
+        limit=120,
+    )
+    typed_repair_exhausted = bool(
+        recovery_required_count > 0
+        and committed_count < execution_count
+        and failed_transaction_with_durable_effect_count == 0
+        # Committed prefixes own their effects; later uncommitted Turns must not.
+        and state_written_count == committed_count
+        and quota_spent_count == committed_count
+        and counters.get("product_mode_typed_repair_terminal") is True
+        and counters.get(
+            "product_mode_typed_repair_terminal_receipt_consistent"
+        )
+        is True
+        and typed_repair_terminal_reason
+        in SKILLSBENCH_TYPED_REPAIR_EXHAUSTED_REASONS
     )
     terminal_host_failure = bool(
         host_failure_count > 0
@@ -140,6 +169,15 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
         status = "committed"
         causal_consistency = "committed_effects_observed"
         first_blocker = "none"
+    elif typed_repair_exhausted:
+        if validation_failed_count:
+            status = "validation_failed_typed_repair_exhausted"
+            causal_consistency = "validation_failure_effects_not_committed"
+            first_blocker = "loopx_turn_validation_failed"
+        else:
+            status = "recovery_required_typed_repair_exhausted"
+            causal_consistency = "recovery_required_effects_not_committed"
+            first_blocker = "loopx_turn_repair_required"
     elif validation_failed_count:
         status = "validation_failed"
         causal_consistency = "validation_failure_effects_not_committed"
@@ -155,6 +193,8 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
             if nonrecoverable_failure_category == "codex_usage_limit"
             else "terminal_host_failure"
         )
+    elif typed_repair_exhausted:
+        recovery_status = "case_exclusion_required"
     elif repair_required_count:
         recovery_status = "repair_required"
     elif replan_required_count:
@@ -173,11 +213,19 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
         "progress_blocked": (
             committed_count != execution_count and not terminal_host_failure
         ),
+        "next_case_blocked": (
+            committed_count != execution_count
+            and not terminal_host_failure
+            and not typed_repair_exhausted
+        ),
+        "typed_repair_exhausted": typed_repair_exhausted,
+        "case_exclusion_required": typed_repair_exhausted,
         "first_blocker": first_blocker,
         "execution_count": execution_count,
         "committed_count": committed_count,
         "uncommitted_count": execution_count - committed_count,
         "validation_failed_count": validation_failed_count,
+        "recovery_required_count": recovery_required_count,
         "repair_required_count": repair_required_count,
         "replan_required_count": replan_required_count,
         "state_written_count": state_written_count,
@@ -190,6 +238,7 @@ def _skillsbench_turn_transaction_outcome(run: dict[str, Any]) -> dict[str, Any]
         "nonrecoverable_host_failure_category": (
             nonrecoverable_failure_category
         ),
+        "typed_repair_terminal_reason": typed_repair_terminal_reason,
     }
 
 
@@ -331,6 +380,16 @@ def build_skillsbench_post_run_debug_gate(
     turn_transaction_blocks_progress = bool(
         turn_transaction.get("progress_blocked") is True
     )
+    turn_transaction_blocks_next_case = bool(
+        turn_transaction.get(
+            "next_case_blocked",
+            turn_transaction_blocks_progress,
+        )
+        is True
+    )
+    typed_repair_exhausted = bool(
+        turn_transaction.get("typed_repair_exhausted") is True
+    )
     terminal_host_provider_failure = bool(
         turn_transaction.get("terminal_host_failure") is True
     )
@@ -338,7 +397,9 @@ def build_skillsbench_post_run_debug_gate(
         (effective_lifecycle_satisfied or terminal_host_provider_failure)
         and not turn_transaction_blocks_progress
     )
-    if turn_transaction_blocks_progress:
+    if turn_transaction_blocks_progress and typed_repair_exhausted:
+        qualified_closeout_status = "turn_transaction_unqualified_case_excluded"
+    elif turn_transaction_blocks_progress:
         qualified_closeout_status = "turn_transaction_repair_required"
     elif terminal_host_provider_failure:
         qualified_closeout_status = "host_provider_failure_terminal"
@@ -453,9 +514,14 @@ def build_skillsbench_post_run_debug_gate(
         else:
             next_case_gate = "open_with_attribution"
             next_action = "repair_host_provider_before_rerunning_same_case"
-    elif turn_transaction_blocks_progress:
+    elif turn_transaction_blocks_next_case:
         next_case_gate = "blocked_turn_transaction_repair"
         next_action = "repair_loopx_turn_transaction_before_next_matched_case"
+    elif typed_repair_exhausted:
+        next_case_gate = "open_with_exclusion"
+        next_action = (
+            "record_unqualified_case_arm_and_continue_after_protocol_rerun"
+        )
     elif attribution_layer == "clean_pass":
         next_case_gate = "open"
         next_action = "upsert_ledger_and_continue_or_compare_pair"
@@ -477,7 +543,7 @@ def build_skillsbench_post_run_debug_gate(
         "normal_progress_allowed": bool(
             packet_complete
             and case_closeout_complete
-            and not turn_transaction_blocks_progress
+            and not turn_transaction_blocks_next_case
             and not terminal_host_provider_failure
         ),
         "first_blocker": first_blocker,

@@ -21,6 +21,13 @@ QUOTA_CLI_GOAL_BOUNDARY_COMPACTION_SCHEMA_VERSION = (
 QUOTA_CLI_GOAL_BOUNDARY_DETAIL_COMMAND = (
     "quota should-run --include-detail goal-boundary"
 )
+QUOTA_CLI_VISION_COMPACTION_SCHEMA_VERSION = (
+    "quota_cli_vision_continuation_compaction_v0"
+)
+QUOTA_CLI_VISION_DETAIL_COMMAND = "quota should-run --include-detail vision"
+QUOTA_CLI_CAPABILITY_GATE_COMPACTION_SCHEMA_VERSION = (
+    "quota_cli_capability_gate_compaction_v0"
+)
 _RETAINED_AGENT_ITEM_LANES = {
     "first_executable_items": 3,
     "unclaimed_priority_open_items": 3,
@@ -66,6 +73,14 @@ _RETAINED_AGENT_ITEM_FIELDS = (
     "reason",
 )
 _RETAINED_SUCCESSION_WARNING_TODO_IDS = 3
+_RUNTIME_CAPABILITY_PREFIX_FIELDS = (
+    "ok",
+    "status_health_ok",
+    "mode",
+    "goal_id",
+    "decision",
+    "should_run",
+)
 
 
 def _compact_agent_item(item: Any) -> Any:
@@ -193,12 +208,200 @@ def _compact_goal_boundary(boundary: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _compact_vision_continuation_audit(
+    audit: dict[str, Any],
+) -> dict[str, Any]:
+    retained_fields = (
+        "schema_version",
+        "required",
+        "agent_id",
+        "decision",
+        "selected_todo_is_goal_completion",
+        "closeout_allowed_without_evidence",
+        "trigger_count",
+        "trigger_kinds",
+        "required_before_closeout",
+        "recommended_action",
+    )
+    compact = {key: audit[key] for key in retained_fields if key in audit}
+    judge = audit.get("vision_gap_judge")
+    if isinstance(judge, dict):
+        retained_judge_fields = (
+            "schema_version",
+            "done",
+            "decision",
+            "reason",
+            "evidence_read_instruction",
+        )
+        compact["vision_gap_judge"] = {
+            key: judge[key] for key in retained_judge_fields if key in judge
+        }
+    omitted_fields = sorted(set(audit) - set(compact))
+    compact["payload_compaction"] = {
+        "schema_version": QUOTA_CLI_VISION_COMPACTION_SCHEMA_VERSION,
+        "mode": "compact_hot_path",
+        "omitted_fields": omitted_fields,
+        "full_detail_cold_path": QUOTA_CLI_VISION_DETAIL_COMMAND,
+    }
+    return compact
+
+
+def _vision_continuation_ref(audit: dict[str, Any]) -> dict[str, Any]:
+    compact = {
+        key: audit[key]
+        for key in ("schema_version", "required", "decision")
+        if key in audit
+    }
+    judge = audit.get("vision_gap_judge")
+    if isinstance(judge, dict):
+        compact["vision_gap_judge"] = {
+            key: judge[key] for key in ("done", "decision") if key in judge
+        }
+        compact["vision_gap_judge"]["projection_ref"] = (
+            "$.vision_continuation_audit.vision_gap_judge"
+        )
+    compact["projection_ref"] = "$.vision_continuation_audit"
+    return compact
+
+
+def _replace_nested_vision_continuation_audits(
+    payload: dict[str, Any],
+    *,
+    source_audit: dict[str, Any],
+    audit_ref: dict[str, Any],
+) -> None:
+    frontier = payload.get("goal_frontier_projection")
+    if (
+        isinstance(frontier, dict)
+        and frontier.get("vision_continuation_audit") == source_audit
+    ):
+        compact_frontier = dict(frontier)
+        compact_frontier["vision_continuation_audit"] = dict(audit_ref)
+        payload["goal_frontier_projection"] = compact_frontier
+
+    interaction = payload.get("interaction_contract")
+    if not isinstance(interaction, dict):
+        return
+    compact_interaction = dict(interaction)
+    for channel_name in ("agent_channel", "cli_channel"):
+        channel = compact_interaction.get(channel_name)
+        if (
+            not isinstance(channel, dict)
+            or channel.get("vision_continuation_audit") != source_audit
+        ):
+            continue
+        compact_channel = dict(channel)
+        compact_channel["vision_continuation_audit"] = dict(audit_ref)
+        compact_interaction[channel_name] = compact_channel
+    payload["interaction_contract"] = compact_interaction
+
+
+def _compact_capability_gate(gate: dict[str, Any]) -> dict[str, Any]:
+    omitted_fields = (
+        "available",
+        "candidate_order_policy",
+        "runnable_candidates",
+        "blocked_candidates",
+        "resolution_bindings",
+    )
+    compact = {key: value for key, value in gate.items() if key not in omitted_fields}
+    compact["payload_compaction"] = {
+        "schema_version": QUOTA_CLI_CAPABILITY_GATE_COMPACTION_SCHEMA_VERSION,
+        "omitted_fields": [key for key in omitted_fields if key in gate],
+        "omitted_candidate_counts": {
+            "runnable": len(gate.get("runnable_candidates") or []),
+            "blocked": len(gate.get("blocked_candidates") or []),
+            "resolution_bindings": len(gate.get("resolution_bindings") or []),
+        },
+        "full_detail_cold_path": QUOTA_CLI_TODO_SUMMARY_DETAIL_COMMAND,
+    }
+    return compact
+
+
+def _deduplicate_next_action_warning(
+    warning: dict[str, Any],
+    *,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    projection_fields = (
+        "active_state_next_action",
+        "latest_run_recommended_action",
+        "agent_lane_next_action",
+    )
+    compact = dict(warning)
+    projection_refs: dict[str, str] = {}
+    for key in projection_fields:
+        if key not in compact or key not in payload:
+            continue
+        projected_value = payload[key]
+        if key == "agent_lane_next_action" and isinstance(projected_value, dict):
+            projected_value = projected_value.get("text")
+        if compact[key] != projected_value:
+            continue
+        compact.pop(key)
+        projection_refs[key] = f"$.{key}"
+    if projection_refs:
+        compact["projection_refs"] = projection_refs
+    return compact
+
+
+def _deduplicate_agent_lane_next_action(item: dict[str, Any]) -> dict[str, Any]:
+    text = item.get("text")
+    title = item.get("title")
+    if (
+        not isinstance(text, str)
+        or not isinstance(title, str)
+        or (text != title and not text.endswith(f" {title}"))
+    ):
+        return item
+    compact = dict(item)
+    compact.pop("title", None)
+    return compact
+
+
+def _compact_goal_route_hint(route: dict[str, Any]) -> dict[str, Any]:
+    other_actions = route.get("other_agent_next_actions")
+    if not isinstance(other_actions, list) or not other_actions:
+        return route
+    compact = dict(route)
+    compact.pop("other_agent_next_actions", None)
+    compact["other_agent_next_action_count"] = len(other_actions)
+    compact["other_agent_next_actions_detail_ref"] = (
+        QUOTA_CLI_TODO_SUMMARY_DETAIL_COMMAND
+    )
+    return compact
+
+
+def _promote_runtime_capability_reentry(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    interaction = payload.get("interaction_contract")
+    if not isinstance(interaction, dict):
+        return payload
+    cli_channel = interaction.get("cli_channel")
+    if not isinstance(cli_channel, dict):
+        return payload
+    packet = cli_channel.get("runtime_capability_reentry")
+    if not isinstance(packet, dict):
+        return payload
+
+    promoted = {
+        key: payload[key] for key in _RUNTIME_CAPABILITY_PREFIX_FIELDS if key in payload
+    }
+    promoted["runtime_capability_reentry"] = packet
+    promoted.update(
+        (key, value) for key, value in payload.items() if key not in promoted
+    )
+    return promoted
+
+
 def compact_quota_should_run_cli_payload(
     payload: dict[str, Any],
     *,
     include_todo_summary_detail: bool = False,
     include_user_todo_summary_detail: bool = False,
     include_goal_boundary_detail: bool = False,
+    include_vision_detail: bool = False,
 ) -> dict[str, Any]:
     """Bound CLI-only diagnostics after the full decision is computed."""
 
@@ -233,4 +436,35 @@ def compact_quota_should_run_cli_payload(
         if compact_goal_boundary is not goal_boundary:
             compact = dict(compact)
             compact["goal_boundary"] = compact_goal_boundary
-    return compact
+    vision_audit = payload.get("vision_continuation_audit")
+    if not include_vision_detail and isinstance(vision_audit, dict):
+        compact = dict(compact)
+        compact_vision_audit = _compact_vision_continuation_audit(vision_audit)
+        compact["vision_continuation_audit"] = compact_vision_audit
+        _replace_nested_vision_continuation_audits(
+            compact,
+            source_audit=vision_audit,
+            audit_ref=_vision_continuation_ref(compact_vision_audit),
+        )
+    if not include_todo_summary_detail:
+        capability_gate = payload.get("capability_gate")
+        if isinstance(capability_gate, dict):
+            compact = dict(compact)
+            compact["capability_gate"] = _compact_capability_gate(capability_gate)
+        warning = payload.get("next_action_projection_warning")
+        if isinstance(warning, dict):
+            compact = dict(compact)
+            compact["next_action_projection_warning"] = (
+                _deduplicate_next_action_warning(warning, payload=payload)
+            )
+        agent_lane_next_action = payload.get("agent_lane_next_action")
+        if isinstance(agent_lane_next_action, dict):
+            compact = dict(compact)
+            compact["agent_lane_next_action"] = _deduplicate_agent_lane_next_action(
+                agent_lane_next_action
+            )
+        goal_route_hint = payload.get("goal_route_hint")
+        if isinstance(goal_route_hint, dict):
+            compact = dict(compact)
+            compact["goal_route_hint"] = _compact_goal_route_hint(goal_route_hint)
+    return _promote_runtime_capability_reentry(compact)

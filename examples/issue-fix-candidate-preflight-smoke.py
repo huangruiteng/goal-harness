@@ -22,6 +22,20 @@ from loopx.capabilities.issue_fix.workflow_plan import (  # noqa: E402
 )
 
 
+def evidence_receipt(
+    query_scope: str,
+    rows: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "repo": "volcengine/OpenViking",
+        "issue_ref": "#3005",
+        "query_scope": query_scope,
+        "complete": True,
+        "truncated": False,
+        "rows": rows,
+    }
+
+
 def fixture() -> dict[str, object]:
     return {
         "schema_version": "issue_fix_candidate_preflight_input_v0",
@@ -31,18 +45,43 @@ def fixture() -> dict[str, object]:
             "route": "comment_only",
             "status": "open",
         },
-        "numeric_pr_evidence": [],
-        "semantic_pr_evidence": [
-            {
-                "repo": "volcengine/OpenViking",
-                "pr_ref": "pull_2999",
-                "state": "OPEN",
-                "url": "https://github.com/volcengine/OpenViking/pull/2999",
-                "related_issue_refs": ["#3005"],
-                "relation": "implementation",
-                "current_revision_verified": True,
-            }
-        ],
+        "numeric_pr_evidence": evidence_receipt(
+            "issue_specific_all_states",
+            [],
+        ),
+        "semantic_pr_evidence": evidence_receipt(
+            "issue_specific_current_revision",
+            [
+                {
+                    "repo": "volcengine/OpenViking",
+                    "pr_ref": "pull_2999",
+                    "state": "OPEN",
+                    "url": "https://github.com/volcengine/OpenViking/pull/2999",
+                    "related_issue_refs": ["#3005"],
+                    "relation": "implementation",
+                    "current_revision_verified": False,
+                    "revision": "a" * 40,
+                }
+            ],
+        ),
+        "maintainer_comment_evidence": evidence_receipt(
+            "issue_specific_comment_metadata",
+            [],
+        ),
+        "candidate_resolution": {
+            "schema_version": "issue_fix_candidate_resolution_v0",
+            "repo": "volcengine/OpenViking",
+            "issue_ref": "#3005",
+            "rows": [
+                {
+                    "kind": "pr_revision",
+                    "ref": "pull_2999",
+                    "revision": "a" * 40,
+                    "outcome": "implementation",
+                }
+            ],
+            "raw_content_captured": False,
+        },
         "agentic_recall_receipt": {
             "status": "completed_no_influence",
             "call_count": 2,
@@ -94,9 +133,9 @@ def main() -> int:
     assert plan["candidate_fix_workflow_allowed"] is False, plan
     assert_reuse(plan["candidate_preflight"])
     todos = plan["ordered_loopx_todo_writeback_preview"]
-    assert [todo["action_kind"] for todo in todos] == [
-        "issue_fix_reuse_existing_pr"
-    ], todos
+    assert [todo["action_kind"] for todo in todos] == ["issue_fix_reuse_existing_pr"], (
+        todos
+    )
     assert "agentic recall" in todos[0]["text"], todos
     assert plan["first_screen"]["top_agent_todo"] == todos[0], plan
 
@@ -113,9 +152,7 @@ def main() -> int:
         candidate_preflight_input=fixture(),
         generated_at=generated_at,
     )
-    gated_non_proceed_todos = gated_non_proceed[
-        "ordered_loopx_todo_writeback_preview"
-    ]
+    gated_non_proceed_todos = gated_non_proceed["ordered_loopx_todo_writeback_preview"]
     assert [todo["action_kind"] for todo in gated_non_proceed_todos] == [
         "issue_fix_reuse_existing_pr"
     ], gated_non_proceed_todos
@@ -123,15 +160,19 @@ def main() -> int:
 
     merged_and_open = fixture()
     merged_and_open["domain_state"] = None
-    merged_and_open["numeric_pr_evidence"] = [
-        {
-            "repo": "volcengine/OpenViking",
-            "pr_ref": "pull_2998",
-            "state": "MERGED",
-            "url": "https://github.com/volcengine/OpenViking/pull/2998",
-            "closing_issue_refs": ["#3005"],
-        }
-    ]
+    merged_and_open["numeric_pr_evidence"] = evidence_receipt(
+        "issue_specific_all_states",
+        [
+            {
+                "repo": "volcengine/OpenViking",
+                "pr_ref": "pull_2998",
+                "state": "MERGED",
+                "url": "https://github.com/volcengine/OpenViking/pull/2998",
+                "closing_issue_refs": ["#3005"],
+                "revision": "b" * 40,
+            }
+        ],
+    )
     terminal_implementation = build_issue_fix_candidate_preflight_packet(
         repo="volcengine/OpenViking",
         issue_ref="#3005",
@@ -147,15 +188,23 @@ def main() -> int:
 
     unverified = fixture()
     unverified["domain_state"] = None
-    unverified["semantic_pr_evidence"][0]["current_revision_verified"] = False
-    fail_open = build_issue_fix_candidate_preflight_packet(
+    unverified.pop("candidate_resolution")
+    unverified_candidate = build_issue_fix_candidate_preflight_packet(
         repo="volcengine/OpenViking",
         issue_ref="#3005",
         input_payload=unverified,
         generated_at=generated_at,
     )
-    assert fail_open["decision"]["route"] == "proceed", fail_open
-    assert fail_open["decision"]["candidate_runnable"] is True, fail_open
+    assert unverified_candidate["decision"]["route"] is None, unverified_candidate
+    assert unverified_candidate["admission"]["state"] == "verification_required", (
+        unverified_candidate
+    )
+    assert unverified_candidate["decision"]["reason_codes"] == [
+        "semantic_candidate_requires_current_revision_verification"
+    ], unverified_candidate
+    assert unverified_candidate["decision"]["candidate_runnable"] is False, (
+        unverified_candidate
+    )
 
     terminal = fixture()
     terminal["domain_state"]["status"] = "resolved"
@@ -189,13 +238,15 @@ def main() -> int:
             cwd=ROOT,
             check=True,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
     cli = json.loads(result.stdout)
     assert cli["ok"] is True, cli
     assert cli["candidate_fix_workflow_allowed"] is False, cli
     assert_reuse(cli["candidate_preflight"])
+    projection = cli["candidate_preflight"]["domain_state_projection"]
+    assert projection["write_performed"] is False, projection
+    assert projection["write_skipped_reason"] == "goal_id_or_ledger_path_missing"
     print("issue-fix-candidate-preflight-smoke: ok")
     return 0
 

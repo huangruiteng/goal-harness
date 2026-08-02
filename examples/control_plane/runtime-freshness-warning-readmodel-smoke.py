@@ -124,7 +124,10 @@ def assert_promotion_readiness_warning() -> None:
     assert warning["requires_readiness_run"] is True, warning
     assert warning["goal_id"] == TARGET_GOAL, warning
     assert warning["json_exists"] is True, warning
-    assert "promotion readiness evidence" in warning["message"], warning
+    assert warning["message"].endswith(
+        "python3 examples/canary/canary-promotion-readiness-smoke.py"
+    ), warning
+    assert "--no-write-evidence" not in warning["message"], warning
 
     missing_status = {
         "promotion_readiness_summary": {
@@ -139,6 +142,10 @@ def assert_promotion_readiness_warning() -> None:
     assert missing_warning is not None, missing_warning
     assert missing_warning["available"] is False, missing_warning
     assert missing_warning["reason"] == "no canary promotion readiness run found in sampled history"
+    assert missing_warning["message"].endswith(
+        "python3 examples/canary/canary-promotion-readiness-smoke.py"
+    ), missing_warning
+    assert "--no-write-evidence" not in missing_warning["message"], missing_warning
 
 
 def main() -> int:

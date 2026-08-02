@@ -68,6 +68,24 @@ flowchart LR
 `material_rerank_apply_receipt_v0` 与 proposal 分离。真正 apply 必须记录
 owner gate、验证引用、前后 revision；发生修改时还必须有 rollback 引用。
 
+`material_ranked_entry_rebuild_plan_v0` 负责小范围 rank move 无法表达的结构
+修复。超过成员预算的 ranked entry 必须拆成两个或更多可以独立排序的条目，
+不能把 overflow 隐藏到 supporting-only index。调用方在 exact read 后提供语义
+分组，provider-neutral builder 统一执行以下硬门禁：
+
+- 每个重建条目最多包含 `max_materials_per_entry` 个素材引用；
+- 每个源素材引用在完整结果中恰好出现一次；
+- child entry 保留精确 source-entry 成员关系，但 exact-read 语义分组可以替换
+  旧存储中的偶然顺序；
+- 完整 ranked set 的 target rank 唯一且从 1 连续；
+- 未拆分条目保留原引用，拆分 child 根据 source entry 与有序成员生成确定性引用；
+- 可选的 material-level rank anchor 必须留在受保护的 target rank。
+
+完整 ranked set 可以大于活跃窗口。窗口外条目进入显式 ranked backlog，仍属于
+排序系统，而不是“隐藏材料”。`material_ranked_entry_rebuild_apply_receipt_v0`
+记录 owner-gated cutover、验证、前后 revision、数量与 rollback 引用。两个 packet
+均不携带标题、正文、来源位置或凭据。
+
 ## 迁移边界
 
 旧 Markdown、数据库、inbox 等存储在以下条件满足前始终是 authority：
@@ -102,6 +120,26 @@ digest、生命周期计数、解析错误引用，以及三个显式验证结�
 解析 Markdown、数据库或其他来源，但必须证明同一组只读与 backup invariant，
 LoopX 才会准备迁移。
 
+## Owner-Gated Apply 与回滚
+
+`MaterialMigrationApplyProvider` 是私有写 adapter 边界。通用 capability 不接收原始
+材料或私有位置，只编排五个显式步骤：
+
+1. 用准备阶段的 source revision 对当前 authority 做 compare-and-swap；
+2. 以原子写入和读回验证生成 staged store；
+3. staging 后再次检查 source authority revision；
+4. 双读对账 stable ID、item count、lifecycle count 与 content parity；
+5. 携带显式 owner-gate reference，原子切换 authority pointer。
+
+`material_migration_apply_receipt_v0` 记录 before/after revision、target digest、item 与
+lifecycle count、reconciliation reference、authority reference、rollback reference，
+以及已验证的 CAS、原子写入和读回不变量。Receipt 仍保持 public-safe，不携带正文。
+
+回滚复用同一个 authority-pointer CAS。只有当前 authority 仍等于已应用的 target
+revision 时才继续，且需要独立 owner-gate reference，最终生成
+`material_migration_rollback_receipt_v0`。Provider 负责文件系统、数据库或对象存储的
+具体机制；capability 负责顺序、不变量和可审计 receipt。
+
 ## 决策驱动的排序与探索
 
 provider-neutral 的决策规划路径接收 Decision Context 产出的、经过验证且
@@ -122,10 +160,11 @@ provider 调用数、新增候选数与显式 stop condition。它仅用于分�
 
 ## 本阶段不做什么
 
-当前 capability 交付确定性契约、provider-neutral 的只读准备路径、受限决策
-规划、catalog、架构 CLI、聚焦测试和公开 smoke，不交付：
+当前 capability 交付确定性契约、provider-neutral 的只读准备路径、owner-gated
+apply/rollback 编排、受限决策规划、catalog、架构 CLI、聚焦测试和公开 smoke，
+不交付：
 
-- 内置 legacy 素材 parser 或迁移 apply；
+- 内置 legacy 素材 parser 或私有写 adapter；
 - 原始素材持久化；
 - 内置决策 policy；
 - 联网探索 provider；

@@ -57,6 +57,10 @@ from .private_state import load_private_decision_cursors
 from .runtime import (
     assemble_profile_decision_evidence,
 )
+from .outcome_feedback import (
+    DECISION_OUTCOME_FEEDBACK_SCHEMA_VERSION,
+    build_decision_outcome_feedback,
+)
 
 __all__ = [
     "DECISION_CONTEXT_ASSEMBLY_SCHEMA_VERSION",
@@ -66,6 +70,7 @@ __all__ = [
     "DECISION_CURSOR_COMMIT_RECEIPT_SCHEMA_VERSION",
     "DECISION_EVIDENCE_PACKET_SCHEMA_VERSION",
     "DECISION_OUTCOME_RECEIPT_SCHEMA_VERSION",
+    "DECISION_OUTCOME_FEEDBACK_SCHEMA_VERSION",
     "DECISION_PROPOSAL_SCHEMA_VERSION",
     "DECISION_CONTEXT_PROFILE_SCHEMA_VERSION",
     "DECISION_SOURCE_MANIFEST_SCHEMA_VERSION",
@@ -90,6 +95,7 @@ __all__ = [
     "build_decision_context_architecture_packet",
     "build_decision_evidence_packet",
     "build_decision_outcome_receipt",
+    "build_decision_outcome_feedback",
     "build_decision_proposal",
     "build_decision_source_item_refs",
     "build_decision_source_manifest",

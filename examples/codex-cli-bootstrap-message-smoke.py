@@ -74,6 +74,16 @@ def assert_message_contract(payload: dict[str, object]) -> None:
     assert any("host loop surface activated" in item for item in checklist), payload
     assert any("registry/quota identity alone" in item for item in checklist), payload
     assert any("no raw Codex transcripts" in item for item in checklist), payload
+    progress_refresh = str(payload["progress_refresh_command"])
+    quota_spend = str(payload["quota_spend_command"])
+    state_only_refresh = str(payload["refresh_command"])
+    assert "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>" in progress_refresh, payload
+    assert "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>" in progress_refresh, payload
+    assert "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>" in progress_refresh, payload
+    assert "--delivery-batch-scale multi_surface" not in progress_refresh, payload
+    assert "--delivery-outcome outcome_progress" not in progress_refresh, payload
+    assert "--agent-id codex-side-bypass" in progress_refresh, payload
+    assert "--progress-scope agent_lane" in progress_refresh, payload
     message = str(payload["message"])
     normalized = " ".join(message.split())
     assert message.startswith("Install and connect LoopX for this repo"), message
@@ -85,7 +95,11 @@ def assert_message_contract(payload: dict[str, object]) -> None:
     assert normalized.index("shared global registry for this goal") < normalized.index("loopx bootstrap"), message
     assert normalized.index("bootstrap/connect this project") < normalized.index("heartbeat-prompt --thin"), message
     assert normalized.index("quota should-run") < normalized.index("interaction_contract"), message
-    assert normalized.index("refresh-state") < normalized.index("quota spend-slot"), message
+    assert message.index(progress_refresh) < message.index(quota_spend), message
+    assert message.index(quota_spend) < message.rindex(state_only_refresh), message
+    assert "must not carry a delivery outcome" in normalized, message
+    assert "Do not append another accountable progress refresh after spend" in normalized, message
+    assert "Never default or upgrade them to `multi_surface` / `outcome_progress`" in message, message
     assert "do not run `loopx bootstrap` for the same `goal_id`" in normalized, message
     assert "Only run bootstrap when the probe clearly says the goal is absent" in normalized, message
     assert "registry/quota identity alone" in normalized, message
@@ -110,7 +124,13 @@ def assert_docs_surface_codex_cli_quickstart() -> None:
     getting_started = (REPO_ROOT / "docs/guides/getting-started.md").read_text(encoding="utf-8")
     product_contract = (REPO_ROOT / "docs/product/codex-cli-tui-loop.md").read_text(encoding="utf-8")
 
-    for text in (readme, getting_started, product_contract):
+    assert "Codex CLI" in readme, readme[:500]
+    assert "Visible `/goal <task_body>`; no hidden headless execution by default" in readme
+    assert "docs/product/codex-cli-packaged-install.md" in readme
+    assert "docs/product/loopx-turn-codex-cli-quickstart.md" in readme
+    assert "loopx codex-cli-bootstrap-message" in readme
+
+    for text in (getting_started, product_contract):
         assert "Codex CLI" in text and "TUI" in text, text[:500]
         assert "Connect this repo to LoopX" in text, text[:500]
         assert "Do not clone the" in text, text[:500]
@@ -119,32 +139,29 @@ def assert_docs_surface_codex_cli_quickstart() -> None:
     for text in (getting_started, product_contract):
         assert "loopx codex-cli-bootstrap-message --project . --goal-id <goal-id>" in text, text[:500]
 
-    normalized_readme = " ".join(readme.split())
     normalized_getting_started = " ".join(getting_started.split())
     normalized_product_contract = " ".join(product_contract.split())
     assert "<project repo URL or current repo>" not in readme, readme
     assert "<project repo URL or current repo>" not in getting_started, getting_started
     assert "<项目仓库链接或当前 repo>" not in readme, readme
     assert "<项目仓库链接或当前 repo>" not in getting_started, getting_started
-    assert "Connect the current project to LoopX." in readme, readme
     assert "Connect the current project to LoopX." in getting_started, getting_started
-    assert "Hidden `codex exec` is not the default bootstrap path" in normalized_readme, readme
-    assert "paste one setup message" in normalized_readme, readme
-    assert "install, connect, and status check" in normalized_readme, readme
-    assert "heartbeat automation to start at 3 minutes" in normalized_readme, readme
+    assert "do not use hidden headless execution" in normalized_getting_started
+    assert "one TUI setup message" in normalized_product_contract
+    assert "install or reuse LoopX" in normalized_getting_started
+    assert "starts at 3 minutes" in normalized_getting_started
     assert (
         "set the current Codex CLI goal to `/goal <thin task_body>`"
         in normalized_product_contract
         or "set the current Codex CLI goal to `/goal <thin task_body>`"
         in normalized_getting_started
     ), product_contract
-    assert "reuse it" in normalized_readme, readme
+    assert "reuse it" in normalized_getting_started, getting_started
     assert "loopx codex-cli-bootstrap-message --project . --goal-id <goal-id>" not in readme, readme
     assert (
-        "status, current user gate, top agent todo, and next safe action" in normalized_readme
-        or "report the goal id, current user gate, top agent todo, and next safe action"
+        "report the active state id, current user gate, top agent todo, and next safe action"
         in normalized_getting_started
-    ), readme
+    ), getting_started
     assert "first-run path should not require you to understand registry paths" in normalized_getting_started, getting_started
     assert "setup-first rewrite of the App onboarding experience" in normalized_getting_started, getting_started
     assert "Codex App gets a heartbeat automation body that starts at 3 minutes" in normalized_getting_started, getting_started

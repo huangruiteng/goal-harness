@@ -288,29 +288,40 @@ for the actor and promotion contract.
 非零状态退出。
 
 The regular live suite is
-`actual_default_model_behavior_portfolio_v0`: twelve one-arm scenarios, two
-attempts each, and at most 24 provider calls. Nine core scenarios check normal
+`actual_default_model_behavior_portfolio_v0`: fifteen one-arm scenarios, two
+attempts each, and at most 30 provider calls. Nine core scenarios check normal
 onboarding, agent identity and goal selection, selected todo, peer identity
 routing, same-agent continuation, final human gate, healthy continuation, and
 projection repair. Three composition scenarios check vision/monitor/peer replan
 precedence, non-blocking user notice plus ready-successor execution, and
-capability fallback into monitor-schedule repair. Each scenario has an
-independent deterministic source oracle; every repeat must pass and hard actor
-errors are not retried. The live turn actor consumes the default full
-`quota should-run` packet used by Codex App automation and returns runtime-facing
-decisions rather than echoing the testing-only nine-field semantic contract.
+capability fallback into monitor-schedule repair. Three compaction scenarios
+check the JSON budget and source-derived semantic parity, then repeat clean
+selected-work and blocking-gate contracts under over-budget omitted diagnostics.
+Four contrast groups require the clean/noisy cases to remain invariant while
+blocking gate versus non-blocking notice and selected work versus required
+vision replan remain distinguishable. Each
+scenario has an independent deterministic source oracle derived before CLI
+projection; every repeat must pass and hard actor errors are not retried. The
+live turn actor consumes the default CLI hot-path
+`quota should-run` projection used by Codex App automation and returns
+runtime-facing decisions rather than echoing the testing-only nine-field
+semantic contract.
 Exact scheduler, vision, writeback, and warning fields stay in deterministic
 action-signature coverage; pair mode keeps TurnEnvelope semantic extraction for
 explicit packet differentials or outcome claims.
 
-常规 live suite 是 `actual_default_model_behavior_portfolio_v0`：12 个 one-arm
-场景，每个重复 2 次，最多 24 次模型调用。9 个核心场景覆盖正常接入、agent 身份与
+常规 live suite 是 `actual_default_model_behavior_portfolio_v0`：15 个 one-arm
+场景，每个重复 2 次，最多 30 次模型调用。9 个核心场景覆盖正常接入、agent 身份与
 goal 选择、selected todo、peer 身份路由、same-agent 续接、最终 human gate、健康继续
 和 projection repair；3 个组合场景覆盖 vision/monitor/peer replan 优先级、非阻塞
 user notice 与 ready successor 并存，以及 capability fallback 转入 monitor schedule
-修复。每个场景都有独立的确定性 source oracle，所有重复都必须通过；actor 硬错误不
-自动重试。live turn actor 直接读取 Codex App automation 使用的默认完整
-`quota should-run` packet 并返回运行时决策，不再回显测试专用的九字段 semantic
+修复；3 个 compaction 场景覆盖 JSON 预算与 source-derived 语义一致，并分别让正常
+selected work 和阻塞 gate 在超预算省略诊断下重复运行。4 个 contrast group 要求
+clean/noisy 场景保持不变，同时要求 blocking gate 与 non-blocking notice、selected
+work 与 required vision replan 仍然可区分。每个
+场景都有在 CLI projection 前推导的独立确定性 source oracle，所有重复都必须通过；
+actor 硬错误不自动重试。live turn actor 直接读取 Codex App automation 使用的默认 CLI hot-path
+`quota should-run` projection 并返回运行时决策，不再回显测试专用的九字段 semantic
 contract。scheduler、vision、writeback 与 warning 的精确字段继续由 action-signature
 确定性覆盖；pair 中的 TurnEnvelope 只用于明确的 packet 差分或结果提升声明。
 
@@ -360,7 +371,7 @@ results from an earlier commit cannot qualify a later tag.
 | `full_public` | Fleet receipt is ready with no failure or timeout / 全量集群 ready 且无失败或超时 |
 | `install_upgrade_host` | Install, upgrade, and host routes all passed / 安装、升级与 host 路径均通过 |
 | `public_boundary` | Zero public/private violations / 零公开私有边界违规 |
-| `doubao_actual_default` | The 12-scenario, 2-repeat actual-default one-arm portfolio passed all 24 calls / 12 场景、2 次重复的实际默认 one-arm 共 24 次调用全部通过 |
+| `doubao_actual_default` | The 15-scenario, 4-contrast, 2-repeat actual-default portfolio passed all 30 calls / 15 场景、4 组对照、2 次重复的实际默认 portfolio 共 30 次调用全部通过 |
 
 Alongside repeated source identity and status, each receipt keeps only its
 result schema, result digest, completion time, and bounded counters. Result

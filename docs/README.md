@@ -44,6 +44,9 @@ incident report, or launch draft.
 - [Architecture](architecture.md): core concepts and control-plane shape.
 - [Extensions and capabilities](reference/extensions.md): declarative manifests,
   doctor-verified subprocess activation, and reversible provider lifecycle.
+- [Project skill delivery](reference/project-skill-delivery.md): managed,
+  project-local discovery for release-owned agent skills without domain
+  authority expansion.
 - [Integration guide](integration.md): how to connect a project to LoopX,
   including public-safe Lark or Feishu reply card payloads.
 - [Showcases](showcases/README.md): public-safe cases, reproducible demos, and
@@ -95,6 +98,7 @@ incident report, or launch draft.
 - [State interaction model](state-interaction-model.md)
 - [Interaction pattern catalog](interaction-pattern-catalog.md)
 - [Extensions and capabilities](reference/extensions.md)
+- [Project skill delivery](reference/project-skill-delivery.md)
 - [Field-derived patterns](field-derived-patterns.md)
 - [Public/private boundary](public-private-boundary.md)
 

@@ -8,7 +8,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CONTROL_PLANE_EXAMPLES = ROOT / "examples" / "control_plane"
 for path in (ROOT, CONTROL_PLANE_EXAMPLES):
@@ -134,11 +133,11 @@ def main() -> int:
             "--repo",
             "public-fixture/widgets",
             "--period-start",
-            "2026-07-01T00:00:00Z",
+            "2000-01-01T00:00:00Z",
             "--period-end",
-            "2026-08-01T00:00:00Z",
+            "2100-01-01T00:00:00Z",
             "--generated-at",
-            "2026-08-01T00:01:00Z",
+            "2100-01-01T00:01:00Z",
         )
         partial = run_cli(registry_path, *common_args)
         assert partial["supplement"]["coverage"]["capability_gap"] == {
@@ -152,7 +151,7 @@ def main() -> int:
             registry_path,
             *common_args,
             "--capability-gap-coverage-start",
-            "2026-07-01T00:00:00Z",
+            "2000-01-01T00:00:00Z",
         )
         counts = complete["supplement"]["counts"]
         assert counts["loopx_capability_gaps_found"] == 1, complete
@@ -162,7 +161,7 @@ def main() -> int:
             "source": "loopx_rollout_event_log",
             "observed_gaps": 1,
             "complete": True,
-            "complete_from": "2026-07-01T00:00:00Z",
+            "complete_from": "2000-01-01T00:00:00Z",
         }, complete
         assert complete["source_summary"]["rollout_event_rows"] >= 4, complete
 

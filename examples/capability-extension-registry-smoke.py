@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,8 +57,11 @@ next_real_step = "Keep explicit enablement bounded."
 
     baseline = run_cli(runtime_root, "capability", "list")
     assert [item["id"] for item in baseline["capabilities"]] == [
+        "integration-branch-reconcile",
+        "change-quality-qualification",
         "issue-fix",
         "decision-context",
+        "project-skill-delivery",
         "material-lifecycle",
         "semantic-preference",
         "reward-memory",

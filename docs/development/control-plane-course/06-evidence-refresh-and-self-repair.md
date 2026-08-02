@@ -5,6 +5,9 @@
 
 建议时长：100 分钟。讲解 55 分钟、失败回放 25 分钟、实验 20 分钟。
 
+如果尚未建立 Turn、material delta、replan 与 self-repair 的整体关系，先读一小时专题
+[长程任务如何收敛](topic-long-horizon-convergence.md)，再用本讲深入 writeback 和恢复细节。
+
 ## 学习目标
 
 完成本讲后，开发者应该能够：

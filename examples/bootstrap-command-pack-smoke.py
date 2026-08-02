@@ -231,6 +231,8 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         assert "--url <github-pr-url>" in pr_lifecycle_template
         assert "--goal-id" in pr_lifecycle_template
         assert str(payload["goal_id"]) in pr_lifecycle_template
+        assert "--claimed-by codex-test-agent" in pr_lifecycle_template
+        assert "--execute-transition" in pr_lifecycle_template
         assert "issue_fix_reviewer_request_template" in commands
         reviewer_request_template = str(commands["issue_fix_reviewer_request_template"])
         assert "issue-fix reviewer-request" in reviewer_request_template
@@ -243,11 +245,16 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         assert "--progress-scope agent_lane" in refresh_command
         assert "--health-check" not in refresh_command
         assert "Same-priority items use that write order as the tie-breaker" in str(payload["message"])
-        assert "preview the issue-fix route before todo writeback" in str(payload["message"])
+        assert "preview the issue-fix route:" in str(payload["message"])
+        assert "preview the issue-fix route before todo writeback" not in str(
+            payload["message"]
+        )
         assert "PR lifecycle monitor" in str(payload["message"])
         assert "default top requestable non-author reviewer" in str(payload["message"])
         domain_routes = goal_start["domain_route_hints"]
-        assert domain_routes["issue_fix_workflow"]["when"].startswith("goal text contains")
+        assert domain_routes["issue_fix_workflow"]["when"].startswith(
+            "goal text explicitly asks"
+        )
         assert "workflow-plan" in domain_routes["issue_fix_workflow"]["preview_command"]
         assert "feasibility" in domain_routes["issue_fix_workflow"]["decision_command"]
         assert "reviewer-request" in domain_routes["issue_fix_workflow"][
@@ -422,6 +429,11 @@ def test_start_goal_guided_requires_explicit_goal_for_multi_goal_project() -> No
             ], choice
         commands = payload["command_pack"]["commands"]
         assert set(commands) == {"doctor", "status", "goal_selection_choices"}, commands
+        assert payload["command_pack"]["host_loop_activation"] == {
+            "activation_state": "goal_selection_required",
+            "activation_allowed": False,
+            "activation_required_after_todo_write": False,
+        }, payload
         assert payload["safety_contract"]["writes_registry"] is False, payload
         assert payload["safety_contract"]["creates_heartbeat"] is False, payload
         assert_packet_summary_refs(
@@ -624,7 +636,10 @@ def test_skill_slash_fallback_contract() -> None:
     assert "loopx bootstrap-command-pack --project ." in skill_text
     assert "loopx start-goal --guided --project ." in skill_text
     assert "canonical_project_alias" in skill_text
-    assert "worktree-local shadow goal" in skill_text
+    assert (
+        "`start-goal --project` keeps the requested project route" in skill_text
+    )
+    assert "Lower-level diagnostic command packs" in normalized
     assert '--goal-text "<GOAL_TEXT>"' in skill_text
     assert "bare `/loopx` read-only command" in skill_text
     assert "explicit goal-start intent" in normalized

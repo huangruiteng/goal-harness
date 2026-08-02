@@ -7,6 +7,9 @@
 建议时长：130 分钟。扩展地图 30 分钟、Explore 30 分钟、Single-Agent Auto ML 25 分钟、
 Multi-agent/Auto Research 30 分钟、实验 15 分钟。
 
+一小时专题[长程任务如何收敛](topic-long-horizon-convergence.md)从“如何退出局部循环”解释
+Graph、Harness 与 Kernel 的关系；本讲继续展开它们的扩展边界和产品组合方式。
+
 ## 学习目标
 
 完成本讲后，开发者应该能够：

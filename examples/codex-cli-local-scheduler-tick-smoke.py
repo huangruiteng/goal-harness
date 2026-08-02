@@ -129,7 +129,7 @@ QUOTA_HINT_FIXTURE = {
             },
             "after_limits": {
                 "local_scheduler": "stop_tick_loop",
-                "codex_cli_tui": "exit_goal_loop",
+                "codex_cli_tui": "update_goal_blocked_keep_loopx_active",
                 "claude_code_loop": "stop_loop",
             },
             "final_quota_replan_check_enabled": True,

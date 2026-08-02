@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -42,15 +43,13 @@ from .control_plane.work_items.primary_action import (
 )
 from .control_plane.goals.goal_frontier import (
     AUTONOMOUS_REPLAN_REQUIRED_MODE,
-    autonomous_replan_decision_allowed,
     build_goal_frontier_projection_context_from_status,
-    goal_frontier_is_terminal_no_followup,
 )
 from .control_plane.quota.heartbeat_recommendation import (
     HEARTBEAT_HANDOFF_READINESS_COMPACT_FIELDS as HANDOFF_READINESS_COMPACT_FIELDS,
     HEARTBEAT_POST_HANDOFF_RUN_COMPACT_FIELDS as POST_HANDOFF_RUN_COMPACT_FIELDS,
     build_heartbeat_recommendation,
-    open_todo_notify_reason,
+    refine_heartbeat_recommendation,
 )
 from .control_plane.quota.projection_repair import (
     build_boundary_projection_repair_hint,
@@ -68,6 +67,8 @@ from .control_plane.quota.stall_repair import (
 from .control_plane.quota.decision_summary import (
     goal_status_health_ok as _goal_status_health_ok,
     quota_decision_agent_id,
+    refine_quota_recommended_action,
+    resolve_quota_run_decision,
 )
 from .control_plane.quota.goal_boundary import effective_available_capabilities as _effective_available_capabilities, goal_boundary as _goal_boundary, quota_execution_profile_summary as _quota_execution_profile_summary
 from .control_plane.quota.monitor_poll import (
@@ -98,8 +99,6 @@ from .control_plane.quota.task_orchestration import (
     build_quota_work_lane_contract,
     payload_work_lane_contract as _payload_work_lane_contract,
     task_goal_route_hint,
-    task_orchestration_effective_action,
-    task_selected_recommended_action,
 )
 from .control_plane.quota.slot_accounting import (
     QUOTA_SLOT_SPENT_CLASSIFICATION,
@@ -142,7 +141,6 @@ from .control_plane.scheduler.state import (
     load_scheduler_state,
 )
 from .state_projection import (
-    actions_are_projection_aligned,
     next_action_projection_warning,
     state_action_projection_warning as build_state_action_projection_warning,
 )
@@ -176,11 +174,10 @@ from .control_plane.todos.quota_summary import (
     select_quota_todo_summary,
 )
 from .control_plane.todos.user_gate import (
+    apply_scoped_user_gate_fallback_projection as _apply_scoped_user_gate_fallback_projection,
     build_gate_prompt as _build_gate_prompt,
-    has_open_user_gate_todo as _has_open_user_gate_todo,
+    build_user_todo_notification as _build_user_todo_notification,
     open_todo_count as _open_todo_count,
-    should_notify_user_on_open_todo as _should_notify_user_on_open_todo,
-    user_gate_todo_notify_reason as _user_gate_todo_notify_reason,
 )
 from .control_plane.todos.write_hint import build_todo_write_hint
 
@@ -628,38 +625,6 @@ def _blocked_priority_fallback(
     }
 
 
-def _selected_action_with_capability_gate(
-    selected_action: Any,
-    *,
-    capability_gate: dict[str, Any] | None,
-) -> Any:
-    if not isinstance(capability_gate, dict) or capability_gate.get("action") != "run":
-        return selected_action
-    blocked = (
-        capability_gate.get("blocked_candidates")
-        if isinstance(capability_gate.get("blocked_candidates"), list)
-        else []
-    )
-    if not any(
-        isinstance(item, dict)
-        and actions_are_projection_aligned(selected_action, item.get("text"))
-        for item in blocked
-    ):
-        return selected_action
-    runnable = (
-        capability_gate.get("runnable_candidates")
-        if isinstance(capability_gate.get("runnable_candidates"), list)
-        else []
-    )
-    for item in runnable:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text") or "").strip()
-        if text:
-            return text
-    return selected_action
-
-
 def _compact_handoff_readiness(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -869,6 +834,56 @@ def _execution_obligation(
     )
 
 
+def _quota_plan_goal_quota(
+    *,
+    attention: dict[str, Any],
+    project_asset: dict[str, Any],
+    goal: dict[str, Any],
+    waiting_on: str,
+    lifecycle_phase: Any,
+    lifecycle_flags: Any,
+    status: Any,
+) -> dict[str, Any]:
+    project_asset_quota = (
+        project_asset.get("quota")
+        if isinstance(project_asset.get("quota"), dict)
+        else {}
+    )
+    raw_quota = (
+        attention.get("quota")
+        if isinstance(attention.get("quota"), dict)
+        else goal.get("quota")
+    )
+    if project_asset_quota:
+        raw_quota_base = raw_quota if isinstance(raw_quota, dict) else {}
+        quota = {**raw_quota_base, **project_asset_quota}
+    elif isinstance(raw_quota, dict):
+        quota = _quota_with_focus_wait_override(
+            raw_quota,
+            waiting_on=waiting_on,
+            lifecycle_phase=lifecycle_phase,
+            lifecycle_flags=lifecycle_flags,
+            status=status,
+        )
+    else:
+        quota = quota_status(
+            goal,
+            waiting_on=waiting_on,
+            severity=str(attention.get("severity") or ""),
+            lifecycle_phase=lifecycle_phase,
+            lifecycle_flags=lifecycle_flags,
+            status=status,
+        )
+    return quota_with_handoff_outcome_floor(
+        quota,
+        waiting_on=waiting_on,
+        project_asset=project_asset,
+        handoff_readiness=attention.get("handoff_readiness")
+        if isinstance(attention.get("handoff_readiness"), dict)
+        else None,
+    )
+
+
 def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") -> dict[str, Any]:
     queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
     queue_items = queue.get("items") if isinstance(queue.get("items"), list) else []
@@ -910,11 +925,6 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             if isinstance(attention.get("project_asset"), dict)
             else {}
         )
-        project_asset_quota = (
-            project_asset.get("quota")
-            if isinstance(project_asset.get("quota"), dict)
-            else {}
-        )
         latest = _latest_run(goal)
         waiting_on = attention.get("waiting_on") or "none"
         lifecycle_phase = attention.get("lifecycle_phase") or goal.get("lifecycle_phase")
@@ -925,35 +935,14 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             or compact_control_plane_policy(project_asset.get("control_plane"))
             or compact_control_plane_policy(goal.get("control_plane"))
         )
-        raw_quota = attention.get("quota") if isinstance(attention.get("quota"), dict) else goal.get("quota")
-        if project_asset_quota:
-            raw_quota_base = raw_quota if isinstance(raw_quota, dict) else {}
-            quota = {**raw_quota_base, **project_asset_quota}
-        elif isinstance(raw_quota, dict):
-            quota = raw_quota
-            quota = _quota_with_focus_wait_override(
-                quota,
-                waiting_on=str(waiting_on or ""),
-                lifecycle_phase=lifecycle_phase,
-                lifecycle_flags=lifecycle_flags,
-                status=status,
-            )
-        else:
-            quota = quota_status(
-                goal,
-                waiting_on=str(waiting_on or ""),
-                severity=str(attention.get("severity") or ""),
-                lifecycle_phase=lifecycle_phase,
-                lifecycle_flags=lifecycle_flags,
-                status=status,
-            )
-        quota = quota_with_handoff_outcome_floor(
-            quota,
-            waiting_on=str(waiting_on or ""),
+        quota = _quota_plan_goal_quota(
+            attention=attention,
             project_asset=project_asset,
-            handoff_readiness=attention.get("handoff_readiness")
-            if isinstance(attention.get("handoff_readiness"), dict)
-            else None,
+            goal=goal,
+            waiting_on=str(waiting_on or ""),
+            lifecycle_phase=lifecycle_phase,
+            lifecycle_flags=lifecycle_flags,
+            status=status,
         )
         state = str(quota.get("state") or "waiting")
         item: dict[str, Any] = {
@@ -1015,6 +1004,12 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             "active_state_next_action",
             "active_state_next_action_entries",
             "standing_decision_authority",
+            "long_task_cadence_hint",
+            "stale_latest_run_warning",
+            "backlog_hygiene_warning",
+            "completed_todo_archive_warning",
+            "dreaming_proposal",
+            "dreaming_lane_badge",
         ):
             if optional_field in attention:
                 if optional_field == "handoff_readiness":
@@ -1163,45 +1158,6 @@ def _recovery_delivery_allowed(quota: dict[str, Any], *, plan_ok: bool) -> bool:
         and quota.get("safe_bypass_allowed") is True
         and str(quota.get("safe_bypass_kind") or "") == "outcome_floor_recovery"
     )
-
-
-def _effective_action(
-    *,
-    normal_delivery_allowed: bool,
-    recovery_delivery_allowed: bool,
-    self_repair_allowed: bool,
-    capability_repair_allowed: bool = False,
-    workspace_repair_allowed: bool = False,
-    stall_self_repair: dict[str, Any] | None,
-    state: str,
-    quota: dict[str, Any],
-) -> str:
-    if normal_delivery_allowed:
-        return "normal_run"
-    if recovery_delivery_allowed:
-        return "outcome_floor_recovery"
-    if workspace_repair_allowed:
-        return "agent_workspace_repair"
-    if self_repair_allowed:
-        repair_action = (
-            stall_self_repair.get("effective_action")
-            if isinstance(stall_self_repair, dict)
-            else None
-        )
-        return str(repair_action or "control_plane_repair")
-    if capability_repair_allowed:
-        return "capability_bridge_repair"
-    if state == "operator_gate":
-        return "operator_gate_notify"
-    if state == "blocked_health":
-        return "blocked_health"
-    if state == "throttled":
-        return "throttled_skip"
-    if state in {"focus_wait", "waiting"}:
-        return "blocked_wait"
-    if quota.get("focus_wait"):
-        return "blocked_wait"
-    return "quota_skip"
 
 
 def _quota_agent_profile(agent_identity: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1430,588 +1386,663 @@ def _build_quota_plan_for_goal(
     )
 
 
-def build_quota_should_run(
-    status_payload: dict[str, Any],
+def _attach_truthy_fields(payload: dict[str, Any], **fields: Any) -> None:
+    payload.update({key: value for key, value in fields.items() if value})
+
+
+def _dict_field(payload: dict[str, Any], key: str) -> dict[str, Any] | None:
+    return payload.get(key) if isinstance(payload.get(key), dict) else None
+
+
+def _attach_quota_supporting_projections(
+    payload: dict[str, Any],
     *,
+    status_payload: dict[str, Any],
+    item: dict[str, Any],
+    project_asset: dict[str, Any],
     goal_id: str,
-    agent_id: str | None = None,
-    available_capabilities: Any = None,
-    include_scheduler_detail: bool = False, codex_app_current_rrule: Any = None,
-    scheduler_execution_context: Mapping[str, Any] | SchedulerExecutionContextResolution | None = None, operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    safe_goal_id = str(goal_id or "").strip()
-    resolved_scheduler_context = resolve_scheduler_execution_context(
-        scheduler_execution_context
-    )
-    registry_goal = _registry_goal_by_id(status_payload).get(safe_goal_id) or {}
-    plan, goal_health_ok = _build_quota_plan_for_goal(
-        status_payload,
-        goal_id=safe_goal_id,
-    )
-    item = next((candidate for candidate in _quota_plan_items(plan) if candidate.get("goal_id") == safe_goal_id), None)
-    health_items = plan.get("health_items") if isinstance(plan.get("health_items"), list) else []
-    health_item = next(
-        (
-            candidate
-            for candidate in health_items
-            if isinstance(candidate, dict) and candidate.get("goal_id") == safe_goal_id
+    selected_recommended_action: Any,
+    state: str,
+    user_todo_summary: dict[str, Any] | None,
+    should_run: bool,
+    state_action_projection_warning: dict[str, Any] | None,
+    next_action_warning: dict[str, Any] | None,
+    replan_obligation: dict[str, Any] | None,
+) -> None:
+    _attach_truthy_fields(
+        payload,
+        stale_latest_run_warning=_dict_field(item, "stale_latest_run_warning"),
+        state_action_projection_warning=state_action_projection_warning,
+        next_action_projection_warning=next_action_warning,
+        backlog_hygiene_warning=_dict_field(item, "backlog_hygiene_warning"),
+        completed_todo_archive_warning=_dict_field(item, "completed_todo_archive_warning"),
+        autonomous_replan_obligation=replan_obligation,
+        dreaming_proposal=_dict_field(item, "dreaming_proposal"),
+        dreaming_lane_badge=_dict_field(item, "dreaming_lane_badge"),
+        interface_budget_cadence=_dict_field(project_asset, "interface_budget_cadence"),
+        decision_freshness_warning=_decision_freshness_warning(status_payload, goal_id=goal_id),
+        promotion_readiness_warning=_promotion_readiness_warning(status_payload),
+        reward_lesson_projection_warning=_reward_lesson_projection_warning(
+            status_payload,
+            goal_id=goal_id,
+            recommended_action=selected_recommended_action,
         ),
-        None,
+    )
+    if state == "operator_gate" and (
+        gate_prompt := _build_gate_prompt(item, user_todo_summary=user_todo_summary)
+    ):
+        payload["gate_prompt"] = gate_prompt
+        payload["notify_user_on_gate"] = True
+    _attach_truthy_fields(
+        payload, next_handoff_condition=item.get("next_handoff_condition"),
+        agent_command=item.get("agent_command") if should_run else None,
     )
 
-    if item:
-        quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
-        state = str(quota.get("state") or "unknown")
+
+@dataclass(slots=True)
+class _QuotaDecisionPreparation:
+    status_payload: dict[str, Any]
+    safe_goal_id: str
+    requested_agent_id: str | None
+    plan: dict[str, Any]
+    goal_health_ok: bool
+    item: dict[str, Any]
+    quota: dict[str, Any]
+    state: str
+    normal_delivery_allowed: bool
+    recovery_allowed: bool
+    reason: str
+    agent_identity: dict[str, Any] | None
+    project_asset: dict[str, Any]
+    agent_lane_recommendation: Any
+    effective_available_capabilities: Any
+    user_todo_summary: dict[str, Any] | None
+    agent_todo_summary: dict[str, Any] | None
+    agent_scoped_user_todo_override: dict[str, Any] | None
+    goal_boundary: dict[str, Any] | None
+    automation_prompt_upgrade: dict[str, Any] | None
+    automation_prompt_upgrade_required: bool
+    blocked_priority_fallback: dict[str, Any] | None
+    stall_self_repair: dict[str, Any] | None
+    self_repair_allowed: bool
+    monitor_debt_arbitration: dict[str, Any]
+    agent_monitor_only: bool
+    work_lane_contract: dict[str, Any] | None
+    task_orchestration_contract: dict[str, Any] | None
+    capability_gate: dict[str, Any] | None
+    capability_monitor_fallback: dict[str, Any] | None
+    scoped_user_gate_fallback: dict[str, Any] | None
+    inbox_reply_due: bool
+    workspace_guard: dict[str, Any] | None
+    agent_frontier_id: str | None
+    registered_agent_ids: list[str]
+    replan_obligation: dict[str, Any] | None
+    replan_scope: dict[str, Any]
+    goal_frontier_projection: dict[str, Any]
+    projection_gap: dict[str, Any] | None
+    boundary_projection_repair: dict[str, Any] | None
+    include_scheduler_detail: bool
+    codex_app_current_rrule: Any
+    resolved_scheduler_context: SchedulerExecutionContextResolution
+
+
+@dataclass(slots=True)
+class _QuotaDecisionRoute:
+    normal_delivery_allowed: bool
+    recovery_allowed: bool
+    self_repair_allowed: bool
+    capability_repair_allowed: bool
+    workspace_repair_allowed: bool
+    should_run: bool
+    effective_action: str
+    reason: str
+    state: str
+    quota: dict[str, Any]
+    replan_decision_allowed: bool
+    heartbeat_recommendation: dict[str, Any]
+    external_evidence_observation: dict[str, Any] | None
+    external_evidence_observation_recent: dict[str, Any] | None
+    selected_recommended_action: Any
+    agent_lane_next_action: dict[str, Any] | None
+    agent_scope_frontier: dict[str, Any] | None
+    agent_lane_frontier_hint: dict[str, Any] | None
+    state_action_projection_warning: dict[str, Any] | None
+    active_state_next_action_text: str
+    latest_run_recommended_action_text: str
+    next_action_warning: dict[str, Any] | None
+    goal_route_hint: dict[str, Any] | None
+    payload_work_lane_contract: dict[str, Any] | None
+
+
+def _prepare_quota_should_run_item(
+    status_payload: dict[str, Any],
+    *,
+    safe_goal_id: str,
+    requested_agent_id: str | None,
+    available_capabilities: Any,
+    include_scheduler_detail: bool,
+    codex_app_current_rrule: Any,
+    resolved_scheduler_context: SchedulerExecutionContextResolution,
+    operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None,
+    registry_goal: dict[str, Any],
+    plan: dict[str, Any],
+    goal_health_ok: bool,
+    item: dict[str, Any],
+    health_items: list[Any],
+) -> _QuotaDecisionPreparation:
+    quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+    state = str(quota.get("state") or "unknown")
+    normal_delivery_allowed = goal_health_ok and state == "eligible"
+    recovery_allowed = _recovery_delivery_allowed(quota, plan_ok=goal_health_ok)
+    reason = str(quota.get("reason") or "quota state is not eligible")
+    if not goal_health_ok:
+        reason = "status or contract health is not ok; skip automatic compute"
+    agent_identity = build_quota_agent_identity(item, agent_id=requested_agent_id)
+    item, project_asset, agent_lane_recommendation = _scope_status_item_to_agent_lane(
+        item=item,
+        latest_runs=_goal_latest_runs(status_payload, goal_id=safe_goal_id),
+        agent_id=requested_agent_id,
+        public_safe_compact_text=_protocol_action_text,
+    )
+    effective_available_capabilities = _effective_available_capabilities(
+        available_capabilities,
+        item=item,
+        project_asset=project_asset,
+    )
+    user_todo_summary = select_quota_todo_summary(
+        item.get("user_todos"),
+        project_asset.get("user_todos") if project_asset else None,
+        agent_identity=agent_identity,
+        filter_user_gate_blocks_agent=True,
+        available_capabilities=effective_available_capabilities,
+    )
+    agent_todo_summary = select_quota_todo_summary(
+        item.get("agent_todos"),
+        project_asset.get("agent_todos") if project_asset else None,
+        agent_identity=agent_identity,
+        available_capabilities=effective_available_capabilities,
+    )
+    user_todo_source_items = select_quota_todo_source_items(
+        item.get("user_todos"),
+        project_asset.get("user_todos") if project_asset else None,
+    )
+    agent_todo_source_items = select_quota_todo_source_items(
+        item.get("agent_todos"),
+        project_asset.get("agent_todos") if project_asset else None,
+    )
+    agent_scoped_user_todo_override = _agent_scoped_user_todo_override(
+        state=state,
+        item=item,
+        user_todo_summary=user_todo_summary,
+        agent_todo_summary=agent_todo_summary,
+        agent_identity=agent_identity,
+    )
+    if agent_scoped_user_todo_override:
+        state = str(agent_scoped_user_todo_override["to_state"])
+        reason = str(agent_scoped_user_todo_override["reason"])
+        quota = {
+            **quota,
+            **agent_scoped_user_todo_override.pop("quota_patch", {}),
+            "state": state,
+            str(agent_scoped_user_todo_override["kind"]): agent_scoped_user_todo_override,
+            "reason": reason,
+        }
+        item = {**item, **agent_scoped_user_todo_override.pop("item_patch", {})}
         normal_delivery_allowed = goal_health_ok and state == "eligible"
         recovery_allowed = _recovery_delivery_allowed(quota, plan_ok=goal_health_ok)
-        reason = str(quota.get("reason") or "quota state is not eligible")
-        if not goal_health_ok:
-            reason = "status or contract health is not ok; skip automatic compute"
-        agent_identity = build_quota_agent_identity(item, agent_id=agent_id)
-        item, project_asset, agent_lane_recommendation = (
-            _scope_status_item_to_agent_lane(
-                item=item,
-                latest_runs=_goal_latest_runs(status_payload, goal_id=safe_goal_id),
-                agent_id=agent_id,
-                public_safe_compact_text=_protocol_action_text,
-            )
-        )
-        effective_available_capabilities = _effective_available_capabilities(
-            available_capabilities,
-            item=item,
+    if recovery_allowed and _outcome_floor_blocker_already_projected(agent_todo_summary):
+        quota = {
+            **quota,
+            "safe_bypass_allowed": False,
+            "safe_bypass_kind": None,
+            "outcome_floor_blocker_projected": True,
+            "reason": (
+                "handoff outcome floor blocker already projected: no executable "
+                "agent todo exists; wait for fresh ranker/cross-domain evidence "
+                "or a new manifest before spending recovery compute"
+            ),
+        }
+        recovery_allowed = False
+        reason = str(quota["reason"])
+    boundary_agent_id = normalize_todo_claimed_by((agent_identity or {}).get("agent_id"))
+    reward_memory_experiment_status = _resolve_reward_memory_experiment_from_status(
+        status_payload,
+        goal_id=safe_goal_id,
+        agent_id=boundary_agent_id,
+    )
+    boundary_registry_value = str(status_payload.get("registry") or "").strip()
+    goal_boundary = _goal_boundary(
+        registry_goal or item,
+        item=item,
+        agent_id=boundary_agent_id,
+        registry_path=Path(boundary_registry_value) if boundary_registry_value else None,
+        operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+        reward_memory_experiment_status=reward_memory_experiment_status,
+    )
+    workspace_guard = None
+    automation_prompt_upgrade = _automation_prompt_upgrade(
+        item,
+        goal_id=safe_goal_id,
+        agent_identity=agent_identity,
+    )
+    automation_prompt_upgrade_required = bool(
+        automation_prompt_upgrade
+        and automation_prompt_upgrade.get("blocks_should_run") is True
+    )
+    blocked_priority_fallback = _blocked_priority_fallback(agent_todo_summary)
+    stall_self_repair = build_quota_stall_self_repair_hint(
+        item,
+        state=state,
+        plan_ok=goal_health_ok,
+        health_items=health_items,
+        user_todo_summary=user_todo_summary,
+        agent_todo_summary=agent_todo_summary,
+        agent_id=boundary_agent_id,
+        user_todo_source_items=user_todo_source_items,
+        agent_todo_source_items=agent_todo_source_items,
+        standing_decision_authority=_standing_decision_authority_from_status_item(
+            item,
             project_asset=project_asset,
-        )
-        user_todo_summary = select_quota_todo_summary(
-            item.get("user_todos"),
-            project_asset.get("user_todos") if project_asset else None,
-            agent_identity=agent_identity,
-            filter_user_gate_blocks_agent=True,
-            available_capabilities=effective_available_capabilities,
-        )
-        agent_todo_summary = select_quota_todo_summary(
-            item.get("agent_todos"),
-            project_asset.get("agent_todos") if project_asset else None,
-            agent_identity=agent_identity,
-            available_capabilities=effective_available_capabilities,
-        )
-        user_todo_source_items = select_quota_todo_source_items(
-            item.get("user_todos"),
-            project_asset.get("user_todos") if project_asset else None,
-        )
-        agent_todo_source_items = select_quota_todo_source_items(
-            item.get("agent_todos"),
-            project_asset.get("agent_todos") if project_asset else None,
-        )
-        agent_scoped_user_todo_override = _agent_scoped_user_todo_override(
-            state=state,
-            item=item,
-            user_todo_summary=user_todo_summary,
-            agent_todo_summary=agent_todo_summary,
-            agent_identity=agent_identity,
-        )
-        if agent_scoped_user_todo_override:
-            state = str(agent_scoped_user_todo_override["to_state"])
-            reason = str(agent_scoped_user_todo_override["reason"])
-            quota = {
-                **quota,
-                **agent_scoped_user_todo_override.pop("quota_patch", {}),
-                "state": state,
-                str(agent_scoped_user_todo_override["kind"]): agent_scoped_user_todo_override,
-                "reason": reason,
-            }
-            item = {**item, **agent_scoped_user_todo_override.pop("item_patch", {})}
-            normal_delivery_allowed = goal_health_ok and state == "eligible"
-            recovery_allowed = _recovery_delivery_allowed(
-                quota,
-                plan_ok=goal_health_ok,
-            )
-        outcome_floor_blocker_projected = (
-            recovery_allowed
-            and _outcome_floor_blocker_already_projected(agent_todo_summary)
-        )
-        if outcome_floor_blocker_projected:
-            quota = {
-                **quota,
-                "safe_bypass_allowed": False,
-                "safe_bypass_kind": None,
-                "outcome_floor_blocker_projected": True,
-                "reason": (
-                    "handoff outcome floor blocker already projected: no executable "
-                    "agent todo exists; wait for fresh ranker/cross-domain evidence "
-                    "or a new manifest before spending recovery compute"
-                ),
-            }
-            recovery_allowed = False
-            reason = str(quota["reason"])
-        boundary_agent_id = normalize_todo_claimed_by(
-            (agent_identity or {}).get("agent_id")
-        )
-        reward_memory_experiment_status = _resolve_reward_memory_experiment_from_status(
-            status_payload,
-            goal_id=safe_goal_id,
             agent_id=boundary_agent_id,
-        )
-        boundary_registry_value = str(status_payload.get("registry") or "").strip()
-        goal_boundary = _goal_boundary(
-            registry_goal or item,
-            item=item,
-            agent_id=boundary_agent_id,
-            registry_path=(
-                Path(boundary_registry_value) if boundary_registry_value else None
-            ),
-            operator_inbox_urgency_projector=operator_inbox_urgency_projector, reward_memory_experiment_status=reward_memory_experiment_status,
-        )
-        workspace_guard = None
-        automation_prompt_upgrade = _automation_prompt_upgrade(
+        ),
+        available_capabilities=effective_available_capabilities,
+    )
+    self_repair_allowed = bool(stall_self_repair and stall_self_repair.get("allowed"))
+    normal_delivery_allowed, recovery_allowed, reason = apply_stall_repair_delivery_guard(
+        stall_self_repair,
+        normal_delivery_allowed=normal_delivery_allowed,
+        recovery_allowed=recovery_allowed,
+        reason=reason,
+    )
+    monitor_debt_arbitration = _build_monitor_debt_arbitration(
+        status_payload,
+        goal_id=safe_goal_id,
+        agent_id=boundary_agent_id,
+    )
+    agent_monitor_only, work_lane_contract, task_orchestration_contract = (
+        _build_agent_work_lane(
             item,
-            goal_id=safe_goal_id,
-            agent_identity=agent_identity,
-        )
-        automation_prompt_upgrade_required = bool(
-            automation_prompt_upgrade
-            and automation_prompt_upgrade.get("blocks_should_run") is True
-        )
-        blocked_priority_fallback = _blocked_priority_fallback(agent_todo_summary)
-        stall_self_repair = build_quota_stall_self_repair_hint(
-            item,
-            state=state,
-            plan_ok=goal_health_ok,
-            health_items=health_items,
-            user_todo_summary=user_todo_summary,
-            agent_todo_summary=agent_todo_summary,
-            agent_id=normalize_todo_claimed_by((agent_identity or {}).get("agent_id")),
-            user_todo_source_items=user_todo_source_items,
-            agent_todo_source_items=agent_todo_source_items,
-            standing_decision_authority=_standing_decision_authority_from_status_item(
-                item,
-                project_asset=project_asset,
-                agent_id=normalize_todo_claimed_by(
-                    (agent_identity or {}).get("agent_id")
-                ),
-            ),
-            available_capabilities=effective_available_capabilities,
-        )
-        self_repair_allowed = bool(stall_self_repair and stall_self_repair.get("allowed"))
-        normal_delivery_allowed, recovery_allowed, reason = apply_stall_repair_delivery_guard(
-            stall_self_repair,
-            normal_delivery_allowed=normal_delivery_allowed,
-            recovery_allowed=recovery_allowed,
-            reason=reason,
-        )
-        monitor_debt_arbitration = _build_monitor_debt_arbitration(
-            status_payload, goal_id=safe_goal_id, agent_id=boundary_agent_id
-        )
-        agent_monitor_only, work_lane_contract, task_orchestration_contract = (
-            _build_agent_work_lane(
-                item,
-                status_payload=status_payload,
-                project_asset=project_asset,
-                goal_id=safe_goal_id,
-                agent_id=boundary_agent_id,
-                goal_boundary=goal_boundary,
-                agent_identity=agent_identity,
-                agent_todo_summary=agent_todo_summary,
-                monitor_debt_arbitration=monitor_debt_arbitration,
-            )
-        )
-        capability_gate, capability_monitor_contract, capability_monitor_fallback = build_capability_gate_with_monitor_fallback(agent_todo_summary, available_capabilities=effective_available_capabilities, agent_identity=agent_identity, monitor_item_limit=MONITOR_DUE_ITEM_LIMIT)
-        if task_orchestration_contract:
-            capability_monitor_contract = capability_monitor_fallback = None
-        work_lane_contract = capability_monitor_contract or work_lane_contract
-        scoped_user_gate_fallback = _scoped_user_gate_fallback(
-            user_todo_summary, agent_todo_summary, capability_gate=capability_gate,
-            allow_unrelated_gate=bool(quota.get("safe_bypass_allowed")),
-            monitor_debt_backoff_active=bool(monitor_debt_arbitration.get("active")),
-        )
-        work_lane_contract = scoped_user_gate_due_monitor_contract(
-            scoped_user_gate_fallback, current_contract=work_lane_contract) or work_lane_contract
-        work_lane_contract = lark_inbox_reply_due_work_lane_contract(goal_boundary, current_contract=work_lane_contract)
-        inbox_reply_due = work_lane_contract_is_lark_inbox_reply_due(work_lane_contract)
-        work_lane_selected_todo = _selected_todo_projection(
-            agent_lane_next_action=None, work_lane_contract=work_lane_contract)
-        if inbox_reply_due:
-            task_orchestration_contract = capability_gate = capability_monitor_contract = None
-            capability_monitor_fallback = scoped_user_gate_fallback = workspace_guard = None
-        else:
-            workspace_guard = build_agent_workspace_guard(
-                item, agent_identity, agent_todo_summary=agent_todo_summary,
-                selected_todo=work_lane_selected_todo)
-        agent_frontier_id = (
-            normalize_todo_claimed_by(agent_identity.get("agent_id"))
-            if isinstance(agent_identity, dict)
-            else None
-        )
-        registered_agent_ids = (
-            list(agent_identity.get("registered_agents") or [])
-            if isinstance(agent_identity, dict)
-            else []
-        )
-        goal_frontier_context = build_goal_frontier_projection_context_from_status(
-            goal_id=safe_goal_id,
-            agent_id=agent_frontier_id,
             status_payload=status_payload,
-            item=item,
             project_asset=project_asset,
-            user_todo_summary=user_todo_summary,
-            agent_todo_summary=agent_todo_summary,
-            work_lane_contract=work_lane_contract,
-            neutral_replan_ack_classifications=AUTONOMOUS_REPLAN_ACK_NEUTRAL_CLASSIFICATIONS,
-            registered_agent_ids=registered_agent_ids,
-            goal_status=str(registry_goal.get("status") or ""),
-            agent_profile=_quota_agent_profile(agent_identity),
-        )
-        replan_obligation = goal_frontier_context.get("replan_obligation")
-        replan_scope = goal_frontier_context.get("replan_scope") or {}
-        goal_frontier_projection = (
-            goal_frontier_context.get("goal_frontier_projection")
-            if isinstance(goal_frontier_context.get("goal_frontier_projection"), dict)
-            else {}
-        )
-        capability_repair_allowed = False
-        workspace_repair_allowed = False
-        projection_gap = build_state_projection_gap(item, project_asset)
-        projection_gap_repair = build_state_projection_gap_repair_hint(
-            projection_gap,
-            candidate_should_run=bool(
-                normal_delivery_allowed or recovery_allowed or self_repair_allowed
-            ),
-            user_todo_summary=user_todo_summary,
-            agent_todo_summary=agent_todo_summary,
-            work_lane_contract=work_lane_contract,
-        )
-        if projection_gap_repair:
-            stall_self_repair = projection_gap_repair
-            self_repair_allowed = True
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            reason = str(projection_gap_repair.get("reason") or reason)
-        boundary_projection_repair = build_boundary_projection_repair_hint(
-            goal_boundary,
-            agent_todo_summary,
-            candidate_should_run=bool(
-                normal_delivery_allowed or recovery_allowed or self_repair_allowed
-            ),
-            capability_gate=capability_gate, selected_todo=work_lane_selected_todo,
-        )
-        if boundary_projection_repair:
-            stall_self_repair = boundary_projection_repair
-            self_repair_allowed = True
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            reason = str(boundary_projection_repair.get("reason") or reason)
-        if capability_gate and capability_gate.get("action") != "run" and not capability_monitor_fallback:
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            if capability_gate.get("action") == "repair_bridge":
-                capability_repair_allowed = True
-                reason = str(capability_gate.get("reason") or "capability bridge repair required")
-            else:
-                reason = str(capability_gate.get("reason") or "selected todo capability is unavailable")
-        if workspace_guard:
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            self_repair_allowed = False
-            capability_repair_allowed = False
-            workspace_repair_allowed = True
-            reason = str(workspace_guard.get("reason") or "agent workspace guard blocks delivery")
-        if automation_prompt_upgrade_required:
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            self_repair_allowed = False
-            capability_repair_allowed = False
-            workspace_repair_allowed = False
-            reason = str(
-                automation_prompt_upgrade.get("reason")
-                or "identity-aware automation prompt upgrade is required"
-            )
-        should_run = bool(normal_delivery_allowed or recovery_allowed or self_repair_allowed
-                          or capability_repair_allowed or workspace_repair_allowed)
-        effective_action = _effective_action(
-            normal_delivery_allowed=normal_delivery_allowed, recovery_delivery_allowed=recovery_allowed,
-            self_repair_allowed=self_repair_allowed, capability_repair_allowed=capability_repair_allowed,
-            workspace_repair_allowed=workspace_repair_allowed, stall_self_repair=stall_self_repair,
-            state=state, quota=quota,
-        )
-        replan_decision_allowed = not inbox_reply_due and autonomous_replan_decision_allowed(
-            replan_obligation=replan_obligation, plan_ok=goal_health_ok,
-            workspace_blocked=bool(workspace_guard),
-            automation_prompt_upgrade_required=automation_prompt_upgrade_required,
-            agent_id=agent_frontier_id, registered_agent_ids=registered_agent_ids,
-        )
-        if replan_decision_allowed:
-            normal_delivery_allowed = False
-            recovery_allowed = False
-            should_run = True
-            effective_action = AUTONOMOUS_REPLAN_REQUIRED_MODE
-            reason = (
-                "autonomous replan obligation is selected before monitor quiet "
-                "or agent-scope wait classification"
-            )
-        terminal_no_followup = goal_frontier_is_terminal_no_followup(projection=goal_frontier_projection)
-        if terminal_no_followup and not inbox_reply_due:
-            quota = {**quota, "state": "terminal_no_followup", "reason": (
-                "derived terminal no-follow-up is confirmed by complete todo sources and an empty frontier")}
-            state = "terminal_no_followup"
-            normal_delivery_allowed = recovery_allowed = self_repair_allowed = False
-            capability_repair_allowed = workspace_repair_allowed = should_run = False
-            effective_action = "terminal_no_followup"
-            reason = ("validated closure evidence derives terminal no-follow-up from complete todo sources "
-                      "and an empty frontier; stop recurring automation until an explicit resume")
-        if automation_prompt_upgrade_required and not terminal_no_followup:
-            should_run = False
-            effective_action = "automation_prompt_upgrade_required"
-        elif inbox_reply_due:
-            should_run, normal_delivery_allowed = True, True
-            recovery_allowed = self_repair_allowed = capability_repair_allowed = workspace_repair_allowed = False
-            effective_action, reason = "lark_inbox_reply_due", (
-                "a direct Lark question, bot mention, or verified reply to the bot "
-                "is pending reply"
-            )
-        effective_action, reason = task_orchestration_effective_action(
-            task_orchestration_contract,
-            should_run=should_run,
-            normal_delivery_allowed=normal_delivery_allowed,
-            effective_action=effective_action,
-            reason=reason,
-        )
-        recommendation_item = {**item, "quota": quota}
-        heartbeat_recommendation = build_heartbeat_recommendation(
-            recommendation_item,
             goal_id=safe_goal_id,
-            state=state,
-            should_run=should_run,
-            user_todo_summary=user_todo_summary,
+            agent_id=boundary_agent_id,
+            goal_boundary=goal_boundary,
+            agent_identity=agent_identity,
             agent_todo_summary=agent_todo_summary,
-            work_lane_contract=work_lane_contract,
-            stall_self_repair=stall_self_repair,
-            replan_obligation=replan_obligation,
-            select_replan_obligation=False,
-            monitor_due_item_limit=MONITOR_DUE_ITEM_LIMIT,
+            monitor_debt_arbitration=monitor_debt_arbitration,
         )
-        if capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "repair_bridge":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "repair_capability_bridge",
-                "notify": "DONT_NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "append exactly one quota spend only after a validated bridge "
-                    "repair, todo rewrite, or compact blocker writeback"
-                ),
-            }
-        elif capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "ask_owner":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "ask_owner_for_capability",
-                "notify": "NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": "do not append quota spend while asking for missing capability",
-            }
-        elif capability_gate and not capability_monitor_fallback and capability_gate.get("action") == "skip":
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "capability_skip",
-                "notify": "DONT_NOTIFY",
-                "reason": capability_gate.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": "do not append quota spend while all executable todos lack current capabilities",
-            }
-        if workspace_guard:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "repair_agent_workspace",
-                "notify": "DONT_NOTIFY",
-                "reason": workspace_guard.get("reason") or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "do not append quota spend for workspace relocation; rerun quota "
-                    "from the independent worktree before delivery"
-                ),
-            }
-        if automation_prompt_upgrade_required:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "automation_prompt_upgrade",
-                "notify": "DONT_NOTIFY",
-                "reason": automation_prompt_upgrade.get("reason")
-                or heartbeat_recommendation.get("reason"),
-                "spend_policy": (
-                    "do not append quota spend for stale/unscoped automation; "
-                    "rerun quota should-run from an identity-scoped prompt"
-                ),
-            }
-        if blocked_priority_fallback and should_run:
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "blocked_priority_fallback": blocked_priority_fallback,
-            }
-            if blocked_priority_fallback.get("notify_user") is True:
-                heartbeat_recommendation = {
-                    **heartbeat_recommendation,
-                    "notify": "NOTIFY",
-                    "reason": blocked_priority_fallback.get("reason")
-                    or heartbeat_recommendation.get("reason"),
-                }
-        external_evidence_observation = build_external_evidence_observation_obligation(
+    )
+    capability_gate, capability_monitor_contract, capability_monitor_fallback = (
+        build_capability_gate_with_monitor_fallback(
+            agent_todo_summary,
+            available_capabilities=effective_available_capabilities,
+            agent_identity=agent_identity,
+            monitor_item_limit=MONITOR_DUE_ITEM_LIMIT,
+        )
+    )
+    if task_orchestration_contract:
+        capability_monitor_contract = capability_monitor_fallback = None
+    work_lane_contract = capability_monitor_contract or work_lane_contract
+    scoped_user_gate_fallback = _scoped_user_gate_fallback(
+        user_todo_summary,
+        agent_todo_summary,
+        capability_gate=capability_gate,
+        allow_unrelated_gate=bool(quota.get("safe_bypass_allowed")),
+        monitor_debt_backoff_active=bool(monitor_debt_arbitration.get("active")),
+    )
+    work_lane_contract = (
+        scoped_user_gate_due_monitor_contract(
+            scoped_user_gate_fallback,
+            current_contract=work_lane_contract,
+        )
+        or work_lane_contract
+    )
+    work_lane_contract = lark_inbox_reply_due_work_lane_contract(
+        goal_boundary,
+        current_contract=work_lane_contract,
+    )
+    inbox_reply_due = work_lane_contract_is_lark_inbox_reply_due(work_lane_contract)
+    work_lane_selected_todo = _selected_todo_projection(
+        agent_lane_next_action=None,
+        work_lane_contract=work_lane_contract,
+    )
+    if inbox_reply_due:
+        task_orchestration_contract = capability_gate = capability_monitor_contract = None
+        capability_monitor_fallback = scoped_user_gate_fallback = workspace_guard = None
+    else:
+        workspace_guard = build_agent_workspace_guard(
             item,
-            state=state,
+            agent_identity,
             agent_todo_summary=agent_todo_summary,
-            work_lane_contract=work_lane_contract,
+            selected_todo=work_lane_selected_todo,
         )
-        external_evidence_observation_recent = None
-        if external_evidence_observation:
-            external_evidence_observation_recent = _recent_external_monitor_observation_unchanged(
-                status_payload,
-                goal_id=safe_goal_id,
-                agent_id=normalize_todo_claimed_by(agent_identity.get("agent_id"))
-                if isinstance(agent_identity, dict)
-                else None,
-            )
-            if external_evidence_observation_recent:
-                external_evidence_observation = None
-            elif external_evidence_observation.get("poll_window_status") == "before_next_due":
-                external_evidence_observation = None
-        ready_deferred_resume_candidates: list[dict[str, Any]] = []
-        if (
-            isinstance(agent_identity, dict)
-            and isinstance(agent_todo_summary, dict)
+    agent_frontier_id = (
+        normalize_todo_claimed_by(agent_identity.get("agent_id"))
+        if isinstance(agent_identity, dict)
+        else None
+    )
+    registered_agent_ids = (
+        list(agent_identity.get("registered_agents") or [])
+        if isinstance(agent_identity, dict)
+        else []
+    )
+    goal_frontier_context = build_goal_frontier_projection_context_from_status(
+        goal_id=safe_goal_id,
+        agent_id=agent_frontier_id,
+        status_payload=status_payload,
+        item=item,
+        project_asset=project_asset,
+        user_todo_summary=user_todo_summary,
+        agent_todo_summary=agent_todo_summary,
+        work_lane_contract=work_lane_contract,
+        neutral_replan_ack_classifications=AUTONOMOUS_REPLAN_ACK_NEUTRAL_CLASSIFICATIONS,
+        registered_agent_ids=registered_agent_ids,
+        goal_status=str(registry_goal.get("status") or ""),
+        agent_profile=_quota_agent_profile(agent_identity),
+    )
+    replan_obligation = goal_frontier_context.get("replan_obligation")
+    replan_scope = goal_frontier_context.get("replan_scope") or {}
+    goal_frontier_projection = (
+        goal_frontier_context.get("goal_frontier_projection")
+        if isinstance(goal_frontier_context.get("goal_frontier_projection"), dict)
+        else {}
+    )
+    projection_gap = build_state_projection_gap(item, project_asset)
+    projection_gap_repair = build_state_projection_gap_repair_hint(
+        projection_gap,
+        candidate_should_run=bool(
+            normal_delivery_allowed or recovery_allowed or self_repair_allowed
+        ),
+        user_todo_summary=user_todo_summary,
+        agent_todo_summary=agent_todo_summary,
+        work_lane_contract=work_lane_contract,
+    )
+    if projection_gap_repair:
+        stall_self_repair = projection_gap_repair
+        self_repair_allowed = True
+        normal_delivery_allowed = False
+        recovery_allowed = False
+        reason = str(projection_gap_repair.get("reason") or reason)
+    boundary_projection_repair = build_boundary_projection_repair_hint(
+        goal_boundary,
+        agent_todo_summary,
+        candidate_should_run=bool(
+            normal_delivery_allowed or recovery_allowed or self_repair_allowed
+        ),
+        capability_gate=capability_gate,
+        selected_todo=work_lane_selected_todo,
+    )
+    if boundary_projection_repair:
+        stall_self_repair = boundary_projection_repair
+        self_repair_allowed = True
+        normal_delivery_allowed = False
+        recovery_allowed = False
+        reason = str(boundary_projection_repair.get("reason") or reason)
+    return _QuotaDecisionPreparation(
+        status_payload=status_payload,
+        safe_goal_id=safe_goal_id,
+        requested_agent_id=requested_agent_id,
+        plan=plan,
+        goal_health_ok=goal_health_ok,
+        item=item,
+        quota=quota,
+        state=state,
+        normal_delivery_allowed=normal_delivery_allowed,
+        recovery_allowed=recovery_allowed,
+        reason=reason,
+        agent_identity=agent_identity,
+        project_asset=project_asset,
+        agent_lane_recommendation=agent_lane_recommendation,
+        effective_available_capabilities=effective_available_capabilities,
+        user_todo_summary=user_todo_summary,
+        agent_todo_summary=agent_todo_summary,
+        agent_scoped_user_todo_override=agent_scoped_user_todo_override,
+        goal_boundary=goal_boundary,
+        automation_prompt_upgrade=automation_prompt_upgrade,
+        automation_prompt_upgrade_required=automation_prompt_upgrade_required,
+        blocked_priority_fallback=blocked_priority_fallback,
+        stall_self_repair=stall_self_repair,
+        self_repair_allowed=self_repair_allowed,
+        monitor_debt_arbitration=monitor_debt_arbitration,
+        agent_monitor_only=agent_monitor_only,
+        work_lane_contract=work_lane_contract,
+        task_orchestration_contract=task_orchestration_contract,
+        capability_gate=capability_gate,
+        capability_monitor_fallback=capability_monitor_fallback,
+        scoped_user_gate_fallback=scoped_user_gate_fallback,
+        inbox_reply_due=inbox_reply_due,
+        workspace_guard=workspace_guard,
+        agent_frontier_id=agent_frontier_id,
+        registered_agent_ids=registered_agent_ids,
+        replan_obligation=replan_obligation,
+        replan_scope=replan_scope,
+        goal_frontier_projection=goal_frontier_projection,
+        projection_gap=projection_gap,
+        boundary_projection_repair=boundary_projection_repair,
+        include_scheduler_detail=include_scheduler_detail,
+        codex_app_current_rrule=codex_app_current_rrule,
+        resolved_scheduler_context=resolved_scheduler_context,
+    )
+
+
+def _resolve_quota_should_run_route(
+    prepared: _QuotaDecisionPreparation,
+) -> _QuotaDecisionRoute:
+    item = prepared.item
+    normal_delivery_allowed = prepared.normal_delivery_allowed
+    recovery_allowed = prepared.recovery_allowed
+    self_repair_allowed = prepared.self_repair_allowed
+    state = prepared.state
+    quota = prepared.quota
+    reason = prepared.reason
+    run_decision = resolve_quota_run_decision(
+        normal_delivery_allowed=normal_delivery_allowed,
+        recovery_delivery_allowed=recovery_allowed,
+        self_repair_allowed=self_repair_allowed,
+        stall_self_repair=prepared.stall_self_repair,
+        state=state,
+        quota=quota,
+        reason=reason,
+        capability_gate=prepared.capability_gate,
+        capability_monitor_fallback=prepared.capability_monitor_fallback,
+        workspace_guard=prepared.workspace_guard,
+        automation_prompt_upgrade=prepared.automation_prompt_upgrade,
+        automation_prompt_upgrade_required=prepared.automation_prompt_upgrade_required,
+        replan_obligation=prepared.replan_obligation,
+        goal_health_ok=prepared.goal_health_ok,
+        inbox_reply_due=prepared.inbox_reply_due,
+        agent_frontier_id=prepared.agent_frontier_id,
+        registered_agent_ids=prepared.registered_agent_ids,
+        goal_frontier_projection=prepared.goal_frontier_projection,
+        task_orchestration_contract=prepared.task_orchestration_contract,
+    )
+    normal_delivery_allowed = run_decision.normal_delivery_allowed
+    recovery_allowed = run_decision.recovery_delivery_allowed
+    self_repair_allowed = run_decision.self_repair_allowed
+    capability_repair_allowed = run_decision.capability_repair_allowed
+    workspace_repair_allowed = run_decision.workspace_repair_allowed
+    should_run = run_decision.should_run
+    effective_action = run_decision.effective_action
+    reason = run_decision.reason
+    state = run_decision.state
+    quota = run_decision.quota
+    replan_decision_allowed = run_decision.replan_decision_allowed
+    heartbeat_recommendation = build_heartbeat_recommendation(
+        {**item, "quota": quota},
+        goal_id=prepared.safe_goal_id,
+        state=state,
+        should_run=should_run,
+        user_todo_summary=prepared.user_todo_summary,
+        agent_todo_summary=prepared.agent_todo_summary,
+        work_lane_contract=prepared.work_lane_contract,
+        stall_self_repair=prepared.stall_self_repair,
+        replan_obligation=prepared.replan_obligation,
+        select_replan_obligation=False,
+        monitor_due_item_limit=MONITOR_DUE_ITEM_LIMIT,
+    )
+    heartbeat_recommendation = refine_heartbeat_recommendation(
+        heartbeat_recommendation,
+        should_run=should_run,
+        capability_gate=prepared.capability_gate,
+        capability_monitor_fallback=prepared.capability_monitor_fallback,
+        workspace_guard=prepared.workspace_guard,
+        automation_prompt_upgrade=prepared.automation_prompt_upgrade,
+        automation_prompt_upgrade_required=prepared.automation_prompt_upgrade_required,
+        blocked_priority_fallback=prepared.blocked_priority_fallback,
+    )
+    external_evidence_observation = build_external_evidence_observation_obligation(
+        item,
+        state=state,
+        agent_todo_summary=prepared.agent_todo_summary,
+        work_lane_contract=prepared.work_lane_contract,
+    )
+    external_evidence_observation_recent = None
+    if external_evidence_observation:
+        external_evidence_observation_recent = _recent_external_monitor_observation_unchanged(
+            prepared.status_payload,
+            goal_id=prepared.safe_goal_id,
+            agent_id=(
+                normalize_todo_claimed_by(prepared.agent_identity.get("agent_id"))
+                if isinstance(prepared.agent_identity, dict)
+                else None
+            ),
+        )
+        if external_evidence_observation_recent or (
+            external_evidence_observation.get("poll_window_status") == "before_next_due"
         ):
-            ready_deferred_resume_candidates = _agent_scope_deferred_resume_candidates(
-                agent_todo_summary,
-                agent_id=normalize_todo_claimed_by(agent_identity.get("agent_id")),
-            )
-        if external_evidence_observation and not workspace_guard and not inbox_reply_due:
-            normal_delivery_allowed = False
-            should_run = True
-            heartbeat_recommendation = {
-                **heartbeat_recommendation,
-                "recommended_mode": "external_evidence_observe_or_blocker",
-                "notify": "DONT_NOTIFY",
-                "reason": (
-                    "waiting external evidence requires a read-only observation "
-                    "or compact blocker before quiet no-op"
-                ),
-                "spend_policy": external_evidence_observation.get("spend_policy")
-                or heartbeat_recommendation.get("spend_policy"),
-            }
-            effective_action = "external_evidence_observe"
-            reason = "external evidence monitor requires read-only observation before quiet no-op"
-        monitor_quiet_skip = (
-            not replan_decision_allowed
-            and normal_delivery_allowed
-            and not recovery_allowed
-            and not self_repair_allowed
-            and isinstance(work_lane_contract, dict)
-            and work_lane_contract.get("obligation") == "quiet_until_material_monitor_transition"
-            and work_lane_contract.get("must_attempt_work") is False
-            and heartbeat_recommendation.get("recommended_mode") == "monitor_quiet_until_material_transition"
-            and heartbeat_recommendation.get("notify") == "DONT_NOTIFY"
-            and not ready_deferred_resume_candidates
+            external_evidence_observation = None
+    ready_deferred_resume_candidates: list[dict[str, Any]] = []
+    if isinstance(prepared.agent_identity, dict) and isinstance(
+        prepared.agent_todo_summary, dict
+    ):
+        ready_deferred_resume_candidates = _agent_scope_deferred_resume_candidates(
+            prepared.agent_todo_summary,
+            agent_id=normalize_todo_claimed_by(
+                prepared.agent_identity.get("agent_id")
+            ),
         )
-        if monitor_quiet_skip:
-            normal_delivery_allowed = False
-            should_run = False
-            effective_action = "monitor_quiet_skip"
-            reason = str(
-                heartbeat_recommendation.get("reason")
-                or "monitor-only polling has no material transition; skip delivery compute"
-            )
-        selected_recommended_action = selected_recommended_action_from_work_lane(
-            item,
-            agent_todo_summary=agent_todo_summary,
-            work_lane_contract=work_lane_contract,
-            agent_lane_recommendation=agent_lane_recommendation,
-            prefer_agent_lane_recommendation=monitor_quiet_skip,
+    if (
+        external_evidence_observation
+        and not prepared.workspace_guard
+        and not prepared.inbox_reply_due
+    ):
+        normal_delivery_allowed = False
+        should_run = True
+        heartbeat_recommendation = {
+            **heartbeat_recommendation,
+            "recommended_mode": "external_evidence_observe_or_blocker",
+            "notify": "DONT_NOTIFY",
+            "reason": (
+                "waiting external evidence requires a read-only observation "
+                "or compact blocker before quiet no-op"
+            ),
+            "spend_policy": external_evidence_observation.get("spend_policy")
+            or heartbeat_recommendation.get("spend_policy"),
+        }
+        effective_action = "external_evidence_observe"
+        reason = "external evidence monitor requires read-only observation before quiet no-op"
+    monitor_quiet_skip = (
+        not replan_decision_allowed
+        and normal_delivery_allowed
+        and not recovery_allowed
+        and not self_repair_allowed
+        and isinstance(prepared.work_lane_contract, dict)
+        and prepared.work_lane_contract.get("obligation")
+        == "quiet_until_material_monitor_transition"
+        and prepared.work_lane_contract.get("must_attempt_work") is False
+        and heartbeat_recommendation.get("recommended_mode")
+        == "monitor_quiet_until_material_transition"
+        and heartbeat_recommendation.get("notify") == "DONT_NOTIFY"
+        and not ready_deferred_resume_candidates
+    )
+    if monitor_quiet_skip:
+        normal_delivery_allowed = False
+        should_run = False
+        effective_action = "monitor_quiet_skip"
+        reason = str(
+            heartbeat_recommendation.get("reason")
+            or "monitor-only polling has no material transition; skip delivery compute"
         )
-        selected_recommended_action = task_selected_recommended_action(
-            task_orchestration_contract,
+    selected_recommended_action = selected_recommended_action_from_work_lane(
+        item,
+        agent_todo_summary=prepared.agent_todo_summary,
+        work_lane_contract=prepared.work_lane_contract,
+        agent_lane_recommendation=prepared.agent_lane_recommendation,
+        prefer_agent_lane_recommendation=monitor_quiet_skip,
+    )
+    selected_recommended_action = refine_quota_recommended_action(
+        selected_recommended_action,
+        task_orchestration_contract=prepared.task_orchestration_contract,
+        capability_gate=prepared.capability_gate,
+        capability_monitor_fallback=prepared.capability_monitor_fallback,
+        work_lane_contract=prepared.work_lane_contract,
+        workspace_guard=prepared.workspace_guard,
+        automation_prompt_upgrade=prepared.automation_prompt_upgrade,
+        automation_prompt_upgrade_required=prepared.automation_prompt_upgrade_required,
+        replan_obligation=prepared.replan_obligation,
+        replan_decision_allowed=replan_decision_allowed,
+    )
+    due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(
+        prepared.work_lane_contract
+    )
+    agent_lane_next_action = None
+    if (
+        not due_monitor_attempt
+        and not prepared.inbox_reply_due
+        and not prepared.task_orchestration_contract
+        and not prepared.capability_monitor_fallback
+    ):
+        agent_lane_next_action = build_agent_lane_next_action(
+            agent_identity=prepared.agent_identity,
+            agent_todo_summary=prepared.agent_todo_summary,
+            capability_gate=prepared.capability_gate,
+            scoped_user_gate_fallback=prepared.scoped_user_gate_fallback,
+            active_next_action=(
+                item.get("active_state_next_action")
+                or (
+                    item.get("project_asset", {}).get("next_action")
+                    if isinstance(item.get("project_asset"), dict)
+                    else None
+                )
+            ),
+        )
+    agent_scope_frontier = None
+    agent_lane_frontier_hint = None
+    if not replan_decision_allowed:
+        selected_recommended_action = selected_action_with_agent_lane(
             selected_recommended_action,
+            agent_lane_next_action=agent_lane_next_action,
         )
-        if capability_monitor_fallback and isinstance(work_lane_contract, dict) and work_lane_contract.get("action"):
-            selected_recommended_action = work_lane_contract["action"]
-        due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(work_lane_contract)
-        if capability_gate and not due_monitor_attempt and not capability_monitor_fallback:
-            if capability_gate.get("action") in {"repair_bridge", "ask_owner", "skip"}:
-                selected_recommended_action = (
-                    capability_gate.get("owner_action")
-                    or capability_gate.get("reason")
-                    or selected_recommended_action
-                )
-            else:
-                selected_recommended_action = _selected_action_with_capability_gate(
-                    selected_recommended_action,
-                    capability_gate=capability_gate,
-                )
-        if workspace_guard:
-            selected_recommended_action = (
-                workspace_guard.get("required_action")
-                or workspace_guard.get("reason")
-                or selected_recommended_action
-            )
-        if automation_prompt_upgrade_required:
-            selected_recommended_action = (
-                automation_prompt_upgrade.get("recommended_action")
-                or automation_prompt_upgrade.get("reason")
-                or selected_recommended_action
-            )
-        if replan_decision_allowed:
-            selected_recommended_action = (
-                str(replan_obligation.get("recommended_action") or "").strip()
-                or str(replan_obligation.get("stop_condition") or "").strip()
-                or "Run one bounded autonomous replan slice and write back the selected todo/frontier changes."
-            )
-        agent_lane_next_action = None
-        if not due_monitor_attempt and not inbox_reply_due and not task_orchestration_contract and not capability_monitor_fallback:
-            agent_lane_next_action = build_agent_lane_next_action(
-                agent_identity=agent_identity,
-                agent_todo_summary=agent_todo_summary,
-                capability_gate=capability_gate,
-                scoped_user_gate_fallback=scoped_user_gate_fallback,
-                active_next_action=(
-                    item.get("active_state_next_action")
-                    or (
-                        item.get("project_asset", {}).get("next_action")
-                        if isinstance(item.get("project_asset"), dict)
-                        else None
-                    )
-                ),
-            )
-            if not replan_decision_allowed:
-                selected_recommended_action = selected_action_with_agent_lane(
-                    selected_recommended_action,
-                    agent_lane_next_action=agent_lane_next_action,
-                )
-        agent_scope_frontier = None
-        if not replan_decision_allowed:
-            agent_scope_frontier = _agent_scope_no_candidate_frontier(
-                agent_identity=agent_identity,
-                agent_todo_summary=agent_todo_summary,
-                agent_lane_next_action=agent_lane_next_action,
-                work_lane_contract=work_lane_contract,
-                candidate_should_run=bool(
-                    (should_run and normal_delivery_allowed)
-                    or ready_deferred_resume_candidates
-                ),
-            )
+        agent_scope_frontier = _agent_scope_no_candidate_frontier(
+            agent_identity=prepared.agent_identity,
+            agent_todo_summary=prepared.agent_todo_summary,
+            agent_lane_next_action=agent_lane_next_action,
+            work_lane_contract=prepared.work_lane_contract,
+            candidate_should_run=bool(
+                (should_run and normal_delivery_allowed)
+                or ready_deferred_resume_candidates
+            ),
+        )
         if (
             isinstance(agent_scope_frontier, dict)
             and agent_scope_frontier.get("priority_preemption") is True
         ):
             agent_lane_next_action = None
-        agent_lane_frontier_hint = None
-        if not replan_decision_allowed:
-            agent_lane_frontier_hint = _agent_lane_frontier_hint(
-                goal_id=safe_goal_id,
-                agent_identity=agent_identity,
-                agent_todo_summary=agent_todo_summary,
-                agent_lane_next_action=agent_lane_next_action,
-                agent_scope_frontier=agent_scope_frontier,
-                work_lane_contract=work_lane_contract,
-            )
+        agent_lane_frontier_hint = _agent_lane_frontier_hint(
+            goal_id=prepared.safe_goal_id,
+            agent_identity=prepared.agent_identity,
+            agent_todo_summary=prepared.agent_todo_summary,
+            agent_lane_next_action=agent_lane_next_action,
+            agent_scope_frontier=agent_scope_frontier,
+            work_lane_contract=prepared.work_lane_contract,
+        )
         if agent_scope_frontier and agent_lane_frontier_hint:
             agent_scope_frontier["frontier_hint"] = agent_lane_frontier_hint
-        if agent_scope_frontier and not replan_decision_allowed:
+        if agent_scope_frontier:
             frontier_action = str(agent_scope_frontier.get("effective_action") or "")
             successor_replan_required = (
-                frontier_action == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value
+                frontier_action
+                == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value
             )
             normal_delivery_allowed = False
             should_run = bool(successor_replan_required)
@@ -2029,417 +2060,441 @@ def build_quota_should_run(
                 "spend_policy": agent_scope_frontier.get("spend_policy")
                 or "do not append quota spend while the current agent has no in-scope runnable candidate",
             }
-        state_action_projection_warning = build_state_action_projection_warning(
-            item,
-            agent_todo_summary=agent_todo_summary,
-            selected_action=selected_recommended_action,
-            work_lane_contract=work_lane_contract,
-        )
-        active_state_next_action_text = _protocol_action_text(
-            item.get("active_state_next_action")
-            or project_asset.get("active_state_next_action")
-            or project_asset.get("next_action"),
-            limit=320,
-        )
-        latest_run_recommended_action_text = _protocol_action_text(
-            item.get("latest_run_recommended_action")
-            or project_asset.get("latest_run_recommended_action"),
-            limit=320,
-        )
-        next_action_warning = next_action_projection_warning(
-            active_state_next_action=active_state_next_action_text,
-            latest_run_recommended_action=latest_run_recommended_action_text,
-            agent_lane_next_action=agent_lane_next_action,
-        )
-        goal_route_hint = build_goal_route_hint(
-            agent_identity=agent_identity,
-            agent_todo_summary=agent_todo_summary,
-            agent_lane_next_action=agent_lane_next_action,
-            agent_scope_frontier=agent_scope_frontier,
-            agent_lane_frontier_hint=agent_lane_frontier_hint,
-            active_state_next_action=active_state_next_action_text,
-            latest_run_recommended_action=latest_run_recommended_action_text,
-            selected_recommended_action=selected_recommended_action,
-        )
-        goal_route_hint = task_goal_route_hint(goal_route_hint, task_orchestration_contract)
-        agent_scope_action = _agent_scope_frontier_action(effective_action)
-        payload_work_lane_contract = _payload_work_lane_contract(
-            work_lane_contract,
-            effective_action=effective_action,
-            recovery_allowed=recovery_allowed,
-            agent_scope_frontier=agent_scope_frontier,
-        )
-        payload = {
-            **_standing_decision_authority_payload_from_status_item(
-                item,
-                project_asset=project_asset,
-                agent_id=normalize_todo_claimed_by(
-                    (agent_identity or {}).get("agent_id")
-                ),
-            ),
-            "ok": goal_health_ok or self_repair_allowed or capability_repair_allowed or workspace_repair_allowed,
-            "status_health_ok": goal_health_ok,
-            "mode": "should-run",
-            "goal_id": safe_goal_id,
-            "decision": (
-                AUTONOMOUS_REPLAN_REQUIRED_MODE
-                if replan_decision_allowed
-                else "run"
-                if normal_delivery_allowed
-                else "observe"
-                if external_evidence_observation
-                else "safe_bypass_recovery"
-                if recovery_allowed
-                else "self_repair"
-                if self_repair_allowed
-                else "repair_bridge"
-                if capability_repair_allowed
-                else "workspace_guard"
-                if workspace_repair_allowed
-                else "automation_prompt_upgrade"
-                if automation_prompt_upgrade_required
-                else agent_scope_action.value
-                if agent_scope_action is not None
-                else "skip"
-            ),
-            "should_run": should_run,
-            "normal_delivery_allowed": normal_delivery_allowed,
-            "recovery_delivery_allowed": recovery_allowed,
-            "self_repair_allowed": self_repair_allowed,
-            "capability_repair_allowed": capability_repair_allowed,
-            "workspace_repair_allowed": workspace_repair_allowed,
-            "effective_action": effective_action,
-            "actionable_by_codex": bool(
-                should_run
-                or recovery_allowed
-                or external_evidence_observation
-                or capability_repair_allowed
-                or workspace_repair_allowed
-            ),
-            "reason": (
-                str(stall_self_repair.get("reason"))
-                if self_repair_allowed and isinstance(stall_self_repair, dict)
-                else reason
-            ),
-            "quota": quota,
-            "state": state,
-            "blocked_action_scope": (
-                boundary_projection_repair.get("blocked_action_scope")
-                if boundary_projection_repair
-                else stall_repair_blocked_action_scope(stall_self_repair)
-                or quota.get("blocked_action_scope")
-            ),
-            "safe_bypass_allowed": bool(quota.get("safe_bypass_allowed")),
-            "safe_bypass_kind": quota.get("safe_bypass_kind"),
-            "safe_bypass_policy": quota.get("safe_bypass_policy"),
-            "waiting_on": item.get("waiting_on"),
-            "status": item.get("status"),
-            "lifecycle_phase": item.get("lifecycle_phase"),
-            "lifecycle_flags": item.get("lifecycle_flags"),
-            "source": item.get("source"),
-            "project_asset_source": item.get("project_asset_source"),
-            "recommended_action": selected_recommended_action,
-            "active_state_next_action": active_state_next_action_text or None,
-            "latest_run_recommended_action": latest_run_recommended_action_text or None,
-            "execution_profile": _quota_execution_profile_summary(
-                project_asset.get("execution_profile")
-            )
-            if project_asset
-            else None,
-            "long_task_cadence_hint": (
-                project_asset.get("long_task_cadence_hint")
-                if project_asset and isinstance(project_asset.get("long_task_cadence_hint"), dict)
-                else (
-                    item.get("long_task_cadence_hint")
-                    if isinstance(item.get("long_task_cadence_hint"), dict)
-                    else None
-                )
-            ),
-            "handoff_readiness": item.get("handoff_readiness"),
-            "heartbeat_recommendation": heartbeat_recommendation,
-            "execution_obligation": _execution_obligation(
-                should_run=should_run,
-                effective_action=effective_action,
-                heartbeat_recommendation=heartbeat_recommendation,
-                work_lane_contract=payload_work_lane_contract,
-                external_evidence_observation=external_evidence_observation,
-            ),
-            "goal_boundary": goal_boundary,
-            "goal_frontier_projection": goal_frontier_projection,
-            "plan_summary": plan.get("summary"),
-            "todo_write_hint": build_todo_write_hint(safe_goal_id),
-        }
-        payload = attach_task_orchestration_payload(payload, task_orchestration_contract)
-        for key in ("autonomous_replan_decision", "vision_continuation_audit",
-                    "vision_wait_state"):
-            if isinstance(value := goal_frontier_projection.get(key), dict):
-                payload[key] = value
-        if replan_scope.get("required"):
-            payload["autonomous_replan_scope"] = replan_scope
-        payload = _attach_agent_identity_contracts(
-            payload=payload,
-            agent_identity=agent_identity,
-        )
-        if agent_lane_next_action:
-            payload["agent_lane_next_action"] = agent_lane_next_action
-        selected_todo_projection = _selected_todo_projection(
-            agent_lane_next_action=agent_lane_next_action,
-            work_lane_contract=payload_work_lane_contract,
-            agent_scope_frontier=agent_scope_frontier,
-        )
-        if selected_todo_projection:
-            payload["selected_todo"] = selected_todo_projection
-        if agent_lane_frontier_hint:
-            payload["agent_lane_frontier_hint"] = agent_lane_frontier_hint
-        if goal_route_hint:
-            payload["goal_route_hint"] = goal_route_hint
-        if agent_scope_frontier:
-            payload["agent_scope_frontier"] = agent_scope_frontier
-        if workspace_guard:
-            payload["workspace_guard"] = workspace_guard
-        if automation_prompt_upgrade:
-            payload["automation_prompt_upgrade"] = automation_prompt_upgrade
-        if agent_scoped_user_todo_override:
-            payload[str(agent_scoped_user_todo_override["kind"])] = agent_scoped_user_todo_override
-        if payload_work_lane_contract:
-            payload["work_lane_contract"] = payload_work_lane_contract
-        if monitor_debt_arbitration.get("active"):
-            payload["monitor_debt_arbitration"] = monitor_debt_arbitration
-        if capability_gate:
-            payload["capability_gate"] = capability_gate
-            if capability_gate.get("owner_missing"):
-                payload["notify_user_on_capability_gate"] = True
-        if capability_monitor_fallback:
-            payload["capability_monitor_fallback"] = capability_monitor_fallback
-        if external_evidence_observation:
-            payload["external_evidence_observation"] = external_evidence_observation
-        if external_evidence_observation_recent:
-            payload["external_evidence_observation_recent"] = external_evidence_observation_recent
-        control_plane = compact_control_plane_policy(item.get("control_plane"))
-        if control_plane:
-            payload["control_plane"] = control_plane
-        if stall_self_repair:
-            payload["stall_self_repair"] = stall_self_repair
-            payload.update(stall_repair_payload(stall_self_repair))
-        if projection_gap:
-            payload["state_projection_gap"] = projection_gap
-        if boundary_projection_repair:
-            payload["boundary_projection_gap"] = boundary_projection_repair
-        if item.get("operator_question"):
-            payload["operator_question"] = item.get("operator_question")
-        if item.get("missing_gates"):
-            payload["missing_gates"] = item.get("missing_gates")
-        if user_todo_summary:
-            payload["user_todo_summary"] = compact_quota_todo_summary_for_payload(user_todo_summary)
-            repeat_open_todo_notification = (
-                heartbeat_recommendation.get("repeat_notification_required") is True
-            )
-            user_gate_todo_open = _has_open_user_gate_todo(user_todo_summary)
-            if user_gate_todo_open:
-                payload["notify_user_on_gate"] = True
-                payload["open_todo_notify_reason"] = _user_gate_todo_notify_reason(
-                    user_todo_summary
-                )
-                payload["open_todo_notification_policy"] = "repeat_until_resolved"
-            elif _should_notify_user_on_open_todo(
-                state=state,
-                waiting_on=str(item.get("waiting_on") or ""),
-                user_todo_summary=user_todo_summary,
-            ) or repeat_open_todo_notification:
-                payload["notify_user_on_open_todo"] = True
-                payload["open_todo_notify_reason"] = open_todo_notify_reason(
-                    state=state,
-                    waiting_on=str(item.get("waiting_on") or ""),
-                )
-                if repeat_open_todo_notification:
-                    payload["open_todo_notify_reason"] = (
-                        heartbeat_recommendation.get("reason")
-                        or "no-work polling should ask the current open user todo"
-                    )
-                    payload["open_todo_notification_policy"] = "repeat_until_resolved"
-        if scoped_user_gate_fallback and not replan_decision_allowed:
-            payload["scoped_user_gate_fallback"] = scoped_user_gate_fallback
-            payload["should_run"] = True
-            if payload.get("decision") == "skip":
-                payload["decision"] = "safe_bypass_user_gate_fallback"
-            if payload.get("effective_action") in {"skip", "monitor_quiet_skip", None}:
-                payload["effective_action"] = "scoped_user_gate_fallback"
-            execution_obligation_payload = (
-                dict(payload.get("execution_obligation"))
-                if isinstance(payload.get("execution_obligation"), dict)
-                else {}
-            )
-            execution_obligation_payload.update(
-                {
-                    "must_attempt_work": True,
-                    "kind": "scoped_user_gate_fallback",
-                    "minimum": "one_non_gated_fallback_segment_after_user_gate_notice",
-                    "delivery_allowed": True,
-                    "notify_is_execution_gate": False,
-                    "contract": "scoped_user_gate_fallback",
-                    "contract_obligation": scoped_user_gate_fallback.get(
-                        "recommended_action"
-                    ),
-                    "reason": scoped_user_gate_fallback.get("reason"),
-                }
-            )
-            payload["execution_obligation"] = execution_obligation_payload
-            payload["safe_bypass_allowed"] = True
-            payload["safe_bypass_kind"] = "scoped_user_gate_fallback"
-            payload["safe_bypass_policy"] = (
-                "The user gate blocks only the matched agent action scope. Surface "
-                "that gate, then advance the selected non-gated fallback; spend only "
-                "after validated writeback."
-            )
-            payload["actionable_by_codex"] = True
-        payload["requires_user_action"] = bool(
-            state == "operator_gate"
-            or payload.get("notify_user_on_gate") is True
-            or payload.get("notify_user_on_open_todo") is True
-            or payload.get("notify_user_on_capability_gate") is True
-        )
-        if agent_todo_summary:
-            payload["agent_todo_summary"] = compact_quota_todo_summary_for_payload(agent_todo_summary)
-        if blocked_priority_fallback:
-            payload["blocked_priority_fallback"] = blocked_priority_fallback
-        attention_queue = status_payload.get("attention_queue") if isinstance(status_payload.get("attention_queue"), dict) else {}
-        backlog_context = _compact_autonomous_candidate_context(
-            attention_queue.get("autonomous_backlog_candidates"),
-            goal_id=safe_goal_id,
-        )
-        if backlog_context:
-            payload["autonomous_backlog_candidates"] = backlog_context
-        monitor_context = _compact_autonomous_candidate_context(
-            attention_queue.get("autonomous_monitor_candidates"),
-            goal_id=safe_goal_id,
-        )
-        if monitor_context:
-            payload["autonomous_monitor_candidates"] = monitor_context
-        projection_warning = (
-            item.get("stale_latest_run_warning")
-            if isinstance(item.get("stale_latest_run_warning"), dict)
-            else project_asset.get("stale_latest_run_warning")
-            if isinstance(project_asset.get("stale_latest_run_warning"), dict)
-            else None
-        )
-        if projection_warning:
-            payload["stale_latest_run_warning"] = projection_warning
-        if state_action_projection_warning:
-            payload["state_action_projection_warning"] = state_action_projection_warning
-        if next_action_warning:
-            payload["next_action_projection_warning"] = next_action_warning
-        backlog_warning = (
-            item.get("backlog_hygiene_warning")
-            if isinstance(item.get("backlog_hygiene_warning"), dict)
-            else project_asset.get("backlog_hygiene_warning")
-            if isinstance(project_asset.get("backlog_hygiene_warning"), dict)
-            else None
-        )
-        if backlog_warning:
-            payload["backlog_hygiene_warning"] = backlog_warning
-        archive_warning = (
-            item.get("completed_todo_archive_warning")
-            if isinstance(item.get("completed_todo_archive_warning"), dict)
-            else project_asset.get("completed_todo_archive_warning")
-            if isinstance(project_asset.get("completed_todo_archive_warning"), dict)
-            else None
-        )
-        if archive_warning:
-            payload["completed_todo_archive_warning"] = archive_warning
-        if replan_obligation:
-            payload["autonomous_replan_obligation"] = replan_obligation
-        dreaming_proposal = (
-            item.get("dreaming_proposal")
-            if isinstance(item.get("dreaming_proposal"), dict)
-            else project_asset.get("dreaming_proposal")
-            if isinstance(project_asset.get("dreaming_proposal"), dict)
-            else None
-        )
-        if dreaming_proposal:
-            payload["dreaming_proposal"] = dreaming_proposal
-        dreaming_lane_badge = (
-            item.get("dreaming_lane_badge")
-            if isinstance(item.get("dreaming_lane_badge"), dict)
-            else project_asset.get("dreaming_lane_badge")
-            if isinstance(project_asset.get("dreaming_lane_badge"), dict)
-            else None
-        )
-        if dreaming_lane_badge:
-            payload["dreaming_lane_badge"] = dreaming_lane_badge
-        interface_budget_cadence = (
-            project_asset.get("interface_budget_cadence")
-            if isinstance(project_asset.get("interface_budget_cadence"), dict)
-            else None
-        )
-        if interface_budget_cadence:
-            payload["interface_budget_cadence"] = interface_budget_cadence
-        decision_warning = _decision_freshness_warning(status_payload, goal_id=safe_goal_id)
-        if decision_warning:
-            payload["decision_freshness_warning"] = decision_warning
-        promotion_warning = _promotion_readiness_warning(status_payload)
-        if promotion_warning:
-            payload["promotion_readiness_warning"] = promotion_warning
-        reward_lesson_warning = _reward_lesson_projection_warning(
-            status_payload,
-            goal_id=safe_goal_id,
-            recommended_action=selected_recommended_action,
-        )
-        if reward_lesson_warning:
-            payload["reward_lesson_projection_warning"] = reward_lesson_warning
-        gate_prompt = (
-            _build_gate_prompt(item, user_todo_summary=user_todo_summary)
-            if state == "operator_gate"
-            else None
-        )
-        if gate_prompt:
-            payload["gate_prompt"] = gate_prompt
-            payload["notify_user_on_gate"] = True
-        if item.get("next_handoff_condition"):
-            payload["next_handoff_condition"] = item.get("next_handoff_condition")
-        if should_run and item.get("agent_command"):
-            payload["agent_command"] = item.get("agent_command")
-        _apply_agent_monitor_only_precedence(
-            payload,
-            monitor_only=agent_monitor_only,
-            inbox_reply_due=inbox_reply_due,
-        )
-        required_reads = _quota_required_reads(payload)
-        if required_reads:
-            payload["required_reads"] = required_reads
-            if isinstance(payload.get("autonomous_replan_obligation"), dict):
-                payload["autonomous_replan_obligation"] = {
-                    **payload["autonomous_replan_obligation"],
-                    "required_reads": required_reads,
-                }
-        payload["automation_liveness"] = build_automation_liveness(payload)
-        payload["interaction_contract"] = build_interaction_contract(
-            payload,
-            available_capabilities=effective_available_capabilities, scheduler_execution_context=resolved_scheduler_context,
-        )
-        payload["scheduler_hint"] = _scheduler_hint(
-            payload,
-            include_detail=include_scheduler_detail,
-            available_capabilities=effective_available_capabilities,
-            codex_app_scheduler_state=(
-                _load_codex_app_scheduler_state(
-                    status_payload,
-                    goal_id=safe_goal_id,
-                    agent_id=quota_decision_agent_id(payload) or agent_id,
-                )
-                if resolved_scheduler_context.ok
-                and resolved_scheduler_context.context is not None
-                and resolved_scheduler_context.context.codex_app_applicable
-                else None
-            ), codex_app_current_rrule=codex_app_current_rrule,
-            scheduler_execution_context=resolved_scheduler_context,
-        )
-        finalize_user_gate_notification_cooldown(
-            payload,
-            available_capabilities=effective_available_capabilities, scheduler_execution_context=resolved_scheduler_context,
-        )
-        payload["protocol_action_packet"] = build_protocol_action_packet(payload)
-        return payload
+    state_action_projection_warning = build_state_action_projection_warning(
+        item,
+        agent_todo_summary=prepared.agent_todo_summary,
+        selected_action=selected_recommended_action,
+        work_lane_contract=prepared.work_lane_contract,
+    )
+    active_state_next_action_text = _protocol_action_text(
+        item.get("active_state_next_action")
+        or prepared.project_asset.get("active_state_next_action")
+        or prepared.project_asset.get("next_action"),
+        limit=320,
+    )
+    latest_run_recommended_action_text = _protocol_action_text(
+        item.get("latest_run_recommended_action")
+        or prepared.project_asset.get("latest_run_recommended_action"),
+        limit=320,
+    )
+    next_action_warning = next_action_projection_warning(
+        active_state_next_action=active_state_next_action_text,
+        latest_run_recommended_action=latest_run_recommended_action_text,
+        agent_lane_next_action=agent_lane_next_action,
+    )
+    goal_route_hint = build_goal_route_hint(
+        agent_identity=prepared.agent_identity,
+        agent_todo_summary=prepared.agent_todo_summary,
+        agent_lane_next_action=agent_lane_next_action,
+        agent_scope_frontier=agent_scope_frontier,
+        agent_lane_frontier_hint=agent_lane_frontier_hint,
+        active_state_next_action=active_state_next_action_text,
+        latest_run_recommended_action=latest_run_recommended_action_text,
+        selected_recommended_action=selected_recommended_action,
+    )
+    goal_route_hint = task_goal_route_hint(
+        goal_route_hint,
+        prepared.task_orchestration_contract,
+    )
+    payload_work_lane_contract = _payload_work_lane_contract(
+        prepared.work_lane_contract,
+        effective_action=effective_action,
+        recovery_allowed=recovery_allowed,
+        agent_scope_frontier=agent_scope_frontier,
+    )
+    return _QuotaDecisionRoute(
+        normal_delivery_allowed=normal_delivery_allowed,
+        recovery_allowed=recovery_allowed,
+        self_repair_allowed=self_repair_allowed,
+        capability_repair_allowed=capability_repair_allowed,
+        workspace_repair_allowed=workspace_repair_allowed,
+        should_run=should_run,
+        effective_action=effective_action,
+        reason=reason,
+        state=state,
+        quota=quota,
+        replan_decision_allowed=replan_decision_allowed,
+        heartbeat_recommendation=heartbeat_recommendation,
+        external_evidence_observation=external_evidence_observation,
+        external_evidence_observation_recent=external_evidence_observation_recent,
+        selected_recommended_action=selected_recommended_action,
+        agent_lane_next_action=agent_lane_next_action,
+        agent_scope_frontier=agent_scope_frontier,
+        agent_lane_frontier_hint=agent_lane_frontier_hint,
+        state_action_projection_warning=state_action_projection_warning,
+        active_state_next_action_text=active_state_next_action_text,
+        latest_run_recommended_action_text=latest_run_recommended_action_text,
+        next_action_warning=next_action_warning,
+        goal_route_hint=goal_route_hint,
+        payload_work_lane_contract=payload_work_lane_contract,
+    )
 
+
+def _build_quota_should_run_payload(
+    prepared: _QuotaDecisionPreparation,
+    route: _QuotaDecisionRoute,
+) -> dict[str, Any]:
+    agent_scope_action = _agent_scope_frontier_action(route.effective_action)
+    payload = {
+        **_standing_decision_authority_payload_from_status_item(
+            prepared.item,
+            project_asset=prepared.project_asset,
+            agent_id=normalize_todo_claimed_by(
+                (prepared.agent_identity or {}).get("agent_id")
+            ),
+        ),
+        "ok": (
+            prepared.goal_health_ok
+            or route.self_repair_allowed
+            or route.capability_repair_allowed
+            or route.workspace_repair_allowed
+        ),
+        "status_health_ok": prepared.goal_health_ok,
+        "mode": "should-run",
+        "goal_id": prepared.safe_goal_id,
+        "decision": (
+            AUTONOMOUS_REPLAN_REQUIRED_MODE
+            if route.replan_decision_allowed
+            else "run"
+            if route.normal_delivery_allowed
+            else "observe"
+            if route.external_evidence_observation
+            else "safe_bypass_recovery"
+            if route.recovery_allowed
+            else "self_repair"
+            if route.self_repair_allowed
+            else "repair_bridge"
+            if route.capability_repair_allowed
+            else "workspace_guard"
+            if route.workspace_repair_allowed
+            else "automation_prompt_upgrade"
+            if prepared.automation_prompt_upgrade_required
+            else agent_scope_action.value
+            if agent_scope_action is not None
+            else "skip"
+        ),
+        "should_run": route.should_run,
+        "normal_delivery_allowed": route.normal_delivery_allowed,
+        "recovery_delivery_allowed": route.recovery_allowed,
+        "self_repair_allowed": route.self_repair_allowed,
+        "capability_repair_allowed": route.capability_repair_allowed,
+        "workspace_repair_allowed": route.workspace_repair_allowed,
+        "effective_action": route.effective_action,
+        "actionable_by_codex": bool(
+            route.should_run
+            or route.recovery_allowed
+            or route.external_evidence_observation
+            or route.capability_repair_allowed
+            or route.workspace_repair_allowed
+        ),
+        "reason": (
+            str(prepared.stall_self_repair.get("reason"))
+            if route.self_repair_allowed
+            and isinstance(prepared.stall_self_repair, dict)
+            else route.reason
+        ),
+        "quota": route.quota,
+        "state": route.state,
+        "blocked_action_scope": (
+            prepared.boundary_projection_repair.get("blocked_action_scope")
+            if prepared.boundary_projection_repair
+            else stall_repair_blocked_action_scope(prepared.stall_self_repair)
+            or route.quota.get("blocked_action_scope")
+        ),
+        "safe_bypass_allowed": bool(route.quota.get("safe_bypass_allowed")),
+        "safe_bypass_kind": route.quota.get("safe_bypass_kind"),
+        "safe_bypass_policy": route.quota.get("safe_bypass_policy"),
+        "waiting_on": prepared.item.get("waiting_on"),
+        "status": prepared.item.get("status"),
+        "lifecycle_phase": prepared.item.get("lifecycle_phase"),
+        "lifecycle_flags": prepared.item.get("lifecycle_flags"),
+        "source": prepared.item.get("source"),
+        "project_asset_source": prepared.item.get("project_asset_source"),
+        "recommended_action": route.selected_recommended_action,
+        "active_state_next_action": route.active_state_next_action_text or None,
+        "latest_run_recommended_action": (
+            route.latest_run_recommended_action_text or None
+        ),
+        "execution_profile": (
+            _quota_execution_profile_summary(
+                prepared.project_asset.get("execution_profile")
+            )
+            if prepared.project_asset
+            else None
+        ),
+        "long_task_cadence_hint": (
+            prepared.item.get("long_task_cadence_hint")
+            if isinstance(prepared.item.get("long_task_cadence_hint"), dict)
+            else None
+        ),
+        "handoff_readiness": prepared.item.get("handoff_readiness"),
+        "heartbeat_recommendation": route.heartbeat_recommendation,
+        "execution_obligation": _execution_obligation(
+            should_run=route.should_run,
+            effective_action=route.effective_action,
+            heartbeat_recommendation=route.heartbeat_recommendation,
+            work_lane_contract=route.payload_work_lane_contract,
+            external_evidence_observation=route.external_evidence_observation,
+        ),
+        "goal_boundary": prepared.goal_boundary,
+        "goal_frontier_projection": prepared.goal_frontier_projection,
+        "plan_summary": prepared.plan.get("summary"),
+        "todo_write_hint": build_todo_write_hint(prepared.safe_goal_id),
+    }
+    payload = attach_task_orchestration_payload(
+        payload,
+        prepared.task_orchestration_contract,
+    )
+    for key in (
+        "autonomous_replan_decision",
+        "vision_continuation_audit",
+        "vision_wait_state",
+    ):
+        if isinstance(value := prepared.goal_frontier_projection.get(key), dict):
+            payload[key] = value
+    if prepared.replan_scope.get("required"):
+        payload["autonomous_replan_scope"] = prepared.replan_scope
+    payload = _attach_agent_identity_contracts(
+        payload=payload,
+        agent_identity=prepared.agent_identity,
+    )
+    _attach_truthy_fields(
+        payload,
+        agent_lane_next_action=route.agent_lane_next_action,
+    )
+    selected_todo_projection = _selected_todo_projection(
+        agent_lane_next_action=route.agent_lane_next_action,
+        work_lane_contract=route.payload_work_lane_contract,
+        agent_scope_frontier=route.agent_scope_frontier,
+    )
+    if selected_todo_projection:
+        payload["selected_todo"] = selected_todo_projection
+    _attach_truthy_fields(
+        payload,
+        agent_lane_frontier_hint=route.agent_lane_frontier_hint,
+        goal_route_hint=route.goal_route_hint,
+        agent_scope_frontier=route.agent_scope_frontier,
+        workspace_guard=prepared.workspace_guard,
+        automation_prompt_upgrade=prepared.automation_prompt_upgrade,
+    )
+    if prepared.agent_scoped_user_todo_override:
+        payload[str(prepared.agent_scoped_user_todo_override["kind"])] = (
+            prepared.agent_scoped_user_todo_override
+        )
+    _attach_truthy_fields(
+        payload,
+        work_lane_contract=route.payload_work_lane_contract,
+        monitor_debt_arbitration=(
+            prepared.monitor_debt_arbitration
+            if prepared.monitor_debt_arbitration.get("active")
+            else None
+        ),
+    )
+    if prepared.capability_gate:
+        payload["capability_gate"] = prepared.capability_gate
+        if prepared.capability_gate.get("owner_missing"):
+            payload["notify_user_on_capability_gate"] = True
+    _attach_truthy_fields(
+        payload,
+        capability_monitor_fallback=prepared.capability_monitor_fallback,
+        external_evidence_observation=route.external_evidence_observation,
+        external_evidence_observation_recent=(
+            route.external_evidence_observation_recent
+        ),
+    )
+    control_plane = compact_control_plane_policy(prepared.item.get("control_plane"))
+    if control_plane:
+        payload["control_plane"] = control_plane
+    if prepared.stall_self_repair:
+        payload["stall_self_repair"] = prepared.stall_self_repair
+        payload.update(stall_repair_payload(prepared.stall_self_repair))
+    _attach_truthy_fields(
+        payload,
+        state_projection_gap=prepared.projection_gap,
+        boundary_projection_gap=prepared.boundary_projection_repair,
+        operator_question=prepared.item.get("operator_question"),
+        missing_gates=prepared.item.get("missing_gates"),
+    )
+    if prepared.user_todo_summary:
+        payload["user_todo_summary"] = compact_quota_todo_summary_for_payload(
+            prepared.user_todo_summary
+        )
+        payload.update(
+            _build_user_todo_notification(
+                prepared.user_todo_summary,
+                state=route.state,
+                waiting_on=str(prepared.item.get("waiting_on") or ""),
+                repeat_notification_required=(
+                    route.heartbeat_recommendation.get(
+                        "repeat_notification_required"
+                    )
+                    is True
+                ),
+                repeat_notification_reason=route.heartbeat_recommendation.get(
+                    "reason"
+                ),
+            )
+        )
+    payload = _apply_scoped_user_gate_fallback_projection(
+        payload,
+        fallback=prepared.scoped_user_gate_fallback,
+        replan_decision_allowed=route.replan_decision_allowed,
+    )
+    payload["requires_user_action"] = bool(
+        route.state == "operator_gate"
+        or payload.get("notify_user_on_gate") is True
+        or payload.get("notify_user_on_open_todo") is True
+        or payload.get("notify_user_on_capability_gate") is True
+    )
+    _attach_truthy_fields(
+        payload,
+        agent_todo_summary=(
+            compact_quota_todo_summary_for_payload(prepared.agent_todo_summary)
+            if prepared.agent_todo_summary
+            else None
+        ),
+        blocked_priority_fallback=prepared.blocked_priority_fallback,
+    )
+    attention_queue = (
+        prepared.status_payload.get("attention_queue")
+        if isinstance(prepared.status_payload.get("attention_queue"), dict)
+        else {}
+    )
+    _attach_truthy_fields(
+        payload,
+        autonomous_backlog_candidates=_compact_autonomous_candidate_context(
+            attention_queue.get("autonomous_backlog_candidates"),
+            goal_id=prepared.safe_goal_id,
+        ),
+        autonomous_monitor_candidates=_compact_autonomous_candidate_context(
+            attention_queue.get("autonomous_monitor_candidates"),
+            goal_id=prepared.safe_goal_id,
+        ),
+    )
+    _attach_quota_supporting_projections(
+        payload,
+        status_payload=prepared.status_payload,
+        item=prepared.item,
+        project_asset=prepared.project_asset,
+        goal_id=prepared.safe_goal_id,
+        selected_recommended_action=route.selected_recommended_action,
+        state=route.state,
+        user_todo_summary=prepared.user_todo_summary,
+        should_run=route.should_run,
+        state_action_projection_warning=route.state_action_projection_warning,
+        next_action_warning=route.next_action_warning,
+        replan_obligation=prepared.replan_obligation,
+    )
+    _apply_agent_monitor_only_precedence(
+        payload,
+        monitor_only=prepared.agent_monitor_only,
+        inbox_reply_due=prepared.inbox_reply_due,
+    )
+    required_reads = _quota_required_reads(payload)
+    if required_reads:
+        payload["required_reads"] = required_reads
+        if isinstance(payload.get("autonomous_replan_obligation"), dict):
+            payload["autonomous_replan_obligation"] = {
+                **payload["autonomous_replan_obligation"],
+                "required_reads": required_reads,
+            }
+    payload["automation_liveness"] = build_automation_liveness(payload)
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        available_capabilities=prepared.effective_available_capabilities,
+        scheduler_execution_context=prepared.resolved_scheduler_context,
+    )
+    payload["scheduler_hint"] = _scheduler_hint(
+        payload,
+        include_detail=prepared.include_scheduler_detail,
+        available_capabilities=prepared.effective_available_capabilities,
+        codex_app_scheduler_state=(
+            _load_codex_app_scheduler_state(
+                prepared.status_payload,
+                goal_id=prepared.safe_goal_id,
+                agent_id=quota_decision_agent_id(payload)
+                or prepared.requested_agent_id,
+            )
+            if prepared.resolved_scheduler_context.ok
+            and prepared.resolved_scheduler_context.context is not None
+            and prepared.resolved_scheduler_context.context.codex_app_applicable
+            else None
+        ),
+        codex_app_current_rrule=prepared.codex_app_current_rrule,
+        scheduler_execution_context=prepared.resolved_scheduler_context,
+    )
+    finalize_user_gate_notification_cooldown(
+        payload,
+        available_capabilities=prepared.effective_available_capabilities,
+        scheduler_execution_context=prepared.resolved_scheduler_context,
+    )
+    payload["protocol_action_packet"] = build_protocol_action_packet(payload)
+    return payload
+
+
+def build_quota_should_run(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    agent_id: str | None = None,
+    available_capabilities: Any = None,
+    include_scheduler_detail: bool = False,
+    codex_app_current_rrule: Any = None,
+    scheduler_execution_context: (
+        Mapping[str, Any] | SchedulerExecutionContextResolution | None
+    ) = None,
+    operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    safe_goal_id = str(goal_id or "").strip()
+    resolved_scheduler_context = resolve_scheduler_execution_context(
+        scheduler_execution_context
+    )
+    registry_goal = _registry_goal_by_id(status_payload).get(safe_goal_id) or {}
+    plan, goal_health_ok = _build_quota_plan_for_goal(
+        status_payload,
+        goal_id=safe_goal_id,
+    )
+    item = next(
+        (
+            candidate
+            for candidate in _quota_plan_items(plan)
+            if candidate.get("goal_id") == safe_goal_id
+        ),
+        None,
+    )
+    health_items = (
+        plan.get("health_items")
+        if isinstance(plan.get("health_items"), list)
+        else []
+    )
+    health_item = next(
+        (
+            candidate
+            for candidate in health_items
+            if isinstance(candidate, dict) and candidate.get("goal_id") == safe_goal_id
+        ),
+        None,
+    )
+    if item:
+        prepared = _prepare_quota_should_run_item(
+            status_payload,
+            safe_goal_id=safe_goal_id,
+            requested_agent_id=agent_id,
+            available_capabilities=available_capabilities,
+            include_scheduler_detail=include_scheduler_detail,
+            codex_app_current_rrule=codex_app_current_rrule,
+            resolved_scheduler_context=resolved_scheduler_context,
+            operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+            registry_goal=registry_goal,
+            plan=plan,
+            goal_health_ok=goal_health_ok,
+            item=item,
+            health_items=health_items,
+        )
+        return _build_quota_should_run_payload(
+            prepared,
+            _resolve_quota_should_run_route(prepared),
+        )
     if health_item:
         return {
             "ok": False,
@@ -2447,7 +2502,10 @@ def build_quota_should_run(
             "goal_id": safe_goal_id,
             "decision": "skip",
             "should_run": False,
-            "reason": str(health_item.get("recommended_action") or "health item blocks automatic compute"),
+            "reason": str(
+                health_item.get("recommended_action")
+                or "health item blocks automatic compute"
+            ),
             "state": "blocked_health",
             "waiting_on": health_item.get("waiting_on"),
             "status": health_item.get("status"),
@@ -2455,7 +2513,6 @@ def build_quota_should_run(
             "recommended_action": health_item.get("recommended_action"),
             "plan_summary": plan.get("summary"),
         }
-
     return {
         "ok": False,
         "mode": "should-run",
@@ -2467,7 +2524,9 @@ def build_quota_should_run(
         "waiting_on": None,
         "status": "goal_not_found",
         "source": "quota",
-        "recommended_action": "run `loopx registry` and connect or sync the goal before spending compute",
+        "recommended_action": (
+            "run `loopx registry` and connect or sync the goal before spending compute"
+        ),
         "plan_summary": plan.get("summary"),
     }
 
@@ -2478,6 +2537,7 @@ def build_quota_slot_preview(
     goal_id: str,
     slots: int = 1,
     agent_id: str | None = None,
+    workspace_path: Path | None = None,
     available_capabilities: Any = None, operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
@@ -2492,6 +2552,7 @@ def build_quota_slot_preview(
         goal_id=safe_goal_id,
         slots=slots,
         agent_id=agent_id,
+        workspace_path=workspace_path,
         before=before,
         after_decision=lambda after_status: build_quota_should_run(
             after_status,
@@ -2697,6 +2758,7 @@ def spend_quota_slot(
     execute: bool = False,
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
     agent_id: str | None = None,
+    workspace_path: Path | None = None,
     available_capabilities: Any = None, operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
@@ -2705,6 +2767,7 @@ def spend_quota_slot(
         goal_id=safe_goal_id,
         slots=slots,
         agent_id=agent_id,
+        workspace_path=workspace_path,
         available_capabilities=available_capabilities, operator_inbox_urgency_projector=operator_inbox_urgency_projector,
     )
     if not preview.get("ok"):

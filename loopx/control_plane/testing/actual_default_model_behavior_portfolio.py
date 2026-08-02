@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 from ...bootstrap_command_pack import build_start_goal_guided_packet
+from ..quota.cli_projection import compact_quota_should_run_cli_payload
 from ..quota.turn_envelope import quota_action_signature_document
 from ..work_items.interaction_contract import build_interaction_contract
 from .control_plane_composition_scenarios import (
     build_control_plane_composition_scenario_sources,
 )
 from .model_behavior_qualification import (
+    MODEL_BEHAVIOR_HARD_INVARIANT_FIELDS,
     ModelBehaviorActor,
     _actor_failure_code,
     build_model_behavior_actor_request,
@@ -41,6 +44,10 @@ ACTUAL_DEFAULT_MODEL_BEHAVIOR_CATALOG_SCHEMA_VERSION = (
 ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS = 2
 ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_GOAL_ID = "portfolio-goal"
 ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID = "codex-portfolio"
+ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET = 40_000
+ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_SCHEMA_VERSION = (
+    "actual_default_model_behavior_contrast_v0"
+)
 
 
 @dataclass(frozen=True)
@@ -51,6 +58,16 @@ class _ScenarioSpec:
     expected_route: str
     scenario_family: str = "core_contract"
     composition_dimensions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ContrastSpec:
+    contrast_id: str
+    contrast_kind: str
+    left_scenario_id: str
+    right_scenario_id: str
+    must_match_fields: tuple[str, ...]
+    must_differ_fields: tuple[str, ...] = ()
 
 
 _SCENARIOS = (
@@ -121,6 +138,34 @@ _SCENARIOS = (
         ("capability_gate", "monitor_schedule", "fallback", "selected_action"),
     ),
     _ScenarioSpec(
+        "turn_quota_hot_path_compaction_regression",
+        "turn",
+        None,
+        "execute",
+        "quota_cli_compaction_regression",
+        (
+            "json_budget",
+            "source_semantics",
+            "model_route",
+        ),
+    ),
+    _ScenarioSpec(
+        "turn_quota_hot_path_selected_todo_invariance",
+        "turn",
+        None,
+        "execute",
+        "quota_cli_compaction_contrast",
+        ("selected_todo", "omitted_diagnostics", "invariance"),
+    ),
+    _ScenarioSpec(
+        "turn_quota_hot_path_human_gate_invariance",
+        "turn",
+        None,
+        "ask_user",
+        "quota_cli_compaction_contrast",
+        ("blocking_user_gate", "omitted_diagnostics", "invariance"),
+    ),
+    _ScenarioSpec(
         "onboarding_healthy_continue",
         "onboarding",
         "postcondition",
@@ -135,9 +180,66 @@ _SCENARIOS = (
 )
 ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT = len(_SCENARIOS)
 
+_HARD_INVARIANT_FIELDS = tuple(MODEL_BEHAVIOR_HARD_INVARIANT_FIELDS)
+_CONTRASTS = (
+    _ContrastSpec(
+        "selected_todo_survives_omitted_diagnostics",
+        "invariance",
+        "turn_selected_todo",
+        "turn_quota_hot_path_selected_todo_invariance",
+        _HARD_INVARIANT_FIELDS,
+    ),
+    _ContrastSpec(
+        "blocking_gate_survives_omitted_diagnostics",
+        "invariance",
+        "turn_human_gate",
+        "turn_quota_hot_path_human_gate_invariance",
+        _HARD_INVARIANT_FIELDS,
+    ),
+    _ContrastSpec(
+        "blocking_gate_vs_non_blocking_notice",
+        "sensitivity",
+        "turn_human_gate",
+        "turn_scoped_gate_successor_replan",
+        (
+            "user_action_required",
+            "quiet_noop_allowed",
+            "external_write_requested",
+        ),
+        (
+            "decision",
+            "selected_todo_id",
+            "must_attempt_work",
+            "delivery_allowed",
+        ),
+    ),
+    _ContrastSpec(
+        "selected_work_vs_required_vision_replan",
+        "sensitivity",
+        "turn_selected_todo",
+        "turn_required_vision_replan",
+        (
+            "decision",
+            "user_action_required",
+            "must_attempt_work",
+            "delivery_allowed",
+            "quiet_noop_allowed",
+            "external_write_requested",
+        ),
+        ("selected_todo_id",),
+    ),
+)
+ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_COUNT = len(_CONTRASTS)
+
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _pretty_json_size(value: Any) -> int:
+    return len(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+    )
 
 
 def _digest(value: Any) -> str:
@@ -168,6 +270,17 @@ def actual_default_model_behavior_scenario_catalog() -> dict[str, Any]:
                 },
             }
             for spec in _SCENARIOS
+        ],
+        "contrasts": [
+            {
+                "contrast_id": spec.contrast_id,
+                "contrast_kind": spec.contrast_kind,
+                "left_scenario_id": spec.left_scenario_id,
+                "right_scenario_id": spec.right_scenario_id,
+                "must_match_fields": list(spec.must_match_fields),
+                "must_differ_fields": list(spec.must_differ_fields),
+            }
+            for spec in _CONTRASTS
         ],
     }
 
@@ -330,10 +443,138 @@ def _turn_scenario_source(
     return payload
 
 
-def build_actual_default_model_behavior_scenario_packets(
+def build_quota_hot_path_compaction_regression_source() -> dict[str, Any]:
+    """Build a coherent over-budget turn whose cold diagnostics are removable."""
+
+    payload = _turn_scenario_source(human_gate=False)
+    selected_todo = dict(payload["selected_todo"])
+    selected_todo.update(
+        {
+            "todo_id": "todo_c0ffee123456",
+            "text": "Implement the bounded hot-path qualification slice.",
+        }
+    )
+    payload["selected_todo"] = selected_todo
+    payload["recommended_action"] = selected_todo["text"]
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        available_capabilities=["network", "shell", "filesystem_write"],
+    )
+
+    repeated_detail = "Bounded public-safe candidate diagnostic. " * 28
+
+    def candidate(kind: str, index: int) -> dict[str, Any]:
+        return {
+            "todo_id": f"todo_{index:012x}",
+            "status": "open",
+            "priority": "P1",
+            "task_class": "advancement_task",
+            "action_kind": f"regression_{kind}",
+            "claimed_by": ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID,
+            "text": f"{kind} candidate {index}. {repeated_detail}",
+        }
+
+    runnable_candidates = [candidate("runnable", index) for index in range(1, 25)]
+    blocked_candidates = [candidate("blocked", index) for index in range(25, 41)]
+    resolution_bindings = [candidate("binding", index) for index in range(41, 57)]
+    payload["capability_gate"] = {
+        "schema_version": "capability_gate_v0",
+        "required": ["shell", "filesystem_write"],
+        "available": ["network", "shell", "filesystem_write"],
+        "missing": [],
+        "action": "run",
+        "decision_owner": "agent",
+        "candidate_order_policy": "claim_then_profile_then_priority",
+        "runnable_count": len(runnable_candidates),
+        "runnable_candidates": runnable_candidates,
+        "blocked_candidates": blocked_candidates,
+        "resolution_bindings": resolution_bindings,
+    }
+
+    lane_title = "Implement the bounded hot-path qualification slice."
+    payload["agent_lane_next_action"] = {
+        **selected_todo,
+        "title": lane_title,
+        "text": f"[P1] {lane_title}",
+    }
+    payload["active_state_next_action"] = (
+        "Preserve the durable quality route while the peer lane remains independent."
+    )
+    payload["latest_run_recommended_action"] = selected_todo["text"]
+    payload["next_action_projection_warning"] = {
+        "schema_version": "next_action_projection_warning_v0",
+        "kind": "next_action_projection_mismatch",
+        "severity": "info",
+        "requires_state_writeback": False,
+        "active_state_next_action": payload["active_state_next_action"],
+        "latest_run_recommended_action": payload["latest_run_recommended_action"],
+        "agent_lane_next_action": payload["agent_lane_next_action"]["text"],
+        "reason": "The agent lane is intentionally narrower than the durable route.",
+        "recommended_action": selected_todo["text"],
+    }
+    peer_actions = [candidate("peer", index) for index in range(57, 81)]
+    payload["goal_route_hint"] = {
+        "schema_version": "goal_route_hint_v0",
+        "route_decision": "run_current_agent_lane",
+        "counts": {"other_agent_claimed_advancement_count": len(peer_actions)},
+        "other_agent_next_actions": peer_actions,
+    }
+    return payload
+
+
+def _build_quota_hot_path_selected_todo_invariance_source() -> dict[str, Any]:
+    payload = build_quota_hot_path_compaction_regression_source()
+    selected_todo = dict(payload["selected_todo"])
+    selected_todo.update(
+        {
+            "todo_id": "todo_portfolio001",
+            "text": "Implement one bounded public-safe slice.",
+        }
+    )
+    payload["selected_todo"] = selected_todo
+    payload["recommended_action"] = selected_todo["text"]
+    payload["latest_run_recommended_action"] = selected_todo["text"]
+    payload["agent_lane_next_action"] = {
+        **selected_todo,
+        "title": selected_todo["text"],
+        "text": f"[P1] {selected_todo['text']}",
+    }
+    warning = dict(payload["next_action_projection_warning"])
+    warning["latest_run_recommended_action"] = selected_todo["text"]
+    warning["agent_lane_next_action"] = payload["agent_lane_next_action"]["text"]
+    warning["recommended_action"] = selected_todo["text"]
+    payload["next_action_projection_warning"] = warning
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        available_capabilities=["network", "shell", "filesystem_write"],
+    )
+    return payload
+
+
+def _build_quota_hot_path_human_gate_invariance_source() -> dict[str, Any]:
+    payload = _turn_scenario_source(human_gate=True)
+    noisy_source = build_quota_hot_path_compaction_regression_source()
+    capability_gate = deepcopy(noisy_source["capability_gate"])
+    capability_gate.update(
+        {
+            "required": [],
+            "available": ["network"],
+            "missing": [],
+            "action": "operator_gate",
+            "decision_owner": "user",
+        }
+    )
+    payload["capability_gate"] = capability_gate
+    goal_route_hint = deepcopy(noisy_source["goal_route_hint"])
+    goal_route_hint["route_decision"] = "wait_for_blocking_user_gate"
+    payload["goal_route_hint"] = goal_route_hint
+    return payload
+
+
+def _build_actual_default_model_behavior_scenario_sources(
     root: Path,
 ) -> dict[str, dict[str, Any]]:
-    """Build the default packets used by Codex App automation qualification."""
+    """Build authoritative pre-projection sources for behavior qualification."""
 
     packets = _entry_scenario_packets(root)
     packets.update(
@@ -348,6 +589,15 @@ def build_actual_default_model_behavior_scenario_packets(
                 continuation_policy="same_agent_non_delivery",
             ),
             "turn_human_gate": _turn_scenario_source(human_gate=True),
+            "turn_quota_hot_path_compaction_regression": (
+                build_quota_hot_path_compaction_regression_source()
+            ),
+            "turn_quota_hot_path_selected_todo_invariance": (
+                _build_quota_hot_path_selected_todo_invariance_source()
+            ),
+            "turn_quota_hot_path_human_gate_invariance": (
+                _build_quota_hot_path_human_gate_invariance_source()
+            ),
             "onboarding_healthy_continue": build_onboarding_postcondition_observation(
                 check_warning_codes=[],
                 executable_todo_count=1,
@@ -372,6 +622,37 @@ def build_actual_default_model_behavior_scenario_packets(
             agent_id=ACTUAL_DEFAULT_MODEL_BEHAVIOR_FIXTURE_AGENT_ID,
         )
     )
+    return packets
+
+
+def _compact_actual_default_model_behavior_scenario_sources(
+    sources: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {
+        scenario_id: (
+            compact_quota_should_run_cli_payload(deepcopy(dict(packet)))
+            if packet.get("mode") == "should-run"
+            else deepcopy(dict(packet))
+        )
+        for scenario_id, packet in sources.items()
+    }
+
+
+def build_actual_default_model_behavior_scenario_inputs(
+    root: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Build paired source and actual-default actor packets from one fixture."""
+
+    sources = _build_actual_default_model_behavior_scenario_sources(root)
+    return sources, _compact_actual_default_model_behavior_scenario_sources(sources)
+
+
+def build_actual_default_model_behavior_scenario_packets(
+    root: Path,
+) -> dict[str, dict[str, Any]]:
+    """Build the default packets used by Codex App automation qualification."""
+
+    _, packets = build_actual_default_model_behavior_scenario_inputs(root)
     return packets
 
 
@@ -413,27 +694,59 @@ def _turn_expected_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
     return contract
 
 
+def _validate_quota_hot_path_compaction_regression(
+    source: Mapping[str, Any],
+    packet: Mapping[str, Any],
+    contract: Mapping[str, Any],
+    *,
+    expected_selected_todo_id: str | None,
+) -> None:
+    if _pretty_json_size(source) <= ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET:
+        raise ValueError("compaction-regression source must exceed the hot-path budget")
+    if _pretty_json_size(packet) > ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET:
+        raise ValueError("compaction-regression packet exceeds the hot-path budget")
+    if contract.get("selected_todo_id") != expected_selected_todo_id:
+        raise ValueError("compaction regression must preserve the selected todo")
+
+
 def _scenario_contract(
     spec: _ScenarioSpec,
-    packet: Mapping[str, Any],
+    source_packet: Mapping[str, Any],
+    actor_packet: Mapping[str, Any],
 ) -> dict[str, Any]:
     if spec.actor_kind == "turn":
         build_model_behavior_actor_request(
-            packet,
+            actor_packet,
             qualification_id=f"portfolio-preflight-{spec.scenario_id}",
             arm="full_packet",
             semantic_contract_required=False,
         )
-        contract = _turn_expected_contract(packet)
+        contract = _turn_expected_contract(source_packet)
+        if _turn_expected_contract(actor_packet) != contract:
+            raise ValueError(
+                f"scenario {spec.scenario_id} actor packet diverges "
+                "from source action contract"
+            )
+        if model_behavior_semantic_contract_from_packet(
+            actor_packet,
+            arm="full_packet",
+        ) != model_behavior_semantic_contract_from_packet(
+            source_packet,
+            arm="full_packet",
+        ):
+            raise ValueError(
+                f"scenario {spec.scenario_id} actor packet diverges "
+                "from source semantic contract"
+            )
     else:
         if spec.phase == "entry":
-            _validate_actual_default_projection(packet)
+            _validate_actual_default_projection(actor_packet)
         build_onboarding_model_behavior_actor_request(
-            packet,
+            actor_packet,
             qualification_id=f"portfolio-preflight-{spec.scenario_id}",
             phase=str(spec.phase),
         )
-        contract = _semantic_contract(packet, phase=str(spec.phase))
+        contract = _semantic_contract(source_packet, phase=str(spec.phase))
         violations = _behavior_contract_violations(contract, phase=str(spec.phase))
         if violations:
             raise OnboardingActualBehaviorValidationError(
@@ -463,7 +776,7 @@ def _scenario_contract(
         "turn_same_agent_continuation",
     }:
         peer_route = model_behavior_semantic_contract_from_packet(
-            packet,
+            source_packet,
             arm="full_packet",
         )["peer_route"]
         if not peer_route.get("agent_id"):
@@ -489,7 +802,7 @@ def _scenario_contract(
             raise ValueError("human-gate scenario violates final gate precedence")
     if spec.scenario_id == "turn_required_vision_replan":
         semantics = model_behavior_semantic_contract_from_packet(
-            packet,
+            source_packet,
             arm="full_packet",
         )
         vision = semantics["vision_continuation"]
@@ -513,7 +826,7 @@ def _scenario_contract(
                 "required-vision scenario must remain immediately runnable"
             )
     if spec.scenario_id == "turn_scoped_gate_successor_replan":
-        signature = quota_action_signature_document(packet)
+        signature = quota_action_signature_document(source_packet)
         action = dict(signature.get("action") or {})
         user = dict(signature.get("user") or {})
         selected = dict(action.get("selected_todo") or {})
@@ -528,7 +841,7 @@ def _scenario_contract(
                 "scoped-gate scenario must notify without blocking successor replan"
             )
         semantics = model_behavior_semantic_contract_from_packet(
-            packet,
+            source_packet,
             arm="full_packet",
         )
         if semantics["gate_or_stop"].get("interaction_mode") != (
@@ -538,7 +851,7 @@ def _scenario_contract(
         if semantics["scheduler_action"].get("action") != "run_now":
             raise ValueError("scoped-gate fallback must remain immediately runnable")
     if spec.scenario_id == "turn_capability_monitor_repair":
-        signature = quota_action_signature_document(packet)
+        signature = quota_action_signature_document(source_packet)
         capsule = dict(signature.get("contract_capsule") or {})
         lane = dict(capsule.get("work_lane_contract") or {})
         fallback = dict(capsule.get("capability_monitor_fallback") or {})
@@ -556,7 +869,68 @@ def _scenario_contract(
             )
         if "todo_portfolio_monitor_schedule" not in str(action.get("primary_action")):
             raise ValueError("primary action must name the selected monitor repair")
+    compaction_selected_todos = {
+        "turn_quota_hot_path_compaction_regression": "todo_c0ffee123456",
+        "turn_quota_hot_path_selected_todo_invariance": "todo_portfolio001",
+        "turn_quota_hot_path_human_gate_invariance": None,
+    }
+    if spec.scenario_id in compaction_selected_todos:
+        _validate_quota_hot_path_compaction_regression(
+            source_packet,
+            actor_packet,
+            contract,
+            expected_selected_todo_id=compaction_selected_todos[spec.scenario_id],
+        )
     return contract
+
+
+def _contrast_relation_failures(
+    spec: _ContrastSpec,
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+) -> list[str]:
+    failures = [
+        f"expected_match:{field}"
+        for field in spec.must_match_fields
+        if left.get(field) != right.get(field)
+    ]
+    failures.extend(
+        f"expected_difference:{field}"
+        for field in spec.must_differ_fields
+        if left.get(field) == right.get(field)
+    )
+    return failures
+
+
+def _validate_contrast_source_contracts(
+    contracts: Mapping[str, Mapping[str, Any]],
+) -> None:
+    scenario_ids = set(contracts)
+    allowed_fields = set(_HARD_INVARIANT_FIELDS)
+    for spec in _CONTRASTS:
+        if spec.contrast_kind not in {"invariance", "sensitivity"}:
+            raise ValueError(f"contrast {spec.contrast_id} has an invalid kind")
+        if spec.left_scenario_id not in scenario_ids or spec.right_scenario_id not in (
+            scenario_ids
+        ):
+            raise ValueError(
+                f"contrast {spec.contrast_id} references an unknown scenario"
+            )
+        relation_fields = set(spec.must_match_fields) | set(spec.must_differ_fields)
+        if not relation_fields or not relation_fields <= allowed_fields:
+            raise ValueError(f"contrast {spec.contrast_id} has invalid relation fields")
+        if set(spec.must_match_fields) & set(spec.must_differ_fields):
+            raise ValueError(f"contrast {spec.contrast_id} has overlapping fields")
+        failures = _contrast_relation_failures(
+            spec,
+            contracts[spec.left_scenario_id],
+            contracts[spec.right_scenario_id],
+        )
+        if failures:
+            raise ValueError(
+                f"contrast {spec.contrast_id} source relation is invalid: "
+                + ", ".join(failures)
+            )
 
 
 def _receipt_alignment(
@@ -590,11 +964,12 @@ def _scenario_result(
     qualification_id: str,
     turn_actor: ModelBehaviorActor,
     onboarding_actor: OnboardingModelBehaviorActor,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[dict[str, Any], bool, list[dict[str, Any]]]:
     receipt_digests: list[str] = []
     observed_routes: list[str] = []
     failure_codes: list[str] = []
     actor_error = False
+    observations: list[dict[str, Any]] = []
     for repeat_index in range(ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS):
         run_id = f"{qualification_id}:{spec.scenario_id}:r{repeat_index + 1}"
         try:
@@ -621,6 +996,9 @@ def _scenario_result(
             break
         aligned, mismatches = _receipt_alignment(spec, receipt, expected)
         receipt_digests.append(_digest(dict(receipt)))
+        observations.append(
+            {field: receipt.get(field) for field in _HARD_INVARIANT_FIELDS}
+        )
         if observed_route not in observed_routes:
             observed_routes.append(observed_route)
         if not aligned:
@@ -644,12 +1022,60 @@ def _scenario_result(
             "receipt_digests": receipt_digests,
         },
         actor_error,
+        observations,
     )
+
+
+def _contrast_result(
+    spec: _ContrastSpec,
+    observations: Mapping[str, list[Mapping[str, Any]]],
+) -> dict[str, Any]:
+    left = observations.get(spec.left_scenario_id, [])
+    right = observations.get(spec.right_scenario_id, [])
+    compared = min(len(left), len(right))
+    failure_codes: list[str] = []
+    observation_digests: list[str] = []
+    if compared != ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS:
+        failure_codes.append("contrast_scenarios_incomplete")
+    for repeat_index in range(compared):
+        failures = _contrast_relation_failures(
+            spec,
+            left[repeat_index],
+            right[repeat_index],
+        )
+        failure_codes.extend(failures)
+        observation_digests.append(
+            _digest(
+                {
+                    "left": dict(left[repeat_index]),
+                    "right": dict(right[repeat_index]),
+                }
+            )
+        )
+    passed = bool(
+        not failure_codes
+        and compared == ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS
+    )
+    return {
+        "schema_version": ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_SCHEMA_VERSION,
+        "contrast_id": spec.contrast_id,
+        "contrast_kind": spec.contrast_kind,
+        "left_scenario_id": spec.left_scenario_id,
+        "right_scenario_id": spec.right_scenario_id,
+        "must_match_fields": list(spec.must_match_fields),
+        "must_differ_fields": list(spec.must_differ_fields),
+        "status": "passed" if passed else "failed",
+        "repeats_required": ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS,
+        "repeats_compared": compared,
+        "failure_codes": sorted(set(failure_codes)),
+        "observation_digests": observation_digests,
+    }
 
 
 def run_actual_default_model_behavior_portfolio(
     scenario_packets: Mapping[str, Mapping[str, Any]],
     *,
+    scenario_sources: Mapping[str, Mapping[str, Any]],
     qualification_id: str,
     turn_actor: ModelBehaviorActor,
     onboarding_actor: OnboardingModelBehaviorActor,
@@ -663,13 +1089,27 @@ def run_actual_default_model_behavior_portfolio(
         raise ValueError(
             f"scenario packets must match the catalog; missing={missing}, unknown={unknown}"
         )
+    source_ids = set(scenario_sources)
+    if source_ids != expected_ids:
+        missing = sorted(expected_ids - source_ids)
+        unknown = sorted(source_ids - expected_ids)
+        raise ValueError(
+            "scenario sources must match the catalog; "
+            f"missing={missing}, unknown={unknown}"
+        )
 
     catalog = actual_default_model_behavior_scenario_catalog()
     contracts = {
-        spec.scenario_id: _scenario_contract(spec, scenario_packets[spec.scenario_id])
+        spec.scenario_id: _scenario_contract(
+            spec,
+            scenario_sources[spec.scenario_id],
+            scenario_packets[spec.scenario_id],
+        )
         for spec in _SCENARIOS
     }
+    _validate_contrast_source_contracts(contracts)
     results: list[dict[str, Any]] = []
+    observations: dict[str, list[dict[str, Any]]] = {}
     actor_call_count = 0
     aborted = False
     for spec in _SCENARIOS:
@@ -689,7 +1129,7 @@ def run_actual_default_model_behavior_portfolio(
                 }
             )
             continue
-        result, actor_error = _scenario_result(
+        result, actor_error, scenario_observations = _scenario_result(
             spec,
             scenario_packets[spec.scenario_id],
             expected=contracts[spec.scenario_id],
@@ -702,22 +1142,41 @@ def run_actual_default_model_behavior_portfolio(
             actor_call_count += 1
             aborted = True
         results.append(result)
+        observations[spec.scenario_id] = scenario_observations
 
-    passed = all(result["status"] == "passed" for result in results)
+    contrast_results = [
+        _contrast_result(spec, observations)
+        for spec in _CONTRASTS
+    ]
+    passed = all(result["status"] == "passed" for result in results) and all(
+        result["status"] == "passed" for result in contrast_results
+    )
+    scenario_failure_count = sum(
+        result["status"] == "failed" for result in results
+    )
+    contrast_failure_count = sum(
+        result["status"] == "failed" for result in contrast_results
+    )
+    skip_count = sum(result["status"] == "not_run" for result in results)
     return {
         "schema_version": ACTUAL_DEFAULT_MODEL_BEHAVIOR_PORTFOLIO_SCHEMA_VERSION,
         "qualification_id": qualification_id,
         "topology": "actual_default_one_arm",
         "scenario_catalog_digest": _digest(catalog),
         "scenario_count": ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT,
+        "contrast_count": ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_COUNT,
         "actor_call_budget": (
             ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT
             * ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS
         ),
         "actor_call_count": actor_call_count,
+        "failure_count": scenario_failure_count + contrast_failure_count,
+        "skip_count": skip_count,
+        "contrast_failure_count": contrast_failure_count,
         "qualification_passed": passed,
         "automatic_release_promotion_allowed": False,
         "scenarios": results,
+        "contrasts": contrast_results,
         "boundary": {
             "tools_enabled": False,
             "raw_packets_persisted": False,

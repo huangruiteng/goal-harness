@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run only non-browser checks for CI environments without Playwright/Chrome.",
     )
+    parser.add_argument(
+        "--require-dependencies",
+        action="store_true",
+        help="Fail instead of reporting a skip when dashboard npm dependencies are unavailable.",
+    )
     return parser.parse_args()
 
 
@@ -75,12 +80,16 @@ def ensure_dashboard_dependencies(env: dict[str, str]) -> bool:
     return True
 
 
+def missing_dependency_exit_code(*, require_dependencies: bool) -> int:
+    return 1 if require_dependencies else 0
+
+
 def main() -> int:
     args = parse_args()
     env = build_env()
     if not ensure_dashboard_dependencies(env):
         print("dashboard-demo-readiness-smoke skipped: dashboard dependencies unavailable")
-        return 0
+        return missing_dependency_exit_code(require_dependencies=args.require_dependencies)
     commands = list(BASE_COMMANDS)
     if not args.skip_browser:
         commands.extend(BROWSER_COMMANDS)

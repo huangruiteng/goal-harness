@@ -209,6 +209,12 @@ def test_assembler_rebases_authority_recall_and_cursor_without_raw_capture() -> 
     serialized = json.dumps(packet, sort_keys=True)
 
     assert packet["schema_version"] == "decision_context_assembly_v0"
+    assert packet["source_coverage"]["schema_version"] == (
+        "decision_source_coverage_v0"
+    )
+    assert packet["source_coverage"]["status"] == "complete"
+    assert packet["source_coverage"]["complete"] is True
+    assert packet["source_coverage"]["incomplete_required_source_ids"] == []
     assert (
         packet["evidence_packet"]["recalled_claims"][0]["exact_read_verified"] is True
     )
@@ -314,6 +320,23 @@ def test_source_failure_fails_open_and_preserves_cursor() -> None:
     serialized = json.dumps(packet, sort_keys=True)
 
     assert packet["source_scan_receipts"][0]["status"] == "unavailable"
+    assert packet["source_coverage"]["status"] == "incomplete"
+    assert packet["source_coverage"]["complete"] is False
+    assert packet["source_coverage"]["incomplete_required_source_ids"] == [
+        "source:owner"
+    ]
+    assert packet["source_coverage"]["priority_rows"][0] == {
+        "priority": "p0",
+        "source_count": 1,
+        "complete_count": 0,
+        "exact_read_incomplete_count": 0,
+        "status_counts": {
+            "completed": 0,
+            "no_change": 0,
+            "failed": 0,
+            "unavailable": 1,
+        },
+    }
     assert packet["context_retrieval_receipt"]["status"] == "unavailable"
     assert packet["cursor_checkpoint"]["sources"][0]["disposition"] == "preserve"
     assert assembly.proposed_cursors == {}
@@ -416,6 +439,10 @@ def test_exact_read_failure_does_not_advance_cursor() -> None:
     packet = assembly.public_packet()
     assert packet["source_scan_receipts"][0]["changed_count"] == 1
     assert packet["source_scan_receipts"][0]["exact_read_count"] == 0
+    assert packet["source_coverage"]["status"] == "incomplete"
+    assert packet["source_coverage"]["priority_rows"][0][
+        "exact_read_incomplete_count"
+    ] == 1
     assert packet["cursor_checkpoint"]["sources"][0]["disposition"] == "preserve"
     assert assembly.proposed_cursors == {}
 
@@ -434,6 +461,7 @@ def test_no_change_scan_can_checkpoint_after_validated_writeback() -> None:
 
     packet = assembly.public_packet()
     assert packet["source_scan_receipts"][0]["status"] == "no_change"
+    assert packet["source_coverage"]["status"] == "complete"
     assert packet["cursor_checkpoint"]["sources"][0]["disposition"] == (
         "ready_after_writeback"
     )

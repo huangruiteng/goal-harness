@@ -1,15 +1,32 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+PROMOTION_READINESS_CLASSIFICATION = "canary_promotion_readiness_smoke_group"
+PROMOTION_READINESS_DELIVERY_BATCH_SCALE = "multi_surface"
+PROMOTION_READINESS_DELIVERY_OUTCOME = "surface_only"
+PROMOTION_READINESS_RUNTIME_DIR = Path("release") / "promotion-readiness" / "runs"
+PROMOTION_READINESS_RUNTIME_INDEX = PROMOTION_READINESS_RUNTIME_DIR / "index.jsonl"
+PROMOTION_READINESS_RECOMMENDED_ACTION = (
+    "Canary promotion-readiness smoke passed; promotion may proceed after "
+    "doctor/status reports fresh evidence."
+)
+PROMOTION_READINESS_RECOMMENDED_ACTION_DASHBOARD_SKIPPED = (
+    "Canary promotion-readiness smoke passed for the installed release boundary; "
+    "dashboard readiness was skipped because apps/presentation/dashboard is not "
+    "shipped in the release snapshot."
+)
 
 PROMOTION_READINESS_PROXY_NOTE = (
-    "canary promotion-readiness projection from append-only run history; exact evidence stays in run artifacts"
+    "canary readiness from runtime ledger or legacy goal history; exact evidence stays "
+    "in append-only artifacts"
 )
-PROMOTION_READINESS_WARNING_MESSAGE = (
-    "promotion readiness evidence is missing, stale, or unknown; run canary readiness smoke"
+PROMOTION_READINESS_WRITEBACK_COMMAND = (
+    "python3 examples/canary/canary-promotion-readiness-smoke.py"
 )
+PROMOTION_READINESS_WARNING_MESSAGE = PROMOTION_READINESS_WRITEBACK_COMMAND
 
 ParseTimestamp = Callable[[Any], Any]
 FreshnessBuilder = Callable[[dict[str, Any]], dict[str, Any]]
@@ -45,11 +62,23 @@ def build_promotion_readiness_summary(
             latest_at = generated_at
             latest = run
 
-    if latest is None and runtime_root is not None:
+    if runtime_root is not None:
         full_scan_latest = latest_promotion_readiness_event(runtime_root)
-        if full_scan_latest.get("available"):
+        full_scan_generated_at = parse_timestamp(full_scan_latest.get("generated_at"))
+        runtime_release_authority = (
+            full_scan_latest.get("source") == "runtime_release_ledger"
+        )
+        if full_scan_latest.get("available") and (
+            runtime_release_authority
+            or latest_at is None
+            or (
+                full_scan_generated_at is not None
+                and full_scan_generated_at > latest_at
+            )
+        ):
             latest = full_scan_latest
-            source = "run_history_full_scan"
+            latest_at = full_scan_generated_at
+            source = str(full_scan_latest.get("source") or "run_history_full_scan")
 
     if latest is None:
         readiness = add_promotion_readiness_freshness(
@@ -69,6 +98,8 @@ def build_promotion_readiness_summary(
                 "available": True,
                 "source": source,
                 "goal_id": latest.get("goal_id"),
+                "evidence_scope": latest.get("evidence_scope"),
+                "dashboard_readiness": latest.get("dashboard_readiness"),
                 "generated_at": latest.get("generated_at"),
                 "classification": latest.get("classification"),
                 "delivery_batch_scale": latest.get("delivery_batch_scale"),
@@ -113,6 +144,7 @@ def promotion_readiness_warning(status_payload: dict[str, Any]) -> dict[str, Any
         "goal_id": readiness.get("goal_id"),
         "generated_at": readiness.get("generated_at"),
         "classification": readiness.get("classification"),
+        "dashboard_readiness": readiness.get("dashboard_readiness"),
         "json_exists": readiness.get("json_exists"),
         "markdown_exists": readiness.get("markdown_exists"),
         "reason": readiness.get("reason"),

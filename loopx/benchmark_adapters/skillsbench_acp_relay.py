@@ -32,6 +32,7 @@ from loopx.benchmark_adapters.skillsbench_remote_bridge import (
     run_skillsbench_remote_command_file_bridge_probe,
 )
 from loopx.benchmark_adapters.skillsbench_turn_runtime import (
+    SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE,
     SkillsBenchTurnAgentResult,
     run_skillsbench_loopx_turn_relay,
 )
@@ -100,6 +101,13 @@ SAFE_LOOPX_GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,120}$")
 CODEX_EXEC_TRANSPORT_RETRY_LIMIT = 1
 CODEX_EXEC_SESSION_ROLLOVER_LIMIT = 1
 CODEX_EXEC_SAME_SESSION_CONTINUATION_LIMIT = 1
+CODEX_EXEC_PROGRESS_HANDOFF_SETTLE_TIMEOUT_SEC = 1.0
+CODEX_EXEC_PROGRESS_VALIDATION_HANDOFF_CATEGORIES = frozenset(
+    {
+        "codex_exec_timeout",
+        "codex_exec_bridge_idle_timeout",
+    }
+)
 
 
 def _loopx_turn_local_session_root(
@@ -493,6 +501,56 @@ def _codex_exec_same_session_continuation_allowed(
         and receipt.get("task_facing_success_count", 0) > 0
         and receipt.get("raw_material_recorded") is False
     )
+
+
+def _codex_exec_progress_validation_handoff_allowed(
+    *,
+    category: str,
+    bridge_summary_path: Path | None,
+    same_session_continuation_scheduled: bool,
+    final_message_present: bool,
+    turn_deadline: float | None,
+) -> bool:
+    turn_deadline_expired = bool(
+        turn_deadline is not None and time.monotonic() >= turn_deadline
+    )
+    if (
+        category not in CODEX_EXEC_PROGRESS_VALIDATION_HANDOFF_CATEGORIES
+        or same_session_continuation_scheduled
+        or final_message_present
+        or bridge_summary_path is None
+        or (
+            turn_deadline_expired
+            and category != "codex_exec_timeout"
+        )
+        or _bridge_summary_has_inflight_operation(bridge_summary_path)
+    ):
+        return False
+    receipt = _bridge_summary_task_progress_receipt(bridge_summary_path)
+    return bool(
+        receipt.get("task_facing_operation_count", 0) > 0
+        and receipt.get("task_facing_success_count", 0) > 0
+        and receipt.get("raw_material_recorded") is False
+    )
+
+
+def _wait_for_bridge_summary_quiescence(
+    bridge_summary_path: Path | None,
+    *,
+    timeout_sec: float = CODEX_EXEC_PROGRESS_HANDOFF_SETTLE_TIMEOUT_SEC,
+    poll_interval_sec: float = 0.05,
+) -> bool:
+    """Let a terminating bridge wrapper finish its final compact record."""
+
+    if bridge_summary_path is None:
+        return False
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    while _bridge_summary_has_inflight_operation(bridge_summary_path):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(max(0.001, poll_interval_sec), remaining))
+    return True
 
 
 def _codex_exec_session_rollover_allowed(
@@ -1134,6 +1192,19 @@ class SkillsBenchLocalAcpRelay:
                                     turn_deadline=_turn_deadline,
                                 )
                             )
+                            validation_handoff_scheduled = (
+                                _bypass_loopx_turn
+                                and self._config.loopx_turn_agent_cli
+                                and _codex_exec_progress_validation_handoff_allowed(
+                                    category="codex_exec_bridge_idle_timeout",
+                                    bridge_summary_path=bridge_summary_path,
+                                    same_session_continuation_scheduled=(
+                                        continuation_scheduled
+                                    ),
+                                    final_message_present=output_path.exists(),
+                                    turn_deadline=_turn_deadline,
+                                )
+                            )
                             self._publish_remote_bridge_agent_operations_trace(
                                 bridge_summary_path=bridge_summary_path,
                             )
@@ -1154,6 +1225,9 @@ class SkillsBenchLocalAcpRelay:
                                 ),
                                 same_session_continuation_scheduled=(
                                     continuation_scheduled
+                                ),
+                                independent_validation_handoff_scheduled=(
+                                    validation_handoff_scheduled
                                 ),
                             )
                             if continuation_scheduled:
@@ -1208,6 +1282,15 @@ class SkillsBenchLocalAcpRelay:
                                     ),
                                 )
                                 return response
+                            if validation_handoff_scheduled:
+                                self._latest_loopx_turn_agent_progress_receipt = (
+                                    _bridge_summary_task_progress_receipt(
+                                        bridge_summary_path
+                                    )
+                                )
+                                return (
+                                    SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE
+                                )
                             return _recoverable_codex_turn_failure_message(
                                 "codex_exec_bridge_idle_timeout"
                             )
@@ -1232,6 +1315,7 @@ class SkillsBenchLocalAcpRelay:
                             )
                         time.sleep(0.2)
             except subprocess.TimeoutExpired:
+                failure_category = "codex_exec_timeout"
                 stdout_text = (
                     stdout_path.read_text(encoding="utf-8", errors="replace")
                     if stdout_path.exists()
@@ -1241,6 +1325,21 @@ class SkillsBenchLocalAcpRelay:
                     stderr_path.read_text(encoding="utf-8", errors="replace")
                     if stderr_path.exists()
                     else ""
+                )
+                validation_handoff_eligible = bool(
+                    _bypass_loopx_turn and self._config.loopx_turn_agent_cli
+                )
+                if validation_handoff_eligible:
+                    _wait_for_bridge_summary_quiescence(bridge_summary_path)
+                validation_handoff_scheduled = bool(
+                    validation_handoff_eligible
+                    and _codex_exec_progress_validation_handoff_allowed(
+                        category=failure_category,
+                        bridge_summary_path=bridge_summary_path,
+                        same_session_continuation_scheduled=False,
+                        final_message_present=output_path.exists(),
+                        turn_deadline=_turn_deadline,
+                    )
                 )
                 if bridge_summary_path is not None:
                     self._publish_remote_bridge_agent_operations_trace(
@@ -1255,8 +1354,17 @@ class SkillsBenchLocalAcpRelay:
                     final_message_bytes=(
                         output_path.stat().st_size if output_path.exists() else 0
                     ),
+                    failure_category=failure_category,
+                    independent_validation_handoff_scheduled=(
+                        validation_handoff_scheduled
+                    ),
                 )
-                return _recoverable_codex_turn_failure_message("codex_exec_timeout")
+                if validation_handoff_scheduled:
+                    self._latest_loopx_turn_agent_progress_receipt = (
+                        _bridge_summary_task_progress_receipt(bridge_summary_path)
+                    )
+                    return SKILLSBENCH_TURN_AGENT_VALIDATION_HANDOFF_RESPONSE
+                return _recoverable_codex_turn_failure_message(failure_category)
             finally:
                 self._terminate_bridge_server_process(bridge_server_proc)
             stdout_text = (
@@ -3401,6 +3509,7 @@ raise SystemExit(proc.returncode)
         session_rollover_scheduled: bool = False,
         same_session_continuation_index: int = 0,
         same_session_continuation_scheduled: bool = False,
+        independent_validation_handoff_scheduled: bool = False,
     ) -> None:
         if not self._config.worker_public_trace_dir:
             return
@@ -3442,6 +3551,9 @@ raise SystemExit(proc.returncode)
                 ),
                 "same_session_continuation_scheduled": bool(
                     same_session_continuation_scheduled
+                ),
+                "independent_validation_handoff_scheduled": bool(
+                    independent_validation_handoff_scheduled
                 ),
                 "returncode": (
                     returncode

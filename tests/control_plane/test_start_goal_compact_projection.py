@@ -4,15 +4,20 @@ import contextlib
 import io
 import json
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from loopx.bootstrap_command_pack import (
     GUIDED_COMMAND_PACK_PROJECTION_SCHEMA_VERSION,
     build_start_goal_guided_packet,
+    render_start_goal_guided_markdown,
+)
+from loopx.capabilities.issue_fix.candidate_preflight import (
+    build_issue_fix_candidate_preflight_packet,
+    candidate_preflight_input_contract,
 )
 from loopx.cli import main as cli_main
-
 
 GOAL_ID = "guided-projection-goal"
 AGENT_ID = "codex-guided-projection"
@@ -70,6 +75,7 @@ def _host_shadow_document(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": payload["schema_version"],
         "project": payload["project"],
+        "command_cwd_source": transaction["command_cwd_source"],
         "goal_id": payload["goal_id"],
         "agent_id": payload["agent_id"],
         "host_surface": payload["host_surface"],
@@ -117,6 +123,9 @@ def test_default_projection_preserves_host_actions_and_json_anchors(
     assert _host_shadow_document(compact) == _host_shadow_document(detailed)
     assert compact["command_pack_detail_included"] is False
     assert detailed["command_pack_detail_included"] is True
+    assert compact["guided_transaction"]["ordered_steps"][-1]["id"] == (
+        "scheduler_ack_when_needed"
+    )
 
     projection = compact["command_pack"]
     assert projection["schema_version"] == "loopx_bootstrap_command_pack_v0"
@@ -148,6 +157,307 @@ def test_default_projection_preserves_host_actions_and_json_anchors(
         _resolve_pointer(compact, ref["json_pointer"])
     for ref in projection["packet_summary"]["detail_refs"].values():
         _resolve_pointer(projection, ref["json_pointer"])
+
+
+def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="ark-managed-agent",
+        goal_text=(
+            "Autonomously deliver review-ready fixes for two distinct open "
+            "repository issues in one long-running Goal."
+        ),
+        available_capabilities=["network"],
+    )
+
+    transaction = payload["guided_transaction"]
+    assert transaction["command_cwd_source"] == "#/project"
+    assert payload["project"] == str(project)
+    route = transaction["selected_capability_route"]
+    assert route == {
+        "schema_version": "loopx_goal_capability_route_v0",
+        "capability_id": "issue-fix",
+        "selection_source": "explicit_goal_text",
+        "selection_reason_code": "issue_fix_intent",
+        "entry_command_key": "issue_fix_workflow_plan_template",
+        "admission_command_key": "issue_fix_feasibility_template",
+        "candidate_authority": "public_open_tracker_issue",
+        "authority_refresh_required": "current issue body and latest comments",
+        "candidate_preflight": candidate_preflight_input_contract(),
+        "implementation_admission": {
+            "status": "qualification_required",
+            "state_owner": "issue_fix",
+            "route_scope": "start_goal_bootstrap_only",
+            "candidate_receipt_stream": "candidate-preflight",
+            "feasibility_required_for_route": "proceed",
+            "durable_execution_binding": {
+                "schema_version": "capability_execution_binding_v0",
+                "capability_id": "issue-fix",
+                "todo_binding_ref_field": "capability_binding_ref",
+                "authority_source": "admission_result.capability_execution_binding",
+                "authority_stream": "feasibility",
+                "authority_packet_schema_version": "issue_fix_feasibility_v0",
+                "bound_todo_fields": ["action_kind", "target_key"],
+                "legacy_unbound_todo_fallback": {
+                    "authority": "current_feasibility_row",
+                    "match": "exact_action_kind_and_target_key",
+                    "prefix_match_allowed": False,
+                },
+            },
+        },
+        "activation_condition": (
+            "after selecting a public issue candidate and before substantive "
+            "implementation"
+        ),
+    }
+    guard = transaction["ordered_steps"][2]
+    assert guard["id"] == "qualify_selected_capability"
+    assert guard["candidate_discovery_command_template"].startswith(
+        "gh issue list "
+    )
+    assert guard["command_source"].endswith(
+        "/commands/issue_fix_workflow_plan_template"
+    )
+    assert guard["admission_command_source"].endswith(
+        "/commands/issue_fix_feasibility_template"
+    )
+    assert guard["durable_successor_sources"] == {
+        "proceed": "admission_result.transition.projected_todo",
+        "non_proceed": "entry_result.ordered_loopx_todo_writeback_preview",
+    }
+    assert "for non-proceed" in guard["completion_condition"]
+    assert "command_template" not in guard
+    assert "admission_command_template" not in guard
+    commands = payload["command_pack"]["commands"]
+    assert commands[route["entry_command_key"]].startswith(
+        "loopx issue-fix workflow-plan "
+    )
+    assert "--fetch-candidate-evidence" in commands[
+        route["entry_command_key"]
+    ]
+    assert f"--goal-id {GOAL_ID}" in commands[route["entry_command_key"]]
+    assert guard["candidate_preflight"]["required_before_implementation"] is True
+    assert commands[route["admission_command_key"]].startswith(
+        "loopx issue-fix feasibility "
+    )
+    rendered = render_start_goal_guided_markdown(payload)
+    assert "authority: open public issue; source clues are evidence only" in rendered
+    assert "discover: `gh issue list " in rendered
+    assert (
+        "numeric_pr_evidence + semantic_pr_evidence + "
+        "maintainer_comment_evidence"
+    ) in rendered
+    assert "only admitted proceed may start a new implementation" in rendered
+    assert "loopx issue-fix workflow-plan " in rendered
+    assert "loopx issue-fix feasibility " in rendered
+    assert "proceed: `loopx issue-fix feasibility " in rendered
+    assert len(rendered.replace(str(project), "<project>")) <= 3_600
+    todo_command = next(
+        step["command_template"]
+        for step in transaction["ordered_steps"]
+        if step["id"] == "write_ordered_todos"
+    )
+    assert "--project ." in todo_command
+    assert "--action-kind <action_kind>" in todo_command
+    assert "[--target-key <target_key>]" in todo_command
+    refresh_command = next(
+        step["command"]
+        for step in transaction["ordered_steps"]
+        if step["id"] == "refresh_state"
+    )
+    assert "--project ." in refresh_command
+    assert all(
+        field not in todo_command
+        for field in ("issue_url", "issue_number", "base_sha", "acceptance")
+    )
+
+
+def test_configured_candidate_preflight_requires_prior_work_evidence() -> None:
+    try:
+        build_issue_fix_candidate_preflight_packet(
+            repo="volcengine/OpenViking",
+            issue_ref="#3005",
+            input_payload={
+                "schema_version": "issue_fix_candidate_preflight_input_v0",
+                "semantic_pr_evidence": [],
+            },
+            generated_at="2026-07-30T00:00:00Z",
+        )
+    except ValueError as error:
+        assert "numeric_pr_evidence" in str(error)
+    else:
+        raise AssertionError("configured preflight must require prior-work evidence")
+
+
+def test_candidate_preflight_rejects_unqualified_negative_evidence() -> None:
+    def receipt(query_scope: str) -> dict[str, Any]:
+        return {
+            "repo": "volcengine/OpenViking",
+            "issue_ref": "#3005",
+            "query_scope": query_scope,
+            "complete": True,
+            "truncated": False,
+            "rows": [],
+        }
+
+    complete = {
+        "schema_version": "issue_fix_candidate_preflight_input_v0",
+        "numeric_pr_evidence": receipt("issue_specific_all_states"),
+        "semantic_pr_evidence": receipt("issue_specific_current_revision"),
+        "maintainer_comment_evidence": receipt(
+            "issue_specific_comment_metadata"
+        ),
+    }
+    packet = build_issue_fix_candidate_preflight_packet(
+        repo="volcengine/OpenViking",
+        issue_ref="#3005",
+        input_payload=complete,
+        generated_at="2026-07-30T00:00:00Z",
+    )
+    assert packet["decision"]["route"] == "proceed"
+    assert packet["input_contract"] == candidate_preflight_input_contract()
+
+    missing_comment_evidence = dict(complete)
+    missing_comment_evidence.pop("maintainer_comment_evidence")
+    try:
+        build_issue_fix_candidate_preflight_packet(
+            repo="volcengine/OpenViking",
+            issue_ref="#3005",
+            input_payload=missing_comment_evidence,
+            generated_at="2026-07-30T00:00:00Z",
+        )
+    except ValueError as error:
+        assert "maintainer_comment_evidence" in str(error)
+    else:
+        raise AssertionError("missing comment evidence must not admit a candidate")
+
+    invalid_inputs = [
+        {
+            **complete,
+            "numeric_pr_evidence": {
+                **complete["numeric_pr_evidence"],
+                "truncated": True,
+            },
+        },
+        {
+            **complete,
+            "semantic_pr_evidence": {
+                **complete["semantic_pr_evidence"],
+                "query_scope": "aggregate_recent_pull_requests",
+            },
+        },
+    ]
+    for payload in invalid_inputs:
+        try:
+            build_issue_fix_candidate_preflight_packet(
+                repo="volcengine/OpenViking",
+                issue_ref="#3005",
+                input_payload=payload,
+                generated_at="2026-07-30T00:00:00Z",
+            )
+        except (TypeError, ValueError):
+            pass
+        else:
+            raise AssertionError("unqualified negative evidence must fail closed")
+
+    try:
+        build_issue_fix_candidate_preflight_packet(
+            repo="volcengine/OpenViking",
+            issue_ref="#3005",
+            input_payload={**complete, "numeric_pr_evidence": []},
+            generated_at="2026-07-30T00:00:00Z",
+        )
+    except TypeError as error:
+        assert "one evidence receipt object, not a list" in str(error)
+        assert "issue_specific_all_states" in str(error)
+    else:
+        raise AssertionError("receipt lists must fail with an actionable error")
+
+
+def test_candidate_preflight_contract_describes_receipt_shapes() -> None:
+    contract = candidate_preflight_input_contract()
+    receipts = contract["evidence_receipts"]
+
+    assert {
+        field: receipt["query_scope"] for field, receipt in receipts.items()
+    } == {
+        "numeric_pr_evidence": "issue_specific_all_states",
+        "semantic_pr_evidence": "issue_specific_current_revision",
+        "maintainer_comment_evidence": "issue_specific_comment_metadata",
+    }
+    for receipt in receipts.values():
+        assert receipt["cardinality"] == "one_receipt_object"
+        assert receipt["required_fields"] == [
+            "repo",
+            "issue_ref",
+            "query_scope",
+            "complete",
+            "truncated",
+            "rows",
+        ]
+        assert (
+            receipt["negative_result_rule"]
+            == "rows may be empty only when complete=true and truncated=false"
+        )
+
+
+def test_non_issue_goal_does_not_select_capability_route(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="ark-managed-agent",
+        goal_text="Improve the public onboarding documentation.",
+    )
+
+    transaction = payload["guided_transaction"]
+    assert "selected_capability_route" not in transaction
+    assert transaction["ordered_steps"][-1]["id"] == "quota_guard"
+    assert all(
+        step["id"] != "scheduler_ack_when_needed"
+        for step in transaction["ordered_steps"]
+    )
+    assert (
+        payload["command_pack"]["goal_start_contract"]["selected_capability_route"]
+        is None
+    )
+    referenced = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="ark-managed-agent",
+        goal_text="Fix https://github.com/owner/repo/pull/42.",
+    )
+    assert (
+        referenced["guided_transaction"]["selected_capability_route"][
+            "selection_reason_code"
+        ]
+        == "public_issue_or_pr_reference"
+    )
+    for goal_text in (
+        "Review https://github.com/owner/repo/pull/42.",
+        "Merge https://github.com/owner/repo/pull/42 after checks pass.",
+        "Monitor https://github.com/owner/repo/pull/42.",
+        "Summarize https://github.com/owner/repo/issues/42.",
+    ):
+        unrelated = build_start_goal_guided_packet(
+            project=project,
+            goal_id=GOAL_ID,
+            agent_id=AGENT_ID,
+            cli_bin="loopx",
+            host_surface="ark-managed-agent",
+            goal_text=goal_text,
+        )
+        assert "selected_capability_route" not in unrelated["guided_transaction"]
 
 
 def test_explicit_cold_path_restores_the_complete_command_pack(tmp_path: Path) -> None:
@@ -273,6 +583,99 @@ def test_projection_preserves_multi_goal_selection_actions(tmp_path: Path) -> No
     assert _host_shadow_document(compact) == _host_shadow_document(detailed)
 
 
+def test_start_goal_keeps_the_requested_linked_worktree(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    primary = tmp_path / "primary"
+    primary.mkdir()
+    subprocess.run(["git", "init"], cwd=primary, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "loopx@example.invalid"],
+        cwd=primary,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "LoopX Test"],
+        cwd=primary,
+        check=True,
+        capture_output=True,
+    )
+    (primary / "README.md").write_text("# primary\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "README.md"], cwd=primary, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=primary,
+        check=True,
+        capture_output=True,
+    )
+
+    worktree = tmp_path / "fresh-worktree"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "fresh-worktree", str(worktree)],
+        cwd=primary,
+        check=True,
+        capture_output=True,
+    )
+
+    old_goal_id = "old-primary-goal"
+    primary_registry = primary / ".loopx" / "registry.json"
+    primary_registry.parent.mkdir(parents=True)
+    old_goal = {
+        "id": old_goal_id,
+        "status": "active",
+        "repo": str(primary),
+        "state_file": f".codex/goals/{old_goal_id}/ACTIVE_GOAL_STATE.md",
+    }
+    primary_registry.write_text(
+        json.dumps({"schema_version": "0.1", "goals": [old_goal]}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "registry.global.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "goals": [
+                    {
+                        **old_goal,
+                        "source_registry": str(primary_registry),
+                    }
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LOOPX_RUNTIME_ROOT", str(runtime))
+
+    payload = build_start_goal_guided_packet(
+        project=worktree,
+        goal_id=None,
+        agent_id=None,
+        cli_bin="loopx",
+        host_surface="ark-managed-agent",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    assert Path(payload["project"]).resolve() == worktree.resolve()
+    assert payload["goal_id"] == "fresh-worktree-goal"
+    alias = payload["project_connection"]["canonical_project_alias"]
+    assert alias["applied"] is False
+    assert alias["kind"] == "exact_project_route"
+    connect_command = payload["command_pack"]["commands"][
+        "goal_start_connect_if_needed"
+    ]
+    assert str(worktree.resolve()) in connect_command
+    assert old_goal_id not in json.dumps(payload)
+
+
 def test_cli_without_host_returns_read_only_host_selection_gate(
     tmp_path: Path,
 ) -> None:
@@ -308,10 +711,66 @@ def test_cli_without_host_returns_read_only_host_selection_gate(
         "codex-cli-tui",
         "claude-code",
         "opencode",
+        "ark-managed-agent",
         "shell",
+        "other-agent",
     ]
     ide = next(choice for choice in choices if choice["host_surface"] == "codex-ide-plugin")
     assert "--host-surface codex-ide-plugin" in ide["rerun_command"]
+
+
+def test_ark_managed_agent_plans_todos_before_one_shot_goal_activation(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="ark-managed-agent",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    ordered_step_ids = [
+        step["id"] for step in payload["guided_transaction"]["ordered_steps"]
+    ]
+    activation = payload["command_pack"]["host_loop_activation"]
+    inspect_step = payload["guided_transaction"]["ordered_steps"][0]
+    connect_step = payload["guided_transaction"]["ordered_steps"][1]
+
+    assert ordered_step_ids.index("write_ordered_todos") < ordered_step_ids.index(
+        "activate_host_loop"
+    )
+    assert inspect_step["command_source"] == "#/command_pack/canonical_cli_command"
+    inspect_command = payload["command_pack"]["canonical_cli_command"]
+    assert "--host-surface ark-managed-agent" in inspect_command
+    assert "--available-capability network" in inspect_command
+    assert f"--goal-text '{GOAL_TEXT}'" in inspect_command
+    connect_command = connect_step["command"]
+    assert "\n" in connect_command
+    assert f"--objective {shlex.quote(GOAL_TEXT)}" in connect_command
+    actionable_connect_command = (
+        f"cd {shlex.quote(str(project))} && loopx bootstrap"
+        " --project ."
+        f" --goal-id {GOAL_ID}"
+        f" --objective {shlex.quote(GOAL_TEXT)}"
+        " --adapter-kind read_only_project_map_v0"
+        " --adapter-status connected-read-only"
+        " --no-onboarding-scan"
+        " --codex-app-heartbeat ask"
+    )
+    assert actionable_connect_command in payload["message"]
+    assert "preview the issue-fix route before todo writeback" not in payload["message"]
+    assert activation["agent_type"] == "ark-managed-agent"
+    assert activation["host_surface"] == "ark_managed_agent_goal_mode"
+    assert activation["activation_method"] == "submit_goal_once"
+    assert activation["host_mutation"]["transport_contract"] == "goal_prompt_v0"
+    assert activation["host_mutation"]["prompt_field"] == "task_body"
+    assert "--runtime-profile ark_managed_agent_goal" in (
+        activation["commands"]["heartbeat_prompt"]
+    )
 
 
 def test_codex_ide_plugin_uses_visible_goal_and_preserves_compact_parity(

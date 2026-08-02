@@ -559,6 +559,119 @@ def assert_replan_ack_without_delta_is_noop() -> None:
         assert guard["heartbeat_recommendation"]["recommended_mode"] == "autonomous_replan_required", guard
 
 
+def assert_bare_successor_claim_does_not_clear_replan() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
+        registry_path, runtime = write_fixture(
+            Path(tmp),
+            include_replan_signals=False,
+            periodic_run_count=20,
+        )
+        refresh = run_cli(
+            "refresh-state",
+            "--goal-id",
+            GOAL_ID,
+            "--classification",
+            "autonomous_replan_recorded",
+            "--autonomous-replan-recorded",
+            "--repair-delta-kind",
+            "successor_or_supersede",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+
+        assert refresh["classification"] == "replan_noop", refresh
+        delta = refresh["repair_delta_contract"]
+        assert delta["delta_present"] is False, delta
+        assert delta["delta_kinds"] == [], delta
+        assert delta["rejected_claims"] == [
+            {
+                "kind": "successor_or_supersede",
+                "reason": "no completed todo links a scoped open advancement successor",
+            }
+        ], delta
+        assert refresh["vision_checkpoint"]["decision"] == "missing_required", refresh
+
+        guard = run_cli(
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert guard["autonomous_replan_obligation"]["required"] is True, guard
+        assert guard["heartbeat_recommendation"]["recommended_mode"] == (
+            "autonomous_replan_required"
+        ), guard
+
+
+def assert_watch_replan_ack_requires_bounded_state_evidence() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
+        registry_path, runtime = write_fixture(
+            Path(tmp),
+            include_replan_signals=False,
+            periodic_run_count=20,
+        )
+        state_path = (
+            registry_path.parent.parent
+            / ".codex"
+            / "goals"
+            / GOAL_ID
+            / "ACTIVE_GOAL_STATE.md"
+        )
+        state_text = state_path.read_text(encoding="utf-8")
+        advancement = "- [ ] [P1] Advance the next bounded project hardening slice.\n"
+        monitor = (
+            "- [ ] [P1] Watch the external review transition.\n"
+            "  <!-- loopx:todo todo_id=todo_123456789abc status=open "
+            "task_class=continuous_monitor target_key=review cadence=30m "
+            "next_due_at=2026-08-01T13:00:00Z -->\n"
+        )
+        state_path.write_text(
+            state_text.replace(advancement, monitor),
+            encoding="utf-8",
+        )
+
+        rejected = run_cli(
+            "refresh-state",
+            "--goal-id",
+            GOAL_ID,
+            "--classification",
+            "autonomous_replan_recorded",
+            "--autonomous-replan-recorded",
+            "--repair-delta-kind",
+            "watch_lane_continuation",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert rejected["classification"] == "replan_noop", rejected
+        assert rejected["repair_delta_contract"]["delta_present"] is False, rejected
+        assert rejected["repair_delta_contract"]["rejected_claims"], rejected
+
+        state_path.write_text(
+            state_path.read_text(encoding="utf-8").replace(
+                "next_due_at=2026-08-01T13:00:00Z",
+                "next_due_at=2026-08-01T13:00:00Z expires_at=2026-08-02T13:00:00Z",
+            ),
+            encoding="utf-8",
+        )
+        accepted = run_cli(
+            "refresh-state",
+            "--goal-id",
+            GOAL_ID,
+            "--classification",
+            "autonomous_replan_recorded",
+            "--autonomous-replan-recorded",
+            "--repair-delta-kind",
+            "watch_lane_continuation",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert accepted["autonomous_replan_recorded"] is True, accepted
+        evidence = accepted["repair_delta_contract"]["auto_evidence"]
+        assert evidence[0]["todo_ids"] == ["todo_123456789abc"], evidence
+
+
 def assert_no_replan_obligation_without_signal() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
         registry_path, runtime = write_fixture(Path(tmp), include_replan_signals=False)
@@ -587,6 +700,8 @@ def main() -> int:
     assert_validated_classification_without_ack_does_not_clear_replan()
     assert_refresh_state_structured_ack_clears_replan()
     assert_replan_ack_without_delta_is_noop()
+    assert_bare_successor_claim_does_not_clear_replan()
+    assert_watch_replan_ack_requires_bounded_state_evidence()
     assert_no_replan_obligation_without_signal()
     print("autonomous-replan-obligation-smoke ok")
     return 0

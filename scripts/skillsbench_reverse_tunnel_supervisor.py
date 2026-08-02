@@ -37,6 +37,7 @@ from loopx.benchmark_core.remote_closeout import (  # noqa: E402
     closeout_remote_benchmark_batch,
 )
 from loopx.benchmark_core.lifecycle import (  # noqa: E402
+    build_benchmark_live_worker_phase,
     compact_benchmark_live_worker_phase,
 )
 
@@ -44,6 +45,11 @@ from loopx.benchmark_core.lifecycle import (  # noqa: E402
 SCHEMA_VERSION = "skillsbench_reverse_tunnel_supervisor_v0"
 PUBLIC_LIVENESS_SCHEMA_VERSION = "skillsbench_supervisor_public_liveness_v0"
 ACTIVE_PHASE_SCHEMA_VERSION = "skillsbench_supervisor_active_phase_v0"
+TERMINAL_CLOSEOUT_SCHEMA_VERSION = "skillsbench_supervisor_terminal_closeout_v0"
+OWNER_CONTROL_SCHEMA_VERSION = "skillsbench_supervisor_owner_control_v0"
+OWNER_STOP_REQUEST_SCHEMA_VERSION = "skillsbench_supervisor_owner_stop_request_v0"
+OWNER_STOP_RECEIPT_SCHEMA_VERSION = "skillsbench_supervisor_owner_stop_receipt_v0"
+OWNER_STOP_REQUEST_BASENAME = "supervisor.stop.request.json"
 PUBLIC_LIVENESS_INTERVAL_SEC = 30.0
 DEFAULT_REMOTE_FORWARD = "127.0.0.1:18180:127.0.0.1:18180"
 DEFAULT_TEST_HOST = "chatgpt.com"
@@ -51,6 +57,121 @@ DEFAULT_TEST_PORT = 443
 BRIDGE_HELPER = (
     Path(__file__).resolve().with_name("skillsbench_reverse_channel_bridge.py")
 )
+PROXY_PORT_FIELDS = (
+    "codex_reverse_proxy_port",
+    "benchmark_egress_proxy_port",
+    "container_forwarder_port",
+)
+
+
+class _SupervisorTerminationSignal(Exception):
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signal.Signals(signum).name)
+
+
+def _valid_owner_control_id(value: str) -> bool:
+    return bool(
+        value
+        and len(value) <= 240
+        and all(character.isalnum() or character in "._:-" for character in value)
+    )
+
+
+def _owner_stop_request_path(public_output_path: str | None) -> Path | None:
+    if not public_output_path:
+        return None
+    return Path(public_output_path).expanduser().with_name(
+        OWNER_STOP_REQUEST_BASENAME
+    )
+
+
+def _owner_control_public_contract(args: argparse.Namespace) -> dict[str, Any]:
+    control_id = str(getattr(args, "owner_control_id", "") or "")
+    enabled = bool(control_id and args.public_output_path)
+    return {
+        "schema_version": OWNER_CONTROL_SCHEMA_VERSION,
+        "enabled": enabled,
+        "state": "listening" if enabled else "disabled",
+        "control_id": control_id if enabled else None,
+        "request_basename": OWNER_STOP_REQUEST_BASENAME if enabled else None,
+        "request_poll_count": 0,
+        "accepted_request_count": 0,
+        "invalid_request_count": 0,
+        "raw_request_recorded": False,
+        "raw_path_recorded": False,
+        "pid_read": False,
+        "process_table_read": False,
+    }
+
+
+def _prepare_owner_control(
+    args: argparse.Namespace,
+    contract: dict[str, Any],
+) -> None:
+    if contract.get("enabled") is not True:
+        return
+    request_path = _owner_stop_request_path(args.public_output_path)
+    if request_path is None:
+        return
+    try:
+        request_path.unlink(missing_ok=True)
+    except OSError:
+        contract["state"] = "request_cleanup_failed"
+        contract["request_cleanup_error"] = True
+
+
+def _poll_owner_stop_request(
+    args: argparse.Namespace,
+    contract: dict[str, Any],
+) -> bool:
+    if contract.get("enabled") is not True:
+        return False
+    request_path = _owner_stop_request_path(args.public_output_path)
+    if request_path is None:
+        return False
+    contract["request_poll_count"] = int(contract["request_poll_count"]) + 1
+    if not request_path.exists():
+        return False
+
+    request: Any = None
+    try:
+        if request_path.is_symlink() or request_path.stat().st_size > 4096:
+            raise ValueError("unsafe owner stop request")
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        contract["state"] = "invalid_request_ignored"
+        contract["invalid_request_count"] = int(contract["invalid_request_count"]) + 1
+        try:
+            request_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+    valid = (
+        isinstance(request, Mapping)
+        and request.get("schema_version") == OWNER_STOP_REQUEST_SCHEMA_VERSION
+        and request.get("action") == "terminate"
+        and request.get("control_id") == contract.get("control_id")
+    )
+    if not valid:
+        contract["state"] = "invalid_request_ignored"
+        contract["invalid_request_count"] = int(contract["invalid_request_count"]) + 1
+        try:
+            request_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+    contract["state"] = "accepted"
+    contract["accepted_request_count"] = int(contract["accepted_request_count"]) + 1
+    contract["accepted_action"] = "terminate"
+    contract["accepted_at"] = _utc_timestamp(time.time())
+    try:
+        request_path.unlink(missing_ok=True)
+    except OSError:
+        contract["accepted_request_cleanup_error"] = True
+    return True
 
 
 def _host_kind(value: str) -> str:
@@ -94,6 +215,56 @@ def _forward_public_contract(remote_forward: str) -> dict[str, Any]:
         "local_port": parsed["local_port"],
         "raw_forward_recorded": False,
     }
+
+
+def _proxy_port_coherence_public_contract(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    declared = {
+        field: getattr(args, field, None)
+        for field in PROXY_PORT_FIELDS
+        if getattr(args, field, None) is not None
+    }
+    contract: dict[str, Any] = {
+        "schema_version": "skillsbench_proxy_port_coherence_v0",
+        "state": "not_requested",
+        "guard_enforced": False,
+        "declared_surface_count": len(declared),
+        "expected_surface_count": len(PROXY_PORT_FIELDS),
+        "raw_command_read": False,
+        "raw_command_recorded": False,
+    }
+    if not declared:
+        return contract
+    if len(declared) != len(PROXY_PORT_FIELDS):
+        missing = [
+            "--" + field.replace("_", "-")
+            for field in PROXY_PORT_FIELDS
+            if field not in declared
+        ]
+        raise ValueError(
+            "proxy port coherence declarations are all-or-none; missing "
+            + ", ".join(missing)
+        )
+
+    remote_port = _parse_remote_forward(args.remote_forward)["remote_port"]
+    ports = [remote_port, *(int(declared[field]) for field in PROXY_PORT_FIELDS)]
+    if any(port < 1 or port > 65535 for port in ports):
+        raise ValueError("proxy port coherence declarations must be valid TCP ports")
+    if len(set(ports)) != 1:
+        raise ValueError(
+            "--remote-forward remote port, --codex-reverse-proxy-port, "
+            "--benchmark-egress-proxy-port, and --container-forwarder-port "
+            "must match"
+        )
+    contract.update(
+        {
+            "state": "coherent",
+            "guard_enforced": True,
+            "coherent_port": remote_port,
+        }
+    )
+    return contract
 
 
 def _local_forward_dependency_public_contract(
@@ -981,6 +1152,27 @@ def _write_public_checkpoint(
 ) -> None:
     now = time.time() if observed_at is None else observed_at
     payload["duration_sec"] = round(max(0.0, now - started_at), 3)
+    if terminal:
+        active_phase = payload.get("active_phase")
+        active_phase = active_phase if isinstance(active_phase, dict) else {}
+        live_worker_phase = compact_benchmark_live_worker_phase(
+            active_phase.get("benchmark_live_worker_phase")
+        )
+        phase_ready = live_worker_phase.get("phase_ready")
+        if live_worker_phase and isinstance(phase_ready, dict):
+            terminal_disposition = {
+                "succeeded": "completed",
+                "failed": "failed",
+            }.get(state, "ended_unresolved")
+            active_phase["benchmark_live_worker_phase"] = (
+                build_benchmark_live_worker_phase(
+                    runtime_preparing=phase_ready.get("runtime_preparing") is True,
+                    worker_prepared=phase_ready.get("worker_prepared") is True,
+                    worker_running=phase_ready.get("worker_running") is True,
+                    agent_active=phase_ready.get("agent_active") is True,
+                    terminal_disposition=terminal_disposition,
+                )
+            )
     payload["public_liveness"] = {
         "schema_version": PUBLIC_LIVENESS_SCHEMA_VERSION,
         "state": state,
@@ -1010,6 +1202,20 @@ def _write_public_checkpoint(
         temporary.replace(target)
     finally:
         temporary.unlink(missing_ok=True)
+    closeout = payload.get("terminal_closeout")
+    if isinstance(closeout, Mapping):
+        closeout_target = target.with_name("supervisor_closeout.compact.json")
+        closeout_temporary = closeout_target.with_name(
+            f".{closeout_target.name}.{os.getpid()}.tmp"
+        )
+        try:
+            closeout_temporary.write_text(
+                json.dumps(closeout, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            closeout_temporary.replace(closeout_target)
+        finally:
+            closeout_temporary.unlink(missing_ok=True)
 
 
 def _public_artifact_sync_requested(args: argparse.Namespace) -> bool:
@@ -1388,9 +1594,8 @@ def _run_remote_failure_cleanup(
     return payload
 
 
-def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
-    started_at = time.time()
-    payload: dict[str, Any] = {
+def _initial_public_payload(args: argparse.Namespace) -> dict[str, Any]:
+    return {
         "schema_version": SCHEMA_VERSION,
         "ok": False,
         "tunnel_started": False,
@@ -1404,6 +1609,7 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "raw_remote_output_recorded": False,
         "private_log_written": False,
         "remote_forward": _forward_public_contract(args.remote_forward),
+        "proxy_port_coherence": dict(args.proxy_port_coherence),
         "local_forward_dependency": (
             _local_forward_dependency_public_contract(args)
         ),
@@ -1415,7 +1621,399 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             _incremental_public_artifact_sync_contract(args)
         ),
         "tunnel_liveness": _tunnel_liveness_public_contract(args),
+        "owner_control": _owner_control_public_contract(args),
     }
+
+
+def _owner_stop_receipt(
+    *,
+    control_id: str,
+    status: str,
+    matched_supervisor_count: int,
+    active_supervisor_count: int,
+    terminal_supervisor_count: int,
+    request_written: bool = False,
+    terminal_observed: bool = False,
+) -> dict[str, Any]:
+    return {
+        "schema_version": OWNER_STOP_RECEIPT_SCHEMA_VERSION,
+        "ok": status in {"requested", "already_terminal", "terminal_observed"},
+        "status": status,
+        "control_id": control_id,
+        "matched_supervisor_count": matched_supervisor_count,
+        "active_supervisor_count": active_supervisor_count,
+        "terminal_supervisor_count": terminal_supervisor_count,
+        "request_written": request_written,
+        "terminal_observed": terminal_observed,
+        "raw_path_recorded": False,
+        "raw_request_recorded": False,
+        "pid_read": False,
+        "process_table_read": False,
+    }
+
+
+def request_owner_stop(argv: list[str]) -> tuple[int, dict[str, Any]]:
+    parser = argparse.ArgumentParser(
+        prog="skillsbench_reverse_tunnel_supervisor.py stop",
+        description=(
+            "Request cooperative terminal closeout for one owned SkillsBench "
+            "supervisor by public control id."
+        ),
+    )
+    parser.add_argument("--run-root", required=True)
+    parser.add_argument("--control-id", required=True)
+    parser.add_argument("--wait-timeout-sec", type=float, default=30.0)
+    args = parser.parse_args(argv)
+    control_id = str(args.control_id)
+    if not _valid_owner_control_id(control_id):
+        parser.error("--control-id must be a bounded public-safe identifier")
+
+    run_root = Path(args.run_root).expanduser()
+    if not run_root.is_dir() or run_root.is_symlink():
+        return 2, _owner_stop_receipt(
+            control_id=control_id,
+            status="run_root_unavailable",
+            matched_supervisor_count=0,
+            active_supervisor_count=0,
+            terminal_supervisor_count=0,
+        )
+
+    matches: list[tuple[Path, dict[str, Any]]] = []
+    for public_path in run_root.rglob("supervisor.public.json"):
+        if public_path.is_symlink() or not public_path.is_file():
+            continue
+        try:
+            loaded = json.loads(public_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(loaded, dict):
+            continue
+        owner_control = loaded.get("owner_control")
+        if (
+            isinstance(owner_control, Mapping)
+            and owner_control.get("schema_version") == OWNER_CONTROL_SCHEMA_VERSION
+            and owner_control.get("enabled") is True
+            and owner_control.get("control_id") == control_id
+        ):
+            matches.append((public_path, loaded))
+
+    active = [
+        item
+        for item in matches
+        if isinstance(item[1].get("public_liveness"), Mapping)
+        and item[1]["public_liveness"].get("terminal") is not True
+        and item[1]["public_liveness"].get("process_alive") is True
+    ]
+    terminal = [
+        item
+        for item in matches
+        if isinstance(item[1].get("public_liveness"), Mapping)
+        and item[1]["public_liveness"].get("terminal") is True
+    ]
+    counts = {
+        "matched_supervisor_count": len(matches),
+        "active_supervisor_count": len(active),
+        "terminal_supervisor_count": len(terminal),
+    }
+    if not active:
+        status = "already_terminal" if terminal else "supervisor_not_found"
+        return (0 if terminal else 2), _owner_stop_receipt(
+            control_id=control_id,
+            status=status,
+            **counts,
+        )
+    if len(active) != 1:
+        return 3, _owner_stop_receipt(
+            control_id=control_id,
+            status="ambiguous_active_supervisor",
+            **counts,
+        )
+
+    public_path = active[0][0]
+    request_path = public_path.with_name(OWNER_STOP_REQUEST_BASENAME)
+    request = {
+        "schema_version": OWNER_STOP_REQUEST_SCHEMA_VERSION,
+        "control_id": control_id,
+        "action": "terminate",
+        "requested_at": _utc_timestamp(time.time()),
+    }
+    temporary = request_path.with_name(f".{request_path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(request, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(request_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+    wait_timeout_sec = max(0.0, float(args.wait_timeout_sec))
+    if wait_timeout_sec == 0.0:
+        return 0, _owner_stop_receipt(
+            control_id=control_id,
+            status="requested",
+            request_written=True,
+            **counts,
+        )
+
+    deadline = time.monotonic() + wait_timeout_sec
+    while time.monotonic() < deadline:
+        try:
+            latest = json.loads(public_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            latest = {}
+        liveness = latest.get("public_liveness") if isinstance(latest, dict) else {}
+        if isinstance(liveness, Mapping) and liveness.get("terminal") is True:
+            return 0, _owner_stop_receipt(
+                control_id=control_id,
+                status="terminal_observed",
+                request_written=True,
+                terminal_observed=True,
+                **counts,
+            )
+        time.sleep(0.1)
+
+    return 4, _owner_stop_receipt(
+        control_id=control_id,
+        status="request_pending",
+        request_written=True,
+        **counts,
+    )
+
+
+def _last_public_liveness_contract(path: str | None) -> dict[str, Any]:
+    contract: dict[str, Any] = {
+        "schema_version": "skillsbench_supervisor_previous_liveness_v0",
+        "status": "unavailable",
+        "state": "unknown",
+        "terminal": False,
+        "process_alive": False,
+        "heartbeat_count": 0,
+        "elapsed_sec": 0.0,
+        "last_known_tunnel_ready": False,
+        "raw_task_text_read": False,
+        "raw_logs_read": False,
+        "raw_trajectory_read": False,
+        "raw_verifier_output_read": False,
+        "local_paths_recorded": False,
+    }
+    if not path:
+        return contract
+    try:
+        loaded = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return contract
+    if not isinstance(loaded, Mapping):
+        return contract
+    liveness = loaded.get("public_liveness")
+    if not isinstance(liveness, Mapping):
+        return contract
+
+    state = str(liveness.get("state") or "unknown")
+    if state not in {"starting", "running", "succeeded", "failed"}:
+        state = "unknown"
+    try:
+        heartbeat_count = max(0, int(liveness.get("heartbeat_count", 0)))
+    except (TypeError, ValueError):
+        heartbeat_count = 0
+    try:
+        elapsed_sec = max(0.0, float(liveness.get("elapsed_sec", 0.0)))
+    except (TypeError, ValueError):
+        elapsed_sec = 0.0
+    contract.update(
+        {
+            "status": "read",
+            "state": state,
+            "terminal": bool(liveness.get("terminal")),
+            "process_alive": bool(liveness.get("process_alive")),
+            "heartbeat_count": heartbeat_count,
+            "elapsed_sec": elapsed_sec,
+            "last_known_tunnel_ready": bool(loaded.get("tunnel_ready")),
+        }
+    )
+    return contract
+
+
+def _last_public_checkpoint(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    try:
+        loaded = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(loaded, Mapping):
+        return {}
+    if loaded.get("schema_version") != SCHEMA_VERSION:
+        return {}
+    return dict(loaded)
+
+
+def _terminal_artifact_presence(args: argparse.Namespace) -> dict[str, Any]:
+    contract = {
+        "status": "unavailable",
+        "benchmark_compact_present": False,
+        "controller_trace_present": False,
+        "public_artifact_read": False,
+        "raw_artifacts_read": False,
+        "local_paths_recorded": False,
+    }
+    if not args.local_public_artifact_dir:
+        return contract
+    root = Path(args.local_public_artifact_dir).expanduser()
+    if not root.is_dir() or root.is_symlink():
+        return contract
+    basenames: set[str] = set()
+    for path in root.rglob("*.json"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        basenames.add(path.name)
+    contract.update(
+        status="observed",
+        benchmark_compact_present="benchmark_run.compact.json" in basenames,
+        controller_trace_present="loopx_controller_trace.public.json" in basenames,
+        public_artifact_read=True,
+    )
+    return contract
+
+
+def _terminal_closeout_contract(
+    args: argparse.Namespace,
+    *,
+    trigger: str,
+    signal_name: str = "",
+) -> dict[str, Any]:
+    artifacts = _terminal_artifact_presence(args)
+    benchmark_compact_present = bool(artifacts["benchmark_compact_present"])
+    contract = {
+        "schema_version": TERMINAL_CLOSEOUT_SCHEMA_VERSION,
+        "status": "complete",
+        "disposition": (
+            "defer_to_benchmark_compact"
+            if benchmark_compact_present
+            else "typed_exclusion"
+        ),
+        "reason_code": trigger,
+        "benchmark_compact_present": benchmark_compact_present,
+        "controller_trace_present": bool(artifacts["controller_trace_present"]),
+        "official_score_countable": None if benchmark_compact_present else False,
+        "retry_recommended": False,
+        "rotation_allowed": True,
+        "public_artifact_read": bool(artifacts["public_artifact_read"]),
+        "raw_artifacts_read": False,
+        "raw_task_text_read": False,
+        "raw_logs_read": False,
+        "raw_trajectory_read": False,
+        "raw_verifier_output_read": False,
+        "local_paths_recorded": False,
+    }
+    if signal_name:
+        contract["signal_name"] = signal_name
+    return contract
+
+
+def _termination_public_artifact_sync(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    if not _public_artifact_sync_requested(args):
+        return _public_artifact_sync_contract(args)
+    try:
+        return _sync_remote_public_artifacts(args)
+    except Exception as exc:
+        contract = _public_artifact_sync_contract(args)
+        contract.update(
+            attempted=True,
+            ok=False,
+            first_blocker="termination_public_artifact_sync_failed",
+            error_type=type(exc).__name__[:80],
+        )
+        return contract
+
+
+def _finalize_unhandled_supervisor_failure(
+    args: argparse.Namespace,
+    exc: Exception,
+) -> dict[str, Any]:
+    previous = _last_public_liveness_contract(args.public_output_path)
+    now = time.time()
+    started_at = now - float(previous["elapsed_sec"])
+    payload = _last_public_checkpoint(args.public_output_path)
+    if not payload:
+        try:
+            payload = _initial_public_payload(args)
+        except Exception as payload_exc:
+            payload = {
+                "schema_version": SCHEMA_VERSION,
+                "ok": False,
+                "tunnel_started": False,
+                "tunnel_ready": False,
+                "remote_command_requested": bool(args.remote_command),
+                "raw_ssh_destination_recorded": False,
+                "raw_remote_command_recorded": False,
+                "raw_probe_output_recorded": False,
+                "raw_remote_output_recorded": False,
+                "private_log_written": False,
+                "fallback_payload_error_type": type(payload_exc).__name__[:80],
+            }
+    payload["ok"] = False
+    termination_signal = (
+        exc.signum if isinstance(exc, _SupervisorTerminationSignal) else None
+    )
+    payload["first_blocker"] = (
+        "supervisor_termination_signal"
+        if termination_signal is not None
+        else "supervisor_unhandled_exception"
+    )
+    payload["supervisor_error_type"] = type(exc).__name__[:80]
+    payload["public_terminal_fallback"] = {
+        "schema_version": "skillsbench_supervisor_terminal_fallback_v0",
+        "triggered": True,
+        "trigger": payload["first_blocker"],
+        "previous_liveness": previous,
+        "exception_message_recorded": False,
+        "raw_task_text_recorded": False,
+        "raw_logs_recorded": False,
+        "raw_trajectory_recorded": False,
+        "raw_verifier_output_recorded": False,
+        "local_paths_recorded": False,
+    }
+    if termination_signal is not None:
+        signal_name = signal.Signals(termination_signal).name
+        payload["public_terminal_fallback"]["signal_name"] = signal_name
+    else:
+        signal_name = ""
+    try:
+        payload["remote_failure_cleanup"] = _run_remote_failure_cleanup(
+            args,
+            trigger=str(payload["first_blocker"]),
+        )
+    except Exception as cleanup_exc:
+        cleanup = _remote_failure_cleanup_public_contract(args)
+        cleanup["trigger"] = str(payload["first_blocker"])
+        cleanup["first_blocker"] = "remote_failure_cleanup_failed"
+        cleanup["error_type"] = type(cleanup_exc).__name__[:80]
+        payload["remote_failure_cleanup"] = cleanup
+    payload["public_artifact_sync"] = _termination_public_artifact_sync(args)
+    payload["terminal_closeout"] = _terminal_closeout_contract(
+        args,
+        trigger=str(payload["first_blocker"]),
+        signal_name=signal_name,
+    )
+    _write_public_checkpoint(
+        args.public_output_path,
+        payload,
+        state="failed",
+        started_at=started_at,
+        heartbeat_count=int(previous["heartbeat_count"]) + 1,
+        terminal=True,
+        observed_at=now,
+    )
+    return payload
+
+
+def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
+    started_at = time.time()
+    payload = _initial_public_payload(args)
+    _prepare_owner_control(args, payload["owner_control"])
     public_heartbeat_count = 0
 
     def checkpoint(state: str, *, terminal: bool = False) -> None:
@@ -1737,6 +2335,9 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             )
 
             while remote_proc.poll() is None:
+                if _poll_owner_stop_request(args, payload["owner_control"]):
+                    checkpoint("running")
+                    raise _SupervisorTerminationSignal(signal.SIGTERM)
                 now = time.monotonic()
                 if now >= run_deadline:
                     remote_command_timed_out = True
@@ -2005,6 +2606,55 @@ def run_supervisor(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             if remote_proc.returncode == 0 and sync_ok
             else remote_proc.returncode or 3
         )
+    except _SupervisorTerminationSignal as exc:
+        if remote_proc is not None:
+            _stop_process_group(remote_proc, grace_sec=1.0)
+        owner_stop_requested = (
+            payload.get("owner_control", {}).get("state") == "accepted"
+        )
+        trigger = (
+            "supervisor_owner_stop_requested"
+            if owner_stop_requested
+            else "supervisor_termination_signal"
+        )
+        payload["ok"] = False
+        payload["first_blocker"] = trigger
+        payload["supervisor_error_type"] = type(exc).__name__[:80]
+        try:
+            payload["remote_failure_cleanup"] = _run_remote_failure_cleanup(
+                args,
+                trigger=trigger,
+            )
+        except Exception as cleanup_exc:
+            cleanup = _remote_failure_cleanup_public_contract(args)
+            cleanup["trigger"] = trigger
+            cleanup["first_blocker"] = "remote_failure_cleanup_failed"
+            cleanup["error_type"] = type(cleanup_exc).__name__[:80]
+            payload["remote_failure_cleanup"] = cleanup
+        payload["public_artifact_sync"] = _termination_public_artifact_sync(args)
+        payload["terminal_closeout"] = _terminal_closeout_contract(
+            args,
+            trigger=trigger,
+            signal_name=(
+                "" if owner_stop_requested else signal.Signals(exc.signum).name
+            ),
+        )
+        payload["public_terminal_fallback"] = {
+            "schema_version": "skillsbench_supervisor_terminal_fallback_v0",
+            "triggered": True,
+            "trigger": trigger,
+            "exception_message_recorded": False,
+            "raw_task_text_recorded": False,
+            "raw_logs_recorded": False,
+            "raw_trajectory_recorded": False,
+            "raw_verifier_output_recorded": False,
+            "local_paths_recorded": False,
+        }
+        if not owner_stop_requested:
+            payload["public_terminal_fallback"]["signal_name"] = signal.Signals(
+                exc.signum
+            ).name
+        return finish(128 + exc.signum)
     except (OSError, subprocess.TimeoutExpired) as exc:
         if remote_proc is not None:
             _stop_process_group(remote_proc, grace_sec=1.0)
@@ -2030,6 +2680,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--server-alive-interval-sec", type=int, default=30)
     parser.add_argument("--server-alive-count-max", type=int, default=3)
     parser.add_argument("--remote-forward", default=DEFAULT_REMOTE_FORWARD)
+    parser.add_argument(
+        "--codex-reverse-proxy-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the remote Codex reverse-proxy port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
+    parser.add_argument(
+        "--benchmark-egress-proxy-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the benchmark egress-proxy port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
+    parser.add_argument(
+        "--container-forwarder-port",
+        type=int,
+        default=None,
+        help=(
+            "Structured declaration of the container forwarder listen port. "
+            "Must match the other proxy port declarations and --remote-forward."
+        ),
+    )
     parser.add_argument(
         "--local-forward-managed-command",
         default="",
@@ -2349,7 +3026,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional path for compact public-safe supervisor JSON.",
     )
+    parser.add_argument(
+        "--owner-control-id",
+        default="",
+        help=(
+            "Public-safe run id that enables cooperative owner stop requests "
+            "through the supervisor public-output directory."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.owner_control_id:
+        if not _valid_owner_control_id(args.owner_control_id):
+            parser.error("--owner-control-id must be a bounded public-safe identifier")
+        if not args.public_output_path:
+            parser.error("--owner-control-id requires --public-output-path")
+    try:
+        args.proxy_port_coherence = _proxy_port_coherence_public_contract(args)
+    except ValueError as exc:
+        parser.error(str(exc))
     if _json_bridge_requested(args):
         args.json_bridge = True
         missing = [
@@ -2418,8 +3112,39 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    rc, payload = run_supervisor(args)
+    resolved_argv = list(sys.argv[1:] if argv is None else argv)
+    if resolved_argv[:1] == ["stop"]:
+        rc, receipt = request_owner_stop(resolved_argv[1:])
+        sys.stdout.write(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+        return rc
+
+    args = parse_args(resolved_argv)
+    previous_signal_handlers: dict[int, Any] = {}
+
+    def request_terminal_closeout(signum: int, _frame: Any) -> None:
+        raise _SupervisorTerminationSignal(signum)
+
+    for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        previous_signal_handlers[signum] = signal.signal(
+            signum,
+            request_terminal_closeout,
+        )
+    try:
+        rc, payload = run_supervisor(args)
+    except Exception as exc:
+        payload = _finalize_unhandled_supervisor_failure(args, exc)
+        rc = (
+            128 + exc.signum
+            if isinstance(exc, _SupervisorTerminationSignal)
+            else 70
+        )
+        sys.stderr.write(
+            "skillsbench supervisor failed unexpectedly: "
+            f"{type(exc).__name__}\n"
+        )
+    finally:
+        for signum, previous_handler in previous_signal_handlers.items():
+            signal.signal(signum, previous_handler)
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     sys.stdout.write(text)
     return rc

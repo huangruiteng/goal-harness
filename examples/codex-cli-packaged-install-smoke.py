@@ -123,6 +123,9 @@ def main() -> None:
             "loopx-self-repair",
         ):
             assert (home / ".codex" / "skills" / skill / "SKILL.md").exists(), skill
+        assert not (
+            home / ".codex" / "skills" / "loopx-change-quality"
+        ).exists()
 
         assert not (home / ".local" / "bin" / "loopx-canary").exists()
         assert not (home / ".local" / "bin" / "goal-harness-canary").exists()

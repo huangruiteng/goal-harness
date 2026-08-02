@@ -100,8 +100,10 @@ def main() -> int:
     assert "## Issue-Fix Domain Route" in loopx_goal_command
     assert "loopx issue-fix workflow-plan" in loopx_goal_command
     assert "--repository-context-json <compact-context.json>" in loopx_goal_command
+    assert "--goal-id <goal-id>" in loopx_goal_command
     assert "before writing todos" in loopx_goal_command
     assert "priority and planner order" in loopx_goal_command
+    assert "must not invoke feasibility" in loopx_goal_command
     assert "gates must cover private repro material" in loopx_goal_command
     assert_ordered(
         doc,

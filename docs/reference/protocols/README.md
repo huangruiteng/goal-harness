@@ -19,6 +19,7 @@ Current contracts:
 - [agent_management_projection_v0](agent-management-projection-v0.md)
 - [agent_material_frontier_v0](agent-material-frontier-v0.md)
 - [todo_detail_cold_path_v0](todo-detail-cold-path-v0.md)
+- [quota_cli_hot_path_compaction_v0](quota-cli-hot-path-compaction-v0.md)
 - [long_horizon_agent_state_protocol_v0](long-horizon-agent-state-protocol-v0.md)
 - [model_behavior_qualification_v0](model-behavior-qualification-v0.md)
 - [release_outcome_baseline_v0](release-outcome-baseline-v0.md)

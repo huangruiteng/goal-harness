@@ -209,6 +209,21 @@ def main() -> int:
         DEFAULT_HOST_LOCAL_CODEX_BRIDGE_IDLE_TIMEOUT_SEC
         + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC
     )
+    host_local_outer_timeout_args = SimpleNamespace(
+        agent_idle_timeout=900,
+        host_local_acp_launch=True,
+        local_codex_bridge_idle_timeout_sec=None,
+        local_codex_exec_timeout_sec=None,
+        outer_timeout_sec=10800,
+        route="loopx-product-mode",
+    )
+    assert (
+        _effective_local_codex_exec_timeout_sec(host_local_outer_timeout_args)
+        == 10800
+    )
+    assert _effective_benchflow_agent_timeout_sec(
+        host_local_outer_timeout_args
+    ) == (10800 + HOST_LOCAL_ACP_AGENT_TIMEOUT_MARGIN_SEC)
     non_host_local_timeout_args = SimpleNamespace(
         agent_idle_timeout=7200,
         host_local_acp_launch=False,

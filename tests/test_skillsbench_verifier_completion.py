@@ -8,6 +8,7 @@ from typing import Any
 
 import loopx.benchmark_core.container_exec as container_exec_module
 from scripts.skillsbench_automation_loop import (
+    _public_runner_prerequisites,
     install_benchflow_docker_exec_output_capture,
     install_benchflow_verifier_prep_timeout_override,
 )
@@ -58,6 +59,68 @@ def test_host_local_docker_exec_recovers_output_and_status_from_compose_copy() -
     assert prereqs["host_local_acp_docker_exec_capture_required"] is True
     assert prereqs["host_local_acp_docker_exec_capture_compose_copy"] is True
     assert prereqs["host_local_acp_docker_exec_capture_raw_output_recorded"] is False
+
+
+def test_host_local_docker_exec_reinstalls_capture_after_exec_rebind() -> None:
+    class FakeDockerEnv:
+        def __init__(self) -> None:
+            self.exec_calls: list[tuple[str, dict[str, Any]]] = []
+
+        async def exec(self, command: str, **kwargs: Any) -> Any:
+            self.exec_calls.append((command, dict(kwargs)))
+            return types.SimpleNamespace(stdout="", stderr="", return_code=0)
+
+        async def _run_docker_compose_command(
+            self, command: list[str], **_kwargs: Any
+        ) -> Any:
+            source = command[1].split(":", 1)[1]
+            if source.endswith("/status"):
+                payload = b"7\n"
+            elif source.endswith("/stdout"):
+                payload = b"captured stdout"
+            elif source.endswith("/stderr"):
+                payload = b"captured stderr"
+            else:
+                raise AssertionError(source)
+            Path(command[-1]).write_bytes(payload)
+            return types.SimpleNamespace(stdout="", stderr="", return_code=0)
+
+    env = FakeDockerEnv()
+    plan = {"runner_prerequisites": {}}
+    install_benchflow_docker_exec_output_capture(env, plan=plan)
+
+    rebound_calls: list[str] = []
+
+    async def rebound_exec(command: str, **_kwargs: Any) -> Any:
+        rebound_calls.append(command)
+        return types.SimpleNamespace(stdout="", stderr="", return_code=0)
+
+    env.exec = rebound_exec  # type: ignore[method-assign]
+    original_exec = install_benchflow_docker_exec_output_capture(env, plan=plan)
+    assert original_exec is rebound_exec
+
+    result = asyncio.run(env.exec("printf ignored", timeout_sec=2))
+
+    assert result.return_code == 7
+    assert result.stdout == "captured stdout"
+    assert result.stderr == "captured stderr"
+    assert rebound_calls
+    prereqs = plan["runner_prerequisites"]
+    assert prereqs["host_local_acp_docker_exec_capture_status"] == (
+        "reinstalled_after_exec_rebind"
+    )
+    assert prereqs["host_local_acp_docker_exec_capture_rebound"] is True
+    prereqs["host_local_acp_docker_exec_capture_lifecycle_guard"] = (
+        "install_agent_boundary"
+    )
+    public = _public_runner_prerequisites(prereqs)
+    assert public["host_local_acp_docker_exec_capture_status"] == (
+        "reinstalled_after_exec_rebind"
+    )
+    assert public["host_local_acp_docker_exec_capture_rebound"] is True
+    assert public["host_local_acp_docker_exec_capture_lifecycle_guard"] == (
+        "install_agent_boundary"
+    )
 
 
 def test_final_verifier_waits_for_container_completion_marker(monkeypatch) -> None:

@@ -643,11 +643,13 @@ of an error string.
       "limits": {
         "local_scheduler": 3,
         "codex_cli_tui": 3,
+        "codex_app_ssh_goal": 3,
         "claude_code_loop": 3
       },
       "after_limits": {
         "local_scheduler": "stop_tick_loop",
-        "codex_cli_tui": "exit_goal_loop",
+        "codex_cli_tui": "update_goal_blocked_keep_loopx_active",
+        "codex_app_ssh_goal": "update_goal_blocked_keep_loopx_active",
         "claude_code_loop": "stop_loop"
       },
       "final_quota_replan_check_enabled": true,
@@ -667,6 +669,7 @@ of an error string.
       "contains": [
         "local_scheduler",
         "codex_cli_tui",
+        "codex_app_ssh_goal",
         "claude_code_loop",
         "final_quota_replan_check",
         "reset_policy_detail",
@@ -796,10 +799,13 @@ When the status payload has missing, stale, or unknown canary promotion
 readiness evidence, `quota should-run` also includes
 `promotion_readiness_warning`. This warning is additive: it does not change
 `should_run`, but it lets heartbeat workers and dashboards report release
-readiness blockers from the shared run-history projection without parsing
-`doctor`, dashboard copy, or chat reports. Before promoting the local release
-snapshot, run the canary promotion-readiness smoke and confirm fresh evidence in
-status or doctor output.
+readiness blockers from the shared runtime release ledger without parsing
+`doctor`, dashboard copy, or chat reports. New evidence is stored there rather
+than in a project Goal. Before promoting the local release
+snapshot, run `python3 examples/canary/canary-promotion-readiness-smoke.py` and
+confirm fresh evidence in status or doctor output. The
+`--no-write-evidence` form remains the non-mutating validation path and therefore
+does not clear this warning.
 Connected delivery goals also include `goal_boundary` when the registry has
 boundary data. That field carries the adapter status, allowed write scope,
 parent-approval scopes, registry guards, next probe, and stop condition. It is
@@ -930,7 +936,7 @@ reset token/identity is not persisted, `apply_needed=false`, `ack_needed=true`,
 and the bound `ack_hint.cli_args` records that exact readback without a no-op
 host write. Missing or mismatched readback still requires `automation_update`;
 LoopX never edits the App manifest directly.
-For Codex CLI TUI and Claude Code loops, the default hot path reads
+For Codex App SSH Goal, Codex CLI TUI, and Claude Code loops, the default hot path reads
 `scheduler_hint.unchanged_poll.limits.<runtime>`. A value of `3` means the third
 unchanged poll triggers the compact final quota/replan check named by
 `scheduler_hint.unchanged_poll.final_quota_replan_check_action`; if the rerun is
@@ -939,12 +945,19 @@ still unchanged, the loop applies
 older per-runtime detail objects must opt in with
 `quota should-run --include-detail scheduler` and read
 `scheduler_hint.cold_path_detail.local_scheduler`,
-`scheduler_hint.cold_path_detail.codex_cli_tui`, or
+`scheduler_hint.cold_path_detail.codex_cli_tui`,
+`scheduler_hint.cold_path_detail.codex_app_ssh_goal`, or
 `scheduler_hint.cold_path_detail.claude_code_loop`. That opt-in is diagnostic
 and migration support only: a host or agent that forgets
 `--include-detail scheduler` must still retain the core scheduling abilities by
 reading the default hot-path fields named in
 `scheduler_hint.detail_ref.hot_path_runtime_fields`.
+For native Codex `/goal` runtimes (`codex_cli_tui` and
+`codex_app_ssh_goal`), the after-limit action calls `update_goal` with
+`status=blocked` only after the same blocked condition has repeated for three
+consecutive Goal turns. The registered LoopX goal stays active, the user resumes
+the native Goal with `/goal resume`, and neither the final check nor the blocked
+transition spends LoopX quota.
 The response also includes `execution_obligation`, which is the compatibility
 field that separates worker execution from user-facing notification.
 `heartbeat_recommendation.notify` answers "should this heartbeat interrupt the
@@ -989,12 +1002,23 @@ Post-turn accounting protocol:
 
 - call `quota should-run` before spending delivery compute;
 - do the bounded automatic turn, validation, and state writeback;
+- append an accountable `refresh-state` with `delivery_outcome=outcome_progress`
+  or `primary_goal_outcome` before spend. This run is the causal delivery record
+  consumed by `spend-slot`; a plain `state_refreshed` run without delivery
+  outcome is quota-neutral and cannot replace it;
 - append exactly one `quota spend-slot --execute` event for that completed
   turn after validated writeback. When the writeback is a state refresh that
   moves the guard from eligible/replan to waiting, `spend-slot` may still
   account the latest unspent `outcome_progress` delivery run once; a later
   duplicate spend is rejected because the latest run is then the spend event,
   not the delivery run.
+- a quota-neutral `refresh-state` record may use a custom classification. Its
+  refresh provenance, rather than the literal `state_refreshed` classification,
+  keeps it from hiding the prior delivery. Explicit non-accountable delivery
+  outcomes and unrelated events remain fail-closed.
+- after spend, an optional plain state-only refresh may update dashboard or
+  controller state. Do not append another accountable progress refresh after
+  spend, because it would become a new unspent delivery record;
 - keep accountable delivery attribution on the worktree that produced it. If
   `refresh-state` must run from a separate registry checkout, pass
   `--delivery-workspace-path <delivery-worktree>`; the path is validated locally
@@ -1003,7 +1027,11 @@ Post-turn accounting protocol:
 - autonomous replans follow the same accountable-outcome rule: spend after a
   concrete successor, blocker, or `outcome_progress`/`primary_goal_outcome`
   writeback, but do not spend for a `surface_only` watch-lane continuation or
-  no-follow-up rationale that closes into `monitor_quiet_skip`.
+  no-follow-up rationale that closes into `monitor_quiet_skip`. A replan that
+  only changes a user gate, monitor target, watch continuation, or durable Next
+  Action is normalized to `outcome_gap` even if the caller requests an
+  accountable outcome; it must also change the executable, blocked, or terminal
+  frontier before it can count as delivery progress.
 - give each heartbeat a stable turn id and pass it to `quota should-run`; the
   guard commits one idempotent receipt, and for unchanged `monitor_quiet_skip`
   it idempotently appends the no-spend stall observation before returning quiet
@@ -1014,7 +1042,9 @@ Post-turn accounting protocol:
   completes bounded safe-bypass work, append one spend event for that work. For
   `safe_bypass_kind=outcome_floor_recovery`, spend only after validated
   ranker/cross-domain evidence or concrete blocker writeback, not for another
-  surface-only report.
+  surface-only report. Every safe-bypass spend must have a latest unspent
+  accountable delivery writeback; the bypass decision alone never authorizes
+  accounting.
 - if `should_run=true` with `effective_action=control_plane_health_repair` or
   `control_plane_projection_repair`, append one spend event only after the
   control-plane projection or blocker writeback is validated.

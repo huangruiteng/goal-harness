@@ -79,6 +79,16 @@ transitions, observed outcomes, invalidated assumptions, and review time. Only
 a verified receipt with outcome evidence is eligible to create a Reward Memory
 candidate.
 
+`decision_outcome_feedback_v0` closes the boundary without making either
+capability authoritative. It accepts only canonical, untampered evidence and
+outcome packets, records aggregate retrieval telemetry, and may emit one
+`procedural_experience` candidate when an exact-read-promoted claim has a
+verified outcome linked to the same evidence packet. Rejected recall is
+telemetry only. The adapter never ingests, reviews, persists, or activates the
+candidate. A caller may pass the canonical public retrieval receipt to preserve
+the distinction between aggregate rejection records and the actual number of
+provider results rejected by exact read.
+
 ## Incremental source plane
 
 Decision Context must not depend on a domain-specific automation prompt to know

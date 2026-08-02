@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 from ...control_plane.runtime.public_safety import public_safe_compact_text
 from .repository_memory import build_issue_fix_repository_memory_hook
 
-
 ISSUE_FIX_REPOSITORY_CONTEXT_INPUT_SCHEMA_VERSION = (
     "issue_fix_repository_context_input_v0"
 )
@@ -58,6 +57,34 @@ _EXPERT_QUESTIONS = {
     "reproduction": "What is the smallest repository-native reproduction path?",
     "validation": "Which focused checks are authoritative for this change?",
 }
+
+
+def repository_context_input_contract() -> dict[str, Any]:
+    """Describe the JSON object consumed by workflow-plan and feasibility."""
+
+    return {
+        "schema_version": ISSUE_FIX_REPOSITORY_CONTEXT_INPUT_SCHEMA_VERSION,
+        "allowed_fields": sorted(_INPUT_FIELDS),
+        "source_fields": sorted(_SOURCE_FIELDS),
+        "source_kind_values": sorted(SOURCE_KINDS),
+        "trust_values": sorted(TRUST_LEVELS),
+        "freshness_values": sorted(FRESHNESS_STATES),
+        "supports_values": sorted(SUPPORT_ASPECTS),
+        "minimal_example": {
+            "schema_version": ISSUE_FIX_REPOSITORY_CONTEXT_INPUT_SCHEMA_VERSION,
+            "repository_revision": "<git-revision>",
+            "sources": [
+                {
+                    "source_id": "focused-source",
+                    "source_kind": "source_code",
+                    "reference": "repo/relative/path.py",
+                    "trust": "verified",
+                    "freshness": "current",
+                    "supports": ["change_scope", "reproduction", "validation"],
+                }
+            ],
+        },
+    }
 
 
 def _safe_text(value: Any, *, field: str, limit: int = 220) -> str:

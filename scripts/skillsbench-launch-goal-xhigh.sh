@@ -24,6 +24,8 @@ Optional env:
                                        python3 -m loopx.benchmark_adapters.skillsbench_runner_profile capture
   SKILLSBENCH_LOCAL_CODEX_PROXY_HOST   Local proxy host, default 127.0.0.1
   SKILLSBENCH_LOCAL_CODEX_PROXY_PORT   Local proxy port, default 18180
+  SKILLSBENCH_REMOTE_CODEX_PROXY_PORT  Remote proxy port override; default is
+                                       deterministic and scoped to the run id
   SKILLSBENCH_LOCAL_CODEX_PROXY_COMMAND
                                        Optional private foreground command that
                                        the supervisor owns and restarts when
@@ -64,10 +66,16 @@ Optional env:
                                        control; default codex from local PATH
   SKILLSBENCH_LOCAL_CODEX_SANDBOX      Host Codex sandbox mode; default
                                        workspace-write
+  SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC
+                                       Exact-host sandbox probe timeout;
+                                       default 30
   SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC
                                        Optional positive per-prompt timeout for
                                        host-local Codex; unset preserves the
                                        runner default
+  SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS
+                                       Positive startup preflight attempts for
+                                       split-control Codex; default 3
   SKILLSBENCH_OUTER_TIMEOUT_SEC         Optional positive runner-wide timeout;
                                        unset preserves the runner default
   SKILLSBENCH_CLI_GOAL_THREAD_PREWARM  Set to 1 to prewarm the persisted Codex
@@ -80,6 +88,19 @@ Optional env:
                                        Set to 1 to stop after real job-root and
                                        environment materialization, before any
                                        agent or verifier lifecycle
+  SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY
+                                       With setup-only preflight, set to 1 to
+                                       exercise agent install and stop before
+                                       agent execution or verification
+  SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY
+                                       With setup-only agent install, set to 1
+                                       to initialize a task-free ACP session and
+                                       prove one LoopX state read/write lifecycle
+  SKILLSBENCH_SCORED_LIFECYCLE_CANARY_TIMEOUT_SEC
+                                       Strict canary terminal budget, default 180
+  SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT
+                                       Local public canary receipt required for
+                                       every non-setup scored launch
   SKILLSBENCH_PRODUCT_MODE_SOFT_VERIFY_POLICY
                                        Optional product-mode intermediate
                                        verifier policy: every-round or
@@ -172,7 +193,7 @@ fi
 task_id="${task_ids[0]}"
 task_count="${#task_ids[@]}"
 tag="${2:-${SKILLSBENCH_RUN_TAG:-manual}}"
-remote_proxy_port="${3:-${SKILLSBENCH_REMOTE_CODEX_PROXY_PORT:-18180}}"
+remote_proxy_port="${3:-${SKILLSBENCH_REMOTE_CODEX_PROXY_PORT:-}}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runner_profile="${SKILLSBENCH_RUNNER_PROFILE:-}"
@@ -235,7 +256,9 @@ remote_codex_bin="${SKILLSBENCH_REMOTE_CODEX_BIN:-codex}"
 local_codex_split_control="${SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL:-0}"
 local_codex_bin="${SKILLSBENCH_LOCAL_CODEX_BIN:-codex}"
 local_codex_sandbox="${SKILLSBENCH_LOCAL_CODEX_SANDBOX:-workspace-write}"
+exact_host_codex_sandbox_preflight_timeout="${SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC:-30}"
 local_codex_exec_timeout="${SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC:-}"
+host_local_acp_codex_exec_preflight_attempts="${SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS:-3}"
 outer_timeout="${SKILLSBENCH_OUTER_TIMEOUT_SEC:-}"
 codex_cli_goal_thread_prewarm="${SKILLSBENCH_CLI_GOAL_THREAD_PREWARM:-0}"
 if [[ "$codex_cli_goal_thread_prewarm" != "0" && "$codex_cli_goal_thread_prewarm" != "1" ]]; then
@@ -247,6 +270,14 @@ if [[ -n "$local_codex_exec_timeout" ]] &&
   echo "SKILLSBENCH_LOCAL_CODEX_EXEC_TIMEOUT_SEC must be a positive integer" >&2
   exit 2
 fi
+if [[ ! "$host_local_acp_codex_exec_preflight_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SKILLSBENCH_HOST_LOCAL_ACP_CODEX_EXEC_PREFLIGHT_ATTEMPTS must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "$exact_host_codex_sandbox_preflight_timeout" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SKILLSBENCH_EXACT_HOST_CODEX_SANDBOX_PREFLIGHT_TIMEOUT_SEC must be a positive integer" >&2
+  exit 2
+fi
 if [[ -n "$outer_timeout" ]] &&
   [[ ! "$outer_timeout" =~ ^[1-9][0-9]*$ ]]; then
   echo "SKILLSBENCH_OUTER_TIMEOUT_SEC must be a positive integer" >&2
@@ -256,6 +287,10 @@ skip_global_ledger_sync="${SKILLSBENCH_SKIP_GLOBAL_LEDGER_SYNC:-0}"
 skip_current_aggregate_update="${SKILLSBENCH_SKIP_CURRENT_AGGREGATE_UPDATE:-0}"
 allow_staged_bootstrap_repair_run="${SKILLSBENCH_ALLOW_STAGED_BOOTSTRAP_REPAIR_RUN:-0}"
 setup_only_public_preflight="${SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT:-0}"
+setup_only_agent_install_canary="${SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY:-0}"
+setup_only_scored_lifecycle_canary="${SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY:-0}"
+scored_lifecycle_canary_timeout="${SKILLSBENCH_SCORED_LIFECYCLE_CANARY_TIMEOUT_SEC:-180}"
+scored_lifecycle_readiness_receipt="${SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT:-}"
 benchmark_egress_proxy_mode="${SKILLSBENCH_BENCHMARK_EGRESS_PROXY_MODE:-require}"
 benchmark_egress_no_proxy="${SKILLSBENCH_BENCHMARK_EGRESS_NO_PROXY:-}"
 docker_apt_source_mode="${SKILLSBENCH_DOCKER_APT_SOURCE_MODE:-}"
@@ -308,6 +343,26 @@ validate_bool_toggle \
 validate_bool_toggle \
   SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT "$setup_only_public_preflight"
 validate_bool_toggle \
+  SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY "$setup_only_agent_install_canary"
+validate_bool_toggle \
+  SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY \
+  "$setup_only_scored_lifecycle_canary"
+if [[ "$setup_only_agent_install_canary" == "1" ]] &&
+  [[ "$setup_only_public_preflight" != "1" ]]; then
+  echo "SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY requires SKILLSBENCH_SETUP_ONLY_PUBLIC_PREFLIGHT=1" >&2
+  exit 2
+fi
+if [[ "$setup_only_scored_lifecycle_canary" == "1" ]] &&
+  [[ "$setup_only_agent_install_canary" != "1" ]]; then
+  echo "SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY requires SKILLSBENCH_SETUP_ONLY_AGENT_INSTALL_CANARY=1" >&2
+  exit 2
+fi
+if [[ ! "$scored_lifecycle_canary_timeout" =~ ^[1-9][0-9]*$ ]] ||
+  ((10#$scored_lifecycle_canary_timeout > 300)); then
+  echo "SKILLSBENCH_SCORED_LIFECYCLE_CANARY_TIMEOUT_SEC must be between 1 and 300" >&2
+  exit 2
+fi
+validate_bool_toggle \
   SKILLSBENCH_LOCAL_CODEX_SPLIT_CONTROL "$local_codex_split_control"
 if [[ "$local_codex_split_control" == "1" ]] &&
   [[ "$local_codex_sandbox" != "workspace-write" ]]; then
@@ -354,6 +409,49 @@ if [[ -n "$product_mode_soft_verify_policy" ]] &&
   echo "SKILLSBENCH_PRODUCT_MODE_SOFT_VERIFY_POLICY must be every-round or final-only" >&2
   exit 2
 fi
+scored_lifecycle_readiness="not_required_for_setup_only"
+if [[ "$setup_only_public_preflight" == "1" ]]; then
+  if [[ "$setup_only_scored_lifecycle_canary" == "1" ]]; then
+    scored_lifecycle_readiness="canary_will_generate_receipt"
+  fi
+elif [[ "$dry_run" == "true" ]]; then
+  scored_lifecycle_readiness="required_at_live_launch"
+else
+  if [[ -z "$scored_lifecycle_readiness_receipt" ]]; then
+    echo "SKILLSBENCH_SCORED_LIFECYCLE_READINESS_RECEIPT is required before scored launch" >&2
+    exit 3
+  fi
+  if ! scored_lifecycle_gate="$(
+    PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}" \
+      python3 - \
+      "$scored_lifecycle_readiness_receipt" \
+      "$SKILLSBENCH_EXPECTED_LOOPX_GIT_HEAD" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from loopx.benchmark_adapters.skillsbench_setup_preflight import (
+    skillsbench_scored_lifecycle_readiness_gate,
+)
+
+try:
+    receipt = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    receipt = {}
+gate = skillsbench_scored_lifecycle_readiness_gate(
+    receipt if isinstance(receipt, dict) else {},
+    expected_git_head=sys.argv[2],
+)
+print(json.dumps(gate, sort_keys=True))
+raise SystemExit(0 if gate["allowed"] else 1)
+PY
+  )"; then
+    printf '%s\n' "$scored_lifecycle_gate" >&2
+    exit 3
+  fi
+  unset scored_lifecycle_gate
+  scored_lifecycle_readiness="passed"
+fi
 remote_codex_bin_mode="path_lookup"
 if [[ -n "${SKILLSBENCH_REMOTE_CODEX_BIN:-}" ]]; then
   remote_codex_bin_mode="explicit"
@@ -391,7 +489,7 @@ elif [[ "$dry_run" == "false" && "$setup_only_public_preflight" != "1" ]]; then
     exit 2
   fi
   remote_codex_sandbox_probe_py='import shutil, subprocess, sys, tempfile
-codex_bin, sandbox_mode = sys.argv[1:]
+codex_bin, sandbox_mode, timeout_raw = sys.argv[1:]
 with tempfile.TemporaryDirectory(prefix="gh-skillsbench-codex-sandbox-") as tmp:
     try:
         proc = subprocess.run(
@@ -406,19 +504,35 @@ with tempfile.TemporaryDirectory(prefix="gh-skillsbench-codex-sandbox-") as tmp:
             cwd=tmp,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=10,
+            timeout=int(timeout_raw),
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        raise SystemExit(1) from None
-raise SystemExit(proc.returncode)'
+    except subprocess.TimeoutExpired:
+        raise SystemExit(124) from None
+    except OSError:
+        raise SystemExit(125) from None
+raise SystemExit(0 if proc.returncode == 0 else 123)'
   printf -v remote_codex_sandbox_probe \
-    '%q -c %q %q %q' \
+    '%q -c %q %q %q %q' \
     python3 "$remote_codex_sandbox_probe_py" \
-    "$remote_codex_bin" "$local_codex_sandbox"
-  if ! ssh "${ssh_command_options[@]}" "$SKILLSBENCH_SSH_DESTINATION" \
+    "$remote_codex_bin" "$local_codex_sandbox" \
+    "$exact_host_codex_sandbox_preflight_timeout"
+  if ssh "${ssh_command_options[@]}" "$SKILLSBENCH_SSH_DESTINATION" \
     "$remote_codex_sandbox_probe" >/dev/null 2>&1; then
-    python3 - "$local_codex_sandbox" "$remote_codex_bin_mode" <<'PY' >&2
+    exact_host_codex_sandbox_preflight="passed"
+  else
+    remote_codex_sandbox_probe_status=$?
+    case "$remote_codex_sandbox_probe_status" in
+      123) remote_codex_sandbox_failure_category="sandbox_command_failed" ;;
+      124) remote_codex_sandbox_failure_category="timeout" ;;
+      125) remote_codex_sandbox_failure_category="execution_unavailable" ;;
+      *) remote_codex_sandbox_failure_category="transport_or_unknown" ;;
+    esac
+    python3 - \
+      "$local_codex_sandbox" \
+      "$remote_codex_bin_mode" \
+      "$remote_codex_sandbox_failure_category" \
+      "$exact_host_codex_sandbox_preflight_timeout" <<'PY' >&2
 import json
 import sys
 
@@ -430,6 +544,8 @@ print(
             "error": "skillsbench_exact_host_codex_sandbox_preflight_failed",
             "sandbox_mode": sys.argv[1],
             "remote_codex_bin_mode": sys.argv[2],
+            "failure_category": sys.argv[3],
+            "timeout_seconds": int(sys.argv[4]),
             "raw_output_recorded": False,
             "remote_path_recorded": False,
             "ssh_destination_recorded": False,
@@ -440,7 +556,6 @@ print(
 PY
     exit 3
   fi
-  exact_host_codex_sandbox_preflight="passed"
 elif [[ "$setup_only_public_preflight" != "1" ]]; then
   exact_host_codex_sandbox_preflight="required"
 fi
@@ -452,10 +567,40 @@ safe_task="${safe_task//_/-}"
 if ((task_count > 1)); then
   safe_task="batch-${task_count}"
 fi
+run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
+job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
+if [[ -z "$remote_proxy_port" ]]; then
+  remote_proxy_port="$(
+    python3 - "$run_group" <<'PY'
+import hashlib
+import sys
+
+digest = hashlib.sha256(sys.argv[1].encode("utf-8")).digest()
+print(20000 + (int.from_bytes(digest[:4], "big") % 40000))
+PY
+  )"
+  remote_proxy_port_mode="run_scoped"
+else
+  remote_proxy_port_mode="explicit"
+fi
+if [[ ! "$remote_proxy_port" =~ ^[1-9][0-9]{0,4}$ ]] ||
+  ((10#$remote_proxy_port > 65535)); then
+  echo "remote proxy port must be an integer from 1 through 65535" >&2
+  exit 2
+fi
 
 goal_id="${SKILLSBENCH_GOAL_ID:-loopx-meta}"
 local_run_ledger="${SKILLSBENCH_LOCAL_RUN_LEDGER_PATH:-.local/goals/${goal_id}/skillsbench-ledgers/live-standard-run-ledger.json}"
 route="${SKILLSBENCH_ROUTE:-codex-cli-goal-baseline}"
+if [[ "$setup_only_scored_lifecycle_canary" == "1" ]]; then
+  case "$route" in
+    loopx-product-mode|loopx-goal-start-product-mode|loopx-turn-agent-cli) ;;
+    *)
+      echo "SKILLSBENCH_SETUP_ONLY_SCORED_LIFECYCLE_CANARY requires a case-local LoopX route" >&2
+      exit 2
+      ;;
+  esac
+fi
 if [[ "$route" == "loopx-turn-agent-cli" ]] &&
   [[ -z "$loopx_turn_validation_command" ]]; then
   echo "SKILLSBENCH_LOOPX_TURN_VALIDATION_COMMAND is required for loopx-turn-agent-cli" >&2
@@ -610,7 +755,8 @@ if [[ "$local_codex_split_control" == "1" ]]; then
   extra_runner_args+=(
     --local-codex-provider reverse-channel
     --host-local-acp-codex-exec-preflight
-    --host-local-acp-codex-exec-preflight-attempts 1
+    --host-local-acp-codex-exec-preflight-attempts
+    "$host_local_acp_codex_exec_preflight_attempts"
   )
 fi
 if [[ -n "$local_codex_exec_timeout" ]]; then
@@ -631,6 +777,16 @@ if [[ "$allow_staged_bootstrap_repair_run" == "1" ]]; then
 fi
 if [[ "$setup_only_public_preflight" == "1" ]]; then
   extra_runner_args+=(--setup-only-public-preflight)
+fi
+if [[ "$setup_only_agent_install_canary" == "1" ]]; then
+  extra_runner_args+=(--setup-only-agent-install-canary)
+fi
+if [[ "$setup_only_scored_lifecycle_canary" == "1" ]]; then
+  extra_runner_args+=(
+    --setup-only-scored-lifecycle-canary
+    --scored-lifecycle-canary-timeout-sec
+    "$scored_lifecycle_canary_timeout"
+  )
 fi
 if [[ -n "$benchmark_egress_no_proxy" ]]; then
   extra_runner_args+=(
@@ -703,8 +859,6 @@ if [[ "$skip_current_aggregate_update" == "1" ]]; then
   extra_runner_args+=(--skip-current-aggregate-update)
 fi
 
-run_group="skillsbench-codex-cli-goal-xhigh-${safe_task}-${tag}-${stamp}"
-job_name="${safe_task}__codex_cli_goal_xhigh_${tag}_${stamp}"
 codex_channel_id="$(
   python3 - "$job_name" <<'PY'
 import hashlib
@@ -787,6 +941,9 @@ supervisor_cmd=(
   "${ssh_options[@]}"
   --cleanup-stale-local-forward
   --remote-forward "127.0.0.1:${remote_proxy_port}:${local_proxy_host}:${local_proxy_port}"
+  --codex-reverse-proxy-port "$remote_proxy_port"
+  --benchmark-egress-proxy-port "$remote_proxy_port"
+  --container-forwarder-port "$remote_proxy_port"
   --probe-timeout-sec "$tunnel_probe_timeout"
   --tunnel-ready-timeout-sec "$tunnel_ready_timeout"
   --tunnel-health-interval-sec "$tunnel_health_interval"
@@ -808,6 +965,7 @@ supervisor_cmd=(
   --local-public-artifact-dir "$public_dir"
   --private-log-path "${private_dir}/remote-command.log"
   --public-output-path "${public_dir}/supervisor.public.json"
+  --owner-control-id "$run_group"
 )
 
 if [[ -n "$local_proxy_command" ]]; then
@@ -857,6 +1015,8 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'public_output=%s/supervisor.public.json\n' "$public_dir"
   printf 'private_dir=%s\n' "$private_dir"
   printf 'remote_proxy_port=%s\n' "$remote_proxy_port"
+  printf 'remote_proxy_port_mode=%s\n' "$remote_proxy_port_mode"
+  printf 'proxy_port_coherence_guard=enforced\n'
   printf 'docker_proxy_host_recorded=false\n'
   printf 'docker_proxy_endpoint_mode=%s\n' "$docker_proxy_endpoint_mode"
   printf 'docker_api_version=%s\n' "$docker_api_version"
@@ -872,12 +1032,25 @@ if [[ "$dry_run" == "true" ]]; then
   printf 'local_codex_sandbox=%s\n' "$local_codex_sandbox"
   printf 'local_codex_exec_timeout_sec=%s\n' \
     "${local_codex_exec_timeout:-runner-default}"
+  printf 'host_local_acp_codex_exec_preflight_attempts=%s\n' \
+    "$host_local_acp_codex_exec_preflight_attempts"
   printf 'outer_timeout_sec=%s\n' "${outer_timeout:-runner-default}"
   printf 'exact_host_codex_sandbox_preflight=%s\n' \
     "$exact_host_codex_sandbox_preflight"
+  printf 'exact_host_codex_sandbox_preflight_timeout_sec=%s\n' \
+    "$exact_host_codex_sandbox_preflight_timeout"
   printf 'codex_cli_goal_thread_prewarm=%s\n' "$codex_cli_goal_thread_prewarm"
   printf 'allow_staged_bootstrap_repair_run=%s\n' "$allow_staged_bootstrap_repair_run"
   printf 'setup_only_public_preflight=%s\n' "$setup_only_public_preflight"
+  printf 'setup_only_agent_install_canary=%s\n' \
+    "$setup_only_agent_install_canary"
+  printf 'setup_only_scored_lifecycle_canary=%s\n' \
+    "$setup_only_scored_lifecycle_canary"
+  printf 'scored_lifecycle_canary_timeout_sec=%s\n' \
+    "$scored_lifecycle_canary_timeout"
+  printf 'scored_lifecycle_readiness=%s\n' \
+    "$scored_lifecycle_readiness"
+  printf 'scored_lifecycle_readiness_receipt_path_recorded=false\n'
   printf 'public_artifact_sync_interval_sec=%s\n' \
     "$public_artifact_sync_interval"
   printf 'benchmark_egress_proxy_mode=%s\n' "$benchmark_egress_proxy_mode"
@@ -997,6 +1170,7 @@ job_name=${job_name}
 public_output=${public_dir}/supervisor.public.json
 private_dir=${private_dir}
 remote_proxy_port=${remote_proxy_port}
+remote_proxy_port_mode=${remote_proxy_port_mode}
 docker_proxy_host=${docker_proxy_host}
 docker_proxy_endpoint_mode=${docker_proxy_endpoint_mode}
 docker_api_version=${docker_api_version}
@@ -1008,6 +1182,12 @@ local_codex_sandbox=${local_codex_sandbox}
 codex_cli_goal_thread_prewarm=${codex_cli_goal_thread_prewarm}
 allow_staged_bootstrap_repair_run=${allow_staged_bootstrap_repair_run}
 setup_only_public_preflight=${setup_only_public_preflight}
+setup_only_agent_install_canary=${setup_only_agent_install_canary}
+setup_only_scored_lifecycle_canary=${setup_only_scored_lifecycle_canary}
+scored_lifecycle_canary_timeout_sec=${scored_lifecycle_canary_timeout}
+scored_lifecycle_readiness=${scored_lifecycle_readiness}
+scored_lifecycle_readiness_receipt_path_recorded=false
 exact_host_codex_sandbox_preflight=${exact_host_codex_sandbox_preflight}
+exact_host_codex_sandbox_preflight_timeout_sec=${exact_host_codex_sandbox_preflight_timeout}
 public_artifact_sync_interval_sec=${public_artifact_sync_interval}
 EOF

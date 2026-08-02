@@ -47,7 +47,12 @@ SCENARIOS = (
 )
 
 
-def _write_fixture(root: Path, scenario: Scenario) -> tuple[Path, Path, Path, Path]:
+def _write_fixture(
+    root: Path,
+    scenario: Scenario,
+    *,
+    include_agent_vision: bool = False,
+) -> tuple[Path, Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_relative = Path(".codex") / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -124,27 +129,56 @@ def _write_fixture(root: Path, scenario: Scenario) -> tuple[Path, Path, Path, Pa
         + "\n",
         encoding="utf-8",
     )
-    _write_run_history(runtime, agents=agents, run_count=scenario.run_count)
+    _write_run_history(
+        runtime,
+        agents=agents,
+        run_count=scenario.run_count,
+        include_agent_vision=include_agent_vision,
+    )
     _write_rollout_event(runtime, agent_id=agents[0])
     return project, runtime, registry_path, state_file
 
 
-def _write_run_history(runtime: Path, *, agents: tuple[str, ...], run_count: int) -> None:
+def _write_run_history(
+    runtime: Path,
+    *,
+    agents: tuple[str, ...],
+    run_count: int,
+    include_agent_vision: bool = False,
+) -> None:
     runs_dir = runtime / "goals" / GOAL_ID / "runs"
     runs_dir.mkdir(parents=True)
     index_rows = []
     for index in range(run_count):
         json_path = runs_dir / f"fixture-run-{index:02d}.json"
         markdown_path = json_path.with_suffix(".md")
+        agent_id = agents[index % len(agents)]
         record = {
             "generated_at": f"2026-01-01T00:{index:02d}:00+00:00",
             "goal_id": GOAL_ID,
             "classification": "fixture_progress",
             "recommended_action": f"Continue fixture step {index}.",
             "health_check": "public fixture healthy",
-            "agent_id": agents[index % len(agents)],
+            "agent_id": agent_id,
             "progress_scope": "agent_lane",
         }
+        if include_agent_vision and agent_id == agents[0]:
+            record["agent_vision"] = {
+                "schema_version": "goal_vision_replan_contract_v0",
+                "agent_id": agent_id,
+                "state": "vision_active",
+                "vision_patch": {
+                    "acceptance_summary": (
+                        "Keep the public CLI contract within its declared output "
+                        "budget while preserving every executable decision signal."
+                    ),
+                    "replan_trigger_summary": (
+                        "Create a successor when an agent-facing default exceeds "
+                        "its characterized hot-path budget."
+                    ),
+                    "advancement_policy": "repeat_until_closed",
+                },
+            }
         json_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
         markdown_path.write_text("# Public fixture run\n", encoding="utf-8")
         index_rows.append(
@@ -547,6 +581,19 @@ def _mode_variant_commands(
             "--include-detail",
             "goal-boundary",
         ],
+        "quota_should_run_vision_detail": common
+        + [
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_IDS[0],
+            "--scan-root",
+            str(project),
+            "--include-detail",
+            "vision",
+        ],
         "quota_should_run_all_detail": common
         + [
             "quota",
@@ -675,6 +722,7 @@ def test_manifest_covers_the_declared_agent_facing_surface_set() -> None:
         "quota_should_run_todo_summary_detail",
         "quota_should_run_user_todo_summary_detail",
         "quota_should_run_goal_boundary_detail",
+        "quota_should_run_vision_detail",
         "quota_should_run_all_detail",
         "quota_should_run_turn_envelope",
         "loopx_turn_plan_transaction_detail",
@@ -795,7 +843,82 @@ def test_quota_cli_keeps_full_agent_todo_diagnostics_on_explicit_cold_path(
     assert detail_summary["backlog_items"]
     assert "todo_summary_projection" not in detail_payload
     for key in ("interaction_contract", "scheduler_hint", "selected_todo"):
-        assert default_payload[key] == detail_payload[key]
+        assert default_payload.get(key) == detail_payload.get(key)
+
+
+def test_quota_cli_bounds_real_scale_vision_audit_and_keeps_cold_detail(
+    tmp_path: Path,
+) -> None:
+    with _stable_budget_fixture_root(tmp_path / "quota-vision-detail") as stable_root:
+        project, runtime, registry_path, state_file = _write_fixture(
+            stable_root,
+            SCENARIOS[1],
+            include_agent_vision=True,
+        )
+        default_command = _surface_commands(
+            project=project,
+            runtime=runtime,
+            registry_path=registry_path,
+            state_file=state_file,
+            output_format="json",
+        )["quota_should_run"]
+        detail_command = _mode_variant_commands(
+            project=project,
+            runtime=runtime,
+            registry_path=registry_path,
+            state_file=state_file,
+            output_format="json",
+        )["quota_should_run_vision_detail"]
+
+        default_exit_code, default_text = _invoke_cli(default_command)
+        detail_exit_code, detail_text = _invoke_cli(detail_command)
+
+    assert default_exit_code == 0, default_text
+    assert detail_exit_code == 0, detail_text
+    assert len(default_text) <= 40_000
+    default_payload = json.loads(default_text)
+    detail_payload = json.loads(detail_text)
+    compact_audit = default_payload["vision_continuation_audit"]
+    detailed_audit = detail_payload["vision_continuation_audit"]
+    assert compact_audit["required"] is True
+    assert compact_audit["vision_gap_judge"]["decision"] == "continue"
+    assert compact_audit["payload_compaction"]["full_detail_cold_path"] == (
+        "quota should-run --include-detail vision"
+    )
+    assert "registry_read_instruction" not in compact_audit["vision_gap_judge"]
+    assert "registry_read_instruction" in detailed_audit["vision_gap_judge"]
+    assert default_payload["goal_frontier_projection"][
+        "vision_continuation_audit"
+    ]["projection_ref"] == "$.vision_continuation_audit"
+    for key in (
+        "decision",
+        "should_run",
+        "effective_action",
+        "recommended_action",
+        "selected_todo",
+        "scheduler_hint",
+        "user_todo_summary",
+    ):
+        assert default_payload.get(key) == detail_payload.get(key)
+    assert default_payload["goal_frontier_projection"]["replan_required"] == (
+        detail_payload["goal_frontier_projection"]["replan_required"]
+    )
+    assert default_payload["goal_frontier_projection"]["acceptance_gaps"] == (
+        detail_payload["goal_frontier_projection"]["acceptance_gaps"]
+    )
+    default_interaction = default_payload["interaction_contract"]
+    detail_interaction = detail_payload["interaction_contract"]
+    assert default_interaction["mode"] == detail_interaction["mode"]
+    assert default_interaction["user_channel"] == detail_interaction["user_channel"]
+    assert default_interaction["agent_channel"]["must_attempt"] == (
+        detail_interaction["agent_channel"]["must_attempt"]
+    )
+    assert default_interaction["agent_channel"]["primary_action"] == (
+        detail_interaction["agent_channel"]["primary_action"]
+    )
+    assert default_interaction["cli_channel"]["next_cli_actions"] == (
+        detail_interaction["cli_channel"]["next_cli_actions"]
+    )
 
 
 def test_quota_cli_keeps_full_user_todo_diagnostics_on_explicit_cold_path(

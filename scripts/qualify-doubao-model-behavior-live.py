@@ -3,18 +3,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (
-    build_actual_default_model_behavior_scenario_packets,
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+repo_root_text = str(REPO_ROOT)
+if sys.path[0] != repo_root_text:
+    sys.path.insert(0, repo_root_text)
+
+# The candidate checkout must win over any installed LoopX package.
+from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (  # noqa: E402
+    build_actual_default_model_behavior_scenario_inputs,
     run_actual_default_model_behavior_portfolio,
 )
-from loopx.control_plane.testing.doubao_model_behavior_actor import (
+from loopx.control_plane.testing.doubao_model_behavior_actor import (  # noqa: E402
     DoubaoModelBehaviorActor,
     DoubaoOnboardingModelBehaviorActor,
 )
-from loopx.control_plane.testing.release_commit_qualification import (
+from loopx.control_plane.testing.release_commit_qualification import (  # noqa: E402
     collect_release_source_identity,
 )
 
@@ -46,9 +54,12 @@ def main() -> int:
         timeout_seconds=args.timeout_seconds
     )
     with TemporaryDirectory(prefix="loopx-doubao-live-") as temp_dir:
-        packets = build_actual_default_model_behavior_scenario_packets(Path(temp_dir))
+        sources, packets = build_actual_default_model_behavior_scenario_inputs(
+            Path(temp_dir)
+        )
         result = run_actual_default_model_behavior_portfolio(
             packets,
+            scenario_sources=sources,
             qualification_id=args.qualification_id,
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,

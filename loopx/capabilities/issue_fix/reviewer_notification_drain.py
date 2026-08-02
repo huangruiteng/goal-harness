@@ -12,6 +12,7 @@ from ...domain_packs.issue_fix import (
     persist_issue_fix_reviewer_notification_state,
 )
 from .cli_input import load_jsonl_rows
+from .pr_lifecycle import issue_fix_grouped_monitor_identity
 from .reviewer_notification import (
     CommandRunner,
     NotificationSinkAdapter,
@@ -100,12 +101,14 @@ def _row_with_live_lifecycle_facts(
     fresh_grouped = dict(grouped) if isinstance(grouped, Mapping) else {}
     fresh_grouped["state_bucket"] = state_bucket
     terminal = state_bucket == "terminal"
-    fresh_grouped["target_key"] = (
-        None if terminal else f"github-pr-state-{state_bucket.replace('_', '-')}"
+    repository = str(fresh_observation.get("repo") or "unknown")
+    target_key, action_kind = issue_fix_grouped_monitor_identity(
+        repository=repository,
+        state_bucket=state_bucket,
     )
-    fresh_grouped["action_kind"] = (
-        None if terminal else f"issue_fix_pr_state_{state_bucket}_monitor"
-    )
+    fresh_grouped["repository"] = repository
+    fresh_grouped["target_key"] = None if terminal else target_key
+    fresh_grouped["action_kind"] = None if terminal else action_kind
     fresh_grouped["member_operation"] = "remove" if terminal else "upsert"
     fresh_grouped["materialize_nonempty_bucket_monitor"] = not terminal
     updated["grouped_monitor_projection"] = fresh_grouped

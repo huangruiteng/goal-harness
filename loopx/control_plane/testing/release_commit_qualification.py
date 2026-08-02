@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping
 
 from ..runtime.public_safety import public_safe_compact_text
 from .actual_default_model_behavior_portfolio import (
+    ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_COUNT,
     ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS,
     ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT,
 )
@@ -279,6 +280,8 @@ def _validate_doubao(value: Any) -> tuple[dict[str, Any], list[str]]:
             "model_id",
             "topology",
             "scenario_count",
+            "contrast_count",
+            "contrast_failure_count",
             "repeats_per_scenario",
             "actor_call_count",
             "failure_count",
@@ -290,6 +293,13 @@ def _validate_doubao(value: Any) -> tuple[dict[str, Any], list[str]]:
     topology = _token(summary.get("topology"), field="doubao_actual_default.topology")
     scenario_count = _positive_int(
         summary.get("scenario_count"), field="doubao_actual_default.scenario_count"
+    )
+    contrast_count = _positive_int(
+        summary.get("contrast_count"), field="doubao_actual_default.contrast_count"
+    )
+    contrast_failures = _non_negative_int(
+        summary.get("contrast_failure_count"),
+        field="doubao_actual_default.contrast_failure_count",
     )
     repeats = _positive_int(
         summary.get("repeats_per_scenario"),
@@ -311,6 +321,8 @@ def _validate_doubao(value: Any) -> tuple[dict[str, Any], list[str]]:
     valid = bool(
         topology == "actual_default_one_arm"
         and scenario_count == ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT
+        and contrast_count == ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_COUNT
+        and contrast_failures == 0
         and repeats == ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS
         and calls == scenario_count * repeats
         and failures == 0
@@ -321,6 +333,8 @@ def _validate_doubao(value: Any) -> tuple[dict[str, Any], list[str]]:
         "model_id": model_id,
         "topology": topology,
         "scenario_count": scenario_count,
+        "contrast_count": contrast_count,
+        "contrast_failure_count": contrast_failures,
         "repeats_per_scenario": repeats,
         "actor_call_count": calls,
         "failure_count": failures,

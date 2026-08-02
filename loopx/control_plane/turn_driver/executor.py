@@ -721,6 +721,316 @@ def _execution_payload(
     }
 
 
+def _host_result_stage(
+    plan: Mapping[str, Any],
+    request: Mapping[str, Any],
+    *,
+    host_runner: HostRunner | None,
+    argv: Sequence[str] | None,
+    project: Path,
+    timeout_seconds: float,
+    journal: dict[str, Any],
+    journal_path: Path,
+    effects: dict[str, bool],
+) -> tuple[dict[str, Any] | None, list[str], dict[str, Any] | None]:
+    completed_phases = list(journal.get("completed_phases") or [])
+    result = (
+        journal.get("host_result")
+        if isinstance(journal.get("host_result"), dict)
+        else None
+    )
+    if "typed_result" not in completed_phases:
+        host_observation = (
+            _run_host_runner(request, runner=host_runner)
+            if host_runner is not None
+            else _run_host(
+                request,
+                argv=argv or [],
+                project=project,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        effects["host_invoked"] = True
+        if not host_observation.get("ok"):
+            failure = _host_failure(
+                plan,
+                kind=LoopXTurnResultKind.HOST_FAILURE,
+                completed_phases=[],
+                failed_phase="host_execute",
+                reason=str(host_observation.get("reason") or "host execution failed"),
+            )
+            journal.update(
+                status="failed",
+                reason=failure["reason"],
+                receipt=failure["receipt"],
+                completed_phases=[],
+                result_kind=LoopXTurnResultKind.HOST_FAILURE.value,
+            )
+            _write_journal(journal_path, journal)
+            return (
+                None,
+                [],
+                _execution_payload(
+                    plan,
+                    journal,
+                    execute=True,
+                    replayed=False,
+                    effects=effects,
+                ),
+            )
+        result = dict(host_observation["value"])
+        completed_phases = list(TRANSACTION_PHASES[:2])
+
+    validation = validate_loopx_turn_host_result(plan, result or {})
+    if not validation.get("ok"):
+        failure = _host_failure(
+            plan,
+            kind=LoopXTurnResultKind.VALIDATION_FAILED,
+            completed_phases=list(TRANSACTION_PHASES[:2]),
+            failed_phase="validation",
+            reason="; ".join(
+                validation.get("errors") or ["host result validation failed"]
+            ),
+        )
+        journal.update(
+            status="failed",
+            reason=failure["reason"],
+            receipt=failure["receipt"],
+            completed_phases=list(TRANSACTION_PHASES[:2]),
+            result_kind=LoopXTurnResultKind.VALIDATION_FAILED.value,
+            validation_stage="host_result_contract",
+        )
+        _write_journal(journal_path, journal)
+        return (
+            None,
+            list(TRANSACTION_PHASES[:2]),
+            _execution_payload(
+                plan,
+                journal,
+                execute=True,
+                replayed=False,
+                effects=effects,
+            ),
+        )
+
+    normalized = dict(validation["result"])
+    if len(completed_phases) < 2:
+        completed_phases = list(TRANSACTION_PHASES[:2])
+    journal.update(
+        host_result=normalized,
+        result_kind=normalized.get("result_kind"),
+        completed_phases=completed_phases,
+    )
+    _write_journal(journal_path, journal)
+    return normalized, completed_phases, None
+
+
+def _task_validation_stage(
+    plan: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    task_validator: TaskValidator | None,
+    completed_phases: list[str],
+    journal: dict[str, Any],
+    journal_path: Path,
+    effects: dict[str, bool],
+) -> tuple[list[str], dict[str, Any] | None]:
+    kind = LoopXTurnResultKind(str(result["result_kind"]))
+    if kind in STOP_HOST_RESULT_KINDS:
+        completed_phases = list(TRANSACTION_PHASES[:3])
+        journal.update(
+            status="stopped",
+            completed_phases=completed_phases,
+            task_validation=_task_validation_receipt(
+                status="not_required",
+                validator_kind="stop_result",
+                summary="task validation is not required for a typed stop result",
+            ),
+            receipt=_receipt(plan, result, completed_phases=completed_phases),
+            scheduler={"disposition": "not_applicable"},
+        )
+        _write_journal(journal_path, journal)
+        return completed_phases, _execution_payload(
+            plan,
+            journal,
+            execute=True,
+            replayed=False,
+            effects=effects,
+        )
+
+    stored_task_validation = (
+        journal.get("task_validation")
+        if isinstance(journal.get("task_validation"), dict)
+        else None
+    )
+    task_validation = (
+        stored_task_validation
+        if "validation" in completed_phases
+        and stored_task_validation is not None
+        and stored_task_validation.get("ok") is True
+        else _run_task_validator(
+            plan,
+            result,
+            validator=task_validator,
+        )
+    )
+    journal["task_validation"] = task_validation
+    if not task_validation.get("ok"):
+        reason = str(
+            task_validation.get("summary") or "independent task validation failed"
+        )
+        failure = _host_failure(
+            plan,
+            kind=LoopXTurnResultKind.VALIDATION_FAILED,
+            completed_phases=list(TRANSACTION_PHASES[:2]),
+            failed_phase="validation",
+            reason=reason,
+        )
+        journal.update(
+            status="failed",
+            reason=reason,
+            receipt=failure["receipt"],
+            completed_phases=list(TRANSACTION_PHASES[:2]),
+            result_kind=LoopXTurnResultKind.VALIDATION_FAILED.value,
+            validation_stage="task_postcondition",
+        )
+        _write_journal(journal_path, journal)
+        return list(TRANSACTION_PHASES[:2]), _execution_payload(
+            plan,
+            journal,
+            execute=True,
+            replayed=False,
+            effects=effects,
+        )
+
+    if "validation" not in completed_phases:
+        completed_phases = list(TRANSACTION_PHASES[:3])
+    journal.update(
+        result_kind=result.get("result_kind"),
+        completed_phases=completed_phases,
+        validation_stage="task_postcondition",
+    )
+    _write_journal(journal_path, journal)
+    return completed_phases, None
+
+
+def _transaction_closeout_stage(
+    plan: Mapping[str, Any],
+    result: dict[str, Any],
+    *,
+    completed_phases: list[str],
+    journal: dict[str, Any],
+    journal_path: Path,
+    effects: dict[str, bool],
+    writeback: Writeback,
+    spend: Spend,
+    scheduler: Scheduler,
+) -> dict[str, Any]:
+    if "durable_writeback" not in completed_phases:
+        writeback_payload = writeback(result)
+        if not writeback_payload.get("ok") or not writeback_payload.get("appended"):
+            failure = _host_failure(
+                plan,
+                kind=LoopXTurnResultKind.WRITEBACK_FAILED,
+                completed_phases=completed_phases,
+                failed_phase="durable_writeback",
+                reason=str(
+                    writeback_payload.get("error")
+                    or writeback_payload.get("reason")
+                    or "writeback failed"
+                ),
+            )
+            journal.update(
+                status="failed",
+                reason=failure["reason"],
+                receipt=failure["receipt"],
+            )
+            _write_journal(journal_path, journal)
+            return _execution_payload(
+                plan,
+                journal,
+                execute=True,
+                replayed=False,
+                effects=effects,
+            )
+        effects["state_written"] = True
+        completed_phases = list(TRANSACTION_PHASES[:4])
+        journal.update(
+            completed_phases=completed_phases,
+            writeback=_compact_callback(writeback_payload),
+        )
+        _write_journal(journal_path, journal)
+
+    if "quota_spend" not in completed_phases:
+        spend_payload = spend()
+        if not spend_payload.get("ok") or not spend_payload.get("appended"):
+            failure = _host_failure(
+                plan,
+                kind=LoopXTurnResultKind.QUOTA_SPEND_FAILED,
+                completed_phases=completed_phases,
+                failed_phase="quota_spend",
+                reason=str(spend_payload.get("reason") or "quota spend failed"),
+            )
+            journal.update(
+                status="failed",
+                reason=failure["reason"],
+                receipt=failure["receipt"],
+            )
+            _write_journal(journal_path, journal)
+            return _execution_payload(
+                plan,
+                journal,
+                execute=True,
+                replayed=False,
+                effects=effects,
+            )
+        effects["quota_spent"] = True
+        completed_phases = list(TRANSACTION_PHASES[:5])
+        journal.update(
+            completed_phases=completed_phases,
+            quota_spend=_compact_callback(spend_payload),
+        )
+        _write_journal(journal_path, journal)
+    else:
+        spend_payload = (
+            dict(journal["quota_spend"])
+            if isinstance(journal.get("quota_spend"), dict)
+            else {"ok": True, "appended": True}
+        )
+
+    scheduler_payload = scheduler(spend_payload)
+    journal["scheduler"] = scheduler_payload
+    if scheduler_payload.get("completed") is not True:
+        journal.update(
+            status="scheduler_action_required",
+            receipt=_receipt(plan, result, completed_phases=completed_phases),
+        )
+        _write_journal(journal_path, journal)
+        return _execution_payload(
+            plan,
+            journal,
+            execute=True,
+            replayed=False,
+            effects=effects,
+        )
+
+    completed_phases = list(TRANSACTION_PHASES)
+    effects["scheduler_acknowledged"] = bool(scheduler_payload.get("acknowledged"))
+    journal.update(
+        status="committed",
+        completed_phases=completed_phases,
+        receipt=_receipt(plan, result, completed_phases=completed_phases),
+    )
+    _write_journal(journal_path, journal)
+    return _execution_payload(
+        plan,
+        journal,
+        execute=True,
+        replayed=False,
+        effects=effects,
+    )
+
+
 def run_loopx_turn_once(
     plan: Mapping[str, Any],
     *,
@@ -820,228 +1130,41 @@ def run_loopx_turn_once(
             _write_journal(journal_path, journal)
 
         effects = dict(empty_effects)
-        completed_phases = list(journal.get("completed_phases") or [])
-        result = journal.get("host_result") if isinstance(journal.get("host_result"), dict) else None
-        if "typed_result" not in completed_phases:
-            host_observation = (
-                _run_host_runner(request, runner=host_runner)
-                if host_runner is not None
-                else _run_host(
-                    request,
-                    argv=argv or [],
-                    project=project,
-                    timeout_seconds=timeout_seconds,
-                )
-            )
-            effects["host_invoked"] = True
-            if not host_observation.get("ok"):
-                failure = _host_failure(
-                    plan,
-                    kind=LoopXTurnResultKind.HOST_FAILURE,
-                    completed_phases=[],
-                    failed_phase="host_execute",
-                    reason=str(host_observation.get("reason") or "host execution failed"),
-                )
-                journal.update(
-                    status="failed",
-                    reason=failure["reason"],
-                    receipt=failure["receipt"],
-                    completed_phases=[],
-                )
-                _write_journal(journal_path, journal)
-                return _execution_payload(plan, journal, execute=True, replayed=False, effects=effects)
-            result = dict(host_observation["value"])
-            completed_phases = list(TRANSACTION_PHASES[:2])
+        result, completed_phases, terminal = _host_result_stage(
+            plan,
+            request,
+            host_runner=host_runner,
+            argv=argv,
+            project=project,
+            timeout_seconds=timeout_seconds,
+            journal=journal,
+            journal_path=journal_path,
+            effects=effects,
+        )
+        if terminal is not None:
+            return terminal
+        assert result is not None
 
-        validation = validate_loopx_turn_host_result(plan, result or {})
-        if not validation.get("ok"):
-            failure = _host_failure(
-                plan,
-                kind=LoopXTurnResultKind.VALIDATION_FAILED,
-                completed_phases=list(TRANSACTION_PHASES[:2]),
-                failed_phase="validation",
-                reason="; ".join(validation.get("errors") or ["host result validation failed"]),
-            )
-            journal.update(
-                status="failed",
-                reason=failure["reason"],
-                receipt=failure["receipt"],
-                completed_phases=list(TRANSACTION_PHASES[:2]),
-                result_kind=LoopXTurnResultKind.VALIDATION_FAILED.value,
-                validation_stage="host_result_contract",
-            )
-            _write_journal(journal_path, journal)
-            return _execution_payload(plan, journal, execute=True, replayed=False, effects=effects)
-        result = dict(validation["result"])
-        if len(completed_phases) < 2:
-            completed_phases = list(TRANSACTION_PHASES[:2])
-        journal.update(
-            host_result=result,
-            result_kind=result.get("result_kind"),
+        completed_phases, terminal = _task_validation_stage(
+            plan,
+            result,
+            task_validator=task_validator,
             completed_phases=completed_phases,
+            journal=journal,
+            journal_path=journal_path,
+            effects=effects,
         )
-        _write_journal(journal_path, journal)
+        if terminal is not None:
+            return terminal
 
-        kind = LoopXTurnResultKind(str(result["result_kind"]))
-        if kind in STOP_HOST_RESULT_KINDS:
-            completed_phases = list(TRANSACTION_PHASES[:3])
-            journal.update(
-                status="stopped",
-                completed_phases=completed_phases,
-                task_validation=_task_validation_receipt(
-                    status="not_required",
-                    validator_kind="stop_result",
-                    summary="task validation is not required for a typed stop result",
-                ),
-                receipt=_receipt(plan, result, completed_phases=completed_phases),
-                scheduler={"disposition": "not_applicable"},
-            )
-            _write_journal(journal_path, journal)
-            return _execution_payload(plan, journal, execute=True, replayed=False, effects=effects)
-
-        stored_task_validation = (
-            journal.get("task_validation")
-            if isinstance(journal.get("task_validation"), dict)
-            else None
-        )
-        task_validation = (
-            stored_task_validation
-            if "validation" in completed_phases
-            and stored_task_validation is not None
-            and stored_task_validation.get("ok") is True
-            else _run_task_validator(
-                plan,
-                result,
-                validator=task_validator,
-            )
-        )
-        journal["task_validation"] = task_validation
-        if not task_validation.get("ok"):
-            reason = str(
-                task_validation.get("summary")
-                or "independent task validation failed"
-            )
-            failure = _host_failure(
-                plan,
-                kind=LoopXTurnResultKind.VALIDATION_FAILED,
-                completed_phases=list(TRANSACTION_PHASES[:2]),
-                failed_phase="validation",
-                reason=reason,
-            )
-            journal.update(
-                status="failed",
-                reason=reason,
-                receipt=failure["receipt"],
-                completed_phases=list(TRANSACTION_PHASES[:2]),
-                result_kind=LoopXTurnResultKind.VALIDATION_FAILED.value,
-                validation_stage="task_postcondition",
-            )
-            _write_journal(journal_path, journal)
-            return _execution_payload(
-                plan,
-                journal,
-                execute=True,
-                replayed=False,
-                effects=effects,
-            )
-
-        if "validation" not in completed_phases:
-            completed_phases = list(TRANSACTION_PHASES[:3])
-        journal.update(
-            result_kind=result.get("result_kind"),
+        return _transaction_closeout_stage(
+            plan,
+            result,
             completed_phases=completed_phases,
-            validation_stage="task_postcondition",
+            journal=journal,
+            journal_path=journal_path,
+            effects=effects,
+            writeback=writeback,
+            spend=spend,
+            scheduler=scheduler,
         )
-        _write_journal(journal_path, journal)
-
-        if "durable_writeback" not in completed_phases:
-            writeback_payload = writeback(result)
-            if not writeback_payload.get("ok") or not writeback_payload.get("appended"):
-                failure = _host_failure(
-                    plan,
-                    kind=LoopXTurnResultKind.WRITEBACK_FAILED,
-                    completed_phases=completed_phases,
-                    failed_phase="durable_writeback",
-                    reason=str(
-                        writeback_payload.get("error")
-                        or writeback_payload.get("reason")
-                        or "writeback failed"
-                    ),
-                )
-                journal.update(
-                    status="failed",
-                    reason=failure["reason"],
-                    receipt=failure["receipt"],
-                )
-                _write_journal(journal_path, journal)
-                return _execution_payload(
-                    plan,
-                    journal,
-                    execute=True,
-                    replayed=False,
-                    effects=effects,
-                )
-            effects["state_written"] = True
-            completed_phases = list(TRANSACTION_PHASES[:4])
-            journal.update(
-                completed_phases=completed_phases,
-                writeback=_compact_callback(writeback_payload),
-            )
-            _write_journal(journal_path, journal)
-
-        if "quota_spend" not in completed_phases:
-            spend_payload = spend()
-            if not spend_payload.get("ok") or not spend_payload.get("appended"):
-                failure = _host_failure(
-                    plan,
-                    kind=LoopXTurnResultKind.QUOTA_SPEND_FAILED,
-                    completed_phases=completed_phases,
-                    failed_phase="quota_spend",
-                    reason=str(spend_payload.get("reason") or "quota spend failed"),
-                )
-                journal.update(
-                    status="failed",
-                    reason=failure["reason"],
-                    receipt=failure["receipt"],
-                )
-                _write_journal(journal_path, journal)
-                return _execution_payload(
-                    plan,
-                    journal,
-                    execute=True,
-                    replayed=False,
-                    effects=effects,
-                )
-            effects["quota_spent"] = True
-            completed_phases = list(TRANSACTION_PHASES[:5])
-            journal.update(
-                completed_phases=completed_phases,
-                quota_spend=_compact_callback(spend_payload),
-            )
-            _write_journal(journal_path, journal)
-        else:
-            spend_payload = (
-                dict(journal["quota_spend"])
-                if isinstance(journal.get("quota_spend"), dict)
-                else {"ok": True, "appended": True}
-            )
-
-        scheduler_payload = scheduler(spend_payload)
-        journal["scheduler"] = scheduler_payload
-        if scheduler_payload.get("completed") is not True:
-            journal.update(
-                status="scheduler_action_required",
-                receipt=_receipt(plan, result, completed_phases=completed_phases),
-            )
-            _write_journal(journal_path, journal)
-            return _execution_payload(plan, journal, execute=True, replayed=False, effects=effects)
-
-        completed_phases = list(TRANSACTION_PHASES)
-        effects["scheduler_acknowledged"] = bool(scheduler_payload.get("acknowledged"))
-        journal.update(
-            status="committed",
-            completed_phases=completed_phases,
-            receipt=_receipt(plan, result, completed_phases=completed_phases),
-        )
-        _write_journal(journal_path, journal)
-        return _execution_payload(plan, journal, execute=True, replayed=False, effects=effects)

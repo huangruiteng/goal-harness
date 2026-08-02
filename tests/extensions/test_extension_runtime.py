@@ -447,7 +447,7 @@ def test_extension_run_terminates_provider_on_timeout(tmp_path: Path) -> None:
     provider = tmp_path / "timeout-provider"
     child_code = (
         "from pathlib import Path; import time; "
-        "time.sleep(1.2); "
+        "time.sleep(3.5); "
         f"Path({str(marker)!r}).write_text('completed', encoding='utf-8')"
     )
     provider.write_text(
@@ -459,7 +459,7 @@ import time
 if "--doctor" in sys.argv:
     raise SystemExit(0)
 subprocess.Popen([sys.executable, "-c", {json.dumps(child_code)}])
-time.sleep(5)
+time.sleep(10)
 """,
         encoding="utf-8",
     )
@@ -471,7 +471,9 @@ time.sleep(5)
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(
             "timeout_seconds = 5",
-            "timeout_seconds = 1",
+            # The same timeout gates the install-time doctor subprocess. Keep
+            # enough startup headroom for loaded parallel test hosts.
+            "timeout_seconds = 3",
         ),
         encoding="utf-8",
     )
@@ -489,7 +491,7 @@ time.sleep(5)
     assert receipt["status"] == "provider_failed"
     assert receipt["failure_kind"] == "timeout"
     assert receipt["exit_code"] is None
-    time.sleep(0.5)
+    time.sleep(0.75)
     assert not marker.exists()
 
 

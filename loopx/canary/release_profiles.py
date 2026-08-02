@@ -19,8 +19,13 @@ RELEASE_PROMOTION_PROFILE: dict[str, Any] = {
     "checks": [
         {
             "command": "python3 examples/canary/canary-promotion-readiness-smoke.py",
+            "tier": "deep",
+            "reason": "runs the complete install, boundary, status, and dashboard release preflight",
+        },
+        {
+            "command": "python3 examples/control_plane/promotion-readiness-readmodel-smoke.py",
             "tier": "default",
-            "reason": "checks promotion readiness from compact run history",
+            "reason": "checks runtime-ledger authority and legacy Goal fallback without the full release preflight",
         },
         {
             "command": "python3 examples/release/exact-release-commit-qualification-smoke.py",

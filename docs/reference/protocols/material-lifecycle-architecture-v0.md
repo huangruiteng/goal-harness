@@ -72,6 +72,27 @@ copying raw content into another queue.
 requires an owner-gate reference, validation reference, before/after revisions,
 and rollback reference for applied changes.
 
+`material_ranked_entry_rebuild_plan_v0` handles structural queue repair that a
+bounded rank move cannot express. A ranked entry that exceeds the configured
+member budget must become two or more independently sortable entries; overflow
+cannot be hidden in a supporting-only index. The caller supplies the semantic
+grouping after exact reads. The provider-neutral builder then enforces:
+
+- at most `max_materials_per_entry` references per rebuilt entry;
+- every source material reference appears exactly once;
+- child entries preserve exact source-entry membership while exact-read
+  semantic grouping may replace incidental legacy order;
+- target ranks are unique and contiguous across the complete ranked set;
+- unchanged entries retain their reference, while split children receive a
+  deterministic reference derived from their source entry and ordered members;
+- optional material-level rank anchors remain at their protected target rank.
+
+The complete ranked set may be larger than the active window. Entries below the
+window remain in an explicit ranked backlog, not outside the ranking system.
+`material_ranked_entry_rebuild_apply_receipt_v0` records the owner-gated
+cutover, validation, before/after revisions, counts, and rollback reference.
+Neither packet carries titles, content, source locations, or credentials.
+
 ## Migration Boundary
 
 Legacy Markdown, databases, inboxes, and other stores remain authoritative
@@ -110,6 +131,32 @@ capability. A host adapter may parse Markdown, a database, or another source,
 but it must prove the same read-only and backup invariants before LoopX will
 prepare migration.
 
+## Owner-Gated Apply and Rollback
+
+`MaterialMigrationApplyProvider` is the private write adapter boundary. The
+generic capability never receives raw material or a private location. It
+orchestrates five explicit steps:
+
+1. compare-and-swap the current authority revision against the prepared source;
+2. stage the target store with an atomic write and verified readback;
+3. recheck the source authority revision after staging;
+4. reconcile stable IDs, item counts, lifecycle counts, and content parity
+   under dual read;
+5. atomically switch the authority pointer with an explicit owner-gate
+   reference.
+
+`material_migration_apply_receipt_v0` records the before/after revisions,
+target digest, item and lifecycle counts, reconciliation reference, authority
+reference, rollback reference, and the verified CAS/atomic-write/readback
+invariants. It remains public-safe and content-free.
+
+Rollback uses the same authority-pointer CAS. It only proceeds while the
+currently authoritative revision still equals the applied target revision,
+requires a separate owner-gate reference, and emits
+`material_migration_rollback_receipt_v0`. The provider owns filesystem,
+database, or object-store mechanics; the capability owns ordering, validation,
+and auditable receipts.
+
 ## Decision-Driven Ranking and Exploration
 
 The provider-neutral decision-planning path accepts a validated, public-safe
@@ -124,6 +171,17 @@ advances a source cursor. If the policy is unavailable or emits invalid output,
 planning fails open to an audited no-change proposal and discards partial
 exploration output.
 
+`execute_material_explore_intent(...)` is the explicit read-only execution
+boundary. A private host supplies transient queries, a configured
+`ContextProvider`, and an execution-authority reference. The executor enforces
+the intent's call and candidate budgets, keeps queries, resource locations, and
+content in-process, and emits `material_explore_execution_receipt_v0` with only
+opaque result references and compact telemetry. Provider failure fails open.
+
+The receipt cannot authorize rerank, candidate insertion, cursor advancement,
+or any source mutation. Every hit remains a candidate until an independent
+managed-material exact read verifies it against the current authority.
+
 Search engines, web clients, messaging providers, and repository scanners
 remain replaceable providers. Their raw queries, output, credentials, and
 private locations cannot enter public packets.
@@ -136,15 +194,17 @@ validated receipts, not in an automation prompt.
 ## Stage Boundary
 
 The capability now ships deterministic contracts, a provider-neutral read-only
-preparation path, bounded decision planning, catalog visibility, an
-architecture CLI, focused tests, and a public smoke. It does not ship:
+preparation path, owner-gated apply/rollback orchestration, bounded decision
+planning and exploration execution, catalog visibility, an architecture CLI,
+focused tests, and a public smoke. It does not ship:
 
-- a built-in legacy material parser or migration apply path;
+- a built-in legacy material parser or private write adapter;
 - raw-material persistence;
 - a built-in decision policy;
 - an exploration provider;
 - a messaging or contact source profile;
-- automatic reranking, provider calls, archive moves, or cursor advancement.
+- automatic reranking, automatic provider calls, archive moves, or cursor
+  advancement.
 
 Those require a private read-only adapter, exact dual-read reconciliation, and
 an explicit owner gate.

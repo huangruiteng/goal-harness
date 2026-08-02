@@ -59,9 +59,11 @@ def summary(qualification_id: str) -> dict[str, object]:
         "doubao_actual_default": {
             "model_id": "doubao-seed-1.6",
             "topology": "actual_default_one_arm",
-            "scenario_count": 12,
+            "scenario_count": 15,
+            "contrast_count": 4,
+            "contrast_failure_count": 0,
             "repeats_per_scenario": 2,
-            "actor_call_count": 24,
+            "actor_call_count": 30,
             "failure_count": 0,
             "skip_count": 0,
             "qualification_passed": True,

@@ -254,6 +254,16 @@ def test_public_execution_outcome_predicates_share_transaction_semantics() -> No
         "receipt": {"status": "failed", "failed_phase": "validation"},
         "effects": {"state_written": False, "quota_spent": False},
     }
+    pre_host_repair = {
+        "status": "failed",
+        "result_kind": "repair_required",
+        "receipt": {
+            "status": "failed",
+            "result_kind": "repair_required",
+            "failed_phase": "turn_plan",
+        },
+        "effects": {"state_written": False, "quota_spent": False},
+    }
 
     assert loopx_turn_execution_committed(committed) is True
     assert loopx_turn_execution_recovery_required(committed) is False
@@ -261,6 +271,7 @@ def test_public_execution_outcome_predicates_share_transaction_semantics() -> No
     assert loopx_turn_execution_committed(repair) is False
     assert loopx_turn_execution_recovery_required(repair) is True
     assert loopx_turn_execution_has_durable_effects(repair) is False
+    assert loopx_turn_execution_recovery_required(pre_host_repair) is True
 
     repair["effects"] = {"state_written": True, "quota_spent": False}
     assert loopx_turn_execution_has_durable_effects(repair) is True

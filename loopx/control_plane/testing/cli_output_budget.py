@@ -408,6 +408,16 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         max_lines={"json": 900, "markdown": 78},
     ),
     CliOutputModeVariantSpec(
+        variant_id="quota_should_run_vision_detail",
+        parent_surface_id="quota_should_run",
+        command="quota should-run --include-detail vision",
+        output_formats=("json", "markdown"),
+        semantic_json_keys=("interaction_contract", "scheduler_hint", "selected_todo"),
+        markdown_anchor="# LoopX Quota Should Run",
+        max_chars={"json": 55_000, "markdown": 7_800},
+        max_lines={"json": 1_350, "markdown": 78},
+    ),
+    CliOutputModeVariantSpec(
         variant_id="quota_should_run_all_detail",
         parent_surface_id="quota_should_run",
         command="quota should-run --include-detail all",

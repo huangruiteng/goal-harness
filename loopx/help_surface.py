@@ -153,12 +153,24 @@ COMMAND_GROUPS: list[dict[str, object]] = [
             },
             {"command": "loopx upgrade-plan", "purpose": "Plan default heartbeat upgrade propagation."},
             {"command": "loopx update", "purpose": "Check, dry-run, or execute the no-clone update path."},
+            {
+                "command": "loopx project-skill --help",
+                "purpose": "Install, inspect, or remove release-owned skills in selected project agent hosts.",
+            },
         ],
     },
     {
         "title": "Maintainer and adapter commands",
         "commands": [
             {"command": "loopx check", "purpose": "Run contract and public/private boundary checks."},
+            {
+                "command": "loopx change-quality --help",
+                "purpose": "Qualify one exact final diff against an enabled project policy and receipt contract.",
+            },
+            {
+                "command": "loopx integration-branch --help",
+                "purpose": "Detect reviewed source-branch drift and rebuild one local integration branch.",
+            },
             {"command": "loopx registry", "purpose": "Inspect registered goals and adapters."},
             {"command": "loopx sync-global", "purpose": "Merge project state into the shared registry."},
             {

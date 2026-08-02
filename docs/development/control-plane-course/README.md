@@ -49,6 +49,11 @@ transition；State Kernel 拥有通用生命周期。Domain State 和 receipt �
 自动算作模型证据”“研究假设为什么需要 holdout successor”这类具体问题，而不是在抽象
 名词之间跳转。
 
+若要在一小时内向接入方讲清楚“长程、复杂任务如何不跑偏、不陷入局部循环”，可以直接使用
+[长程任务如何收敛](topic-long-horizon-convergence.md)专题。它把方向锚点、Turn 合同、
+material delta、monitor quiet、replan、self-repair、Explore 与独立 oracle 串成一条收敛闭环，
+并用 PR Issue Fix 和 Auto Research 做成对回放。
+
 Single-Agent Auto ML 还提供一条贯穿第 0、1、2、3、4、5、6、8、9 讲的进阶主线：
 Explore Graph 把假设、实验、支持、反驳和负向结果保存成可追溯证据拓扑；Explore Harness
 读取显式 Graph refs、当前 todo 和资源容量，给出 analysis-only 的候选组合；单个 Agent 仍必须经
@@ -118,6 +123,7 @@ receipt、projection、replan 与 self-repair；随后再进入下面的代码�
 | 讲次 | 主题 | 读完应能回答 |
 | --- | --- | --- |
 | 导读 | [先把 LoopX 放进一张图](00-concept-primer.md) | 有限上下文为何需要外置状态，原生 Goal 与 LoopX 如何递进，核心概念怎样组成一条生命周期？ |
+| 专题 | [长程任务如何收敛：不跑偏、不陷入局部循环](topic-long-horizon-convergence.md) | 如何用方向、权限、证据、Delta、活性与终局不变量，让复杂任务持续接力而不把忙碌误判为进展？ |
 | [第 0 讲](00-goal-control-plane-architecture.md) | 从三个 Showcase 理解 LoopX 架构 | Issue-Fix、Single-Agent Auto ML 与 Auto Research 如何按 Agent / Provider / Capability / Kernel 分工并复用同一控制面？ |
 | [第 1 讲](01-first-real-loop.md) | 从 Showcase 到第一次真实 Loop | 用户只说一句目标后，guided start、todo、heartbeat、quota、refresh 和 spend 如何串起来？ |
 | [第 2 讲](02-state-substrate.md) | 状态底座与可重放事实 | registry、event、active state、run history 和 projection 分别拥有什么事实？ |
@@ -131,8 +137,11 @@ receipt、projection、replan 与 self-repair；随后再进入下面的代码�
 
 ## 建议学习方式
 
-概念陌生的读者先读导读，再按 0 到 9 的顺序进行。第 0 讲从 Issue-Fix、Single-Agent Auto ML
-与 Auto Research 推导共同架构，
+面向潜在合作方、自编排 runner 或远端开发机接入者的一小时分享，建议使用“导读 + 长程收敛
+专题”；专题正文已给出 60 分钟主讲路线，延伸实验和代码领读可以留作课后材料。
+
+准备系统开发 LoopX 的读者先读导读，再按 0 到 9 的顺序进行。第 0 讲从 Issue-Fix、
+Single-Agent Auto ML 与 Auto Research 推导共同架构，
 第 1 讲运行端到端路径，第 2 到 6 讲拆开状态、工作图、决策、host 和证据，第 7 讲把这些
 知识收束成工程变更方法，第 8 讲建立自主交付的质量门禁，第 9 讲再系统讨论扩展层。
 

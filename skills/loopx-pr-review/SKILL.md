@@ -100,6 +100,8 @@ table can be a short preface, but stopping at the table is incomplete for
 For each selected PR, read the PR evidence before writing the review. Prefer the
 packet's `evidence_commands`; equivalent targeted `gh pr view`, `gh pr diff
 --name-only`, and `gh pr diff --patch` commands are acceptable when needed.
+Each PR must receive its own evidence pass and standalone review card. Do not
+reuse one PR's architecture, validation, or risk statements as queue-wide prose.
 
 Treat `agent_response_contract.explanation_depth_contract` and each
 `review_template.sections[].agent_instruction` as the canonical detail policy.
@@ -117,7 +119,51 @@ Do not fill the five-block review from title, labels, changed-file counts, or
 metadata risk hints alone. `metadata_risk_hint` is only for queue ordering.
 
 If the queue is too large for one response, review the highest-priority PRs
-first and say which PRs remain. Do not silently replace review with a summary.
+first and say which PRs remain. Do not compress individual cards to cover more
+of the queue, and do not silently replace review with a summary.
+
+## Per-PR Evidence And Depth Gate
+
+Before drafting each card, build a compact internal evidence record for that PR.
+This is preparation for the five required headings, not a sixth output section.
+At minimum, record:
+
+- the reviewed base and head SHA, PR body claim, changed paths, and exact check
+  state;
+- the old behavior and affected caller, plus the intended observable result;
+- the entry point, important symbols, active call site, state or data flow, and
+  ownership or authority boundary;
+- the changed-line breakdown by production, tests/fixtures, docs, generated
+  files, and mechanical moves;
+- focused validation tied to the changed invariant, including failures, skipped
+  checks, and material cases that remain untested;
+- the strongest concrete regression scenario and the code path that permits or
+  prevents it;
+- the code-volume verdict and one evidence-backed simplification opportunity,
+  or an explicit statement that no safe reduction is supported.
+
+Do not draft the verdict while any applicable item above is still inferred only
+from the title, PR description, labels, or metadata hint. Read the relevant diff
+and symbol, run or inspect focused validation where feasible, and mark evidence
+that cannot be obtained as unverified. Each card must stand on its own for a
+reader who has not read the PR body or another card in the queue.
+
+Detailed means mechanism-rich, not repetitive. Explain how the implementation
+works and why the evidence supports the conclusion instead of paraphrasing the
+PR body. For runtime, selector, policy, state, authority, lifecycle, installer,
+or bridge changes, include both:
+
+- one concrete positive walkthrough from input or user action to observable
+  outcome; and
+- one concrete negative or failure walkthrough showing rejection, fallback,
+  stale state, malformed input, or missing capability behavior.
+
+For a blocking finding, name the triggering input or state, trace it to the
+incorrect outcome, cite the narrowest file/line or symbol, and state the minimum
+repair plus regression test. When no blocker is found, say so explicitly and
+still name residual risk and the strongest missing validation. Do not use
+generic phrases such as "CI is green", "low risk", or "looks reasonable" as a
+substitute for this evidence.
 
 ## Code Volume And Simplification Review
 
@@ -163,9 +209,12 @@ exactly these five headings for each reviewed PR:
 Use the packet's blank `review_template` as the required structure and minimum
 detail signal, not as fake/example content. Fill each section only after reading
 PR body, files, checks, and diff. Follow the packet's per-section ranges and
-instructions as depth signals rather than padding. Avoid title-only summaries
-such as "improves docs" or "low risk", and distinguish intended behavior from
-what the implementation and validation actually prove.
+instructions as the normal per-PR depth target rather than optional aggregate
+guidance. Going shorter is acceptable only when the PR genuinely has less
+applicable surface, and the card must still satisfy the per-PR evidence gate.
+Avoid title-only summaries such as "improves docs" or "low risk", and
+distinguish intended behavior from what the implementation and validation
+actually prove.
 
 ## Failure And Fallback
 

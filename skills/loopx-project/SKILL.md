@@ -41,11 +41,11 @@ If there is any non-whitespace text after `/loopx`, it is goal text. Preserve
 that exact trailing text, pass it to the guided start preview, and do not
 downgrade the request into a status or inspection turn.
 
-When the target is a linked git worktree, trust the command pack's
-`canonical_project_alias` / `source_registry` route. Do not manually run
-`loopx bootstrap` in the linked worktree merely because its local `.loopx`
-state is missing or stale; that can create a worktree-local shadow goal instead
-of updating the canonical project state.
+`start-goal --project` keeps the requested project route, including a linked
+git worktree, so a fresh task cannot inherit an older worktree's goal.
+Lower-level diagnostic command packs may still report a canonical
+`canonical_project_alias` / `source_registry` route. Do not manually replace
+either route with an unadvertised bootstrap command.
 
 From the target project root, pass the text after `/loopx` as the explicit
 goal-start objective before planning or writing project state:
@@ -738,6 +738,28 @@ creates an `operator_gate_*` compact run so `loopx status` and the
 dashboard can tell whether the project agent may run the approved command. This
 is not a human reward signal and does not grant write-control.
 
+## Qualify Non-Trivial Final Diffs
+
+Before a non-trivial delivery or merge, inspect the current goal configuration.
+When `change_quality_qualification.enabled` is true, load
+`loopx-change-quality` and follow its exact-scope workflow:
+
+```bash
+loopx --format json change-quality prepare \
+  --goal-id <STABLE_GOAL_ID> \
+  --repo-path .
+```
+
+The policy keeps two decisions separate: `safe_fix` permits at most one bounded
+repair pass, while `strict_receipt` requires a passing receipt for the exact
+final diff. Any edit invalidates the old fingerprint. Record and verify the
+final receipt, then pass `--goal-id <STABLE_GOAL_ID>` to `canary premerge`.
+
+If the host cannot load skills, use the self-contained prepare packet as the
+review contract. Turn may carry the packet or receipt reference, but it does
+not own policy or enforcement. Do not invent a receipt, reuse one from an older
+diff, or turn subjective style advice into a blocker.
+
 ## Refresh State After Non-Adapter Work
 
 If the agent updated `ACTIVE_GOAL_STATE.md`, a progress ledger, a planning doc,
@@ -762,11 +784,15 @@ from the classification name:
 loopx refresh-state \
   --goal-id <STABLE_GOAL_ID> \
   --classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION> \
-  --delivery-batch-scale multi_surface \
-  --delivery-outcome outcome_progress \
+  --delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE> \
+  --delivery-outcome <ACTUAL_DELIVERY_OUTCOME> \
   --agent-id <REGISTERED_AGENT_ID> \
   --progress-scope goal
 ```
+
+Replace all three placeholders from the current validated turn. Never default
+or upgrade a smaller/preparatory turn to `multi_surface` / `outcome_progress`
+just because those values would satisfy a delivery floor.
 
 If the current run may write local LoopX state but its runtime boundary forbids
 configured external sink writes, keep `explore_graph.enabled` unchanged and add

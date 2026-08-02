@@ -10,6 +10,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CANARY_PATH = REPO_ROOT / "examples" / "canary" / "canary-promotion-readiness-smoke.py"
+DASHBOARD_PATH = REPO_ROOT / "examples" / "dashboard-demo-readiness-smoke.py"
 
 
 def load_canary_module():
@@ -23,8 +24,22 @@ def load_canary_module():
     return module
 
 
+def load_dashboard_module():
+    spec = importlib.util.spec_from_file_location(
+        "dashboard_demo_readiness_smoke",
+        DASHBOARD_PATH,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main() -> int:
     canary = load_canary_module()
+    dashboard = load_dashboard_module()
+    assert dashboard.missing_dependency_exit_code(require_dependencies=False) == 0
+    assert dashboard.missing_dependency_exit_code(require_dependencies=True) == 1
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         release_dashboard = root / "release" / "apps" / "presentation" / "dashboard"
@@ -58,13 +73,15 @@ def main() -> int:
 
         source_plan = canary.dashboard_readiness_plan(dashboard_dir=source_dashboard)
         assert source_plan["status"] == "run", source_plan
-        assert source_plan["command"][-1] == "--skip-browser", source_plan
+        assert "--require-dependencies" in source_plan["command"], source_plan
+        assert "--skip-browser" in source_plan["command"], source_plan
 
         source_browser_plan = canary.dashboard_readiness_plan(
             dashboard_dir=source_dashboard,
             include_browser=True,
         )
         assert source_browser_plan["status"] == "run", source_browser_plan
+        assert "--require-dependencies" in source_browser_plan["command"], source_browser_plan
         assert "--skip-browser" not in source_browser_plan["command"], source_browser_plan
 
     print("canary-promotion-readiness-boundary-smoke ok")

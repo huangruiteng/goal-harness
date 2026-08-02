@@ -617,7 +617,11 @@ carry `schema_version=todo_summary_v0`; individual items carry
 `schema_version=todo_item_v0`, `todo_id`, `role`, `status`, `priority`,
 `title`, `archive_state`, `source_section`, `index`, `text`, `task_class`, and
 optional `action_kind`, `claimed_by`, `required_capabilities`, and
-`target_capabilities`. `action_kind` is extensible; optional
+`target_capabilities`. A capability-admitted agent Todo may also carry an opaque
+`capability_binding_ref`; it identifies the capability-owned authority row and
+is preserved across generated agent successors. Once set, the binding is
+immutable and is distinct from executor `required_capabilities`.
+`action_kind` is extensible; optional
 `continuation_policy` is limited to `independent_handoff`,
 or `same_agent_non_delivery`. Agent todos may also carry `excluded_agents`,
 `unblocks_todo_id`, and `no_followup=true` to express executor separation,
