@@ -10,12 +10,13 @@ from .control_plane.todos.contract import (
     normalize_required_capabilities,
     normalize_required_write_scopes,
     normalize_target_capabilities,
-    normalize_todo_decision_scope,
     normalize_todo_action_kind,
     normalize_todo_blocks_agent,
     normalize_todo_bound_agent,
+    normalize_todo_capability_binding_ref,
     normalize_todo_claimed_by,
     normalize_todo_continuation_policy,
+    normalize_todo_decision_scope,
     normalize_todo_excluded_agents,
     normalize_todo_global_gate,
     normalize_todo_goal_bound,
@@ -84,6 +85,7 @@ NEXT_ACTION_USER_WAIT_PATTERN = re.compile(
 )
 TODO_METADATA_KEYS = (
     "action_kind",
+    "capability_binding_ref",
     "task_repository",
     "continuation_policy",
     "required_write_scopes",
@@ -512,6 +514,11 @@ def _normalize_structured_todo_item(
         normalized["title"] = title
     if action_kind:
         normalized["action_kind"] = action_kind
+    capability_binding_ref = normalize_todo_capability_binding_ref(
+        item.get("capability_binding_ref")
+    )
+    if capability_binding_ref:
+        normalized["capability_binding_ref"] = capability_binding_ref
     task_repository = normalize_todo_task_repository(item.get("task_repository"))
     if task_repository:
         normalized["task_repository"] = task_repository

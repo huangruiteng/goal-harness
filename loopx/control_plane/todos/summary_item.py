@@ -30,6 +30,7 @@ TODO_SUMMARY_COMPACT_FIELDS = (
     "source_section",
     "task_class",
     "action_kind",
+    "capability_binding_ref",
     "task_repository",
     "continuation_policy",
     "removed_continuation_policy",

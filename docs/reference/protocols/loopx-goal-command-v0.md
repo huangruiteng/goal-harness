@@ -158,14 +158,18 @@ scheduling route (`action_kind`) and stable public target
 (`target_key`); issue facts, prior-work checks, repository evidence,
 reproduction, scope, and validation remain owned by `issue_fix` state.
 
-Later turns re-enter through `quota should-run.selected_todo`, which preserves
-the successor's `action_kind` and `target_key`; they do not call `start-goal`
-again or infer admission from stale prompt context.
+Later turns continue through `quota should-run.selected_todo`; they do not call
+`start-goal` again or infer admission from stale prompt context. A runnable
+feasibility result binds its projected successor to the persisted feasibility
+row with `capability_binding_ref`. The route's typed
+`implementation_admission.durable_execution_binding` contract tells a Host how
+to resolve that ref and compare the Todo's exact `action_kind` and `target_key`
+with the admitted projection.
 
-Host adapters validate that handoff with the route's typed
-`implementation_admission.durable_reentry_match` contract. The contract names
-the capability-owned `action_kind` and `target_key` prefixes, so a generic Todo
-that merely has both fields cannot impersonate completed capability admission.
+For pre-binding Todos, a Host may compare the exact action and target against
+the current feasibility row. Prefix-only matching is never admission authority.
+This keeps capability selection, durable Todo execution ownership, and Goal
+continuation as separate contracts.
 
 The guided transaction's `command_cwd_source` points to the packet's resolved
 `project`; hosts execute its project-relative commands from that exact root.

@@ -59,6 +59,7 @@ def test_store_projection_and_markdown() -> None:
                 "planner_order": 1,
                 "task_class": "advancement_task",
                 "action_kind": "implement",
+                "capability_binding_ref": "issue-fix:feasibility-a1b2c3d4",
                 "continuation_policy": "independent_handoff",
                 "required_write_scopes": ["loopx/**"],
                 "blocks_agent": "codex-main-control",
@@ -149,6 +150,9 @@ def test_store_projection_and_markdown() -> None:
             projection["agent_todos"]["items"][0]["continuation_policy"]
             == "independent_handoff"
         ), projection
+        assert projection["agent_todos"]["items"][0]["capability_binding_ref"] == (
+            "issue-fix:feasibility-a1b2c3d4"
+        ), projection
         assert projection["agent_todos"]["items"][0]["required_write_scopes"] == [
             "loopx/**"
         ], projection
@@ -165,6 +169,9 @@ def test_store_projection_and_markdown() -> None:
         assert "todo_id=todo_event_a" in markdown, markdown
         assert "todo_id=todo_user_gate" in markdown, markdown
         assert "claimed_by=codex-product-capability" in markdown, markdown
+        assert (
+            "capability_binding_ref=issue-fix:feasibility-a1b2c3d4" in markdown
+        ), markdown
         assert "continuation_policy=independent_handoff" in markdown, markdown
         assert "required_write_scopes=loopx%2F%2A%2A" in markdown, markdown
         assert "blocks_agent=codex-main-control" in markdown, markdown
@@ -173,6 +180,12 @@ def test_store_projection_and_markdown() -> None:
         parsed = parse_active_state_todos(markdown)
         assert parsed["agent_todos"]["total_count"] == 2, parsed
         assert parsed["agent_todos"]["done_count"] == 1, parsed
+        parsed_agent_todos = {
+            item["todo_id"]: item for item in parsed["agent_todos"]["items"]
+        }
+        assert parsed_agent_todos["todo_event_a"]["capability_binding_ref"] == (
+            "issue-fix:feasibility-a1b2c3d4"
+        ), parsed
         assert parsed["user_todos"]["open_count"] == 1, parsed
 
 
@@ -209,6 +222,27 @@ def test_conflicts_and_mutations_fail_closed() -> None:
             assert "must not mutate prior events" in str(exc), exc
         else:
             raise AssertionError("prior event mutation was accepted")
+
+        rebound = todo_event(
+            "evt-rebind",
+            TODO_UPDATED,
+            "todo_conflict",
+            {"capability_binding_ref": "issue-fix:feasibility-second"},
+        )
+        bound = dict(event)
+        bound["event_id"] = "evt-bound"
+        bound["append_sequence"] = 1
+        bound["payload"] = {
+            **event["payload"],
+            "capability_binding_ref": "issue-fix:feasibility-first",
+        }
+        rebound["append_sequence"] = 2
+        try:
+            build_state_projection([bound, rebound])
+        except StateEventError as exc:
+            assert "capability_binding_ref is immutable once set" in str(exc), exc
+        else:
+            raise AssertionError("event replay accepted capability binding re-assignment")
 
 
 def main() -> int:

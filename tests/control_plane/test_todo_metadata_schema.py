@@ -14,6 +14,7 @@ def test_todo_metadata_round_trip_preserves_canonical_values() -> None:
         status="open",
         task_class="advancement_task",
         action_kind="run_eval",
+        capability_binding_ref="issue-fix:feasibility-a1b2c3d4",
         task_repository="git:github.com/owner/repo",
         continuation_policy="same_agent_non_delivery",
         required_write_scopes=["loopx/**", "tests/**"],
@@ -63,6 +64,7 @@ def test_todo_metadata_round_trip_preserves_canonical_values() -> None:
         "status": "open",
         "task_class": "advancement_task",
         "action_kind": "run_eval",
+        "capability_binding_ref": "issue-fix:feasibility-a1b2c3d4",
         "task_repository": "git:github.com/owner/repo",
         "continuation_policy": "same_agent_non_delivery",
         "required_write_scopes": ["loopx/**", "tests/**"],
@@ -162,6 +164,10 @@ def test_todo_metadata_parser_skips_invalid_canonical_values() -> None:
     [
         ({"todo_id": "bad"}, "todo_id must use the public token shape"),
         ({"status": "unknown"}, "todo status must be one of"),
+        (
+            {"capability_binding_ref": "not-namespaced"},
+            "capability_binding_ref must be a public-safe namespaced token",
+        ),
         ({"required_write_scopes": ["/private"]}, "public-safe relative scope"),
         ({"decision_scope": "invalid"}, "decision_scope must use"),
         ({"excluded_agents": ["bad/value"]}, "public-safe agent tokens"),

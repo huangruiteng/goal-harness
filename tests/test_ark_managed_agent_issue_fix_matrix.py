@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import pytest
@@ -69,7 +70,50 @@ def test_runnable_route_requires_exact_durable_target_key() -> None:
 
     assert validation["ok"] is False
     assert validation["errors"] == [
-        "projected successor target_key must identify the admitted issue"
+        "projected successor target_key must identify the admitted issue",
+        "capability execution binding must match the admitted feasibility transition",
+    ]
+
+
+def test_runnable_route_binds_successor_to_persisted_feasibility_authority() -> None:
+    packet = build_issue_fix_feasibility_packet(
+        repo="owner/repo",
+        issue_ref="issue_42",
+        reproduction_status="confirmed",
+        reproduction_label="focused unit repro",
+        scope_class="bounded",
+        validation_label="focused unit test",
+    )
+
+    binding = packet["capability_execution_binding"]
+    projected_todo = packet["transition"]["projected_todo"]
+    assert binding == {
+        "schema_version": "capability_execution_binding_v0",
+        "binding_ref": projected_todo["capability_binding_ref"],
+        "capability_id": "issue-fix",
+        "authority": {
+            "domain_pack": "issue_fix",
+            "stream": "feasibility",
+            "packet_schema_version": "issue_fix_feasibility_v0",
+            "observation_fingerprint": packet["decision"][
+                "observation_fingerprint"
+            ],
+            "route": "fix_pr",
+        },
+        "todo_contract": {
+            "action_kind": projected_todo["action_kind"],
+            "target_key": projected_todo["target_key"],
+        },
+    }
+
+    forged = copy.deepcopy(packet)
+    forged["transition"]["projected_todo"]["capability_binding_ref"] = (
+        "issue-fix:feasibility-forged"
+    )
+    validation = validate_issue_fix_feasibility_packet(forged)
+    assert validation["ok"] is False
+    assert validation["errors"] == [
+        "projected successor capability_binding_ref must match the feasibility authority"
     ]
 
 
