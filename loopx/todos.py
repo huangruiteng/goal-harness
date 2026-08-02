@@ -32,6 +32,7 @@ from .control_plane.todos.contract import (
     normalize_target_capabilities,
     normalize_todo_blocks_agent,
     normalize_todo_bound_agent,
+    normalize_todo_capability_binding_ref,
     normalize_todo_claimed_by,
     normalize_todo_continuation_policy,
     normalize_todo_decision_scope,
@@ -602,6 +603,7 @@ def add_todo_to_lines(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    capability_binding_ref: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
     required_write_scopes: list[str] | None = None,
@@ -629,6 +631,8 @@ def add_todo_to_lines(
         )
     if role != "agent" and excluded_agents:
         raise ValueError("excluded_agents is only valid for agent todos")
+    if role != "agent" and capability_binding_ref:
+        raise ValueError("capability_binding_ref is only valid for agent todos")
     require_user_todo_task_class(
         role=role,
         task_class=task_class,
@@ -676,6 +680,7 @@ def add_todo_to_lines(
             status=normalized_status,
             task_class=task_class,
             action_kind=action_kind,
+            capability_binding_ref=capability_binding_ref,
             task_repository=task_repository,
             continuation_policy=continuation_policy,
             required_write_scopes=required_write_scopes,
@@ -714,6 +719,25 @@ def add_todo_to_lines(
             updates["task_class"] = task_class
         if action_kind:
             updates["action_kind"] = action_kind
+        if capability_binding_ref:
+            requested_binding_ref = normalize_todo_capability_binding_ref(
+                capability_binding_ref
+            )
+            if not requested_binding_ref:
+                raise ValueError(
+                    "capability_binding_ref must be a public-safe namespaced token"
+                )
+            existing_binding_ref = normalize_todo_capability_binding_ref(
+                block.get("capability_binding_ref")
+            )
+            if (
+                existing_binding_ref
+                and existing_binding_ref != requested_binding_ref
+            ):
+                raise ValueError(
+                    "capability_binding_ref is immutable once set"
+                )
+            updates["capability_binding_ref"] = requested_binding_ref
         if task_repository:
             updates["task_repository"] = task_repository
         if continuation_policy:
@@ -771,6 +795,8 @@ def add_todo_to_lines(
         "status": normalize_todo_status(effective_metadata.get("status")) or normalized_status,
         "task_class": effective_metadata.get("task_class") or task_class,
         "action_kind": effective_metadata.get("action_kind") or action_kind,
+        "capability_binding_ref": effective_metadata.get("capability_binding_ref")
+        or capability_binding_ref,
         "task_repository": normalize_todo_task_repository(
             effective_metadata.get("task_repository") or task_repository
         ),
@@ -823,6 +849,7 @@ def add_goal_todo(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    capability_binding_ref: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
     required_write_scopes: list[str] | None = None,
@@ -867,6 +894,8 @@ def add_goal_todo(
         )
     if task_repository and role != "agent":
         raise ValueError("task_repository is only valid for agent todos")
+    if capability_binding_ref and role != "agent":
+        raise ValueError("capability_binding_ref is only valid for agent todos")
     normalized_status = normalize_todo_status(status) if status else TODO_STATUS_OPEN
     if status and not normalized_status:
         raise ValueError("todo status must be one of: open, done, blocked, deferred")
@@ -989,6 +1018,7 @@ def add_goal_todo(
             status=normalized_status,
             task_class=task_class,
             action_kind=action_kind,
+            capability_binding_ref=capability_binding_ref,
             task_repository=task_repository,
             continuation_policy=continuation_policy,
             required_write_scopes=required_write_scopes,
@@ -1035,6 +1065,7 @@ def add_goal_todo(
         "status": add_result.get("status"),
         "task_class": add_result.get("task_class"),
         "action_kind": add_result.get("action_kind"),
+        "capability_binding_ref": add_result.get("capability_binding_ref"),
         "task_repository": add_result.get("task_repository"),
         "continuation_policy": add_result.get("continuation_policy"),
         "required_write_scopes": add_result.get("required_write_scopes"),
@@ -1677,6 +1708,9 @@ def complete_goal_todo(
                     ),
                     task_class=next_task_class or "advancement_task",
                     action_kind=next_action_kind,
+                    capability_binding_ref=completion_todo.get(
+                        "capability_binding_ref"
+                    ),
                     task_repository=next_task_repository,
                     required_capabilities=next_required_capabilities,
                     continuation_policy=next_continuation_policy,
@@ -1886,6 +1920,9 @@ def supersede_goal_todo(
                     ),
                     task_class=next_task_class or "advancement_task",
                     action_kind=next_action_kind,
+                    capability_binding_ref=current_block.get(
+                        "capability_binding_ref"
+                    ),
                     task_repository=next_task_repository,
                     required_capabilities=next_required_capabilities,
                     continuation_policy=next_continuation_policy,

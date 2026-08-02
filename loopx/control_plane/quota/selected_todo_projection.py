@@ -14,6 +14,7 @@ SELECTED_TODO_COMPACT_FIELDS = (
     "status",
     "task_class",
     "action_kind",
+    "capability_binding_ref",
     "task_repository",
     "required_write_scopes",
     "claimed_by",

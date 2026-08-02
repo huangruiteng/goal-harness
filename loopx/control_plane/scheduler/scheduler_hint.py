@@ -17,6 +17,7 @@ from .arbitration import (
     build_scheduler_arbitration,
 )
 from .execution_context import (
+    SchedulerOwner,
     SchedulerExecutionContextResolution,
     SchedulerRuntimeProfile,
     apply_scheduler_execution_context,
@@ -57,15 +58,25 @@ MONITOR_WAIT_PHASE_RANK = {
     "cadence_only": 2,
     "far_window": 3,
 }
-SCHEDULER_IDENTITY_KEYS = (
+SCHEDULER_BASE_IDENTITY_KEYS = (
     "goal_id",
     "agent_identity.agent_id",
     "effective_action",
     "heartbeat_recommendation.recommended_mode",
     "interaction_contract.mode",
+)
+SCHEDULER_FRONTIER_IDENTITY_KEYS = (
+    "selected_todo.todo_id",
+    "selected_todo.action_kind",
+    "selected_todo.target_key",
+    "selected_todo.claimed_by",
+    "selected_todo.capability_binding_ref",
+)
+SCHEDULER_IDENTITY_KEYS = (
+    *SCHEDULER_BASE_IDENTITY_KEYS,
     "recommended_action",
 )
-MONITOR_WAIT_IDENTITY_KEYS = SCHEDULER_IDENTITY_KEYS[:-1]
+MONITOR_WAIT_IDENTITY_KEYS = SCHEDULER_BASE_IDENTITY_KEYS
 CODEX_APP_SSH_GOAL_RUNTIME_KEY = SchedulerRuntimeProfile.CODEX_APP_SSH_VISIBLE.value
 CODEX_NATIVE_GOAL_BLOCK_ACTION = "update_goal_blocked_keep_loopx_active"
 CODEX_NATIVE_GOAL_RESUME_TRIGGER = "explicit_codex_goal_resume"
@@ -87,6 +98,28 @@ def _stable_digest(value: Any, *, length: int) -> str:
 
 def _dict_or_empty(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _scheduler_identity_keys(
+    *,
+    cadence_class: str,
+    execution_context: SchedulerExecutionContextResolution,
+) -> tuple[str, ...]:
+    base_keys = (
+        MONITOR_WAIT_IDENTITY_KEYS
+        if cadence_class == "monitor_wait"
+        else SCHEDULER_IDENTITY_KEYS
+    )
+    context = execution_context.context if execution_context.ok else None
+    if context is None or context.scheduler_owner is not SchedulerOwner.GOAL_RUNTIME:
+        return base_keys
+    if cadence_class == "monitor_wait":
+        return (*base_keys, *SCHEDULER_FRONTIER_IDENTITY_KEYS)
+    return (
+        *base_keys[:-1],
+        *SCHEDULER_FRONTIER_IDENTITY_KEYS,
+        base_keys[-1],
+    )
 
 
 def _scheduler_progression_interval_elapsed(
@@ -543,9 +576,10 @@ class _SchedulerHintBuilder:
             "spend_policy": "no quota spend for final replan check or loop stop",
         }
         identity_keys = list(
-            MONITOR_WAIT_IDENTITY_KEYS
-            if cadence_class == "monitor_wait"
-            else SCHEDULER_IDENTITY_KEYS
+            _scheduler_identity_keys(
+                cadence_class=cadence_class,
+                execution_context=self.execution_context,
+            )
         )
         identity_snapshot = {key: self._identity_value(key) for key in identity_keys}
         codex_rrule = rrule_for_minutes(codex_initial_interval)
@@ -1026,7 +1060,12 @@ def build_scheduler_hint(
                     "final_quota_replan_check_enabled": False,
                     "spend_policy": "no quota spend for terminal loop stop",
                 },
-                "unchanged_identity_keys": list(SCHEDULER_IDENTITY_KEYS),
+                "unchanged_identity_keys": list(
+                    _scheduler_identity_keys(
+                        cadence_class="terminal_no_followup",
+                        execution_context=execution_context,
+                    )
+                ),
             },
             execution_context,
         )

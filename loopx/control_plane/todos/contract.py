@@ -19,6 +19,9 @@ TODO_ACTION_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TODO_ID_PATTERN = re.compile(r"^todo_[a-z0-9_-]{3,64}$")
 TODO_AGENT_CLAIM_PATTERN = re.compile(r"^[a-z][a-z0-9_.:@-]{0,79}$")
 TODO_CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
+TODO_CAPABILITY_BINDING_REF_PATTERN = re.compile(
+    r"^[a-z][a-z0-9_.-]{0,31}:[a-z][a-z0-9_.:-]{2,95}$"
+)
 TODO_EXPLORE_RESULT_NODE_REF_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,95}$")
 TODO_EXPLORE_RESULT_NODE_REF_LIMIT = 8
 TODO_DECISION_SCOPE_KEY_PATTERN = re.compile(r"^(?:\*|[a-z0-9][a-z0-9_.:@*/-]{0,95})$")
@@ -233,6 +236,15 @@ def normalize_todo_action_kind(value: Any) -> str | None:
     if not candidate:
         return None
     if TODO_ACTION_KIND_PATTERN.match(candidate):
+        return candidate
+    return None
+
+
+def normalize_todo_capability_binding_ref(value: Any) -> str | None:
+    candidate = str(value or "").strip().lower()
+    if not candidate:
+        return None
+    if TODO_CAPABILITY_BINDING_REF_PATTERN.fullmatch(candidate):
         return candidate
     return None
 
@@ -862,6 +874,13 @@ _TODO_METADATA_FIELD_SCHEMA = (
         ),
     ),
     _TodoMetadataField(
+        "capability_binding_ref",
+        normalize_todo_capability_binding_ref,
+        invalid_message=(
+            "capability_binding_ref must be a public-safe namespaced token"
+        ),
+    ),
+    _TodoMetadataField(
         "task_repository",
         normalize_todo_task_repository,
         invalid_message=(
@@ -1136,6 +1155,7 @@ def format_todo_metadata_line(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    capability_binding_ref: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
     removed_continuation_policy: str | None = None,

@@ -258,6 +258,7 @@ def apply_todo_update_to_lines(
         "goal_bound": normalize_todo_goal_bound(effective_metadata.get("goal_bound")),
         "task_class": effective_metadata.get("task_class"),
         "action_kind": effective_metadata.get("action_kind"),
+        "capability_binding_ref": effective_metadata.get("capability_binding_ref"),
         "task_repository": normalize_todo_task_repository(
             effective_metadata.get("task_repository")
         ),

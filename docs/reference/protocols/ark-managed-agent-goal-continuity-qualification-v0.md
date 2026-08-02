@@ -17,6 +17,7 @@ an execution envelope.
 | Goal boundary, todo frontier, claims, evidence, quota, and leases | LoopX registry, active state, and event/runtime stores | Run a fresh `quota should-run`; never reconstruct the frontier from chat memory or an old prompt. |
 | Installed LoopX CLI and workflow skills | One fixed installer release | Read back one CLI/skills revision. Codex and Managed Agent differ only in the installer target root. |
 | Goal evaluation phase and terminal result | Goal host durable journal and event readback | Rehydrate before evaluating another completion. A journal existing on disk is not by itself proof that rehydration occurred. |
+| Continue, defer, or complete decision | `quota should-run.scheduler_hint.goal_runtime_continuation` | Consume the typed disposition and defer wake policy; read reason and state identity from the sibling scheduler fields named by the Host contract. Never derive wake behavior from the Goal prompt or evaluator prose. |
 | Host session id and in-memory transcript | Host session | Non-authoritative. It may help locate events, but its survival is not a continuity requirement. |
 
 ## Recovery sequence
@@ -26,12 +27,16 @@ After a pause, host replacement, or ambiguous transport failure:
 1. reopen the expected workspace and verify its repository identity;
 2. run installer/doctor readback and reject mixed CLI/skill revisions;
 3. read current LoopX status and run `quota should-run`;
-4. reconcile the selected todo, claim or lease, evidence, and workspace diff;
-5. inspect Goal-host events before retrying an activation whose admission is
+4. consume `goal_runtime_continuation_v0` plus the sibling scheduler reason and
+   reset identity; continue immediately, durably defer until the identity
+   changes or the bounded recheck deadline arrives, or complete the host Goal
+   as directed;
+5. reconcile the selected todo, claim or lease, evidence, and workspace diff;
+6. inspect Goal-host events before retrying an activation whose admission is
    unknown;
-6. regenerate the current `task_body` from LoopX state and submit it once only
+7. regenerate the current `task_body` from LoopX state and submit it once only
    when the readback proves another activation is needed; and
-7. require both validated LoopX writeback and Goal-host terminal evidence
+8. require both validated LoopX writeback and Goal-host terminal evidence
    before calling the recovery complete.
 
 The regenerated prompt may be textually identical when the durable frontier

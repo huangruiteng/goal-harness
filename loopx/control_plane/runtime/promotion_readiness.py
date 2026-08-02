@@ -20,7 +20,7 @@ PROMOTION_READINESS_RECOMMENDED_ACTION_DASHBOARD_SKIPPED = (
 )
 
 PROMOTION_READINESS_PROXY_NOTE = (
-    "canary readiness from release ledger or legacy goal history; exact evidence "
+    "canary readiness from runtime ledger or legacy goal history; exact evidence stays "
     "in append-only artifacts"
 )
 PROMOTION_READINESS_WRITEBACK_COMMAND = (

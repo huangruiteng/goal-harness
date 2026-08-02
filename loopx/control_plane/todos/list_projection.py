@@ -38,6 +38,7 @@ _ITEM_FIELDS = (
     "note",
     "task_class",
     "action_kind",
+    "capability_binding_ref",
     "task_repository",
     "continuation_policy",
     "required_capabilities",
