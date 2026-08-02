@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ...control_plane.runtime.public_safety import public_safe_compact_text
+from .registry import IDENTITY_SCOPE_FIELDS
 
 
 REWARD_MEMORY_CANDIDATE_SCHEMA_VERSION = "reward_memory_candidate_v0"
@@ -82,12 +83,17 @@ def _scope(raw: object) -> dict[str, Any]:
     )
     if not surfaces or any(not SURFACE_RE.fullmatch(item) for item in surfaces):
         raise ValueError("scope.surface_ids must contain module-qualified tokens")
-    return {
+    scope = {
         "workspace_ref": _token(raw.get("workspace_ref"), "scope.workspace_ref"),
         "project_ref": _token(raw.get("project_ref"), "scope.project_ref"),
         "surface_ids": surfaces,
         "revision_ref": _optional_token(raw.get("revision_ref"), "scope.revision_ref"),
     }
+    for field in IDENTITY_SCOPE_FIELDS:
+        value = _optional_token(raw.get(field), f"scope.{field}")
+        if value:
+            scope[field] = value
+    return scope
 
 
 def _source(raw: object) -> dict[str, str]:

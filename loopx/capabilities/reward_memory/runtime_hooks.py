@@ -82,6 +82,9 @@ def run_reward_memory_automatic_recall_hook(
     read_authority_checkpoints: Mapping[str, Mapping[str, Any]],
     application_id: str,
     artifact_ref: str | None = None,
+    user_ref: str | None = None,
+    peer_ref: str | None = None,
+    session_ref: str | None = None,
     apply_memory: RewardMemoryApplier | None = None,
     provider: ContextProvider | None = None,
 ) -> dict[str, Any]:
@@ -145,6 +148,9 @@ def run_reward_memory_automatic_recall_hook(
                 {
                     "workspace_ref": workspace_ref,
                     "project_ref": project_ref,
+                    "user_ref": user_ref,
+                    "peer_ref": peer_ref,
+                    "session_ref": session_ref,
                     "surface_id": surface_id,
                     "revision_ref": revision_ref,
                     "mode": profile["mode"],

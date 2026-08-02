@@ -42,6 +42,7 @@ FRESHNESS_MODES = {
 }
 LIFECYCLE_STATES = {"active", "superseded", "retired"}
 VISIBILITIES = {"private", "workspace", "public_safe"}
+IDENTITY_SCOPE_FIELDS = ("user_ref", "peer_ref", "session_ref")
 
 
 def _token(value: object, label: str) -> str:
@@ -96,14 +97,14 @@ def _normalize_scope(raw: object) -> dict[str, Any]:
     )
     if not surfaces:
         raise ValueError("scope.surface_ids must not be empty")
-    return {
+    scope = {
         "workspace_ref": _token(raw.get("workspace_ref"), "scope.workspace_ref"),
         "project_ref": _token(raw.get("project_ref"), "scope.project_ref"),
         "surface_ids": surfaces,
-        "user_ref": _optional_token(raw.get("user_ref"), "scope.user_ref"),
-        "peer_ref": _optional_token(raw.get("peer_ref"), "scope.peer_ref"),
-        "session_ref": _optional_token(raw.get("session_ref"), "scope.session_ref"),
     }
+    for field in IDENTITY_SCOPE_FIELDS:
+        scope[field] = _optional_token(raw.get(field), f"scope.{field}")
+    return scope
 
 
 def _normalize_freshness(raw: object) -> dict[str, Any]:

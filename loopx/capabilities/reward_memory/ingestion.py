@@ -26,7 +26,7 @@ from .candidate_review import (
     TARGET_CLASS_IDS,
     review_reward_memory_candidate,
 )
-from .registry import normalize_reward_memory_corpus
+from .registry import IDENTITY_SCOPE_FIELDS, normalize_reward_memory_corpus
 
 
 REWARD_MEMORY_STANDING_POLICY_SCHEMA_VERSION = "reward_memory_standing_policy_v0"
@@ -51,7 +51,14 @@ _POLICY_FIELDS = {
     "allowed_action_scopes",
     "raw_content_captured",
 }
-_POLICY_SCOPE_FIELDS = {"workspace_ref", "project_ref", "surface_ids"}
+_POLICY_SCOPE_FIELDS = {
+    "workspace_ref",
+    "project_ref",
+    "surface_ids",
+    "user_ref",
+    "peer_ref",
+    "session_ref",
+}
 
 
 def _strict_object(
@@ -75,6 +82,12 @@ def _token(value: object, label: str) -> str:
     if not TOKEN_RE.fullmatch(result):
         raise ValueError(f"{label} must be a compact public-safe token")
     return result
+
+
+def _optional_token(value: object, label: str) -> str | None:
+    if value in (None, ""):
+        return None
+    return _token(value, label)
 
 
 def _boolean(value: object, label: str) -> bool:
@@ -132,6 +145,23 @@ def normalize_reward_memory_standing_policy(
     )
     if raw_content:
         raise ValueError("standing policy must not capture raw content")
+    normalized_scope = {
+        "workspace_ref": _token(
+            scope.get("workspace_ref"), "standing_policy.scope.workspace_ref"
+        ),
+        "project_ref": _token(
+            scope.get("project_ref"), "standing_policy.scope.project_ref"
+        ),
+        "surface_ids": _tokens(
+            scope.get("surface_ids"),
+            "standing_policy.scope.surface_ids",
+            surface=True,
+        ),
+    }
+    for field in IDENTITY_SCOPE_FIELDS:
+        value = _optional_token(scope.get(field), f"standing_policy.scope.{field}")
+        if value:
+            normalized_scope[field] = value
     return {
         "schema_version": REWARD_MEMORY_STANDING_POLICY_SCHEMA_VERSION,
         "policy_id": _token(raw.get("policy_id"), "standing_policy.policy_id"),
@@ -145,19 +175,7 @@ def normalize_reward_memory_standing_policy(
             raw.get("authority_source_ref"),
             "standing_policy.authority_source_ref",
         ),
-        "scope": {
-            "workspace_ref": _token(
-                scope.get("workspace_ref"), "standing_policy.scope.workspace_ref"
-            ),
-            "project_ref": _token(
-                scope.get("project_ref"), "standing_policy.scope.project_ref"
-            ),
-            "surface_ids": _tokens(
-                scope.get("surface_ids"),
-                "standing_policy.scope.surface_ids",
-                surface=True,
-            ),
-        },
+        "scope": normalized_scope,
         "allowed_target_classes": target_classes,
         "allowed_source_kinds": _tokens(
             raw.get("allowed_source_kinds"),
@@ -207,6 +225,9 @@ def _policy_guard(
         reasons.append("standing_policy_workspace_corpus_mismatch")
     if policy_scope["project_ref"] != corpus_scope["project_ref"]:
         reasons.append("standing_policy_project_corpus_mismatch")
+    for field in IDENTITY_SCOPE_FIELDS:
+        if policy_scope.get(field) != corpus_scope.get(field):
+            reasons.append(f"standing_policy_{field}_corpus_mismatch")
     if not set(policy_scope["surface_ids"]).issubset(set(corpus_scope["surface_ids"])):
         reasons.append("standing_policy_surface_exceeds_corpus")
     if corpus["lifecycle"]["state"] != "active":
@@ -229,6 +250,9 @@ def _policy_guard(
         reasons.append("candidate_workspace_policy_mismatch")
     if scope.get("project_ref") != policy_scope["project_ref"]:
         reasons.append("candidate_project_policy_mismatch")
+    for field in IDENTITY_SCOPE_FIELDS:
+        if scope.get(field) != policy_scope.get(field):
+            reasons.append(f"candidate_{field}_policy_mismatch")
     if len(candidate_surfaces) != 1:
         reasons.append("candidate_surface_count_not_one")
     if not candidate_surfaces.issubset(set(policy_scope["surface_ids"])):
@@ -237,6 +261,9 @@ def _policy_guard(
         reasons.append("candidate_workspace_corpus_mismatch")
     if scope.get("project_ref") != corpus_scope["project_ref"]:
         reasons.append("candidate_project_corpus_mismatch")
+    for field in IDENTITY_SCOPE_FIELDS:
+        if scope.get(field) != corpus_scope.get(field):
+            reasons.append(f"candidate_{field}_corpus_mismatch")
     if not candidate_surfaces.issubset(set(corpus_scope["surface_ids"])):
         reasons.append("candidate_surface_corpus_mismatch")
     if corpus["freshness"]["mode"] == "revision_bound" and (
@@ -432,11 +459,13 @@ def ingest_reward_memory_candidate(
     surface_id = str(surfaces[0])
     scope = candidate.get("scope")
     assert isinstance(scope, Mapping)
+    identity_scope = {field: scope.get(field) for field in IDENTITY_SCOPE_FIELDS}
     recall_request = build_reward_memory_recall_request(
         normalized_corpus,
         {
             "workspace_ref": scope["workspace_ref"],
             "project_ref": scope["project_ref"],
+            **identity_scope,
             "surface_id": surface_id,
             "revision_ref": scope.get("revision_ref"),
             "mode": "function_boundary",
@@ -461,6 +490,7 @@ def ingest_reward_memory_candidate(
             "corpus_id": normalized_corpus["corpus_id"],
             "workspace_ref": scope["workspace_ref"],
             "project_ref": scope["project_ref"],
+            **identity_scope,
             "surface_id": surface_id,
             "read_authority": normalized_corpus["read_authority"],
             "source_ref": policy["authority_source_ref"],

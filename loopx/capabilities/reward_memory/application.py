@@ -17,7 +17,7 @@ from ..context_providers.base import (
     opaque_provider_ref,
 )
 from .candidate_review import REWARD_MEMORY_REVIEW_SCHEMA_VERSION
-from .registry import normalize_reward_memory_corpus
+from .registry import IDENTITY_SCOPE_FIELDS, normalize_reward_memory_corpus
 
 
 REWARD_MEMORY_ACTIVE_RECORD_SCHEMA_VERSION = "reward_memory_active_record_v0"
@@ -120,6 +120,10 @@ def _scope_matches(record: Mapping[str, Any], corpus: Mapping[str, Any]) -> bool
     return (
         scope.get("workspace_ref") == corpus_scope["workspace_ref"]
         and scope.get("project_ref") == corpus_scope["project_ref"]
+        and all(
+            scope.get(field) == corpus_scope.get(field)
+            for field in IDENTITY_SCOPE_FIELDS
+        )
         and set(scope.get("surface_ids") or []).issubset(
             set(corpus_scope["surface_ids"])
         )
@@ -214,6 +218,10 @@ def _authority_checkpoint(
         ),
         "source_ref": _optional_token(raw.get("source_ref"), "checkpoint.source_ref"),
     }
+    for field in IDENTITY_SCOPE_FIELDS:
+        expected_scope = corpus["scope"].get(field)
+        if expected_scope:
+            checkpoint[field] = _optional_token(raw.get(field), f"checkpoint.{field}")
     reasons: list[str] = []
     expected = {
         "corpus_id": corpus["corpus_id"],
@@ -222,6 +230,12 @@ def _authority_checkpoint(
         "surface_id": request["surface_id"],
         "read_authority": corpus["read_authority"],
     }
+    for field in IDENTITY_SCOPE_FIELDS:
+        expected_scope = corpus["scope"].get(field)
+        if expected_scope:
+            expected[field] = expected_scope
+            if request.get(field) != expected_scope:
+                reasons.append(f"read_authority_{field}_scope_mismatch")
     if checkpoint["verified"] is not True:
         reasons.append("read_authority_unverified")
     if not checkpoint["source_ref"]:
@@ -323,6 +337,10 @@ def build_reward_memory_recall_request(
         "observed_at": _observed_at(request.get("observed_at")),
         "conflict_state": str(request.get("conflict_state") or "").strip(),
     }
+    for field in IDENTITY_SCOPE_FIELDS:
+        value = _optional_token(request.get(field), field)
+        if value:
+            recall_request[field] = value
     query_kind = str(request.get("query_kind") or "business_recall").strip()
     if query_kind not in RECALL_QUERY_KINDS:
         raise ValueError("query_kind must be business_recall or ingest_verification")
@@ -350,6 +368,10 @@ def build_reward_memory_recall_request(
         reasons.append("workspace_scope_mismatch")
     if recall_request["project_ref"] != scope["project_ref"]:
         reasons.append("project_scope_mismatch")
+    for field in IDENTITY_SCOPE_FIELDS:
+        expected_scope = scope.get(field)
+        if expected_scope and recall_request.get(field) != expected_scope:
+            reasons.append(f"{field}_scope_mismatch")
     if surface not in scope["surface_ids"]:
         reasons.append("surface_scope_mismatch")
     if recall_request["conflict_state"] != "clear":
