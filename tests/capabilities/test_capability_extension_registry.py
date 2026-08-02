@@ -29,6 +29,7 @@ BUILTIN_IDS = [
     "decision-context",
     "project-skill-delivery",
     "material-lifecycle",
+    "agent-turn-recall",
     "semantic-preference",
     "reward-memory",
     "periodic-report",
