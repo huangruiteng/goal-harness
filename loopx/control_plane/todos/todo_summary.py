@@ -18,6 +18,7 @@ from .contract import (
     normalize_explore_result_node_refs,
     normalize_target_capabilities,
     normalize_todo_action_kind,
+    normalize_todo_capability_binding_ref,
     normalize_todo_task_repository,
     normalize_todo_blocks_agent,
     normalize_todo_bound_agent,
@@ -310,6 +311,11 @@ def structured_todo_item(
     action_kind = normalize_todo_action_kind(item.get("action_kind"))
     if action_kind:
         normalized["action_kind"] = action_kind
+    capability_binding_ref = normalize_todo_capability_binding_ref(
+        item.get("capability_binding_ref")
+    )
+    if capability_binding_ref:
+        normalized["capability_binding_ref"] = capability_binding_ref
     task_repository = normalize_todo_task_repository(item.get("task_repository"))
     if task_repository:
         normalized["task_repository"] = task_repository
@@ -403,6 +409,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "source_section",
         "task_class",
         "action_kind",
+        "capability_binding_ref",
         "task_repository",
         "continuation_policy",
         "removed_continuation_policy",

@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+import json
 import sys
 import tempfile
+from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -365,8 +366,25 @@ def assert_outcome_floor_recovery_should_run() -> None:
     }
     decision = build_quota_should_run(payload, goal_id=goal_id)
     markdown = render_quota_should_run_markdown(decision)
-    preview = build_quota_slot_preview(payload, goal_id=goal_id, slots=1)
-    spend_event = build_quota_slot_spend_event(preview, source="heartbeat")
+    with tempfile.TemporaryDirectory(prefix="loopx-outcome-floor-spend-") as tmp:
+        runtime_root = Path(tmp)
+        index_path = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        index_path.write_text(
+            json.dumps(
+                {
+                    "generated_at": "2026-01-01T00:01:00+00:00",
+                    "goal_id": goal_id,
+                    "classification": "validated_recovery",
+                    "delivery_outcome": "outcome_progress",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        payload["runtime_root"] = str(runtime_root)
+        preview = build_quota_slot_preview(payload, goal_id=goal_id, slots=1)
+        spend_event = build_quota_slot_spend_event(preview, source="heartbeat")
 
     assert decision["ok"] is True, decision
     assert decision["decision"] == "safe_bypass_recovery", decision
@@ -1225,7 +1243,43 @@ def assert_decision_freshness_warning_in_should_run() -> None:
 
 
 def assert_safe_bypass_slot_preview(status_payload: dict) -> None:
-    payload = build_quota_slot_preview(status_payload, goal_id="needs-operator", slots=1)
+    rejected = build_quota_slot_preview(
+        status_payload,
+        goal_id="needs-operator",
+        slots=1,
+    )
+    assert rejected["ok"] is False, rejected
+    assert "accountable delivery writeback" in rejected["reason"], rejected
+
+    with tempfile.TemporaryDirectory(prefix="loopx-safe-bypass-spend-") as tmp:
+        runtime_root = Path(tmp)
+        index_path = (
+            runtime_root
+            / "goals"
+            / "needs-operator"
+            / "runs"
+            / "index.jsonl"
+        )
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        index_path.write_text(
+            json.dumps(
+                {
+                    "generated_at": "2026-01-01T00:00:00+00:00",
+                    "goal_id": "needs-operator",
+                    "classification": "validated_safe_bypass",
+                    "delivery_outcome": "outcome_progress",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        status_with_delivery = deepcopy(status_payload)
+        status_with_delivery["runtime_root"] = str(runtime_root)
+        payload = build_quota_slot_preview(
+            status_with_delivery,
+            goal_id="needs-operator",
+            slots=1,
+        )
 
     assert payload["ok"] is True, payload
     assert payload["safe_bypass_spend"] is True, payload

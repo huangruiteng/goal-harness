@@ -56,6 +56,21 @@ FRONTIER_REPLAN_ACK_DELTA_KINDS = frozenset(
     }
 )
 
+# These deltas change the executable or terminal frontier. Watch/readback-only
+# deltas may acknowledge a replan, but they do not by themselves prove an
+# accountable delivery that may consume quota.
+ACCOUNTABLE_REPLAN_DELTA_KINDS = frozenset(
+    {
+        "blocker",
+        "capability_gate",
+        "goal_boundary_projection",
+        "goal_vision_patch",
+        "no_followup",
+        "runnable_todo_set",
+        "successor_or_supersede",
+    }
+)
+
 
 def normalize_repair_delta_kinds(values: Iterable[str] | None) -> list[str]:
     normalized: list[str] = []
@@ -85,6 +100,19 @@ def repair_delta_kinds_have_frontier_delta(values: Iterable[str] | None) -> bool
             if str(item or "").strip()
         }
         & FRONTIER_REPLAN_ACK_DELTA_KINDS
+    )
+
+
+def repair_delta_kinds_have_accountable_progress(
+    values: Iterable[str] | None,
+) -> bool:
+    return bool(
+        {
+            str(item or "").strip()
+            for item in (values or [])
+            if str(item or "").strip()
+        }
+        & ACCOUNTABLE_REPLAN_DELTA_KINDS
     )
 
 

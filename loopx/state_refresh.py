@@ -20,6 +20,7 @@ from .control_plane.agents.workspace_guard import capture_delivery_workspace
 from .control_plane.work_items.repair_delta import (
     REPAIR_DELTA_KIND_CHOICES as REPAIR_DELTA_KIND_CHOICES,
     normalize_repair_delta_kinds,
+    repair_delta_kinds_have_accountable_progress,
     repair_delta_kinds_have_frontier_delta,
     validate_repair_delta_claims,
 )
@@ -1133,6 +1134,13 @@ def refresh_state_run(
             effective_autonomous_replan_recorded = False
             if normalized_delivery_outcome in {"outcome_progress", "primary_goal_outcome"}:
                 normalized_delivery_outcome = "outcome_gap"
+        elif (
+            normalized_delivery_outcome in {"outcome_progress", "primary_goal_outcome"}
+            and not repair_delta_kinds_have_accountable_progress(
+                validated_repair_delta_kinds
+            )
+        ):
+            normalized_delivery_outcome = "outcome_gap"
     vision_checkpoint = build_vision_checkpoint(
         agent_id=normalized_agent_id or None,
         agent_vision=agent_vision,

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from .control_plane.scheduler.execution_context import (
+    GOAL_RUNTIME_CONTINUATION_SCHEMA_VERSION,
+)
 from .control_plane.work_items.runtime_capability_reentry import (
     RUNTIME_CAPABILITY_REENTRY_SCHEMA_VERSION,
 )
-
 
 ARK_MANAGED_AGENT_HOST = "ark-managed-agent"
 ARK_MANAGED_AGENT_HOST_CONTRACT_SCHEMA_VERSION = (
@@ -31,6 +33,17 @@ def build_ark_managed_agent_host_contract() -> dict[str, Any]:
         "phase_handoff_allowed": False,
         "loopx_turn_driver_required": False,
         "session_state_authoritative": False,
+        "goal_runtime_continuation": {
+            "source_ref": "quota_should_run.scheduler_hint.goal_runtime_continuation",
+            "packet_schema_version": GOAL_RUNTIME_CONTINUATION_SCHEMA_VERSION,
+            "dispositions": ["continue_now", "defer", "complete"],
+            "defer_wake_policy": "state_change_or_deadline",
+            "reason_source_ref": "quota_should_run.scheduler_hint.reason_code",
+            "state_identity_source_ref": (
+                "quota_should_run.scheduler_hint.reset_policy"
+            ),
+            "goal_prompt_mutated": False,
+        },
         "runtime_capability_reentry": {
             "source_ref": (
                 "quota_should_run.interaction_contract.cli_channel."

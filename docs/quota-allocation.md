@@ -1027,7 +1027,11 @@ Post-turn accounting protocol:
 - autonomous replans follow the same accountable-outcome rule: spend after a
   concrete successor, blocker, or `outcome_progress`/`primary_goal_outcome`
   writeback, but do not spend for a `surface_only` watch-lane continuation or
-  no-follow-up rationale that closes into `monitor_quiet_skip`.
+  no-follow-up rationale that closes into `monitor_quiet_skip`. A replan that
+  only changes a user gate, monitor target, watch continuation, or durable Next
+  Action is normalized to `outcome_gap` even if the caller requests an
+  accountable outcome; it must also change the executable, blocked, or terminal
+  frontier before it can count as delivery progress.
 - give each heartbeat a stable turn id and pass it to `quota should-run`; the
   guard commits one idempotent receipt, and for unchanged `monitor_quiet_skip`
   it idempotently appends the no-spend stall observation before returning quiet
@@ -1038,7 +1042,9 @@ Post-turn accounting protocol:
   completes bounded safe-bypass work, append one spend event for that work. For
   `safe_bypass_kind=outcome_floor_recovery`, spend only after validated
   ranker/cross-domain evidence or concrete blocker writeback, not for another
-  surface-only report.
+  surface-only report. Every safe-bypass spend must have a latest unspent
+  accountable delivery writeback; the bypass decision alone never authorizes
+  accounting.
 - if `should_run=true` with `effective_action=control_plane_health_repair` or
   `control_plane_projection_repair`, append one spend event only after the
   control-plane projection or blocker writeback is validated.

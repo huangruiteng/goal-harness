@@ -25,6 +25,7 @@ from .control_plane.todos.contract import (
     normalize_todo_action_kind,
     normalize_todo_blocks_agent,
     normalize_todo_bound_agent,
+    normalize_todo_capability_binding_ref,
     normalize_todo_claimed_by,
     normalize_todo_continuation_policy,
     normalize_todo_excluded_agents,
@@ -272,6 +273,9 @@ def backfill_todo_events_from_markdown(
         }
         task_class = normalize_explicit_todo_task_class(record.get("task_class"))
         action_kind = normalize_todo_action_kind(record.get("action_kind"))
+        capability_binding_ref = normalize_todo_capability_binding_ref(
+            record.get("capability_binding_ref")
+        )
         task_repository = normalize_todo_task_repository(
             record.get("task_repository")
         )
@@ -296,6 +300,8 @@ def backfill_todo_events_from_markdown(
             payload["task_class"] = task_class
         if action_kind:
             payload["action_kind"] = action_kind
+        if capability_binding_ref:
+            payload["capability_binding_ref"] = capability_binding_ref
         if task_repository:
             payload["task_repository"] = task_repository
         if continuation_policy:
@@ -447,6 +453,15 @@ def normalize_state_event(event: dict[str, Any], *, append_sequence: int | None 
         if not todo_id:
             raise StateEventError(f"{event_type} requires refs.todo_id")
         refs["todo_id"] = todo_id
+        if payload.get("capability_binding_ref") is not None:
+            capability_binding_ref = normalize_todo_capability_binding_ref(
+                payload.get("capability_binding_ref")
+            )
+            if not capability_binding_ref:
+                raise StateEventError(
+                    "capability_binding_ref must be a public-safe namespaced token"
+                )
+            payload["capability_binding_ref"] = capability_binding_ref
 
     privacy = compact_text(event.get("privacy") or PUBLIC_PRIVACY)
     if privacy not in PRIVACY_VALUES:
@@ -592,6 +607,9 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
     )
     task_class = normalize_explicit_todo_task_class(payload.get("task_class"))
     action_kind = normalize_todo_action_kind(payload.get("action_kind"))
+    capability_binding_ref = normalize_todo_capability_binding_ref(
+        payload.get("capability_binding_ref")
+    )
     task_repository = normalize_todo_task_repository(payload.get("task_repository"))
     continuation_policy = normalize_todo_continuation_policy(
         payload.get("continuation_policy")
@@ -630,6 +648,8 @@ def _todo_from_added_event(event: dict[str, Any]) -> dict[str, Any]:
         todo["task_class"] = task_class
     if action_kind:
         todo["action_kind"] = action_kind
+    if capability_binding_ref:
+        todo["capability_binding_ref"] = capability_binding_ref
     if task_repository:
         todo["task_repository"] = task_repository
     if removed_continuation_policy:
@@ -672,6 +692,14 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
         for key in ("priority", "role", "title", "task_class", "action_kind"):
             if payload.get(key):
                 todo[key] = compact_text(payload[key])
+        capability_binding_ref = normalize_todo_capability_binding_ref(
+            payload.get("capability_binding_ref")
+        )
+        if capability_binding_ref:
+            existing_binding_ref = todo.get("capability_binding_ref")
+            if existing_binding_ref and existing_binding_ref != capability_binding_ref:
+                raise StateEventError("capability_binding_ref is immutable once set")
+            todo["capability_binding_ref"] = capability_binding_ref
         continuation_policy = normalize_todo_continuation_policy(
             payload.get("continuation_policy")
         )
@@ -861,6 +889,7 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         status=status,
         task_class=item.get("task_class"),
         action_kind=item.get("action_kind"),
+        capability_binding_ref=item.get("capability_binding_ref"),
         task_repository=item.get("task_repository"),
         continuation_policy=item.get("continuation_policy"),
         removed_continuation_policy=item.get("removed_continuation_policy"),

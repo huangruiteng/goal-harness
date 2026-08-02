@@ -843,7 +843,7 @@ def main() -> int:
             runtime=runtime,
         )
         assert refresh["ok"] is True, refresh
-        assert refresh["delivery_outcome"] == "outcome_progress", refresh
+        assert refresh["delivery_outcome"] == "outcome_gap", refresh
 
         post_refresh_guard = run_cli(
             root,
@@ -861,25 +861,7 @@ def main() -> int:
         )
         assert post_refresh_guard.get("autonomous_replan_obligation") is None, post_refresh_guard
 
-        neutral_checkpoint = run_cli(
-            root,
-            "refresh-state",
-            "--goal-id",
-            GOAL_ID,
-            "--agent-id",
-            "codex-main-control",
-            "--classification",
-            "custom_vision_checkpoint_ack",
-            "--vision-unchanged-reason",
-            "validated delivery keeps the current agent vision unchanged",
-            "--no-global-sync",
-            registry_path=registry_path,
-            runtime=runtime,
-        )
-        assert neutral_checkpoint["ok"] is True, neutral_checkpoint
-        assert neutral_checkpoint.get("delivery_outcome") is None, neutral_checkpoint
-
-        spend = run_cli(
+        spend_rc, spend = run_cli_result(
             root,
             "quota",
             "spend-slot",
@@ -897,13 +879,10 @@ def main() -> int:
             registry_path=registry_path,
             runtime=runtime,
         )
-        assert spend["ok"] is True, spend
-        assert spend["delivery_completion_spend"] is True, spend
-        assert spend["quota_event"]["delivery_run_classification"] == (
-            "monitor_poll_autonomous_replan_recorded_v0"
-        ), spend
-        assert spend["quota_event"]["delivery_run_generated_at"] == refresh["generated_at"], spend
-        assert count_spend_events(runtime) == 1, spend
+        assert spend_rc == 1, spend
+        assert spend["ok"] is False, spend
+        assert "monitor-class work" in spend["reason"], spend
+        assert count_spend_events(runtime) == 0, spend
 
         duplicate_rc, duplicate = run_cli_result(
             root,
@@ -925,23 +904,9 @@ def main() -> int:
         )
         assert duplicate_rc == 1, duplicate
         assert duplicate["ok"] is False, duplicate
-        assert count_spend_events(runtime) == 1, duplicate
+        assert count_spend_events(runtime) == 0, duplicate
 
-        ack = run_cli(
-            root,
-            "refresh-state",
-            "--goal-id",
-            GOAL_ID,
-            "--classification",
-            "delivery_completion_spend_accounted_v0",
-            "--no-global-sync",
-            registry_path=registry_path,
-            runtime=runtime,
-        )
-        assert ack["ok"] is True, ack
-        assert ack.get("delivery_outcome") is None, ack
-
-        post_ack_guard = run_cli(
+        post_rejected_spend_guard = run_cli(
             root,
             "quota",
             "should-run",
@@ -955,24 +920,35 @@ def main() -> int:
             registry_path=registry_path,
             runtime=runtime,
         )
-        assert post_ack_guard["effective_action"] == "monitor_quiet_skip", post_ack_guard
-        assert post_ack_guard["execution_obligation"]["must_attempt_work"] is False, post_ack_guard
-        assert post_ack_guard.get("autonomous_replan_obligation") is None, post_ack_guard
+        assert post_rejected_spend_guard["effective_action"] == "monitor_quiet_skip", (
+            post_rejected_spend_guard
+        )
         assert (
-            post_ack_guard["heartbeat_recommendation"]["recommended_mode"]
+            post_rejected_spend_guard["execution_obligation"]["must_attempt_work"]
+            is False
+        ), post_rejected_spend_guard
+        assert post_rejected_spend_guard.get("autonomous_replan_obligation") is None, (
+            post_rejected_spend_guard
+        )
+        assert (
+            post_rejected_spend_guard["heartbeat_recommendation"]["recommended_mode"]
             == "monitor_quiet_until_material_transition"
-        ), post_ack_guard
-        post_ack_interaction = post_ack_guard["interaction_contract"]
-        assert post_ack_interaction["mode"] == "monitor_quiet_skip", post_ack_interaction
-        post_ack_actions = post_ack_interaction["cli_channel"]["next_cli_actions"]
-        assert len(post_ack_actions) == 1, post_ack_interaction
-        assert "missing/write_failed heartbeat_receipt only" in post_ack_actions[0], (
-            post_ack_interaction
+        ), post_rejected_spend_guard
+        post_rejection_interaction = post_rejected_spend_guard["interaction_contract"]
+        assert post_rejection_interaction["mode"] == "monitor_quiet_skip", (
+            post_rejection_interaction
         )
-        assert '--turn-instance-id "${LOOPX_TURN:?' in post_ack_actions[0], (
-            post_ack_interaction
+        post_rejection_actions = post_rejection_interaction["cli_channel"][
+            "next_cli_actions"
+        ]
+        assert len(post_rejection_actions) == 1, post_rejection_interaction
+        assert "missing/write_failed heartbeat_receipt only" in post_rejection_actions[0], (
+            post_rejection_interaction
         )
-        post_ack_poll_count = count_events(runtime, "quota_monitor_poll")
+        assert '--turn-instance-id "${LOOPX_TURN:?' in post_rejection_actions[0], (
+            post_rejection_interaction
+        )
+        post_rejection_poll_count = count_events(runtime, "quota_monitor_poll")
         heartbeat_turn_one = run_cli(
             root,
             "quota",
@@ -1038,8 +1014,8 @@ def main() -> int:
         assert heartbeat_turn_two["execution_obligation"]["must_attempt_work"] is True, (
             heartbeat_turn_two
         )
-        assert count_spend_events(runtime) == 1, heartbeat_turn_two
-        assert count_events(runtime, "quota_monitor_poll") == post_ack_poll_count + 2, (
+        assert count_spend_events(runtime) == 0, heartbeat_turn_two
+        assert count_events(runtime, "quota_monitor_poll") == post_rejection_poll_count + 2, (
             heartbeat_turn_two
         )
 

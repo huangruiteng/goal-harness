@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 
-from loopx.control_plane.work_items.repair_delta import validate_repair_delta_claims
+from loopx.control_plane.work_items.repair_delta import (
+    repair_delta_kinds_have_accountable_progress,
+    validate_repair_delta_claims,
+)
 
 
 def _summary(*items: dict) -> dict:
@@ -23,6 +26,15 @@ def _validate(
         vision_patch_written=False,
         observed_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
     )
+
+
+def test_watch_only_replan_delta_is_not_accountable_progress() -> None:
+    assert repair_delta_kinds_have_accountable_progress(
+        ["user_gate", "monitor_target", "active_state_next_action"]
+    ) is False
+    assert repair_delta_kinds_have_accountable_progress(
+        ["active_state_next_action", "runnable_todo_set"]
+    ) is True
 
 
 def test_runnable_todo_claim_requires_scoped_advancement() -> None:
