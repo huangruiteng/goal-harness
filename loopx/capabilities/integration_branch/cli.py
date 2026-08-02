@@ -71,8 +71,8 @@ def register_integration_branch_commands(
         "--refresh-remotes",
         action="store_true",
         help=(
-            "Fetch configured remotes before resolving base and source refs; "
-            "never pushes or changes source branches."
+            "Fetch only configured remote-tracking refs before resolving base "
+            "and source refs; never pushes or changes source branches."
         ),
     )
 
@@ -93,8 +93,8 @@ def register_integration_branch_commands(
         "--refresh-remotes",
         action="store_true",
         help=(
-            "Fetch configured remotes before building or verifying the candidate; "
-            "never pushes or changes source branches."
+            "Fetch only configured remote-tracking refs before building or "
+            "verifying the candidate; never pushes or changes source branches."
         ),
     )
     sync.add_argument("--execute", action="store_true")

@@ -6,53 +6,53 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .capabilities.auto_research.cli import (
-    handle_auto_research_command,
-    register_auto_research_commands,
-    rewrite_auto_research_question_argv,
+from .capabilities.content_ops.cli import (
+    handle_content_ops_command,
+    register_content_ops_commands,
 )
 from .capabilities.change_quality.cli import (
     handle_change_quality_command,
     register_change_quality_commands,
 )
-from .capabilities.content_ops.cli import (
-    handle_content_ops_command,
-    register_content_ops_commands,
+from .capabilities.integration_branch.cli import (
+    handle_integration_branch_command,
+    register_integration_branch_commands,
 )
 from .capabilities.decision_context.cli import (
     handle_decision_context_command,
     register_decision_context_commands,
 )
-from .capabilities.integration_branch.cli import (
-    handle_integration_branch_command,
-    register_integration_branch_commands,
+from .capabilities.material_lifecycle.cli import (
+    handle_material_lifecycle_command,
+    register_material_lifecycle_commands,
 )
 from .capabilities.issue_fix.cli import (
     handle_issue_fix_command,
     register_issue_fix_commands,
 )
-from .capabilities.material_lifecycle.cli import (
-    handle_material_lifecycle_command,
-    register_material_lifecycle_commands,
+from .capabilities.reward_memory.cli import (
+    handle_reward_memory_command,
+    register_reward_memory_commands,
 )
 from .capabilities.periodic_report.cli import (
     handle_periodic_report_command,
     register_periodic_report_commands,
 )
-from .capabilities.reward_memory.cli import (
-    handle_reward_memory_command,
-    register_reward_memory_commands,
-)
 from .capabilities.semantic_preference.cli import (
     handle_semantic_preference_command,
     register_semantic_preference_commands,
+)
+from .capabilities.auto_research.cli import (
+    handle_auto_research_command,
+    register_auto_research_commands,
+    rewrite_auto_research_question_argv,
 )
 from .capabilities.value_connectors.cli import (
     handle_value_connector_command,
     register_value_connector_commands,
 )
 from .cli_commands import (
-    build_lark_issue_fix_reviewer_provider_hooks,
+    handle_turn_command,
     handle_benchmark_command,
     handle_bootstrap_connect_command,
     handle_canary_command,
@@ -62,56 +62,56 @@ from .cli_commands import (
     handle_doctor_command,
     handle_dreaming_command,
     handle_evidence_log_command,
-    handle_explore_command,
     handle_extension_command,
+    handle_explore_command,
     handle_history_command,
-    handle_host_mode_plan_command,
     handle_lark_inbox_command,
     handle_lark_kanban_command,
     handle_ml_experiment_command,
     handle_multi_agent_command,
-    handle_pr_review_command,
-    handle_presentation_command,
     handle_preset_command,
+    handle_presentation_command,
     handle_project_lifecycle_command,
+    handle_pr_review_command,
     handle_quota_command,
     handle_ready_score_command,
-    handle_registry_admin_command,
     handle_review_batch_command,
+    handle_registry_admin_command,
     handle_review_packet_command,
     handle_slash_commands_command,
-    handle_starter_command,
     handle_status_command,
+    handle_starter_command,
     handle_summary_all_command,
     handle_support_control_command,
     handle_task_lease_command,
     handle_todo_command,
-    handle_turn_command,
     handle_version_command,
+    handle_host_mode_plan_command,
     handle_worker_bridge_command,
     register_benchmark_command_group,
+    register_turn_commands,
     register_bootstrap_connect_command,
     register_canary_commands,
     register_capability_commands,
     register_doctor_command,
     register_dreaming_commands,
     register_evidence_log_command,
-    register_explore_commands,
     register_extension_commands,
+    register_explore_commands,
     register_history_command,
-    register_host_mode_plan_command,
     register_lark_inbox_commands,
+    build_lark_issue_fix_reviewer_provider_hooks,
     register_lark_kanban_commands,
     register_ml_experiment_commands,
     register_multi_agent_commands,
-    register_pr_review_command,
-    register_presentation_commands,
     register_preset_commands,
+    register_presentation_commands,
     register_project_lifecycle_commands,
+    register_pr_review_command,
     register_quota_command,
     register_ready_score_command,
-    register_registry_admin_commands,
     register_review_batch_commands,
+    register_registry_admin_commands,
     register_slash_commands_command,
     register_starter_commands,
     register_status_commands,
@@ -119,14 +119,18 @@ from .cli_commands import (
     register_support_control_commands,
     register_task_lease_command,
     register_todo_command,
-    register_turn_commands,
     register_version_command,
+    register_host_mode_plan_command,
     register_worker_bridge_commands,
 )
 from .cli_rollout import (
     append_benchmark_result_rollout_event,
     append_benchmark_run_rollout_event,
     append_cli_rollout_event,
+)
+from .project_skill_cli import (
+    handle_project_skill_command,
+    register_project_skill_commands,
 )
 from .help_surface import (
     build_command_reference_payload,
@@ -135,10 +139,6 @@ from .help_surface import (
     top_level_help_requested,
 )
 from .paths import DEFAULT_RUNTIME_ROOT, default_registry_path, global_registry_path
-from .project_skill_cli import (
-    handle_project_skill_command,
-    register_project_skill_commands,
-)
 
 
 class LoopXArgumentParser(argparse.ArgumentParser):

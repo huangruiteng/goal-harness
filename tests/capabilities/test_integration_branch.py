@@ -295,6 +295,56 @@ def test_remote_refresh_observes_published_source_intent_and_reconciles(
     )
 
 
+def test_remote_refresh_fetches_only_configured_tracking_refs(
+    tmp_path: Path,
+) -> None:
+    consumer, publisher = _remote_repositories(tmp_path)
+    configure_integration_branch(
+        repo_path=consumer,
+        base_ref="origin/main",
+        integration_branch="codex/local-integration",
+        source_refs=["origin/feature-a", "origin/fix-b"],
+        execute=True,
+    )
+    sync_integration_branch(repo_path=consumer, execute=True)
+    _git(consumer, "config", "--unset-all", "remote.origin.fetch")
+    _git(
+        consumer,
+        "config",
+        "--add",
+        "remote.origin.fetch",
+        "+refs/heads/main:refs/remotes/origin/main",
+    )
+    fetch_head = Path(_git(consumer, "rev-parse", "--git-path", "FETCH_HEAD"))
+    if not fetch_head.is_absolute():
+        fetch_head = consumer / fetch_head
+    fetch_head.write_text("preserve existing fetch evidence\n", encoding="utf-8")
+
+    _git(publisher, "switch", "feature-a")
+    published_head = _commit(publisher, "a.txt", "a2\n", "published review fix")
+    _git(publisher, "push", "origin", "feature-a")
+    _git(publisher, "switch", "-c", "unrelated", "main")
+    _commit(publisher, "unrelated.txt", "unrelated\n", "unrelated branch")
+    _git(publisher, "push", "origin", "unrelated")
+
+    refreshed = integration_branch_status(
+        repo_path=consumer,
+        refresh_remotes=True,
+    )
+
+    assert refreshed["resolved"]["sources"][0]["sha"] == published_head
+    with pytest.raises(subprocess.CalledProcessError):
+        _git(
+            consumer,
+            "rev-parse",
+            "--verify",
+            "refs/remotes/origin/unrelated",
+        )
+    assert fetch_head.read_text(encoding="utf-8") == (
+        "preserve existing fetch evidence\n"
+    )
+
+
 def test_merge_conflict_keeps_previous_integration_head(tmp_path: Path) -> None:
     repo = _repository(tmp_path)
     _configure(repo)

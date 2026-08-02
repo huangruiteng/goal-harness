@@ -46,7 +46,7 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "[--refresh-remotes] --format json"
                 ),
                 "purpose": "Optionally refresh remote-tracking refs, then compare exact base, source, and integration heads with the last successful sync.",
-                "write_boundary": "read-only integration inputs; optional fetch updates remote-tracking refs only",
+                "write_boundary": "remote-read-only inputs; optional fetch updates configured local remote-tracking refs only",
             },
             {
                 "command": (
@@ -54,7 +54,7 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "[--refresh-remotes] [--execute] --format json"
                 ),
                 "purpose": "Preview or atomically publish an ordered merge candidate to the local integration branch.",
-                "write_boundary": "local integration branch and ignored receipt only; no source or remote write",
+                "write_boundary": "local integration branch, ignored receipt, and optional configured remote-tracking refs only; no source-branch or remote-repository write",
             },
         ],
         "implemented_protocols": [
@@ -80,7 +80,7 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
             "The plan is project-local and ignored; it records refs and sync receipts, not credentials, review bodies, or private evidence.",
             "Sync uses exact resolved source heads and updates only the configured local integration branch after every ordered merge succeeds.",
             "Dirty checked-out integration worktrees, merge conflicts, missing refs, and concurrent plan/input/integration movement fail closed before publication.",
-            "Remote refresh is explicit and read-only; the capability never pushes, force-pushes, retargets PRs, merges protected branches, or changes source branches.",
+            "Remote refresh is explicit and remote-read-only; it updates only configured local remote-tracking refs and never pushes, force-pushes, retargets PRs, merges protected branches, or changes source branches.",
             "v0 uses ordered merge commits; it does not rewrite or squash source history.",
         ],
         "next_real_step": (

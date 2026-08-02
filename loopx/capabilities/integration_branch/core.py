@@ -196,26 +196,58 @@ def _write_plan(path: Path, plan: Mapping[str, Any]) -> None:
     os.replace(temporary_path, path)
 
 
-def _configured_remotes(repo: Path, plan: Mapping[str, Any]) -> list[str]:
-    known_remotes = set(_git(repo, "remote").stdout.split())
+def _configured_remote_refspecs(
+    repo: Path,
+    plan: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    known_remotes = sorted(
+        _git(repo, "remote").stdout.split(),
+        key=len,
+        reverse=True,
+    )
     configured_refs = [str(plan["base_ref"]), *map(str, plan["source_refs"])]
-    remotes: list[str] = []
+    refspecs_by_remote: dict[str, list[str]] = {}
     for ref in configured_refs:
-        normalized = ref.removeprefix("refs/remotes/")
-        candidate, separator, _ = normalized.partition("/")
-        if separator and candidate in known_remotes and candidate not in remotes:
-            remotes.append(candidate)
-    return remotes
+        symbolic = _git(repo, "rev-parse", "--symbolic-full-name", ref).stdout.strip()
+        if not symbolic.startswith("refs/remotes/"):
+            continue
+        target = _git(repo, "symbolic-ref", "--quiet", symbolic, check=False)
+        if target.returncode == 0:
+            symbolic = target.stdout.strip()
+        remote_path = symbolic.removeprefix("refs/remotes/")
+        remote = next(
+            (
+                candidate
+                for candidate in known_remotes
+                if remote_path.startswith(f"{candidate}/")
+            ),
+            None,
+        )
+        if remote is None:
+            continue
+        branch = remote_path.removeprefix(f"{remote}/")
+        refspec = f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+        remote_refspecs = refspecs_by_remote.setdefault(remote, [])
+        if refspec not in remote_refspecs:
+            remote_refspecs.append(refspec)
+    return refspecs_by_remote
 
 
 def _refresh_configured_remotes(
     repo: Path,
     plan: Mapping[str, Any],
 ) -> dict[str, Any]:
-    remotes = _configured_remotes(repo, plan)
-    for remote in remotes:
-        _git(repo, "fetch", "--no-tags", "--prune", remote)
-    return {"requested": True, "remotes": remotes}
+    refspecs_by_remote = _configured_remote_refspecs(repo, plan)
+    for remote, refspecs in refspecs_by_remote.items():
+        _git(
+            repo,
+            "fetch",
+            "--no-tags",
+            "--no-write-fetch-head",
+            remote,
+            *refspecs,
+        )
+    return {"requested": True, "remotes": list(refspecs_by_remote)}
 
 
 def _resolved_state(repo: Path, plan: Mapping[str, Any]) -> dict[str, Any]:
@@ -392,8 +424,8 @@ def integration_branch_status(
         "drift_reasons": reasons,
         "remote_refresh": remote_refresh,
         "write_boundary": (
-            "read-only integration inputs; optional remote refresh updates only "
-            "remote-tracking refs"
+            "remote-read-only integration inputs; optional refresh updates only "
+            "configured local remote-tracking refs"
         ),
     }
 
@@ -681,7 +713,8 @@ def sync_integration_branch(
             "candidate_source": candidate_source,
             "status_packet": status,
             "write_boundary": (
-                "candidate commit read only; integration and source refs unchanged"
+                "candidate commit and optional configured remote-tracking refs only; "
+                "integration and source branches unchanged"
             ),
         }
 
@@ -729,7 +762,7 @@ def sync_integration_branch(
         "candidate_source": candidate_source,
         "status_packet": refreshed,
         "write_boundary": (
-            "local integration branch and ignored sync receipt only; "
-            "source refs and remotes unchanged"
+            "local integration branch, ignored sync receipt, and optional configured "
+            "remote-tracking refs only; source branches and remote repositories unchanged"
         ),
     }
