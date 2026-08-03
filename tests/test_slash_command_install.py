@@ -206,7 +206,7 @@ def test_opencode_install_writes_commands_bridge_and_pinned_dependencies(
     assert "quota" in runtime_text
     assert "terminal_no_followup" in runtime_text
     package_text = package.read_text(encoding="utf-8")
-    assert '"opencode-goal-plugin": "0.6.5"' in package_text
+    assert '"opencode-goal-plugin": "0.7.0"' in package_text
     assert '"@opencode-ai/plugin": ">=1.17.15 <2"' in package_text
     assert _row(payload, "opencode_goal_bridge")["status"] == "created"
 

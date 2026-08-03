@@ -22,7 +22,7 @@ EXISTING_LOOPX_CAPABILITY_SKILL_SIGNATURES = (
 )
 OPENCODE_GOAL_DEPENDENCIES = {
     "@opencode-ai/plugin": ">=1.17.15 <2",
-    "opencode-goal-plugin": "0.6.5",
+    "opencode-goal-plugin": "0.7.0",
 }
 
 
