@@ -772,7 +772,7 @@ fi
 # loopx OpenCode goal bridge: OPT-IN, OFF by default. Static OpenCode commands
 # remain part of the ordinary slash-command install; this flag additionally
 # provisions the plugin, runtime, and pinned dependencies. The bridge wraps
-# opencode-goal-plugin@0.6.5 and gates idle continuation plus timer wakes
+# opencode-goal-plugin@0.7.0 and gates idle continuation plus timer wakes
 # through LoopX quota should-run. Install manually with:
 #   loopx slash-commands --install --surface opencode --with-goal-bridge
 install_opencode="${LOOPX_INSTALL_OPENCODE:-0}"
