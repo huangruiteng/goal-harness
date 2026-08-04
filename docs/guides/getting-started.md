@@ -816,6 +816,14 @@ For shared-control-plane agents, pass identity and scope in the automation
 prompt, then let the agent soft-claim matching todos with a registered
 `--claimed-by` id:
 
+New onboarding defaults to a new identity. When `agent-onboard` or an
+argument-bearing `start-goal --guided` call has no `--agent-id`, follow its
+fresh-agent registration preview/apply commands before writing todos. An
+existing id is reused only when the user explicitly asks to take over that
+exact agent; the presence of a single registered agent is not takeover intent.
+The fresh path uses `--require-new` and continues only when preview reports
+`changed=true`, so an accidental id collision cannot become implicit takeover.
+
 ```bash
 loopx register-agent --goal-id your-project-goal \
   --agent-id codex-main-control \
