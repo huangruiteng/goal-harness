@@ -71,8 +71,12 @@ def main() -> int:
         "Code Volume And Simplification Review",
         "Classify the volume as `necessary`, `partly avoidable`, or `not yet proven`",
         "A code-volume conclusion without diff and call-site evidence is incomplete",
-        "Do not use this skill to approve",
-        "Route those decisions to `loopx-pr-merge`",
+        "submit a formal `REQUEST_CHANGES` review",
+        "A plain PR comment is not an adequate substitute for `REQUEST_CHANGES`",
+        "keep the workflow read-only only when the user explicitly says `local-only`",
+        "the GitHub review state must match the written verdict",
+        "After publication, include the GitHub review/comment URL",
+        "route approval, merge, self-merge, and admin-bypass actions to `loopx-pr-merge`",
     ):
         assert phrase in skill_text, phrase
 

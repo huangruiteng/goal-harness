@@ -1,6 +1,6 @@
 ---
 name: loopx-pr-review
-description: Use when the visible request starts with `/loopx-pr-review` or asks LoopX to review a repository PR queue by time window, open/unmerged status, merged/closed status, or current-day PR activity. Run `loopx pr-review` first, preserve the full packet contract, then read PR evidence and produce per-PR reviews with the five required blocks, including code-volume necessity and concrete simplification analysis. Do not use for approving, commenting on, merging, self-merging, or admin-bypassing a specific PR; use `loopx-pr-merge` for those actions.
+description: Use when the visible request starts with `/loopx-pr-review` or asks LoopX to review a repository PR queue by time window, open/unmerged status, merged/closed status, or current-day PR activity. Run `loopx pr-review` first, preserve the full packet contract, then read PR evidence and produce per-PR reviews with the five required blocks, including code-volume necessity and concrete simplification analysis. For an open PR, publish validated actionable findings by default and submit REQUEST_CHANGES when blockers are found; keep review local only when the user explicitly asks for local-only or dry-run output. Use `loopx-pr-merge` for approval, merge, self-merge, or admin-bypass actions.
 ---
 
 # LoopX PR Review
@@ -14,12 +14,21 @@ Use this skill for `/loopx-pr-review` and for requests such as:
 - review PRs since a timestamp;
 - show the merged PRs that need post-merge audit.
 
-Do not use this skill to approve, request changes on GitHub, post PR comments,
-merge, self-merge, or admin-bypass. Route those decisions to `loopx-pr-merge`.
+This skill owns evidence-backed review publication for open PRs. After the
+review is complete:
 
-`/loopx-pr-review` is a read-only review workflow. It may use GitHub metadata,
-PR bodies, changed files, checks, and diffs, but it must not mutate GitHub or
-LoopX state.
+- submit a formal `REQUEST_CHANGES` review when one or more validated blocking
+  findings remain;
+- otherwise post the review findings or no-blocker result as a normal PR
+  review/comment, unless approval was explicitly requested;
+- keep the workflow read-only only when the user explicitly says `local-only`,
+  `dry-run`, `不要评论`, `不要提交 review`, or equivalent;
+- route approval, merge, self-merge, and admin-bypass actions to
+  `loopx-pr-merge`.
+
+Do not leave actionable blockers only in chat. A plain PR comment is not an
+adequate substitute for `REQUEST_CHANGES` when the evidence-based verdict is
+that the open PR should not merge.
 
 ## First Command
 
@@ -114,6 +123,13 @@ Record the remote `headRefOid` before deep review and query it again before the
 verdict. If it changed, review the new head instead of carrying forward stale
 findings. Use a clean read-only worktree at the exact head when local execution
 or line-level evidence is useful, and name the reviewed short SHA in the answer.
+
+Before publishing a review, query `headRefOid` one final time. Build the public
+review body from the exact reviewed head, remove local paths, private context,
+raw logs, credentials, and internal-only links, then submit it with literal-safe
+GitHub text handling. Read the resulting review back and verify its state and
+rendered body. Avoid duplicate reviews when the same reviewer has already
+submitted an equivalent decision for the same head.
 
 Do not fill the five-block review from title, labels, changed-file counts, or
 metadata risk hints alone. `metadata_risk_hint` is only for queue ordering.
@@ -216,12 +232,26 @@ Avoid title-only summaries such as "improves docs" or "low risk", and
 distinguish intended behavior from what the implementation and validation
 actually prove.
 
+For an open PR, the GitHub review state must match the written verdict:
+
+- any remaining P0/P1 blocker, or another explicitly merge-blocking finding:
+  `REQUEST_CHANGES`;
+- non-blocking findings only: normal review/comment unless the user explicitly
+  requests approval;
+- no findings: report that clearly and route approval through `loopx-pr-merge`
+  when approval is requested.
+
+After publication, include the GitHub review/comment URL in the user-facing
+summary. If GitHub rejects the requested review state, report the exact reason
+and do not imply that the PR status was updated.
+
 ## Failure And Fallback
 
 If `loopx pr-review` is unavailable, first repair the LoopX install or run the
 checked-out LoopX CLI from the intended worktree. Do not reconstruct the whole
 queue manually from GitHub and call it a successful `/loopx-pr-review` run.
 
-If a selected PR needs an approve/hold/merge action, finish the read-only review
-first, then route the action to `loopx-pr-merge` or ask for explicit merge
-authorization.
+If a selected PR needs approval, merge, self-merge, or admin-bypass, finish the
+review first and route that action to `loopx-pr-merge`. Blocking findings do not
+need a second authorization step: publish them and submit `REQUEST_CHANGES` by
+default unless the user explicitly requested a local-only review.
