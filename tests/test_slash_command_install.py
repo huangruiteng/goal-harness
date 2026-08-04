@@ -7,7 +7,6 @@ from loopx.slash_command_install import (
     materialize_loopx_entry_skill,
 )
 
-
 MANAGED_SKILL = "<!-- loopx-managed-slash-command:v1 command=/loopx surface=codex-skills -->\n"
 MANAGED_METADATA = (
     "# <!-- loopx-managed-slash-command:v1 command=/loopx "
@@ -50,6 +49,8 @@ def test_host_materialization_installs_generated_loopx_entry_skill(
     assert "Never infer a route from issue/PR wording or URLs" in skill_text
     assert "run its exact CLI `interaction_contract` or quota command first" in skill_text
     assert "do not call `start-goal` or bootstrap another goal" in skill_text
+    assert "treat this invocation as a new agent connection by default" in skill_text
+    assert "Only reuse an existing registered identity" in skill_text
     assert materialize_loopx_entry_skill(
         skills_dir=skills_dir,
         execute=True,

@@ -218,6 +218,62 @@ def test_codex_app_activation_uses_narrow_runtime_profile() -> None:
     assert "--execution-mode" not in command
 
 
+def test_new_agent_onboarding_defaults_to_fresh_identity() -> None:
+    packet = build_host_loop_activation_packet(
+        agent_type="codex-app",
+        goal_id="fixture-goal",
+        registered_agents=["codex-existing"],
+        fresh_agent_default=True,
+    )
+
+    assert packet["activation_state"] == "fresh_agent_registration_required"
+    assert packet["activation_allowed"] is False
+    gate = packet["identity_selection_gate"]
+    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["fresh_agent_registration"]["recommended"] is True
+    assert "register-agent --goal-id fixture-goal" in gate[
+        "fresh_agent_registration"
+    ]["preview_command"]
+    assert "--require-new" in gate["fresh_agent_registration"]["preview_command"]
+    assert gate["fresh_agent_registration"]["execute_command"].endswith(
+        "--execute"
+    )
+    assert len(gate["choices"]) == 1
+    takeover = gate["choices"][0]
+    assert takeover["agent_id"] == "codex-existing"
+    assert takeover["mode"] == "takeover_existing_agent"
+    assert takeover["requires_explicit_takeover_intent"] is True
+
+
+def test_new_agent_onboarding_gates_an_empty_agent_registry() -> None:
+    packet = build_host_loop_activation_packet(
+        agent_type="codex-app",
+        goal_id="fixture-goal",
+        registered_agents=[],
+        fresh_agent_default=True,
+    )
+
+    gate = packet["identity_selection_gate"]
+    assert packet["activation_allowed"] is False
+    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["choices"] == []
+
+
+def test_explicit_identity_preserves_existing_agent_continuation() -> None:
+    packet = build_host_loop_activation_packet(
+        agent_type="codex-app",
+        goal_id="fixture-goal",
+        agent_id="codex-existing",
+        registered_agents=["codex-existing"],
+        fresh_agent_default=True,
+    )
+
+    assert packet["activation_state"] == "selected"
+    assert packet["activation_allowed"] is True
+    assert packet["agent_id"] == "codex-existing"
+    assert packet["identity_selection_gate"] is None
+
+
 def test_codex_app_thin_prompt_embeds_profile_only_in_quota_command() -> None:
     prompt = build_heartbeat_prompt(
         goal_id="fixture-goal",

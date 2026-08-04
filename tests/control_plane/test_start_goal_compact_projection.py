@@ -583,7 +583,44 @@ def test_projection_preserves_agent_identity_gate_actions(tmp_path: Path) -> Non
     )
 
     assert compact["guided_transaction"]["blocked_by"] == "agent_identity_selection"
+    gate = compact["guided_transaction"]["identity_selection_gate"]
+    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["fresh_agent_registration"]["recommended"] is True
+    assert "--agent-id '<new-public-safe-agent-id>'" in gate[
+        "fresh_agent_registration"
+    ]["rerun_start_goal_command"]
+    assert all(
+        choice["mode"] == "takeover_existing_agent"
+        and choice["requires_explicit_takeover_intent"] is True
+        and f"--agent-id {choice['agent_id']}" in choice["rerun_start_goal_command"]
+        for choice in gate["choices"]
+    )
+    assert [
+        step["id"] for step in compact["guided_transaction"]["ordered_steps"][:3]
+    ] == ["inspect_connection", "connect_if_needed", "select_agent_identity"]
     assert _host_shadow_document(compact) == _host_shadow_document(detailed)
+
+
+def test_start_goal_does_not_reuse_the_only_registered_agent(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    assert payload["agent_id"] is None
+    assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
+    gate = payload["guided_transaction"]["identity_selection_gate"]
+    assert gate["state"] == "fresh_agent_registration_required"
+    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["choices"][0]["agent_id"] == AGENT_ID
+    assert gate["choices"][0]["requires_explicit_takeover_intent"] is True
 
 
 def test_projection_preserves_multi_goal_selection_actions(tmp_path: Path) -> None:

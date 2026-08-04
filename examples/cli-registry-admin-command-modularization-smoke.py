@@ -202,7 +202,7 @@ def main() -> None:
 
     for command, options in {
         "configure-goal": ("--quota-compute", "--registered-agent", "--execute"),
-        "register-agent": ("--agent-id", "--execute"),
+        "register-agent": ("--agent-id", "--require-new", "--execute"),
         "archive-runtime": ("--archive-root", "--allow-registered", "--execute"),
         "retire-global-goal": ("--goal-id", "--execute"),
         "uninstall-project": ("--goal-id", "--archive-state", "--remove-empty-registry", "--execute"),

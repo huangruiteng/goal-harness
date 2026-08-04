@@ -11,7 +11,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -183,12 +182,22 @@ def main() -> int:
     assert payload["agent_type"] == "codex-cli", payload
     activation = payload["host_loop_activation"]
     assert activation["host_surface"] == "codex_cli_visible_goal_mode", activation
+    assert activation["activation_allowed"] is False, activation
+    assert activation["activation_state"] == "invalid_selection", activation
+    fresh_registration = activation["identity_selection_gate"][
+        "fresh_agent_registration"
+    ]
+    assert fresh_registration["agent_id"] == "codex-value-explorer", fresh_registration
+    assert fresh_registration["preview_command"].endswith(
+        "--agent-id codex-value-explorer --require-new"
+    ), fresh_registration
+    assert fresh_registration["execute_command"].endswith("--execute"), fresh_registration
     contract = payload["goal_start_contract"]
     assert contract["activation"]["host_loop_required_after_todo_writeback"] is True, contract
     assert payload["safety_contract"]["explicit_goal_start_must_activate_host_loop"] is True, payload
     message = payload["message"]
-    assert "/goal <task_body>" in message, message
-    assert "agent-onboard" in message, message
+    assert "register-agent" in message, message
+    assert "explicit takeover" in message, message
 
     with tempfile.TemporaryDirectory(prefix="loopx-agent-onboard-identity-") as tmp:
         root = Path(tmp)
@@ -280,7 +289,7 @@ def main() -> int:
         )
         transaction = guided_gate["guided_transaction"]
         assert transaction["blocked_by"] == "agent_identity_selection", transaction
-        assert transaction["ordered_steps"][1]["id"] == "select_agent_identity", transaction
+        assert transaction["ordered_steps"][2]["id"] == "select_agent_identity", transaction
 
         selected_pack = build_loopx_bootstrap_command_pack(
             project=project,
