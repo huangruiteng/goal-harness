@@ -11,8 +11,8 @@ from .control_plane.todos.contract import (
 from .project_prompt import (
     render_heartbeat_prompt_command,
     render_heartbeat_prompt_json_command,
+    shell_arg,
 )
-
 
 SCHEMA_VERSION = "loopx_host_loop_activation_v1"
 AGENT_TYPE_CATALOG_SCHEMA_VERSION = "loopx_agent_type_catalog_v0"
@@ -354,6 +354,7 @@ def _identity_state(
     *,
     agent_id: str | None,
     registered_agents: list[str] | None,
+    fresh_agent_default: bool,
 ) -> dict[str, Any]:
     registered = normalize_registered_agents(registered_agents)
     selected = normalize_todo_claimed_by(agent_id)
@@ -365,6 +366,38 @@ def _identity_state(
             **values,
         }
 
+    if fresh_agent_default and not selected:
+        return identity_payload(
+            {
+                "state": "fresh_agent_registration_required",
+                "activation_allowed": False,
+                "selected_agent_id": None,
+                "registered_agents": registered,
+                "action_required": True,
+                "reason": (
+                    "new agent onboarding has no explicit identity; register a fresh "
+                    "public-safe agent id by default. Reuse an existing identity only "
+                    "when the user explicitly requests takeover of that exact agent"
+                ),
+                "required_cli_arg": "--agent-id <freshly-registered-agent-id>",
+            }
+        )
+    if fresh_agent_default and selected not in registered:
+        return identity_payload(
+            {
+                "state": "invalid_selection",
+                "activation_allowed": False,
+                "selected_agent_id": None,
+                "requested_agent_id": selected,
+                "registered_agents": registered,
+                "action_required": True,
+                "reason": (
+                    f"agent_id={selected!r} is not registered for this goal; register "
+                    "that fresh identity before host-loop activation"
+                ),
+                "required_cli_arg": "--agent-id <freshly-registered-agent-id>",
+            }
+        )
     if not registered:
         return identity_payload(
             {
@@ -636,11 +669,13 @@ def build_host_loop_activation_packet(
     agent_id: str | None = None,
     registered_agents: list[str] | None = None,
     available_capabilities: list[str] | None = None,
+    fresh_agent_default: bool = False,
 ) -> dict[str, Any]:
     canonical = normalize_agent_type(agent_type)
     identity = _identity_state(
         agent_id=agent_id,
         registered_agents=registered_agents,
+        fresh_agent_default=fresh_agent_default,
     )
     selected_agent_id = identity.get("selected_agent_id")
     activation_allowed = bool(identity.get("activation_allowed"))
@@ -688,27 +723,81 @@ def build_host_loop_activation_packet(
                 agent_id=candidate,
                 available_capabilities=normalized_available_capabilities,
             )
-            choices.append(
-                {
-                    "agent_id": candidate,
-                    "heartbeat_prompt_json": candidate_commands["heartbeat_prompt_json"],
-                    "heartbeat_prompt": candidate_commands["heartbeat_prompt"],
-                }
-            )
+            choice = {
+                "agent_id": candidate,
+                "heartbeat_prompt_json": candidate_commands["heartbeat_prompt_json"],
+                "heartbeat_prompt": candidate_commands["heartbeat_prompt"],
+            }
+            if fresh_agent_default:
+                choice.update(
+                    {
+                        "mode": "takeover_existing_agent",
+                        "requires_explicit_takeover_intent": True,
+                    }
+                )
+            choices.append(choice)
+        requested_agent_id = identity.get("requested_agent_id")
+        fresh_agent_id = (
+            str(requested_agent_id)
+            if requested_agent_id
+            else "<new-public-safe-agent-id>"
+        )
+        register_command = (
+            f"{shell_arg(cli_bin)} register-agent --goal-id {shell_arg(goal_id)} "
+            f"--agent-id {shell_arg(fresh_agent_id)} --require-new"
+        )
+        fresh_registration = (
+            {
+                "mode": "register_fresh_agent",
+                "recommended": True,
+                "agent_id": fresh_agent_id,
+                "preview_command": register_command,
+                "execute_command": f"{register_command} --execute",
+                "continuation": (
+                    "continue only when preview changed=true, then rerun onboarding "
+                    "with the newly registered --agent-id before todo writeback or "
+                    "host-loop activation"
+                ),
+            }
+            if fresh_agent_default
+            else None
+        )
         identity_selection_gate = {
             **identity,
             "choices": choices,
-            "external_write_required": False,
+            "default_action": (
+                "register_fresh_agent" if fresh_registration else "select_agent_identity"
+            ),
+            "fresh_agent_registration": fresh_registration,
+            "external_write_required": bool(fresh_registration),
         }
-        surface["activation_method"] = "select_agent_identity_before_host_loop_activation"
+        surface["activation_method"] = (
+            "register_fresh_agent_or_explicit_takeover_before_host_loop_activation"
+            if fresh_registration
+            else "select_agent_identity_before_host_loop_activation"
+        )
         surface["activation_input_command"] = None
+        if fresh_registration:
+            gate_steps = [
+                "Register a fresh public-safe agent id from identity_selection_gate by default.",
+                "Only select an existing lane when the user explicitly requests takeover of that exact agent.",
+                "Rerun onboarding with the selected --agent-id.",
+            ]
+            gate_criterion = (
+                "A fresh registered agent identity is selected, or exact takeover intent is recorded."
+            )
+        else:
+            gate_steps = [
+                "Select one registered agent lane from identity_selection_gate.",
+                "Run that choice's identity-aware heartbeat-prompt JSON command.",
+            ]
+            gate_criterion = "One registered agent identity is explicitly selected."
         surface["activation_steps"] = [
-            "Select one registered agent lane from identity_selection_gate.",
-            "Run that choice's identity-aware heartbeat-prompt JSON command.",
+            *gate_steps,
             *surface["activation_steps"][1:],
         ]
         surface["success_criteria"] = [
-            "One registered agent identity is explicitly selected.",
+            gate_criterion,
             *surface["success_criteria"],
         ]
     return {

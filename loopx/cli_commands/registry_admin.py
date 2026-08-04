@@ -71,6 +71,7 @@ def register_agent_via_source_registry(
     goal_id: str,
     agent_ids: list[str],
     execute: bool,
+    require_new: bool = False,
 ) -> dict[str, object]:
     global_path = explicit_global_registry(runtime_root_arg)
     if not global_path.exists():
@@ -93,6 +94,30 @@ def register_agent_via_source_registry(
     coordination = source_goal.get("coordination") if isinstance(source_goal.get("coordination"), dict) else {}
     existing_agents = normalize_registered_agents(coordination.get("registered_agents"))
     requested_agents = normalize_registered_agents(agent_ids)
+    collisions = [agent_id for agent_id in requested_agents if agent_id in existing_agents]
+    if require_new and collisions:
+        return {
+            "ok": False,
+            "dry_run": not execute,
+            "execute": execute,
+            "goal_id": goal_id,
+            "global_registry": str(global_path),
+            "source_registry": str(source_registry_path),
+            "existing_agents": existing_agents,
+            "requested_agents": requested_agents,
+            "registered_agents": existing_agents,
+            "changed": False,
+            "written": False,
+            "error_kind": "agent_identity_already_registered",
+            "error": (
+                "fresh agent registration requires an unused agent id; already "
+                f"registered: {', '.join(collisions)}"
+            ),
+            "recommended_action": (
+                "choose a different public-safe agent id, rerun the preview with "
+                "--require-new, then apply only when changed=true"
+            ),
+        }
     merged_agents = list(existing_agents)
     for agent_id in requested_agents:
         if agent_id not in merged_agents:
@@ -549,6 +574,15 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Public-safe agent id to add. Repeatable; comma-separated values are also accepted.",
     )
     register_agent_parser.add_argument(
+        "--require-new",
+        action="store_true",
+        help=(
+            "Fail when any requested id is already registered. Fresh-agent onboarding "
+            "uses this to prevent accidental takeover; ordinary registration remains "
+            "idempotent without the flag."
+        ),
+    )
+    register_agent_parser.add_argument(
         "--execute",
         action="store_true",
         help="Write the source registry and sync it globally. Without this flag, preview only.",
@@ -822,6 +856,7 @@ def handle_registry_admin_command(
                 goal_id=args.goal_id,
                 agent_ids=args.agent_id,
                 execute=bool(args.execute),
+                require_new=bool(args.require_new),
             )
         except Exception as exc:
             payload = {

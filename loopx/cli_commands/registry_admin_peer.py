@@ -15,6 +15,8 @@ def render_register_agent_markdown(payload: dict[str, object]) -> str:
         f"- changed: `{payload.get('changed')}`",
         f"- written: `{payload.get('written')}`",
     ]
+    if payload.get("error_kind"):
+        lines.append(f"- error_kind: `{payload.get('error_kind')}`")
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
     lines.append(f"- existing_agents: `{', '.join(payload.get('existing_agents') or [])}`")

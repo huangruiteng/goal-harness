@@ -337,6 +337,7 @@ def build_agent_onboarding_packet(
         agent_id=agent_id,
         registered_agents=registered_agents,
         available_capabilities=available_capabilities,
+        fresh_agent_default=True,
     )
     selected_agent_id = host_loop_activation.get("agent_id")
     activation_allowed = bool(host_loop_activation.get("activation_allowed"))
@@ -411,7 +412,8 @@ def build_agent_onboarding_packet(
         "host_loop_activation": host_loop_activation,
         "skill_delivery": skill_delivery,
         "recommended_start": (
-            "Select one registered agent lane from identity_selection_gate, then rerun onboarding."
+            "Register a fresh agent id by default, or select an existing lane only "
+            "after explicit takeover intent; then rerun onboarding with --agent-id."
             if not activation_allowed
             else _start_instruction(canonical_agent_type)
         ),
@@ -584,10 +586,20 @@ def render_agent_onboarding_markdown(payload: dict[str, Any]) -> str:
     if identity_gate:
         lines.extend(["", "## Agent Identity Gate", ""])
         lines.append(f"- reason: {identity_gate.get('reason')}")
+        fresh_registration = identity_gate.get("fresh_agent_registration")
+        if isinstance(fresh_registration, dict):
+            lines.extend(
+                [
+                    "- default_action: `register_fresh_agent`",
+                    f"- preview: `{fresh_registration.get('preview_command')}`",
+                    f"- apply: `{fresh_registration.get('execute_command')}`",
+                    "- existing identities below require explicit takeover intent:",
+                ]
+            )
         for choice in identity_gate.get("choices") or []:
             if isinstance(choice, dict):
                 lines.append(
-                    f"- `{choice.get('agent_id')}` ({choice.get('role')}): "
+                    f"- takeover `{choice.get('agent_id')}`: "
                     f"`{choice.get('heartbeat_prompt_json')}`"
                 )
     lines.extend(

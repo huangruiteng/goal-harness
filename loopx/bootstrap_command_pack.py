@@ -177,7 +177,7 @@ def _build_packet_summary(
     }
 
 
-def _start_goal_detail_command(
+def _start_goal_command(
     *,
     project: str,
     goal_id: str | None,
@@ -187,6 +187,7 @@ def _start_goal_detail_command(
     goal_text: str,
     available_capabilities: list[str] | None,
     capability_route: str | None,
+    include_command_pack_detail: bool,
 ) -> str:
     return (
         f"{shell_arg(cli_bin)} --format json start-goal --guided "
@@ -201,7 +202,31 @@ def _start_goal_detail_command(
             else ""
         )
         + f" --goal-text {shell_arg(goal_text)}"
-        + " --include-command-pack-detail"
+        + (" --include-command-pack-detail" if include_command_pack_detail else "")
+    )
+
+
+def _start_goal_detail_command(
+    *,
+    project: str,
+    goal_id: str | None,
+    agent_id: str | None,
+    cli_bin: str,
+    host_surface: str,
+    goal_text: str,
+    available_capabilities: list[str] | None,
+    capability_route: str | None,
+) -> str:
+    return _start_goal_command(
+        project=project,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        cli_bin=cli_bin,
+        host_surface=host_surface,
+        goal_text=goal_text,
+        available_capabilities=available_capabilities,
+        capability_route=capability_route,
+        include_command_pack_detail=True,
     )
 
 
@@ -838,6 +863,7 @@ def build_loopx_bootstrap_command_pack(
         agent_id=agent_id,
         registered_agents=registered_agents,
         available_capabilities=available_capabilities,
+        fresh_agent_default=explicit_goal_start,
     )
     selected_agent_id = host_loop_activation.get("agent_id")
     issue_fix_commands = build_issue_fix_goal_command_templates(
@@ -1013,6 +1039,11 @@ def build_loopx_bootstrap_command_pack(
                 identity_selection_gate.get("choices")
                 if isinstance(identity_selection_gate, dict)
                 else []
+            ),
+            "fresh_agent_registration": (
+                identity_selection_gate.get("fresh_agent_registration")
+                if isinstance(identity_selection_gate, dict)
+                else None
             ),
             **issue_fix_commands,
         },
@@ -1342,6 +1373,37 @@ def build_start_goal_guided_packet(
     activation = command_pack.get("host_loop_activation")
     activation = activation if isinstance(activation, dict) else {}
     identity_selection_gate = activation.get("identity_selection_gate")
+    if isinstance(identity_selection_gate, dict):
+        def rerun_start_goal(selected_agent_id: str) -> str:
+            return _start_goal_command(
+                project=str(command_pack.get("project") or project),
+                goal_id=str(command_pack.get("goal_id") or "") or None,
+                agent_id=selected_agent_id,
+                cli_bin=cli_bin,
+                host_surface=host_surface,
+                goal_text=str(command_pack.get("goal_text") or goal_text),
+                available_capabilities=available_capabilities,
+                capability_route=capability_route,
+                include_command_pack_detail=False,
+            )
+
+        fresh_registration = identity_selection_gate.get("fresh_agent_registration")
+        if isinstance(fresh_registration, dict):
+            fresh_agent_id = str(
+                fresh_registration.get("agent_id") or "<new-public-safe-agent-id>"
+            )
+            fresh_registration["connect_if_needed_command"] = commands.get(
+                "goal_start_connect_if_needed"
+            )
+            fresh_registration["rerun_start_goal_command"] = rerun_start_goal(
+                fresh_agent_id
+            )
+        for choice in identity_selection_gate.get("choices") or []:
+            if not isinstance(choice, dict) or not choice.get("agent_id"):
+                continue
+            choice["rerun_start_goal_command"] = rerun_start_goal(
+                str(choice["agent_id"])
+            )
     goal_start_contract = command_pack.get("goal_start_contract")
     goal_start_contract = (
         goal_start_contract if isinstance(goal_start_contract, dict) else {}
@@ -1446,19 +1508,26 @@ def build_start_goal_guided_packet(
         guided_transaction["blocked_by"] = "agent_identity_selection"
         guided_transaction["identity_selection_gate"] = identity_selection_gate
         guided_transaction["ordered_steps"].insert(
-            1,
+            2,
             {
                 "id": "select_agent_identity",
                 "kind": "identity_gate",
+                "default_action": identity_selection_gate.get("default_action"),
+                "fresh_agent_registration": identity_selection_gate.get(
+                    "fresh_agent_registration"
+                ),
                 "choices": identity_selection_gate.get("choices") or [],
-                "purpose": "select one registered agent lane before generating heartbeat or quota commands",
+                "purpose": (
+                    "register a fresh agent identity by default; reuse an exact existing "
+                    "identity only after explicit takeover intent, before todo writeback"
+                ),
             },
         )
     if selected_capability_route is not None:
         entry_key = str(selected_capability_route["entry_command_key"])
         admission_key = str(selected_capability_route["admission_command_key"])
         guided_transaction["ordered_steps"].insert(
-            2,
+            3 if isinstance(identity_selection_gate, dict) else 2,
             {
                 "id": "qualify_selected_capability",
                 "kind": "capability_guard",
@@ -1654,16 +1723,28 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
     identity_gate = identity_gate if isinstance(identity_gate, dict) else {}
     identity_gate_lines = ""
     if identity_gate:
+        fresh_registration = identity_gate.get("fresh_agent_registration")
+        fresh_lines = []
+        if isinstance(fresh_registration, dict):
+            fresh_lines = [
+                "- **default: register a fresh agent**",
+                f"  - preview: `{fresh_registration.get('preview_command')}`",
+                f"  - apply: `{fresh_registration.get('execute_command')}`",
+                (
+                    "  - rerun: "
+                    f"`{fresh_registration.get('rerun_start_goal_command')}`"
+                ),
+            ]
         choices = [
-            f"- `{choice.get('agent_id')}` ({choice.get('role')}): "
-            f"`{choice.get('heartbeat_prompt_json')}`"
+            f"- explicit takeover `{choice.get('agent_id')}`: "
+            f"`{choice.get('rerun_start_goal_command')}`"
             for choice in identity_gate.get("choices") or []
             if isinstance(choice, dict)
         ]
         identity_gate_lines = (
             "\n## Agent Identity Gate\n\n"
             f"{identity_gate.get('reason')}\n\n"
-            + "\n".join(choices)
+            + "\n".join([*fresh_lines, *choices])
             + "\n"
         )
     goal_gate = transaction.get("goal_selection_gate")
@@ -1788,12 +1869,34 @@ After a PR exists, reconcile compact public PR state through the capability-owne
 
     if identity_gate:
         choices = "\n".join(
-            f"- `{choice.get('agent_id')}` ({choice.get('role')}): "
-            f"`{choice.get('heartbeat_prompt_json')}`"
+            f"- explicit takeover `{choice.get('agent_id')}`: rerun with "
+            f"`--agent-id {choice.get('agent_id')}`"
             for choice in identity_gate.get("choices") or []
             if isinstance(choice, dict)
         )
-        action = f"""Select one registered agent lane before planning writes or host-loop activation.
+        fresh_registration = identity_gate.get("fresh_agent_registration")
+        fresh_registration = (
+            fresh_registration if isinstance(fresh_registration, dict) else {}
+        )
+        if fresh_registration:
+            action = f"""Resolve agent identity before planning writes or host-loop activation.
+No unscoped heartbeat or quota command is advertised for a new agent connection.
+
+Reason: {identity_gate.get("reason")}
+
+Default fresh-agent registration:
+```bash
+{fresh_registration.get("preview_command") or ""}
+{fresh_registration.get("execute_command") or ""}
+```
+
+Only with explicit takeover intent, choose one existing identity:
+{choices}
+
+Rerun `{payload.get("canonical_cli_command")} --agent-id <selected-agent-id>`
+after fresh registration or exact takeover selection before continuing."""
+        else:
+            action = f"""Select one registered agent lane before planning writes or host-loop activation.
 No unscoped heartbeat or quota command is advertised for this multi-agent goal.
 
 Reason: {identity_gate.get("reason")}

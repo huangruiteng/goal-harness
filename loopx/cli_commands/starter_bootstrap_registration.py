@@ -119,7 +119,11 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
     start_goal_parser.add_argument("--goal-id", help="Goal id. Defaults to <project-name>-goal.")
     start_goal_parser.add_argument(
         "--agent-id",
-        help="Registered LoopX agent id to include in quota/heartbeat commands.",
+        help=(
+            "Explicit registered LoopX identity for an ongoing session or exact "
+            "user-requested takeover. When omitted, new onboarding defaults to fresh "
+            "agent registration."
+        ),
     )
     start_goal_parser.add_argument(
         "--cli-bin",
