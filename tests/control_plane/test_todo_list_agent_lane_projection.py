@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from loopx.control_plane.todos.contract import encode_metadata_value
@@ -15,6 +18,7 @@ from loopx.todos import list_goal_todos
 GOAL_ID = "todo-list-agent-lane-goal"
 AGENT_ID = "codex-quality-qualification"
 OTHER_AGENT_ID = "codex-other-agent"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _todo_line(
@@ -291,10 +295,26 @@ def test_event_projection_role_change_keeps_one_todo_identity(tmp_path: Path) ->
         )
     )
 
-    payload = list_goal_todos(
-        registry_path=registry_path,
-        goal_id=GOAL_ID,
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "loopx.cli",
+            "todo",
+            "list",
+            "--format",
+            "json",
+            "--goal-id",
+            GOAL_ID,
+        ],
+        cwd=REPO_ROOT,
+        env={**os.environ, "LOOPX_REGISTRY": str(registry_path)},
+        check=False,
+        capture_output=True,
+        text=True,
     )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
 
     todo_ids = [item["todo_id"] for item in payload["todos"]]
     assert len(todo_ids) == len(set(todo_ids))

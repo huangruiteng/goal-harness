@@ -45,7 +45,11 @@ def assert_source_shape() -> None:
     assert_contains(init_text, "handle_quota_command", "__init__")
     assert "todo_parser = sub.add_parser" not in cli_text
     assert "quota_parser = sub.add_parser" not in cli_text
-    assert_contains(cli_text, "register_todo_command(sub)", "cli.py")
+    assert_contains(
+        cli_text,
+        "register_todo_command(sub, add_subcommand_format)",
+        "cli.py",
+    )
     assert_contains(cli_text, "register_quota_command(sub)", "cli.py")
     assert_contains(cli_text, "handle_todo_command(", "cli.py")
     assert_contains(cli_text, "handle_quota_command(", "cli.py")
