@@ -318,13 +318,17 @@ def _merge_todo_projection_fields(
         "event_only_todo_ids": [],
         "overlaid_todo_ids": [],
     }
+
+    # A todo_id is goal-wide identity. Merge both sources before splitting by
+    # role so an event-projected role change replaces the stale Markdown item.
+    by_id: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    markdown_ids: set[str] = set()
+    markdown_ids_by_role: dict[str, set[str]] = {"user": set(), "agent": set()}
+    event_ids: set[str] = set()
+    event_order: list[str] = []
     for role in ("user", "agent"):
         markdown_items = _summary_items(markdown_fields, role)
-        event_items = _summary_items(event_fields, role)
-        if not markdown_items and not event_items:
-            continue
-        by_id: dict[str, dict[str, Any]] = {}
-        order: list[str] = []
         for item in markdown_items:
             todo_id = normalize_todo_id(item.get("todo_id")) or build_todo_id(
                 role=role,
@@ -334,9 +338,12 @@ def _merge_todo_projection_fields(
             )
             if todo_id not in by_id:
                 order.append(todo_id)
+            markdown_ids.add(todo_id)
+            markdown_ids_by_role[role].add(todo_id)
             by_id[todo_id] = dict(item)
-        markdown_ids = set(order)
-        event_ids: set[str] = set()
+
+    for role in ("user", "agent"):
+        event_items = _summary_items(event_fields, role)
         for item in event_items:
             todo_id = normalize_todo_id(item.get("todo_id")) or build_todo_id(
                 role=role,
@@ -344,20 +351,39 @@ def _merge_todo_projection_fields(
                 index=item.get("index"),
                 text=item.get("text"),
             )
-            event_ids.add(todo_id)
             if todo_id not in by_id:
                 order.append(todo_id)
-                overlay["event_only_todo_ids"].append(todo_id)
-            else:
-                overlay["overlaid_todo_ids"].append(todo_id)
+            if todo_id not in event_ids:
+                event_order.append(todo_id)
+                event_ids.add(todo_id)
             by_id[todo_id] = dict(item)
-        overlay["markdown_only_todo_ids"].extend(sorted(markdown_ids - event_ids))
+
+    markdown_only_todo_ids: list[str] = []
+    seen_markdown_only_ids: set[str] = set()
+    for role in ("user", "agent"):
+        for todo_id in sorted(markdown_ids_by_role[role] - event_ids):
+            if todo_id not in seen_markdown_only_ids:
+                markdown_only_todo_ids.append(todo_id)
+                seen_markdown_only_ids.add(todo_id)
+    overlay["markdown_only_todo_ids"] = markdown_only_todo_ids
+    overlay["event_only_todo_ids"] = [
+        todo_id for todo_id in event_order if todo_id not in markdown_ids
+    ]
+    overlay["overlaid_todo_ids"] = [
+        todo_id for todo_id in event_order if todo_id in markdown_ids
+    ]
+
+    for todo_id in order:
+        item = by_id[todo_id]
+        final_role = "user" if item.get("role") == "user" else "agent"
+        merged_items[final_role].append(item)
+
+    for role in ("user", "agent"):
         source_section = str(
             (markdown_fields.get(f"{role}_todos") or {}).get("source_section")
             or (event_fields.get(f"{role}_todos") or {}).get("source_section")
             or TODO_SECTION_HEADINGS[role]
         )
-        merged_items[role] = [by_id[todo_id] for todo_id in order]
         source_sections[role] = source_section
 
     resume_source_items = [*merged_items["user"], *merged_items["agent"]]
