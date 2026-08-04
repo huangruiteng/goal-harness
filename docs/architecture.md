@@ -1,21 +1,28 @@
 # Architecture
 
-LoopX has seven layers.
+LoopX has six durable control-plane layers, plus an optional read-only probe
+surface that is not a peer layer.
 
 1. **Registry**: lists known goals, their repos, adapters, authority sources,
    status, and guards.
 2. **Goal state**: the active state file for one goal.
-3. **Adapter pre-tick**: a read-only project-specific probe.
-4. **Run log**: JSON and Markdown reports saved per goal.
-5. **Run history**: compact indexes consumed by agents, heartbeats, and UI.
-6. **Status / attention queue**: first-screen summary of who needs to act next.
-7. **Compute quota**: local policy for how much automatic agent compute each
+3. **Run log**: JSON and Markdown reports saved per goal.
+4. **Run history**: compact indexes consumed by agents, heartbeats, and UI.
+5. **Status / attention queue**: first-screen summary of who needs to act next.
+6. **Compute quota**: local policy for how much automatic agent compute each
    goal may consume.
+
+**Optional probe surface (not a seventh layer):** goals may register a
+project-specific read-only `next_probe` via bootstrap `--next-probe`. Status may
+label a goal `pre-tick-runnable` when such a probe is configured. There is no
+shipped `pre_tick` module or adapter pre-tick package; treat the probe as an
+optional planned/operator surface until a dedicated read-only pre-tick command
+exists.
 
 ```text
 project goal state
   + private registry
-  + project adapter
+  + optional next_probe
         |
         v
 shared runtime root
@@ -34,9 +41,34 @@ The core repository intentionally avoids domain logic. A data experiment goal,
 a note-maintenance goal, and a harness self-improvement goal should share the
 same runtime and contract, but use different adapters.
 
+## Turn Decision Vocabulary
+
+Operator-facing docs and heartbeat prompts often summarize a turn as deliver,
+wait, ask, replan, repair, or stay quiet. That shorthand describes interaction
+intent; it is not the typed packet vocabulary carried by the Turn contracts.
+
+Typed Turn decisions use two enums in `loopx/control_plane/turn_driver/`:
+
+| Contract | When | Members |
+| --- | --- | --- |
+| `LoopXTurnRoute` | Before host execution | `ready_for_host`, `repair_required`, `replan_required`, `user_action_required`, `wait`, `blocked`, `contract_error` |
+| `LoopXTurnResultKind` | After host execution | `validated_progress`, `validated_completion`, `repair_required`, `replan_required`, `user_action_required`, `wait`, `host_failure`, `validation_failed`, `writeback_failed`, `quota_spend_failed` |
+
+Important distinctions the shorthand erases:
+
+- prose "deliver" splits into `validated_progress` versus `validated_completion`;
+- failure kinds (`host_failure`, `validation_failed`, `writeback_failed`,
+  `quota_spend_failed`) are first-class post-execution results;
+- "stay quiet" is a notification / monitor behavior (for example
+  `monitor_quiet_skip` or heartbeat `DONT_NOTIFY`), not a member of either enum.
+
+Quota `interaction_contract` and heartbeat guidance may still use the operator
+shorthand. When implementing or reviewing Turn adapters, prefer the enums above
+over the six-verb prose list.
+
 ## Runtime Responsibility Model
 
-The seven layers above describe durable control-plane surfaces. They do not
+The six durable layers above describe control-plane surfaces. They do not
 describe who performs each step of a turn. For runtime ownership, use four
 responsibilities:
 
@@ -174,7 +206,7 @@ remains available when an adapter is absent.
 
 LoopX should optimize for **lifetime goals**: durable intentions that
 may outlive a single thread, executor, project phase, or plan. This is a
-product invariant, not an eighth storage layer.
+product invariant, not an additional storage layer.
 
 A lifetime goal must be stable enough that a future human or agent can recover
 what the goal is, what currently defines it, who may change it, and what the

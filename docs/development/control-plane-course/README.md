@@ -128,7 +128,7 @@ receipt、projection、replan 与 self-repair；随后再进入下面的代码�
 | [第 1 讲](01-first-real-loop.md) | 从 Showcase 到第一次真实 Loop | 用户只说一句目标后，guided start、todo、heartbeat、quota、refresh 和 spend 如何串起来？ |
 | [第 2 讲](02-state-substrate.md) | 状态底座与可重放事实 | registry、event、active state、run history 和 projection 分别拥有什么事实？ |
 | [第 3 讲](03-work-graph-and-peers.md) | Todo 工作图与 Peer 协作 | equal peer 如何 claim、显式委托 lifecycle authority、handoff 材料前沿，而不恢复 primary/side 层级？ |
-| [第 4 讲](04-quota-decision-kernel.md) | Quota 决策内核与 Interaction Contract | `should-run` 如何把复杂状态压成 deliver、wait、ask、repair 或 quiet？ |
+| [第 4 讲](04-quota-decision-kernel.md) | Quota 决策内核与 Interaction Contract | `should-run` 如何压成 operator-facing mode，以及它与 `LoopXTurnRoute` / `LoopXTurnResultKind` 的关系？ |
 | [第 5 讲](05-host-scheduler-and-heartbeat.md) | Host、Heartbeat 与 Stateful Backoff | LoopX 决策、heartbeat prompt、execution context、Codex App RRULE 和 ACK 各自负责什么？ |
 | [第 6 讲](06-evidence-refresh-and-self-repair.md) | 证据、Refresh 与 Self-Repair | 什么算 material progress，何时必须 replan，连续无推进如何形成可验证 repair delta？ |
 | [第 7 讲](07-engineering-a-control-plane-rule.md) | 如何给 Control Plane 增加一条规则 | 如何从 invariant、ordered rules、schema、projection 到 smoke 完成一次可审计变更？ |

@@ -96,8 +96,11 @@ LoopX 不否定这层能力，而是继续外置两层：
 
 1. **外置目标**：Goal 让 objective 与一次 prompt 分离；
 2. **外置结构化状态**：LoopX 记录 goal 之外的 frontier、authority、evidence、cadence 与 recovery；
-3. **外置过程协议**：LoopX 每轮把当前结构化状态编译成 compact CLI packet，告诉 executor
-   当前应 deliver、wait、ask、replan、repair 还是 quiet，以及验证后怎样 writeback/spend。
+3. **外置过程协议**：LoopX 每轮把当前结构化状态编译成 compact CLI packet。Operator 侧常用
+   deliver / wait / ask / replan / repair / quiet 描述意图；typed Turn 合同则使用
+   `LoopXTurnRoute` 与 `LoopXTurnResultKind`（含 progress/completion 分裂与 failure kinds）。
+   验证后怎样 writeback/spend 以这些合同为准，见
+   [architecture overview](../../architecture.md#turn-decision-vocabulary)。
 
 ```text
 finite model context
@@ -484,7 +487,7 @@ LoopX 提供的是让这些能力可以被组合、约束、观察和恢复的�
 | 一个 goal 第一次怎样真正跑起来？ | [第 1 讲](01-first-real-loop.md) |
 | registry、event、active state、projection 各自拥有什么？ | [第 2 讲](02-state-substrate.md) |
 | todo、claim、lease、gate 和 equal peer 怎样组合？ | [第 3 讲](03-work-graph-and-peers.md) |
-| should-run 为什么会返回 deliver、wait、ask、repair 或 quiet？ | [第 4 讲](04-quota-decision-kernel.md) |
+| should-run 怎样压成 interaction contract，以及它与 typed Turn 枚举有何不同？ | [第 4 讲](04-quota-decision-kernel.md)、[architecture Turn vocabulary](../../architecture.md#turn-decision-vocabulary) |
 | scheduler、heartbeat、RRULE 和 ACK 的边界是什么？ | [第 5 讲](05-host-scheduler-and-heartbeat.md) |
 | evidence、replan 和 self-repair 何时触发？ | [第 6 讲](06-evidence-refresh-and-self-repair.md) |
 | 怎样实现和验证一条新的控制面规则？ | [第 7 讲](07-engineering-a-control-plane-rule.md) |

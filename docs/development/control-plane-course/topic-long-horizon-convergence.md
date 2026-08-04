@@ -91,7 +91,7 @@ Judge 可以判断“是否完成”，却未必能告诉下一轮“路线为�
 | Evidence / Receipt | observation、revision、scope、effect 与 lineage | 不自动授予下一步权限 |
 | Domain State | 某个 pack 的紧凑领域 observation、判断与稳定 identity | 不拥有 quota、claim、permission 或外部真相 |
 | Capability / Provider | 领域事实归一化；外部 effect 与 readback | 不拥有通用 lifecycle |
-| Quota / Interaction Contract | 将当前状态编译为本轮 deliver、wait、ask、repair 或 quiet | 不执行 Agent runtime |
+| Quota / Interaction Contract | 将当前状态编译为本轮 operator-facing mode（deliver / wait / ask / repair / quiet 等简述）；typed Turn 见 `LoopXTurnRoute` / `LoopXTurnResultKind` | 不执行 Agent runtime |
 | Turn / Scheduler | 一次有界执行；决定何时再次唤醒 | 不把“被唤醒”当成进展 |
 
 其中 Capability 与 Provider 容易混淆：
@@ -264,7 +264,7 @@ flowchart TD
   V["Vision<br/>长期方向与角色边界"]
   G["Goal + Acceptance<br/>当前阶段交付与完成条件"]
   F["Frontier<br/>todo · gate · monitor · successor"]
-  Q["Quota / Interaction Contract<br/>deliver · wait · ask · replan · repair · quiet"]
+  Q["Quota / Interaction Contract<br/>operator mode · typed TurnRoute / TurnResultKind"]
   T["Bounded Turn<br/>推理 · 工具 · 一次有界动作"]
   P["Provider Effect / Observation<br/>external truth · readback"]
   E["Validation + Receipt<br/>source · lineage · freshness · scope"]

@@ -111,7 +111,7 @@ LoopX 不把整个 registry、event ledger、run history 和所有 todo 直接�
 | Packet 层 | 典型内容 | 为什么必须保留 |
 | --- | --- | --- |
 | Identity | goal、agent lane、selected todo、snapshot/lineage | 防止把结果写到另一个目标或旧状态 |
-| Decision | mode、primary action、user/agent/CLI channel | 区分 deliver、wait、ask、repair 与 quiet |
+| Decision | mode、primary action、user/agent/CLI channel | 区分 operator-facing deliver/wait/ask/repair/quiet 与 typed Turn route/result |
 | Proof boundary | required evidence、gate、workspace/capability guard | 防止“做过”或“能做”冒充可提交 |
 | Closeout | refresh、receipt、spend、scheduler ACK 命令 | 让本轮结果进入下一轮可重放事实 |
 
