@@ -1,26 +1,24 @@
 const setupPrompts = {
-  en: `Set up LoopX for this project using the official Getting Started guide:
-https://github.com/huangruiteng/loopx/blob/main/docs/guides/getting-started.md
+  en: `Connect the current project to LoopX: https://github.com/huangruiteng/loopx
 
-Work only from the project root.
+Do not clone LoopX. Follow the README Quick Start to use the no-clone installer and \`loopx doctor\`, then reuse or \`loopx connect/bootstrap\` the current project state.
 
-1. Install or repair LoopX if needed, then run loopx doctor.
-2. Preserve existing state and run loopx connect. Use loopx bootstrap only when initialization is required.
-3. Detect the exact host and complete its loopx agent-onboard activation instructions.
-4. Stop at any identity, approval, or host-tool gate instead of guessing.
-5. Do not commit LoopX runtime state, credentials, logs, private links, or local paths.
-6. Report the current state, gate, top todo, host activation, and next safe action. Do not start delivery yet.`,
-  zh: `按照官方 Getting Started 为当前项目设置 LoopX：
-https://github.com/huangruiteng/loopx/blob/main/docs/guides/getting-started.md
+After setup, first report the project connection status, current user gate, top agent todo, next safe action, and available commands.
 
-只在当前项目根目录工作。
+Then I will use \`/loopx <complex task>\` to begin real work.
+When you receive \`/loopx <goal text>\`, first provide a concise ordered plan, then write it as P0/P1/P2 todos so I can see what needs to be done, what is blocked by a gate, and what the next safe action is.`,
+  zh: `把当前项目接入 LoopX: https://github.com/huangruiteng/loopx
 
-1. 如有需要，安装或修复 LoopX，然后运行 loopx doctor。
-2. 复用已有状态并运行 loopx connect。只有需要初始化时才使用 loopx bootstrap。
-3. 识别准确 Host，并完成对应的 loopx agent-onboard 激活指令。
-4. 遇到 identity、approval 或 host-tool Gate 时停止并询问，不能自行猜测。
-5. 不要提交 LoopX runtime state、凭据、日志、私有链接或本地路径。
-6. 汇报当前状态、Gate、最高优先级 Todo、Host activation 和 next safe action。本轮不要开始交付。`,
+不要 clone LoopX；按 README Quick Start 使用 no-clone installer、
+\`loopx doctor\`，复用或 \`loopx connect/bootstrap\` 当前项目状态。
+
+接入后先汇报：项目连接状态、当前 user gate、top agent todo、
+next safe action，以及可用命令。
+
+然后我会直接用 \`/loopx <复杂任务>\` 开始真实工作。
+收到 \`/loopx <goal text>\` 后，先给出简洁有序计划，再把它写成
+P0/P1/P2 todos，让我能看到当前要做什么、什么被 gate 卡住、
+下一步安全动作是什么。`,
 };
 
 const zh = {

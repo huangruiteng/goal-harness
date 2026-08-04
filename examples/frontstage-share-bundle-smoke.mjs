@@ -130,16 +130,20 @@ if (!homepageScript.includes('"hero.eyebrow": "长程目标控制面"') || !home
   throw new Error("homepage language switch must include the public-safe Chinese locale and default to English");
 }
 for (const promptContract of [
-  "official Getting Started guide",
-  "run loopx doctor",
-  "Preserve existing state and run loopx connect",
-  "Use loopx bootstrap only when initialization is required",
-  "Detect the exact host and complete its loopx agent-onboard activation instructions",
-  "Stop at any identity, approval, or host-tool gate",
-  "Do not commit LoopX runtime state",
-  "Report the current state, gate, top todo, host activation, and next safe action",
-  "Do not start delivery yet",
-  "本轮不要开始交付",
+  "Connect the current project to LoopX",
+  "Do not clone LoopX",
+  "README Quick Start",
+  "no-clone installer",
+  "loopx doctor",
+  "loopx connect/bootstrap",
+  "project connection status, current user gate, top agent todo",
+  "next safe action, and available commands",
+  "/loopx <complex task>",
+  "/loopx <goal text>",
+  "concise ordered plan",
+  "P0/P1/P2 todos",
+  "把当前项目接入 LoopX",
+  "下一步安全动作是什么",
 ]) {
   if (!homepageScript.includes(promptContract)) {
     throw new Error(`homepage agent setup prompt is missing contract: ${promptContract}`);
