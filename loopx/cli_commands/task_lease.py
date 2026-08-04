@@ -13,6 +13,8 @@ from ..control_plane.work_items.task_lease import (
     runtime_root_from_registry,
     transfer_task_lease,
 )
+from ..file_lock import LockAcquireTimeoutError
+from ..presentation.markdown import append_operator_action_markdown
 
 
 PrintPayload = Callable[
@@ -57,6 +59,7 @@ def render_task_lease_markdown(payload: dict[str, object]) -> str:
                 f"expires_at=`{conflict.get('expires_at')}` "
                 f"write_scopes=`{', '.join(conflict.get('write_scopes') or [])}`"
             )
+    append_operator_action_markdown(lines, payload)
     return "\n".join(lines)
 
 
@@ -203,6 +206,14 @@ def handle_task_lease_command(
             "error": str(exc),
             "error_code": exc.code,
             **exc.payload,
+        }
+    except LockAcquireTimeoutError as exc:
+        payload = {
+            "ok": False,
+            "schema_version": "task_lease_v0",
+            "action": getattr(args, "task_lease_command", None),
+            "error": str(exc),
+            **exc.to_payload(),
         }
     except Exception as exc:
         payload = {

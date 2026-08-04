@@ -10,7 +10,12 @@ from ...control_plane.quota.states import QUOTA_STATE_ORDER
 from ...control_plane.runtime.decision_freshness import (
     DECISION_FRESHNESS_WARNING_ITEM_LIMIT,
 )
-from ..markdown import as_dict, as_list, markdown_scalar
+from ..markdown import (
+    append_operator_action_markdown,
+    as_dict,
+    as_list,
+    markdown_scalar,
+)
 
 
 def _append_fallback_projection_markdown(
@@ -267,6 +272,7 @@ def render_quota_markdown(payload: dict[str, Any]) -> str:
                 lines.append(f"  - agent_command: `{item.get('agent_command')}`")
             if item.get("next_handoff_condition"):
                 lines.append(f"  - next_handoff_condition: {item.get('next_handoff_condition')}")
+    append_operator_action_markdown(lines, payload)
     return "\n".join(lines)
 
 
@@ -297,6 +303,7 @@ def render_quota_scheduler_ack_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- scheduler_state_path: `{payload.get('scheduler_state_path')}`")
     if payload.get("reason"):
         lines.append(f"- reason: {payload.get('reason')}")
+    append_operator_action_markdown(lines, payload)
     return "\n".join(lines)
 
 
@@ -326,6 +333,7 @@ def render_quota_scheduler_failure_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- scheduler_state_path: `{payload.get('scheduler_state_path')}`")
     if payload.get("reason"):
         lines.append(f"- reason: {payload.get('reason')}")
+    append_operator_action_markdown(lines, payload)
     return "\n".join(lines)
 
 
@@ -1094,4 +1102,5 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             f"next_automatic_turn={summary.get('next_automatic_turn') or 'none'} "
             f"{state_text}"
         )
+    append_operator_action_markdown(lines, payload)
     return "\n".join(lines)

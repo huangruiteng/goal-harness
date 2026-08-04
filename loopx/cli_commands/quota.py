@@ -34,6 +34,7 @@ from ..control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
 )
+from ..file_lock import lock_timeout_error_fields
 from ..presentation.renderers.quota_event_markdown import (
     render_quota_monitor_poll_markdown,
     render_quota_slot_preview_markdown,
@@ -501,6 +502,7 @@ def _quota_failure_payload(
     error: Exception,
 ) -> dict[str, object]:
     command = args.quota_command
+    lock_timeout_fields = lock_timeout_error_fields(error)
     if command not in QUOTA_EVENT_KINDS:
         return {
             "ok": False,
@@ -525,6 +527,7 @@ def _quota_failure_payload(
                     "source": "quota",
                 }
             ],
+            **lock_timeout_fields,
         }
 
     payload: dict[str, object] = {
@@ -541,7 +544,10 @@ def _quota_failure_payload(
         "recommended_action": (
             "fix quota/status collection before spending automatic compute"
         ),
+        **lock_timeout_fields,
     }
+    if lock_timeout_fields:
+        payload["recommended_action"] = "inspect the lock holder before retrying"
     if command == "monitor-poll":
         payload.update(
             {

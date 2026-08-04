@@ -13,6 +13,7 @@ from ..todo_suggestion_prompt import (
 )
 from ..todo_followups import capture_followup_todos
 from ..control_plane.todos.markdown import render_todo_markdown
+from ..file_lock import lock_timeout_error_fields
 from ..todos import (
     ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE,
     archive_completed_todos,
@@ -632,6 +633,7 @@ def handle_todo_command(
             "role": args.role,
             "todo": args.text or "",
             "error": str(exc),
+            **lock_timeout_error_fields(exc),
         }
     append_todo_rollout_event(
         payload,

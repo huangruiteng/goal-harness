@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ...file_lock import exclusive_file_lock
+from ...file_lock import LockAcquisitionPolicy, exclusive_file_lock
 from ...turn_identity import normalize_turn_instance_id
 from .decision_summary import compact_quota_decision, quota_decision_agent_id
 from .spend_sources import DEFAULT_SLOT_SPEND_SOURCE, VALID_SLOT_SPEND_SOURCES
@@ -475,7 +475,12 @@ def record_quota_monitor_poll_for_decision(
     index_path = runs_dir / "index.jsonl"
 
     if execute and normalized_turn_instance_id and not _index_lock_held:
-        with exclusive_file_lock(index_path):
+        with exclusive_file_lock(
+            index_path,
+            policy=LockAcquisitionPolicy.MONITOR,
+            agent_id=str(decision_agent_id),
+            operation="quota_monitor_poll_index",
+        ):
             existing = _find_monitor_poll_turn(
                 index_path,
                 goal_id=goal_id,
