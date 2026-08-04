@@ -5,6 +5,11 @@ from pathlib import Path
 
 from loopx.control_plane.todos.contract import encode_metadata_value
 from loopx.control_plane.todos.markdown import render_todo_markdown
+from loopx.event_sourced_state import (
+    AppendOnlyStateEventStore,
+    TODO_ADDED,
+    make_state_event,
+)
 from loopx.todos import list_goal_todos
 
 GOAL_ID = "todo-list-agent-lane-goal"
@@ -264,3 +269,53 @@ def test_explicit_done_filter_remains_a_full_detail_cold_path(
     assert len(payload["agent_todos"]["items"]) == 220
     assert "returned_todo_count" not in payload
     assert "todo_list_projection" not in payload
+
+
+def test_event_projection_role_change_keeps_one_todo_identity(tmp_path: Path) -> None:
+    registry_path, state_file = _write_fixture(tmp_path)
+    store = AppendOnlyStateEventStore(state_file.with_name("events.jsonl"))
+    store.append(
+        make_state_event(
+            event_id="evt-role-change",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": "todo_agent_unclaimed"},
+            payload={
+                "role": "user",
+                "title": "Review the formerly unclaimed advancement.",
+                "task_class": "user_action",
+                "bound_agent": AGENT_ID,
+            },
+            recorded_at="2026-08-04T00:00:00Z",
+            producer="todo-list-role-change-regression",
+        )
+    )
+
+    payload = list_goal_todos(
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+    )
+
+    todo_ids = [item["todo_id"] for item in payload["todos"]]
+    assert len(todo_ids) == len(set(todo_ids))
+    assert payload["todo_count"] == len(todo_ids)
+    matching = [
+        item
+        for item in payload["todos"]
+        if item["todo_id"] == "todo_agent_unclaimed"
+    ]
+    assert len(matching) == 1
+    assert matching[0]["role"] == "user"
+    assert all(
+        item["todo_id"] != "todo_agent_unclaimed"
+        for item in payload["agent_todos"]["items"]
+    )
+    assert payload["projection_overlay"]["overlaid_todo_ids"] == [
+        "todo_agent_unclaimed"
+    ]
+    assert "todo_agent_unclaimed" not in payload["projection_overlay"][
+        "event_only_todo_ids"
+    ]
+    assert "todo_agent_unclaimed" not in payload["projection_overlay"][
+        "markdown_only_todo_ids"
+    ]
