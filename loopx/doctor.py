@@ -45,7 +45,9 @@ REQUIRED_INSTALLED_SKILL_PHRASES = {
         "loopx --format json pr-review --state all",
         "agent_response_contract",
         "Do not pipe the first packet through `jq`",
-        "Do not use this skill to approve",
+        "submit a formal `REQUEST_CHANGES` review",
+        "A plain PR comment is not an adequate substitute for `REQUEST_CHANGES`",
+        "route approval, merge, self-merge, and admin-bypass actions to",
     ),
     "loopx-doc-registry": (
         "Use even when the user does not mention LoopX or doc registry",
