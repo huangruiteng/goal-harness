@@ -1,7 +1,7 @@
 # Architecture
 
-LoopX has six durable control-plane layers, plus an optional read-only probe
-surface that is not a peer layer.
+LoopX has six durable control-plane layers, plus an optional probe surface
+whose execution policy requires read-only observation; it is not a peer layer.
 
 1. **Registry**: lists known goals, their repos, adapters, authority sources,
    status, and guards.
@@ -13,11 +13,13 @@ surface that is not a peer layer.
    goal may consume.
 
 **Optional probe surface (not a seventh layer):** goals may register a
-project-specific read-only `next_probe` via bootstrap `--next-probe`. Status may
-label a goal `pre-tick-runnable` when such a probe is configured. There is no
-shipped `pre_tick` module or adapter pre-tick package; treat the probe as an
-optional planned/operator surface until a dedicated read-only pre-tick command
-exists.
+project-specific `next_probe` command via bootstrap `--next-probe`. Registration
+stores the command as free-form text and does not validate that it is read-only;
+heartbeat and operator policy require any executed observation to be read-only.
+The `pre-tick-runnable` adapter status is declared separately and is not inferred
+from `next_probe`. There is no shipped `pre_tick` module or adapter pre-tick
+package, so keep probe registration, execution policy, and adapter status as
+separate contracts.
 
 ```text
 project goal state
