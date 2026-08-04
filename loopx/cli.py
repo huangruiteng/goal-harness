@@ -276,7 +276,7 @@ def build_parser() -> LoopXArgumentParser:
     register_dreaming_commands(sub, add_subcommand_format)
     register_evidence_log_command(sub, add_subcommand_format)
     register_explore_commands(sub, add_subcommand_format)
-    register_todo_command(sub)
+    register_todo_command(sub, add_subcommand_format)
     register_task_lease_command(sub, add_subcommand_format)
     register_quota_command(sub)
 
@@ -735,6 +735,7 @@ def main(argv: list[str] | None = None) -> int:
             args,
             registry_path=registry_path,
             runtime_root_arg=args.runtime_root,
+            format_name=output_format(args),
             print_payload=print_payload,
             append_cli_rollout_event=append_cli_rollout_event,
         )

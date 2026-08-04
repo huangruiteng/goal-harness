@@ -46,7 +46,10 @@ PrintPayload = Callable[
 ]
 
 
-def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
+def register_todo_command(
+    subparsers: argparse._SubParsersAction,
+    add_subcommand_format: Callable[[argparse.ArgumentParser], None],
+) -> None:
     todo_parser = subparsers.add_parser(
         "todo",
         help="Add a user or agent todo to a goal's active state.",
@@ -56,6 +59,7 @@ def register_todo_command(subparsers: argparse._SubParsersAction) -> None:
             "unsupported combinations fail before state is read or written."
         ),
     )
+    add_subcommand_format(todo_parser)
     todo_parser.add_argument(
         "todo_command",
         nargs="?",
@@ -395,6 +399,7 @@ def handle_todo_command(
     runtime_root_arg: str | None,
     print_payload: PrintPayload,
     append_cli_rollout_event: RolloutEventAppender,
+    format_name: str | None = None,
 ) -> int:
     renderer = (
         render_todo_suggestion_prompt_markdown
@@ -635,5 +640,9 @@ def handle_todo_command(
         runtime_root_arg=runtime_root_arg,
         append_cli_rollout_event=append_cli_rollout_event,
     )
-    print_payload(payload, args.format, renderer)
+    print_payload(
+        payload,
+        format_name or str(getattr(args, "format", None) or "markdown"),
+        renderer,
+    )
     return 0 if payload.get("ok") else 1
