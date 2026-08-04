@@ -105,8 +105,11 @@ if (!homepageHtml.includes("Your agents keep") || !homepageHtml.includes('class=
 if (!homepageHtml.includes('href="/loopx/frontstage/"')) {
   throw new Error("homepage footer must retain the Frontstage entry");
 }
-if (!homepageHtml.includes("scripts/install-from-github.sh | bash") || !homepageHtml.includes('data-copy="loopx connect"') || !homepageHtml.includes("Inspect installer")) {
-  throw new Error("homepage must publish the install command before the project connection step");
+if (!homepageHtml.includes('data-copy-key="agentSetup"') || !homepageHtml.includes("One message to your current agent") || !homepageHtml.includes('href="#quickstart"')) {
+  throw new Error("homepage must make the localized agent setup prompt the primary first-run path");
+}
+if (!homepageHtml.includes("scripts/install-from-github.sh | bash") || !homepageHtml.includes("loopx connect") || !homepageHtml.includes("Inspect installer")) {
+  throw new Error("homepage must retain the official manual setup fallback");
 }
 if (!homepageHtml.includes("Goal-level control plane") || !homepageHtml.includes("data-language-toggle")) {
   throw new Error("homepage must publish the official goal-level positioning and language switch");
@@ -125,6 +128,34 @@ for (const assetName of [
 const homepageScript = await readFile(resolve(siteDir, "site-assets/home.js"), "utf8");
 if (!homepageScript.includes('"hero.eyebrow": "长程目标控制面"') || !homepageScript.includes('requestedLanguage === "zh" ? "zh" : "en"')) {
   throw new Error("homepage language switch must include the public-safe Chinese locale and default to English");
+}
+for (const promptContract of [
+  "official Getting Started guide",
+  "run loopx doctor",
+  "Preserve existing state and run loopx connect",
+  "Use loopx bootstrap only when initialization is required",
+  "Detect the exact host and complete its loopx agent-onboard activation instructions",
+  "Stop at any identity, approval, or host-tool gate",
+  "Do not commit LoopX runtime state",
+  "Report the current state, gate, top todo, host activation, and next safe action",
+  "Do not start delivery yet",
+  "本轮不要开始交付",
+]) {
+  if (!homepageScript.includes(promptContract)) {
+    throw new Error(`homepage agent setup prompt is missing contract: ${promptContract}`);
+  }
+}
+const setupPromptMatch = homepageScript.match(/const setupPrompts = \{\s+en: `([\s\S]*?)`,\s+zh: `([\s\S]*?)`,\s+\};/);
+if (!setupPromptMatch) {
+  throw new Error("homepage must expose concise English and Chinese setup prompts");
+}
+for (const [language, prompt] of [["English", setupPromptMatch[1]], ["Chinese", setupPromptMatch[2]]]) {
+  if (prompt.length < 300 || prompt.length > 1_000) {
+    throw new Error(`${language} homepage setup prompt must stay concise and complete; received ${prompt.length} characters`);
+  }
+}
+if (!homepageScript.includes('document.createElement("textarea")') || !homepageScript.includes('document.execCommand("copy")')) {
+  throw new Error("homepage setup prompt must keep a clipboard fallback for non-secure preview origins");
 }
 if (!homepageScript.includes("Math.min(200, Math.max(50, nextZoom))") || !homepageScript.includes('addEventListener("pointerdown"')) {
   throw new Error("homepage evidence viewer must retain bounded zoom and drag-to-pan controls");

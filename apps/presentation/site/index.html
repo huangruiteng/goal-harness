@@ -59,57 +59,37 @@
             A durable control plane for long-horizon work across sessions, runtimes, and hosts—keeping authority, gates, todos, quota, evidence, recovery, and handoffs in one loop.
           </p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://github.com/huangruiteng/loopx#quick-start">
-              <span data-i18n="hero.getStarted">Get started</span> <span aria-hidden="true">→</span>
-            </a>
+            <button
+              class="button button-primary hero-copy-prompt"
+              type="button"
+              data-copy-key="agentSetup"
+              data-i18n-aria="hero.copyPromptAria"
+              aria-label="Copy the LoopX setup prompt for your current agent"
+            >
+              <span data-copy-feedback data-i18n="hero.copyPrompt" aria-live="polite">Copy setup prompt</span>
+              <span class="button-copy-icon" aria-hidden="true"></span>
+            </button>
             <a class="button button-secondary" href="#showcases">
               <span data-i18n="hero.demo">See it in action</span> <span class="play-icon" aria-hidden="true">▶</span>
             </a>
           </div>
-          <div class="install-block">
-            <div class="install-block-heading">
-              <p><i aria-hidden="true"></i><span data-i18n="install.label">Quick install</span></p>
-              <small data-i18n="install.support">macOS &amp; Linux · Python 3.11+</small>
+          <div class="agent-setup-summary" aria-labelledby="agent-setup-label">
+            <p class="agent-setup-label" id="agent-setup-label">
+              <i aria-hidden="true"></i>
+              <span data-i18n="agentSetup.label">One message to your current agent</span>
+            </p>
+            <div class="agent-setup-points" role="list" data-i18n-aria="agentSetup.pointsAria" aria-label="What the setup prompt asks your agent to do">
+              <span role="listitem"><b aria-hidden="true">01</b><span data-i18n="agentSetup.detect">Detects your host</span></span>
+              <span role="listitem"><b aria-hidden="true">02</b><span data-i18n="agentSetup.preserve">Preserves existing state</span></span>
+              <span role="listitem"><b aria-hidden="true">03</b><span data-i18n="agentSetup.activate">Activates the loop</span></span>
             </div>
-            <div class="install-steps">
-              <button
-                class="install-step install-step-primary"
-                type="button"
-                data-copy="curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash"
-                data-i18n-aria="install.copyInstallAria"
-                aria-label="Copy the LoopX install command"
-              >
-                <span class="install-step-number">01</span>
-                <span class="install-step-copy">
-                  <small data-i18n="install.installMeta">Official no-clone installer</small>
-                  <strong data-i18n="install.installTitle">Install LoopX</strong>
-                </span>
-                <span class="install-copy-action">
-                  <span class="copy-icon" aria-hidden="true"></span>
-                  <span class="copy-label" data-i18n="install.copy" aria-live="polite">Copy</span>
-                </span>
-              </button>
-              <button
-                class="install-step"
-                type="button"
-                data-copy="loopx connect"
-                data-i18n-aria="install.copyConnectAria"
-                aria-label="Copy the LoopX project connection command"
-              >
-                <span class="install-step-number">02</span>
-                <span class="install-step-copy">
-                  <small data-i18n="install.connectMeta">From your project root</small>
-                  <code>loopx connect</code>
-                </span>
-                <span class="install-copy-action">
-                  <span class="copy-icon" aria-hidden="true"></span>
-                  <span class="copy-label" data-i18n="install.copy" aria-live="polite">Copy</span>
-                </span>
-              </button>
+            <p class="agent-setup-description" data-i18n="agentSetup.description">
+              Paste it into Codex, Claude Code, OpenCode, Cursor, or another shell-capable agent. It will follow the official guide and select the matching host path.
+            </p>
+            <div class="agent-setup-links">
+              <a href="#quickstart" data-i18n="agentSetup.manual">Manual setup ↓</a>
+              <a href="https://github.com/huangruiteng/loopx/blob/main/docs/guides/getting-started.md#codex-app-and-other-agent-setup" target="_blank" rel="noreferrer" data-i18n="agentSetup.guide">Read setup guide ↗</a>
             </div>
-            <a class="install-inspect" href="https://github.com/huangruiteng/loopx/blob/main/scripts/install-from-github.sh">
-              <span data-i18n="install.inspect">Inspect installer</span><span aria-hidden="true">↗</span>
-            </a>
           </div>
         </div>
 
@@ -308,10 +288,11 @@
         <p class="evidence-boundary" data-i18n="showcase.boundary">Elapsed lifetime is wall-clock project time. It does not claim continuous model execution or unattended production autonomy.</p>
       </section>
 
-      <section class="quickstart-section reveal" aria-labelledby="quickstart-title">
+      <section class="quickstart-section reveal" id="quickstart" aria-labelledby="quickstart-title">
         <div>
-          <p class="eyebrow" data-i18n="quickstart.eyebrow">No clone required</p>
-          <h2 id="quickstart-title" data-i18n="quickstart.title">Connect one project. Keep the lifetime goal clear.</h2>
+          <p class="eyebrow" data-i18n="quickstart.eyebrow">Manual fallback</p>
+          <h2 id="quickstart-title" data-i18n="quickstart.title">Prefer the shell? Install LoopX manually.</h2>
+          <p class="quickstart-description" data-i18n="quickstart.description">Use this path when your current agent cannot run shell commands. The same official installer registers lightweight command entries for supported hosts.</p>
         </div>
         <div class="terminal-card">
           <div class="terminal-bar"><span></span><span></span><span></span><small>terminal</small></div>
@@ -322,10 +303,13 @@
 <b>$</b> loopx connect
 <b>$</b> loopx status
 
-<em>✓ objective visible</em>
-<em>✓ human gate explicit</em>
-<em>✓ next safe action ready</em></code></pre>
-          <a href="https://github.com/huangruiteng/loopx#quick-start" data-i18n="quickstart.link">Read the Quick Start →</a>
+<em data-i18n="quickstart.checkDoctor">✓ CLI health checked</em>
+<em data-i18n="quickstart.checkState">✓ project state readable</em>
+<em data-i18n="quickstart.checkActivation">→ finish host activation from the onboarding packet</em></code></pre>
+          <div class="terminal-links">
+            <a href="https://github.com/huangruiteng/loopx#quick-start" data-i18n="quickstart.link">Read the Quick Start →</a>
+            <a href="https://github.com/huangruiteng/loopx/blob/main/scripts/install-from-github.sh" data-i18n="quickstart.inspect">Inspect installer ↗</a>
+          </div>
         </div>
       </section>
     </main>

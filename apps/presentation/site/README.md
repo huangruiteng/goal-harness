@@ -11,6 +11,13 @@ The language switch keeps English as the canonical source markup and default
 entry, then applies a public-safe Chinese locale in the browser. `?lang=zh`
 provides a shareable Chinese entry.
 
+The first-run CTA is agent-first. It copies the localized, public-safe setup
+contract from `home.js` so the current agent can install or repair LoopX,
+identify its exact host, preserve existing project state, and complete the
+host-specific activation packet. The terminal block lower on the page remains
+the manual fallback; it does not claim that project connection alone activates
+a host loop.
+
 The homepage control-plane diagrams are synthetic UI. The curated evidence maps
 summarize two public README trajectories, and the full-screen viewer loads only
 the two explicitly copied `docs/assets/long-running-loop-*-trajectory.png`

@@ -1,3 +1,28 @@
+const setupPrompts = {
+  en: `Set up LoopX for this project using the official Getting Started guide:
+https://github.com/huangruiteng/loopx/blob/main/docs/guides/getting-started.md
+
+Work only from the project root.
+
+1. Install or repair LoopX if needed, then run loopx doctor.
+2. Preserve existing state and run loopx connect. Use loopx bootstrap only when initialization is required.
+3. Detect the exact host and complete its loopx agent-onboard activation instructions.
+4. Stop at any identity, approval, or host-tool gate instead of guessing.
+5. Do not commit LoopX runtime state, credentials, logs, private links, or local paths.
+6. Report the current state, gate, top todo, host activation, and next safe action. Do not start delivery yet.`,
+  zh: `按照官方 Getting Started 为当前项目设置 LoopX：
+https://github.com/huangruiteng/loopx/blob/main/docs/guides/getting-started.md
+
+只在当前项目根目录工作。
+
+1. 如有需要，安装或修复 LoopX，然后运行 loopx doctor。
+2. 复用已有状态并运行 loopx connect。只有需要初始化时才使用 loopx bootstrap。
+3. 识别准确 Host，并完成对应的 loopx agent-onboard 激活指令。
+4. 遇到 identity、approval 或 host-tool Gate 时停止并询问，不能自行猜测。
+5. 不要提交 LoopX runtime state、凭据、日志、私有链接或本地路径。
+6. 汇报当前状态、Gate、最高优先级 Todo、Host activation 和 next safe action。本轮不要开始交付。`,
+};
+
 const zh = {
   "nav.product": "产品",
   "nav.workflow": "工作方式",
@@ -7,18 +32,19 @@ const zh = {
   "hero.eyebrow": "长程目标控制面",
   "hero.title": "Agent 持续推进。<br />判断始终由你掌握。",
   "hero.body": "面向跨会话、跨运行时、跨宿主的长程任务控制面，把权限状态、Gate、Todo、Quota、Evidence、恢复与交接组织在同一闭环中。",
-  "hero.getStarted": "开始使用",
+  "hero.copyPrompt": "复制 Agent 安装指令",
+  "hero.promptCopied": "已复制，请粘贴给当前 Agent",
+  "hero.copyFailed": "复制失败，请打开安装指南",
+  "hero.copyPromptAria": "复制 LoopX 设置指令并粘贴给当前 Agent",
   "hero.demo": "查看演示",
-  "install.label": "快速安装",
-  "install.support": "macOS 与 Linux · Python 3.11+",
-  "install.installMeta": "官方免 Clone 安装器",
-  "install.installTitle": "安装 LoopX",
-  "install.connectMeta": "在你的项目根目录运行",
-  "install.copy": "复制",
-  "install.copied": "已复制",
-  "install.inspect": "查看安装脚本",
-  "install.copyInstallAria": "复制 LoopX 安装命令",
-  "install.copyConnectAria": "复制 LoopX 项目连接命令",
+  "agentSetup.label": "一条指令交给当前 Agent",
+  "agentSetup.detect": "识别当前 Host",
+  "agentSetup.preserve": "复用已有状态",
+  "agentSetup.activate": "激活运行闭环",
+  "agentSetup.description": "粘贴给 Codex、Claude Code、OpenCode、Cursor 或其他具备 Shell 能力的 Agent。它会遵循官方指南，并选择匹配当前 Host 的路径。",
+  "agentSetup.manual": "手动安装 ↓",
+  "agentSetup.guide": "阅读设置指南 ↗",
+  "agentSetup.pointsAria": "设置指令要求 Agent 完成的事项",
   "visual.activeGoal": "当前目标",
   "visual.goalText": "交付可审查的结果",
   "visual.onTrack": "进展正常",
@@ -112,9 +138,14 @@ const zh = {
   "dialog.zoomIn": "放大",
   "dialog.close": "关闭证据查看器",
   "dialog.viewport": "拖动以平移证据轨迹",
-  "quickstart.eyebrow": "无需 Clone",
-  "quickstart.title": "连接一个项目，让长期目标始终清晰。",
+  "quickstart.eyebrow": "手动备用方案",
+  "quickstart.title": "更习惯终端？可以手动安装 LoopX。",
+  "quickstart.description": "当你使用的 Agent 无法执行 Shell 命令时使用这条路径。同一官方安装器会为受支持的 Host 注册轻量命令入口。",
+  "quickstart.checkDoctor": "✓ CLI 健康检查完成",
+  "quickstart.checkState": "✓ 项目状态可以读取",
+  "quickstart.checkActivation": "→ 按照 onboarding packet 完成 Host 激活",
   "quickstart.link": "阅读快速开始 →",
+  "quickstart.inspect": "查看安装脚本 ↗",
   "footer.tagline": "让闭环持续运转，让判断始终属于人。",
   "footer.frontstage": "Frontstage",
 };
@@ -199,21 +230,57 @@ if (menuButton && mobileNav) {
   });
 }
 
-const copyButtons = document.querySelectorAll("[data-copy]");
+function localizedText(target) {
+  const key = target?.dataset.i18n;
+  if (!target || !key) return "";
+  return document.body.dataset.language === "zh" ? (zh[key] ?? target.dataset.english ?? "") : (target.dataset.english ?? "");
+}
+
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    const activeElement = document.activeElement;
+    const fallback = document.createElement("textarea");
+    fallback.value = text;
+    fallback.setAttribute("readonly", "");
+    fallback.setAttribute("aria-hidden", "true");
+    fallback.tabIndex = -1;
+    fallback.style.position = "fixed";
+    fallback.style.inset = "0 auto auto -9999px";
+    document.body.append(fallback);
+    let copied = false;
+    try {
+      fallback.focus({ preventScroll: true });
+      fallback.select();
+      fallback.setSelectionRange(0, fallback.value.length);
+      copied = typeof document.execCommand === "function" && document.execCommand("copy");
+    } finally {
+      fallback.remove();
+      if (activeElement instanceof HTMLElement) activeElement.focus({ preventScroll: true });
+    }
+    if (!copied) throw new Error("clipboard unavailable");
+  }
+}
+
+const copyButtons = document.querySelectorAll("[data-copy-key]");
 copyButtons.forEach((copyButton) => {
   if (!(copyButton instanceof HTMLButtonElement)) return;
   copyButton.addEventListener("click", async () => {
-    const command = copyButton.dataset.copy ?? "";
-    const label = copyButton.querySelector(".copy-label");
+    const language = document.body.dataset.language === "zh" ? "zh" : "en";
+    const copyKey = copyButton.dataset.copyKey;
+    const copyText = copyKey === "agentSetup" ? setupPrompts[language] : "";
+    const label = copyButton.querySelector("[data-copy-feedback]");
     try {
-      await navigator.clipboard.writeText(command);
-      if (label) label.textContent = document.body.dataset.language === "zh" ? zh["install.copied"] : "Copied";
+      await writeClipboard(copyText);
+      if (label) label.textContent = language === "zh" ? zh["hero.promptCopied"] : "Copied — paste into your agent";
     } catch {
-      if (label) label.textContent = command;
+      if (label) label.textContent = language === "zh" ? zh["hero.copyFailed"] : "Copy failed — open the setup guide";
     }
     window.setTimeout(() => {
-      if (label) label.textContent = document.body.dataset.language === "zh" ? zh["install.copy"] : "Copy";
-    }, 1800);
+      if (label) label.textContent = localizedText(label);
+    }, 2600);
   });
 });
 
