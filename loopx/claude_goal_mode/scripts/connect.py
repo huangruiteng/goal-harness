@@ -86,7 +86,7 @@ def main():
     if dry:
         inst.append("--dry-run")
     print("[install]", " ".join(inst))
-    ri = subprocess.run(inst)
+    ri = subprocess.run(inst, cwd=str(proj))
     if ri.returncode != 0:
         # Fail closed: don't claim success / print next steps if the adapter
         # install failed.

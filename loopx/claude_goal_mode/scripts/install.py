@@ -125,12 +125,21 @@ def provision_mcp_python(dry: bool, allow_system_pip: bool = False) -> str:
     return _python_cmd()
 
 
-def install_mcp(dry: bool, py: str, scope: str, migrate_goal_harness: bool = False):
+def install_mcp(
+    dry: bool,
+    py: str,
+    scope: str,
+    migrate_goal_harness: bool = False,
+    project_dir: Path | None = None,
+):
     """Register the loopx MCP server at the chosen scope via `claude mcp add`.
 
     We replace only OUR `loopx` entry. A legacy/user-owned `goal-harness` MCP is
     left untouched by default — we don't delete a server we don't own. If one
     exists we print a manual cleanup hint; `--migrate-goal-harness` removes it."""
+    if scope == "project" and project_dir is None:
+        raise ValueError("project_dir is required for project-scoped MCP registration")
+    cwd_run = str(project_dir) if scope == "project" else None
     claude = shutil.which("claude")
     mcp_path = _p("mcp", "loopx_mcp.py")
     add = ["mcp", "add", "--scope", scope, "loopx", "--", py, mcp_path]
@@ -140,17 +149,37 @@ def install_mcp(dry: bool, py: str, scope: str, migrate_goal_harness: bool = Fal
     print(f"[mcp] claude mcp add --scope {scope} loopx -- {py} <loopx_mcp.py>")
     if dry:
         return
-    subprocess.run([claude, "mcp", "remove", "--scope", scope, "loopx"], capture_output=True, text=True)
-    has_gh = subprocess.run([claude, "mcp", "get", "goal-harness"], capture_output=True, text=True).returncode == 0
+    subprocess.run(
+        [claude, "mcp", "remove", "--scope", scope, "loopx"],
+        capture_output=True,
+        text=True,
+        cwd=cwd_run,
+    )
+    has_gh = subprocess.run(
+        [claude, "mcp", "get", "goal-harness"],
+        capture_output=True,
+        text=True,
+        cwd=cwd_run,
+    ).returncode == 0
     if has_gh:
         if migrate_goal_harness:
             print(f"[mcp] --migrate-goal-harness: removing legacy goal-harness MCP at {scope} scope")
-            subprocess.run([claude, "mcp", "remove", "--scope", scope, "goal-harness"], capture_output=True, text=True)
+            subprocess.run(
+                [claude, "mcp", "remove", "--scope", scope, "goal-harness"],
+                capture_output=True,
+                text=True,
+                cwd=cwd_run,
+            )
         else:
             print("[mcp] note: a legacy `goal-harness` MCP entry exists — left untouched. Remove it "
                   f"yourself with `claude mcp remove --scope {scope} goal-harness`, or re-run with "
                   "--migrate-goal-harness.")
-    r = subprocess.run([claude, *add], capture_output=True, text=True)
+    r = subprocess.run(
+        [claude, *add],
+        capture_output=True,
+        text=True,
+        cwd=cwd_run,
+    )
     if r.returncode != 0:
         print("  (mcp add failed; add manually:\n   claude " + " ".join(add) + "\n  " + (r.stdout + r.stderr)[:200] + ")")
 
@@ -247,9 +276,10 @@ def main():
     a = ap.parse_args()
     dry = a.dry_run
 
+    project_dir = None
     if a.scope == "project":
-        proj = Path(a.project).resolve() if a.project else Path.cwd()
-        claude_dir = proj / ".claude"
+        project_dir = Path(a.project).resolve() if a.project else Path.cwd()
+        claude_dir = project_dir / ".claude"
         print(f"[scope] PROJECT — installs into {claude_dir} (this project only)")
     else:
         claude_dir = Path.home() / ".claude"
@@ -261,7 +291,13 @@ def main():
         print("[mcp] skipped (--skip-mcp)")
     else:
         mcp_python = provision_mcp_python(dry, a.allow_system_pip)
-        install_mcp(dry, mcp_python, a.scope, a.migrate_goal_harness)
+        install_mcp(
+            dry,
+            mcp_python,
+            a.scope,
+            a.migrate_goal_harness,
+            project_dir=project_dir,
+        )
     install_command(dry, claude_dir / "commands")
 
     settings_path = claude_dir / "settings.json"
