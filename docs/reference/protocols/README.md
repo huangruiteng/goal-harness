@@ -11,6 +11,7 @@ scanning a chronological list.
 - [`decision_scope_v0`](decision-scope-v0.md): Decision scope v0
 - [`event_sourced_state_contract_v0`](event-sourced-state-contract-v0.md): Event-sourced state contract v0
 - [`event_store_migration_bridge_v0`](event-store-migration-bridge-v0.md): Event store migration bridge v0
+- [`file_lock_acquisition_v0`](file-lock-acquisition-v0.md): Bounded file-lock acquisition and operator recovery v0
 - [`global_manager_command_v0`](global-manager-command-v0.md): Global manager command v0
 - [`goal_vision_replan_contract_v0`](goal-vision-replan-contract-v0.md): Goal vision replan contract v0
 - [`local_state_write_correctness_v0`](local-state-write-correctness-v0.md): Local state write correctness v0
