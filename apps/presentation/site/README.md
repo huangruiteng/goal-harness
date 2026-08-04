@@ -18,8 +18,9 @@ host-specific activation packet. The terminal block lower on the page remains
 the manual fallback; it does not claim that project connection alone activates
 a host loop.
 
-The homepage control-plane diagrams are synthetic UI. The curated evidence maps
-summarize two public README trajectories, and the full-screen viewer loads only
-the two explicitly copied `docs/assets/long-running-loop-*-trajectory.png`
-files. The site must not consume live LoopX state, local status feeds, private
-registries, raw logs, or write APIs.
+The homepage control-plane diagrams are synthetic UI. Finite, tabbed terminal
+replays summarize two public README trajectories; they are curated projections,
+not raw session logs. The full-screen viewer loads only the two explicitly
+copied `docs/assets/long-running-loop-*-trajectory.png` files. The site must not
+consume live LoopX state, local status feeds, private registries, raw logs, or
+write APIs.

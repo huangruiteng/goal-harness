@@ -102,6 +102,9 @@ const homepageHtml = await readFile(resolve(siteDir, "index.html"), "utf8");
 if (!homepageHtml.includes("Your agents keep") || !homepageHtml.includes('class="button button-secondary" href="#showcases"')) {
   throw new Error("homepage root is missing the LoopX hero or curated evidence CTA");
 }
+if (!homepageHtml.includes('data-hero-wave="progress"') || !homepageHtml.includes('data-hero-wave="judgment"')) {
+  throw new Error("homepage hero must retain the finite semantic keyword wave");
+}
 if (!homepageHtml.includes('href="/loopx/frontstage/"')) {
   throw new Error("homepage footer must retain the Frontstage entry");
 }
@@ -115,7 +118,19 @@ if (!homepageHtml.includes("Goal-level control plane") || !homepageHtml.includes
   throw new Error("homepage must publish the official goal-level positioning and language switch");
 }
 if (!homepageHtml.includes("Evidence from real loops") || !homepageHtml.includes("data-evidence-dialog")) {
-  throw new Error("homepage must publish the curated evidence maps and full-screen evidence viewer");
+  throw new Error("homepage must publish the curated evidence terminal and full-screen evidence viewer");
+}
+for (const terminalContract of [
+  "data-terminal-showcase",
+  'data-terminal-tab="issue"',
+  'data-terminal-tab="ml"',
+  "data-terminal-control",
+  "data-terminal-last",
+  "Curated replay from public evidence",
+]) {
+  if (!homepageHtml.includes(terminalContract)) {
+    throw new Error(`homepage evidence terminal is missing contract: ${terminalContract}`);
+  }
 }
 for (const assetName of [
   "long-running-loop-openviking-trajectory.png",
@@ -164,9 +179,28 @@ if (!homepageScript.includes('document.createElement("textarea")') || !homepageS
 if (!homepageScript.includes("Math.min(200, Math.max(50, nextZoom))") || !homepageScript.includes('addEventListener("pointerdown"')) {
   throw new Error("homepage evidence viewer must retain bounded zoom and drag-to-pan controls");
 }
+for (const terminalMotionContract of [
+  "playTerminalPanel",
+  'addEventListener("animationend"',
+  'event.key !== "ArrowLeft"',
+  'window.matchMedia("(prefers-reduced-motion: reduce)")',
+]) {
+  if (!homepageScript.includes(terminalMotionContract)) {
+    throw new Error(`homepage evidence terminal motion is missing contract: ${terminalMotionContract}`);
+  }
+}
+if (!homepageScript.includes("prepareHeroWaves") || !homepageScript.includes('span.style.setProperty("--char-delay"')) {
+  throw new Error("homepage hero must split localized keywords into accessible staggered characters");
+}
 const homepageCss = await readFile(resolve(siteDir, "site-assets/home.css"), "utf8");
 if (!homepageCss.includes("@media (prefers-reduced-motion: reduce)") || !homepageCss.includes("animation-iteration-count: 1 !important")) {
   throw new Error("homepage motion must expose a static reduced-motion state");
+}
+if (!homepageCss.includes("@keyframes terminal-line-in") || !homepageCss.includes(".terminal-demo-panel.is-paused") || !homepageCss.includes(".terminal-playback { display: none; }")) {
+  throw new Error("homepage evidence terminal must support finite replay, pause, and a static reduced-motion state");
+}
+if (!homepageCss.includes("@keyframes hero-word-wave") || !homepageCss.includes("var(--char-delay, 0ms)") || !homepageCss.includes("animation: none !important; color: inherit")) {
+  throw new Error("homepage hero keyword wave must be staggered, finite, and reduced-motion safe");
 }
 if (!homepageHtml.includes('href="/loopx/site-assets/home.css"') || homepageHtml.includes("__LOOPX_BASE__")) {
   throw new Error("homepage assets did not resolve against the GitHub Pages base");

@@ -28,7 +28,7 @@ const zh = {
   "nav.docs": "文档",
   "nav.github": "GitHub",
   "hero.eyebrow": "长程目标控制面",
-  "hero.title": "Agent 持续推进。<br />判断始终由你掌握。",
+  "hero.title": "Agent <span class=\"hero-wave\" data-hero-wave=\"progress\">持续推进</span>。<br />判断始终<span class=\"hero-wave\" data-hero-wave=\"judgment\">由你掌握</span>。",
   "hero.body": "面向跨会话、跨运行时、跨宿主的长程任务控制面，把权限状态、Gate、Todo、Quota、Evidence、恢复与交接组织在同一闭环中。",
   "hero.copyPrompt": "复制 Agent 安装指令",
   "hero.promptCopied": "已复制，请粘贴给当前 Agent",
@@ -95,38 +95,46 @@ const zh = {
   "showcase.body": "两条公开安全的真实轨迹，保留了多轮 Agent 推进中的交付、决策、证据分支与恢复过程。",
   "showcase.elapsed": "200+ 小时自然时长",
   "showcase.publicSafe": "公开安全证据",
-  "showcase.issue.label": "开源问题修复",
+  "showcase.shellTitle": "~/loopx/evidence — 精选回放",
+  "showcase.tabsAria": "真实闭环终端示例",
+  "showcase.pause": "暂停",
+  "showcase.pauseAria": "暂停终端回放",
+  "showcase.resume": "继续",
+  "showcase.resumeAria": "继续终端回放",
+  "showcase.replay": "重播",
+  "showcase.replayAria": "重新播放终端示例",
+  "showcase.curated": "基于公开证据的精选回放",
+  "showcase.state.active": "进行中",
+  "showcase.state.running": "运行中",
+  "showcase.state.waiting": "等待中",
+  "showcase.state.ready": "已就绪",
+  "showcase.state.written": "已写回",
+  "showcase.state.safe": "安全",
+  "showcase.state.matched": "已匹配",
+  "showcase.state.visible": "可见",
+  "showcase.issue.tab": "问题修复",
   "showcase.issue.title": "PR 交付与可复用修复知识共同演进。",
-  "showcase.issue.body": "聚焦修复持续连接审查权限、仓库知识、终端恢复与下一轮可复用发现闭环。",
-  "showcase.issue.stage1": "聚焦式 PR 交付",
-  "showcase.issue.stage2": "审查权限",
-  "showcase.issue.stage3": "终端恢复",
-  "showcase.issue.stage4": "可复用能力",
-  "showcase.issue.deliveryLane": "交付线路",
-  "showcase.issue.capabilityLane": "能力沉淀线路",
-  "showcase.issue.node1": "聚焦问题 / PR",
-  "showcase.issue.node2": "审查关卡",
-  "showcase.issue.node3": "合并 / 开放证据",
-  "showcase.issue.node4": "仓库知识",
-  "showcase.issue.node5": "终端恢复",
-  "showcase.issue.node6": "可复用发现",
-  "showcase.issue.stagesAria": "开源问题修复轨迹阶段",
-  "showcase.issue.mapAria": "开源问题修复轨迹精选地图",
-  "showcase.ml.label": "自动化机器学习实验",
+  "showcase.issue.session": "公开轨迹 01 · 开源问题修复",
+  "showcase.issue.command": "$ loopx status --goal-id issue-fix",
+  "showcase.issue.goal": "交付聚焦修复，并保留可复用知识。",
+  "showcase.issue.p0": "聚焦式 PR 交付 · 有边界的改动与验证",
+  "showcase.issue.gate": "审查权限 · 批准聚焦改动",
+  "showcase.issue.p1": "仓库知识与终端恢复保持可用",
+  "showcase.issue.evidence": "合并 / 开放结果连接到下一轮可复用发现",
+  "showcase.issue.next": "先审查聚焦改动，再继续能力沉淀线路。",
+  "showcase.ml.tab": "自动化 ML",
   "showcase.ml.title": "证据分支保持可见，直到晋级或停止。",
-  "showcase.ml.body": "匹配基线、无效谱系、负向结果、运行中复现与决策关卡都保留在同一条实验弧线中。",
-  "showcase.ml.stage1": "匹配基线",
-  "showcase.ml.stage2": "谱系审计",
-  "showcase.ml.stage3": "运行中复现",
-  "showcase.ml.stage4": "晋级 / 停止关卡",
-  "showcase.ml.node1": "匹配基线",
-  "showcase.ml.node2": "正向证据",
-  "showcase.ml.node3": "负向结果",
-  "showcase.ml.node4": "无效谱系",
-  "showcase.ml.node5": "运行中复现",
-  "showcase.ml.node6": "晋级 / 停止关卡",
-  "showcase.ml.stagesAria": "自动化机器学习实验轨迹阶段",
-  "showcase.ml.mapAria": "自动化机器学习实验轨迹精选地图",
+  "showcase.ml.session": "公开轨迹 02 · 自动化 ML 实验",
+  "showcase.ml.command": "$ loopx status --goal-id auto-ml",
+  "showcase.ml.baseline": "匹配候选项与评估契约已锁定。",
+  "showcase.ml.positive": "正向",
+  "showcase.ml.negative": "负向",
+  "showcase.ml.invalid": "无效谱系",
+  "showcase.ml.replicate": "运行中复现",
+  "showcase.ml.p1": "证据持续积累，同时保持复现容量有界",
+  "showcase.ml.evidence": "负向结果和无效谱系持续可追溯",
+  "showcase.ml.gate": "运行中复现完成后，决定晋级或停止",
+  "showcase.ml.next": "比较复现证据，再记录最终决策。",
   "showcase.viewFull": "查看完整证据",
   "showcase.boundary": "这里的时长是项目自然时长，不代表连续模型执行或无人值守的生产自治。",
   "dialog.eyebrow": "原始公开安全轨迹",
@@ -168,6 +176,7 @@ function applyLanguage(nextLanguage, updateUrl = false) {
   ariaTargets.forEach((target) => {
     target.setAttribute("aria-label", language === "zh" ? (zh[target.dataset.i18nAria] ?? target.dataset.englishAria) : target.dataset.englishAria);
   });
+  prepareHeroWaves();
   document.querySelectorAll("[data-language-toggle]").forEach((toggle) => {
     toggle.textContent = language === "zh" ? "EN" : "中文";
     toggle.setAttribute("aria-label", language === "zh" ? "Switch to English" : "切换为中文");
@@ -188,6 +197,21 @@ function applyLanguage(nextLanguage, updateUrl = false) {
   }
 }
 
+function prepareHeroWaves() {
+  document.querySelectorAll("[data-hero-wave]").forEach((wave) => {
+    const phrase = wave.textContent ?? "";
+    wave.setAttribute("aria-label", phrase);
+    wave.textContent = "";
+    [...phrase].forEach((character, index) => {
+      const span = document.createElement("span");
+      span.setAttribute("aria-hidden", "true");
+      span.style.setProperty("--char-delay", `${index * 55}ms`);
+      span.textContent = character === " " ? "\u00a0" : character;
+      wave.append(span);
+    });
+  });
+}
+
 const requestedLanguage = new URLSearchParams(window.location.search).get("lang");
 const initialLanguage = requestedLanguage === "zh" ? "zh" : "en";
 applyLanguage(initialLanguage);
@@ -195,6 +219,7 @@ applyLanguage(initialLanguage);
 document.querySelectorAll("[data-language-toggle]").forEach((toggle) => {
   toggle.addEventListener("click", () => {
     applyLanguage(document.body.dataset.language === "zh" ? "en" : "zh", true);
+    refreshTerminalControls();
     if (toggle.classList.contains("mobile-language-toggle")) {
       const navigation = document.querySelector(".mobile-nav");
       const menu = document.querySelector(".menu-button");
@@ -281,6 +306,119 @@ copyButtons.forEach((copyButton) => {
     }, 2600);
   });
 });
+
+const terminalShowcase = document.querySelector("[data-terminal-showcase]");
+const terminalTabs = [...document.querySelectorAll("[data-terminal-tab]")];
+const terminalPanels = [...document.querySelectorAll("[data-terminal-panel]")];
+const terminalMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+const terminalControlLabels = {
+  en: {
+    running: { label: "Pause", aria: "Pause terminal replay" },
+    paused: { label: "Resume", aria: "Resume terminal replay" },
+    complete: { label: "Replay", aria: "Replay terminal example" },
+  },
+  zh: {
+    running: { label: zh["showcase.pause"], aria: zh["showcase.pauseAria"] },
+    paused: { label: zh["showcase.resume"], aria: zh["showcase.resumeAria"] },
+    complete: { label: zh["showcase.replay"], aria: zh["showcase.replayAria"] },
+  },
+};
+
+function activeTerminalPanel() {
+  return terminalPanels.find((panel) => !panel.hidden);
+}
+
+function refreshTerminalControls() {
+  const language = document.body.dataset.language === "zh" ? "zh" : "en";
+  terminalPanels.forEach((panel) => {
+    const state = panel.dataset.playbackState || "running";
+    const copy = terminalControlLabels[language][state] || terminalControlLabels[language].running;
+    const control = panel.querySelector("[data-terminal-control]");
+    const label = panel.querySelector("[data-terminal-control-label]");
+    if (control) control.setAttribute("aria-label", copy.aria);
+    if (label) label.textContent = copy.label;
+  });
+}
+
+function setTerminalPlaybackState(panel, state) {
+  panel.dataset.playbackState = state;
+  panel.classList.toggle("is-paused", state === "paused");
+  panel.classList.toggle("is-complete", state === "complete");
+  refreshTerminalControls();
+}
+
+function playTerminalPanel(panel) {
+  if (!terminalShowcase || terminalMotionQuery.matches) return;
+  panel.classList.remove("is-running", "is-paused", "is-complete");
+  panel.dataset.playbackState = "running";
+  const body = panel.querySelector("[data-terminal-body]");
+  if (body) body.scrollTop = 0;
+  void panel.offsetWidth;
+  panel.classList.add("is-running");
+  refreshTerminalControls();
+}
+
+function selectTerminalPanel(key, shouldPlay = true) {
+  terminalTabs.forEach((tab) => {
+    const selected = tab.dataset.terminalTab === key;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  });
+  terminalPanels.forEach((panel) => {
+    const selected = panel.dataset.terminalPanel === key;
+    panel.hidden = !selected;
+    if (selected && shouldPlay) playTerminalPanel(panel);
+  });
+}
+
+if (terminalShowcase && terminalTabs.length && terminalPanels.length) {
+  terminalTabs.forEach((tab, index) => {
+    tab.tabIndex = tab.getAttribute("aria-selected") === "true" ? 0 : -1;
+    tab.addEventListener("click", () => selectTerminalPanel(tab.dataset.terminalTab));
+    tab.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const offset = event.key === "ArrowRight" ? 1 : -1;
+      const nextTab = terminalTabs[(index + offset + terminalTabs.length) % terminalTabs.length];
+      selectTerminalPanel(nextTab.dataset.terminalTab);
+      nextTab.focus();
+    });
+  });
+
+  terminalPanels.forEach((panel) => {
+    panel.dataset.playbackState = "running";
+    panel.querySelector("[data-terminal-control]")?.addEventListener("click", () => {
+      const state = panel.dataset.playbackState;
+      if (state === "complete") {
+        playTerminalPanel(panel);
+        return;
+      }
+      setTerminalPlaybackState(panel, state === "paused" ? "running" : "paused");
+    });
+    panel.querySelector("[data-terminal-last]")?.addEventListener("animationend", (event) => {
+      if (event.animationName === "terminal-line-in") setTerminalPlaybackState(panel, "complete");
+    });
+  });
+
+  if (terminalMotionQuery.matches) {
+    terminalPanels.forEach((panel) => setTerminalPlaybackState(panel, "complete"));
+  } else {
+    terminalShowcase.classList.add("terminal-showcase-enhanced");
+    if ("IntersectionObserver" in window) {
+      const terminalObserver = new IntersectionObserver((entries, observer) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        const panel = activeTerminalPanel();
+        if (panel) playTerminalPanel(panel);
+        observer.disconnect();
+      }, { threshold: 0.28 });
+      terminalObserver.observe(terminalShowcase);
+    } else {
+      const panel = activeTerminalPanel();
+      if (panel) playTerminalPanel(panel);
+    }
+  }
+  refreshTerminalControls();
+}
 
 const evidenceDialog = document.querySelector("[data-evidence-dialog]");
 const evidenceViewport = document.querySelector("[data-evidence-viewport]");

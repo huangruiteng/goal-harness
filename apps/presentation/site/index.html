@@ -54,7 +54,7 @@
         <div class="hero-grid" aria-hidden="true"></div>
         <div class="hero-copy">
           <p class="eyebrow" data-i18n="hero.eyebrow">Goal-level control plane</p>
-          <h1 id="hero-title" data-i18n-html="hero.title">Your agents keep<br /> the night shift.<br />You keep the judgment.</h1>
+          <h1 id="hero-title" data-i18n-html="hero.title">Your agents keep<br /> the <span class="hero-wave" data-hero-wave="progress">night shift</span>.<br />You keep the <span class="hero-wave" data-hero-wave="judgment">judgment</span>.</h1>
           <p class="hero-body" data-i18n="hero.body">
             A durable control plane for long-horizon work across sessions, runtimes, and hosts—keeping authority, gates, todos, quota, evidence, recovery, and handoffs in one loop.
           </p>
@@ -186,103 +186,83 @@
           <p data-i18n="showcase.body">Two public-safe trajectories preserve delivery, decisions, evidence branches, and recovery across many bounded agent turns.</p>
         </div>
 
-        <div class="evidence-stories">
-          <article class="evidence-story evidence-story-issue">
-            <div class="evidence-story-copy">
-              <div class="evidence-badges">
-                <span data-i18n="showcase.elapsed">200+ hours elapsed lifetime</span>
-                <span data-i18n="showcase.publicSafe">Public-safe evidence</span>
-              </div>
-              <p class="evidence-case-label" data-i18n="showcase.issue.label">Open-source issue fix</p>
-              <h3 data-i18n="showcase.issue.title">PR delivery and reusable fix knowledge evolve together.</h3>
-              <p data-i18n="showcase.issue.body">Focused fixes stay connected to reviewer authority, repository knowledge, terminal recovery, and the next reusable discovery loop.</p>
-              <ol class="evidence-stages" data-i18n-aria="showcase.issue.stagesAria" aria-label="Issue Fix trajectory stages">
-                <li><span>01</span><strong data-i18n="showcase.issue.stage1">Focused PR delivery</strong></li>
-                <li><span>02</span><strong data-i18n="showcase.issue.stage2">Review authority</strong></li>
-                <li><span>03</span><strong data-i18n="showcase.issue.stage3">Terminal recovery</strong></li>
-                <li><span>04</span><strong data-i18n="showcase.issue.stage4">Reusable capability</strong></li>
-              </ol>
-              <button
-                class="evidence-open"
-                type="button"
-                data-evidence-open
-                data-evidence-src="__LOOPX_BASE__site-assets/evidence/long-running-loop-openviking-trajectory.png"
-                data-evidence-title-key="showcase.issue.title"
-              >
-                <span data-i18n="showcase.viewFull">View full evidence</span>
-                <span aria-hidden="true">↗</span>
-              </button>
-            </div>
+        <div class="evidence-terminal" data-terminal-showcase>
+          <div class="evidence-terminal-bar">
+            <div class="evidence-terminal-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+            <p data-i18n="showcase.shellTitle">~/loopx/evidence — curated replay</p>
+            <span data-i18n="showcase.publicSafe">Public-safe evidence</span>
+          </div>
 
-            <div class="curated-map issue-map" data-i18n-aria="showcase.issue.mapAria" aria-label="Curated map of the Open-source Issue Fix trajectory">
-              <div class="map-grid" aria-hidden="true"></div>
-              <div class="map-beam" aria-hidden="true"></div>
-              <div class="map-lane">
-                <span class="map-lane-label" data-i18n="showcase.issue.deliveryLane">Delivery lane</span>
-                <div class="map-route">
-                  <span class="map-node map-node-blue" data-i18n="showcase.issue.node1">Focused issue / PR</span>
-                  <i class="map-connector"><b></b></i>
-                  <span class="map-node map-node-red" data-i18n="showcase.issue.node2">Review gate</span>
-                  <i class="map-connector"><b></b></i>
-                  <span class="map-node map-node-green" data-i18n="showcase.issue.node3">Merge / open evidence</span>
-                </div>
-              </div>
-              <div class="map-crosslink" aria-hidden="true"><i></i></div>
-              <div class="map-lane">
-                <span class="map-lane-label" data-i18n="showcase.issue.capabilityLane">Capability lane</span>
-                <div class="map-route">
-                  <span class="map-node map-node-violet" data-i18n="showcase.issue.node4">Repository knowledge</span>
-                  <i class="map-connector"><b></b></i>
-                  <span class="map-node map-node-blue" data-i18n="showcase.issue.node5">Terminal resume</span>
-                  <i class="map-connector"><b></b></i>
-                  <span class="map-node map-node-violet" data-i18n="showcase.issue.node6">Reusable discovery</span>
-                </div>
-              </div>
-            </div>
-          </article>
+          <div class="evidence-terminal-tabs" role="tablist" data-i18n-aria="showcase.tabsAria" aria-label="Real loop terminal examples">
+            <button id="terminal-tab-issue" type="button" role="tab" aria-selected="true" aria-controls="terminal-panel-issue" data-terminal-tab="issue" data-i18n="showcase.issue.tab">Issue Fix</button>
+            <button id="terminal-tab-ml" type="button" role="tab" aria-selected="false" aria-controls="terminal-panel-ml" data-terminal-tab="ml" data-i18n="showcase.ml.tab">Auto ML</button>
+          </div>
 
-          <article class="evidence-story evidence-story-ml">
-            <div class="evidence-story-copy">
-              <div class="evidence-badges">
-                <span data-i18n="showcase.elapsed">200+ hours elapsed lifetime</span>
-                <span data-i18n="showcase.publicSafe">Public-safe evidence</span>
+          <section class="terminal-demo-panel" id="terminal-panel-issue" role="tabpanel" aria-labelledby="terminal-tab-issue" data-terminal-panel="issue">
+            <header class="terminal-session-header">
+              <span class="terminal-agent-mark" aria-hidden="true">∞</span>
+              <div><strong>LoopX Agent</strong><small data-i18n="showcase.issue.session">Public trajectory 01 · Open-source issue fix</small></div>
+              <button class="terminal-playback" type="button" data-terminal-control data-i18n-aria="showcase.pauseAria" aria-label="Pause terminal replay"><span data-terminal-control-label data-i18n="showcase.pause">Pause</span><i aria-hidden="true"></i></button>
+            </header>
+            <div class="terminal-demo-body" data-terminal-body>
+              <div class="terminal-command"><span aria-hidden="true">›</span><code data-i18n="showcase.issue.command">$ loopx status --goal-id issue-fix</code></div>
+              <div class="terminal-demo-line terminal-line-goal" style="--delay: 900ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">GOAL</span><p data-i18n="showcase.issue.goal">Ship the focused fix and preserve reusable knowledge.</p><b data-i18n="showcase.state.active">ACTIVE</b>
               </div>
-              <p class="evidence-case-label" data-i18n="showcase.ml.label">Auto ML experiment</p>
-              <h3 data-i18n="showcase.ml.title">Evidence branches stay visible until promote or stop.</h3>
-              <p data-i18n="showcase.ml.body">Matched baselines, invalid lineages, negative results, running replicates, and decision gates remain traceable in one experiment arc.</p>
-              <ol class="evidence-stages" data-i18n-aria="showcase.ml.stagesAria" aria-label="Auto ML trajectory stages">
-                <li><span>01</span><strong data-i18n="showcase.ml.stage1">Matched baseline</strong></li>
-                <li><span>02</span><strong data-i18n="showcase.ml.stage2">Lineage audit</strong></li>
-                <li><span>03</span><strong data-i18n="showcase.ml.stage3">Running replicates</strong></li>
-                <li><span>04</span><strong data-i18n="showcase.ml.stage4">Promote / stop gates</strong></li>
-              </ol>
-              <button
-                class="evidence-open"
-                type="button"
-                data-evidence-open
-                data-evidence-src="__LOOPX_BASE__site-assets/evidence/long-running-loop-ml-experiment-trajectory.png"
-                data-evidence-title-key="showcase.ml.title"
-              >
-                <span data-i18n="showcase.viewFull">View full evidence</span>
-                <span aria-hidden="true">↗</span>
-              </button>
+              <div class="terminal-demo-line terminal-line-running" style="--delay: 1800ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">P0</span><p data-i18n="showcase.issue.p0">Focused PR delivery · bounded diff and validation</p><b data-i18n="showcase.state.running">RUNNING</b>
+              </div>
+              <div class="terminal-demo-line terminal-line-gate" style="--delay: 2900ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">GATE</span><p data-i18n="showcase.issue.gate">Reviewer authority · approve the focused change</p><b data-i18n="showcase.state.waiting">WAITING</b>
+              </div>
+              <div class="terminal-demo-line terminal-line-ready" style="--delay: 4100ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">P1</span><p data-i18n="showcase.issue.p1">Repository knowledge and terminal resume remain available</p><b data-i18n="showcase.state.ready">READY</b>
+              </div>
+              <div class="terminal-demo-line terminal-line-evidence" style="--delay: 5400ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">EVIDENCE</span><p data-i18n="showcase.issue.evidence">Merge/open result linked to the next reusable discovery</p><b data-i18n="showcase.state.written">WRITTEN</b>
+              </div>
+              <div class="terminal-demo-line terminal-line-next" data-terminal-last style="--delay: 6800ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">NEXT</span><p data-i18n="showcase.issue.next">Review the focused diff, then continue the capability lane.</p><b data-i18n="showcase.state.safe">SAFE</b>
+              </div>
             </div>
+            <footer class="terminal-demo-footer">
+              <span><b data-i18n="showcase.elapsed">200+ hours elapsed lifetime</b><small data-i18n="showcase.curated">Curated replay from public evidence</small></span>
+              <button class="evidence-open" type="button" data-evidence-open data-evidence-src="__LOOPX_BASE__site-assets/evidence/long-running-loop-openviking-trajectory.png" data-evidence-title-key="showcase.issue.title"><span data-i18n="showcase.viewFull">View full evidence</span><span aria-hidden="true">↗</span></button>
+            </footer>
+          </section>
 
-            <div class="curated-map ml-map" data-i18n-aria="showcase.ml.mapAria" aria-label="Curated map of the Auto ML Experiment trajectory">
-              <div class="map-grid" aria-hidden="true"></div>
-              <div class="auto-map-route">
-                <span class="map-node map-node-blue auto-map-start" data-i18n="showcase.ml.node1">Matched baseline</span>
-                <div class="auto-map-branches">
-                  <span class="map-node map-node-green" data-i18n="showcase.ml.node2">Positive evidence</span>
-                  <span class="map-node map-node-gray" data-i18n="showcase.ml.node3">Negative result</span>
-                  <span class="map-node map-node-red" data-i18n="showcase.ml.node4">Invalid lineage</span>
-                  <span class="map-node map-node-violet" data-i18n="showcase.ml.node5">Running replicate</span>
-                </div>
-                <span class="map-node map-node-green auto-map-end" data-i18n="showcase.ml.node6">Promote / stop gate</span>
+          <section class="terminal-demo-panel" id="terminal-panel-ml" role="tabpanel" aria-labelledby="terminal-tab-ml" data-terminal-panel="ml" hidden>
+            <header class="terminal-session-header">
+              <span class="terminal-agent-mark" aria-hidden="true">∞</span>
+              <div><strong>LoopX Agent</strong><small data-i18n="showcase.ml.session">Public trajectory 02 · Auto ML experiment</small></div>
+              <button class="terminal-playback" type="button" data-terminal-control data-i18n-aria="showcase.pauseAria" aria-label="Pause terminal replay"><span data-terminal-control-label data-i18n="showcase.pause">Pause</span><i aria-hidden="true"></i></button>
+            </header>
+            <div class="terminal-demo-body" data-terminal-body>
+              <div class="terminal-command"><span aria-hidden="true">›</span><code data-i18n="showcase.ml.command">$ loopx status --goal-id auto-ml</code></div>
+              <div class="terminal-demo-line terminal-line-goal" style="--delay: 900ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">BASELINE</span><p data-i18n="showcase.ml.baseline">Matched candidate and evaluation contract locked.</p><b data-i18n="showcase.state.matched">MATCHED</b>
               </div>
-              <div class="auto-map-pulse" aria-hidden="true"><i></i></div>
+              <div class="terminal-demo-line terminal-line-branches" style="--delay: 1900ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">BRANCHES</span><p class="terminal-branch-list"><em data-i18n="showcase.ml.positive">Positive</em><em data-i18n="showcase.ml.negative">Negative</em><em data-i18n="showcase.ml.invalid">Invalid lineage</em><em data-i18n="showcase.ml.replicate">Running replicate</em></p><b data-i18n="showcase.state.visible">VISIBLE</b>
+              </div>
+              <div class="terminal-demo-line terminal-line-running" style="--delay: 3400ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">P1</span><p data-i18n="showcase.ml.p1">Replicate capacity stays bounded while evidence accumulates</p><b data-i18n="showcase.state.running">RUNNING</b>
+              </div>
+              <div class="terminal-demo-line terminal-line-evidence" style="--delay: 4800ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">EVIDENCE</span><p data-i18n="showcase.ml.evidence">Negative results and invalid lineages remain traceable</p><b data-i18n="showcase.state.written">WRITTEN</b>
+              </div>
+              <div class="terminal-demo-line terminal-line-gate" style="--delay: 5900ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">P0 GATE</span><p data-i18n="showcase.ml.gate">Promote or stop after the running replicate completes</p><b data-i18n="showcase.state.waiting">WAITING</b>
+              </div>
+              <div class="terminal-demo-line terminal-line-next" data-terminal-last style="--delay: 7100ms">
+                <i aria-hidden="true"></i><span class="terminal-line-label">NEXT</span><p data-i18n="showcase.ml.next">Compare replicate evidence, then record the decision.</p><b data-i18n="showcase.state.safe">SAFE</b>
+              </div>
             </div>
-          </article>
+            <footer class="terminal-demo-footer">
+              <span><b data-i18n="showcase.elapsed">200+ hours elapsed lifetime</b><small data-i18n="showcase.curated">Curated replay from public evidence</small></span>
+              <button class="evidence-open" type="button" data-evidence-open data-evidence-src="__LOOPX_BASE__site-assets/evidence/long-running-loop-ml-experiment-trajectory.png" data-evidence-title-key="showcase.ml.title"><span data-i18n="showcase.viewFull">View full evidence</span><span aria-hidden="true">↗</span></button>
+            </footer>
+          </section>
         </div>
 
         <p class="evidence-boundary" data-i18n="showcase.boundary">Elapsed lifetime is wall-clock project time. It does not claim continuous model execution or unattended production autonomy.</p>
