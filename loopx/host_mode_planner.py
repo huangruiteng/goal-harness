@@ -728,7 +728,13 @@ def build_host_mode_plan(
                 suggestions=SUPPORTED_TURN_HOST_IDENTITIES,
             )
         normalized_host_identity = candidate
-    identity = _identity_state(agent_id=agent_id, registered_agents=registered_agents)
+    # Host-mode planning continues an existing goal; fresh identity creation
+    # belongs to the onboarding entry points that opt into that policy.
+    identity = _identity_state(
+        agent_id=agent_id,
+        registered_agents=registered_agents,
+        fresh_agent_default=False,
+    )
     raw_scoped = identity.get("selected_agent_id")
     scoped_agent_id = str(raw_scoped) if raw_scoped else None
 
