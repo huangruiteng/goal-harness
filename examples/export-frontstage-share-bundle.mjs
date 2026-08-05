@@ -4,16 +4,21 @@
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
+const homepageDir = resolve(repoRoot, "apps/presentation/site");
 const defaultOutDir = resolve("/tmp", "loopx-frontstage-share-bundle");
 const statusFileName = "status.frontstage-share.json";
 const manifestFileName = "frontstage-share-manifest.json";
 const showcaseCatalogPath = "docs/showcases/showcase-catalog.json";
 const projectionFixturePath = "examples/goal-channel-frontstage-fixture.py";
+const homepageEvidenceAssets = [
+  "docs/assets/long-running-loop-openviking-trajectory.png",
+  "docs/assets/long-running-loop-ml-experiment-trajectory.png",
+];
 
 function parseArgs(argv) {
   const args = {
@@ -45,9 +50,9 @@ function parseArgs(argv) {
 function printHelp() {
   console.log(`Usage: node examples/export-frontstage-share-bundle.mjs [--out-dir DIR] [--base /path/]
 
-Builds apps/presentation/dashboard into a public-safe static bundle, writes a sanitized
-goal_channel_projection_v0 status fixture, and creates /frontstage/index.html
-for direct static hosting.
+Builds the public homepage and apps/presentation/dashboard into a public-safe static
+bundle, writes a sanitized goal_channel_projection_v0 status fixture, and creates
+/frontstage/index.html for direct static hosting.
 
 Defaults:
   --out-dir ${defaultOutDir}
@@ -78,6 +83,21 @@ async function copyIndexForFrontstage(siteDir) {
   await mkdir(frontstageDir, { recursive: true });
   const html = await readFile(indexPath, "utf8");
   await writeFile(resolve(frontstageDir, "index.html"), html);
+}
+
+async function copyHomepage(siteDir, base) {
+  const sourceHtml = await readFile(resolve(homepageDir, "index.html"), "utf8");
+  const html = sourceHtml.replaceAll("__LOOPX_BASE__", base);
+  const assetDir = resolve(siteDir, "site-assets");
+  await mkdir(assetDir, { recursive: true });
+  await writeFile(resolve(siteDir, "index.html"), html);
+  await copyFile(resolve(homepageDir, "home.css"), resolve(assetDir, "home.css"));
+  await copyFile(resolve(homepageDir, "home.js"), resolve(assetDir, "home.js"));
+  const evidenceDir = resolve(assetDir, "evidence");
+  await mkdir(evidenceDir, { recursive: true });
+  for (const assetPath of homepageEvidenceAssets) {
+    await copyFile(resolve(repoRoot, assetPath), resolve(evidenceDir, basename(assetPath)));
+  }
 }
 
 function validateShowcaseHtmlPath(path) {
@@ -183,6 +203,7 @@ function buildStatusFixture(projection) {
 
 async function writeShareReadme(outDir, base, interactivePages) {
   const siteDir = resolve(outDir, "site");
+  const homepageUrl = base;
   const frontstageUrl = `${base}frontstage/`;
   const previewBlock = base === "/"
     ? `## Try It Locally
@@ -192,9 +213,10 @@ cd ${relative(process.cwd(), siteDir) || "."}
 python3 -m http.server 8080
 \`\`\`
 
-Then open:
+Then open the homepage or showcase:
 
 \`\`\`text
+http://127.0.0.1:8080${homepageUrl}
 http://127.0.0.1:8080${frontstageUrl}
 \`\`\`
 `
@@ -204,18 +226,20 @@ This bundle was built for the non-root browser base \`${base}\`. Upload
 \`site/\` to a host that serves it at that base path. For a quick local preview,
 rerun the exporter without \`--base\` and open the generated root-base URL.
 
-Hosted entry:
+Hosted entries:
 
 \`\`\`text
+${homepageUrl}
 ${frontstageUrl}
 \`\`\`
 `;
-  const readme = `# LoopX Frontstage Share Bundle
+  const readme = `# LoopX Public Website Bundle
 
 This directory is a generated, public-safe static bundle. It contains the
-dashboard build plus a sanitized \`goal_channel_projection_v0\` status fixture.
-The public entry opens frontstage showcase mode and does not load \`statusUrl\`
-by default.
+LoopX homepage, the dashboard build, and a sanitized
+\`goal_channel_projection_v0\` status fixture. The root entry is the product
+homepage. The \`/frontstage/\` entry opens showcase mode and does not load
+\`statusUrl\` by default.
 
 Primary public story content is rendered from \`${showcaseCatalogPath}\`. The
 status fixture only gives the frontstage a read-only control-plane shell for
@@ -225,9 +249,11 @@ ${previewBlock}
 
 ## Publication Boundary
 
-- Includes: compiled dashboard assets, \`${statusFileName}\`, direct
-  \`/frontstage/\` static route support, and catalog-declared interactive
-  case pages.
+- Includes: static homepage assets, compiled dashboard assets,
+  \`${statusFileName}\`, direct \`/frontstage/\` static route support, and
+  catalog-declared interactive case pages.
+- Homepage source: \`apps/presentation/site\`.
+- Homepage evidence assets: ${homepageEvidenceAssets.map((path) => `\`${path}\``).join(", ")}.
 - Primary case source: \`${showcaseCatalogPath}\`.
 - Interactive case pages: ${interactivePages.length ? interactivePages.map((path) => `\`${path}\``).join(", ") : "none"}.
 - Demo shell fixture: \`${projectionFixturePath} --format json\`.
@@ -243,8 +269,11 @@ async function writeManifest(outDir, base, interactivePages) {
     base,
     site_dir: "site",
     status_fixture: `site/${statusFileName}`,
+    homepage_entry: "site/index.html",
     frontstage_entry: "site/frontstage/index.html",
     content_sources: {
+      public_homepage: "apps/presentation/site",
+      homepage_evidence_assets: homepageEvidenceAssets,
       primary_public_story: showcaseCatalogPath,
       interactive_case_pages: interactivePages,
       read_only_control_plane_shell: projectionFixturePath,
@@ -334,6 +363,7 @@ async function main() {
 
   await removeCopiedLiveStatusFiles(siteDir);
   await copyIndexForFrontstage(siteDir);
+  await copyHomepage(siteDir, args.base);
   const interactivePages = await copyInteractiveCasePages(siteDir);
 
   const projectionOutput = run("python3", [resolve(repoRoot, "examples/goal-channel-frontstage-fixture.py"), "--format", "json"], {
@@ -351,6 +381,7 @@ async function main() {
     ok: true,
     out_dir: outDir,
     site_dir: siteDir,
+    homepage_url: args.base,
     frontstage_url: `${args.base}frontstage/`,
     status_fixture: `site/${statusFileName}`,
   }, null, 2));

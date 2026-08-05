@@ -6,7 +6,10 @@ on:
     paths:
       - ".github/workflows/frontstage-pages.yml"
       - "apps/presentation/dashboard/**"
+      - "apps/presentation/site/**"
       - "docs/showcases/**"
+      - "docs/assets/long-running-loop-openviking-trajectory.png"
+      - "docs/assets/long-running-loop-ml-experiment-trajectory.png"
       - "examples/export-frontstage-share-bundle.mjs"
       - "examples/frontstage-share-bundle-smoke.mjs"
       - "examples/goal-channel-frontstage-fixture.py"
@@ -18,7 +21,10 @@ on:
     paths:
       - ".github/workflows/frontstage-pages.yml"
       - "apps/presentation/dashboard/**"
+      - "apps/presentation/site/**"
       - "docs/showcases/**"
+      - "docs/assets/long-running-loop-openviking-trajectory.png"
+      - "docs/assets/long-running-loop-ml-experiment-trajectory.png"
       - "examples/export-frontstage-share-bundle.mjs"
       - "examples/frontstage-share-bundle-smoke.mjs"
       - "examples/goal-channel-frontstage-fixture.py"
