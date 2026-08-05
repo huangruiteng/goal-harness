@@ -685,7 +685,11 @@ def build_heartbeat_prompt(
         "registered_agents": normalized_registered_agents,
         "runtime_profile": runtime_profile,
         "scheduler_execution_context": scheduler_execution_context,
-        "visible_goal_host": visible_goal_host,
+        **(
+            {"visible_goal_host": visible_goal_host}
+            if visible_goal_host
+            else {}
+        ),
         **(
             {
                 "initial_runtime_capability_projection": (

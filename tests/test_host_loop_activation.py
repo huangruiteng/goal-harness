@@ -463,6 +463,12 @@ def test_opencode_activation_uses_bridge_tool_and_generic_cli_quota() -> None:
     assert "--runtime-profile generic_cli" in packet["commands"]["heartbeat_prompt"]
 
 
+def test_standard_heartbeat_omits_inactive_visible_goal_host() -> None:
+    payload = build_heartbeat_prompt(goal_id="standard-heartbeat-fixture", thin=True)
+
+    assert "visible_goal_host" not in payload
+
+
 def test_traex_cli_is_an_exact_visible_goal_host_on_the_generic_cli_loop() -> None:
     assert normalize_agent_type("traex") == "traex-cli"
     assert normalize_agent_type("TraeX CLI") == "traex-cli"
