@@ -14,6 +14,7 @@ ROOT_DOCS = {
     "README.md",
     "architecture.md",
     "heartbeat-automation-prompt.md",
+    "index.md",
     "integration.md",
     "project-agent-todo-contract.md",
     "public-private-boundary.md",
