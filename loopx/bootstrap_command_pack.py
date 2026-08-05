@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .agent_registry import registered_agent_ids_from_registry
+from .agent_registry import registered_agent_ids_for_goal
+from .thread_agent_binding import normalize_thread_id, resolve_thread_agent_binding
 from .bootstrap import default_goal_id
 from .capabilities.issue_fix.candidate_preflight import (
     candidate_preflight_input_contract,
@@ -183,6 +184,8 @@ def _start_goal_command(
     project: str,
     goal_id: str | None,
     agent_id: str | None,
+    thread_id: str | None,
+    new_peer: bool,
     cli_bin: str,
     host_surface: str,
     goal_text: str,
@@ -195,6 +198,8 @@ def _start_goal_command(
         f"--project {shell_arg(project)}"
         + (f" --goal-id {shell_arg(goal_id)}" if goal_id else "")
         + (f" --agent-id {shell_arg(agent_id)}" if agent_id else "")
+        + (f" --thread-id {shell_arg(thread_id)}" if thread_id else "")
+        + (" --new-peer" if new_peer else "")
         + f" --host-surface {shell_arg(host_surface)}"
         + render_available_capability_args(available_capabilities)
         + (
@@ -212,6 +217,8 @@ def _start_goal_detail_command(
     project: str,
     goal_id: str | None,
     agent_id: str | None,
+    thread_id: str | None,
+    new_peer: bool,
     cli_bin: str,
     host_surface: str,
     goal_text: str,
@@ -222,6 +229,8 @@ def _start_goal_detail_command(
         project=project,
         goal_id=goal_id,
         agent_id=agent_id,
+        thread_id=thread_id,
+        new_peer=new_peer,
         cli_bin=cli_bin,
         host_surface=host_surface,
         goal_text=goal_text,
@@ -278,6 +287,8 @@ def build_start_goal_host_surface_selection_packet(
     agent_id: str | None,
     cli_bin: str,
     goal_text: str,
+    thread_id: str | None = None,
+    new_peer: bool = False,
     available_capabilities: list[str] | None = None,
     capability_route: str | None = None,
     include_command_pack_detail: bool = False,
@@ -305,6 +316,8 @@ def build_start_goal_host_surface_selection_packet(
             f"--project {shell_arg(resolved_project)}"
             + (f" --goal-id {shell_arg(goal_id)}" if goal_id else "")
             + (f" --agent-id {shell_arg(agent_id)}" if agent_id else "")
+            + (f" --thread-id {shell_arg(thread_id)}" if thread_id else "")
+            + (" --new-peer" if new_peer else "")
             + f" --host-surface {shell_arg(host_surface)}"
             + render_available_capability_args(available_capabilities)
             + (
@@ -366,6 +379,8 @@ def build_start_goal_host_surface_selection_packet(
         "project": resolved_project,
         "goal_id": goal_id,
         "agent_id": agent_id,
+        "thread_id": normalize_thread_id(thread_id),
+        "new_peer": new_peer,
         "host_surface": None,
         "goal_text": normalized_goal_text,
         "host_surface_selection_gate": gate,
@@ -820,6 +835,8 @@ def build_loopx_bootstrap_command_pack(
     cli_bin: str,
     host_surface: str,
     goal_text: str | None = None,
+    thread_id: str | None = None,
+    new_peer: bool = False,
     available_capabilities: list[str] | None = None,
     capability_route: str | None = None,
     resolve_linked_worktree_alias: bool = True,
@@ -834,6 +851,7 @@ def build_loopx_bootstrap_command_pack(
     connected = inspection.get("connection_state") == "connected"
     mutation_confirmation_required = bool(inspection.get("mutation_confirmation_required"))
     normalized_goal_text = " ".join(goal_text.split()) if goal_text else None
+    normalized_thread_id = normalize_thread_id(thread_id)
     explicit_goal_start = bool(normalized_goal_text)
     issue_fix_hint_commands = build_issue_fix_goal_command_templates(
         cli_bin=cli_bin,
@@ -841,10 +859,30 @@ def build_loopx_bootstrap_command_pack(
     )
     agent_type = agent_type_for_host_surface(host_surface)
     registry_path = Path(str(inspection["registry"]))
-    registered_agents = registered_agent_ids_from_registry(
-        registry_path,
-        resolved_goal_id,
+    registry_payload, _registry_error = _read_registry(registry_path)
+    registry_goal = next(
+        (
+            goal
+            for goal in registry_goals(registry_payload or {})
+            if str(goal.get("id")) == resolved_goal_id
+        ),
+        None,
     )
+    registered_agents = registered_agent_ids_for_goal(registry_goal)
+    thread_binding = resolve_thread_agent_binding(
+        registry_goal,
+        host_surface=host_surface,
+        thread_id=normalized_thread_id,
+    )
+    thread_binding["selection_required"] = bool(
+        explicit_goal_start
+        and agent_type == "codex-app"
+        and not normalized_thread_id
+        and not new_peer
+    )
+    effective_agent_id = agent_id
+    if not effective_agent_id and thread_binding.get("status") == "bound":
+        effective_agent_id = str(thread_binding.get("agent_id"))
 
     bootstrap_preview_command = _bootstrap_command(
         project=resolved_project,
@@ -862,10 +900,17 @@ def build_loopx_bootstrap_command_pack(
         agent_type=agent_type,
         goal_id=resolved_goal_id,
         cli_bin=cli_bin,
-        agent_id=agent_id,
+        agent_id=effective_agent_id,
         registered_agents=registered_agents,
         available_capabilities=available_capabilities,
-        fresh_agent_default=explicit_goal_start,
+        fresh_agent_default=(
+            explicit_goal_start
+            and (
+                new_peer
+                or (not normalized_thread_id and agent_type != "codex-app")
+            )
+        ),
+        thread_binding=thread_binding,
     )
     selected_agent_id = host_loop_activation.get("agent_id")
     issue_fix_commands = build_issue_fix_goal_command_templates(
@@ -971,6 +1016,12 @@ def build_loopx_bootstrap_command_pack(
                 if selected_agent_id
                 else ""
             )
+            + (
+                f" --thread-id {shell_arg(normalized_thread_id)}"
+                if normalized_thread_id
+                else ""
+            )
+            + (" --new-peer" if new_peer else "")
             + f" --host-surface {shell_arg(host_surface)}"
             + render_available_capability_args(available_capabilities)
             + (
@@ -990,6 +1041,9 @@ def build_loopx_bootstrap_command_pack(
         "goal_id": resolved_goal_id,
         "agent_id": selected_agent_id,
         "requested_agent_id": agent_id,
+        "thread_id": normalized_thread_id,
+        "new_peer": new_peer,
+        "thread_agent_binding": thread_binding,
         "agent_type": agent_type,
         "host_surface": host_surface,
         "project_connection": inspection,
@@ -1016,6 +1070,20 @@ def build_loopx_bootstrap_command_pack(
             "bootstrap_after_user_confirmation": bootstrap_after_confirmation_command,
             "goal_start_connect_if_needed": goal_start_bootstrap_command,
             "goal_start_plan_prompt": goal_start_plan_prompt,
+            "goal_start_bind_thread": (
+                f"{shell_arg(cli_bin)} bind-agent-thread --goal-id {shell_arg(resolved_goal_id)} "
+                f"--thread-id {shell_arg(normalized_thread_id)} --host-surface {shell_arg(host_surface)} "
+                f"--agent-id {shell_arg(str(selected_agent_id))} --execute"
+                if (
+                    normalized_thread_id
+                    and selected_agent_id
+                    and (
+                        thread_binding.get("status") != "bound"
+                        or thread_binding.get("agent_id") == selected_agent_id
+                    )
+                )
+                else None
+            ),
             "goal_start_refresh_state": render_refresh_state_command(
                 resolved_goal_id,
                 cli_bin=cli_bin,
@@ -1083,6 +1151,8 @@ def _build_multi_goal_start_selection_packet(
     *,
     project: Path,
     agent_id: str | None,
+    thread_id: str | None,
+    new_peer: bool,
     cli_bin: str,
     host_surface: str,
     goal_text: str,
@@ -1103,6 +1173,7 @@ def _build_multi_goal_start_selection_packet(
         return None
 
     normalized_goal_text = " ".join(goal_text.split())
+    normalized_thread_id = normalize_thread_id(thread_id)
     resolved_project = str(inspection["project"])
     issue_fix_commands = build_issue_fix_goal_command_templates(
         cli_bin=cli_bin,
@@ -1118,6 +1189,12 @@ def _build_multi_goal_start_selection_packet(
             f"--project {shell_arg(resolved_project)} "
             f"--goal-id {shell_arg(candidate_goal_id)}"
             + (f" --agent-id {shell_arg(agent_id)}" if agent_id else "")
+            + (
+                f" --thread-id {shell_arg(normalized_thread_id)}"
+                if normalized_thread_id
+                else ""
+            )
+            + (" --new-peer" if new_peer else "")
             + f" --host-surface {shell_arg(host_surface)}"
             + render_available_capability_args(available_capabilities)
             + (
@@ -1132,10 +1209,7 @@ def _build_multi_goal_start_selection_packet(
                 "goal_id": candidate_goal_id,
                 "status": goal.get("status"),
                 "state_file": goal.get("state_file"),
-                "registered_agents": registered_agent_ids_from_registry(
-                    registry_path,
-                    candidate_goal_id,
-                ),
+                "registered_agents": registered_agent_ids_for_goal(goal),
                 "rerun_command": rerun_command,
             }
         )
@@ -1275,6 +1349,8 @@ def _build_multi_goal_start_selection_packet(
         project=resolved_project,
         goal_id=None,
         agent_id=agent_id,
+        thread_id=thread_id,
+        new_peer=new_peer,
         cli_bin=cli_bin,
         host_surface=host_surface,
         goal_text=normalized_goal_text,
@@ -1342,6 +1418,8 @@ def build_start_goal_guided_packet(
     cli_bin: str,
     host_surface: str,
     goal_text: str,
+    thread_id: str | None = None,
+    new_peer: bool = False,
     available_capabilities: list[str] | None = None,
     capability_route: str | None = None,
     include_command_pack_detail: bool = False,
@@ -1350,6 +1428,8 @@ def build_start_goal_guided_packet(
         selection_packet = _build_multi_goal_start_selection_packet(
             project=project,
             agent_id=agent_id,
+            thread_id=thread_id,
+            new_peer=new_peer,
             cli_bin=cli_bin,
             host_surface=host_surface,
             goal_text=goal_text,
@@ -1363,6 +1443,8 @@ def build_start_goal_guided_packet(
         project=project,
         goal_id=goal_id,
         agent_id=agent_id,
+        thread_id=thread_id,
+        new_peer=new_peer,
         cli_bin=cli_bin,
         host_surface=host_surface,
         goal_text=goal_text,
@@ -1381,6 +1463,8 @@ def build_start_goal_guided_packet(
                 project=str(command_pack.get("project") or project),
                 goal_id=str(command_pack.get("goal_id") or "") or None,
                 agent_id=selected_agent_id,
+                thread_id=thread_id,
+                new_peer=new_peer,
                 cli_bin=cli_bin,
                 host_surface=host_surface,
                 goal_text=str(command_pack.get("goal_text") or goal_text),
@@ -1461,7 +1545,12 @@ def build_start_goal_guided_packet(
                     f"{shell_arg(str(command_pack.get('goal_id') or ''))} "
                     "--project . "
                     "--role agent "
-                    "--task-class advancement_task --action-kind <action_kind> "
+                    + (
+                        f"--agent-id {shell_arg(str(command_pack.get('agent_id') or ''))} "
+                        if command_pack.get("agent_id")
+                        else "--agent-id <agent-id> "
+                    )
+                    + "--task-class advancement_task --action-kind <action_kind> "
                     "[--target-key <target_key>] --text '<[P0/P1/P2] ...>'"
                 ),
                 "purpose": (
@@ -1578,6 +1667,8 @@ def build_start_goal_guided_packet(
         project=str(command_pack.get("project") or project),
         goal_id=str(command_pack.get("goal_id") or "") or None,
         agent_id=str(command_pack.get("agent_id") or "") or None,
+        thread_id=thread_id,
+        new_peer=new_peer,
         cli_bin=cli_bin,
         host_surface=host_surface,
         goal_text=str(command_pack.get("goal_text") or goal_text),
@@ -1600,6 +1691,9 @@ def build_start_goal_guided_packet(
         "project": command_pack.get("project"),
         "goal_id": command_pack.get("goal_id"),
         "agent_id": command_pack.get("agent_id"),
+        "thread_id": command_pack.get("thread_id"),
+        "new_peer": command_pack.get("new_peer"),
+        "thread_agent_binding": command_pack.get("thread_agent_binding"),
         "host_surface": command_pack.get("host_surface"),
         "goal_text": command_pack.get("goal_text"),
         "project_connection": command_pack.get("project_connection"),
