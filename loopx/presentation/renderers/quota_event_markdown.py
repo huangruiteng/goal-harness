@@ -3,28 +3,28 @@ from __future__ import annotations
 from typing import Any
 
 from ...control_plane.quota.slot_accounting import QUOTA_SLOT_SPENT_CLASSIFICATION
-from ..markdown import as_dict
+from ..markdown import append_operator_action_markdown, as_dict
 
 
 def render_quota_monitor_poll_markdown(payload: dict[str, Any]) -> str:
     if payload.get("ok") is False:
-        return "\n".join(
-            [
-                "# LoopX Quota Monitor Poll",
-                "",
-                "- ok: `False`",
-                f"- mode: `{payload.get('mode') or 'monitor-poll'}`",
-                f"- goal_id: `{payload.get('goal_id') or ''}`",
-                f"- appended: `{bool(payload.get('appended'))}`",
-                f"- registry_mutated: `{bool(payload.get('registry_mutated'))}`",
-                f"- agent_id: `{payload.get('agent_id') or ''}`",
-                f"- source: `{payload.get('source') or ''}`",
-                f"- todo_id: `{payload.get('todo_id') or ''}`",
-                f"- target_key: `{payload.get('target_key') or ''}`",
-                f"- material_change: `{bool(payload.get('material_change'))}`",
-                f"- reason: {payload.get('reason') or 'monitor-poll rejected'}",
-            ]
-        )
+        lines = [
+            "# LoopX Quota Monitor Poll",
+            "",
+            "- ok: `False`",
+            f"- mode: `{payload.get('mode') or 'monitor-poll'}`",
+            f"- goal_id: `{payload.get('goal_id') or ''}`",
+            f"- appended: `{bool(payload.get('appended'))}`",
+            f"- registry_mutated: `{bool(payload.get('registry_mutated'))}`",
+            f"- agent_id: `{payload.get('agent_id') or ''}`",
+            f"- source: `{payload.get('source') or ''}`",
+            f"- todo_id: `{payload.get('todo_id') or ''}`",
+            f"- target_key: `{payload.get('target_key') or ''}`",
+            f"- material_change: `{bool(payload.get('material_change'))}`",
+            f"- reason: {payload.get('reason') or 'monitor-poll rejected'}",
+        ]
+        append_operator_action_markdown(lines, payload)
+        return "\n".join(lines)
     event = as_dict(payload.get("monitor_event"))
     before = as_dict(event.get("before"))
     todo_writeback = as_dict(event.get("todo_writeback"))
@@ -55,6 +55,7 @@ def render_quota_monitor_poll_markdown(payload: dict[str, Any]) -> str:
             f"last_checked_at={todo_writeback.get('last_checked_at')} "
             f"next_due_at={todo_writeback.get('next_due_at')}"
         )
+    append_operator_action_markdown(lines, payload)
     return "\n".join(lines)
 
 
@@ -111,4 +112,5 @@ def render_quota_slot_preview_markdown(payload: dict[str, Any]) -> str:
             )
     if payload.get("rolling_window_note"):
         lines.append(f"- rolling_window_note: {payload.get('rolling_window_note')}")
+    append_operator_action_markdown(lines, payload)
     return "\n".join(lines)

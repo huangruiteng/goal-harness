@@ -372,9 +372,14 @@ def main() -> int:
             "pull_requests[].evidence_commands",
             "Do not pipe the first packet through `jq`",
             "Do not fill the five-block review from title, labels, changed-file counts, or metadata risk hints alone",
-            "Do not use this skill to approve",
+            "submit a formal `REQUEST_CHANGES` review",
+            "A plain PR comment is not an adequate substitute for `REQUEST_CHANGES`",
+            "keep the workflow read-only only when the user explicitly says `local-only`",
+            "the GitHub review state must match the written verdict",
+            "route approval, merge, self-merge, and admin-bypass actions to `loopx-pr-merge`",
         ):
             assert phrase in pr_review_text, phrase
+        assert "Do not use this skill to approve" not in pr_review_text, pr_review_text
         pr_review_metadata = pr_review_skill.parent / "agents" / "openai.yaml"
         pr_review_metadata_text = pr_review_metadata.read_text(encoding="utf-8")
         assert (

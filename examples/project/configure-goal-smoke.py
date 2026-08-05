@@ -617,17 +617,31 @@ def main() -> int:
         assert disabled_goal["spawn_policy"]["max_children"] == 0, disabled_goal
         assert disabled_goal["spawn_policy"]["allowed_domains"] == [], disabled_goal
 
-        invalid = payload(run_cli(
+        paused = payload(run_cli(
             registry_path,
             "configure-goal",
             "--goal-id",
             GOAL_ID,
             "--quota-compute",
             "0",
+        ))
+        assert paused["ok"] is True, paused
+        assert paused["dry_run"] is True, paused
+        assert paused["changed"] is True, paused
+        assert paused["after"]["quota"]["compute"] == 0.0, paused
+        assert goal_from_registry(registry_path)["quota"]["compute"] == 0.5, paused
+
+        invalid = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--quota-compute",
+            "-0.1",
             check=False,
         ))
         assert invalid["ok"] is False, invalid
-        assert "greater than 0" in invalid["error"], invalid
+        assert "greater than or equal to 0" in invalid["error"], invalid
 
         invalid_replace = payload(run_cli(
             registry_path,

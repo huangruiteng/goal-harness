@@ -1023,6 +1023,48 @@ def build_scheduler_hint(
         }
 
     heartbeat_recommendation = _dict_or_empty(payload.get("heartbeat_recommendation"))
+    if heartbeat_recommendation.get("recommended_mode") == "quota_paused":
+        return apply_scheduler_execution_context(
+            {
+                "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
+                "source": "quota.should-run",
+                "action": "stop_until_explicit_resume",
+                "cadence_class": "quota_paused",
+                "reason_code": "quota_paused",
+                "reason": (
+                    "Goal-level compute quota is paused; recurring host automation "
+                    "must stop until quota.compute is explicitly raised above 0"
+                ),
+                "spend_policy": "no quota spend for paused automation shutdown",
+                "codex_app": {
+                    "apply": "pause_or_delete_current_heartbeat_if_possible",
+                    "host_tool": "automation_update",
+                    "host_action": "pause_or_delete_current_heartbeat",
+                    "host_action_required": True,
+                    "attempt_limit": 1,
+                    "verify_host_result": True,
+                    "ack_required": False,
+                    "resume_trigger": "explicit quota resume with quota.compute > 0",
+                    "no_spend_for_host_action": True,
+                },
+                "unchanged_poll": {
+                    "local_scheduler": "stop",
+                    "codex_cli_tui": "exit",
+                    CODEX_APP_SSH_GOAL_RUNTIME_KEY: "complete_host_goal",
+                    "claude_code_loop": "stop",
+                    "final_quota_replan_check_enabled": False,
+                    "spend_policy": "no quota spend while the Goal is paused",
+                },
+                "unchanged_identity_keys": list(
+                    _scheduler_identity_keys(
+                        cadence_class="quota_paused",
+                        execution_context=execution_context,
+                    )
+                ),
+            },
+            execution_context,
+        )
+
     execution_obligation = _dict_or_empty(payload.get("execution_obligation"))
     automation_liveness = _dict_or_empty(payload.get("automation_liveness"))
     spend_policy = (

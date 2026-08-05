@@ -61,7 +61,7 @@ def explore_feishu_sync_singleflight(
     if target_key in held_targets:
         yield True
         return
-    with try_exclusive_file_lock(target) as lock_path:
+    with try_exclusive_file_lock(target, operation="lark_explore_sync") as lock_path:
         if lock_path is None:
             yield False
             return

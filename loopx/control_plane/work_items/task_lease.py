@@ -471,7 +471,11 @@ def acquire_task_lease(
     lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
     lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
     at = now_utc()
-    with exclusive_file_lock(lock_target):
+    with exclusive_file_lock(
+        lock_target,
+        agent_id=owner,
+        operation="task_lease_acquire",
+    ):
         todo = require_task_lease_owner_allowed(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -586,7 +590,11 @@ def renew_task_lease(
     lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
     lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
     at = now_utc()
-    with exclusive_file_lock(lock_target):
+    with exclusive_file_lock(
+        lock_target,
+        agent_id=owner,
+        operation="task_lease_renew",
+    ):
         require_task_lease_owner_allowed(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -637,7 +645,11 @@ def transfer_task_lease(
     lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
     lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
     at = now_utc()
-    with exclusive_file_lock(lock_target):
+    with exclusive_file_lock(
+        lock_target,
+        agent_id=owner,
+        operation="task_lease_transfer",
+    ):
         require_registered_task_lease_owner(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -689,7 +701,11 @@ def release_task_lease(
     lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
     lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
     at = now_utc()
-    with exclusive_file_lock(lock_target):
+    with exclusive_file_lock(
+        lock_target,
+        agent_id=owner,
+        operation="task_lease_release",
+    ):
         lease = read_lease(lease_path)
         assert_expected_version(lease, expected_version)
         if not lease:

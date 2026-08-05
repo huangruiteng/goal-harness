@@ -935,7 +935,11 @@ def add_goal_todo(
         state_file=state_file,
     )
 
-    with exclusive_file_lock(resolved_state_file):
+    with exclusive_file_lock(
+        resolved_state_file,
+        agent_id=agent_id or claimed_by,
+        operation="todo_add",
+    ):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
@@ -1202,7 +1206,11 @@ def update_goal_todo(
         project=project,
         state_file=state_file,
     )
-    with exclusive_file_lock(resolved_state_file):
+    with exclusive_file_lock(
+        resolved_state_file,
+        agent_id=agent_id or claimed_by,
+        operation="todo_update",
+    ):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
@@ -1543,7 +1551,11 @@ def complete_goal_todo(
         project=project,
         state_file=state_file,
     )
-    with exclusive_file_lock(resolved_state_file):
+    with exclusive_file_lock(
+        resolved_state_file,
+        agent_id=agent_id or claimed_by,
+        operation="todo_complete",
+    ):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
@@ -1852,7 +1864,11 @@ def supersede_goal_todo(
         project=project,
         state_file=state_file,
     )
-    with exclusive_file_lock(resolved_state_file):
+    with exclusive_file_lock(
+        resolved_state_file,
+        agent_id=agent_id,
+        operation="todo_supersede",
+    ):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
@@ -2054,7 +2070,7 @@ def archive_completed_todos(
         state_file=state_file,
     )
 
-    with exclusive_file_lock(resolved_state_file):
+    with exclusive_file_lock(resolved_state_file, operation="todo_archive_completed"):
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         archive_result = archive_completed_todo_lines(

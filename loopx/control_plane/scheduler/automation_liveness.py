@@ -36,6 +36,20 @@ def build_automation_liveness(payload: dict[str, Any]) -> dict[str, Any]:
             "stuck for two more eligible turns"
         ),
     }
+    if recommended_mode == "quota_paused":
+        return {
+            **base,
+            "keep_active": False,
+            "pause_allowed": True,
+            "pause_policy": (
+                "pause or delete the recurring automation now; only an explicit "
+                "quota resume with quota.compute > 0 should recreate or resume it"
+            ),
+            "automation_action": "stop_quota_paused",
+            "reason": "Goal-level compute quota is paused",
+            "next_trigger": "explicit quota resume with quota.compute > 0",
+            "spend_policy": "no quota spend for paused automation shutdown",
+        }
     if effective_action == "agent_monitor_only":
         return {
             **base,

@@ -2432,6 +2432,116 @@ def _build_quota_should_run_payload(
     return payload
 
 
+QUOTA_PAUSED_MODE = "quota_paused"
+
+
+def _quota_item_is_paused(item: dict[str, Any]) -> bool:
+    """Return True when a plan item carries a Goal-level hard pause.
+
+    A paused Goal (`quota.compute<=0`) is a typed terminal decision: it is
+    evaluated before the selector builds any capability, workspace, replan,
+    monitor, or inbox candidate, so no lane can emit a contradicting execution
+    signal underneath the pause.
+    """
+
+    quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+    if str(quota.get("state") or "") == "paused":
+        return True
+    compute = quota.get("compute")
+    return isinstance(compute, (int, float)) and not isinstance(compute, bool) and compute <= 0
+
+
+def _build_quota_paused_should_run_payload(
+    status_payload: dict[str, Any],
+    *,
+    safe_goal_id: str,
+    requested_agent_id: str | None,
+    item: dict[str, Any],
+    plan: dict[str, Any],
+    goal_health_ok: bool,
+    include_scheduler_detail: bool,
+    codex_app_current_rrule: Any,
+    resolved_scheduler_context: SchedulerExecutionContextResolution,
+) -> dict[str, Any]:
+    """Project one canonical paused contract with no contradicting lane authority.
+
+    The whole Goal is hard-paused, so every automatic authority field resolves to
+    the same terminal decision: `should_run=false`, all delivery/repair
+    permissions false, `DONT_NOTIFY`, no quota spend, and a scheduler cadence that
+    is never `run_now`. No capability_gate, workspace_guard, replan, monitor, or
+    inbox candidate is constructed here.
+    """
+
+    quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
+    quota = {**quota, "state": "paused"}
+    reason = str(
+        quota.get("reason")
+        or "compute quota is 0; the whole Goal is hard-paused and automatic agent turns stop"
+    )
+    agent_identity = build_quota_agent_identity(item, agent_id=requested_agent_id)
+    heartbeat_recommendation = {
+        "source": "quota.should-run",
+        "recommended_mode": QUOTA_PAUSED_MODE,
+        "notify": "DONT_NOTIFY",
+        "reason": reason,
+        "spend_policy": "do not append quota spend while the Goal is paused",
+    }
+    execution_obligation = _execution_obligation(
+        should_run=False,
+        effective_action="quota_skip",
+        heartbeat_recommendation=heartbeat_recommendation,
+    )
+    payload: dict[str, Any] = {
+        "ok": goal_health_ok,
+        "status_health_ok": goal_health_ok,
+        "mode": "should-run",
+        "goal_id": safe_goal_id,
+        "decision": "skip",
+        "should_run": False,
+        "normal_delivery_allowed": False,
+        "recovery_delivery_allowed": False,
+        "self_repair_allowed": False,
+        "capability_repair_allowed": False,
+        "workspace_repair_allowed": False,
+        "effective_action": "quota_skip",
+        "actionable_by_codex": False,
+        "reason": reason,
+        "quota": quota,
+        "state": "paused",
+        "safe_bypass_allowed": False,
+        "waiting_on": item.get("waiting_on"),
+        "status": item.get("status"),
+        "lifecycle_phase": item.get("lifecycle_phase"),
+        "lifecycle_flags": item.get("lifecycle_flags"),
+        "source": item.get("source"),
+        "recommended_action": reason,
+        "requires_user_action": False,
+        "heartbeat_recommendation": heartbeat_recommendation,
+        "execution_obligation": execution_obligation,
+        "plan_summary": plan.get("summary"),
+        "todo_write_hint": build_todo_write_hint(safe_goal_id),
+    }
+    payload = _attach_agent_identity_contracts(
+        payload=payload,
+        agent_identity=agent_identity,
+    )
+    payload["automation_liveness"] = build_automation_liveness(payload)
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        available_capabilities=None,
+        scheduler_execution_context=resolved_scheduler_context,
+    )
+    payload["scheduler_hint"] = _scheduler_hint(
+        payload,
+        include_detail=include_scheduler_detail,
+        available_capabilities=None,
+        codex_app_current_rrule=codex_app_current_rrule,
+        scheduler_execution_context=resolved_scheduler_context,
+    )
+    payload["protocol_action_packet"] = build_protocol_action_packet(payload)
+    return payload
+
+
 def build_quota_should_run(
     status_payload: dict[str, Any],
     *,
@@ -2476,6 +2586,18 @@ def build_quota_should_run(
         None,
     )
     if item:
+        if _quota_item_is_paused(item):
+            return _build_quota_paused_should_run_payload(
+                status_payload,
+                safe_goal_id=safe_goal_id,
+                requested_agent_id=agent_id,
+                item=item,
+                plan=plan,
+                goal_health_ok=goal_health_ok,
+                include_scheduler_detail=include_scheduler_detail,
+                codex_app_current_rrule=codex_app_current_rrule,
+                resolved_scheduler_context=resolved_scheduler_context,
+            )
         prepared = _prepare_quota_should_run_item(
             status_payload,
             safe_goal_id=safe_goal_id,

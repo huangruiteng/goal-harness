@@ -12,6 +12,11 @@ LoopX-repo-specific.
 The command is read-only. It does not approve reviews, post PR comments, merge,
 push, spend LoopX quota, or mark LoopX todos complete.
 
+The built-in `pull-request-review` capability adds an optional autonomous
+observation to this same command. It reuses the existing GitHub scan and
+normalized review queue; it does not introduce a second crawler or a new write
+authority.
+
 Codex agents should use the dedicated `loopx-pr-review` skill for this slash
 command. Do not route `/loopx-pr-review` through the broader `loopx-project`
 workflow or the merge-focused `loopx-pr-merge` skill.
@@ -33,6 +38,73 @@ templates enter the model context:
 ```bash
 loopx --format json pr-review --state all [--repo owner/repo] [--since ISO]
 ```
+
+For an autonomous maintainer monitor, request the complete open queue and the
+read-only observation packet:
+
+```bash
+loopx --format json pr-review --repo owner/repo --state open \
+  --autonomous-observation
+```
+
+On a later poll, pass either the prior `autonomous_review` object or the full
+prior PR-review packet:
+
+```bash
+loopx --format json pr-review --repo owner/repo --state open \
+  --autonomous-observation \
+  --previous-observation-json previous.json
+```
+
+After the selected candidate has an externally verifiable review or
+merge-readiness result at that exact head, advance the queue with an explicit
+handled cursor:
+
+```bash
+loopx --format json pr-review --repo owner/repo --state open \
+  --autonomous-observation \
+  --previous-observation-json previous.json \
+  --handled-exact-head 2768@0123456789abcdef0123456789abcdef01234567
+```
+
+`--handled-exact-head` is repeatable and uses `NUMBER@HEAD_OID`. The observation
+persists these public-safe cursors in `handled_exact_heads`. Candidate emission
+alone is not a completion receipt: callers must add the cursor only after
+review-result readback proves that exact head was handled. A newly supplied
+cursor must match the prior packet's candidate; a caller cannot skip an
+unselected PR by naming it handled. A new head is a new candidate even when the
+prior head was handled.
+
+`pending_candidate_exact_head` preserves the last selected but unhandled exact
+head across unchanged and incomplete polls. It is a scheduling cursor only;
+callers still deduplicate Todo creation by exact target key and must not treat
+the cursor as evidence that a review happened.
+
+`pull_request_review_queue_observation_v0` has exactly three observation
+states:
+
+- `not_observed`: the source or packet slice was incomplete. Preserve the
+  previous baseline and do not claim the queue is unchanged.
+- `observed_unchanged`: a complete observation has the same queue fingerprint.
+  Do not create a duplicate exact-head Todo. When an explicit handled cursor
+  advances the scheduling state, the packet may select the next unhandled
+  backlog PR while preserving this observation state. An unhandled candidate
+  can remain selected across polls until the caller supplies its completion
+  cursor.
+- `material_transition`: a complete observation changed an exact head, review
+  decision, check state, draft state, mergeability, or open-queue membership.
+
+The repository-scoped fingerprint contains only compact public PR metadata.
+Persisted `items` carry only PR number and item fingerprint, so the autonomous
+packet does not duplicate the full review queue. The capability selects at
+most one unhandled, non-draft open PR in the existing `pr-review` sequence:
+changed PRs first, then the unchanged backlog after an explicit handled cursor.
+It emits a
+`pull_request_review_todo_preview_v0` bound to its exact head. The preview may
+route to initial review, re-review after changes, or merge-readiness
+qualification. It grants no Todo write, GitHub review/comment, push, or merge
+authority; callers must use normal LoopX Todo authority, `loopx-pr-review`, and
+`loopx-pr-merge` policy for those actions.
 
 Do not pipe that first packet through `jq` or another projection that only
 keeps `.summary` and `.review_sequence`; that drops

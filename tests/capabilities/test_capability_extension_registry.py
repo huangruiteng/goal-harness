@@ -25,6 +25,7 @@ from loopx.extensions.runtime import (
 BUILTIN_IDS = [
     "integration-branch-reconcile",
     "change-quality-qualification",
+    "pull-request-review",
     "issue-fix",
     "decision-context",
     "project-skill-delivery",

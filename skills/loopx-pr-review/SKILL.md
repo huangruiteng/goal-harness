@@ -100,6 +100,42 @@ preserving the latest full packet as the queue source of truth. Never infer
 completeness from `summary.total_pr_count`, a count equal to the limit, or the
 absence of a pagination error.
 
+## Autonomous Monitor Route
+
+For a recurring PR monitor, use the built-in `pull-request-review` capability
+instead of inferring queue state from monitor timing or a remembered chat
+summary:
+
+```bash
+loopx --format json pr-review --repo owner/repo --state open \
+  --autonomous-observation \
+  [--previous-observation-json previous.json] \
+  [--handled-exact-head NUMBER@HEAD_OID]
+```
+
+Treat `autonomous_review.observation_state` literally:
+
+- `not_observed` means the complete queue was not obtained. Preserve the prior
+  fingerprint, retry later, and never report this as unchanged.
+- `observed_unchanged` means a complete exact fingerprint matched. Do not
+  recreate the same review Todo. When an explicit handled cursor is present,
+  the packet may expose the next unhandled backlog candidate without changing
+  this observation state. Deduplicate by exact target key while an unhandled
+  candidate remains selected across polls.
+- `material_transition` may expose one exact-head candidate. Materialize it
+  only through normal Todo authority, then run this review skill for deep
+  evidence and publication.
+
+The candidate is a scheduling preview, not permission to review, comment,
+approve, push, or merge. This skill still owns evidence-backed review
+publication; `loopx-pr-merge` still owns approval and merge policy.
+
+After publishing and reading back the formal review result for the candidate's
+exact head, pass `--handled-exact-head NUMBER@HEAD_OID` on the next complete
+poll. Never infer handled state from candidate selection alone. Preserve the
+returned `handled_exact_heads` through later observation packets; a changed
+head must be reviewed again.
+
 ## Review Flow
 
 Review `review_groups.unmerged` first, then `review_groups.merged`. A queue

@@ -273,7 +273,7 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         ),
     )
     configure_goal_parser.add_argument("--goal-id", required=True, help="Goal id to configure.")
-    configure_goal_parser.add_argument("--quota-compute", type=float, help="Per-goal quota compute multiplier.")
+    configure_goal_parser.add_argument("--quota-compute", type=float, help="Per-goal quota compute multiplier. 0 hard-pauses the whole Goal (all automatic agent turns stop); negative values are rejected.")
     configure_goal_parser.add_argument("--quota-window-hours", type=float, help="Quota rolling window in hours.")
     configure_goal_parser.add_argument(
         "--self-repair-enabled",

@@ -1,0 +1,420 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+OBSERVATION_SCHEMA_VERSION = "pull_request_review_queue_observation_v0"
+CANDIDATE_SCHEMA_VERSION = "pull_request_review_candidate_v0"
+TODO_PREVIEW_SCHEMA_VERSION = "pull_request_review_todo_preview_v0"
+
+OBSERVATION_STATES = {
+    "not_observed",
+    "observed_unchanged",
+    "material_transition",
+}
+
+
+def _fingerprint(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
+def _upper(value: Any, default: str = "UNKNOWN") -> str:
+    text = str(value or "").strip().upper()
+    return text or default
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    return sorted({str(item).strip() for item in value if str(item).strip()})
+
+
+def _check_snapshot(value: Any) -> dict[str, Any]:
+    checks = value if isinstance(value, Mapping) else {}
+    counts = checks.get("counts")
+    compact_counts: dict[str, int] = {}
+    if isinstance(counts, Mapping):
+        for key in ("success", "failure", "pending", "unknown"):
+            try:
+                compact_counts[key] = max(0, int(counts.get(key) or 0))
+            except (TypeError, ValueError):
+                compact_counts[key] = 0
+    return {
+        "counts": compact_counts,
+        "failures": _string_list(checks.get("failures")),
+        "pending": _string_list(checks.get("pending")),
+    }
+
+
+def _pr_snapshot(item: Mapping[str, Any]) -> dict[str, Any]:
+    snapshot = {
+        "number": item.get("number"),
+        "state": _upper(item.get("state"), "OPEN"),
+        "head_oid": str(item.get("head_oid") or "").strip(),
+        "review_decision": _upper(item.get("review_decision")),
+        "checks": _check_snapshot(item.get("checks")),
+        "is_draft": item.get("is_draft") is True,
+        "merge_state": _upper(item.get("merge_state")),
+    }
+    return snapshot | {"fingerprint": _fingerprint(snapshot)}
+
+
+def _previous_observation(value: Any) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    nested = value.get("autonomous_review")
+    return nested if isinstance(nested, Mapping) else value
+
+
+def _previous_items(value: Any) -> dict[str, Mapping[str, Any]]:
+    observation = _previous_observation(value)
+    state = str(observation.get("observation_state") or "")
+    if state not in {"observed_unchanged", "material_transition"} and not (
+        state == "not_observed" and observation.get("baseline_preserved") is True
+    ):
+        return {}
+    items = observation.get("items")
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+        return {}
+    result: dict[str, Mapping[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        number = str(item.get("number") or "").strip()
+        if number:
+            result[number] = item
+    return result
+
+
+def _exact_head_key(number: Any, head_oid: Any) -> str | None:
+    number_text = str(number or "").strip()
+    head_text = str(head_oid or "").strip().lower()
+    if not number_text.isdigit() or not re.fullmatch(
+        r"[0-9a-f]{40}|[0-9a-f]{64}", head_text
+    ):
+        return None
+    return f"{int(number_text)}@{head_text}"
+
+
+def _normalize_handled_exact_heads(value: Any) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    normalized: set[str] = set()
+    for item in value:
+        text = str(item or "").strip()
+        if "@" not in text:
+            raise ValueError(
+                "handled exact head must use NUMBER@HEAD_OID with a 40- or 64-hex head"
+            )
+        number, head_oid = text.split("@", 1)
+        key = _exact_head_key(number, head_oid)
+        if key is None:
+            raise ValueError(
+                "handled exact head must use NUMBER@HEAD_OID with a 40- or 64-hex head"
+            )
+        normalized.add(key)
+    return sorted(normalized, key=lambda item: (int(item.split("@", 1)[0]), item))
+
+
+def _previous_handled_exact_heads(value: Any, *, repository: str) -> list[str]:
+    observation = _previous_observation(value)
+    if str(observation.get("repository") or "").strip() != repository:
+        return []
+    return _normalize_handled_exact_heads(observation.get("handled_exact_heads"))
+
+
+def _previous_candidate_exact_head(value: Any, *, repository: str) -> str | None:
+    observation = _previous_observation(value)
+    if str(observation.get("repository") or "").strip() != repository:
+        return None
+    candidate = observation.get("candidate")
+    if isinstance(candidate, Mapping):
+        key = _exact_head_key(candidate.get("number"), candidate.get("head_oid"))
+        if key is not None:
+            return key
+    pending = str(observation.get("pending_candidate_exact_head") or "").strip()
+    if "@" not in pending:
+        return None
+    number, head_oid = pending.split("@", 1)
+    return _exact_head_key(number, head_oid)
+
+
+def _candidate_action(item: Mapping[str, Any]) -> tuple[str, str] | None:
+    if item.get("is_draft") is True or _upper(item.get("state"), "OPEN") != "OPEN":
+        return None
+    head_oid = str(item.get("head_oid") or "").strip()
+    if not item.get("number") or not re.fullmatch(
+        r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", head_oid
+    ):
+        return None
+    decision = _upper(item.get("review_decision"))
+    if decision == "CHANGES_REQUESTED":
+        return "rereview_pull_request_exact_head", "P0"
+    if decision == "APPROVED":
+        return "qualify_pull_request_merge_readiness", "P1"
+    return "review_pull_request_exact_head", "P1"
+
+
+def _candidate_packet(
+    item: Mapping[str, Any],
+    *,
+    repository: str,
+) -> dict[str, Any] | None:
+    action = _candidate_action(item)
+    if action is None:
+        return None
+    action_kind, priority = action
+    number = item.get("number")
+    head_oid = str(item.get("head_oid") or "").strip()
+    url = str(item.get("url") or "").strip()
+    task_repository = f"git:github.com/{repository}" if repository else None
+    verb = {
+        "rereview_pull_request_exact_head": "Re-review",
+        "qualify_pull_request_merge_readiness": "Qualify merge readiness for",
+        "review_pull_request_exact_head": "Review",
+    }[action_kind]
+    text = (
+        f"[{priority}] {verb} PR #{number} at exact head {head_oid}; "
+        "read the diff and checks, publish a review state matching the evidence, "
+        "and route any merge through repository policy."
+    )
+    return {
+        "schema_version": CANDIDATE_SCHEMA_VERSION,
+        "repository": repository or None,
+        "number": number,
+        "url": url or None,
+        "head_oid": head_oid,
+        "review_decision": _upper(item.get("review_decision")),
+        "merge_state": _upper(item.get("merge_state")),
+        "checks": _check_snapshot(item.get("checks")),
+        "fingerprint": item.get("fingerprint"),
+        "todo_preview": {
+            "schema_version": TODO_PREVIEW_SCHEMA_VERSION,
+            "role": "agent",
+            "priority": priority,
+            "task_class": "advancement_task",
+            "action_kind": action_kind,
+            "task_repository": task_repository,
+            "target_key": f"github-pr-review:{repository}#{number}@{head_oid}",
+            "required_capabilities": ["network", "external_evidence_poll"],
+            "text": text,
+        },
+    }
+
+
+def build_pull_request_review_queue_observation(
+    *,
+    repository: str | None,
+    pull_requests: Sequence[Mapping[str, Any]],
+    result_completeness: Mapping[str, Any],
+    previous_observation: Mapping[str, Any] | None = None,
+    handled_exact_heads: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Build one read-only observation and at most one exact-head candidate."""
+
+    normalized_repository = str(repository or "").strip()
+    previous = _previous_observation(previous_observation)
+    previous_handled = _previous_handled_exact_heads(
+        previous_observation, repository=normalized_repository
+    )
+    supplied_handled = _normalize_handled_exact_heads(handled_exact_heads)
+    allowed_supplied = set(previous_handled)
+    previous_candidate = _previous_candidate_exact_head(
+        previous_observation, repository=normalized_repository
+    )
+    if previous_candidate:
+        allowed_supplied.add(previous_candidate)
+    unexpected_handled = [
+        item for item in supplied_handled if item not in allowed_supplied
+    ]
+    if unexpected_handled:
+        raise ValueError(
+            "handled exact head must match the prior candidate or a persisted "
+            f"handled cursor: {', '.join(unexpected_handled)}"
+        )
+    handled = sorted(
+        {
+            *previous_handled,
+            *supplied_handled,
+        },
+        key=lambda item: (int(item.split("@", 1)[0]), item),
+    )
+    previous_fingerprint = (
+        str(
+            previous.get("queue_fingerprint")
+            or previous.get("previous_queue_fingerprint")
+            or ""
+        )
+        or None
+    )
+    previous_items = list(_previous_items(previous_observation).values())
+    if result_completeness.get("complete") is not True:
+        return {
+            "schema_version": OBSERVATION_SCHEMA_VERSION,
+            "repository": normalized_repository or None,
+            "observation_state": "not_observed",
+            "reason": "complete_open_queue_required",
+            "queue_fingerprint": None,
+            "previous_queue_fingerprint": previous_fingerprint,
+            "baseline_preserved": previous_fingerprint is not None,
+            "items": previous_items,
+            "queue_size": None,
+            "changed_pr_numbers": [],
+            "removed_pr_numbers": [],
+            "candidate": None,
+            "candidate_count": 0,
+            "candidate_selection_reason": None,
+            "pending_candidate_exact_head": (
+                previous_candidate
+                if previous_candidate and previous_candidate not in set(handled)
+                else None
+            ),
+            "handled_exact_heads": handled,
+            "handled_exact_head_count": len(handled),
+            "selection_policy": (
+                "first unhandled changed PR, then first unhandled backlog PR, "
+                "in the existing pr-review sequence; exact head required"
+            ),
+            "write_authority_granted": False,
+            "external_write_performed": False,
+        }
+
+    ranked_items: list[dict[str, Any]] = []
+    for rank, item in enumerate(pull_requests, start=1):
+        if _upper(item.get("state"), "OPEN") != "OPEN":
+            continue
+        snapshot = _pr_snapshot(item)
+        snapshot.update(
+            {
+                "rank": rank,
+                "title": str(item.get("title") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+            }
+        )
+        ranked_items.append(snapshot)
+
+    current_exact_heads = {
+        key
+        for item in ranked_items
+        if (key := _exact_head_key(item.get("number"), item.get("head_oid")))
+        is not None
+    }
+    actionable_exact_heads = {
+        key
+        for item in ranked_items
+        if _candidate_action(item) is not None
+        and (key := _exact_head_key(item.get("number"), item.get("head_oid")))
+        is not None
+    }
+    active_handled = [item for item in handled if item in current_exact_heads]
+    handled_set = set(active_handled)
+
+    queue_items = [
+        {key: item[key] for key in ("number", "fingerprint")}
+        for item in sorted(ranked_items, key=lambda row: str(row.get("number")))
+    ]
+    queue_fingerprint = _fingerprint(
+        {"repository": normalized_repository, "items": queue_items}
+    )
+    previous_repository = str(previous.get("repository") or "").strip()
+    prior_items = (
+        _previous_items(previous_observation)
+        if previous_repository == normalized_repository
+        else {}
+    )
+    changed = [
+        item
+        for item in ranked_items
+        if str(prior_items.get(str(item.get("number")), {}).get("fingerprint") or "")
+        != str(item.get("fingerprint") or "")
+    ]
+    removed_numbers = sorted(
+        number
+        for number in prior_items
+        if number not in {str(item.get("number")) for item in ranked_items}
+    )
+    unchanged = previous_fingerprint == queue_fingerprint
+    observation_state = "observed_unchanged" if unchanged else "material_transition"
+
+    candidate = None
+    candidate_selection_reason = None
+    if observation_state == "material_transition":
+        for item in changed:
+            exact_head_key = _exact_head_key(item.get("number"), item.get("head_oid"))
+            if exact_head_key in handled_set:
+                continue
+            candidate = _candidate_packet(item, repository=normalized_repository)
+            if candidate is not None:
+                candidate_selection_reason = "unhandled_material_transition"
+                break
+    if candidate is None and handled:
+        for item in ranked_items:
+            exact_head_key = _exact_head_key(item.get("number"), item.get("head_oid"))
+            if exact_head_key in handled_set:
+                continue
+            candidate = _candidate_packet(item, repository=normalized_repository)
+            if candidate is not None:
+                candidate_selection_reason = "unhandled_backlog_progression"
+                break
+    candidate_exact_head = (
+        _exact_head_key(candidate.get("number"), candidate.get("head_oid"))
+        if candidate
+        else None
+    )
+    pending_candidate_exact_head = candidate_exact_head
+    if (
+        pending_candidate_exact_head is None
+        and previous_candidate in actionable_exact_heads
+        and previous_candidate not in handled_set
+    ):
+        pending_candidate_exact_head = previous_candidate
+
+    return {
+        "schema_version": OBSERVATION_SCHEMA_VERSION,
+        "repository": normalized_repository or None,
+        "observation_state": observation_state,
+        "reason": (
+            "queue_fingerprint_unchanged"
+            if unchanged
+            else "initial_complete_observation"
+            if not previous_fingerprint
+            else "review_material_fingerprint_changed"
+        ),
+        "queue_fingerprint": queue_fingerprint,
+        "previous_queue_fingerprint": previous_fingerprint,
+        "baseline_preserved": True,
+        "items": queue_items,
+        "queue_size": len(queue_items),
+        "changed_pr_numbers": [item.get("number") for item in changed],
+        "removed_pr_numbers": removed_numbers,
+        "candidate": candidate,
+        "candidate_count": 1 if candidate else 0,
+        "candidate_selection_reason": candidate_selection_reason,
+        "pending_candidate_exact_head": pending_candidate_exact_head,
+        "handled_exact_heads": active_handled,
+        "handled_exact_head_count": len(active_handled),
+        "selection_policy": (
+            "first unhandled changed PR, then first unhandled backlog PR, in the "
+            "existing pr-review sequence; exact head required"
+        ),
+        "write_authority_granted": False,
+        "external_write_performed": False,
+    }
+
+
+__all__ = [
+    "CANDIDATE_SCHEMA_VERSION",
+    "OBSERVATION_SCHEMA_VERSION",
+    "OBSERVATION_STATES",
+    "TODO_PREVIEW_SCHEMA_VERSION",
+    "build_pull_request_review_queue_observation",
+]

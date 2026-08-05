@@ -7,8 +7,8 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -224,6 +224,105 @@ def main() -> int:
         run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE)).stdout
     )
     assert default_payload["request"]["limit"] == 100, default_payload["request"]
+    assert "autonomous_review" not in default_payload, default_payload
+
+    observed = json.loads(
+        run_cli(
+            "--format",
+            "json",
+            "pr-review",
+            "--fixture",
+            str(FIXTURE),
+            "--state",
+            "open",
+            "--autonomous-observation",
+        ).stdout
+    )
+    observation = observed["autonomous_review"]
+    assert observed["request"]["autonomous_observation"] is True, observed["request"]
+    assert "autonomous_review" in observed["request"]["include"], observed["request"]
+    assert (
+        observation["schema_version"] == "pull_request_review_queue_observation_v0"
+    ), observation
+    assert observation["observation_state"] == "material_transition", observation
+    assert observation["candidate_count"] == 1, observation
+    assert observation["candidate"]["number"] == 773, observation
+    assert (
+        observation["candidate"]["head_oid"]
+        == "7730000000000000000000000000000000000000"
+    ), observation
+    assert observation["write_authority_granted"] is False, observation
+    assert_public_safe(observed)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        previous_path = Path(temp_dir) / "previous.json"
+        previous_path.write_text(json.dumps(observed), encoding="utf-8")
+        unchanged = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(FIXTURE),
+                "--state",
+                "open",
+                "--autonomous-observation",
+                "--previous-observation-json",
+                str(previous_path),
+            ).stdout
+        )
+        progressed = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(FIXTURE),
+                "--state",
+                "open",
+                "--autonomous-observation",
+                "--previous-observation-json",
+                str(previous_path),
+                "--handled-exact-head",
+                "773@7730000000000000000000000000000000000000",
+            ).stdout
+        )
+    assert unchanged["request"]["previous_observation_supplied"] is True, unchanged[
+        "request"
+    ]
+    assert (
+        unchanged["autonomous_review"]["observation_state"] == "observed_unchanged"
+    ), unchanged
+    assert unchanged["autonomous_review"]["candidate"] is None, unchanged
+    progressed_observation = progressed["autonomous_review"]
+    assert (
+        progressed_observation["observation_state"] == "observed_unchanged"
+    ), progressed
+    assert progressed_observation["candidate"]["number"] == 771, progressed
+    assert (
+        progressed_observation["candidate_selection_reason"]
+        == "unhandled_backlog_progression"
+    ), progressed
+    assert progressed_observation["handled_exact_head_count"] == 1, progressed
+
+    incomplete_observation = json.loads(
+        run_cli(
+            "--format",
+            "json",
+            "pr-review",
+            "--fixture",
+            str(FIXTURE),
+            "--state",
+            "open",
+            "--limit",
+            "1",
+            "--autonomous-observation",
+        ).stdout
+    )["autonomous_review"]
+    assert incomplete_observation["observation_state"] == "not_observed", (
+        incomplete_observation
+    )
+    assert incomplete_observation["candidate"] is None, incomplete_observation
 
     repository, fixture_prs = load_pr_fixture(FIXTURE)
     merged_fixture = next(item for item in fixture_prs if item.get("state") == "MERGED")

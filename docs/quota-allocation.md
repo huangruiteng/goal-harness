@@ -31,8 +31,19 @@ Examples:
   minute-slots.
 - `0.3`: 30% duty cycle, roughly 7.2 hours per day or 30% of scheduling
   minute-slots.
-- `0`: compute-paused. The goal remains visible but should not receive
-  automatic Codex turns.
+- `0`: compute-paused. This is a **Goal-level hard pause**: the goal stays
+  visible but receives no automatic Codex turns, and `quota should-run` returns
+  a single authoritative paused contract. Because the pause is a typed terminal
+  decision evaluated before any selector lane is built, no capability-bridge,
+  workspace, replan, monitor, or inbox lane can leave a contradicting execution
+  signal underneath it (`should_run=false`, all automatic permissions false,
+  `DONT_NOTIFY`, scheduler never `run_now`, no quota spend). Set it with
+  `loopx configure-goal --quota-compute 0`; negative values are rejected.
+
+  This is different from a single agent's `monitor_only` work mode.
+  `quota.compute=0` pauses the **whole Goal** for every agent and every lane;
+  `monitor_only` is a per-agent lane state where one agent still runs bounded
+  read-only monitor polls while the Goal itself remains active for other work.
 
 The number can be interpreted as either a duty cycle or a relative weight,
 depending on the executor:

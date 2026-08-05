@@ -89,6 +89,15 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
                 lines.append(f"- [{marker}] {text}{suffix}")
         if payload.get("error"):
             lines.append(f"- error: {payload.get('error')}")
+        if payload.get("operator_action"):
+            action = payload["operator_action"]
+            lines.append(f"- error_code: `{payload.get('error_code')}`")
+            lines.append(
+                "- operator_action: "
+                f"action={action.get('action')} "
+                f"holder_pid={action.get('holder_pid') or 'unknown'} "
+                f"retry_mode={action.get('retry_mode')}"
+            )
         return "\n".join(lines)
 
     lines = [
@@ -137,6 +146,15 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
         )
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
+        if payload.get("operator_action"):
+            action = payload["operator_action"]
+            lines.append(f"- error_code: `{payload.get('error_code')}`")
+            lines.append(
+                "- operator_action: "
+                f"action={action.get('action')} "
+                f"holder_pid={action.get('holder_pid') or 'unknown'} "
+                f"retry_mode={action.get('retry_mode')}"
+            )
     elif "todo" in payload:
         marker = todo_marker_for_status(payload.get("status") or TODO_STATUS_OPEN)
         lines.extend(["", "## Todo", "", f"- [{marker}] {payload.get('todo')}"])
