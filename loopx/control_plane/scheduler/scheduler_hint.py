@@ -3,14 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 from ..runtime.time import now_utc, utc_isoformat
-from ..todos.frontier_deadline import build_frontier_recheck_plan
+from ..todos.frontier_deadline import (
+    build_frontier_recheck_plan,
+    todo_summary_frontier_deadline,
+)
 from . import ack as scheduler_ack
 from .arbitration import (
     SchedulerArbitration,
@@ -37,6 +39,7 @@ from .state_transition_rules import (
     decide_scheduler_cadence_transition,
     decide_scheduler_host_transition,
 )
+from .monitor_todo import monitor_cadence_delta
 from .time import parse_scheduler_timestamp
 
 SCHEDULER_HINT_SCHEMA_VERSION = "scheduler_hint_v0"
@@ -46,7 +49,6 @@ CODEX_APP_STATEFUL_BACKOFF_SCHEMA_VERSION = "codex_app_stateful_backoff_v0"
 CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION = "codex_app_scheduler_ack_hint_v0"
 CODEX_APP_SCHEDULER_FAILURE_HINT_SCHEMA_VERSION = "codex_app_scheduler_failure_hint_v0"
 USER_GATE_NOTIFICATION_COOLDOWN_SCHEMA_VERSION = "user_gate_notification_cooldown_v0"
-MONITOR_CADENCE_PATTERN = re.compile(r"^\s*(\d+)\s*([mhd])\s*$", re.IGNORECASE)
 MONITOR_WAIT_PROGRESSION_MINUTES = [15, 30, 60]
 CODEX_APP_MAX_INTERVAL_MINUTES = 60
 DEFAULT_ACK_CAPABILITIES = {"shell", "filesystem_read", "filesystem_write"}
@@ -340,16 +342,10 @@ def _parse_monitor_timestamp(value: Any) -> datetime | None:
 
 
 def _monitor_cadence_minutes(value: Any) -> int | None:
-    match = MONITOR_CADENCE_PATTERN.match(str(value or ""))
-    if not match:
+    cadence_delta = monitor_cadence_delta(value)
+    if cadence_delta is None:
         return None
-    amount = max(1, int(match.group(1)))
-    unit = match.group(2).lower()
-    if unit == "h":
-        return amount * 60
-    if unit == "d":
-        return amount * 24 * 60
-    return amount
+    return max(1, math.ceil(cadence_delta.total_seconds() / 60))
 
 
 def _monitor_wait_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -421,9 +417,9 @@ def _monitor_wait_item_plan(
     if expires_at is not None and last_checked_at is not None and last_checked_at <= current_time:
         phase = "active_window"
         if cadence_minutes is not None:
-            cap_candidates.append(max(host_floor, cadence_minutes))
+            cap_candidates.append(cadence_minutes)
         if next_due_at is not None and next_due_at > current_time:
-            cap_candidates.append(max(host_floor, _minutes_until(next_due_at, current_time)))
+            cap_candidates.append(_minutes_until(next_due_at, current_time))
     elif next_due_at is not None and next_due_at > current_time:
         minutes_until_due = _minutes_until(next_due_at, current_time)
         phase = (
@@ -431,16 +427,19 @@ def _monitor_wait_item_plan(
             if minutes_until_due <= MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES
             else "far_window"
         )
-        cap_candidates.append(max(host_floor, minutes_until_due))
+        cap_candidates.append(minutes_until_due)
         include_next_due_in_reset = True
     elif cadence_minutes is not None:
         phase = "cadence_only"
-        cap_candidates.append(max(host_floor, cadence_minutes))
+        cap_candidates.append(cadence_minutes)
 
     if phase is None or not cap_candidates:
         return None
 
-    cap_minutes = max(host_floor, min(cap_candidates))
+    # Fifteen minutes is the quiet-monitor backoff floor, not a deadline floor.
+    # A tighter explicit cadence or due horizon must wake the host in time.
+    host_floor = min(host_floor, min(cap_candidates))
+    cap_minutes = min(cap_candidates)
     selected_identity = _monitor_item_identity(item)
     reset_profile = {
         "monitor_wait_phase": phase,
@@ -488,6 +487,29 @@ def _monitor_wait_cadence_plan(payload: dict[str, Any]) -> dict[str, Any] | None
             expired_count += 1
             continue
         plans.append(plan)
+
+    frontier_deadline = todo_summary_frontier_deadline(
+        payload.get("agent_todo_summary"),
+        current_time=current_time,
+    )
+    if (
+        isinstance(frontier_deadline, dict)
+        and frontier_deadline.get("source") == "continuous_monitor"
+    ):
+        frontier_plan = _monitor_wait_item_plan(
+            {
+                "title": frontier_deadline.get("identity"),
+                "next_due_at": frontier_deadline.get("next_due_at"),
+            },
+            current_time=current_time,
+        )
+        if frontier_plan and not any(
+            plan.get("selected_monitor_identity")
+            == frontier_plan.get("selected_monitor_identity")
+            and plan.get("next_due_at") == frontier_plan.get("next_due_at")
+            for plan in plans
+        ):
+            plans.append(frontier_plan)
 
     if not plans:
         if expired_count:
@@ -1247,11 +1269,16 @@ def build_scheduler_hint(
             if isinstance(monitor_plan, dict)
             else None
         )
+        monitor_initial_interval = (
+            monitor_progression[0]
+            if isinstance(monitor_progression, list) and monitor_progression
+            else MONITOR_WAIT_HOST_FLOOR_MINUTES
+        )
         monitor_reset_profile = (
             {
                 "cadence_class": "monitor_wait",
-                "codex_app_initial_interval_minutes": MONITOR_WAIT_HOST_FLOOR_MINUTES,
-                "codex_app_initial_rrule": rrule_for_minutes(MONITOR_WAIT_HOST_FLOOR_MINUTES),
+                "codex_app_initial_interval_minutes": monitor_initial_interval,
+                "codex_app_initial_rrule": rrule_for_minutes(monitor_initial_interval),
                 "codex_app_max_interval_minutes": 60,
                 "unchanged_poll_backoff_multiplier": 2,
                 "local_scheduler_unchanged_poll_limit": 3,
