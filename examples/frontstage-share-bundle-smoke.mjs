@@ -111,6 +111,12 @@ if (!homepageHtml.includes('class="hero-phrase"')) {
 if (!homepageHtml.includes('href="/loopx/frontstage/"')) {
   throw new Error("homepage footer must retain the Frontstage entry");
 }
+if (!homepageHtml.includes('href="/loopx/docs/"')) {
+  throw new Error("homepage navigation must link to the hosted docs portal");
+}
+if (homepageHtml.includes('https://github.com/huangruiteng/loopx/tree/main/docs')) {
+  throw new Error("homepage Docs links must not bypass the hosted docs portal");
+}
 if (!homepageHtml.includes('data-copy-key="agentSetup"') || !homepageHtml.includes("One message to your current agent") || !homepageHtml.includes('href="#quickstart"')) {
   throw new Error("homepage must make the localized agent setup prompt the primary first-run path");
 }
@@ -228,7 +234,10 @@ const manifest = JSON.parse(await readFile(resolve(outDir, "frontstage-share-man
 if (manifest.base !== "/loopx/") {
   throw new Error(`manifest base mismatch: ${manifest.base}`);
 }
-if (manifest.homepage_entry !== "site/index.html" || manifest.frontstage_entry !== "site/frontstage/index.html") {
+if (
+  manifest.homepage_entry !== "site/index.html" ||
+  manifest.frontstage_entry !== "site/frontstage/index.html"
+) {
   throw new Error(`manifest entries mismatch: ${JSON.stringify(manifest)}`);
 }
 if (manifest.content_sources?.public_homepage !== "apps/presentation/site") {

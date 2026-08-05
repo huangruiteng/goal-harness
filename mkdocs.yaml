@@ -1,0 +1,133 @@
+site_name: LoopX
+site_url: https://huangruiteng.github.io/loopx/docs/
+repo_url: https://github.com/huangruiteng/loopx
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: output/docs-site
+use_directory_urls: true
+exclude_docs: |
+  /README.md
+  archive/**
+  research/long-horizon-agent-benchmarks/*.json
+  showcases/**/*.html
+  showcases/showcase-animation-prototype.html
+  showcases/showcase-catalog.json
+
+theme:
+  name: material
+  logo: assets/loopx-logo.png
+  favicon: assets/loopx-logo.png
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/brightness-2
+        name: Switch to system preference
+  features:
+    - content.action.edit
+    - content.code.copy
+    - content.tabs.link
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.path
+    - search.highlight
+    - search.share
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - attr_list
+  - def_list
+  - md_in_html
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - guides/README.md
+      - Quick Start: guides/getting-started.md
+      - Newcomer Command Path: guides/newcomer-command-path.md
+      - Custom Runner Integration: guides/custom-agent-runner-integration.md
+      - Auto Research Command Path: guides/auto-research-command-path.md
+  - Concepts:
+      - concepts/README.md
+      - Interaction Patterns: concepts/interaction-pattern-catalog.md
+      - State Interaction Model: state-interaction-model.md
+      - Quota Allocation: quota-allocation.md
+  - Operations:
+      - operations/README.md
+      - Attention Queue: operations/attention-queue.md
+      - Long Task Cadence: operations/long-task-cadence-policy.md
+      - Authority Sources: operations/authority-source-registration.md
+  - Capabilities:
+      - capabilities/README.md
+      - Issue Fix: capabilities/issue-fix/README.md
+      - Change Quality: capabilities/change-quality/README.md
+      - Explore: capabilities/explore/README.md
+      - Material Lifecycle: capabilities/material-lifecycle/README.md
+      - Value Connectors: capabilities/value-connectors/README.md
+  - Integrations:
+      - integrations/README.md
+      - Worker Bridge: integrations/worker-bridge-install-contract.md
+      - Lark Kanban: integrations/lark-kanban-control-plane-adapter.md
+      - Runtime Connector Catalog: integrations/runtime-connector-catalog.md
+  - Reference:
+      - reference/README.md
+      - Extensions: reference/extensions.md
+      - Benchmark Architecture: reference/benchmark-architecture.md
+      - Protocols: reference/protocols/README.md
+      - Contracts: reference/contracts/README.md
+  - Development:
+      - development/README.md
+      - Testing And Quality: development/testing-and-quality.md
+      - Documentation Layout: development/documentation-layout.md
+      - Benchmark Workflow: development/benchmark-developer-workflow.md
+      - Control Plane Course: development/control-plane-course/README.md
+  - Product:
+      - product/README.md
+      - Vision: product/vision.md
+      - Release Readiness: product/release-readiness.md
+      - Surfaces: product/surfaces/README.md
+      - Runtimes: product/runtimes/README.md
+      - Foundations: product/foundations/README.md
+  - Showcases:
+      - showcases/README.md
+      - Frontend Surface: showcases/frontend-surface.md
+      - Blocked P0 Safe Rotation: showcases/cases/0617-blocked-p0-safe-rotation.md
+      - LoopX Self Iteration: showcases/cases/0619-loopx-self-iteration.md
+      - PR Issue Auto Fix: showcases/cases/0624-pr-issue-auto-fix.md

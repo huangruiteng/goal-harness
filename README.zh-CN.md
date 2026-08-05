@@ -10,7 +10,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
 
-[产品首页](https://huangruiteng.github.io/loopx/) · [试用 LoopX](#试用-loopx) · [查看真实 Loop](#证据) · [理解工作原理](#为什么需要-loopx) · [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [English](README.md)
+[产品首页](https://huangruiteng.github.io/loopx/) · [文档](https://huangruiteng.github.io/loopx/docs/) · [试用 LoopX](#试用-loopx) · [查看真实 Loop](#证据) · [理解工作原理](#为什么需要-loopx) · [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [English](README.md)
 
 **把会干活的 Agent，接成可管理、可复盘、可持续改进的数字员工。**
 
@@ -304,6 +304,7 @@ treatment 和 guardrail 的任务，不替代生产审批。先读
 
 - 本地 read-first UI：[Dashboard Guide](apps/presentation/dashboard/README.md)
 - 公开产品概览：[产品首页](https://huangruiteng.github.io/loopx/)
+- 文档门户：[线上文档](https://huangruiteng.github.io/loopx/docs/)
 - 飞书投影：[Lark Kanban Adapter](docs/integrations/lark-kanban-control-plane-adapter.md)
 - 通用 host 集成：[Integration Guide](docs/integration.md)
 - 自有 multi-agent runner：
@@ -346,7 +347,8 @@ loopx check \
 
 ## 进阶文档
 
-按你的角色选择入口；[完整文档索引](docs/README.md)仍是权威地图。
+按你的角色选择入口；[线上文档](https://huangruiteng.github.io/loopx/docs/)
+提供发布后的浏览入口，[完整文档索引](docs/README.md)仍是权威地图。
 
 ### 使用与运维
 

@@ -910,7 +910,8 @@ The dashboard should answer, before raw log drill-down:
 - what is waiting on evidence;
 - what boundary cannot be crossed yet.
 
-See [apps/presentation/dashboard/README.md](../../apps/presentation/dashboard/README.md).
+See
+[apps/presentation/dashboard/README.md](https://github.com/huangruiteng/loopx/blob/main/apps/presentation/dashboard/README.md).
 
 ## Public / Private Boundary
 
@@ -982,7 +983,7 @@ that omits dashboard validation; the runtime evidence records that skip.
 
 Start here:
 
-- [Documentation index](../README.md)
+- [Documentation index](https://github.com/huangruiteng/loopx/blob/main/docs/README.md)
 - [Showcase catalog](../showcases/README.md)
 - [State interaction model](../state-interaction-model.md)
 - [Interaction pattern catalog](../concepts/interaction-pattern-catalog.md)
