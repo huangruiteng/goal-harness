@@ -876,7 +876,9 @@ project-launched ACK into project-local scheduler state instead of the shared
 control plane.
 Monitor-only quiet waits move through `[15, 30, 60]` while preserving the
 same no-spend monitor-poll contract, unless a monitor cadence or due time caps
-the progression earlier.
+the progression earlier. Fifteen minutes is only the default quiet-monitor
+floor: an explicit cadence or due horizon below 15 minutes becomes the host
+initial interval so the next wake cannot occur after the monitor is due.
 Agent-scope waits use a more conservative adjustment curve such as
 `[10, 20, 30, 60]`, so a 600-second local tick stays close to the existing
 agent-to-agent interaction cadence before cooling further.
