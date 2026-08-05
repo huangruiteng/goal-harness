@@ -13,9 +13,11 @@ if str(REPO_ROOT) not in sys.path:
 from loopx.benchmark_core.loop_protocol import (
     BLIND_LOOP_DEFAULT_MAX_ROUNDS,
     CODEX_ACP_BLIND_LOOP_BASELINE_ROUTE,
+    CODEX_CLI_GOAL_BASELINE_ROUTE,
     LEGACY_NONPRODUCT_PROMPT_POLLING_ROUTES,
     LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
     LOOPX_PACKET_ONLY_OBSERVATION_ROUTE,
+    MATCHED_PAIR_CONTRACT_SCHEMA_VERSION,
     MAX5_BLIND_LOOP_NO_FEEDBACK_PROTOCOL_ID,
     PACKET_ONLY_OBSERVATION_PROTOCOL_ID,
     PRODUCT_MODE_MAX5_NO_FEEDBACK_PROTOCOL_ID,
@@ -80,8 +82,14 @@ def main() -> int:
 
     product_contract = build_product_mode_main_table_comparison_contract()
     assert product_contract["protocol_id"] == PRODUCT_MODE_MAX5_NO_FEEDBACK_PROTOCOL_ID
-    assert product_contract["baseline_arm"]["route"] == RAW_CODEX_AUTONOMOUS_MAX5_ROUTE
-    assert product_contract["treatment_arm"]["route"] == LOOPX_PRODUCT_MODE_ROUTE
+    assert (
+        product_contract["baseline_arm"]["route"]
+        == CODEX_CLI_GOAL_BASELINE_ROUTE
+    )
+    assert (
+        product_contract["treatment_arm"]["route"]
+        == LOOPX_GOAL_START_PRODUCT_MODE_ROUTE
+    )
     assert product_contract["policy_gate"]["headline_metrics"] == [
         "best_score",
         "final_score",
@@ -102,23 +110,24 @@ def main() -> int:
         is True
     )
 
-    goal_start_contract = build_product_mode_main_table_comparison_contract(
-        treatment_route=LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
+    historical_product_contract = build_product_mode_main_table_comparison_contract(
+        baseline_route=RAW_CODEX_AUTONOMOUS_MAX5_ROUTE,
+        treatment_route=LOOPX_PRODUCT_MODE_ROUTE,
     )
     assert (
-        goal_start_contract["treatment_arm"]["route"]
-        == LOOPX_GOAL_START_PRODUCT_MODE_ROUTE
+        historical_product_contract["baseline_arm"]["route"]
+        == RAW_CODEX_AUTONOMOUS_MAX5_ROUTE
     )
     assert (
-        goal_start_contract["treatment_arm"]["arm_id"]
-        == "loopx_goal_start_product_mode"
+        historical_product_contract["treatment_arm"]["route"]
+        == LOOPX_PRODUCT_MODE_ROUTE
     )
     assert (
-        goal_start_contract["treatment_arm"]["agent_surface"]
+        product_contract["treatment_arm"]["agent_surface"]
         == "loopx_goal_start_plan_todo_lifecycle_cli"
     )
     assert (
-        goal_start_contract["treatment_arm"]["contract"]["protocol_id"]
+        product_contract["treatment_arm"]["contract"]["protocol_id"]
         == PRODUCT_MODE_MAX5_NO_FEEDBACK_PROTOCOL_ID
     )
 
@@ -191,12 +200,36 @@ def main() -> int:
         "loopx_treatment_claim_blocker"
     ]
 
+    matched_pair_contract = {
+        "schema_version": MATCHED_PAIR_CONTRACT_SCHEMA_VERSION,
+        "case_set_fingerprint": "sha256:case-set",
+        "case_order_fingerprint": "sha256:case-order",
+        "model": "gpt-fixture",
+        "reasoning_effort": "xhigh",
+        "task_packet_fingerprint": "sha256:task-packet",
+        "instruction_channel": "skillsbench_private_task_packet_v1",
+        "sandbox_policy": "docker_workspace_write",
+        "network_policy": "matched_default",
+        "outer_timeout_sec": 21600,
+        "token_budget": 200000,
+        "runner_commit": "runner-commit-fixture",
+        "reducer_commit": "reducer-commit-fixture",
+        "official_verifier_closeout_contract": "skillsbench_official_v1",
+        "best_of_retry_replacement": False,
+        "symmetric_infra_exclusion": True,
+    }
     baseline_run = {
         "benchmark_id": "skillsbench@1.1",
         "case_id": "citation-check",
-        "benchmark_loop_contract": raw_product,
-        "arm_id": "raw_codex_autonomous_max5",
+        "benchmark_loop_contract": build_benchmark_loop_contract(
+            route=CODEX_CLI_GOAL_BASELINE_ROUTE,
+            max_rounds=5,
+        ),
+        "arm_id": "codex_cli_goal_baseline",
         "product_mode": True,
+        "goal_get_present": True,
+        "turn_id_present": True,
+        "matched_pair_contract": dict(matched_pair_contract),
         "official_feedback_blinded": True,
         "reward_feedback_forwarded": False,
         "official_score": 0.0,
@@ -206,14 +239,35 @@ def main() -> int:
         "benchmark_id": "skillsbench@1.1",
         "case_id": "citation-check",
         "benchmark_loop_contract": build_benchmark_loop_contract(
-            route=LOOPX_PRODUCT_MODE_ROUTE,
+            route=LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
             max_rounds=5,
         ),
-        "arm_id": "loopx_product_mode",
+        "arm_id": "loopx_goal_start_product_mode",
         "product_mode": True,
         "loopx_inside_case": True,
-        "loopx_prompt_driven_lifecycle_observed": True,
-        "worker_loopx_cli_call_total": 8,
+        "matched_pair_contract": dict(matched_pair_contract),
+        "interaction_counters": {
+            "goal_start_product_mode": True,
+            "selected_p0_todo_id": "todo-fixture-p0",
+            "remote_command_file_bridge_agent_task_facing_success_count": 1,
+        },
+        "goal_start_product_mode_control_score": {
+            "satisfied": True,
+            "goal_start_guided_command_observed": True,
+            "planner_before_todo_write": True,
+            "selected_p0_todo_id": "todo-fixture-p0",
+            "selected_todo_claimed": True,
+            "selected_todo_updated_before_solver": True,
+            "selected_todo_completed_before_spend": True,
+        },
+        "product_mode_lifecycle_contract": {
+            "schema_version": "skillsbench_product_mode_lifecycle_contract_v0",
+            "satisfied": True,
+            "countable_treatment": True,
+            "closeout_satisfied": True,
+            "agent_bridge_refresh_state_count": 1,
+            "agent_bridge_quota_spend_slot_count": 1,
+        },
         "official_feedback_blinded": True,
         "reward_feedback_forwarded": False,
         "official_score": 1.0,
@@ -233,12 +287,12 @@ def main() -> int:
 
     baseline_run_8 = dict(baseline_run)
     baseline_run_8["benchmark_loop_contract"] = build_benchmark_loop_contract(
-        route=RAW_CODEX_AUTONOMOUS_MAX5_ROUTE,
+        route=CODEX_CLI_GOAL_BASELINE_ROUTE,
         max_rounds=8,
     )
     treatment_run_8 = dict(treatment_run)
     treatment_run_8["benchmark_loop_contract"] = build_benchmark_loop_contract(
-        route=LOOPX_PRODUCT_MODE_ROUTE,
+        route=LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
         max_rounds=8,
     )
     product_pair_8 = classify_product_mode_main_table_pair(
@@ -258,35 +312,140 @@ def main() -> int:
     assert "max_rounds_budget_mismatch" in mismatched_budget_pair["claim_blocker"]
 
     shallow_treatment = dict(treatment_run)
-    shallow_treatment["loopx_prompt_driven_lifecycle_observed"] = False
-    shallow_treatment["worker_loopx_cli_call_total"] = 0
+    shallow_treatment["product_mode_lifecycle_contract"] = {
+        "satisfied": True,
+        "countable_treatment": True,
+    }
     shallow_pair = classify_product_mode_main_table_pair(
         baseline_run=baseline_run,
         treatment_run=shallow_treatment,
     )
     assert shallow_pair["main_table_claim_allowed"] is False, shallow_pair
-    assert "treatment_loopx_lifecycle_not_observed" in shallow_pair["claim_blocker"]
+    assert "treatment_goal_start_lifecycle_incomplete" in shallow_pair[
+        "claim_blocker"
+    ]
 
-    orchestrated_treatment = dict(shallow_treatment)
-    orchestrated_treatment["product_mode_lifecycle_contract"] = {
-        "schema_version": "skillsbench_product_mode_lifecycle_contract_v0",
-        "required": True,
-        "satisfied": True,
-        "countable_treatment": True,
-        "state_read_count": 1,
-        "state_write_count": 3,
-        "execution_style": "orchestrated_agentloop_loopx_cli",
+    missing_goal_baseline = dict(baseline_run)
+    missing_goal_baseline["goal_get_present"] = False
+    missing_goal_pair = classify_product_mode_main_table_pair(
+        baseline_run=missing_goal_baseline,
+        treatment_run=treatment_run,
+    )
+    assert missing_goal_pair["main_table_claim_allowed"] is False, missing_goal_pair
+    assert "baseline_persistent_goal_turn_not_observed" in missing_goal_pair[
+        "claim_blocker"
+    ]
+
+    tui_only_baseline = dict(baseline_run)
+    tui_only_baseline["goal_get_present"] = False
+    tui_only_baseline["turn_id_present"] = False
+    tui_only_baseline["interaction_counters"] = {
+        "codex_cli_goal_tui_trace_present": True,
+        "codex_cli_goal_tui_goal_active_observed_count": 1,
+        "codex_cli_goal_tui_first_action_observed_count": 1,
     }
-    orchestrated_pair = classify_product_mode_main_table_pair(
+    tui_only_pair = classify_product_mode_main_table_pair(
+        baseline_run=tui_only_baseline,
+        treatment_run=treatment_run,
+    )
+    assert "baseline_persistent_goal_turn_not_observed" in tui_only_pair[
+        "claim_blocker"
+    ]
+
+    mismatch_values = {
+        "case_set_fingerprint": "sha256:different-case-set",
+        "case_order_fingerprint": "sha256:different-case-order",
+        "model": "different-model",
+        "reasoning_effort": "high",
+        "task_packet_fingerprint": "sha256:different-task-packet",
+        "instruction_channel": "different-instruction-channel",
+        "sandbox_policy": "different-sandbox",
+        "network_policy": "different-network",
+        "outer_timeout_sec": 10800,
+        "token_budget": 100000,
+        "runner_commit": "different-runner-commit",
+        "reducer_commit": "different-reducer-commit",
+        "official_verifier_closeout_contract": "different-verifier-contract",
+    }
+    for field, mismatch_value in mismatch_values.items():
+        mismatched_treatment = dict(treatment_run)
+        mismatched_contract = dict(matched_pair_contract)
+        mismatched_contract[field] = mismatch_value
+        mismatched_treatment["matched_pair_contract"] = mismatched_contract
+        mismatched_pair = classify_product_mode_main_table_pair(
+            baseline_run=baseline_run,
+            treatment_run=mismatched_treatment,
+        )
+        assert mismatched_pair["main_table_claim_allowed"] is False
+        assert f"{field}_mismatch" in mismatched_pair["claim_blocker"]
+
+    retry_replacement_treatment = dict(treatment_run)
+    retry_replacement_contract = dict(matched_pair_contract)
+    retry_replacement_contract["best_of_retry_replacement"] = True
+    retry_replacement_treatment["matched_pair_contract"] = (
+        retry_replacement_contract
+    )
+    retry_replacement_pair = classify_product_mode_main_table_pair(
         baseline_run=baseline_run,
-        treatment_run=orchestrated_treatment,
+        treatment_run=retry_replacement_treatment,
     )
-    assert orchestrated_pair["main_table_claim_allowed"] is True, (
-        orchestrated_pair
+    assert "treatment_best_of_retry_replacement_not_disabled" in (
+        retry_replacement_pair["claim_blocker"]
     )
-    assert orchestrated_pair["treatment_loopx_lifecycle_observed"] is True, (
-        orchestrated_pair
+
+    asymmetric_infra_treatment = dict(treatment_run)
+    asymmetric_infra_contract = dict(matched_pair_contract)
+    asymmetric_infra_contract["symmetric_infra_exclusion"] = False
+    asymmetric_infra_treatment["matched_pair_contract"] = (
+        asymmetric_infra_contract
     )
+    asymmetric_infra_pair = classify_product_mode_main_table_pair(
+        baseline_run=baseline_run,
+        treatment_run=asymmetric_infra_treatment,
+    )
+    assert "treatment_symmetric_infra_exclusion_not_confirmed" in (
+        asymmetric_infra_pair["claim_blocker"]
+    )
+
+    missing_contract_treatment = dict(treatment_run)
+    missing_contract_treatment.pop("matched_pair_contract")
+    missing_contract_pair = classify_product_mode_main_table_pair(
+        baseline_run=baseline_run,
+        treatment_run=missing_contract_treatment,
+    )
+    assert "matched_pair_contract_missing_or_unsupported" in (
+        missing_contract_pair["claim_blocker"]
+    )
+
+    historical_baseline = dict(baseline_run)
+    historical_baseline["route"] = RAW_CODEX_AUTONOMOUS_MAX5_ROUTE
+    historical_baseline["arm_id"] = "raw_codex_autonomous_max5"
+    historical_baseline["benchmark_loop_contract"] = build_benchmark_loop_contract(
+        route=RAW_CODEX_AUTONOMOUS_MAX5_ROUTE,
+        max_rounds=5,
+    )
+    historical_pair = classify_product_mode_main_table_pair(
+        baseline_run=historical_baseline,
+        treatment_run=treatment_run,
+    )
+    assert "baseline_not_codex_cli_goal_baseline" in historical_pair[
+        "claim_blocker"
+    ]
+
+    prefixed_route_baseline = dict(baseline_run)
+    prefixed_route_baseline["route"] = "fake-codex-cli-goal-baseline-wrapper"
+    prefixed_route_baseline["arm_id"] = "fake_codex_cli_goal_baseline"
+    prefixed_route_baseline["benchmark_loop_contract"] = build_benchmark_loop_contract(
+        route="fake-codex-cli-goal-baseline-wrapper",
+        max_rounds=5,
+    )
+    prefixed_route_pair = classify_product_mode_main_table_pair(
+        baseline_run=prefixed_route_baseline,
+        treatment_run=treatment_run,
+    )
+    assert "baseline_not_codex_cli_goal_baseline" in prefixed_route_pair[
+        "claim_blocker"
+    ]
 
     final_score_only_baseline = dict(baseline_run)
     final_score_only_baseline.pop("round_rewards")

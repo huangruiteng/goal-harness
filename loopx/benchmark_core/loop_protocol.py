@@ -14,6 +14,7 @@ BENCHMARK_PRODUCT_MODE_COMPARISON_SCHEMA_VERSION = (
 MAX5_BLIND_LOOP_NO_FEEDBACK_PROTOCOL_ID = "max5_blind_loop_no_feedback"
 PRODUCT_MODE_MAX5_NO_FEEDBACK_PROTOCOL_ID = "product_mode_max5_no_feedback"
 PACKET_ONLY_OBSERVATION_PROTOCOL_ID = "packet_only_observation"
+MATCHED_PAIR_CONTRACT_SCHEMA_VERSION = "skillsbench_matched_pair_contract_v0"
 
 BLIND_LOOP_DEFAULT_MAX_ROUNDS = 5
 CODEX_ACP_BLIND_LOOP_BASELINE_ROUTE = "codex-acp-blind-loop-baseline"
@@ -64,6 +65,21 @@ LOOPX_PRODUCT_MODE_TREATMENT_ROUTES = frozenset(
         LOOPX_PRODUCT_MODE_ROUTE,
         LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
     }
+)
+MATCHED_PAIR_EQUAL_FIELDS = (
+    "case_set_fingerprint",
+    "case_order_fingerprint",
+    "model",
+    "reasoning_effort",
+    "task_packet_fingerprint",
+    "instruction_channel",
+    "sandbox_policy",
+    "network_policy",
+    "outer_timeout_sec",
+    "token_budget",
+    "runner_commit",
+    "reducer_commit",
+    "official_verifier_closeout_contract",
 )
 
 
@@ -141,8 +157,8 @@ def build_product_mode_main_table_comparison_contract(
     *,
     benchmark_id: str = "skillsbench@1.1",
     max_rounds: int | None = BLIND_LOOP_DEFAULT_MAX_ROUNDS,
-    baseline_route: str = RAW_CODEX_AUTONOMOUS_MAX5_ROUTE,
-    treatment_route: str = LOOPX_PRODUCT_MODE_ROUTE,
+    baseline_route: str = CODEX_CLI_GOAL_BASELINE_ROUTE,
+    treatment_route: str = LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
 ) -> dict[str, Any]:
     budget = (
         max_rounds
@@ -185,11 +201,19 @@ def build_product_mode_main_table_comparison_contract(
         "max_rounds_budget": budget,
         "baseline_arm": {
             "route": baseline_route,
-            "arm_id": "raw_codex_autonomous_max5",
+            "arm_id": (
+                "codex_cli_goal_baseline"
+                if baseline_route == CODEX_CLI_GOAL_BASELINE_ROUTE
+                else "raw_codex_autonomous_max5"
+            ),
             "contract": baseline_contract,
             "loopx_state_todo_replan_cli_required": False,
             "loopx_cli_allowed": False,
-            "agent_surface": "raw_codex_autonomous",
+            "agent_surface": (
+                "codex_cli_persistent_goal"
+                if baseline_route == CODEX_CLI_GOAL_BASELINE_ROUTE
+                else "raw_codex_autonomous"
+            ),
         },
         "treatment_arm": {
             "route": treatment_route,
@@ -218,8 +242,9 @@ def build_product_mode_main_table_comparison_contract(
             ],
             "main_table_claim_requires": [
                 "paired_baseline_and_treatment_same_case",
-                "raw_codex_autonomous_max5_baseline",
-                "loopx_state_todo_replan_cli_treatment",
+                "codex_cli_persistent_goal_baseline",
+                "loopx_goal_start_plan_todo_work_closeout_treatment",
+                "complete_matched_pair_contract",
                 "no_official_feedback_to_either_agent",
                 "compact_round_reward_trace_or_equivalent_metrics",
             ],
@@ -257,13 +282,7 @@ def _run_route_tokens(run: dict[str, Any]) -> set[str]:
 def _route_matches(run: dict[str, Any], *needles: str) -> bool:
     tokens = _run_route_tokens(run)
     lower_tokens = {token.lower() for token in tokens}
-    for needle in needles:
-        lower_needle = needle.lower()
-        if lower_needle in lower_tokens:
-            return True
-        if any(lower_needle in token for token in lower_tokens):
-            return True
-    return False
+    return any(needle.lower() in lower_tokens for needle in needles)
 
 
 def _run_case_id(run: dict[str, Any]) -> str:
@@ -370,33 +389,92 @@ def _run_has_headline_metrics(run: dict[str, Any]) -> bool:
     return False
 
 
-def _loopx_product_lifecycle_observed(run: dict[str, Any]) -> bool:
-    lifecycle_contract = run.get("product_mode_lifecycle_contract")
-    if isinstance(lifecycle_contract, dict):
-        if (
-            lifecycle_contract.get("satisfied") is True
-            and lifecycle_contract.get("countable_treatment") is not False
-        ):
-            return True
-    if run.get("loopx_prompt_driven_lifecycle_observed") is True:
-        return True
-    for key in (
-        "worker_loopx_cli_call_total",
-        "loopx_cli_command_count",
-        "loopx_prompt_driven_command_count",
+def _matched_pair_contract(run: dict[str, Any]) -> dict[str, Any]:
+    contract = run.get("matched_pair_contract")
+    return contract if isinstance(contract, dict) else {}
+
+
+def _compact_pair_value(value: Any) -> str | int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return _compact_run_text(value)
+
+
+def _goal_baseline_observed(run: dict[str, Any]) -> bool:
+    return bool(
+        run.get("goal_get_present") is True
+        and run.get("turn_id_present") is True
+    )
+
+
+def _goal_start_lifecycle_complete(run: dict[str, Any]) -> bool:
+    contract = run.get("product_mode_lifecycle_contract")
+    if not isinstance(contract, dict):
+        return False
+    counters = run.get("interaction_counters")
+    if not isinstance(counters, dict):
+        counters = {}
+    control_score = run.get("goal_start_product_mode_control_score")
+    if not isinstance(control_score, dict):
+        control_score = {}
+    selected_p0 = _compact_run_text(
+        control_score.get("selected_p0_todo_id")
+        or counters.get("selected_p0_todo_id")
+        or contract.get("selected_p0_todo_id")
+    )
+    task_facing_success_count = counters.get(
+        "remote_command_file_bridge_agent_task_facing_success_count"
+    )
+    return bool(
+        contract.get("satisfied") is True
+        and contract.get("countable_treatment") is not False
+        and counters.get("goal_start_product_mode") is True
+        and control_score.get("satisfied") is True
+        and control_score.get("goal_start_guided_command_observed") is True
+        and control_score.get("planner_before_todo_write") is True
+        and control_score.get("selected_todo_claimed") is True
+        and control_score.get("selected_todo_updated_before_solver") is True
+        and control_score.get("selected_todo_completed_before_spend") is True
+        and selected_p0
+        and isinstance(task_facing_success_count, int)
+        and not isinstance(task_facing_success_count, bool)
+        and task_facing_success_count > 0
+        and contract.get("closeout_satisfied") is True
+        and isinstance(contract.get("agent_bridge_refresh_state_count"), int)
+        and contract.get("agent_bridge_refresh_state_count", 0) > 0
+        and isinstance(contract.get("agent_bridge_quota_spend_slot_count"), int)
+        and contract.get("agent_bridge_quota_spend_slot_count", 0) == 1
+    )
+
+
+def _matched_pair_blockers(
+    baseline_run: dict[str, Any],
+    treatment_run: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    baseline = _matched_pair_contract(baseline_run)
+    treatment = _matched_pair_contract(treatment_run)
+    if (
+        baseline.get("schema_version") != MATCHED_PAIR_CONTRACT_SCHEMA_VERSION
+        or treatment.get("schema_version") != MATCHED_PAIR_CONTRACT_SCHEMA_VERSION
     ):
-        value = run.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return True
-    counters = run.get("solution_phase_counters")
-    if isinstance(counters, dict):
-        value = counters.get("loopx_cli_command_count")
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return True
-    trace = run.get("loopx_prompt_driven_trace")
-    if isinstance(trace, dict):
-        return trace.get("lifecycle_observed") is True
-    return False
+        return ["matched_pair_contract_missing_or_unsupported"]
+    for field in MATCHED_PAIR_EQUAL_FIELDS:
+        left = _compact_pair_value(baseline.get(field))
+        right = _compact_pair_value(treatment.get(field))
+        if left in {"", 0} or right in {"", 0}:
+            blockers.append(f"{field}_missing")
+        elif left != right:
+            blockers.append(f"{field}_mismatch")
+    if baseline.get("best_of_retry_replacement") is not False:
+        blockers.append("baseline_best_of_retry_replacement_not_disabled")
+    if treatment.get("best_of_retry_replacement") is not False:
+        blockers.append("treatment_best_of_retry_replacement_not_disabled")
+    if baseline.get("symmetric_infra_exclusion") is not True:
+        blockers.append("baseline_symmetric_infra_exclusion_not_confirmed")
+    if treatment.get("symmetric_infra_exclusion") is not True:
+        blockers.append("treatment_symmetric_infra_exclusion_not_confirmed")
+    return blockers
 
 
 def classify_product_mode_main_table_pair(
@@ -416,6 +494,8 @@ def classify_product_mode_main_table_pair(
     contract = build_product_mode_main_table_comparison_contract(
         benchmark_id=benchmark_id,
         max_rounds=resolved_max_rounds,
+        baseline_route=CODEX_CLI_GOAL_BASELINE_ROUTE,
+        treatment_route=LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
     )
     blockers: list[str] = []
     baseline_case = _run_case_id(baseline_run)
@@ -430,18 +510,21 @@ def classify_product_mode_main_table_pair(
         blockers.append("unexpected_benchmark_id")
     if not _route_matches(
         baseline_run,
-        RAW_CODEX_AUTONOMOUS_MAX5_ROUTE,
-        "raw_codex_autonomous_max5",
-        "skillsbench_raw_codex_autonomous_max5",
+        CODEX_CLI_GOAL_BASELINE_ROUTE,
+        "codex_cli_goal_baseline",
+        "skillsbench_codex_cli_goal_baseline",
     ):
-        blockers.append("baseline_not_raw_codex_autonomous_max5")
+        blockers.append("baseline_not_codex_cli_goal_baseline")
     if not _route_matches(
         treatment_run,
-        LOOPX_PRODUCT_MODE_ROUTE,
-        "loopx_product_mode",
-        "skillsbench_loopx_product_mode",
+        LOOPX_GOAL_START_PRODUCT_MODE_ROUTE,
+        "loopx_goal_start_product_mode",
+        "skillsbench_loopx_goal_start_product_mode",
     ):
-        blockers.append("treatment_not_loopx_product_mode")
+        blockers.append("treatment_not_loopx_goal_start_product_mode")
+    if not _goal_baseline_observed(baseline_run):
+        blockers.append("baseline_persistent_goal_turn_not_observed")
+    blockers.extend(_matched_pair_blockers(baseline_run, treatment_run))
     observed_budgets: dict[str, int] = {}
     for label, run in (("baseline", baseline_run), ("treatment", treatment_run)):
         observed_budget = _run_max_rounds_budget(run)
@@ -467,8 +550,8 @@ def classify_product_mode_main_table_pair(
         blockers.append("max_rounds_budget_mismatch")
     if treatment_run.get("loopx_inside_case") is not True:
         blockers.append("treatment_loopx_inside_case_not_confirmed")
-    if not _loopx_product_lifecycle_observed(treatment_run):
-        blockers.append("treatment_loopx_lifecycle_not_observed")
+    if not _goal_start_lifecycle_complete(treatment_run):
+        blockers.append("treatment_goal_start_lifecycle_incomplete")
 
     allowed = not blockers
     return {
@@ -480,10 +563,16 @@ def classify_product_mode_main_table_pair(
         "benchmark_id": baseline_benchmark,
         "case_id": baseline_case or treatment_case,
         "max_rounds_budget": resolved_max_rounds,
-        "baseline_route_valid": "baseline_not_raw_codex_autonomous_max5"
+        "baseline_route_valid": "baseline_not_codex_cli_goal_baseline"
         not in blockers,
-        "treatment_route_valid": "treatment_not_loopx_product_mode" not in blockers,
-        "treatment_loopx_lifecycle_observed": _loopx_product_lifecycle_observed(
+        "treatment_route_valid": (
+            "treatment_not_loopx_goal_start_product_mode" not in blockers
+        ),
+        "baseline_persistent_goal_observed": _goal_baseline_observed(baseline_run),
+        "matched_pair_contract_complete": not _matched_pair_blockers(
+            baseline_run, treatment_run
+        ),
+        "treatment_loopx_lifecycle_observed": _goal_start_lifecycle_complete(
             treatment_run
         ),
         "official_feedback_blinded": (
