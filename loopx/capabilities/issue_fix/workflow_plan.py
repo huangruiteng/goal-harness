@@ -88,13 +88,6 @@ def build_issue_fix_goal_command_templates(
             f"--goal-id {goal} "
             "--format json"
         ),
-        "issue_fix_discovered_issue_promotion_template": (
-            f"{cli} issue-fix promote-discovered-issue "
-            f"--goal-id {goal} "
-            "--project <approved-repo> "
-            "--promotion-json <issue_fix_discovered_issue_promotion_input_v0.json> "
-            "--execute --format json"
-        ),
         "issue_fix_pr_lifecycle_template": build_issue_fix_pr_lifecycle_command(
             cli_bin=cli_bin,
             goal_id=goal_id,

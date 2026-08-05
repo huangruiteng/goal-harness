@@ -627,24 +627,6 @@ def _selected_goal_capability_route(
         "candidate_authority": "public_open_tracker_issue",
         "authority_refresh_required": "current issue body and latest comments",
         "candidate_preflight": candidate_preflight_input_contract(),
-        "discovered_issue_transition": {
-            "schema_version": "issue_fix_discovered_issue_route_v0",
-            "source_state": "discovered-* placeholder",
-            "activation_condition": (
-                "a reproducible defect discovered during issue-fix work has no "
-                "canonical public issue"
-            ),
-            "promotion_command_key": (
-                "issue_fix_discovered_issue_promotion_template"
-            ),
-            "required_transaction": "issue_fix_discovered_issue_promotion_v0",
-            "authority_scope": "publish",
-            "direct_provider_issue_create": "forbidden",
-            "completion_condition": (
-                "verify one reused or newly created canonical issue and replace "
-                "the discovered placeholder before treating it as public authority"
-            ),
-        },
         "implementation_admission": {
             "status": "qualification_required",
             "state_owner": "issue_fix",
@@ -781,9 +763,6 @@ def _goal_start_contract(
                 "post_pr_reviewer_request_command": issue_fix_commands[
                     "issue_fix_reviewer_request_template"
                 ],
-                "discovered_issue_promotion_command": issue_fix_commands[
-                    "issue_fix_discovered_issue_promotion_template"
-                ],
                 "post_pr_monitor_command": issue_fix_commands[
                     "issue_fix_pr_lifecycle_template"
                 ],
@@ -792,8 +771,6 @@ def _goal_start_contract(
                     "feasibility and writes its successor; otherwise reuse, disposition, or close; "
                     "private repro material, issue body/comment reads, external comments, PR creation, "
                     "merge, publish, destructive git, and production actions stay explicit gates; "
-                    "a newly discovered defect stays a discovered-* placeholder and must use the "
-                    "capability-owned promotion transaction instead of a direct provider issue-create; "
                     "after PR creation, use active external-review-request authority to call "
                     "reviewer-request, verify the formal request or its permission-only reviewer "
                     "comment fallback, then use one monitor per PR state bucket, never per PR; "
@@ -831,7 +808,7 @@ Planning rules:
 4. If several todos share the same priority, their listed order is their relative priority. Preserve that exact order when writing them.
 5. Prefer executable Agent Todo items with `task_class=advancement_task`; use User Todo only for concrete owner decisions or private-material gates.
 6. After writing todos, run `loopx refresh-state --goal-id {goal_id}`, activate the host loop if it is missing, unknown, or stale (Codex App automation, Codex CLI `/goal <task_body>`, Claude Code `/loop`, OpenCode bridge, or a custom host-loop gate), then run its typed `quota_guard` and begin the first allowed bounded segment.
-7. Enter issue-fix only when `selected_capability_route.capability_id=issue-fix`; never infer it from goal text or URLs. Run workflow-plan and feasibility before implementation, write only the admitted successor or no-follow-up, use the projected discovered-issue promotion transaction instead of direct provider issue creation, preserve private/external/destructive gates, verify reviewer requests, and reconcile PR lifecycle one PR per message.
+7. Enter issue-fix only when `selected_capability_route.capability_id=issue-fix`; never infer it from goal text or URLs. Run workflow-plan and feasibility before implementation, write only the admitted successor or no-follow-up, preserve private/external/destructive gates, verify reviewer requests, and reconcile PR lifecycle one PR per message.
 """
 
 
@@ -1568,16 +1545,6 @@ def build_start_goal_guided_packet(
                 "candidate_preflight": selected_capability_route[
                     "candidate_preflight"
                 ],
-                "discovered_issue_transition": selected_capability_route[
-                    "discovered_issue_transition"
-                ],
-                "discovered_issue_promotion_command_source": (
-                    "#/command_pack/commands/"
-                    + str(
-                        selected_capability_route["discovered_issue_transition"]
-                        ["promotion_command_key"]
-                    )
-                ),
                 "command_source": f"#/command_pack/commands/{entry_key}",
                 "admission_command_source": (
                     f"#/command_pack/commands/{admission_key}"
@@ -1736,18 +1703,6 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
                     f"provide {required_evidence}; "
                     f"{preflight.get('decision_rule')}"
                 )
-            discovered_transition = step.get("discovered_issue_transition")
-            if isinstance(discovered_transition, dict):
-                promotion_key = str(
-                    discovered_transition.get("promotion_command_key") or ""
-                )
-                step_lines.append(
-                    "   - discovered defect: keep "
-                    f"`{discovered_transition.get('source_state')}`; "
-                    "direct provider issue creation is "
-                    f"`{discovered_transition.get('direct_provider_issue_create')}`; "
-                    f"promote: `{command_summary(commands.get(promotion_key))}`"
-                )
             step_lines.extend(
                 [
                     f"   - qualify: `{command_summary(entry_command)}`",
@@ -1892,12 +1847,6 @@ Persist candidate preflight. Non-proceed: write its successor/no-follow-up; skip
 
 ```bash
 {commands.get("issue_fix_feasibility_template", "")}
-```
-
-If the route discovers a reproducible defect without a canonical public issue, keep it as a `discovered-*` placeholder and use the capability-owned promotion transaction; do not substitute direct provider issue creation:
-
-```bash
-{commands.get("issue_fix_discovered_issue_promotion_template", "")}
 ```
 
 Private repro material, issue body/comment reads, external comments, PR creation, merge, publish, destructive git, and production actions stay explicit gates.

@@ -252,7 +252,6 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         assert "selected_capability_route.capability_id=issue-fix" in plan_prompt
         assert "never infer it from goal text or URLs" in plan_prompt
         assert "Run workflow-plan and feasibility before implementation" in plan_prompt
-        assert "promotion transaction instead of direct provider issue creation" in plan_prompt
         assert "admitted successor or no-follow-up" in plan_prompt
         assert "reconcile PR lifecycle one PR per message" in plan_prompt
         assert "issue_fix_workflow_plan_template" in commands
@@ -269,13 +268,6 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         assert "--scope-class" in feasibility_template
         assert "--repository-context-json <compact-context.json>" in feasibility_template
         assert "--goal-id" in feasibility_template
-        assert "issue_fix_discovered_issue_promotion_template" in commands
-        promotion_template = str(
-            commands["issue_fix_discovered_issue_promotion_template"]
-        )
-        assert "issue-fix promote-discovered-issue" in promotion_template
-        assert "--promotion-json" in promotion_template
-        assert "--execute" in promotion_template
         assert "issue_fix_pr_lifecycle_template" in commands
         pr_lifecycle_template = str(commands["issue_fix_pr_lifecycle_template"])
         assert "issue-fix pr-lifecycle" in pr_lifecycle_template
@@ -306,9 +298,6 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         )
         assert "workflow-plan" in domain_routes["issue_fix_workflow"]["preview_command"]
         assert "feasibility" in domain_routes["issue_fix_workflow"]["decision_command"]
-        assert "promote-discovered-issue" in domain_routes["issue_fix_workflow"][
-            "discovered_issue_promotion_command"
-        ]
         assert "reviewer-request" in domain_routes["issue_fix_workflow"][
             "post_pr_reviewer_request_command"
         ]
@@ -318,9 +307,6 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
             "issue_fix_workflow"
         ]["writeback"]
         assert "domain-state" in domain_routes["issue_fix_workflow"]["writeback"]
-        assert "instead of a direct provider issue-create" in domain_routes[
-            "issue_fix_workflow"
-        ]["writeback"]
         assert_fixture_unchanged(snapshot)
 
 
