@@ -204,11 +204,24 @@ identity/scope upgrade command instead of returning a legacy unscoped prompt.
 returns `automation_prompt_upgrade.required=true`,
 `blocks_should_run=true`, and `should_run=false` instead of allowing delivery.
 For a hierarchy-era registry, `quota should-run` and `upgrade-plan` return one
-stable migration id, one heartbeat command per registered peer, and a completion
-command. The host update may be retried with that idempotency key; the completion
-command atomically records the migration once, and later quota checks do not
-project it again. A registry without `coordination.registered_agents` must first
-register the peer identity before a scoped prompt can be generated.
+stable migration id and a completion command. When no scoped Codex App manifest
+entry exists for a goal and prompt mode, `upgrade-plan` retains registered peers
+as the migration candidates. Once scoped manifest entries exist, their agent ids
+are the Codex App targets for that goal and mode; other registered peers remain
+visible as excluded targets rather than being treated as missing Codex App
+automations. The host update may be retried with that idempotency key; the
+completion command atomically records the migration once, and later quota checks
+do not project it again. A registry without `coordination.registered_agents` must
+first register the peer identity before a scoped prompt can be generated.
+
+A scoped manifest identity that is absent from the registered peer set is an
+obsolete-automation blocker, not a runnable prompt target: re-register that
+identity or remove/rebind the automation. If a scoped entry coexists with a
+legacy unscoped entry for the same goal and mode, the scoped target stays
+selected but the legacy entry remains a blocker until it is removed or replaced.
+When one or more scoped targets are current and the rest explicitly declare that
+they are not installed, the target set is reconciled: retain both counts, but do
+not create a replacement automation for the intentional no-op target.
 
 If even the compact body is too heavy for an installed automation, generate the
 brief body:
@@ -253,6 +266,11 @@ hard-stop appearing before safe-bypass handling, embedded project policy blocks,
 or pinned `--active-state` arguments. Any warning should be treated as upgrade
 work: regenerate the installed heartbeat from the current CLI contract and keep
 project-specific policy in registry/state/status/review-packet payloads.
+
+Codex App discovery intentionally projects prompt digests and policy-audit
+results without raw prompt bodies. Therefore an
+`installed_manifest_task_body_count` of zero is normal and does not indicate a
+missing automation.
 
 For gray rollout, generate the brief body through `loopx-canary` and pass
 `--cli-bin loopx-canary` so only the selected goal controller uses the

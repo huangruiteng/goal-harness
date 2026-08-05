@@ -23,6 +23,9 @@ GOAL_ID = "upgrade-plan-goal"
 DEFERRED_GOAL_ID = "planned-main-control"
 REGISTERED_GOAL_ID = "registered-agent-upgrade-plan-goal"
 REGISTERED_AGENT_ID = "codex-current"
+TWO_PEER_GOAL_ID = "two-peer-host-surface-goal"
+TWO_PEER_SELECTED_AGENT_ID = "agent-alpha"
+TWO_PEER_EXCLUDED_AGENT_ID = "agent-beta"
 
 
 def write_fixture(root: Path) -> tuple[Path, Path]:
@@ -420,6 +423,250 @@ def assert_registered_agent_activation_is_checked(root: Path) -> None:
     assert "host_loop_activation: surface=`codex_app_heartbeat` status=`current` activated=`True`" in markdown, markdown
 
 
+def assert_scoped_manifest_limits_codex_app_targets(root: Path) -> None:
+    project = root / "two-peer-project"
+    runtime = root / "two-peer-runtime"
+    state_file = project / ".codex" / "goals" / TWO_PEER_GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text("## Agent Todo\n\n- [ ] Keep the fixture current.\n", encoding="utf-8")
+    registry_path = project / ".loopx" / "registry.json"
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "common_runtime_root": str(runtime),
+                "goals": [
+                    {
+                        "id": TWO_PEER_GOAL_ID,
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": f".codex/goals/{TWO_PEER_GOAL_ID}/ACTIVE_GOAL_STATE.md",
+                        "adapter": {"kind": "generic_project_goal_v0", "status": "connected"},
+                        "coordination": {
+                            "registered_agents": [
+                                TWO_PEER_SELECTED_AGENT_ID,
+                                TWO_PEER_EXCLUDED_AGENT_ID,
+                            ]
+                        },
+                        "quota": {"compute": 1.0, "window_hours": 24},
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    missing_manifest = root / "two-peer-missing-manifest.json"
+    onboarding_payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=missing_manifest,
+        cli_bin="loopx",
+    )
+    assert onboarding_payload["summary"]["unknown_prompt_count"] == 2, onboarding_payload
+    assert onboarding_payload["summary"]["host_loop_missing_goal_count"] == 1, onboarding_payload
+    assert onboarding_payload["summary"]["ready_for_default_promotion"] is False, onboarding_payload
+
+    rendered = build_heartbeat_prompt(
+        goal_id=TWO_PEER_GOAL_ID,
+        active_state=None,
+        active_state_source="registry",
+        resolved_active_state=state_file,
+        thin=True,
+        cli_bin="loopx",
+        agent_id=TWO_PEER_SELECTED_AGENT_ID,
+        registered_agents=[TWO_PEER_SELECTED_AGENT_ID, TWO_PEER_EXCLUDED_AGENT_ID],
+        runtime_profile="codex_app_heartbeat",
+    )["task_body"]
+    manifest_path = root / "two-peer-installed-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "automations": [
+                    {
+                        "goal_id": TWO_PEER_GOAL_ID,
+                        "mode": "thin",
+                        "agent_id": TWO_PEER_SELECTED_AGENT_ID,
+                        "prompt_sha256": prompt_digest(rendered),
+                        "status": "ACTIVE",
+                    }
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=manifest_path,
+        cli_bin="loopx",
+    )
+    assert payload["summary"]["current_prompt_count"] == 1, payload
+    assert payload["summary"]["unknown_prompt_count"] == 0, payload
+    assert payload["summary"]["host_loop_missing_goal_count"] == 0, payload
+    assert payload["summary"]["ready_for_default_promotion"] is True, payload
+    goal = payload["managed_heartbeats"][0]
+    activation = goal["host_loop_activation"]
+    assert activation["activated"] is True, payload
+    assert activation["missing_count"] == 0, payload
+    projection = goal["host_loop_target_projection"]["by_mode"]["thin"]
+    assert projection["selection"] == "installed_manifest_scoped", projection
+    assert projection["target_agent_ids"] == [TWO_PEER_SELECTED_AGENT_ID], projection
+    assert projection["excluded_registered_agents"] == [TWO_PEER_EXCLUDED_AGENT_ID], projection
+    multi_mode_payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=manifest_path,
+        cli_bin="loopx",
+        modes=["thin", "compact"],
+    )
+    multi_mode_projection = multi_mode_payload["managed_heartbeats"][0][
+        "host_loop_target_projection"
+    ]["by_mode"]
+    assert multi_mode_projection["thin"]["target_agent_ids"] == [TWO_PEER_SELECTED_AGENT_ID]
+    assert multi_mode_projection["compact"]["selection"] == "registry_candidates"
+    assert multi_mode_projection["compact"]["target_agent_ids"] == [
+        TWO_PEER_SELECTED_AGENT_ID,
+        TWO_PEER_EXCLUDED_AGENT_ID,
+    ]
+    assert multi_mode_payload["summary"]["unknown_prompt_count"] == 2, multi_mode_payload
+    assert multi_mode_payload["summary"]["ready_for_default_promotion"] is False, multi_mode_payload
+    markdown = render_upgrade_plan_markdown(payload)
+    assert "host_loop_target_projection" in markdown, markdown
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["automations"].append(
+        {
+            "goal_id": TWO_PEER_GOAL_ID,
+            "mode": "thin",
+            "agent_id": TWO_PEER_EXCLUDED_AGENT_ID,
+            "status": "not_installed",
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    mixed_payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=manifest_path,
+        cli_bin="loopx",
+    )
+    mixed_goal = mixed_payload["managed_heartbeats"][0]
+    mixed_activation = mixed_goal["host_loop_activation"]
+    assert mixed_payload["summary"]["current_prompt_count"] == 1, mixed_payload
+    assert mixed_payload["summary"]["not_installed_prompt_count"] == 1, mixed_payload
+    assert mixed_payload["summary"]["host_loop_missing_goal_count"] == 0, mixed_payload
+    assert mixed_payload["summary"]["ready_for_default_promotion"] is True, mixed_payload
+    assert mixed_goal["requires_update"] is False, mixed_payload
+    assert mixed_activation["status"] == "current_with_explicit_not_installed", mixed_payload
+    assert mixed_activation["activated"] is True, mixed_payload
+    mixed_propagation = mixed_payload["default_upgrade_propagation"]
+    assert mixed_propagation["update_count"] == 0, mixed_payload
+    assert mixed_propagation["managed_targets"][0]["requires_update"] is False, mixed_payload
+    assert (
+        mixed_propagation["managed_targets"][0]["action"]
+        == "current_with_explicit_not_installed"
+    ), mixed_payload
+
+    manifest["automations"] = manifest["automations"][:1]
+    manifest["automations"].append(
+        {
+            "goal_id": TWO_PEER_GOAL_ID,
+            "mode": "thin",
+            "prompt_sha256": "legacy-unscoped-digest",
+            "status": "ACTIVE",
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    legacy_payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=manifest_path,
+        cli_bin="loopx",
+    )
+    legacy_goal = legacy_payload["managed_heartbeats"][0]
+    legacy_activation = legacy_goal["host_loop_activation"]
+    assert legacy_goal["installed_prompts"]["thin:agent-alpha"]["status"] == "current", legacy_payload
+    assert legacy_activation["status"] == "legacy_unscoped", legacy_payload
+    assert legacy_activation["activated"] is False, legacy_payload
+    assert legacy_activation["legacy_unscoped_count"] == 1, legacy_payload
+    assert legacy_payload["summary"]["legacy_unscoped_blocker_count"] == 1, legacy_payload
+    assert legacy_payload["summary"]["ready_for_default_promotion"] is False, legacy_payload
+    assert "remove or replace the legacy unscoped automation" in legacy_activation["recommended_action"]
+    legacy_target = legacy_payload["default_upgrade_propagation"]["managed_targets"][0]
+    assert legacy_target["action"] == "replace_legacy_unscoped_automation", legacy_payload
+    assert "remove or replace the legacy unscoped automation" in legacy_target["reason"]
+    legacy_projection = legacy_goal["host_loop_target_projection"]["by_mode"]["thin"]
+    assert legacy_projection["target_agent_ids"] == [TWO_PEER_SELECTED_AGENT_ID], legacy_projection
+    assert legacy_projection["excluded_registered_agents"] == [TWO_PEER_EXCLUDED_AGENT_ID], legacy_projection
+    assert len(legacy_projection["legacy_unscoped_entries"]) == 1, legacy_projection
+
+    manifest["automations"][1]["status"] = "not_installed"
+    manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    legacy_noop_payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=manifest_path,
+        cli_bin="loopx",
+    )
+    assert legacy_noop_payload["summary"]["legacy_unscoped_blocker_count"] == 0, legacy_noop_payload
+    assert legacy_noop_payload["summary"]["ready_for_default_promotion"] is True, legacy_noop_payload
+
+    manifest["automations"] = manifest["automations"][:1]
+    manifest["automations"][0]["agent_id"] = "agent-orphan"
+    manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    orphan_payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=manifest_path,
+        cli_bin="loopx",
+    )
+    orphan_goal = orphan_payload["managed_heartbeats"][0]
+    orphan_installed = orphan_goal["installed_prompts"]["thin:agent-orphan"]
+    orphan_activation = orphan_goal["host_loop_activation"]
+    assert orphan_installed["status"] == "unregistered_agent", orphan_payload
+    assert orphan_installed["requires_update"] is True, orphan_payload
+    assert orphan_goal["generated_prompts"]["thin:agent-orphan"]["command"] is None, orphan_payload
+    assert orphan_activation["status"] == "unregistered_agent", orphan_payload
+    assert orphan_activation["activated"] is False, orphan_payload
+    assert orphan_payload["summary"]["unregistered_agent_prompt_count"] == 1, orphan_payload
+    assert orphan_payload["summary"]["ready_for_default_promotion"] is False, orphan_payload
+    assert "re-register the scoped automation identity" in orphan_activation["recommended_action"]
+    orphan_target = orphan_payload["default_upgrade_propagation"]["managed_targets"][0]
+    assert orphan_target["action"] == "repair_unregistered_agent", orphan_payload
+    assert "re-register the scoped automation identity" in orphan_target["reason"]
+
+    manifest["automations"][0]["agent_id"] = TWO_PEER_SELECTED_AGENT_ID
+    manifest["automations"][0]["prompt_sha256"] = "stale-digest"
+    manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    stale_payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=manifest_path,
+        cli_bin="loopx",
+    )
+    assert stale_payload["summary"]["stale_prompt_count"] == 1, stale_payload
+    assert stale_payload["summary"]["unknown_prompt_count"] == 0, stale_payload
+    assert stale_payload["summary"]["host_loop_missing_goal_count"] == 1, stale_payload
+    assert stale_payload["summary"]["ready_for_default_promotion"] is False, stale_payload
+    assert stale_payload["managed_heartbeats"][0]["requires_update"] is True, stale_payload
+    assert stale_payload["managed_heartbeats"][0]["host_loop_activation"]["status"] == "stale", stale_payload
+
+    manifest["automations"][0]["status"] = "not_installed"
+    manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    not_installed_payload = build_upgrade_plan(
+        registry_path=registry_path,
+        installed_manifest=manifest_path,
+        cli_bin="loopx",
+    )
+    assert not_installed_payload["summary"]["not_installed_prompt_count"] == 1, not_installed_payload
+    assert not_installed_payload["summary"]["unknown_prompt_count"] == 0, not_installed_payload
+    assert not_installed_payload["summary"]["host_loop_missing_goal_count"] == 0, not_installed_payload
+    assert not_installed_payload["summary"]["ready_for_default_promotion"] is True, not_installed_payload
+    not_installed_goal = not_installed_payload["managed_heartbeats"][0]
+    assert not_installed_goal["requires_update"] is False, not_installed_payload
+    assert not_installed_goal["host_loop_activation"]["status"] == "explicitly_not_installed"
+    assert (
+        not_installed_payload["default_upgrade_propagation"]["managed_targets"][0]["action"]
+        == "not_installed_noop"
+    ), not_installed_payload
+
+
 def assert_codex_app_automation_is_discovered(registry_path: Path, codex_home: Path, first_payload: dict) -> None:
     rendered = build_heartbeat_prompt(
         goal_id=GOAL_ID,
@@ -521,6 +768,7 @@ def main() -> int:
             assert_codex_app_automation_is_discovered(registry_path, root / "codex-home", first_payload)
             assert_codex_app_stale_policy_prompt_is_flagged(registry_path, root / "codex-home")
             assert_registered_agent_activation_is_checked(root)
+            assert_scoped_manifest_limits_codex_app_targets(root)
         finally:
             if old_codex_home is None:
                 os.environ.pop("CODEX_HOME", None)

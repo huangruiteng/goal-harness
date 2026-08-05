@@ -400,6 +400,90 @@ def index_installed_entries(entries: list[dict[str, Any]]) -> dict[tuple[str, st
     return indexed
 
 
+def scoped_manifest_agent_ids(
+    entries: list[dict[str, Any]], *, goal_id: str, mode: str
+) -> list[str]:
+    """Return the installed Codex App targets explicitly scoped to one goal/mode."""
+    agent_ids: list[str] = []
+    for entry in entries:
+        entry_goal_id, entry_mode, agent_id = entry_key(entry)
+        if entry_goal_id != goal_id or entry_mode != mode or not agent_id:
+            continue
+        if agent_id not in agent_ids:
+            agent_ids.append(agent_id)
+    return agent_ids
+
+
+def coexisting_legacy_unscoped_entries(
+    entries: list[dict[str, Any]], *, goal_id: str, mode: str, scoped_agents: list[str]
+) -> list[dict[str, Any]]:
+    """Project unscoped entries only when they coexist with scoped App targets."""
+    if not scoped_agents:
+        return []
+    projected: list[dict[str, Any]] = []
+    for entry in entries:
+        entry_goal_id, entry_mode, agent_id = entry_key(entry)
+        if (
+            entry_goal_id != goal_id
+            or entry_mode != mode
+            or agent_id
+            or entry_declares_not_installed(entry)
+        ):
+            continue
+        projected.append(
+            {
+                "status": "legacy_unscoped",
+                "automation_id": entry.get("automation_id"),
+                "installed": not entry_declares_not_installed(entry),
+                "prompt_sha256": installed_entry_digest(entry),
+                "prompt_policy_audit": installed_prompt_policy_audit(entry),
+                "recommended_action": "remove or replace the legacy unscoped automation with a scoped heartbeat",
+            }
+        )
+    return projected
+
+
+def host_loop_target_projection(
+    *,
+    goal_id: str,
+    modes: tuple[str, ...],
+    registered_agents: list[str],
+    manifest_entries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Explain how each Codex App mode selected its automation targets."""
+    by_mode: dict[str, dict[str, Any]] = {}
+    for mode in modes:
+        scoped_agents = scoped_manifest_agent_ids(
+            manifest_entries, goal_id=goal_id, mode=mode
+        )
+        legacy_entries = coexisting_legacy_unscoped_entries(
+            manifest_entries,
+            goal_id=goal_id,
+            mode=mode,
+            scoped_agents=scoped_agents,
+        )
+        target_agents = scoped_agents or registered_agents
+        excluded_registered_agents = [
+            agent_id for agent_id in registered_agents if agent_id not in target_agents
+        ]
+        by_mode[mode] = {
+            "selection": "installed_manifest_scoped" if scoped_agents else "registry_candidates",
+            "target_agent_ids": target_agents,
+            "excluded_registered_agents": excluded_registered_agents,
+            "excluded_reason": (
+                "installed scoped manifest entries select the Codex App targets for this goal and mode"
+                if excluded_registered_agents
+                else None
+            ),
+            "legacy_unscoped_entries": legacy_entries,
+        }
+    return {
+        "schema_version": "codex_app_host_target_projection_v0",
+        "host_surface": "codex_app_heartbeat",
+        "by_mode": by_mode,
+    }
+
+
 def prompt_target_key(mode: str, agent_id: str | None) -> str:
     return f"{mode}:{agent_id}" if agent_id else mode
 
@@ -434,6 +518,8 @@ def peer_runtime_upgrade_migration(
         ):
             continue
         generated = generated_prompts.get(target) or {}
+        if not generated.get("command"):
+            continue
         host_updates.append(
             {
                 "prompt_target": target,
@@ -470,16 +556,27 @@ def peer_runtime_upgrade_migration(
 def build_loop_activation_summary(
     *,
     installed: dict[str, dict[str, Any]],
+    legacy_unscoped_entries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     current_targets = [key for key, value in installed.items() if value.get("status") == "current"]
     stale_targets = [key for key, value in installed.items() if value.get("status") == "stale"]
     missing_targets = [key for key, value in installed.items() if value.get("status") == "unknown"]
     not_installed_targets = [key for key, value in installed.items() if value.get("status") == "not_installed"]
+    unregistered_targets = [
+        key for key, value in installed.items() if value.get("status") == "unregistered_agent"
+    ]
+    legacy_entries = legacy_unscoped_entries or []
     target_count = len(installed)
-    if target_count and len(current_targets) == target_count:
+    if unregistered_targets:
+        status = "unregistered_agent"
+    elif legacy_entries:
+        status = "legacy_unscoped"
+    elif target_count and len(current_targets) == target_count:
         status = "current"
     elif target_count and len(not_installed_targets) == target_count:
         status = "explicitly_not_installed"
+    elif current_targets and len(current_targets) + len(not_installed_targets) == target_count:
+        status = "current_with_explicit_not_installed"
     elif current_targets and (stale_targets or missing_targets or not_installed_targets):
         status = "partial"
     elif stale_targets:
@@ -490,7 +587,7 @@ def build_loop_activation_summary(
         status = "explicitly_not_installed"
     else:
         status = "unknown"
-    activated = status == "current"
+    activated = status in {"current", "current_with_explicit_not_installed"}
     return {
         "schema_version": "loopx_host_loop_activation_v0",
         "host_surface": "codex_app_heartbeat",
@@ -501,13 +598,21 @@ def build_loop_activation_summary(
         "stale_count": len(stale_targets),
         "missing_count": len(missing_targets),
         "not_installed_count": len(not_installed_targets),
+        "unregistered_agent_count": len(unregistered_targets),
+        "legacy_unscoped_count": len(legacy_entries),
         "current_targets": current_targets,
         "stale_targets": stale_targets,
         "missing_targets": missing_targets,
         "not_installed_targets": not_installed_targets,
+        "unregistered_agent_targets": unregistered_targets,
+        "legacy_unscoped_entries": legacy_entries,
         "recommended_action": (
             "loop surface is active"
             if activated
+            else "for Codex App, re-register the scoped automation identity or remove/rebind the obsolete automation"
+            if unregistered_targets
+            else "for Codex App, remove or replace the legacy unscoped automation with a scoped heartbeat"
+            if legacy_entries
             else "for Codex App, create or update the heartbeat automation from the generated scoped heartbeat-prompt; "
             "for Codex CLI TUI or Claude Code, verify their own host loop surface instead; "
             "do not claim LoopX setup complete until the active host surface is proven or a concrete host-tool gate is reported"
@@ -515,7 +620,16 @@ def build_loop_activation_summary(
     }
 
 
-HOST_LOOP_UPDATE_STATUSES = {"missing", "partial", "stale", "unknown", "error", "unavailable"}
+HOST_LOOP_UPDATE_STATUSES = {
+    "legacy_unscoped",
+    "missing",
+    "partial",
+    "stale",
+    "unregistered_agent",
+    "unknown",
+    "error",
+    "unavailable",
+}
 
 
 def goal_adapter(goal: dict[str, Any]) -> dict[str, Any]:
@@ -559,6 +673,11 @@ def stage_deferred_goal_summary(goal: dict[str, Any], state_file: Path | None) -
 
 def managed_default_upgrade_target(goal: dict[str, Any]) -> dict[str, Any]:
     installed = goal.get("installed_prompts") if isinstance(goal.get("installed_prompts"), dict) else {}
+    activation = (
+        goal.get("host_loop_activation")
+        if isinstance(goal.get("host_loop_activation"), dict)
+        else {}
+    )
     mode_summaries: list[dict[str, Any]] = []
     statuses: set[str] = set()
     policy_warning_count = 0
@@ -586,15 +705,28 @@ def managed_default_upgrade_target(goal: dict[str, Any]) -> dict[str, Any]:
 
     requires_update = bool(goal.get("requires_update"))
     if requires_update:
-        action = "regenerate_installed_prompt"
-        if policy_warning_count:
+        activation_status = str(activation.get("status") or "")
+        if activation_status == "unregistered_agent":
+            action = "repair_unregistered_agent"
+            reason = "re-register the scoped automation identity or remove/rebind the obsolete automation"
+        elif activation_status == "legacy_unscoped":
+            action = "replace_legacy_unscoped_automation"
+            reason = "remove or replace the legacy unscoped automation with a scoped heartbeat"
+        elif policy_warning_count:
+            action = "regenerate_installed_prompt"
             reason = "installed prompt policy warnings must be cleared before default promotion"
         elif "unknown" in statuses:
+            action = "regenerate_installed_prompt"
             reason = "installed prompt is missing from the manifest"
         elif "stale" in statuses:
+            action = "regenerate_installed_prompt"
             reason = "installed prompt digest differs from the generated default"
         else:
+            action = "regenerate_installed_prompt"
             reason = "installed prompt requires refresh before default promotion"
+    elif "current" in statuses and "not_installed" in statuses:
+        action = "current_with_explicit_not_installed"
+        reason = "current heartbeat targets are reconciled with explicitly not installed targets"
     elif "not_installed" in statuses:
         action = "not_installed_noop"
         reason = "heartbeat is explicitly not installed; default promotion must not install it"
@@ -689,10 +821,23 @@ def build_upgrade_plan(
         registered_agents = registered_agent_ids_for_goal(goal)
         prompt_summaries: dict[str, dict[str, Any]] = {}
         installed: dict[str, dict[str, Any]] = {}
+        target_projection = host_loop_target_projection(
+            goal_id=goal_id,
+            modes=selected_modes,
+            registered_agents=registered_agents,
+            manifest_entries=manifest_entries,
+        )
+        legacy_unscoped_entries = [
+            entry
+            for mode_projection in target_projection["by_mode"].values()
+            for entry in mode_projection["legacy_unscoped_entries"]
+        ]
         prompt_targets = [
             (mode, agent_id)
             for mode in selected_modes
-            for agent_id in (registered_agents or [None])
+            for agent_id in (
+                target_projection["by_mode"][mode]["target_agent_ids"] or [None]
+            )
         ]
         for mode, agent_id in prompt_targets:
             key = prompt_target_key(mode, agent_id)
@@ -703,6 +848,45 @@ def build_upgrade_plan(
                 legacy_unscoped = entry is not None
             available_capabilities = installed_entry_available_capabilities(entry)
             agent_profile = agent_profile_for_goal(goal, agent_id)
+            unregistered_agent = bool(agent_id and agent_id not in registered_agents)
+            if unregistered_agent:
+                prompt_summaries[key] = {
+                    "mode": mode,
+                    "sha256": None,
+                    "char_count": None,
+                    "line_count": None,
+                    "interface_budget": {},
+                    "within_interface_budget": None,
+                    "interface_budget_char_count": None,
+                    "interface_budget_max_chars": None,
+                    "command": None,
+                    "agent_id": agent_id,
+                    "prompt_target": key,
+                    "status": "unregistered_agent",
+                    "recommended_action": "re-register the scoped automation identity or remove/rebind the obsolete automation",
+                }
+                installed[key] = {
+                    "status": "unregistered_agent",
+                    "requires_update": True,
+                    "automation_id": entry.get("automation_id") if entry else None,
+                    "installed": bool(entry),
+                    "agent_id": agent_id,
+                    "prompt_target": key,
+                    "legacy_unscoped_match": False,
+                    "prompt_sha256": installed_entry_digest(entry) if entry else None,
+                    "expected_sha256": None,
+                    "available_capabilities": available_capabilities,
+                    "prompt_policy_audit": installed_prompt_policy_audit(entry),
+                    "recommended_action": "re-register the scoped automation identity or remove/rebind the obsolete automation",
+                }
+                continue
+            prompt_registered_agents = (
+                registered_agents
+                if agent_id in registered_agents
+                else [agent_id]
+                if agent_id
+                else None
+            )
             prompt = build_heartbeat_prompt(
                 goal_id=goal_id,
                 active_state=None,
@@ -714,7 +898,7 @@ def build_upgrade_plan(
                 cli_bin=cli_bin,
                 agent_id=agent_id,
                 agent_profile=agent_profile,
-                registered_agents=registered_agents or None,
+                registered_agents=prompt_registered_agents,
                 available_capabilities=available_capabilities,
                 runtime_profile="codex_app_heartbeat",
             )
@@ -778,7 +962,10 @@ def build_upgrade_plan(
                 "available_capabilities": available_capabilities,
                 "prompt_policy_audit": policy_audit,
             }
-        loop_activation = build_loop_activation_summary(installed=installed)
+        loop_activation = build_loop_activation_summary(
+            installed=installed,
+            legacy_unscoped_entries=legacy_unscoped_entries,
+        )
         runtime_migration = peer_runtime_upgrade_migration(
             goal,
             goal_id=goal_id,
@@ -799,6 +986,7 @@ def build_upgrade_plan(
                 "generated_prompts": prompt_summaries,
                 "installed_prompts": installed,
                 "host_loop_activation": loop_activation,
+                "host_loop_target_projection": target_projection,
                 "peer_runtime_automation_migration": runtime_migration,
                 "requires_update": any(item["requires_update"] for item in installed.values())
                 or loop_activation.get("status") in HOST_LOOP_UPDATE_STATUSES
@@ -830,6 +1018,12 @@ def build_upgrade_plan(
         for installed in goal["installed_prompts"].values()
         if installed["status"] == "not_installed"
     )
+    unregistered_agent_count = sum(
+        1
+        for goal in managed
+        for installed in goal["installed_prompts"].values()
+        if installed["status"] == "unregistered_agent"
+    )
     policy_warning_count = sum(
         int(installed.get("prompt_policy_audit", {}).get("warning_count") or 0)
         for goal in managed
@@ -854,6 +1048,11 @@ def build_upgrade_plan(
         if isinstance(goal.get("host_loop_activation"), dict)
         and goal["host_loop_activation"].get("status") in HOST_LOOP_UPDATE_STATUSES
     )
+    legacy_unscoped_blocker_count = sum(
+        int(goal.get("host_loop_activation", {}).get("legacy_unscoped_count") or 0)
+        for goal in managed
+        if isinstance(goal.get("host_loop_activation"), dict)
+    )
     peer_runtime_migration_count = sum(
         1
         for goal in managed
@@ -864,12 +1063,18 @@ def build_upgrade_plan(
         bool(managed)
         and unknown == 0
         and stale == 0
+        and unregistered_agent_count == 0
+        and legacy_unscoped_blocker_count == 0
         and policy_warning_count == 0
         and host_loop_missing == 0
         and peer_runtime_migration_count == 0
     )
     if ready:
         recommended_action = "promotion propagation is complete"
+    elif unregistered_agent_count > 0:
+        recommended_action = "re-register scoped automation identities or remove/rebind obsolete automations before default promotion"
+    elif legacy_unscoped_blocker_count > 0:
+        recommended_action = "remove or replace coexisting legacy unscoped automations before default promotion"
     elif peer_runtime_migration_count > 0:
         recommended_action = (
             "complete each peer runtime automation migration in the projected order; "
@@ -892,6 +1097,8 @@ def build_upgrade_plan(
         "stale_prompt_count": stale,
         "unknown_prompt_count": unknown,
         "not_installed_prompt_count": not_installed,
+        "unregistered_agent_prompt_count": unregistered_agent_count,
+        "legacy_unscoped_blocker_count": legacy_unscoped_blocker_count,
         "stage_deferred_goal_count": len(deferred),
         "ready_for_default_promotion": ready,
         "installed_manifest_available": manifest.get("available"),
@@ -943,6 +1150,8 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
         f"- stale_prompt_count: `{summary.get('stale_prompt_count')}`",
         f"- unknown_prompt_count: `{summary.get('unknown_prompt_count')}`",
         f"- not_installed_prompt_count: `{summary.get('not_installed_prompt_count')}`",
+        f"- unregistered_agent_prompt_count: `{summary.get('unregistered_agent_prompt_count')}`",
+        f"- legacy_unscoped_blocker_count: `{summary.get('legacy_unscoped_blocker_count')}`",
         f"- stage_deferred_goal_count: `{summary.get('stage_deferred_goal_count')}`",
         f"- installed_manifest_source: `{summary.get('installed_manifest_source')}`",
         f"- installed_manifest_entry_count: `{summary.get('installed_manifest_entry_count')}`",
@@ -1032,6 +1241,11 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
             if isinstance(goal.get("host_loop_activation"), dict)
             else {}
         )
+        target_projection = (
+            goal.get("host_loop_target_projection")
+            if isinstance(goal.get("host_loop_target_projection"), dict)
+            else {}
+        )
         status_parts = []
         for mode, status in installed.items():
             if isinstance(status, dict):
@@ -1052,7 +1266,10 @@ def render_upgrade_plan_markdown(payload: dict[str, Any]) -> str:
                 f"  host_loop_activation: surface=`{activation.get('host_surface')}` "
                 f"status=`{activation.get('status')}` "
                 f"activated=`{activation.get('activated')}` current=`{activation.get('current_count')}` "
-                f"missing=`{activation.get('missing_count')}` stale=`{activation.get('stale_count')}`",
+                f"missing=`{activation.get('missing_count')}` stale=`{activation.get('stale_count')}` "
+                f"unregistered=`{activation.get('unregistered_agent_count')}` "
+                f"legacy_unscoped=`{activation.get('legacy_unscoped_count')}`",
+                f"  host_loop_target_projection: `{json.dumps(target_projection.get('by_mode') or {}, sort_keys=True)}`",
                 f"  prompts: `{'; '.join(prompt_parts)}`",
             ]
         )
