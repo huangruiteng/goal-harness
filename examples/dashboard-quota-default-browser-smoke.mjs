@@ -1,21 +1,17 @@
 #!/usr/bin/env node
 // Browser-level smoke for dashboard quota defaults derived from the status contract.
 
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupBrowserSmoke, launchBrowser, loadPlaywright } from "./dashboard-browser-smoke-support.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
 const fixtureName = "status.quota-default.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
-const playwrightCliOutputDir = resolve(repoRoot, ".playwright-cli");
 const port = Number(process.env.LOOPX_DASHBOARD_QUOTA_DEFAULT_SMOKE_PORT ?? "5193");
-const session = `ghqd${process.pid}`;
-const pwcli = process.env.PWCLI ?? resolve(homedir(), ".codex/skills/playwright/scripts/playwright_cli.sh");
 
 const goalId = "quota-default-fixture";
 
@@ -112,22 +108,6 @@ const statusFixture = {
   },
 };
 
-function runPw(args, { allowFailure = false } = {}) {
-  const result = spawnSync("bash", [pwcli, ...args], {
-    cwd: repoRoot,
-    encoding: "utf-8",
-    env: { ...process.env, PLAYWRIGHT_CLI_SESSION: session },
-  });
-  if (!allowFailure && result.status !== 0) {
-    throw new Error([
-      `playwright-cli ${args.join(" ")} failed with ${result.status}`,
-      result.stdout,
-      result.stderr,
-    ].filter(Boolean).join("\n"));
-  }
-  return result;
-}
-
 async function waitForDashboard(url) {
   const deadline = Date.now() + 20_000;
   let lastError;
@@ -146,25 +126,8 @@ async function waitForDashboard(url) {
   throw lastError ?? new Error(`Timed out waiting for ${url}`);
 }
 
-async function removeWithRetry(path) {
-  let lastError;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      await rm(path, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 200));
-    }
-  }
-  throw lastError;
-}
-
 async function main() {
-  if (!existsSync(pwcli)) {
-    throw new Error(`Playwright CLI wrapper not found: ${pwcli}`);
-  }
-
+  const { chromium } = loadPlaywright();
   await writeFile(fixturePath, JSON.stringify(statusFixture, null, 2) + "\n", "utf-8");
 
   const server = spawn("npm", ["run", "dev", "--", "--port", String(port), "--strictPort"], {
@@ -173,46 +136,40 @@ async function main() {
     stdio: "ignore",
   });
 
+  let browser;
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForDashboard(baseUrl);
-    runPw(["open", `${baseUrl}/?statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=all`]);
-    runPw(["resize", "1280", "900"]);
-    runPw([
-      "run-code",
-      String.raw`async (page) => {
-        await page.waitForLoadState("networkidle");
-        await page.getByText("User Actions").waitFor();
-        const body = await page.locator("body").innerText();
-        const required = [
-          "1 actions",
-          "Quota 0.5",
-          "Eligible; 12/720 slots",
-        ];
-        const missing = required.filter((text) => !body.includes(text));
-        if (missing.length) {
-          throw new Error("Missing dashboard text: " + missing.join(", "));
-        }
-        const forbidden = [
-          "12/24 slots",
-          "Quota 1\nEligible; 12/24 slots",
-        ];
-        const present = forbidden.filter((text) => body.includes(text));
-        if (present.length) {
-          throw new Error("Dashboard used stale quota defaults: " + present.join(", "));
-        }
-        return {
-          ok: true,
-          bodyIncludesDerivedQuota: body.includes("Eligible; 12/720 slots"),
-        };
-      }`,
-    ]);
+    browser = await launchBrowser(chromium);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto(`${baseUrl}/?view=ops&statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=all`, { waitUntil: "networkidle" });
+    await page.getByText("用户操作").waitFor();
+    const body = await page.locator("body").innerText();
+    const required = [
+      "1 个操作",
+      "配额 0.5",
+      "可以执行；12/720 个执行槽位",
+    ];
+    const missing = required.filter((text) => !body.includes(text));
+    if (missing.length) {
+      throw new Error(`Missing dashboard text: ${missing.join(", ")}\n${body.slice(0, 4_000)}`);
+    }
+    const forbidden = [
+      "12/24 个执行槽位",
+      "配额 1\n可以执行；12/24 个执行槽位",
+    ];
+    const present = forbidden.filter((text) => body.includes(text));
+    if (present.length) {
+      throw new Error("Dashboard used stale quota defaults: " + present.join(", "));
+    }
+    if (pageErrors.length) {
+      throw new Error(`Dashboard page errors: ${pageErrors.join(" | ")}`);
+    }
     console.log("dashboard-quota-default-browser-smoke ok");
   } finally {
-    server.kill("SIGTERM");
-    await rm(fixturePath, { force: true });
-    runPw(["close"], { allowFailure: true });
-    await removeWithRetry(playwrightCliOutputDir);
+    await cleanupBrowserSmoke({ browser, fixturePaths: [fixturePath], server });
   }
 }
 

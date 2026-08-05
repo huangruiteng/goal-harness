@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 // Browser-level smoke for the dashboard planned operator-gate state.
 
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupBrowserSmoke, launchBrowser, loadPlaywright } from "./dashboard-browser-smoke-support.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
@@ -16,10 +15,7 @@ const staleHistoryApprovedFixtureName = "status.operator-gate-approved-stale-his
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
 const approvedFixturePath = resolve(dashboardDir, "public", approvedFixtureName);
 const staleHistoryApprovedFixturePath = resolve(dashboardDir, "public", staleHistoryApprovedFixtureName);
-const playwrightCliOutputDir = resolve(repoRoot, ".playwright-cli");
 const port = Number(process.env.LOOPX_DASHBOARD_OPERATOR_GATE_SMOKE_PORT ?? "5192");
-const session = `ghog${process.pid}`;
-const pwcli = process.env.PWCLI ?? resolve(homedir(), ".codex/skills/playwright/scripts/playwright_cli.sh");
 
 const goalId = "planned-main-control";
 const operatorQuestion = "是否同意 `planned-main-control` 先执行 read-only map opt-in？";
@@ -322,50 +318,8 @@ const staleHistoryApprovedStatusFixture = {
   },
 };
 
-function runPw(args, { allowFailure = false, timeoutMs = 30_000 } = {}) {
-  const result = spawnSync("bash", [pwcli, ...args], {
-    cwd: repoRoot,
-    encoding: "utf-8",
-    env: { ...process.env, PLAYWRIGHT_CLI_SESSION: session },
-    timeout: timeoutMs,
-  });
-  if (!allowFailure && (result.status !== 0 || result.error)) {
-    throw new Error([
-      `playwright-cli ${args.join(" ")} failed with ${result.status}`,
-      result.error?.message,
-      result.stdout,
-      result.stderr,
-    ].filter(Boolean).join("\n"));
-  }
-  return result;
-}
-
-function parseRawEvalOutput(stdout) {
-  const trimmed = stdout.trim();
-  if (!trimmed) {
-    return "";
-  }
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return trimmed;
-  }
-}
-
-function evalRaw(expression, { timeoutMs = 10_000 } = {}) {
-  const result = runPw(["--raw", "eval", expression], { timeoutMs });
-  return parseRawEvalOutput(result.stdout);
-}
-
-function navigateTo(url) {
-  const gotoResult = runPw(["goto", url], { allowFailure: true, timeoutMs: 5_000 });
-  if (gotoResult.status === 0 && !gotoResult.error) {
-    return;
-  }
-  runPw(["--raw", "eval", `() => {
-    window.location.href = ${JSON.stringify(url)};
-    return window.location.href;
-  }`], { allowFailure: true, timeoutMs: 5_000 });
+async function navigateTo(page, url) {
+  await page.goto(url, { waitUntil: "networkidle" });
 }
 
 function countText(body, text) {
@@ -407,13 +361,13 @@ function requireTextOrder(body, texts, label) {
   }
 }
 
-async function readBodyText({ requiredText = "User Actions", timeoutMs = 15_000 } = {}) {
+async function readBodyText(page, { requiredText = "用户操作", timeoutMs = 15_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let body = "";
   let lastError;
   while (Date.now() < deadline) {
     try {
-      body = String(evalRaw("() => document.querySelector('main')?.innerText ?? document.body?.innerText ?? ''", { timeoutMs: 5_000 }));
+      body = await page.locator("main").innerText({ timeout: 5_000 });
       if (!requiredText || body.includes(requiredText)) {
         return body;
       }
@@ -427,30 +381,6 @@ async function readBodyText({ requiredText = "User Actions", timeoutMs = 15_000 
     lastError?.message,
     body.slice(0, 500),
   ].filter(Boolean).join("\n"));
-}
-
-function startBrowserSession() {
-  let lastProbe;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    runPw(["open", "about:blank"], { allowFailure: true, timeoutMs: 5_000 });
-    lastProbe = runPw(["eval", "() => location.href"], { allowFailure: true, timeoutMs: 10_000 });
-    if (lastProbe.status === 0 && !lastProbe.error) {
-      return;
-    }
-  }
-  throw new Error([
-    "Unable to start Playwright CLI browser session.",
-    lastProbe?.error?.message,
-    lastProbe?.stdout,
-    lastProbe?.stderr,
-  ].filter(Boolean).join("\n"));
-}
-
-function forceKillBrowserSession() {
-  spawnSync("pkill", ["-f", `cliDaemon.js ${session}`], {
-    encoding: "utf-8",
-    timeout: 5_000,
-  });
 }
 
 async function waitForDashboard(url) {
@@ -471,25 +401,8 @@ async function waitForDashboard(url) {
   throw lastError ?? new Error(`Timed out waiting for ${url}`);
 }
 
-async function removeWithRetry(path) {
-  let lastError;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      await rm(path, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 200));
-    }
-  }
-  throw lastError;
-}
-
 async function main() {
-  if (!existsSync(pwcli)) {
-    throw new Error(`Playwright CLI wrapper not found: ${pwcli}`);
-  }
-
+  const { chromium } = loadPlaywright();
   await writeFile(fixturePath, JSON.stringify(statusFixture, null, 2) + "\n", "utf-8");
   await writeFile(approvedFixturePath, JSON.stringify(approvedStatusFixture, null, 2) + "\n", "utf-8");
   await writeFile(staleHistoryApprovedFixturePath, JSON.stringify(staleHistoryApprovedStatusFixture, null, 2) + "\n", "utf-8");
@@ -500,158 +413,159 @@ async function main() {
     stdio: "ignore",
   });
 
+  let browser;
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForDashboard(baseUrl);
-    startBrowserSession();
-    runPw(["resize", "1280", "900"], { allowFailure: true, timeoutMs: 5_000 });
-    navigateTo(`${baseUrl}/?statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=all`);
-    let body = await readBodyText({ requiredText: "Copy" });
+    browser = await launchBrowser(chromium);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await navigateTo(page, `${baseUrl}/?view=ops&statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=all`);
+    let body = await readBodyText(page, { requiredText: "复制操作信息" });
     requireTexts(body, [
-      "Todo Focus",
-      "User Todo",
-      "Agent Priority Todo",
-      "1 actions",
-      "Project",
+      "Todo 重点",
+      "用户 Todo",
+      "Agent 优先 Todo",
+      "1 个操作",
+      "项目",
       goalId,
-      "Controller",
-      "Review controller opt-in",
-      "Needs approval",
-      "User / Controller",
-      "Operator question",
+      "控制者",
+      "审阅控制者接入",
+      "需要批准",
+      "用户 / 控制者",
+      "需要操作者回答",
       "是否同意 `planned-main-control` 先执行 read-only map opt-in？",
       "先做用户待办",
       "Read owner review worksheet first.",
       "Project asset stop: record or defer the owner todo before approval",
-      "Agent command ready after approval",
-      "Quota 0.5",
-      "Agent todo",
+      "批准后可执行 Agent 命令",
+      "配额 0.5",
+      "Agent Todo",
       "Run the read-only map dry-run after owner todo resolution.",
-      "Validation",
+      "验证",
       "planned-high-complexity",
       "fixture planned controller opt-in",
-      "Copy",
+      "复制操作信息",
     ], "pending dashboard");
     forbidTexts(body, [
-      "No user-facing action is active.",
-      "Let Codex continue",
-      "Codex can continue",
-      "Codex can act",
+      "当前没有需要用户处理的操作。",
+      "让 Codex 继续",
+      "Codex 可以继续",
+      "Codex 可以执行",
       "continue_from_refreshed_state",
       "continue_codex_action",
       "Operator Review Packet",
       "Copy Review Packet",
-      "Copy Handoff",
+      "复制交接信息",
       "Suggested decision",
-      "同意先做 read-only map dry-run；不授权写入或主控接管。",
+      "同意先做只读映射预演；不授权写入或生产动作。",
     ], "Operator-gated goal leaked into confusing UI");
-    requireExactTextCount(body, "Review controller opt-in", 2, "All-actions controller action plus selected-detail count");
-    requireExactTextCount(body, "Copy", 1, "All-actions review-packet copy count");
-    requireTextOrder(body, ["Todo Focus", "User Actions"], "Todo focus should lead user action cards");
-    requireTextOrder(body, ["Project", goalId, "Review controller opt-in"], "All-actions project-first card identity");
-    if (body.indexOf("Operator question") > body.indexOf("Agent command ready after approval")) {
+    requireExactTextCount(body, "审阅控制者接入", 2, "All-actions controller action plus selected-detail count");
+    requireExactTextCount(body, "复制操作信息", 1, "All-actions review-packet copy count");
+    requireTextOrder(body, ["Todo 重点", "用户操作"], "Todo focus should lead user action cards");
+    requireTextOrder(body, ["项目", goalId, "审阅控制者接入"], "All-actions project-first card identity");
+    if (body.indexOf("需要操作者回答") > body.indexOf("批准后可执行 Agent 命令")) {
       throw new Error("Operator question should appear before the after-approval agent command hint.");
     }
 
-    navigateTo(`${baseUrl}/?statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=controller`);
-    body = await readBodyText({ requiredText: "Copy" });
+    await navigateTo(page, `${baseUrl}/?view=ops&statusUrl=/${fixtureName}&goalId=${goalId}&actionKind=controller`);
+    body = await readBodyText(page, { requiredText: "复制操作信息" });
     requireTexts(body, [
-      "Todo Focus",
-      "User Todo",
-      "Agent Priority Todo",
-      "1 actions",
-      "Project",
+      "Todo 重点",
+      "用户 Todo",
+      "Agent 优先 Todo",
+      "1 个操作",
+      "项目",
       goalId,
-      "Controller",
-      "Review controller opt-in",
-      "Needs approval",
-      "Operator question",
+      "控制者",
+      "审阅控制者接入",
+      "需要批准",
+      "需要操作者回答",
       "是否同意 `planned-main-control` 先执行 read-only map opt-in？",
       "Read owner review worksheet first.",
-      "Agent todo",
+      "Agent Todo",
       "Run the read-only map dry-run after owner todo resolution.",
-      "Validation",
+      "验证",
       "planned-high-complexity",
-      "Copy",
+      "复制操作信息",
     ], "focused controller dashboard");
     forbidTexts(body, [
-      "No user-facing action is active.",
+      "当前没有需要用户处理的操作。",
       "Operator Review Packet",
-      "Let Codex continue",
-      "Codex can continue",
+      "让 Codex 继续",
+      "Codex 可以继续",
       "Copy Review Packet",
-      "Copy Handoff",
+      "复制交接信息",
       "Suggested decision",
-      "同意先做 read-only map dry-run；不授权写入或主控接管。",
+      "同意先做只读映射预演；不授权写入或生产动作。",
     ], "Focused controller view rendered confusing stale UI");
-    requireExactTextCount(body, "Review controller opt-in", 2, "Focused controller action plus selected-detail count");
-    requireExactTextCount(body, "Copy", 1, "Focused controller review-packet copy count");
-    requireTextOrder(body, ["Todo Focus", "User Actions"], "Focused todo focus should lead user action cards");
-    requireTextOrder(body, ["Project", goalId, "Review controller opt-in"], "Focused controller project-first card identity");
+    requireExactTextCount(body, "审阅控制者接入", 2, "Focused controller action plus selected-detail count");
+    requireExactTextCount(body, "复制操作信息", 1, "Focused controller review-packet copy count");
+    requireTextOrder(body, ["Todo 重点", "用户操作"], "Focused todo focus should lead user action cards");
+    requireTextOrder(body, ["项目", goalId, "审阅控制者接入"], "Focused controller project-first card identity");
 
-    navigateTo(`${baseUrl}/?statusUrl=/${approvedFixtureName}&goalId=${goalId}&actionKind=all`);
-    body = await readBodyText({ requiredText: "Copy" });
+    await navigateTo(page, `${baseUrl}/?view=ops&statusUrl=/${approvedFixtureName}&goalId=${goalId}&actionKind=all`);
+    body = await readBodyText(page, { requiredText: "复制交接信息" });
     requireTexts(body, [
-      "1 actions",
-      "Project",
+      "1 个操作",
+      "项目",
       goalId,
       "Codex",
-      "Run approved agent command",
-      "Approved handoff",
-      "Approved agent command",
-      "approved command",
-      "approve",
-      "Copy Handoff",
+      "执行已批准的 Agent 命令",
+      "已批准交接",
+      "已批准 Agent 命令",
+      "已批准命令",
+      "批准",
+      "复制交接信息",
     ], "approved dashboard");
     forbidTexts(body, [
-      "Review controller opt-in",
-      "Needs approval",
-      "Operator question",
-      "Agent command ready after approval",
-      "Operator gate dry-run draft",
+      "审阅控制者接入",
+      "需要批准",
+      "需要操作者回答",
+      "批准后可执行 Agent 命令",
+      "操作者确认试运行草稿",
       "Operator Review Packet",
       "Copy Review Packet",
     ], "Approved operator gate still looks user-gated");
-    requireExactTextCount(body, "Run approved agent command", 2, "Approved Codex-ready action plus selected-detail count");
-    requireExactTextCount(body, "Copy", 1, "Approved review-packet copy count");
-    requireExactTextCount(body, "Copy Handoff", 1, "Approved handoff copy count");
-    requireTextOrder(body, ["Project", goalId, "Run approved agent command"], "Approved project-first card identity");
+    requireExactTextCount(body, "执行已批准的 Agent 命令", 2, "Approved Codex-ready action plus selected-detail count");
+    requireExactTextCount(body, "复制交接信息", 1, "Approved handoff copy count");
+    requireTextOrder(body, ["项目", goalId, "执行已批准的 Agent 命令"], "Approved project-first card identity");
 
-    navigateTo(`${baseUrl}/?statusUrl=/${staleHistoryApprovedFixtureName}&goalId=${goalId}&actionKind=all`);
-    body = await readBodyText({ requiredText: "Copy" });
+    await navigateTo(page, `${baseUrl}/?view=ops&statusUrl=/${staleHistoryApprovedFixtureName}&goalId=${goalId}&actionKind=all`);
+    body = await readBodyText(page, { requiredText: "复制交接信息" });
     requireTexts(body, [
-      "1 actions",
-      "Project",
+      "1 个操作",
+      "项目",
       goalId,
       "Codex",
-      "Run approved agent command",
-      "Approved handoff",
-      "Approved agent command",
-      "approved command",
-      "Copy Handoff",
+      "执行已批准的 Agent 命令",
+      "已批准交接",
+      "已批准 Agent 命令",
+      "已批准命令",
+      "复制交接信息",
     ], "current queue over stale history dashboard");
     forbidTexts(body, [
-      "Review controller opt-in",
-      "Needs approval",
-      "Agent command ready after approval",
-      "Operator gate dry-run draft",
+      "审阅控制者接入",
+      "需要批准",
+      "批准后可执行 Agent 命令",
+      "操作者确认试运行草稿",
       "Operator Review Packet",
       "Copy Review Packet",
     ], "Current queue approved action was replaced by stale run-history gate");
-    requireExactTextCount(body, "Run approved agent command", 2, "Current queue approved action plus selected-detail count over stale history");
-    requireExactTextCount(body, "Copy", 1, "Current queue approved packet copy count over stale history");
-    requireExactTextCount(body, "Copy Handoff", 1, "Current queue approved handoff copy count over stale history");
-    requireTextOrder(body, ["Project", goalId, "Run approved agent command"], "Current queue approved project-first card identity");
+    requireExactTextCount(body, "执行已批准的 Agent 命令", 2, "Current queue approved action plus selected-detail count over stale history");
+    requireExactTextCount(body, "复制交接信息", 1, "Current queue approved handoff copy count over stale history");
+    requireTextOrder(body, ["项目", goalId, "执行已批准的 Agent 命令"], "Current queue approved project-first card identity");
+    if (pageErrors.length) {
+      throw new Error(`Dashboard page errors: ${pageErrors.join(" | ")}`);
+    }
     console.log("dashboard-operator-gate-browser-smoke ok");
   } finally {
-    server.kill("SIGTERM");
-    await rm(fixturePath, { force: true });
-    await rm(approvedFixturePath, { force: true });
-    await rm(staleHistoryApprovedFixturePath, { force: true });
-    runPw(["close"], { allowFailure: true, timeoutMs: 5_000 });
-    runPw(["kill-all"], { allowFailure: true, timeoutMs: 5_000 });
-    forceKillBrowserSession();
-    await removeWithRetry(playwrightCliOutputDir);
+    await cleanupBrowserSmoke({
+      browser,
+      fixturePaths: [fixturePath, approvedFixturePath, staleHistoryApprovedFixturePath],
+      server,
+    });
   }
 }
 

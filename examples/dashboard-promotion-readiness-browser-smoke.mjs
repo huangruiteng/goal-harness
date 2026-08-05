@@ -4,10 +4,11 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupBrowserSmoke, launchBrowser } from "./dashboard-browser-smoke-support.mjs";
 
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -262,14 +263,6 @@ function loadPlaywright() {
   throw new Error("Playwright package not found; install playwright or set LOOPX_PLAYWRIGHT_PACKAGE");
 }
 
-async function launchBrowser(chromium) {
-  try {
-    return await chromium.launch({ channel: "chrome", headless: true });
-  } catch {
-    return chromium.launch({ headless: true });
-  }
-}
-
 async function waitForDashboard(url) {
   const deadline = Date.now() + 20_000;
   let lastError;
@@ -326,7 +319,7 @@ function assertExcludes(body, forbidden, label) {
 async function assertPromotionPage(page, baseUrl, fixtureName, expected, forbidden) {
   const statusUrl = encodeURIComponent(`${baseUrl}/${fixtureName}`);
   await page.goto(`${baseUrl}/?view=ops&statusUrl=${statusUrl}`, { waitUntil: "networkidle" });
-  await page.waitForSelector("text=Promotion readiness", { timeout: 10_000 });
+  await page.waitForSelector("text=晋级就绪度", { timeout: 10_000 });
   const body = await page.locator("body").innerText();
   assertIncludes(body, expected, fixtureName);
   assertExcludes(body, forbidden, fixtureName);
@@ -357,25 +350,25 @@ async function main() {
       baseUrl,
       freshFixtureName,
       [
-        "Goal Operations",
-        "Promotion readiness",
-        "Promotion gate",
-        "fresh",
-        "ready",
-        "promote ok",
-        "CAN PROMOTE",
-        "yes",
-        "FRESHNESS",
-        "AGE",
-        "SAMPLES",
-        "0.25h",
-        "goal=loopx-meta",
-        "window=24h · artifacts=true/true",
-        "append-only run history",
-        "source of truth",
+        "Goal 控制台",
+        "晋级就绪度",
+        "晋级确认",
+        "最新",
+        "已就绪",
+        "可以晋级",
+        "是否可晋级",
+        "是",
+        "新鲜度",
+        "距今时间",
+        "样本数",
+        "0.25 小时",
+        "Goal=loopx-meta",
+        "检查窗口=24 小时 · 产物=true/true",
+        "只追加运行历史",
+        "事实来源",
         "fresh promotion readiness fixture",
       ],
-      ["rerun needed", "stale promotion readiness fixture", "missing promotion readiness fixture", "[plugin:vite:oxc]", "Transform failed"],
+      ["需要重新运行", "stale promotion readiness fixture", "missing promotion readiness fixture", "[plugin:vite:oxc]", "Transform failed"],
     );
 
     await assertPromotionPage(
@@ -383,20 +376,20 @@ async function main() {
       baseUrl,
       staleFixtureName,
       [
-        "Goal Operations",
-        "Promotion readiness",
-        "Promotion gate",
-        "stale",
-        "rerun needed",
-        "check first",
-        "CAN PROMOTE",
-        "no",
-        "should_warn=true",
+        "Goal 控制台",
+        "晋级就绪度",
+        "晋级确认",
+        "已过期",
+        "需要重新运行",
+        "需要先检查",
+        "是否可晋级",
+        "否",
+        "需要警告=true",
         "python3 examples/canary/canary-promotion-readiness-smoke.py",
         "promotion-readiness evidence is stale; fixture guard",
-        "25.5h",
-        "goal=loopx-meta",
-        "window=24h · artifacts=true/true",
+        "25.5 小时",
+        "Goal=loopx-meta",
+        "检查窗口=24 小时 · 产物=true/true",
         "stale promotion readiness fixture",
       ],
       ["fresh promotion readiness fixture", "missing promotion readiness fixture", "[plugin:vite:oxc]", "Transform failed"],
@@ -407,18 +400,18 @@ async function main() {
       baseUrl,
       missingFixtureName,
       [
-        "Goal Operations",
-        "Promotion readiness",
-        "Promotion gate",
-        "missing",
-        "rerun needed",
-        "check first",
-        "CAN PROMOTE",
-        "no",
-        "should_warn=true",
+        "Goal 控制台",
+        "晋级就绪度",
+        "晋级确认",
+        "缺失",
+        "需要重新运行",
+        "需要先检查",
+        "是否可晋级",
+        "否",
+        "需要警告=true",
         "promotion-readiness evidence is missing; fixture guard",
-        "n/a",
-        "goal=none",
+        "无",
+        "Goal=无",
         "no canary promotion readiness run found in sampled history",
         "missing promotion readiness fixture",
       ],
@@ -431,13 +424,11 @@ async function main() {
 
     console.log("dashboard-promotion-readiness-browser-smoke ok");
   } finally {
-    if (browser) {
-      await browser.close();
-    }
-    server.kill("SIGTERM");
-    await rm(freshFixturePath, { force: true });
-    await rm(staleFixturePath, { force: true });
-    await rm(missingFixturePath, { force: true });
+    await cleanupBrowserSmoke({
+      browser,
+      fixturePaths: [freshFixturePath, staleFixturePath, missingFixturePath],
+      server,
+    });
   }
 }
 

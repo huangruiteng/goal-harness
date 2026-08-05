@@ -4,10 +4,11 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupBrowserSmoke, launchBrowser } from "./dashboard-browser-smoke-support.mjs";
 
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -247,14 +248,6 @@ function loadPlaywright() {
   throw new Error("Playwright package not found; install playwright or set LOOPX_PLAYWRIGHT_PACKAGE");
 }
 
-async function launchBrowser(chromium) {
-  try {
-    return await chromium.launch({ channel: "chrome", headless: true });
-  } catch {
-    return chromium.launch({ headless: true });
-  }
-}
-
 async function waitForDashboard(url) {
   const deadline = Date.now() + 20_000;
   let lastError;
@@ -311,7 +304,7 @@ function assertExcludes(body, forbidden, label) {
 async function assertOpsPage(page, baseUrl, fixtureName, expected, forbidden) {
   const statusUrl = encodeURIComponent(`${baseUrl}/${fixtureName}`);
   await page.goto(`${baseUrl}/?view=ops&statusUrl=${statusUrl}`, { waitUntil: "networkidle" });
-  await page.waitForSelector("text=决策 freshness", { timeout: 10_000 });
+  await page.waitForSelector("text=决策新鲜度", { timeout: 10_000 });
   const body = await page.locator("body").innerText();
   assertIncludes(body, expected, fixtureName);
   assertExcludes(body, forbidden, fixtureName);
@@ -340,7 +333,7 @@ async function main() {
       baseUrl,
       oldContractFixtureName,
       [
-        "Goal Operations",
+        "Goal 控制台",
         "状态服务契约过旧",
         "schema v0",
         "127.0.0.1:8766",
@@ -354,18 +347,18 @@ async function main() {
       baseUrl,
       emptyFixtureName,
       [
-        "Goal Operations",
-        "决策 freshness",
-        "rebase 0",
-        "DECISIONS",
-        "STALE",
-        "REBASE",
-        "FRESH",
-        "当前样本里没有需要 rebase 的 checkpointed decision",
+        "Goal 控制台",
+        "决策新鲜度",
+        "需重新确认 0",
+        "决策数",
+        "已过期",
+        "需重新确认",
+        "仍然有效",
+        "当前样本里没有需要重新确认的检查点决策",
         "live zero-item fixture",
-        "exact replay 仍回到 append-only run history",
+        "精确回放仍以只追加运行历史为准",
       ],
-      ["状态服务契约过旧", "loopx-meta\ngate", "已过期，需 rebase", "[plugin:vite:oxc]", "Transform failed"],
+      ["状态服务契约过旧", "loopx-meta\n操作者确认", "已过期，需重新确认", "[plugin:vite:oxc]", "Transform failed"],
     );
 
     await assertOpsPage(
@@ -373,16 +366,16 @@ async function main() {
       baseUrl,
       staleFixtureName,
       [
-        "Goal Operations",
-        "决策 freshness",
-        "rebase 1",
+        "Goal 控制台",
+        "决策新鲜度",
+        "需重新确认 1",
         "loopx-meta",
-        "gate",
-        "已过期，需 rebase",
+        "操作者确认",
+        "已过期，需重新确认",
         "stale decision fixture",
-        "exact replay 仍回到 append-only run history",
+        "精确回放仍以只追加运行历史为准",
       ],
-      ["状态服务契约过旧", "当前样本里没有需要 rebase 的 checkpointed decision", "[plugin:vite:oxc]", "Transform failed"],
+      ["状态服务契约过旧", "当前样本里没有需要重新确认的检查点决策", "[plugin:vite:oxc]", "Transform failed"],
     );
 
     if (pageErrors.length) {
@@ -391,13 +384,11 @@ async function main() {
 
     console.log("dashboard-ops-decision-freshness-smoke ok");
   } finally {
-    if (browser) {
-      await browser.close();
-    }
-    server.kill("SIGTERM");
-    await rm(oldContractFixturePath, { force: true });
-    await rm(emptyFixturePath, { force: true });
-    await rm(staleFixturePath, { force: true });
+    await cleanupBrowserSmoke({
+      browser,
+      fixturePaths: [oldContractFixturePath, emptyFixturePath, staleFixturePath],
+      server,
+    });
   }
 }
 
