@@ -224,7 +224,7 @@ def assert_not_due_monitor_waits_quietly() -> None:
     assert guard["agent_todo_summary"]["monitor_due_count"] == 0, guard
 
 
-def assert_not_due_monitor_scheduler_applies_host_floor_before_cadence() -> None:
+def assert_not_due_monitor_scheduler_uses_due_horizon_before_cadence() -> None:
     guard = guard_for(
         [
             monitor_item(
@@ -271,6 +271,30 @@ def assert_monitor_scheduler_far_window_uses_coarse_backoff() -> None:
     assert context["cap_minutes"] == 90, context
     assert codex_app["example_progression_minutes"] == [15, 30, 60], scheduler
     assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", scheduler
+
+
+def assert_monitor_scheduler_due_horizon_can_break_host_floor() -> None:
+    guard = guard_for(
+        [
+            monitor_item(
+                index=1,
+                todo_id="todo_due_within_host_floor",
+                priority="P0",
+                cadence=None,
+                next_due_at=frozen_timestamp_after(7),
+                target_key="deadline-sensitive-watch",
+            )
+        ],
+        include_scheduler_detail=True,
+    )
+    scheduler = guard["scheduler_hint"]
+    codex_app = scheduler["codex_app"]
+    context = scheduler["cold_path_detail"]["cadence_context"]
+    assert context["phase"] == "near_window", context
+    assert context["host_floor_minutes"] == 7, context
+    assert context["cap_minutes"] == 7, context
+    assert codex_app["example_progression_minutes"] == [7], scheduler
+    assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=7", scheduler
 
 
 def assert_monitor_scheduler_near_window_caps_without_breaking_floor() -> None:
@@ -351,7 +375,7 @@ def assert_monitor_scheduler_near_window_reset_identity_is_stable() -> None:
     ], same_bucket_scheduler
 
 
-def assert_monitor_scheduler_active_window_respects_host_floor() -> None:
+def assert_monitor_scheduler_active_window_honors_tighter_cadence() -> None:
     guard = guard_for(
         [
             monitor_item(
@@ -373,11 +397,11 @@ def assert_monitor_scheduler_active_window_respects_host_floor() -> None:
     assert guard["effective_action"] == "monitor_quiet_skip", guard
     assert context["phase"] == "active_window", context
     assert context["cadence_minutes"] == 3, context
-    assert context["host_floor_minutes"] == 15, context
-    assert codex_app["example_progression_minutes"] == [15], scheduler
+    assert context["host_floor_minutes"] == 3, context
+    assert codex_app["example_progression_minutes"] == [3], scheduler
     local_scheduler = scheduler["cold_path_detail"]["local_scheduler"]
-    assert local_scheduler["example_progression_minutes"] == [15], scheduler
-    assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", scheduler
+    assert local_scheduler["example_progression_minutes"] == [3], scheduler
+    assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=3", scheduler
 
 
 def assert_unscheduled_monitor_requires_metadata_repair() -> None:
@@ -991,11 +1015,12 @@ def assert_other_agent_claimed_work_stays_diagnostic_when_no_current_lane() -> N
 def main() -> int:
     assert_scheduler_timestamp_parser_is_shared_and_utc_normalized()
     assert_not_due_monitor_waits_quietly()
-    assert_not_due_monitor_scheduler_applies_host_floor_before_cadence()
+    assert_not_due_monitor_scheduler_uses_due_horizon_before_cadence()
     assert_monitor_scheduler_far_window_uses_coarse_backoff()
+    assert_monitor_scheduler_due_horizon_can_break_host_floor()
     assert_monitor_scheduler_near_window_caps_without_breaking_floor()
     assert_monitor_scheduler_near_window_reset_identity_is_stable()
-    assert_monitor_scheduler_active_window_respects_host_floor()
+    assert_monitor_scheduler_active_window_honors_tighter_cadence()
     assert_unscheduled_monitor_requires_metadata_repair()
     assert_unscheduled_monitor_repair_survives_handoff_gates()
     assert_due_monitor_requires_explicit_attempt()

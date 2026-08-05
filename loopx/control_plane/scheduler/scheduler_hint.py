@@ -421,9 +421,9 @@ def _monitor_wait_item_plan(
     if expires_at is not None and last_checked_at is not None and last_checked_at <= current_time:
         phase = "active_window"
         if cadence_minutes is not None:
-            cap_candidates.append(max(host_floor, cadence_minutes))
+            cap_candidates.append(cadence_minutes)
         if next_due_at is not None and next_due_at > current_time:
-            cap_candidates.append(max(host_floor, _minutes_until(next_due_at, current_time)))
+            cap_candidates.append(_minutes_until(next_due_at, current_time))
     elif next_due_at is not None and next_due_at > current_time:
         minutes_until_due = _minutes_until(next_due_at, current_time)
         phase = (
@@ -431,16 +431,19 @@ def _monitor_wait_item_plan(
             if minutes_until_due <= MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES
             else "far_window"
         )
-        cap_candidates.append(max(host_floor, minutes_until_due))
+        cap_candidates.append(minutes_until_due)
         include_next_due_in_reset = True
     elif cadence_minutes is not None:
         phase = "cadence_only"
-        cap_candidates.append(max(host_floor, cadence_minutes))
+        cap_candidates.append(cadence_minutes)
 
     if phase is None or not cap_candidates:
         return None
 
-    cap_minutes = max(host_floor, min(cap_candidates))
+    # Fifteen minutes is the quiet-monitor backoff floor, not a deadline floor.
+    # A tighter explicit cadence or due horizon must wake the host in time.
+    host_floor = min(host_floor, min(cap_candidates))
+    cap_minutes = min(cap_candidates)
     selected_identity = _monitor_item_identity(item)
     reset_profile = {
         "monitor_wait_phase": phase,
@@ -1247,11 +1250,16 @@ def build_scheduler_hint(
             if isinstance(monitor_plan, dict)
             else None
         )
+        monitor_initial_interval = (
+            monitor_progression[0]
+            if isinstance(monitor_progression, list) and monitor_progression
+            else MONITOR_WAIT_HOST_FLOOR_MINUTES
+        )
         monitor_reset_profile = (
             {
                 "cadence_class": "monitor_wait",
-                "codex_app_initial_interval_minutes": MONITOR_WAIT_HOST_FLOOR_MINUTES,
-                "codex_app_initial_rrule": rrule_for_minutes(MONITOR_WAIT_HOST_FLOOR_MINUTES),
+                "codex_app_initial_interval_minutes": monitor_initial_interval,
+                "codex_app_initial_rrule": rrule_for_minutes(monitor_initial_interval),
                 "codex_app_max_interval_minutes": 60,
                 "unchanged_poll_backoff_multiplier": 2,
                 "local_scheduler_unchanged_poll_limit": 3,
