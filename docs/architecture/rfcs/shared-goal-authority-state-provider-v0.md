@@ -42,7 +42,10 @@ To satisfy this need, this RFC defines three things:
    without ever touching the main path. NoKV plays the role of a cloud
    filesystem here.
 
-## 1. Example 1: a real machine -> human -> machine handoff, and why it is slow
+## 1. An example to help everyone understand
+
+Example 1: a walkthrough of a real machine -> human -> machine handoff,
+and why it wastes time
 
 For instance: my agent on the devbox finished two PRs, and the agent on my
 laptop is responsible for review. The handoff, in chronological order:
