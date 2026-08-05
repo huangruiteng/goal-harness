@@ -67,6 +67,9 @@ def todo_summary_frontier_deadline(
         for item in items:
             if not isinstance(item, dict):
                 continue
+            expires_at = parse_timestamp(item.get("expires_at"))
+            if expires_at is not None and expires_at <= current_time:
+                continue
             next_due_at = parse_timestamp(item.get("next_due_at"))
             if next_due_at is None or next_due_at <= current_time:
                 continue

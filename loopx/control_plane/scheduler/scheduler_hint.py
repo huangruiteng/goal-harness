@@ -3,14 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 from ..runtime.time import now_utc, utc_isoformat
-from ..todos.frontier_deadline import build_frontier_recheck_plan
+from ..todos.frontier_deadline import (
+    build_frontier_recheck_plan,
+    todo_summary_frontier_deadline,
+)
 from . import ack as scheduler_ack
 from .arbitration import (
     SchedulerArbitration,
@@ -37,6 +39,7 @@ from .state_transition_rules import (
     decide_scheduler_cadence_transition,
     decide_scheduler_host_transition,
 )
+from .monitor_todo import monitor_cadence_delta
 from .time import parse_scheduler_timestamp
 
 SCHEDULER_HINT_SCHEMA_VERSION = "scheduler_hint_v0"
@@ -46,7 +49,6 @@ CODEX_APP_STATEFUL_BACKOFF_SCHEMA_VERSION = "codex_app_stateful_backoff_v0"
 CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION = "codex_app_scheduler_ack_hint_v0"
 CODEX_APP_SCHEDULER_FAILURE_HINT_SCHEMA_VERSION = "codex_app_scheduler_failure_hint_v0"
 USER_GATE_NOTIFICATION_COOLDOWN_SCHEMA_VERSION = "user_gate_notification_cooldown_v0"
-MONITOR_CADENCE_PATTERN = re.compile(r"^\s*(\d+)\s*([mhd])\s*$", re.IGNORECASE)
 MONITOR_WAIT_PROGRESSION_MINUTES = [15, 30, 60]
 CODEX_APP_MAX_INTERVAL_MINUTES = 60
 DEFAULT_ACK_CAPABILITIES = {"shell", "filesystem_read", "filesystem_write"}
@@ -340,16 +342,10 @@ def _parse_monitor_timestamp(value: Any) -> datetime | None:
 
 
 def _monitor_cadence_minutes(value: Any) -> int | None:
-    match = MONITOR_CADENCE_PATTERN.match(str(value or ""))
-    if not match:
+    cadence_delta = monitor_cadence_delta(value)
+    if cadence_delta is None:
         return None
-    amount = max(1, int(match.group(1)))
-    unit = match.group(2).lower()
-    if unit == "h":
-        return amount * 60
-    if unit == "d":
-        return amount * 24 * 60
-    return amount
+    return max(1, math.ceil(cadence_delta.total_seconds() / 60))
 
 
 def _monitor_wait_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -491,6 +487,29 @@ def _monitor_wait_cadence_plan(payload: dict[str, Any]) -> dict[str, Any] | None
             expired_count += 1
             continue
         plans.append(plan)
+
+    frontier_deadline = todo_summary_frontier_deadline(
+        payload.get("agent_todo_summary"),
+        current_time=current_time,
+    )
+    if (
+        isinstance(frontier_deadline, dict)
+        and frontier_deadline.get("source") == "continuous_monitor"
+    ):
+        frontier_plan = _monitor_wait_item_plan(
+            {
+                "title": frontier_deadline.get("identity"),
+                "next_due_at": frontier_deadline.get("next_due_at"),
+            },
+            current_time=current_time,
+        )
+        if frontier_plan and not any(
+            plan.get("selected_monitor_identity")
+            == frontier_plan.get("selected_monitor_identity")
+            and plan.get("next_due_at") == frontier_plan.get("next_due_at")
+            for plan in plans
+        ):
+            plans.append(frontier_plan)
 
     if not plans:
         if expired_count:
