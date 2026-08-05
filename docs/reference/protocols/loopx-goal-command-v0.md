@@ -95,8 +95,10 @@ Agent identity follows the same fail-closed rule. A new `agent-onboard` or
 argument-bearing `start-goal --guided` invocation with no `--agent-id` must
 default to fresh identity registration, even when the goal has zero or one
 registered agent. Its identity gate must expose a preview/apply
-`register-agent --require-new` path and require a `changed=true` preview before
-todo writeback. Existing identities are takeover choices, never an
+`register-agent --require-new` path. The preview is advisory; todo writeback
+requires an execute result with `ok=true`, `changed=true`, `written=true`,
+successful global sync, and verified source/global registration readback.
+Existing identities are takeover choices, never an
 implicit default; selecting one requires explicit user intent for that exact
 agent. A continuation that already carries an explicit registered `--agent-id`
 keeps that identity across `agent-onboard`, `bootstrap-command-pack`,

@@ -821,8 +821,10 @@ argument-bearing `start-goal --guided` call has no `--agent-id`, follow its
 fresh-agent registration preview/apply commands before writing todos. An
 existing id is reused only when the user explicitly asks to take over that
 exact agent; the presence of a single registered agent is not takeover intent.
-The fresh path uses `--require-new` and continues only when preview reports
-`changed=true`, so an accidental id collision cannot become implicit takeover.
+The fresh path uses `--require-new`; its preview is advisory. Continue only
+after the execute result reports `ok=true`, `changed=true`, `written=true`,
+successful global sync, and verified source/global registration readback, so a
+stale preview or id collision cannot become implicit takeover.
 
 ```bash
 loopx register-agent --goal-id your-project-goal \

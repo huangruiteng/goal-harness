@@ -10,6 +10,7 @@ from ..configure_goal import configure_goal, render_configure_goal_markdown
 from ..control_plane.goals.configure_goal_service import (
     configure_goal_with_global_sync,
 )
+from ..file_lock import exclusive_file_lock, lock_timeout_error_fields
 from ..global_registry import (
     render_global_goal_retirement_markdown,
     render_global_sync_markdown,
@@ -20,8 +21,8 @@ from ..history import load_registry
 from ..orchestration import EXPLORE_HARNESS_PROFILES
 from ..paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from ..project_uninstall import render_project_uninstall_markdown, uninstall_project
-from ..registry_writability import probe_registry_write_path
 from ..registry import registry_goals
+from ..registry_writability import probe_registry_write_path
 from ..runtime import archive_runtime_goal, render_archive_runtime_markdown
 from ..state_migration import (
     LEGACY_GLOBAL_REGISTRY,
@@ -32,17 +33,16 @@ from ..state_migration import (
     render_state_migration_markdown,
 )
 from ..upgrade import build_upgrade_plan
-from .registry_authority import (
-    REGISTRY_AUTHORITY_COMMANDS,
-    handle_registry_authority_command,
-    register_registry_authority_commands,
-)
 from .registry_admin_peer import (
     register_peer_runtime_arguments,
     register_peer_supervisor_arguments,
     render_register_agent_markdown,
 )
-
+from .registry_authority import (
+    REGISTRY_AUTHORITY_COMMANDS,
+    handle_registry_authority_command,
+    register_registry_authority_commands,
+)
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -63,6 +63,76 @@ REGISTRY_ADMIN_COMMANDS = {
 def explicit_global_registry(runtime_root_arg: str | None) -> Path:
     runtime_root = Path(runtime_root_arg).expanduser() if runtime_root_arg else DEFAULT_RUNTIME_ROOT
     return global_registry_path(runtime_root)
+
+
+def _registry_goal(path: Path, goal_id: str) -> dict[str, object]:
+    payload = load_registry(path)
+    goal = next((item for item in registry_goals(payload) if item.get("id") == goal_id), None)
+    if goal is None:
+        raise ValueError(f"{goal_id}: registry does not contain the goal: {path}")
+    return goal
+
+
+def _goal_registered_agents(goal: dict[str, object]) -> list[str]:
+    coordination = goal.get("coordination") if isinstance(goal.get("coordination"), dict) else {}
+    return normalize_registered_agents(coordination.get("registered_agents"))
+
+
+def _fresh_agent_collision_payload(
+    *,
+    execute: bool,
+    goal_id: str,
+    global_path: Path,
+    source_registry_path: Path,
+    existing_agents: list[str],
+    requested_agents: list[str],
+    collisions: list[str],
+) -> dict[str, object]:
+    return {
+        "ok": False,
+        "dry_run": not execute,
+        "execute": execute,
+        "goal_id": goal_id,
+        "global_registry": str(global_path),
+        "source_registry": str(source_registry_path),
+        "existing_agents": existing_agents,
+        "requested_agents": requested_agents,
+        "registered_agents": existing_agents,
+        "changed": False,
+        "written": False,
+        "error_kind": "agent_identity_already_registered",
+        "error": (
+            "fresh agent registration requires an unused agent id; already "
+            f"registered: {', '.join(collisions)}"
+        ),
+        "recommended_action": (
+            "choose a different public-safe agent id and rerun the preview; continue "
+            "only after the execute result reports ok=true, changed=true, and written=true"
+        ),
+    }
+
+
+def _agent_registration_readback(
+    *,
+    source_registry_path: Path,
+    global_path: Path,
+    goal_id: str,
+    requested_agents: list[str],
+) -> dict[str, object]:
+    source_agents = _goal_registered_agents(_registry_goal(source_registry_path, goal_id))
+    global_agents = _goal_registered_agents(_registry_goal(global_path, goal_id))
+    requested_present = all(
+        agent_id in source_agents and agent_id in global_agents
+        for agent_id in requested_agents
+    )
+    return {
+        "schema_version": "loopx_agent_registration_readback_v0",
+        "performed": True,
+        "verified": requested_present and source_agents == global_agents,
+        "requested_agents": requested_agents,
+        "source_registered_agents": source_agents,
+        "global_registered_agents": global_agents,
+    }
 
 
 def register_agent_via_source_registry(
@@ -87,37 +157,20 @@ def register_agent_via_source_registry(
             "use configure-goal with an explicit --registry instead of connect"
         )
     source_registry_path = Path(str(source_registry)).expanduser()
-    source_payload = load_registry(source_registry_path)
-    source_goal = next((item for item in registry_goals(source_payload) if item.get("id") == goal_id), None)
-    if source_goal is None:
-        raise ValueError(f"{goal_id}: source_registry does not contain the goal: {source_registry_path}")
-    coordination = source_goal.get("coordination") if isinstance(source_goal.get("coordination"), dict) else {}
-    existing_agents = normalize_registered_agents(coordination.get("registered_agents"))
+    source_goal = _registry_goal(source_registry_path, goal_id)
+    existing_agents = _goal_registered_agents(source_goal)
     requested_agents = normalize_registered_agents(agent_ids)
     collisions = [agent_id for agent_id in requested_agents if agent_id in existing_agents]
     if require_new and collisions:
-        return {
-            "ok": False,
-            "dry_run": not execute,
-            "execute": execute,
-            "goal_id": goal_id,
-            "global_registry": str(global_path),
-            "source_registry": str(source_registry_path),
-            "existing_agents": existing_agents,
-            "requested_agents": requested_agents,
-            "registered_agents": existing_agents,
-            "changed": False,
-            "written": False,
-            "error_kind": "agent_identity_already_registered",
-            "error": (
-                "fresh agent registration requires an unused agent id; already "
-                f"registered: {', '.join(collisions)}"
-            ),
-            "recommended_action": (
-                "choose a different public-safe agent id, rerun the preview with "
-                "--require-new, then apply only when changed=true"
-            ),
-        }
+        return _fresh_agent_collision_payload(
+            execute=execute,
+            goal_id=goal_id,
+            global_path=global_path,
+            source_registry_path=source_registry_path,
+            existing_agents=existing_agents,
+            requested_agents=requested_agents,
+            collisions=collisions,
+        )
     merged_agents = list(existing_agents)
     for agent_id in requested_agents:
         if agent_id not in merged_agents:
@@ -157,25 +210,76 @@ def register_agent_via_source_registry(
                 "error": str(global_writability.get("error") or "global registry is not writable"),
                 "recommended_action": global_writability.get("recommended_action"),
             }
-    configure_payload = configure_goal(
-        registry_path=source_registry_path,
-        goal_id=goal_id,
-        registered_agents=merged_agents,
-        agent_model="peer_v1",
-        execute=execute,
-    )
     sync_payload: dict[str, object] | None = None
-    if execute and configure_payload.get("written"):
-        sync_payload = sync_project_registry_to_global(
+    readback_payload: dict[str, object] = {
+        "schema_version": "loopx_agent_registration_readback_v0",
+        "performed": False,
+        "verified": False,
+    }
+    if execute:
+        with exclusive_file_lock(
+            source_registry_path,
+            agent_id=requested_agents[0] if len(requested_agents) == 1 else None,
+            operation="register_agent",
+        ):
+            source_goal = _registry_goal(source_registry_path, goal_id)
+            existing_agents = _goal_registered_agents(source_goal)
+            collisions = [
+                agent_id for agent_id in requested_agents if agent_id in existing_agents
+            ]
+            if require_new and collisions:
+                return _fresh_agent_collision_payload(
+                    execute=True,
+                    goal_id=goal_id,
+                    global_path=global_path,
+                    source_registry_path=source_registry_path,
+                    existing_agents=existing_agents,
+                    requested_agents=requested_agents,
+                    collisions=collisions,
+                )
+            merged_agents = list(existing_agents)
+            for agent_id in requested_agents:
+                if agent_id not in merged_agents:
+                    merged_agents.append(agent_id)
+            configure_payload = configure_goal(
+                registry_path=source_registry_path,
+                goal_id=goal_id,
+                registered_agents=merged_agents,
+                agent_model="peer_v1",
+                execute=True,
+            )
+            if configure_payload.get("written"):
+                sync_payload = sync_project_registry_to_global(
+                    registry_path=source_registry_path,
+                    # Sync back to the same shared registry that supplied source_registry.
+                    # A project-local common_runtime_root must not redirect this write.
+                    runtime_root_override=str(global_path.parent),
+                    goal_id=goal_id,
+                    dry_run=False,
+                )
+                readback_payload = _agent_registration_readback(
+                    source_registry_path=source_registry_path,
+                    global_path=global_path,
+                    goal_id=goal_id,
+                    requested_agents=requested_agents,
+                )
+    else:
+        configure_payload = configure_goal(
             registry_path=source_registry_path,
-            # Sync back to the same shared registry that supplied source_registry.
-            # A project-local common_runtime_root must not redirect this write.
-            runtime_root_override=str(global_path.parent),
             goal_id=goal_id,
-            dry_run=False,
+            registered_agents=merged_agents,
+            agent_model="peer_v1",
+            execute=False,
         )
+    sync_ok = bool(sync_payload.get("ok", True)) if isinstance(sync_payload, dict) else True
+    readback_ok = (
+        bool(readback_payload.get("verified"))
+        if execute and configure_payload.get("written")
+        else True
+    )
+    overall_ok = sync_ok and readback_ok
     result = {
-        "ok": bool(sync_payload.get("ok", True)) if isinstance(sync_payload, dict) else True,
+        "ok": overall_ok,
         "dry_run": not execute,
         "execute": execute,
         "goal_id": goal_id,
@@ -188,18 +292,18 @@ def register_agent_via_source_registry(
         "written": configure_payload.get("written"),
         "configure_goal": configure_payload,
         "global_registry_writability": global_writability or {},
-        "partial_write": bool(
-            execute
-            and configure_payload.get("written")
-            and isinstance(sync_payload, dict)
-            and sync_payload.get("ok") is False
-        ),
+        "partial_write": bool(execute and configure_payload.get("written") and not overall_ok),
         "recommended_action": (
             sync_payload.get("recommended_action")
             if isinstance(sync_payload, dict) and sync_payload.get("ok") is False
-            else None
+            else (
+                "repair the source/global registration readback mismatch before continuation"
+                if not readback_ok
+                else None
+            )
         ),
         "global_sync": sync_payload or {"enabled": bool(execute), "wrote": False},
+        "registration_readback": readback_payload,
     }
     result["host_loop_activation"] = loop_activation_for_goal(
         registry_path=global_path,
@@ -867,6 +971,7 @@ def handle_registry_admin_command(
                 "changed": False,
                 "written": False,
                 "error": str(exc),
+                **lock_timeout_error_fields(exc),
             }
         print_payload(payload, args.format, render_register_agent_markdown)
         return 0 if payload.get("ok") else 1

@@ -238,6 +238,16 @@ def test_new_agent_onboarding_defaults_to_fresh_identity() -> None:
     assert gate["fresh_agent_registration"]["execute_command"].endswith(
         "--execute"
     )
+    continuation = gate["fresh_agent_registration"]["continuation_contract"]
+    assert continuation["requires_execute_result"] is True
+    assert continuation["required_result"] == {
+        "ok": True,
+        "changed": True,
+        "written": True,
+        "global_sync": {"ok": True},
+        "registration_readback": {"verified": True},
+    }
+    assert "preview as advisory" in gate["fresh_agent_registration"]["continuation"]
     assert len(gate["choices"]) == 1
     takeover = gate["choices"][0]
     assert takeover["agent_id"] == "codex-existing"

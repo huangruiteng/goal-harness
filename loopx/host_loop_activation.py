@@ -753,10 +753,23 @@ def build_host_loop_activation_packet(
                 "agent_id": fresh_agent_id,
                 "preview_command": register_command,
                 "execute_command": f"{register_command} --execute",
+                "continuation_contract": {
+                    "schema_version": "loopx_fresh_agent_registration_continuation_v0",
+                    "requires_execute_result": True,
+                    "required_result": {
+                        "ok": True,
+                        "changed": True,
+                        "written": True,
+                        "global_sync": {"ok": True},
+                        "registration_readback": {"verified": True},
+                    },
+                },
                 "continuation": (
-                    "continue only when preview changed=true, then rerun onboarding "
-                    "with the newly registered --agent-id before todo writeback or "
-                    "host-loop activation"
+                    "treat preview as advisory; continue only when the execute result "
+                    "reports ok=true, changed=true, written=true, global_sync.ok=true, "
+                    "and registration_readback.verified=true, then rerun onboarding with "
+                    "the newly registered --agent-id before todo writeback or host-loop "
+                    "activation"
                 ),
             }
             if fresh_agent_default

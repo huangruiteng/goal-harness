@@ -66,9 +66,11 @@ Include `--goal-id <STABLE_GOAL_ID>` when known. Include
 that identity or the user explicitly asks to take over that exact agent's work.
 Otherwise treat this as a new agent connection: follow the returned identity
 gate, choose a fresh public-safe id, preview then execute `register-agent`, and
-require the gate's `--require-new` preview to report `changed=true` before
-applying and rerunning `start-goal` with that new id. Never infer takeover from
-registry order or from there being only one registered agent. If
+require the `--require-new --execute` result to report `ok=true`, `changed=true`,
+`written=true`, successful global sync, and verified registration readback
+before rerunning `start-goal` with that new id. A preview is advisory and never
+authorizes continuation. Never infer takeover from registry order or from there
+being only one registered agent. If
 `start-goal --guided` is not available, refresh the local LoopX CLI or use the
 checked-out LoopX repository CLI for validation; do not silently downgrade
 `/loopx <goal text>` into a bare `/loopx` read-only command. Use
