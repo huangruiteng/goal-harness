@@ -36,6 +36,7 @@ def scheduler_command_binding_for_agent_type(
         "codex-cli": SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
         "codex-ide-plugin": SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
         "claude-code": SchedulerRuntimeProfile.CLAUDE_CODE_VISIBLE,
+        "traex": SchedulerRuntimeProfile.TRAEX_VISIBLE,
         "opencode": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
     }.get(canonical)
     if runtime_profile is not None:
@@ -54,6 +55,7 @@ SUPPORTED_AGENT_TYPES = [
     "codex-ide-plugin",
     "codex-cli",
     "claude-code",
+    "traex",
     "opencode",
     "manual",
     "other-agent",
@@ -137,6 +139,12 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
         "entry": "/loopx <task> with the LoopX OpenCode bridge installed",
         "accepted_inputs": ["opencode", "open-code", "open_code", "open code"],
     },
+    "traex": {
+        "display_name": "TraeX",
+        "host_loop": "visible TraeX /goal or /loop gated by LoopX",
+        "entry": "/loopx <task>, then TraeX /goal <task_body> or /loop",
+        "accepted_inputs": ["traex", "traecli"],
+    },
     "manual": {
         "display_name": "Manual shell / external scheduler",
         "host_loop": "external scheduler or manual quota/status loop",
@@ -200,6 +208,8 @@ HOST_SURFACE_TO_AGENT_TYPE = {
     "codex-cli-tui": "codex-cli",
     "claude-code": "claude-code",
     "opencode": "opencode",
+    "traex": "traex",
+    "traecli": "traex",
     "shell": "manual",
     "http": "other-agent",
     "worker-bridge": "other-agent",
@@ -324,6 +334,7 @@ def _heartbeat_commands(
         "codex-ide-plugin": "Codex IDE plugin /goal visible task loop",
         "codex-cli": "Codex CLI /goal visible TUI loop",
         "claude-code": "Claude Code native /loop gated by LoopX",
+        "traex": "TraeX visible /goal or /loop gated by LoopX",
         "opencode": "OpenCode visible goal loop gated by LoopX",
         "manual": "External scheduler or manual shell LoopX poll",
         "other-agent": "Custom agent host loop gated by LoopX",
@@ -596,6 +607,28 @@ def _claude_code_activation(commands: dict[str, str], cli_bin: str) -> dict[str,
     }
 
 
+def _traex_activation(commands: dict[str, str], cli_bin: str) -> dict[str, Any]:
+    activation = _codex_goal_activation(
+        commands,
+        host_label="TraeX TUI",
+        host_surface="traex_visible_goal_mode",
+    )
+    activation["entry_command_hint"] = "/loopx <task>, then TraeX /goal <task_body> or /loop"
+    activation["setup_command"] = f"{cli_bin} slash-commands --install --surface traex"
+    activation["activation_steps"] = [
+        "Install or refresh the LoopX TraeX surface when needed.",
+        "Run the heartbeat-prompt JSON command after project state and todos are written.",
+        "Read task_body from the JSON payload.",
+        "Set the visible TraeX goal to `/goal <task_body>`, or start TraeX `/loop` only after `/loopx <task>` has armed LoopX state.",
+        "Keep delivery visible; every continued turn starts from LoopX quota/status/state.",
+    ]
+    activation["success_criteria"] = [
+        "The visible TraeX session has `/goal <task_body>` active or `/loop` gated by LoopX state.",
+        "Future TraeX turns enter through LoopX quota/status/state before delivery work.",
+    ]
+    return activation
+
+
 def _opencode_activation(commands: dict[str, str], cli_bin: str) -> dict[str, Any]:
     return {
         "host_surface": "opencode_visible_goal_mode",
@@ -705,6 +738,8 @@ def build_host_loop_activation_packet(
         surface = _codex_cli_activation(commands)
     elif canonical == "claude-code":
         surface = _claude_code_activation(commands, cli_bin)
+    elif canonical == "traex":
+        surface = _traex_activation(commands, cli_bin)
     elif canonical == "opencode":
         surface = _opencode_activation(commands, cli_bin)
     else:

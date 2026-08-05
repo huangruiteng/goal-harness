@@ -38,6 +38,8 @@ def _surface_install_command(agent_type: str, cli_bin: str) -> str | None:
         return f"{shell_arg(cli_bin)} slash-commands --install --surface codex"
     if agent_type == "claude-code":
         return f"{shell_arg(cli_bin)} slash-commands --install --surface claude-code"
+    if agent_type == "traex":
+        return f"{shell_arg(cli_bin)} slash-commands --install --surface traex"
     if agent_type == "opencode":
         return (
             f"{shell_arg(cli_bin)} slash-commands --install --surface opencode "
@@ -56,6 +58,8 @@ def _project_skill_surface(agent_type: str) -> str | None:
         return "codex"
     if agent_type == "claude-code":
         return "claude-code"
+    if agent_type == "traex":
+        return "traex"
     if agent_type == "opencode":
         return "opencode"
     return None
@@ -239,6 +243,7 @@ def _bootstrap_pack_command(
         "codex-ide-plugin": "codex-ide-plugin",
         "codex-cli": "codex-cli-tui",
         "claude-code": "claude-code",
+        "traex": "traex",
         "opencode": "opencode",
         "ark-managed-agent": "ark-managed-agent",
         "manual": "shell",
@@ -274,6 +279,8 @@ def _start_instruction(agent_type: str) -> str:
         return "Use `$loopx <task>` or select the LoopX skill from `/skills`; after todos are written, set `/goal <task_body>` in the visible TUI."
     if agent_type == "claude-code":
         return "Run `/loopx <task>` to arm LoopX, then run native `/loop`."
+    if agent_type == "traex":
+        return "Run `/loopx <task>` in TraeX; after todo writeback, set `/goal <task_body>` or run TraeX `/loop` gated by LoopX."
     if agent_type == "opencode":
         return "Run `/loopx <task>`; after todo writeback, call `loopx_goal_activate` with the generated heartbeat task body."
     if agent_type == "ark-managed-agent":

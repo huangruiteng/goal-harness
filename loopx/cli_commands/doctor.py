@@ -4,8 +4,7 @@ import argparse
 from collections.abc import Callable
 
 from ..doctor import collect_doctor, render_doctor_markdown
-from ..host_loop_activation import SUPPORTED_AGENT_TYPES
-
+from ..host_loop_activation import AgentTypeError
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -25,9 +24,9 @@ def register_doctor_command(subparsers: argparse._SubParsersAction) -> argparse.
     )
     parser.add_argument(
         "--agent-type",
-        choices=SUPPORTED_AGENT_TYPES,
         help=(
-            "Evaluate host-specific integration checks. For other-agent, custom-host "
+            "Evaluate host-specific integration checks. Accepted aliases are "
+            "normalized by the host-loop catalog; for other-agent, custom-host "
             "skill delivery replaces the Codex skill-directory check."
         ),
     )
@@ -35,9 +34,13 @@ def register_doctor_command(subparsers: argparse._SubParsersAction) -> argparse.
 
 
 def handle_doctor_command(args: argparse.Namespace, print_payload: PrintPayload) -> int:
-    payload = collect_doctor(
-        deep=bool(args.deep),
-        agent_type=args.agent_type,
-    )
+    try:
+        payload = collect_doctor(
+            deep=bool(args.deep),
+            agent_type=args.agent_type,
+        )
+    except AgentTypeError as exc:
+        print_payload(exc.to_payload(), args.format, render_doctor_markdown)
+        return 2
     print_payload(payload, args.format, render_doctor_markdown)
     return 0 if payload.get("ok") else 1

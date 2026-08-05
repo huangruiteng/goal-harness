@@ -16,6 +16,7 @@ class HostSurface(str, Enum):
     CODEX_APP_SSH = "codex_app_ssh"
     CODEX_CLI = "codex_cli"
     GENERIC_CLI = "generic_cli"
+    TRAEX = "traex"
     CLAUDE_CODE = "claude_code"
     LOCAL_SCHEDULER = "local_scheduler"
 
@@ -40,6 +41,7 @@ class SchedulerRuntimeProfile(str, Enum):
     CODEX_APP_SSH_VISIBLE = "codex_app_ssh_goal"
     CODEX_CLI_VISIBLE = "codex_cli"
     CLAUDE_CODE_VISIBLE = "claude_code"
+    TRAEX_VISIBLE = "traex"
     GENERIC_CLI_AGENT_LOOP = "generic_cli"
     GENERIC_CLI_OUTER_CONTROLLER = "outer_controller"
 
@@ -95,6 +97,11 @@ _SCHEDULER_RUNTIME_PROFILE_CONTEXTS = {
     ),
     SchedulerRuntimeProfile.CLAUDE_CODE_VISIBLE: (
         HostSurface.CLAUDE_CODE,
+        SchedulerOwner.AGENT_CLI_LOOP,
+        ExecutionMode.INTERACTIVE,
+    ),
+    SchedulerRuntimeProfile.TRAEX_VISIBLE: (
+        HostSurface.TRAEX,
         SchedulerOwner.AGENT_CLI_LOOP,
         ExecutionMode.INTERACTIVE,
     ),
@@ -179,6 +186,7 @@ def _validation_errors(context: SchedulerExecutionContext) -> list[str]:
         HostSurface.CODEX_APP_SSH,
         HostSurface.CODEX_CLI,
         HostSurface.GENERIC_CLI,
+        HostSurface.TRAEX,
         HostSurface.CLAUDE_CODE,
     }
     if context.host_surface is HostSurface.CODEX_APP:
@@ -398,6 +406,8 @@ def scheduler_execution_context_for_turn(
         "codex-app-ssh": HostSurface.CODEX_APP_SSH.value,
         "codex-cli": HostSurface.CODEX_CLI.value,
         "generic-cli": HostSurface.GENERIC_CLI.value,
+        "traex": HostSurface.TRAEX.value,
+        "traecli": HostSurface.TRAEX.value,
         "claude-code": HostSurface.CLAUDE_CODE.value,
     }.get(host, host)
     normalized_mode = {

@@ -115,17 +115,17 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "argument_hint": "[--capability-route issue-fix] [task text]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, `opencode` for OpenCode, or `ark-managed-agent` for Ark Managed Agent.",
+                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, `traex` for TraeX, `opencode` for OpenCode, or `ark-managed-agent` for Ark Managed Agent.",
                 f"If arguments are present, parse only an optional leading `--capability-route issue-fix` as an explicit product-route switch, remove that prefix from the task text, and pass it to `{cli_bin} start-goal --guided --project . --goal-text \"<remaining exact arguments>\" --host-surface <exact-current-host>`. Without that switch, preserve all arguments as task text and do not add a capability route. Never infer a route from issue/PR wording or URLs. If the host is unclear, omit the host flag once and follow the returned host-surface selection gate.",
                 f"Treat the returned `ordered_steps` as a required transaction. On first connection, run its bootstrap command, resolve the fresh-agent identity gate before planning, then plan and execute at least one business `{cli_bin} todo add` derived from `$ARGUMENTS` before substantive task work. Encode priority in the todo text such as `[P0]`; `{cli_bin} todo add` has no `--priority` flag. Do not continue until LoopX status shows that business Agent Todo.",
                 "If `selected_capability_route` is present, run its entry and admission commands before substantive implementation. Keep capability facts in capability-owned state; generic Todos remain scheduling records.",
                 f"Before dependent work, persist material scope, acceptance, or non-goal changes in current Todo evidence and the next executable Todo; then run `{cli_bin} refresh-state` and verify quota readback. Chat/model summaries are not durable state.",
                 f"If that packet exposes a goal-selection gate, rerun one exact choice before any mutation. For an argument-bearing task with no active agent interaction contract, treat this invocation as a new agent connection by default: choose a new public-safe agent id and preview `{cli_bin} register-agent --goal-id <selected-goal-id> --agent-id <new-agent-id> --require-new`. Treat preview as advisory; apply with `--execute` and continue only when that result reports `ok=true`, `changed=true`, `written=true`, successful global sync, and verified registration readback. Then rerun start-goal with explicit `--goal-id` and `--agent-id` before todo writeback. Only reuse an existing registered identity when the user explicitly asks to take over that exact agent's work; never infer takeover from a single registered agent or registry order.",
                 f"If arguments are empty and the host task already identifies an active LoopX goal, run its exact CLI `interaction_contract` or quota command first; do not call `start-goal` or bootstrap another goal. Only when no active goal contract is present, inspect `{cli_bin} bootstrap-command-pack --project .`, `{cli_bin} status`, and `{cli_bin} slash-commands` before changing files.",
-                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli`, `claude-code`, `opencode`, or `ark-managed-agent`, never ambiguous `codex`.",
+                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli`, `claude-code`, `traex`, `opencode`, or `ark-managed-agent`, never ambiguous `codex`.",
                 f"Do not configure optional features during first-run. Only when the task needs bounded child agents or Explore, inspect `{cli_bin} configure-goal --goal-id <resolved-goal-id>` and its `configuration_catalog`; preview before explicit apply and never auto-enable a feature merely because it exists.",
                 "When project work is started, plan ordered P0/P1/P2 todos, write them through LoopX todo state, refresh state, activate the host loop if missing/stale, run quota, and complete one bounded delivery segment through validation plus LoopX writeback or an exact blocker; do not return merely after setup, planning, or claim.",
-                "Host loop activation means Codex App heartbeat automation; Codex App over SSH, the Codex IDE plugin, or CLI visible `/goal <task_body>`; Claude Code native `/loop`; OpenCode `loopx_goal_activate`; Ark Managed Agent one-shot Goal submission; or a custom host-loop gate from `loopx agent-onboard`.",
+                "Host loop activation means Codex App heartbeat automation; Codex App over SSH, the Codex IDE plugin, or CLI visible `/goal <task_body>`; Claude Code native `/loop`; TraeX visible `/goal <task_body>` or `/loop`; OpenCode `loopx_goal_activate`; Ark Managed Agent one-shot Goal submission; or a custom host-loop gate from `loopx agent-onboard`.",
                 "If this session cannot mutate the host loop surface, surface the exact pasteable gate instead of saying LoopX is autonomously connected.",
             ],
         },
@@ -325,6 +325,11 @@ def _opencode_home(value: str | None = None) -> Path:
     return Path(raw).expanduser()
 
 
+def _traex_home(value: str | None = None) -> Path:
+    raw = value or os.environ.get("TRAE_HOME") or str(Path.home() / ".trae")
+    return Path(raw).expanduser()
+
+
 def _strip_jsonc_comments(content: str) -> str:
     output: list[str] = []
     index = 0
@@ -505,6 +510,8 @@ def _normalize_surfaces(surfaces: list[str] | None) -> list[str]:
             candidates = ["codex"]
         elif surface in {"codex-app", "codex-app-ssh", "codex-ide-plugin", "codex-ide", "codex-cli"}:
             candidates = ["codex"]
+        elif surface == "traecli":
+            candidates = ["traex"]
         else:
             candidates = [surface]
         for candidate in candidates:
@@ -524,12 +531,14 @@ def install_slash_commands(
     codex_home: str | None = None,
     claude_home: str | None = None,
     opencode_home: str | None = None,
+    traex_home: str | None = None,
 ) -> dict[str, Any]:
     specs = _command_prompt_specs(cli_bin=cli_bin, include_legacy_aliases=include_legacy_aliases)
     effective_surfaces = _normalize_surfaces(surfaces)
     codex_root = _codex_home(codex_home)
     claude_root = _claude_home(claude_home)
     opencode_root = _opencode_home(opencode_home)
+    traex_root = _traex_home(traex_home)
     installed: list[dict[str, Any]] = []
 
     if with_goal_bridge and "opencode" not in effective_surfaces:
@@ -716,6 +725,54 @@ def install_slash_commands(
                     "path": str(path),
                     "status": status,
                     "invoke_as": [str(spec["command"])],
+                }
+            )
+
+    if "traex" in effective_surfaces:
+        skills_dir = traex_root / "skills"
+        for spec in specs:
+            path = skills_dir / str(spec["name"]) / "SKILL.md"
+            if uninstall:
+                status = _retire_status(path, execute=execute)
+                installed.append(
+                    {
+                        "surface": "traex",
+                        "host_surfaces": ["traex"],
+                        "mechanism": "traex_skills",
+                        "command": spec["command"],
+                        "path": str(path),
+                        "status": status,
+                        "invoke_as": [str(spec["command"]), "/skills"],
+                    }
+                )
+                continue
+            content = _skill_body(
+                command=str(spec["command"]),
+                title=f"LoopX {spec['command']}",
+                description=str(spec["description"]),
+                argument_hint=str(spec["argument_hint"]),
+                instructions=[
+                    (
+                        "The exact current host is TraeX. For goal start, pass "
+                        "`--host-surface traex`; after LoopX writes todos, use "
+                        "the returned `/goal <task_body>` in the visible TraeX TUI "
+                        "or start TraeX `/loop` only after `/loopx <task>` has armed LoopX state."
+                    ),
+                    *[str(item) for item in spec["instructions"]],
+                ],
+                surface="traex-skills",
+                front_matter_name=str(spec["name"]),
+            )
+            status = _target_status(path, content, execute=execute)
+            installed.append(
+                {
+                    "surface": "traex",
+                    "host_surfaces": ["traex"],
+                    "mechanism": "traex_skills",
+                    "command": spec["command"],
+                    "path": str(path),
+                    "status": status,
+                    "invoke_as": [str(spec["command"]), "/skills"],
                 }
             )
 
@@ -926,6 +983,7 @@ def install_slash_commands(
             "codex_prompt_dir": None,
             "codex_skill_dir": str(codex_root / "skills") if "codex" in effective_surfaces else None,
             "claude_skill_dir": str(claude_root / "skills") if "claude-code" in effective_surfaces else None,
+            "traex_skill_dir": str(traex_root / "skills") if "traex" in effective_surfaces else None,
             "opencode_command_dir": str(opencode_root / "commands") if "opencode" in effective_surfaces else None,
             "opencode_plugin_path": str(opencode_root / "plugins" / "loopx-goal.js") if "opencode" in effective_surfaces and with_goal_bridge else None,
             "opencode_package_path": str(opencode_root / "package.json") if "opencode" in effective_surfaces and with_goal_bridge else None,
@@ -941,6 +999,7 @@ def install_slash_commands(
             "Codex does not currently support user-defined native top-level slash commands; use explicit skill invocation through `$loopx` or `/skills`.",
             "Explicit LoopX command-facade skills use agents/openai.yaml policy allow_implicit_invocation=false and remain distinct from richer workflow skills such as loopx-project.",
             "Claude Code discovers user skills from CLAUDE_HOME/skills and exposes each skill name as a slash command.",
+            "TraeX discovers user skills from TRAE_HOME/skills and workspace skills from .trae/skills; the TraeX LoopX surface is visible/manual and does not claim background automation.",
             "The default all surface installs only OpenCode's static command facade; the executable goal bridge requires --with-goal-bridge.",
             "The OpenCode goal bridge uses Bun-managed config-directory dependencies and must replace any direct goal-plugin registration.",
             "OpenCode bridge uninstall preserves package.json dependencies because they may be shared by user-owned local plugins.",
@@ -962,6 +1021,7 @@ def render_slash_command_install_markdown(payload: dict[str, Any]) -> str:
     codex_prompt_dir = payload.get("summary", {}).get("codex_prompt_dir")
     codex_skill_dir = payload.get("summary", {}).get("codex_skill_dir")
     claude_skill_dir = payload.get("summary", {}).get("claude_skill_dir")
+    traex_skill_dir = payload.get("summary", {}).get("traex_skill_dir")
     opencode_command_dir = payload.get("summary", {}).get("opencode_command_dir")
     opencode_plugin_path = payload.get("summary", {}).get("opencode_plugin_path")
     if codex_prompt_dir:
@@ -970,6 +1030,8 @@ def render_slash_command_install_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- codex skills: `{codex_skill_dir}`")
     if claude_skill_dir:
         lines.append(f"- claude skills: `{claude_skill_dir}`")
+    if traex_skill_dir:
+        lines.append(f"- traex skills: `{traex_skill_dir}`")
     if opencode_command_dir:
         lines.append(f"- opencode commands: `{opencode_command_dir}`")
     if opencode_plugin_path:

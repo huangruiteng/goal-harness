@@ -50,7 +50,7 @@ def register_slash_commands_command(
     parser.add_argument(
         "--surface",
         action="append",
-        choices=["all", "codex", "codex-cli", "codex-app", "codex-app-ssh", "codex-ide-plugin", "codex-ide", "claude-code", "opencode"],
+        choices=["all", "codex", "codex-cli", "codex-app", "codex-app-ssh", "codex-ide-plugin", "codex-ide", "claude-code", "traex", "traecli", "opencode"],
         help=(
             "Host surface to install. Repeatable. Defaults to static command facades "
             "for Codex, Claude Code, and OpenCode."
@@ -75,6 +75,10 @@ def register_slash_commands_command(
     parser.add_argument(
         "--opencode-home",
         help="OpenCode config directory. Defaults to OPENCODE_CONFIG_DIR or ~/.config/opencode.",
+    )
+    parser.add_argument(
+        "--traex-home",
+        help="TraeX home for skill installation. Defaults to TRAE_HOME or ~/.trae.",
     )
     parser.add_argument(
         "--dry-run",
@@ -102,6 +106,7 @@ def handle_slash_commands_command(
             codex_home=args.codex_home,
             claude_home=args.claude_home,
             opencode_home=args.opencode_home,
+            traex_home=args.traex_home,
         )
         print_payload(payload, output_format(args), render_slash_command_install_markdown)
         return 0 if payload.get("ok") is True else 1

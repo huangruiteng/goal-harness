@@ -460,3 +460,54 @@ def test_opencode_install_ignores_commented_jsonc_goal_plugin(
 
     assert payload["ok"] is True
     assert (opencode_home / "plugins" / "loopx-goal.js").exists()
+
+
+def test_traex_install_writes_loopx_skills(tmp_path: Path) -> None:
+    traex_home = tmp_path / "traex"
+
+    payload = install_slash_commands(
+        execute=True,
+        surfaces=["traex"],
+        traex_home=str(traex_home),
+    )
+
+    assert payload["ok"] is True
+    assert payload["effective_surfaces"] == ["traex"]
+    command = traex_home / "skills" / "loopx" / "SKILL.md"
+    text = command.read_text(encoding="utf-8")
+    assert "surface=traex-skills" in text
+    assert "--host-surface traex" in text
+    assert "visible TraeX TUI" in text
+    assert "`/goal <task_body>`" in text
+    assert _row(payload, "traex_skills")["status"] == "created"
+
+
+def test_traex_install_uses_trae_home_not_traecli_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trae_home = tmp_path / "trae-home"
+    traecli_home = tmp_path / "traecli-home"
+    monkeypatch.setenv("TRAE_HOME", str(trae_home))
+    monkeypatch.setenv("TRAECLI_HOME", str(traecli_home))
+
+    payload = install_slash_commands(
+        execute=True,
+        surfaces=["traex"],
+    )
+
+    assert payload["ok"] is True
+    assert (trae_home / "skills" / "loopx" / "SKILL.md").exists()
+    assert not (traecli_home / "skills" / "loopx" / "SKILL.md").exists()
+    assert payload["summary"]["traex_skill_dir"] == str(trae_home / "skills")
+
+
+def test_surface_aliases_install_traex(tmp_path: Path) -> None:
+    payload = install_slash_commands(
+        execute=False,
+        surfaces=["traecli"],
+        traex_home=str(tmp_path / "traex"),
+    )
+
+    assert payload["effective_surfaces"] == ["traex"]
+    assert any(item.get("surface") == "traex" for item in payload["installed"])

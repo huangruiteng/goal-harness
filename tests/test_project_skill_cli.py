@@ -30,6 +30,8 @@ def test_project_skill_cli_installs_multiple_host_surfaces(
         "claude-code",
         "--surface",
         "opencode",
+        "--surface",
+        "traex",
         "--format",
         "json",
     ]
@@ -44,6 +46,8 @@ def test_project_skill_cli_installs_multiple_host_surfaces(
     applied = json.loads(capsys.readouterr().out)
     assert applied["status"] == "current"
     assert all(item["status"] == "current" for item in applied["surfaces"])
+    targets = {item["surface"]: item["target"] for item in applied["surfaces"]}
+    assert ".trae/skills/loopx-material" in targets["traex"]
 
     assert main(["project-skill", "status", *common]) == 0
     status = json.loads(capsys.readouterr().out)

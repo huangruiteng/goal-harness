@@ -85,6 +85,9 @@ can discover user-installed skills:
   `--with-goal-bridge` install. The wrapped goal runtime keeps private restart
   state under each project's `.opencode/goals/`; add that directory to project
   ignore rules before using the persistent bridge.
+- TraeX: user skills under `$TRAE_HOME/skills/loopx*` expose the same command
+  family. The first supported mode is visible/manual: run `/loopx <task>`, then
+  use TraeX `/goal <task_body>` or `/loop` only after LoopX state is armed.
 
 The command family is the same across surfaces, even when the host-specific
 entry point is different:
@@ -510,12 +513,14 @@ Host-native project roots are:
 | Codex | `.agents/skills/` |
 | Claude Code | `.claude/skills/` |
 | OpenCode | `.opencode/skills/` |
+| TraeX | `.trae/skills/` |
 
 Repeat `--surface` to install the same skill for multiple hosts in one
 transaction. The locations follow the host discovery contracts documented by
 [Codex](https://developers.openai.com/codex/skills),
 [Claude Code](https://code.claude.com/docs/en/slash-commands#where-skills-live),
-and [OpenCode](https://opencode.ai/docs/skills/#place-files).
+[OpenCode](https://opencode.ai/docs/skills/#place-files), and TraeX project
+skill discovery.
 
 Installing a project skill does not grant domain write authority; the current
 goal/profile/todo must still activate the capability. Use

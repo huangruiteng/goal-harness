@@ -6,6 +6,7 @@ from loopx.heartbeat_prompt import (
     build_heartbeat_prompt,
     uses_native_goal_host_loop,
 )
+from loopx.doctor import collect_doctor
 from loopx.host_loop_activation import (
     AgentTypeError,
     agent_type_for_host_surface,
@@ -25,6 +26,8 @@ def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -
     assert agent_type_for_host_surface("codex-app") == "codex-app"
     assert agent_type_for_host_surface("codex-cli-tui") == "codex-cli"
     assert normalize_agent_type("Open Code") == "opencode"
+    assert normalize_agent_type("traecli") == "traex"
+    assert agent_type_for_host_surface("traex") == "traex"
     assert agent_type_for_host_surface("opencode") == "opencode"
     assert agent_type_for_host_surface("ark-managed-agent") == "ark-managed-agent"
 
@@ -49,6 +52,31 @@ def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -
     assert " -M " not in packet["commands"]["heartbeat_prompt"]
 
 
+def test_doctor_normalizes_traecli_alias() -> None:
+    payload = collect_doctor(agent_type="traecli")
+    assert payload["agent_type"] == "traex"
+
+
+def test_doctor_command_reports_unsupported_agent_type_cleanly() -> None:
+    import argparse
+
+    from loopx.cli_commands.doctor import handle_doctor_command
+
+    captured: dict[str, object] = {}
+
+    def _capture(payload, _fmt, _render) -> None:
+        captured["payload"] = payload
+
+    args = argparse.Namespace(deep=False, agent_type="trae", format="json")
+    exit_code = handle_doctor_command(args, _capture)
+
+    assert exit_code == 2
+    payload = captured["payload"]
+    assert payload["ok"] is False
+    assert payload["error_kind"] == "ambiguous_or_unsupported_agent_type"
+    assert payload["agent_type"] == "trae"
+
+
 @pytest.mark.parametrize(
     ("agent_type", "runtime_profile"),
     (
@@ -58,6 +86,7 @@ def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -
         ("codex-cli", "codex_cli"),
         ("codex-ide-plugin", "codex_cli"),
         ("claude-code", "claude_code"),
+        ("traex", "traex"),
         ("opencode", "generic_cli"),
     ),
 )
