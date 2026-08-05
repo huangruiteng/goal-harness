@@ -10,7 +10,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
 
-[Try LoopX](#try-loopx) · [See real loops](#evidence) · [How it works](#why-loopx) · [Hosted frontstage](https://huangruiteng.github.io/loopx/frontstage/) · [User manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [简体中文](README.zh-CN.md)
+[Try LoopX](#try-loopx) · [See real loops](#evidence) · [How it works](#why-loopx) · [Docs](https://huangruiteng.github.io/loopx/docs/) · [Hosted frontstage](https://huangruiteng.github.io/loopx/frontstage/) · [User manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [简体中文](README.zh-CN.md)
 
 **把会干活的 Agent，接成可管理、可复盘、可持续改进的数字员工。**
 
@@ -336,6 +336,7 @@ quota, and handoff explicit.
 ### App and Projection Paths
 
 - Local read-first UI: [dashboard guide](apps/presentation/dashboard/README.md)
+- Documentation portal: [hosted docs](https://huangruiteng.github.io/loopx/docs/)
 - Public-safe product view: [hosted frontstage](https://huangruiteng.github.io/loopx/frontstage/)
 - Feishu/Lark projection: [Lark Kanban adapter](docs/integrations/lark-kanban-control-plane-adapter.md)
 - Generic host integration: [integration guide](docs/integration.md)
@@ -382,8 +383,10 @@ loopx check \
 
 ## Advanced Documentation
 
-Start with the path that matches your role. The
-[documentation index](docs/README.md) remains the complete map.
+Start with the path that matches your role. Use the hosted
+[documentation portal](https://huangruiteng.github.io/loopx/docs/) for the
+published docs site; the [documentation index](docs/README.md) remains the
+complete source map.
 
 ### Use and Operate
 
