@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "loopx" / "cli.py"
 MODULE = ROOT / "loopx" / "cli_commands" / "registry_admin.py"
+CONFIGURE_MODULE = ROOT / "loopx" / "cli_commands" / "registry_admin_configure.py"
 AUTHORITY_MODULE = ROOT / "loopx" / "cli_commands" / "registry_authority.py"
 INIT = ROOT / "loopx" / "cli_commands" / "__init__.py"
 GOAL_ID = "registry-admin-smoke"
@@ -135,8 +136,11 @@ def write_fixture(project: Path) -> tuple[Path, Path, Path, Path]:
 def main() -> None:
     cli_source = CLI.read_text(encoding="utf-8")
     module_source = MODULE.read_text(encoding="utf-8")
+    configure_source = CONFIGURE_MODULE.read_text(encoding="utf-8")
     authority_source = AUTHORITY_MODULE.read_text(encoding="utf-8")
-    registry_admin_family_source = module_source + "\n" + authority_source
+    registry_admin_family_source = (
+        module_source + "\n" + configure_source + "\n" + authority_source
+    )
     init_source = INIT.read_text(encoding="utf-8")
 
     forbidden_cli_markers = [
@@ -195,6 +199,15 @@ def main() -> None:
         require(marker in authority_source, f"registry authority module missing {marker}")
     for marker in ("register_registry_authority_commands", "handle_registry_authority_command"):
         require(marker in module_source, f"registry admin module should delegate authority commands through {marker}")
+    for marker in (
+        "register_configure_goal_command",
+        'subparsers.add_parser(\n        "configure-goal"',
+    ):
+        require(marker in configure_source, f"configure-goal command owner missing {marker}")
+    require(
+        "register_configure_goal_command(subparsers)" in module_source,
+        "registry admin module should delegate configure-goal registration",
+    )
     require("register_registry_admin_commands" in cli_source, "cli.py did not register registry admin commands")
     require("handle_registry_admin_command" in cli_source, "cli.py did not dispatch registry admin commands")
     require("register_registry_admin_commands" in init_source, "__init__ did not export registry admin registration")

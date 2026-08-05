@@ -145,11 +145,7 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
         help="Capability available in this host loop. Repeat for multiple capabilities.",
     )
     _add_capability_route_argument(start_goal_parser)
-    start_goal_parser.add_argument(
-        "--goal-text",
-        required=True,
-        help="Exact goal text to plan before todo writeback.",
-    )
+    start_goal_parser.add_argument("--goal-text", required=True, help="Exact goal text to plan before todo writeback.")
     start_goal_parser.add_argument(
         "--include-command-pack-detail",
         action="store_true",
