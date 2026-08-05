@@ -10,7 +10,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
 
-[Try LoopX](#try-loopx) · [See real loops](#evidence) · [How it works](#why-loopx) · [Hosted frontstage](https://huangruiteng.github.io/loopx/frontstage/) · [User manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [简体中文](README.zh-CN.md)
+[Public website](https://huangruiteng.github.io/loopx/) · [Try LoopX](#try-loopx) · [See real loops](#evidence) · [How it works](#why-loopx) · [User manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [简体中文](README.zh-CN.md)
 
 **把会干活的 Agent，接成可管理、可复盘、可持续改进的数字员工。**
 
@@ -134,8 +134,8 @@ todo, quota, evidence, and targeted wake remain visible.**
 
 More inspectable surfaces:
 
-- [Hosted frontstage](https://huangruiteng.github.io/loopx/frontstage/) and its
-  [public demo script](docs/outreach/frontstage-demo-script.md);
+- the [public homepage](https://huangruiteng.github.io/loopx/) for the product
+  narrative, quick start, and long-running evidence;
 - the [showcase catalog](docs/showcases/README.md), including
   [blocked-P0 safe rotation](docs/showcases/cases/0617-blocked-p0-safe-rotation.md),
   [LoopX self-iteration](docs/showcases/cases/0619-loopx-self-iteration.md), and
@@ -245,7 +245,7 @@ LoopX folds its control-plane mechanics into five questions:
 | Goal state and status | Tracks active state, todos, claims, gates, evidence, run history, and first-screen attention. | `loopx status`, `loopx diagnose`, `loopx review-packet` |
 | Quota and interaction contract | Decides whether a turn should deliver, ask, wait, self-repair, or stay quiet. | `loopx quota should-run`, [quota allocation](docs/quota-allocation.md) |
 | Agent runtime bridges | Keeps Codex App, Codex CLI, Claude Code, and generic workers aligned with the same guard. | `loopx heartbeat-prompt`, `loopx codex-cli-bootstrap-message`, `loopx worker-bridge` |
-| Operator surfaces | Renders compact status without making the browser the state authority. | `loopx serve-status`, [dashboard](apps/presentation/dashboard/README.md), [frontstage](https://huangruiteng.github.io/loopx/frontstage/) |
+| Operator surfaces | Renders compact status without making the browser the state authority. | `loopx serve-status`, [dashboard](apps/presentation/dashboard/README.md) |
 | External projections | Projects todos and gates into collaboration surfaces while LoopX remains authoritative. | `loopx lark-kanban`, [Lark Kanban adapter](docs/integrations/lark-kanban-control-plane-adapter.md) |
 | Domain capabilities | Packages repeatable work lanes such as issue fixing, content operations, value connector planning, ML experiment advice, benchmark evidence, and Explore. | `loopx issue-fix`, `loopx content-ops`, `loopx value-connectors`, `loopx ml-experiment`, `loopx benchmark`, [Explore](docs/capabilities/explore/README.md) |
 | Experimental context learning | Lets named registered agents trial provider-neutral Reward Memory through ignored, default-off project configuration. OpenViking is one provider option, not a global dependency. | `loopx reward-memory experiment-status`, [Reward Memory architecture](docs/reference/protocols/reward-memory-architecture-v0.md) |
@@ -336,7 +336,7 @@ quota, and handoff explicit.
 ### App and Projection Paths
 
 - Local read-first UI: [dashboard guide](apps/presentation/dashboard/README.md)
-- Public-safe product view: [hosted frontstage](https://huangruiteng.github.io/loopx/frontstage/)
+- Public product overview: [public homepage](https://huangruiteng.github.io/loopx/)
 - Feishu/Lark projection: [Lark Kanban adapter](docs/integrations/lark-kanban-control-plane-adapter.md)
 - Generic host integration: [integration guide](docs/integration.md)
 - Custom multi-agent runner:
