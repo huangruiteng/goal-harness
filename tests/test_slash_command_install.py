@@ -78,6 +78,8 @@ def test_host_materialization_can_bind_exact_managed_agent_surface(
     assert "current Todo evidence and the next executable Todo" in skill_text
     assert "Chat/model summaries are not durable state" in skill_text
     assert "run its entry and admission commands" in skill_text
+    assert "capability show <capability-id> --format json" in skill_text
+    assert "instead of substituting provider CLIs" in skill_text
     assert "generic Todos remain scheduling records" in skill_text
     assert "do not add a capability route" in skill_text
     assert "run its exact CLI `interaction_contract` or quota command first" in skill_text

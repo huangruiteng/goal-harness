@@ -192,6 +192,24 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
         "candidate_authority": "public_open_tracker_issue",
         "authority_refresh_required": "current issue body and latest comments",
         "candidate_preflight": candidate_preflight_input_contract(),
+        "discovered_issue_transition": {
+            "schema_version": "issue_fix_discovered_issue_route_v0",
+            "source_state": "discovered-* placeholder",
+            "activation_condition": (
+                "a reproducible defect discovered during issue-fix work has no "
+                "canonical public issue"
+            ),
+            "promotion_command_key": (
+                "issue_fix_discovered_issue_promotion_template"
+            ),
+            "required_transaction": "issue_fix_discovered_issue_promotion_v0",
+            "authority_scope": "publish",
+            "direct_provider_issue_create": "forbidden",
+            "completion_condition": (
+                "verify one reused or newly created canonical issue and replace "
+                "the discovered placeholder before treating it as public authority"
+            ),
+        },
         "implementation_admission": {
             "status": "qualification_required",
             "state_owner": "issue_fix",
@@ -229,6 +247,12 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert guard["admission_command_source"].endswith(
         "/commands/issue_fix_feasibility_template"
     )
+    assert guard["discovered_issue_promotion_command_source"].endswith(
+        "/commands/issue_fix_discovered_issue_promotion_template"
+    )
+    assert guard["discovered_issue_transition"] == route[
+        "discovered_issue_transition"
+    ]
     assert guard["durable_successor_sources"] == {
         "proceed": "admission_result.transition.projected_todo",
         "non_proceed": "entry_result.ordered_loopx_todo_writeback_preview",
@@ -251,6 +275,11 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     assert commands[route["admission_command_key"]].startswith(
         "loopx issue-fix feasibility "
     )
+    promotion_key = route["discovered_issue_transition"]["promotion_command_key"]
+    assert commands[promotion_key].startswith(
+        "loopx issue-fix promote-discovered-issue "
+    )
+    assert "--execute" in commands[promotion_key]
     rendered = render_start_goal_guided_markdown(payload)
     assert "authority: open public issue; source clues are evidence only" in rendered
     assert "discover: `gh issue list " in rendered
@@ -258,6 +287,8 @@ def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
         "numeric_pr_evidence + semantic_pr_evidence + "
         "maintainer_comment_evidence"
     ) in rendered
+    assert "direct provider issue creation" in rendered
+    assert "issue-fix promote-discovered-issue" in rendered
     assert "only admitted proceed may start a new implementation" in rendered
     assert "loopx issue-fix workflow-plan " in rendered
     assert "loopx issue-fix feasibility " in rendered

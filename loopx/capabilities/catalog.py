@@ -313,6 +313,11 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "write_boundary": "writes compact project-local domain state with goal or ledger context; no raw issue/comment/log capture or external write",
             },
             {
+                "command": "loopx issue-fix promote-discovered-issue --goal-id <goal-id> --project <repo> --promotion-json <promotion.json> --execute --format json",
+                "purpose": "Create or reuse one canonical public issue for a reproducible discovered defect and replace its local placeholder.",
+                "write_boundary": "active publish authority only; bounded issue create/reuse and optional PR closing-reference verification plus compact issue-fix domain-state reconciliation; no merge or production action",
+            },
+            {
                 "command": "loopx issue-fix reviewer-plan --repo-path <repo> --repo <owner/repo> --base-ref <base-ref> --execute --format json",
                 "purpose": "Rank explainable reviewer candidates from CODEOWNERS and changed-path/module history.",
                 "write_boundary": "approved local repo read only; no external review request",
