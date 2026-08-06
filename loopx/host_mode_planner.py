@@ -747,11 +747,11 @@ def build_host_mode_plan(
                 suggestions=SUPPORTED_TURN_HOST_IDENTITIES,
             )
         normalized_host_identity = candidate
+        connector_override_identity = (
+            raw_identity if raw_identity in VISIBLE_CONNECTOR_OVERRIDES else None
+        )
     # Host-mode planning continues an existing goal; fresh identity creation
     # belongs to the onboarding entry points that opt into that policy.
-    connector_override_identity = (
-        raw_identity if raw_identity in VISIBLE_CONNECTOR_OVERRIDES else None
-    )
     identity = _identity_state(
         agent_id=agent_id,
         registered_agents=registered_agents,
