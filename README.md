@@ -509,10 +509,7 @@ surface.
 
 ## Star History
 
-<p align="center">
-  <a href="https://github.com/huangruiteng/loopx/stargazers"><img src="https://huangruiteng.github.io/loopx/site-assets/star-history.svg" alt="LoopX GitHub star history, updated daily" width="900"></a><br>
-  <sub>Generated daily from public GitHub stargazer timestamps and served from LoopX GitHub Pages. GitHub's image cache may delay refreshes.</sub>
-</p>
+[![LoopX Star History](https://star-history.dera.page/svg?repos=huangruiteng/loopx&type=date&legend=top-left)](https://star-history.dera.page/#huangruiteng/loopx&type=date&legend=top-left)
 
 ## License
 

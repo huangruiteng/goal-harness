@@ -2,13 +2,9 @@ name: Frontstage Pages
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 3 * * *"
   pull_request:
     paths:
       - ".github/workflows/frontstage-pages.yml"
-      - "README.md"
-      - "README.zh-CN.md"
       - "apps/presentation/dashboard/**"
       - "apps/presentation/site/**"
       - "docs/**"
@@ -18,18 +14,14 @@ on:
       - "docs/assets/long-running-loop-ml-experiment-trajectory.png"
       - "examples/export-frontstage-share-bundle.mjs"
       - "examples/frontstage-share-bundle-smoke.mjs"
-      - "examples/readme-star-history-smoke.py"
       - "examples/goal-channel-frontstage-fixture.py"
       - "examples/showcase-catalog-smoke.py"
       - "examples/status.example.json"
-      - "scripts/render-star-history.py"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/frontstage-pages.yml"
-      - "README.md"
-      - "README.zh-CN.md"
       - "apps/presentation/dashboard/**"
       - "apps/presentation/site/**"
       - "docs/**"
@@ -39,11 +31,9 @@ on:
       - "docs/assets/long-running-loop-ml-experiment-trajectory.png"
       - "examples/export-frontstage-share-bundle.mjs"
       - "examples/frontstage-share-bundle-smoke.mjs"
-      - "examples/readme-star-history-smoke.py"
       - "examples/goal-channel-frontstage-fixture.py"
       - "examples/showcase-catalog-smoke.py"
       - "examples/status.example.json"
-      - "scripts/render-star-history.py"
 
 permissions:
   actions: read
@@ -88,9 +78,6 @@ jobs:
       - name: Validate public showcase catalog
         run: python3 examples/showcase-catalog-smoke.py
 
-      - name: Validate README star history
-        run: python3 examples/readme-star-history-smoke.py
-
       - name: Validate public-safe frontstage bundle
         working-directory: apps/presentation/dashboard
         run: npm run smoke:frontstage-share-bundle
@@ -98,20 +85,6 @@ jobs:
       - name: Export Pages frontstage artifact
         working-directory: apps/presentation/dashboard
         run: npm run export:frontstage-share -- --base /loopx/ --out-dir ../../../output/frontstage-pages
-
-      - name: Generate public star history
-        if: github.event_name != 'pull_request'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          gh api --paginate --slurp \
-            --header "Accept: application/vnd.github.star+json" \
-            "/repos/$GITHUB_REPOSITORY/stargazers?per_page=100" \
-            > "$RUNNER_TEMP/loopx-stargazers.json"
-          python3 scripts/render-star-history.py \
-            --repo "$GITHUB_REPOSITORY" \
-            --input-json "$RUNNER_TEMP/loopx-stargazers.json" \
-            --output output/frontstage-pages/site/site-assets/star-history.svg
 
       - name: Build documentation site
         run: mkdocs build --strict --site-dir output/frontstage-pages/site/docs
