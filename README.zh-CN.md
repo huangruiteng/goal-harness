@@ -462,3 +462,10 @@ Loop 的 terminal acceptance、补足独立采用与 outcome evidence，并打�
 ## License
 
 MIT，见 [LICENSE](LICENSE)。
+
+## Star 趋势
+
+<p align="center">
+  <a href="https://github.com/huangruiteng/loopx/stargazers"><img src="https://huangruiteng.github.io/loopx/site-assets/star-history.svg" alt="LoopX GitHub Star 历史趋势，每日更新" width="900"></a><br>
+  <sub>根据 GitHub 公开 stargazer 时间戳每日更新；GitHub 图片缓存可能导致显示延迟。</sub>
+</p>

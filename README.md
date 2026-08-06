@@ -511,4 +511,11 @@ surface.
 
 MIT. See [LICENSE](LICENSE).
 
+## Star History
+
+<p align="center">
+  <a href="https://github.com/huangruiteng/loopx/stargazers"><img src="https://huangruiteng.github.io/loopx/site-assets/star-history.svg" alt="LoopX GitHub star history, updated daily" width="900"></a><br>
+  <sub>Updated daily from public GitHub stargazer timestamps. GitHub's image cache may delay refreshes.</sub>
+</p>
+
 [osai-verify: eb42dd9cf910399988f0]: #
