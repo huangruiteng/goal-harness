@@ -934,6 +934,7 @@ def test_quality_skill_delivery_is_policy_conditional_and_host_neutral(
     assert inactive["required_skill_ids"] == [
         "loopx",
         "loopx-project",
+        "loopx-pr-program",
         "loopx-pr-review",
         "loopx-doc-registry",
         "loopx-self-repair",

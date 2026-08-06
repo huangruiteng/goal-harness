@@ -13,7 +13,12 @@ commands and credentials outside the snapshot producer committed to LoopX.
   "generated_at": "2026-08-06T10:00:00Z",
   "result_completeness": {
     "complete": true,
-    "scope": "all open change requests in the selected repositories"
+    "scope": {
+      "repositories": ["example/runtime"],
+      "states": ["open"],
+      "authors": [],
+      "time_window": {"since": null, "until": null}
+    }
   },
   "requirements": [
     {
@@ -55,9 +60,15 @@ commands and credentials outside the snapshot producer committed to LoopX.
 - `program_id`, `generated_at`, `result_completeness`, `requirements`, and
   `change_requests` must be present.
 - `ref` is the stable unique key. Prefer `repository#number`; do not use title.
-- `result_completeness.complete` controls removal semantics. Missing rows are
-  removals only when the current inventory is complete. Incomplete snapshots
-  must not replace the durable baseline or monitor result hash.
+- `result_completeness.scope` is a structured inventory identity. It must name
+  repository, state, author, and time-window filters explicitly; arrays are
+  unordered filter sets. The delta helper normalizes and hashes the complete
+  object, including any additional provider-neutral filters.
+- `result_completeness.complete` controls removal semantics only when the
+  previous and current scope fingerprints match. Missing rows are removals only
+  when the current inventory is complete for the same scope. Incomplete or
+  scope-mismatched snapshots must not replace the durable baseline or monitor
+  result hash.
 - `updated_at` is observational. It must not trigger a material transition by
   itself.
 - `description_digest` and `review_digest` may prove content movement without

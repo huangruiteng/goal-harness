@@ -22,7 +22,15 @@ def _snapshot(*, complete: bool, generated_at: str) -> dict[str, object]:
         "schema_version": "loopx_pr_program_snapshot_v0",
         "program_id": "public-runtime-program",
         "generated_at": generated_at,
-        "result_completeness": {"complete": complete, "scope": "fixture"},
+        "result_completeness": {
+            "complete": complete,
+            "scope": {
+                "repositories": ["example/runtime"],
+                "states": ["open"],
+                "authors": [],
+                "time_window": {"since": None, "until": None},
+            },
+        },
         "requirements": [
             {
                 "id": "runtime-controls",
@@ -114,6 +122,26 @@ def test_complete_snapshot_reports_material_gate_and_removal_changes() -> None:
             "after": {"checks": "failed"},
         }
     ]
+
+
+def test_complete_snapshot_scope_mismatch_fails_closed() -> None:
+    module = _load_module()
+    previous = _snapshot(complete=True, generated_at="2026-08-06T09:00:00Z")
+    current = _snapshot(complete=True, generated_at="2026-08-06T10:00:00Z")
+    current["result_completeness"]["scope"]["repositories"] = ["example/other"]
+    current["change_requests"] = current["change_requests"][:1]
+    current["requirements"] = []
+
+    delta = module.build_delta(previous, current)
+
+    assert delta["scope_matches_previous"] is False
+    assert delta["baseline_advance_allowed"] is False
+    assert delta["baseline_block_reason"] == "scope_mismatch"
+    assert delta["result_hash"] is None
+    assert delta["removed"] == []
+    assert delta["omitted_previous"] == ["example/runtime#41"]
+    assert delta["omitted_previous_requirements"] == ["runtime-controls"]
+    assert delta["material_change"] is False
 
 
 def test_skill_composes_read_only_monitoring_with_integration_branch() -> None:

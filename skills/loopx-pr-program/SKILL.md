@@ -55,9 +55,11 @@ Normalize observations using
 `result_completeness.complete=true` only after proving the requested repository,
 author, state, and time-window inventory is exhaustive. An incomplete current
 snapshot must not make absent rows look closed or removed.
-Do not advance the durable baseline or grouped-monitor `result_hash` from an
-incomplete snapshot; otherwise a partial page can create false remove/re-add
-transitions on the next poll.
+Persist the structured scope fingerprint with the baseline. Do not advance the
+durable baseline or grouped-monitor `result_hash` from an incomplete snapshot
+or when the previous and current scope fingerprints differ; otherwise a partial
+page or narrowed query can create false remove/re-add transitions on the next
+poll.
 
 Store raw and normalized snapshots under an ignored owner-local directory such
 as `.local/loopx/pr-program/<program-id>/`. Verify the path with

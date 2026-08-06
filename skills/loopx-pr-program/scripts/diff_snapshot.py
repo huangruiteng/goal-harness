@@ -30,6 +30,83 @@ MATERIAL_FIELDS = (
     "review_digest",
 )
 REQUIREMENT_FIELDS = ("title", "priority", "coverage")
+SCOPE_FIELDS = ("repositories", "states", "authors", "time_window")
+
+
+def _normalized_scope_value(value: Any, *, path: str) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _normalized_scope_value(item, path=f"{path}.{key}")
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, list):
+        normalized = [
+            _normalized_scope_value(item, path=f"{path}[]") for item in value
+        ]
+        return sorted(
+            normalized,
+            key=lambda item: json.dumps(
+                item,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError(f"{path} must not contain an empty string")
+        return text
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    raise TypeError(f"{path} contains an unsupported value")
+
+
+def _scope_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
+    completeness = payload.get("result_completeness")
+    if not isinstance(completeness, Mapping):
+        raise TypeError("result_completeness must be an object")
+    scope = completeness.get("scope")
+    if not isinstance(scope, Mapping):
+        raise TypeError("result_completeness.scope must be an object")
+    missing = [field for field in SCOPE_FIELDS if field not in scope]
+    if missing:
+        raise ValueError(
+            "result_completeness.scope is missing " + ", ".join(missing)
+        )
+    for field in ("repositories", "states", "authors"):
+        if not isinstance(scope.get(field), list):
+            raise TypeError(f"result_completeness.scope.{field} must be an array")
+    if not scope["repositories"]:
+        raise ValueError("result_completeness.scope.repositories must not be empty")
+    if not scope["states"]:
+        raise ValueError("result_completeness.scope.states must not be empty")
+    time_window = scope.get("time_window")
+    if not isinstance(time_window, Mapping):
+        raise TypeError("result_completeness.scope.time_window must be an object")
+    for field in ("since", "until"):
+        if field not in time_window:
+            raise ValueError(
+                f"result_completeness.scope.time_window is missing {field}"
+            )
+        if time_window[field] is not None and not isinstance(time_window[field], str):
+            raise TypeError(
+                f"result_completeness.scope.time_window.{field} must be a string or null"
+            )
+    normalized = _normalized_scope_value(scope, path="result_completeness.scope")
+    json.dumps(normalized, allow_nan=False)
+    return normalized
+
+
+def _scope_fingerprint(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        _scope_projection(payload),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -47,6 +124,7 @@ def _load(path: Path) -> dict[str, Any]:
     ):
         if field not in payload:
             raise ValueError(f"snapshot is missing {field}: {path}")
+    _scope_projection(payload)
     return payload
 
 
@@ -84,6 +162,7 @@ def _material_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
     changes = _rows(payload, "change_requests", "ref")
     return {
         "program_id": payload.get("program_id"),
+        "scope": _scope_projection(payload),
         "requirements": {
             key: _project(row, REQUIREMENT_FIELDS)
             for key, row in sorted(requirements.items())
@@ -115,9 +194,25 @@ def build_delta(
     previous_requirements = (
         _rows(previous, "requirements", "id") if previous is not None else {}
     )
-    complete = bool(
+    current_scope_fingerprint = _scope_fingerprint(current)
+    previous_scope_fingerprint = (
+        _scope_fingerprint(previous) if previous is not None else None
+    )
+    scope_matches_previous = (
+        previous_scope_fingerprint is None
+        or previous_scope_fingerprint == current_scope_fingerprint
+    )
+    current_complete = bool(
         isinstance(current.get("result_completeness"), Mapping)
         and current["result_completeness"].get("complete") is True
+    )
+    complete = current_complete and scope_matches_previous
+    baseline_block_reason = (
+        None
+        if complete
+        else "scope_mismatch"
+        if not scope_matches_previous
+        else "incomplete_result"
     )
 
     added = sorted(set(current_changes) - set(previous_changes))
@@ -188,7 +283,11 @@ def build_delta(
         "generated_at": current.get("generated_at"),
         "baseline": previous is None,
         "baseline_advance_allowed": complete,
+        "baseline_block_reason": baseline_block_reason,
         "result_completeness": current.get("result_completeness"),
+        "scope_fingerprint": current_scope_fingerprint,
+        "previous_scope_fingerprint": previous_scope_fingerprint,
+        "scope_matches_previous": scope_matches_previous,
         "result_hash": observed_result_hash if complete else None,
         "observed_result_hash": observed_result_hash,
         "material_change": material_change,
