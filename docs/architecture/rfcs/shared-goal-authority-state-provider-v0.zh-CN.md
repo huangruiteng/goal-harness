@@ -490,6 +490,18 @@ gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque po
 
 ## 11. 分阶段交付
 
+### 实施前置条件：先让本地文件模式经过同一协调合同
+
+在接入 live NoKV 或其他远端 provider 之前，runtime 应先把当前 todo/lease 写路径中的
+领域判断抽成 provider-neutral coordination core，并让一个 file-backed provider 通过
+同一组 command、precondition、receipt 与 typed outcome 合同。这个重构应先以 shadow
+方式对照当前 Markdown active state 和 task-lease 文件，资格化读写 parity、幂等、CAS
+冲突、崩溃恢复与一键回退；只有经过单独 review 的 promotion 才能让 file aggregate
+成为本地 canonical，并把 Markdown/lease 退为 projection。NoKV 随后复用同一 authority
+与合同，只替换 `load` / `compare_and_put` provider。该前置条件不创建覆盖 registry、run
+history、quota、scheduler 或 evidence 的通用存储抽象，这些账继续遵守第 3 节的 owner
+边界。
+
 ### P0：合同与 deterministic proof
 
 - 本 ownership matrix 与显式 shared-mode boundary；

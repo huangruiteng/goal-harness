@@ -560,6 +560,21 @@ particular deployment topology are deliberately non-normative.
 
 ## 11. Staged Delivery
 
+### Implementation prerequisite: put local file mode behind the same coordination contract
+
+Before wiring a live NoKV or another remote provider, the runtime should first
+extract the domain decisions in the current todo/lease write paths into a
+provider-neutral coordination core and qualify a file-backed provider against
+the same commands, preconditions, receipts, and typed outcomes. That refactor
+must begin as a shadow of the current Markdown active state and task-lease
+files, proving read/write parity, idempotency, CAS conflicts, crash recovery,
+and one-command rollback. Only a separately reviewed promotion may make the
+file aggregate locally canonical and turn Markdown/lease files into
+projections. NoKV then reuses the same authority and contract while replacing
+only the `load` / `compare_and_put` provider. This prerequisite does not create
+a generic storage abstraction over registry, run history, quota, scheduler, or
+evidence; those ledgers retain the owners defined in Section 3.
+
 ### P0: contract and deterministic proof
 
 - this ownership matrix and explicit shared-mode boundary;
