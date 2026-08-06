@@ -1692,12 +1692,12 @@ def run_auto_research_demo_e2e(
                             agent_id=agent_id,
                             workspace=workspace,
                         )
-                    except Exception as exc:
+                    except Exception:
                         skipped_lanes.append({
                             "lane_id": lane_id,
                             "agent_id": agent_id,
                             "reason": "frontier_load_failed",
-                            "error": str(exc)[:200],
+                            "error_code": "FRONTIER_LOAD_FAILED",
                         })
                         continue
                     frontier_data = (
@@ -1742,7 +1742,27 @@ def run_auto_research_demo_e2e(
                         continue
                     ready_lanes.append(lane_id)
 
-                wake_payload = visible_wake(session, ready_lanes)
+                if not ready_lanes:
+                    wake_payload: dict[str, object] = {
+                        "ok": True,
+                        "schema_version": "multi_agent_pane_a2a_wakeup_v0",
+                        "mode": "no_op_all_filtered",
+                        "session_name": session,
+                        "target_lanes": [],
+                        "prompt": "",
+                        "prompt_hash": "",
+                        "coordination_model": "decentralized_state_a2a",
+                        "wakeup_model": "state_aware_filter_no_ready_lanes",
+                        "workflow_driver": False,
+                        "broadcaster_reads_frontier": False,
+                        "broadcaster_reads_todo_readiness": False,
+                        "broadcaster_selects_todo": False,
+                        "prompt_delivery": "skipped_no_ready_lanes",
+                        "prompt_delivered": False,
+                        "auto_wake_backoff_recommended": False,
+                    }
+                else:
+                    wake_payload = visible_wake(session, ready_lanes)
                 if skipped_lanes:
                     wake_payload = dict(wake_payload)
                     wake_payload["state_aware_filter"] = {
