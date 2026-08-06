@@ -938,6 +938,42 @@ async function main() {
       }
     }
 
+    await page.goto(`${baseUrl}/?view=ops`, { waitUntil: "networkidle" });
+    await page.locator('[data-testid="operator-mental-model-panel"]').waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await page.getByLabel("状态地址").fill("/status.missing.browser-smoke.json");
+    await page.getByRole("button", { name: "加载地址" }).click();
+    const requestedStatusState = page.locator('[data-testid="initial-status-state"]');
+    await requestedStatusState.waitFor({ state: "visible", timeout: 10_000 });
+    await requestedStatusState.getByText("无法加载实时状态", { exact: true }).waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    const syntheticOperatorCount = await page
+      .locator('[data-testid="operator-mental-model-panel"], [data-testid="share-overview"]')
+      .count();
+    if (syntheticOperatorCount !== 0) {
+      throw new Error("In-page live status failure left synthetic dashboard content visible.");
+    }
+    await Promise.all([
+      page.waitForResponse((response) => (
+        new URL(response.url()).pathname.endsWith("/status.missing.browser-smoke.json")
+      )),
+      requestedStatusState.getByRole("button", { name: "重试" }).click(),
+    ]);
+    await requestedStatusState.getByText("无法加载实时状态", { exact: true }).waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await requestedStatusState.getByRole("button", { name: "使用示例" }).click();
+    await page.locator('[data-testid="operator-mental-model-panel"]').waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await page.getByText("内置示例", { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+
     if (pageErrors.length) {
       throw new Error(`Dashboard page errors: ${pageErrors.join(" | ")}`);
     }

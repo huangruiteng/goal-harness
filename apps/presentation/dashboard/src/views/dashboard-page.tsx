@@ -6736,7 +6736,7 @@ function GlobalRegistryHealthPanel({ health }: { health: GlobalRegistryHealth })
   );
 }
 
-function InitialStatusRequestView({
+function StatusRequestView({
   error,
   isLoading,
   onReset,
@@ -6809,10 +6809,17 @@ export function DashboardPage() {
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [requestedStatusUrl, setRequestedStatusUrl] = useState<string | null>(
+    search.statusUrl.trim() || null,
+  );
   const [exampleModeRequested, setExampleModeRequested] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const suppressedStatusUrlRef = useRef<string | null>(null);
-  const initialStatusRequest = source.kind === "example" && Boolean(search.statusUrl.trim());
+  const routeStatusRequestUrl = !exampleModeRequested && source.kind === "example"
+    ? search.statusUrl.trim()
+    : "";
+  const activeStatusRequestUrl = requestedStatusUrl ?? routeStatusRequestUrl;
+  const statusRequestActive = Boolean(activeStatusRequestUrl);
   const refreshStatusUrl = source.kind === "url" ? source.label : search.statusUrl.trim();
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
@@ -6831,6 +6838,7 @@ export function DashboardPage() {
     }
     suppressedStatusUrlRef.current = null;
     setExampleModeRequested(false);
+    setRequestedStatusUrl(trimmed);
     setIsLoading(true);
     setLoadError(null);
     try {
@@ -6849,6 +6857,7 @@ export function DashboardPage() {
           view: routeViewForUrl(currentRouteView(current)),
         }),
       });
+      setRequestedStatusUrl(null);
     } catch (error) {
       setLoadError(formatStatusError(error));
     } finally {
@@ -6881,6 +6890,7 @@ export function DashboardPage() {
     setPayload(exampleStatusPayload);
     setSource({ kind: "example", label: "内置示例" });
     setStatusUrl("");
+    setRequestedStatusUrl(null);
     setLoadError(null);
     void navigate({
       search: (current) => ({
@@ -6980,14 +6990,14 @@ export function DashboardPage() {
     });
   }
 
-  if (initialStatusRequest) {
+  if (statusRequestActive) {
     return (
-      <InitialStatusRequestView
+      <StatusRequestView
         error={loadError}
         isLoading={isLoading}
         onReset={resetToExample}
-        onRetry={() => void loadFromUrl(search.statusUrl.trim())}
-        requestedUrl={search.statusUrl.trim()}
+        onRetry={() => void loadFromUrl(activeStatusRequestUrl)}
+        requestedUrl={activeStatusRequestUrl}
         theme={theme}
         toggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
