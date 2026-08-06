@@ -16,6 +16,9 @@ from loopx.extensions.lark.goal_channel import (
     setup_lark_goal_channel,
     sync_lark_goal_channel,
 )
+from loopx.extensions.lark.goal_channel_contracts import (
+    write_goal_channel_binding,
+)
 from loopx.extensions.lark.presentation.kanban import (
     lark_kanban_schema_payload,
     save_lark_kanban_board_config,
@@ -254,6 +257,43 @@ def test_setup_is_preview_only_and_does_not_write_binding(tmp_path: Path) -> Non
     assert not any("+chat-create" in args for args in calls)
     assert not any("+messages-send" in args for args in calls)
     _assert_public_packet(payload)
+
+
+def test_private_binding_atomic_failure_preserves_existing_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    binding_path.parent.mkdir(parents=True)
+    original = {
+        "schema_version": GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
+        "bindings": {"existing": {"enabled": True}},
+    }
+    write_goal_channel_binding(binding_path, original)
+    original_bytes = binding_path.read_bytes()
+
+    def fail_replace(source: object, destination: object) -> None:
+        assert Path(str(source)).stat().st_mode & 0o777 == 0o600
+        assert Path(str(destination)) == binding_path
+        raise OSError("fixture replace failure")
+
+    monkeypatch.setattr(
+        "loopx.extensions.lark.private_json.os.replace",
+        fail_replace,
+    )
+
+    with pytest.raises(OSError, match="fixture replace failure"):
+        write_goal_channel_binding(
+            binding_path,
+            {
+                "schema_version": GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
+                "bindings": {"replacement": {"enabled": True}},
+            },
+        )
+
+    assert binding_path.read_bytes() == original_bytes
+    assert binding_path.stat().st_mode & 0o777 == 0o600
+    assert list(binding_path.parent.glob(f".{binding_path.name}.*.tmp")) == []
 
 
 def test_setup_execute_persists_private_binding_after_verified_pin(
@@ -861,6 +901,88 @@ def test_cli_checks_extension_before_reading_private_binding(
     assert result == 1
     assert captured["blocker"] == "extension_unavailable"
     assert "not-json" not in json.dumps(captured)
+
+
+def test_cli_global_registry_routes_binding_to_source_registry_from_any_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "canonical-project"
+    source_registry_path = project / ".loopx" / "registry.json"
+    source_registry_path.parent.mkdir(parents=True)
+    source_registry = _registry(project)
+    source_registry["goals"][0]["repo"] = str(project)
+    source_registry_path.write_text(json.dumps(source_registry), encoding="utf-8")
+    shared_runtime = tmp_path / "shared-runtime"
+    global_registry_path = shared_runtime / "registry.global.json"
+    global_registry_path.parent.mkdir(parents=True)
+    global_registry = {
+        **source_registry,
+        "registry_role": "global-local",
+        "common_runtime_root": str(shared_runtime),
+    }
+    global_registry["goals"] = [
+        {
+            **source_registry["goals"][0],
+            "source_registry": str(source_registry_path),
+        }
+    ]
+    global_registry_path.write_text(json.dumps(global_registry), encoding="utf-8")
+    captured_paths: list[tuple[Path, Path]] = []
+
+    monkeypatch.setattr(
+        goal_channel_cli,
+        "resolve_extension_activation",
+        lambda *args, **kwargs: {"ok": True},
+    )
+
+    def capture_doctor(**kwargs: Any) -> dict[str, Any]:
+        captured_paths.append((kwargs["registry_path"], kwargs["binding_path"]))
+        return {
+            "ok": True,
+            "goal_id": GOAL_ID,
+            "provider": "lark",
+            "operation": "doctor",
+            "status": "ready",
+            "execute": False,
+            "external_write_performed": False,
+            "readback_verified": True,
+            "public_summary": "ready",
+        }
+
+    monkeypatch.setattr(goal_channel_cli, "doctor_lark_goal_channel", capture_doctor)
+    unrelated_one = tmp_path / "unrelated-one"
+    unrelated_two = tmp_path / "unrelated-two"
+    unrelated_one.mkdir()
+    unrelated_two.mkdir()
+    args = argparse.Namespace(
+        command="goal-channel",
+        goal_channel_command="doctor",
+        goal_id=GOAL_ID,
+        binding_path=None,
+        execute=False,
+        subcommand_format="json",
+        format=None,
+    )
+
+    for cwd in (unrelated_one, unrelated_two):
+        monkeypatch.chdir(cwd)
+        result = goal_channel_cli.handle_goal_channel_command(
+            args,
+            registry_path=global_registry_path,
+            runtime_root_arg=None,
+            print_payload=lambda payload, fmt, renderer: None,
+            output_format=lambda namespace: "json",
+        )
+        assert result == 0
+
+    expected_binding = project / ".loopx" / "goal-channel.json"
+    assert captured_paths == [
+        (source_registry_path.resolve(), expected_binding),
+        (source_registry_path.resolve(), expected_binding),
+    ]
+    assert not (unrelated_one / ".loopx").exists()
+    assert not (unrelated_two / ".loopx").exists()
 
 
 @pytest.mark.parametrize(

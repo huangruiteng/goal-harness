@@ -20,6 +20,9 @@ from ..extensions.runtime import (
     default_extension_state_file,
     resolve_extension_activation,
 )
+from ..control_plane.runtime.runtime_projection_route import (
+    resolve_goal_source_runtime_route,
+)
 from ..history import load_registry
 from ..paths import registry_project_root, resolve_runtime_root
 from ..quota import build_quota_should_run
@@ -171,10 +174,22 @@ def handle_goal_channel_command(
         runtime_root_arg,
         registry_path=registry_path,
     )
+    source_route = resolve_goal_source_runtime_route(
+        registry_path=registry_path,
+        goal_id=goal_id,
+        registry=registry,
+    )
+    source_registry_path = Path(str(source_route["source_registry"]))
+    source_registry = (
+        registry
+        if source_registry_path.expanduser().resolve()
+        == registry_path.expanduser().resolve()
+        else load_registry(source_registry_path)
+    )
     binding_path = (
         Path(args.binding_path).expanduser()
         if args.binding_path
-        else default_goal_channel_binding_path(registry_path)
+        else default_goal_channel_binding_path(source_registry_path)
     )
     try:
         activation = resolve_extension_activation(
@@ -194,8 +209,8 @@ def handle_goal_channel_command(
         try:
             if command == "setup":
                 payload = setup_lark_goal_channel(
-                    registry=registry,
-                    registry_path=registry_path,
+                    registry=source_registry,
+                    registry_path=source_registry_path,
                     goal_id=goal_id,
                     binding_path=binding_path,
                     chat_id=args.chat_id,
@@ -213,15 +228,15 @@ def handle_goal_channel_command(
                 )
             elif command == "doctor":
                 payload = doctor_lark_goal_channel(
-                    registry=registry,
-                    registry_path=registry_path,
+                    registry=source_registry,
+                    registry_path=source_registry_path,
                     goal_id=goal_id,
                     binding_path=binding_path,
                 )
             elif command == "sync":
                 payload = sync_lark_goal_channel(
-                    registry=registry,
-                    registry_path=registry_path,
+                    registry=source_registry,
+                    registry_path=source_registry_path,
                     goal_id=goal_id,
                     binding_path=binding_path,
                     agent_id=args.agent_id,
@@ -229,7 +244,7 @@ def handle_goal_channel_command(
                 )
             elif command == "notify-gate":
                 payload = notify_lark_goal_channel_gate(
-                    registry=registry,
+                    registry=source_registry,
                     goal_id=goal_id,
                     binding_path=binding_path,
                     quota_packet=_quota_packet(

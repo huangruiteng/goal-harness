@@ -9,6 +9,7 @@ from typing import Any
 
 from ...control_plane.runtime.public_safety import public_safe_compact_text
 from ...registry import registry_goals
+from .private_json import write_private_json_atomic
 
 
 GOAL_CHANNEL_BINDING_SCHEMA_VERSION = "loopx_goal_channel_lark_binding_v0"
@@ -27,10 +28,12 @@ PRIVATE_PACKET_KEYS = {
 
 
 def default_goal_channel_binding_path(registry_path: Path) -> Path:
-    expanded = registry_path.expanduser()
-    if expanded.parent.name == ".loopx":
-        return expanded.parent / "goal-channel.json"
-    return Path.cwd() / ".loopx" / "goal-channel.json"
+    expanded = registry_path.expanduser().resolve()
+    if expanded.parent.name != ".loopx":
+        raise ValueError(
+            "Goal Channel default binding requires a project source registry"
+        )
+    return expanded.parent / "goal-channel.json"
 
 
 def read_goal_channel_binding(path: Path) -> dict[str, Any]:
@@ -59,12 +62,7 @@ def write_goal_channel_binding(
     payload: Mapping[str, Any],
 ) -> None:
     binding_path = path.expanduser()
-    binding_path.parent.mkdir(parents=True, exist_ok=True)
-    binding_path.write_text(
-        json.dumps(dict(payload), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    binding_path.chmod(0o600)
+    write_private_json_atomic(binding_path, payload)
 
 
 def goal_from_registry(

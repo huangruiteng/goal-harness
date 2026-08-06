@@ -286,6 +286,10 @@ Rules:
 - Bot membership is verified before sending.
 - Message readback is required before recording a successful send receipt.
 - Raw provider payloads stay local-private.
+- Shared/global registry calls resolve Goal Channel state beside the selected
+  goal's canonical `source_registry`; caller CWD is never a default state root.
+- Local-private JSON uses an owner-only temporary file plus atomic replace, so
+  interrupted writes do not expose or truncate the previous binding.
 - Local checkout paths, active-state paths, credentials, chat ids, member ids,
   message ids, and profile names do not enter public artifacts.
 - The channel may show a Kanban link, but the Kanban remains a projection.

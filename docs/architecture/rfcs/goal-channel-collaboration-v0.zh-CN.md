@@ -268,6 +268,10 @@ goal_id + provider + operation + todo_id/gate_id + gate_text_hash + channel_id
 - 发送前必须验证 bot membership。
 - 记录成功发送 receipt 前必须完成 message readback。
 - Raw provider payload 留在本地私有状态。
+- 从 shared/global registry 调用时，Goal Channel 状态必须落在所选 goal
+  的 canonical `source_registry` 旁边，调用者 CWD 不能作为默认状态根目录。
+- 本地私有 JSON 使用同目录、owner-only 的临时文件完成写入，再原子 replace，
+  避免中断时暴露或截断旧 binding。
 - 本地 checkout 路径、active-state 路径、凭据、chat id、member id、message id
   和 profile name 不进入公开 artifact。
 - channel 可以展示 Kanban 链接，但 Kanban 仍然只是投影。
