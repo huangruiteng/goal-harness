@@ -741,6 +741,7 @@ def write_lark_kanban_local_config(path: Path, payload: dict[str, Any]) -> None:
     to_write["schema_version"] = LARK_KANBAN_LOCAL_CONFIG_VERSION
     to_write["updated_at"] = now_lark_datetime()
     config_path.write_text(json.dumps(to_write, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config_path.chmod(0o600)
 
 
 def parse_lark_base_url(base_url: str) -> dict[str, str]:

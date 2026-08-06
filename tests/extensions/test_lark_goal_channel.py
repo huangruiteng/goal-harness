@@ -287,6 +287,8 @@ def test_setup_execute_persists_private_binding_after_verified_pin(
         "https://example.invalid/base/public-fixture"
     )
     assert persisted["identity"]["bot_app_id"] == "cli_public_fixture"
+    assert binding_path.stat().st_mode & 0o777 == 0o600
+    assert kanban_path.stat().st_mode & 0o777 == 0o600
     assert any(
         "+chat-create" in args
         and args[args.index("--as") + 1] == "user"
@@ -695,6 +697,44 @@ def test_doctor_reports_missing_binding_with_typed_blocker(tmp_path: Path) -> No
 
     assert payload["ok"] is False
     assert payload["blocker"] == "channel_binding_missing"
+    _assert_public_packet(payload)
+
+
+def test_doctor_requires_live_control_message_and_pin(tmp_path: Path) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    binding_path.parent.mkdir(parents=True)
+    kanban_path = tmp_path / ".loopx" / "lark-kanban.json"
+    save_lark_kanban_board_config(
+        kanban_path,
+        base_token="base_public_fixture",
+        table_id="tbl_public_fixture",
+    )
+    _write_binding(binding_path, kanban_path)
+    calls: list[list[str]] = []
+    base_runner = _fake_runner(calls)
+
+    def runner(
+        args: list[str],
+        cwd: Path | None,
+        timeout: float | None,
+    ) -> dict[str, object]:
+        if "pins" in args and "list" in args:
+            calls.append(args)
+            return _result({"ok": True, "data": {"items": []}})
+        return base_runner(args, cwd, timeout)
+
+    payload = doctor_lark_goal_channel(
+        registry=_registry(tmp_path),
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        runner=runner,
+    )
+
+    assert payload["ok"] is False
+    assert payload["blocker"] == "readback_mismatch"
+    assert payload["details"]["control_message_verified"] is False
     _assert_public_packet(payload)
 
 

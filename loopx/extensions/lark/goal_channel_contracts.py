@@ -64,6 +64,7 @@ def write_goal_channel_binding(
         json.dumps(dict(payload), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    binding_path.chmod(0o600)
 
 
 def goal_from_registry(

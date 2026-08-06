@@ -31,6 +31,7 @@ from .goal_channel_transport import (
     lark_args,
     message_readback_verified,
     payload_contains_exact,
+    pin_readback_verified,
     verified_app_id,
 )
 from .presentation.kanban import (
@@ -77,6 +78,7 @@ def doctor_lark_goal_channel(
     identity_config = _mapping(binding.get("identity"))
     kanban = _mapping(binding.get("kanban"))
     chat_id = str(channel.get("chat_id") or "")
+    pinned_message_id = str(channel.get("pinned_message_id") or "")
     cli_bin = str(identity_config.get("cli_bin") or DEFAULT_CLI_BIN)
     identity = str(identity_config.get("sender_identity") or "")
     profile = str(identity_config.get("sender_profile") or "") or None
@@ -109,6 +111,26 @@ def doctor_lark_goal_channel(
             chat_id=chat_id,
         )
     )
+    control_message_ok = bool(
+        channel_ok
+        and MESSAGE_ID_PATTERN.fullmatch(pinned_message_id)
+        and message_readback_verified(
+            runner=runner,
+            cli_bin=cli_bin,
+            profile=profile,
+            identity="bot",
+            message_id=pinned_message_id,
+            expected_text=f"LoopX Goal: {goal_id}",
+        )
+        and pin_readback_verified(
+            runner=runner,
+            cli_bin=cli_bin,
+            profile=profile,
+            identity="bot",
+            chat_id=chat_id,
+            message_id=pinned_message_id,
+        )
+    )
     kanban_path = Path(
         str(kanban.get("config_path") or default_lark_kanban_config_path(registry_path))
     ).expanduser()
@@ -128,6 +150,8 @@ def doctor_lark_goal_channel(
         blocker = "provider_identity_unverified"
     elif not channel_ok:
         blocker = "channel_membership_unverified"
+    elif not control_message_ok:
+        blocker = "readback_mismatch"
     elif not kanban_result.get("ok"):
         blocker = "kanban_binding_missing"
     ok = blocker is None
@@ -149,6 +173,7 @@ def doctor_lark_goal_channel(
             "binding_enabled": binding_enabled,
             "identity_verified": auth_ok,
             "channel_membership_verified": channel_ok,
+            "control_message_verified": control_message_ok,
             "kanban_ready": bool(kanban_result.get("ok")),
         },
     )
