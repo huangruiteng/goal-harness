@@ -67,6 +67,20 @@ commands and credentials outside the snapshot producer committed to LoopX.
 - `coverage` is `none`, `partial`, or `complete`. Do not infer `complete` from a
   merged neighbor.
 
+## Integration-Branch Composition
+
+The snapshot is the remote lifecycle and requirement view; it is not an
+integration-branch plan. When the program uses a local integration candidate,
+map only explicitly selected change requests to the separate ignored
+`loopx_integration_branch_plan_v0` state.
+
+Before each reconcile, prove that the selected local source ref resolves to the
+snapshot row's `head_sha`. Feed the resulting
+`loopx_integration_branch_status_v0` readback into the grouped program monitor
+as additional evidence. Keep source ref names and sync receipts in ignored
+project-local state; do not add them to a public roadmap merely to make this
+composition work.
+
 Normalize lifecycle values as follows:
 
 | Field | Values |

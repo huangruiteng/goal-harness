@@ -89,6 +89,31 @@ explicitly when no change request implements part of the requested behavior;
 do not call the requirement complete because a neighboring parameter or feature
 landed.
 
+## Compose With An Integration Branch
+
+When several selected change requests belong to one repository, compose this
+program view with LoopX's `integration-branch-reconcile` capability. Keep the
+ownership split explicit:
+
+- this skill decides which changes belong in the candidate and why;
+- the integration-branch plan records their ordered local source refs and
+  proves what exact code is composed.
+
+Do not populate the plan from every open or P0 change request automatically.
+Select sources from explicit program scope, dependency order, and current
+review intent. Refresh the local refs through the authorized host workflow,
+then verify that each selected ref resolves to the observed `head_sha` before
+configuring or syncing the integration branch. A mismatch is source evidence
+drift, not permission to merge a stale local ref.
+
+Use the same grouped program monitor to read both the normalized change-request
+delta and `loopx integration-branch status --format json`. Treat base/source
+movement, an unexpected integration head, and merge conflict as material
+program evidence. A monitor poll remains read-only: it may report that the
+candidate needs reconciliation, but it must not run `sync --execute` by itself.
+That command is a separate, explicit local write and never grants authority to
+push, retarget, approve, or merge a remote change request.
+
 ## Project The Program
 
 Keep one canonical program projection with three sections:

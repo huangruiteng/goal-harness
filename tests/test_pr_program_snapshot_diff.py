@@ -6,6 +6,7 @@ from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "skills" / "loopx-pr-program" / "scripts" / "diff_snapshot.py"
+SKILL_PATH = REPO_ROOT / "skills" / "loopx-pr-program" / "SKILL.md"
 
 
 def _load_module() -> ModuleType:
@@ -113,3 +114,11 @@ def test_complete_snapshot_reports_material_gate_and_removal_changes() -> None:
             "after": {"checks": "failed"},
         }
     ]
+
+
+def test_skill_composes_read_only_monitoring_with_integration_branch() -> None:
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+
+    assert "integration-branch-reconcile" in skill
+    assert "verify that each selected ref resolves to the observed `head_sha`" in skill
+    assert "must not run `sync --execute` by itself" in skill
