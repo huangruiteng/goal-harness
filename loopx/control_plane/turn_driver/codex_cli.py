@@ -341,8 +341,12 @@ def _codex_command(
         command = [
             codex_bin,
             "exec",
-            "resume",
             "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "resume",
+            "-c",
+            f'sandbox_mode="{sandbox}"',
             "--output-schema",
             str(schema_path),
             "--output-last-message",
