@@ -260,7 +260,6 @@ class CoordinationAuthority:
         "operation_id",
         "actor",
         "goal_id",
-        "expected_authority_revision",
         "command",
         "transport",
     }
@@ -269,8 +268,16 @@ class CoordinationAuthority:
         "type",
         "todo_id",
         "expected_todo_revision",
+        "expected_preconditions",
         "lease_ttl_seconds",
     }
+    _PRECONDITION_FIELDS = {
+        "authorization_projection_revision",
+        "authorization_projection_digest",
+        "dependency_revision",
+        "gate_revision",
+    }
+    _MAX_CAS_ATTEMPTS = 8
 
     def __init__(
         self,
@@ -295,86 +302,77 @@ class CoordinationAuthority:
             }
         head = self._validated_head(head)
 
-        replay = self._replay(
-            head,
-            provider_generation,
-            operation_id,
-            request_digest,
-        )
-        if replay is not None:
-            return replay
-        if request["expected_authority_revision"] != head["authority_revision"]:
-            return {
-                "result": "conflict",
-                "reason": "authority_revision_mismatch",
-                "expected_authority_revision": request["expected_authority_revision"],
-                "observed_authority_revision": head["authority_revision"],
-                "provider_generation": provider_generation,
-            }
-
-        transition = self._claim(head, request, request_digest)
-        if isinstance(transition, dict):
-            transition.update({
-                "observed_authority_revision": head["authority_revision"],
-                "provider_generation": provider_generation,
-            })
-            return transition
-        proposed, original_receipt = transition
-        provider_result = self.provider.compare_and_put(
-            provider_generation,
-            proposed,
-        )
-        result_kind = provider_result.get("result")
-        if result_kind == "applied":
-            return self._success(
-                "applied",
-                original_receipt,
-                proposed,
-                provider_result["provider_generation"],
+        for attempt in range(self._MAX_CAS_ATTEMPTS):
+            replay = self._replay(
+                head,
+                provider_generation,
+                operation_id,
+                request_digest,
             )
-        if result_kind not in {"conflict", "ambiguous", "failed"}:
-            raise ProviderProtocolError(f"unknown provider result: {provider_result!r}")
-        if result_kind == "failed":
-            # Provider ``failed`` is reserved for a pre-publish failure that
-            # proves no write was attempted; unlike ambiguous, it needs no
-            # reconciliation read to classify this command as unsuccessful.
-            return {
-                "result": "failed",
-                "reason": "provider_failed_before_cas",
-                "observed_authority_revision": head["authority_revision"],
-                "provider_generation": provider_generation,
-            }
+            if replay is not None:
+                return replay
+            transition = self._claim(head, request, request_digest)
+            if isinstance(transition, dict):
+                transition.update({
+                    "observed_authority_revision": head["authority_revision"],
+                    "provider_generation": provider_generation,
+                })
+                return transition
+            proposed, original_receipt = transition
+            provider_result = self.provider.compare_and_put(
+                provider_generation,
+                proposed,
+            )
+            result_kind = provider_result.get("result")
+            if result_kind == "applied":
+                return self._success(
+                    "applied",
+                    original_receipt,
+                    proposed,
+                    provider_result["provider_generation"],
+                )
+            if result_kind not in {"conflict", "ambiguous", "failed"}:
+                raise ProviderProtocolError(
+                    f"unknown provider result: {provider_result!r}"
+                )
+            if result_kind == "failed":
+                return {
+                    "result": "failed",
+                    "reason": "provider_failed_before_cas",
+                    "observed_authority_revision": head["authority_revision"],
+                    "provider_generation": provider_generation,
+                }
 
-        # Conflict and ambiguous outcomes must reload before classification.
-        latest, latest_generation = self.provider.load()
-        if latest is None:
-            return {
-                "result": "failed",
-                "reason": "coordination_head_missing_after_cas",
-                "provider_generation": latest_generation,
-            }
-        latest = self._validated_head(latest)
-        replay = self._replay(
-            latest,
-            latest_generation,
-            operation_id,
-            request_digest,
-        )
-        if replay is not None:
-            return replay
-        if result_kind == "conflict" or latest_generation != provider_generation:
-            return {
-                "result": "conflict",
-                "reason": "coordination_head_advanced",
-                "expected_authority_revision": request["expected_authority_revision"],
-                "observed_authority_revision": latest["authority_revision"],
-                "provider_generation": latest_generation,
-            }
+            latest, latest_generation = self.provider.load()
+            if latest is None:
+                return {
+                    "result": "failed",
+                    "reason": "coordination_head_missing_after_cas",
+                    "provider_generation": latest_generation,
+                }
+            latest = self._validated_head(latest)
+            replay = self._replay(
+                latest,
+                latest_generation,
+                operation_id,
+                request_digest,
+            )
+            if replay is not None:
+                return replay
+            if latest_generation == provider_generation:
+                return {
+                    "result": "failed",
+                    "reason": "provider_outcome_unproved",
+                    "observed_authority_revision": latest["authority_revision"],
+                    "provider_generation": latest_generation,
+                }
+            head, provider_generation = latest, latest_generation
+
         return {
             "result": "failed",
-            "reason": "provider_outcome_unproved",
-            "observed_authority_revision": latest["authority_revision"],
-            "provider_generation": latest_generation,
+            "reason": "provider_contention_exhausted",
+            "observed_authority_revision": head["authority_revision"],
+            "provider_generation": provider_generation,
         }
 
     def _semantic_request(self, envelope: dict) -> dict:
@@ -390,9 +388,6 @@ class CoordinationAuthority:
             raise ValueError("operation_id must be a non-empty string")
         if envelope.get("goal_id") != self.goal_id:
             raise ValueError("command goal_id does not match this authority")
-        authority_revision = envelope.get("expected_authority_revision")
-        if not isinstance(authority_revision, int) or authority_revision < 0:
-            raise ValueError("expected_authority_revision must be non-negative")
         if "transport" in envelope and not isinstance(envelope["transport"], dict):
             raise ValueError("transport metadata must be an object")
 
@@ -410,6 +405,24 @@ class CoordinationAuthority:
             raise ValueError("todo_id must be a non-empty string")
         if not isinstance(command["expected_todo_revision"], int):
             raise ValueError("expected_todo_revision must be an integer")
+        preconditions = command["expected_preconditions"]
+        if not isinstance(preconditions, dict) or set(preconditions) != (
+            self._PRECONDITION_FIELDS
+        ):
+            raise ValueError("expected_preconditions fields do not match v0")
+        revision_fields = (
+            "authorization_projection_revision",
+            "dependency_revision",
+            "gate_revision",
+        )
+        if any(
+            not isinstance(preconditions[field], int) or preconditions[field] < 0
+            for field in revision_fields
+        ):
+            raise ValueError("expected_preconditions revisions must be non-negative")
+        digest = preconditions["authorization_projection_digest"]
+        if not isinstance(digest, str) or not digest.startswith("sha256:"):
+            raise ValueError("expected authorization projection digest is invalid")
         if not isinstance(command["lease_ttl_seconds"], int) or command[
             "lease_ttl_seconds"
         ] <= 0:
@@ -422,7 +435,6 @@ class CoordinationAuthority:
             "operation_id": operation_id,
             "actor": {key: actor[key] for key in sorted(self._ACTOR_FIELDS)},
             "goal_id": self.goal_id,
-            "expected_authority_revision": authority_revision,
             "command": {key: copy.deepcopy(command[key]) for key in sorted(self._COMMAND_FIELDS)},
         }
 
@@ -494,6 +506,19 @@ class CoordinationAuthority:
         eligibility = todo.get("eligibility")
         if not isinstance(eligibility, dict):
             return {"result": "rejected", "reason": "eligibility_missing"}
+        observed_preconditions = {
+            field: eligibility.get(field)
+            for field in self._PRECONDITION_FIELDS
+        }
+        if observed_preconditions != command["expected_preconditions"]:
+            return {
+                "result": "conflict",
+                "reason": "precondition_snapshot_mismatch",
+                "expected_preconditions": copy.deepcopy(
+                    command["expected_preconditions"]
+                ),
+                "observed_preconditions": observed_preconditions,
+            }
         if request["actor"]["agent_id"] not in eligibility.get("allowed_agent_ids", []):
             return {"result": "rejected", "reason": "actor_ineligible"}
         if eligibility.get("dependencies_satisfied") is not True:
@@ -515,7 +540,9 @@ class CoordinationAuthority:
         proposed_todo = proposed["coordination"]["todos"][command["todo_id"]]
         proposed_todo.update({
             "todo_revision": todo["todo_revision"] + 1,
-            "status": "claimed",
+            # LoopX keeps a claimed todo open; ``claimed_by`` and the hard
+            # lease carry ownership without inventing a new lifecycle state.
+            "status": "open",
             "claimed_by": request["actor"]["agent_id"],
             "last_lease_epoch": lease_epoch,
         })
@@ -565,22 +592,29 @@ def sample_envelope(
     agent_id: str = "agent-a",
     device_id: str = "dev-laptop",
     goal_id: str = "ark-agent-loop-shared",
-    expected_authority_revision: int = 0,
     todo_id: str = "todo-0042",
     expected_todo_revision: int = 7,
+    expected_preconditions: dict | None = None,
     lease_ttl_seconds: int = 600,
     transport: dict | None = None,
 ) -> dict:
+    if expected_preconditions is None:
+        expected_preconditions = {
+            "authorization_projection_revision": 3,
+            "authorization_projection_digest": "sha256:bootstrap-auth",
+            "dependency_revision": 12,
+            "gate_revision": 5,
+        }
     envelope = {
         "schema_version": COMMAND_SCHEMA,
         "operation_id": operation_id or str(uuid.uuid4()),
         "actor": {"agent_id": agent_id, "device_id": device_id},
         "goal_id": goal_id,
-        "expected_authority_revision": expected_authority_revision,
         "command": {
             "type": "claim_work",
             "todo_id": todo_id,
             "expected_todo_revision": expected_todo_revision,
+            "expected_preconditions": copy.deepcopy(expected_preconditions),
             "lease_ttl_seconds": lease_ttl_seconds,
         },
     }

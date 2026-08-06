@@ -42,8 +42,8 @@ RFC 不应该一口吞掉消息、调度、配额、run history 和所有 LoopX 
 ## 1. 这份 RFC 最后选择了什么
 
 把 authority 想象成唯一的记账员。各端不直接改账，只提交“我要认领这项工作”的
-申请。记账员检查版本、身份、依赖和 gate；通过就把认领、lease 和回执一起记下，
-不通过就明确告诉申请人原因。
+申请。记账员检查目标 todo、身份、命名依赖和 gate；通过就把认领、lease 和回执
+一起记下，不通过就明确告诉申请人原因。
 
 这次只给记账员一本很小的账，而不是把 LoopX 的所有文件都搬进远端：
 
@@ -60,17 +60,26 @@ LoopX 的控制面权威。
 claim、lease/fence 和 receipt。它先回答两件最容易出事故的事——多人同时抢单时谁
 赢，以及响应丢失后怎样找回原回执——而不把完整 lease lifecycle 说成已经交付。
 
+这里的争用单元是 `(goal_id, todo_id)` 及该 todo 实际引用的 precondition，不是整个
+Goal。两个端抢同一个 todo 时只能一胜；两个端认领同一 Goal 下彼此独立、目标范围
+内的 authorization、dependency 和 gate 均未变化的 todo 时，即使底层先后竞争同一
+个 aggregate CAS，authority 也应 reload、重验并在内部完成重试，而不是把 provider
+head 前进暴露成业务冲突。这与 LoopX 当前公开
+[`architecture.md`](../../architecture.md) 中 todo-level 的并发形状保持一致。
+
 举一个最关键的失败序列：operation A 成功拿到 lease `L1`、epoch `7`，但响应丢了；
-随后 operation B 又把账本推进了一页。A 重启后再次提交同一申请，必须逐字段取回
-自己当时的原始 receipt。只告诉 A “这笔账以前记过”以及 B 的当前版本不够，因为
-没有 `L1`、epoch `7` 和 expiry，A 仍然无法证明自己获准执行过这项工作。
+随后同一 Goal 里另一个独立 todo 的 operation B 又把账本推进了一页；B 没有接管
+A 的 todo。A 重启后再次提交同一申请，必须逐字段取回自己当时的原始 receipt。
+只告诉 A “这笔账以前记过”以及 B 的当前版本不够，因为没有 `L1`、epoch `7` 和
+expiry，A 仍然无法证明自己获准执行过这项工作。
 
 ## 2. 要做的，以及不要做的
 
 **这版要做的**
 
 - 为一个共享 Goal 提供在线、provider-neutral 的 coordination authority；
-- 让并发 claim 只接受一个 owner；
+- 让同一 todo 的并发 claim 只接受一个 owner，同时允许独立 todo 在内部 CAS rebase
+  后分别成功；
 - 把每个 operation identity 绑定到一份 normalized request digest，换一套语义复用
   同一个 id 时明确拒绝；
 - 即使后续 operation 已推进账本，也能找回原始 receipt；
@@ -152,7 +161,7 @@ owner，新 host 或 extension 也可以新增本地 artifact，而无需修改�
     "todos": {
       "todo_review": {
         "todo_revision": 9,
-        "status": "claimed",
+        "status": "open",
         "claimed_by": "laptop-reviewer",
         "eligibility": {
           "authorization_projection_revision": 3,
@@ -174,7 +183,7 @@ owner，新 host 或 extension 也可以新增本地 artifact，而无需修改�
         "owner": "laptop-reviewer",
         "lease_epoch": 7,
         "expires_at": "2026-08-06T03:30:00Z",
-        "write_scopes": ["src/review/**"]
+        "write_scopes": []
       }
     }
   },
@@ -202,7 +211,22 @@ owner，新 host 或 extension 也可以新增本地 artifact，而无需修改�
 ```
 
 该 schema 不包含 raw todo body、transcript、credential、绝对路径或 raw evidence。
-它只包含裁决这一命令切片与恢复其凭证所需的事实。
+它只包含裁决这一命令切片与恢复其凭证所需的事实。与现有 LoopX 一致，claim 后
+todo 仍为 `open`；soft ownership 由 `claimed_by` 表示，执行权由 lease/fence 表示，
+不会引入一个本地状态机不存在的 `claimed` status。
+
+这里的 eligibility revision/digest 都是目标 todo 所引用的快照：authorization 只覆盖
+该 todo 的 actor scope，dependency 只覆盖它的传递依赖闭包，gate 只覆盖实际约束
+它的 gate。它们不是换一个名字继续使用 Goal-wide revision。参考切片固定
+`write_scopes=[]`；未来接入非空 write scope 时，与其他 active lease 的 scope overlap
+也是该 claim 的真实跨 todo precondition，必须在内部 rebase 后重验并在冲突时拒绝。
+
+这些 target-scoped token 还承担 coverage 与 no-ABA 义务。目标 todo 的 claim state
+或 lease epoch 发生任何语义变化，都必须推进 `todo_revision`；allowed actor、依赖
+闭包或满足结论、实际约束它的 gate 集合或结论发生变化，都必须推进对应 revision，
+并在存在 digest 时同时更新 digest。同一个 token 不得复用于不同快照。Authority
+无法证明这些覆盖关系时，不得内部 rebase。Deterministic reference 只验证静态
+bootstrap snapshot，尚未资格化动态 projection publisher。
 
 原始 receipt 证明某 operation 在某个 authority revision 被接受；它不证明对应
 lease 当前仍有效。因此 replay response 返回逐字段等价的 `original_receipt`，同时
@@ -219,19 +243,27 @@ Request envelope 使用 `operation_id`，以免与现有 CLI 中 `command_id` �
   "operation_id": "op_claim_review_01",
   "actor": {"agent_id": "laptop-reviewer", "device_id": "laptop"},
   "goal_id": "shared-rust-review",
-  "expected_authority_revision": 42,
   "command": {
     "type": "claim_work",
     "todo_id": "todo_review",
     "expected_todo_revision": 8,
+    "expected_preconditions": {
+      "authorization_projection_revision": 3,
+      "authorization_projection_digest": "sha256:...",
+      "dependency_revision": 12,
+      "gate_revision": 5
+    },
     "lease_ttl_seconds": 600
   }
 }
 ```
 
 Authority 规范化完整的语义 request 并计算 `request_digest`。Digest 覆盖 actor、
-Goal、expected revision、command type、target 与 command parameter；不覆盖 transport
-retry metadata。
+Goal、command type、target todo revision、命名的 authorization/dependency/gate
+precondition 与 command parameter；不覆盖 transport retry metadata。Goal-wide
+`authority_revision` 不属于客户端业务前置条件，也不进入 request digest。调用方如需
+携带读到的 head revision，只能把它作为 transport observation；改变该观测不构成
+一条新的语义 operation。
 
 对每个 request，authority 执行以下顺序：
 
@@ -239,12 +271,19 @@ retry metadata。
 2. 在执行当前状态校验之前查找 `operation_id`；
 3. id 已存在且 digest 相同：返回 `already_applied` 与已存原始 receipt，不写入；
 4. id 已存在但 digest 不同：返回 typed `operation_identity_mismatch`，不写入；
-5. 校验 actor scope、authority revision、todo revision、eligibility、claim state 与
-   lease rule；
+5. 校验 actor scope、目标 todo revision、命名 precondition、eligibility、claim state
+   与本 reference 切片实现的 empty-scope lease rule；
 6. 在 authority 中计算 next coordination state 与 original receipt；
 7. 把 transition 和 receipt-index entry 一起放进一个确定性 envelope，并提交一次
    provider CAS；
-8. provider 返回 conflict 或 ambiguous 后，reload，并在分类结果前重新查 receipt。
+8. provider 返回 conflict 或 ambiguous 后，reload，并在分类结果前重新查 receipt；
+9. receipt 不存在且 generation 未前进时，以 `provider_outcome_unproved` fail closed；
+   generation 已前进时，重新校验目标 todo 与命名 precondition，相关事实未变才基于
+   latest head 重试。Receipt 缺失本身绝不证明成功；最终 `applied` 必须来自一笔新的
+   successful CAS；
+10. CAS miss 后，只有相关事实仍允许原命令时才继续 rebase；初始无效请求仍按普通
+    domain validation 拒绝。纯粹的无关 head 前进不会成为业务 conflict；持续
+    contention 耗尽 retry budget 时返回 typed `failed`，且不得创建 receipt。
 
 API result class 如下：
 
@@ -252,9 +291,9 @@ API result class 如下：
 | --- | --- |
 | `applied` | State 与原始 receipt 一起提交。 |
 | `already_applied` | 相同 operation 与 digest 早已提交；返回已保存的原始 receipt。 |
-| `conflict` | 此 operation 不存在 receipt，且 expected authority state 已 stale 或有竞争。 |
+| `conflict` | 此 operation 不存在 receipt，且目标 todo 或命名 precondition 已 stale。 |
 | `rejected` | Identity、eligibility、gate 或命令校验失败，未改变状态。 |
-| `failed` | 无法证明存在 accepted result；仅可依据有界基础设施策略重试。 |
+| `failed` | 无法证明存在 accepted result，或无关 provider contention 耗尽内部 retry budget；仅可依据有界基础设施策略重试。 |
 
 `conflict`、`rejected` 和 `failed` 都不是成功凭证，不得得到伪造的 applied receipt。
 
@@ -262,7 +301,7 @@ API result class 如下：
 
 - `claim_work`：在一个 transition 中校验已有 runnable todo、设置 claimant、创建
   lease、铸造下一个 lease epoch，并保存原始 receipt。它的必填字段是 `todo_id`、
-  `expected_todo_revision` 与 `lease_ttl_seconds`。
+  `expected_todo_revision`、`expected_preconditions` 与 `lease_ttl_seconds`。
 
 Accepted claim 同时推进 `authority_revision` 与目标 `todo_revision`。它只能操作由
 显式 bootstrap/migration 安装的 todo，绝不把未知 todo 作为副作用创建。
@@ -270,13 +309,21 @@ Deterministic reference 的 eligibility input 是紧凑元组 `allowed_agent_ids
 `dependencies_satisfied` 与 `gates_open`，并绑定到所命名的 authorization、
 dependency、gate revision 与 digest。
 
+`authority_revision` 是每条 accepted command 的 Goal-wide commit sequence，用于
+审计、read model 和 receipt ordering，不是所有命令共享的 optimistic-concurrency
+前置条件。底层 aggregate 仍以 `provider_generation` 串行提交；CAS loser 必须根据
+自己的 target todo 与命名 precondition 决定是否内部 rebase，而不能仅因另一个独立
+todo 已提交就要求调用方重新发一条 operation。
+
 未知 command type fail closed。`renew_lease`、`release_lease`、过期 lease reclaim、
 stale-fence writeback 校验、`complete_todo_with_successor`、transfer 或 delegated
 assignment、任意 todo/gate mutation、quota reservation 与 external effect，都需要
 后续 runtime 合同与 qualification。Production shared mode 前必须完成 renew/release/
 reclaim 与 stale-fence 校验；此处省略是 scope control，不代表 claim-only runtime 已
-完整。只有 source completion、successor creation/assignment、evidence pointer 与
-receipt 能 atomic commit 时，completion 加 successor creation 才可进入后续切片。
+完整。非空 write scope 与跨 todo scope-overlap 拒绝同样需要后续 command contract
+与 qualification。只有 source completion、successor creation/assignment、evidence
+pointer 与 receipt 能 atomic commit 时，completion 加 successor creation 才可进入
+后续切片。
 
 ## 6. 谁做判断，谁负责保存
 
@@ -286,7 +333,9 @@ LoopX authority 负责：
 
 - request normalization 与 digest；
 - actor、todo、dependency、gate 与 authorization 校验；
-- `authority_revision` 与 todo revision transition；
+- 目标 todo 与命名 precondition 的业务冲突判定，以及无关 head 前进后的有界
+  CAS rebase；
+- `authority_revision` commit sequence 与 todo revision transition；
 - 铸造 time、lease id、lease epoch 与 expiry；
 - receipt 内容与 replay classification；
 - privacy filtering 与 command-specific invariant。
@@ -330,7 +379,7 @@ commit-marker protocol，并通过新的合同 review。
 | 版本域 | Owner | 含义 | Consumer |
 | --- | --- | --- | --- |
 | `provider_generation` | Provider | 条件替换已存字节的 opaque token | 仅 authority/provider seam |
-| `authority_revision` | LoopX authority | 接受一条 command 后的 per-goal 逻辑 coordination revision | Client 与命令校验 |
+| `authority_revision` | LoopX authority | 接受一条 command 后的 per-goal 逻辑 commit sequence | 审计、receipt 与 read model；不作为所有业务命令的共享前置条件 |
 | `lease_epoch` | LoopX authority | Ownership 的 per-todo fencing generation；新 lease generation 时推进，普通 renewal 不推进 | Executor 与获准 writeback |
 
 Backend 常会对每条 accepted command 推进一次 generation，但数值相等永远不是合同。
@@ -409,23 +458,32 @@ gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque po
 
 全部检查均可由机器验证：
 
-1. 两个 actor 从同一 authority revision claim 同一 todo，恰好一个得到 `applied`；
-   loser 得到 `conflict`，且没有 lease；
-2. 以相同 operation id 与 digest 立即 replay，返回原始 receipt 且不改变状态；
-3. 历史 A/B/A replay 从耐久 provider state 重建 authority/provider 后仍成立，并在
-   B 推进 head 后逐字段返回 A 的原始 receipt；
-4. 相同 operation id 搭配不同 normalized digest 时被拒绝，state 与 receipt index
+1. 两个 actor 从同一 provider generation claim 同一 todo，恰好一个得到
+   `applied`；loser 得到 target-specific `conflict`，且没有 lease；winner 的 todo
+   仍为 `open`，ownership 由 `claimed_by` 与 lease 表达；
+2. 两个 actor 从同一 provider generation claim 同一 Goal 下两个独立 todo；在本
+   reference 中二者 `write_scopes=[]`，且目标范围内的 authorization、dependency、
+   gate 均未变化。第一次 CAS 的 loser 在 reload 与相关 precondition 重验后内部
+   rebase，最终两者都得到 `applied`；Goal audit sequence、两个 todo revision 与
+   两条 receipt 均只推进一次；
+3. 以相同 operation id 与 digest 立即 replay，返回原始 receipt 且不改变状态；
+4. 历史 A/B/A replay 在同一 deterministic provider fake 保留 aggregate、重建
+   authority handle 后仍成立，并在 B 推进 head 后逐字段返回 A 的原始 receipt；
+5. 相同 operation id 搭配不同 normalized digest 时被拒绝，state 与 receipt index
    均不改变；
-5. Provider CAS 周围的 fault injection 永远不能暴露无 receipt 的 state 或无 state
+6. Provider CAS 周围的 fault injection 永远不能暴露无 receipt 的 state 或无 state
    的 receipt；
-6. ambiguous provider response 通过 reload receipt index reconcile；receipt 缺失时
-   绝不转成成功；
-7. 对未知 todo、stale revision、不符合 eligibility、dependency blocked 或 gate
+7. ambiguous provider response 通过 reload receipt index reconcile：找到 receipt
+   才恢复成功；同 generation 下缺失则 failed/unproved；generation 前进后缺失也必须
+   重验并由一笔新的 successful CAS 才能得到 `applied`；
+8. 对未知 todo、stale target/precondition、不符合 eligibility、dependency blocked 或 gate
    blocked 的 claim，拒绝且不创建 state 或 receipt；
-8. 保留的 receipt 经 reload fixture 后仍存在，不发生 receipt GC；
-9. 测试分别处理 provider generation、authority revision 与 lease epoch；
-10. privacy scan 不得发现 credential、raw body、transcript 或绝对路径；
-11. 默认本地模式的行为不变，shared mode 永不 fallback 到未 fenced 的本地 writer。
+9. 持续无关 provider contention 耗尽内部 retry budget 时返回 typed `failed`，不生成
+   当前 operation 的 receipt，也不伪装成业务 conflict；
+10. 保留的 receipt 经 reload fixture 后仍存在，不发生 receipt GC；
+11. 测试分别处理 provider generation、authority revision 与 lease epoch；
+12. privacy scan 不得发现 credential、raw body、transcript 或绝对路径；
+13. 默认本地模式的行为不变，shared mode 永不 fallback 到未 fenced 的本地 writer。
 
 配套 provider probe 是候选实现的 evidence，不构成弱化上述 normative check 的许可。
 性能测量与具体部署 topology 被刻意设为 non-normative。
@@ -438,6 +496,7 @@ gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque po
 - 确定性的 `loopx_command_v0` normalization 与 request digest；
 - 显式 bootstrapped todo 上的 `claim_work` authority transition；
 - 单 head、state-plus-receipt CAS；
+- target/precondition-scoped conflict 与无关 head 前进后的内部 CAS rebase；
 - 同一 seam 后的 deterministic 与 NoKV provider candidate；
 - 在所声明证据边界内的 A/B/A、identity mismatch、crash window、eligibility、
   privacy 与 no-GC 检查。

@@ -41,6 +41,7 @@ class DeterministicProvider:
         self._barrier = None
         self._barrier_loads_left = 0
         self._fault = None
+        self._contention_advances = 0
 
     def arm_load_barrier(self, parties: int) -> None:
         self._barrier = threading.Barrier(parties)
@@ -51,10 +52,16 @@ class DeterministicProvider:
             "failed_before",
             "crash_before",
             "crash_after",
+            "ambiguous_before",
+            "ambiguous_with_unrelated_advance",
             "ambiguous_after",
+            "ambiguous_after_with_unrelated_advance",
         }:
             raise ValueError(f"unknown fault: {fault}")
         self._fault = fault
+
+    def arm_contention(self, advances: int) -> None:
+        self._contention_advances = advances
 
     def load(self):
         barrier = None
@@ -81,6 +88,22 @@ class DeterministicProvider:
                     "result": "conflict",
                     "current_provider_generation": self._generation,
                 }
+            if self._fault == "ambiguous_before":
+                self._fault = None
+                return {"result": "ambiguous"}
+            if self._fault == "ambiguous_with_unrelated_advance":
+                self._fault = None
+                self._generation += self._generation_step
+                return {"result": "ambiguous"}
+            if self._contention_advances:
+                # Simulate an unrelated provider-level rewrite.  The opaque
+                # generation advances while the target todo stays unchanged.
+                self._contention_advances -= 1
+                self._generation += self._generation_step
+                return {
+                    "result": "conflict",
+                    "current_provider_generation": self._generation,
+                }
             self._aggregate = copy.deepcopy(aggregate)
             self._generation += self._generation_step
             generation = self._generation
@@ -89,6 +112,10 @@ class DeterministicProvider:
                 raise SimulatedCrash("crash_after")
             if self._fault == "ambiguous_after":
                 self._fault = None
+                return {"result": "ambiguous"}
+            if self._fault == "ambiguous_after_with_unrelated_advance":
+                self._fault = None
+                self._generation += self._generation_step
                 return {"result": "ambiguous"}
             return {"result": "applied", "provider_generation": generation}
 
@@ -145,14 +172,31 @@ def assert_exact_replay(first: dict, replay: dict) -> None:
     assert replay["original_receipt"] == first["original_receipt"], (first, replay)
 
 
+def claim(operation_id: str, goal_id: str, todo_id: str, **values) -> dict:
+    return sample_envelope(
+        operation_id=operation_id,
+        goal_id=goal_id,
+        todo_id=todo_id,
+        **values,
+    )
+
+
+def assert_bootstrap_rejected(todo: dict, message: str | None = None) -> None:
+    try:
+        bootstrap_aggregate("goal-private", {"todo-private": todo})
+    except ValueError as exc:
+        if message is not None:
+            assert message in str(exc)
+    else:
+        raise AssertionError("unsafe todo entered the shared head")
+
+
 def probe_bootstrap_and_preconditions() -> None:
     provider = DeterministicProvider()
     authority = CoordinationAuthority(provider, "goal-preconditions", fixed_clock(1000))
-    uninitialized = authority.apply(sample_envelope(
-        operation_id="op-uninitialized",
-        goal_id="goal-preconditions",
-        todo_id="todo-known",
-    ))
+    uninitialized = authority.apply(
+        claim("op-uninitialized", "goal-preconditions", "todo-known")
+    )
     assert uninitialized["result"] == "failed"
     assert uninitialized["reason"] == "coordination_head_uninitialized"
 
@@ -167,33 +211,48 @@ def probe_bootstrap_and_preconditions() -> None:
     bootstrap_result = provider.compare_and_put(0, initial_head)
     assert bootstrap_result["result"] == "applied"
     initial_generation = bootstrap_result["provider_generation"]
-    missing = authority.apply(sample_envelope(
-        operation_id="op-missing",
-        goal_id="goal-preconditions",
-        todo_id="todo-missing",
-    ))
-    stale = authority.apply(sample_envelope(
-        operation_id="op-stale",
-        goal_id="goal-preconditions",
-        todo_id="todo-known",
-        expected_todo_revision=6,
-    ))
-    ineligible = authority.apply(sample_envelope(
-        operation_id="op-ineligible",
+    missing = authority.apply(claim("op-missing", "goal-preconditions", "todo-missing"))
+    stale = authority.apply(
+        claim("op-stale", "goal-preconditions", "todo-known", expected_todo_revision=6)
+    )
+    expected_preconditions = initial_todo()["eligibility"]
+    expected_preconditions = {
+        field: expected_preconditions[field]
+        for field in (
+            "authorization_projection_revision",
+            "authorization_projection_digest",
+            "dependency_revision",
+            "gate_revision",
+        )
+    }
+    stale_values = {
+        "authorization_projection_revision": 2,
+        "authorization_projection_digest": "sha256:stale-auth",
+        "dependency_revision": 11,
+        "gate_revision": 4,
+    }
+    changed_preconditions = []
+    for field, stale_value in stale_values.items():
+        preconditions = copy.deepcopy(expected_preconditions)
+        preconditions[field] = stale_value
+        changed_preconditions.append(authority.apply(claim(
+            f"op-stale-{field}",
+            "goal-preconditions",
+            "todo-known",
+            expected_preconditions=preconditions,
+        )))
+    ineligible = authority.apply(claim(
+        "op-ineligible",
+        "goal-preconditions",
+        "todo-known",
         agent_id="agent-not-allowed",
-        goal_id="goal-preconditions",
-        todo_id="todo-known",
     ))
-    dependency_blocked = authority.apply(sample_envelope(
-        operation_id="op-dependency-blocked",
-        goal_id="goal-preconditions",
-        todo_id="todo-dependency-blocked",
-    ))
-    gate_blocked = authority.apply(sample_envelope(
-        operation_id="op-gate-blocked",
-        goal_id="goal-preconditions",
-        todo_id="todo-gate-blocked",
-    ))
+    dependency_blocked = authority.apply(
+        claim("op-dependency-blocked", "goal-preconditions", "todo-dependency-blocked")
+    )
+    gate_blocked = authority.apply(
+        claim("op-gate-blocked", "goal-preconditions", "todo-gate-blocked")
+    )
     head, generation = load_head(provider, "goal-preconditions")
     assert missing == {
         "result": "rejected",
@@ -202,6 +261,11 @@ def probe_bootstrap_and_preconditions() -> None:
         "provider_generation": initial_generation,
     }
     assert stale["result"] == "conflict" and stale["reason"] == "todo_revision_mismatch"
+    assert all(result["result"] == "conflict" for result in changed_preconditions)
+    assert all(
+        result["reason"] == "precondition_snapshot_mismatch"
+        for result in changed_preconditions
+    )
     assert ineligible["result"] == "rejected" and ineligible["reason"] == "actor_ineligible"
     assert dependency_blocked["result"] == "rejected"
     assert dependency_blocked["reason"] == "dependencies_not_satisfied"
@@ -210,37 +274,23 @@ def probe_bootstrap_and_preconditions() -> None:
     assert generation == initial_generation
     private_todo = initial_todo()
     private_todo["raw_todo_body"] = "must not enter the shared head"
-    try:
-        bootstrap_aggregate("goal-private", {"todo-private": private_todo})
-    except ValueError as exc:
-        assert "fields do not match v0" in str(exc)
-    else:
-        raise AssertionError("unknown bootstrap field was copied into the head")
+    assert_bootstrap_rejected(private_todo, "fields do not match v0")
     absolute_path_todo = initial_todo()
     absolute_path_todo["repository"] = "/" + "synthetic/local/repository"
-    try:
-        bootstrap_aggregate("goal-private", {"todo-private": absolute_path_todo})
-    except ValueError as exc:
-        assert "repository is not portable" in str(exc)
-    else:
-        raise AssertionError("absolute repository path entered the shared head")
+    assert_bootstrap_rejected(absolute_path_todo, "repository is not portable")
     credential_repository_todo = initial_todo()
     credential_repository_todo["repository"] = "git:" + "user@host/repository"
     invalid_revision_todo = initial_todo()
     invalid_revision_todo["code_revision"] = "review-ready"
     for unsafe_todo in (credential_repository_todo, invalid_revision_todo):
-        try:
-            bootstrap_aggregate("goal-private", {"todo-private": unsafe_todo})
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("unsafe repository metadata entered the shared head")
+        assert_bootstrap_rejected(unsafe_todo)
     out(
         "contract.bootstrap_and_preconditions",
         ok=True,
         uninitialized_failed=True,
         no_implicit_todo_creation=True,
         todo_revision_checked=True,
+        named_preconditions_checked=True,
         eligibility_checked=True,
         dependency_and_gate_checked=True,
         bootstrap_privacy_allowlist_checked=True,
@@ -252,18 +302,9 @@ def probe_a_b_replay_a() -> None:
     provider = DeterministicProvider()
     bootstrap(provider, "goal-review", ["todo-review", "todo-followup"])
     authority = CoordinationAuthority(provider, "goal-review", fixed_clock(1100))
-    envelope_a = sample_envelope(
-        operation_id="op-review-a",
-        goal_id="goal-review",
-        todo_id="todo-review",
-    )
+    envelope_a = claim("op-review-a", "goal-review", "todo-review")
     first_a = authority.apply(envelope_a)
-    first_b = authority.apply(sample_envelope(
-        operation_id="op-followup-b",
-        goal_id="goal-review",
-        todo_id="todo-followup",
-        expected_authority_revision=1,
-    ))
+    first_b = authority.apply(claim("op-followup-b", "goal-review", "todo-followup"))
     replay_a = CoordinationAuthority(provider, "goal-review", fixed_clock(9000)).apply(
         envelope_a
     )
@@ -291,10 +332,10 @@ def probe_operation_identity() -> None:
     provider = DeterministicProvider()
     bootstrap(provider, "goal-digest", ["todo-original", "todo-mutated"])
     authority = CoordinationAuthority(provider, "goal-digest", fixed_clock(1200))
-    original = sample_envelope(
-        operation_id="op-stable",
-        goal_id="goal-digest",
-        todo_id="todo-original",
+    original = claim(
+        "op-stable",
+        "goal-digest",
+        "todo-original",
         transport={"attempt": 1, "trace_id": "trace-a"},
     )
     first = authority.apply(original)
@@ -327,53 +368,120 @@ def probe_operation_identity() -> None:
 
 
 def probe_competing_claims() -> None:
-    provider = DeterministicProvider(generation_step=23)
-    bootstrap(provider, "goal-race", ["todo-one-winner"])
-    provider.arm_load_barrier(2)
-    envelopes = [
-        sample_envelope(
-            operation_id=f"op-claim-{index}",
+    def race(provider, goal_id, envelopes):
+        provider.arm_load_barrier(2)
+
+        def run(index: int):
+            return CoordinationAuthority(
+                provider,
+                goal_id,
+                fixed_clock(1300 + index),
+            ).apply(envelopes[index])
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            return list(executor.map(run, range(2)))
+
+    same_provider = DeterministicProvider(generation_step=23)
+    bootstrap(same_provider, "goal-race", ["todo-one-winner"])
+    same_envelopes = [
+        claim(
+            f"op-claim-{index}",
+            "goal-race",
+            "todo-one-winner",
             agent_id=f"agent-{index}",
             device_id=f"device-{index}",
-            goal_id="goal-race",
-            todo_id="todo-one-winner",
         )
         for index in range(2)
     ]
-
-    def run(index: int):
-        return CoordinationAuthority(
-            provider,
-            "goal-race",
-            fixed_clock(1300 + index),
-        ).apply(envelopes[index])
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(run, range(2)))
-    applied = [result for result in results if result["result"] == "applied"]
-    conflicts = [result for result in results if result["result"] == "conflict"]
-    head, generation = load_head(provider, "goal-race")
-    assert len(applied) == 1 and len(conflicts) == 1, results
+    same_results = race(same_provider, "goal-race", same_envelopes)
+    applied = [result for result in same_results if result["result"] == "applied"]
+    conflicts = [result for result in same_results if result["result"] == "conflict"]
+    head, generation = load_head(same_provider, "goal-race")
+    assert len(applied) == 1 and len(conflicts) == 1, same_results
+    winner = applied[0]["original_receipt"]["actor"]["agent_id"]
+    assert conflicts[0]["reason"] == "todo_revision_mismatch"
+    assert "original_receipt" not in conflicts[0] and "lease_id" not in conflicts[0]
     assert head["authority_revision"] == 1 and len(head["receipt_index"]) == 1
+    same_todo = head["coordination"]["todos"]["todo-one-winner"]
+    assert same_todo["todo_revision"] == 8
+    assert same_todo["status"] == "open"
+    assert same_todo["claimed_by"] == winner
+    assert set(head["coordination"]["leases"]) == {"todo-one-winner"}
+    assert head["coordination"]["leases"]["todo-one-winner"]["owner"] == winner
     assert generation == 46
+
+    independent_provider = DeterministicProvider(generation_step=29)
+    bootstrap(independent_provider, "goal-independent", ["todo-a", "todo-b"])
+    independent_envelopes = [
+        claim(
+            f"op-independent-{index}",
+            "goal-independent",
+            f"todo-{'ab'[index]}",
+            agent_id=f"agent-{index}",
+            device_id=f"device-{index}",
+        )
+        for index in range(2)
+    ]
+    independent_results = race(
+        independent_provider,
+        "goal-independent",
+        independent_envelopes,
+    )
+    independent_head, independent_generation = load_head(
+        independent_provider,
+        "goal-independent",
+    )
+    assert [result["result"] for result in independent_results].count("applied") == 2, (
+        independent_results
+    )
+    assert independent_head["authority_revision"] == 2
+    assert len(independent_head["receipt_index"]) == 2
+    assert set(independent_head["coordination"]["leases"]) == {"todo-a", "todo-b"}
+    assert independent_head["coordination"]["todos"]["todo-a"]["todo_revision"] == 8
+    assert independent_head["coordination"]["todos"]["todo-b"]["todo_revision"] == 8
+    assert independent_head["coordination"]["todos"]["todo-a"]["status"] == "open"
+    assert independent_head["coordination"]["todos"]["todo-b"]["status"] == "open"
+    assert independent_head["coordination"]["todos"]["todo-a"]["claimed_by"] == "agent-0"
+    assert independent_head["coordination"]["todos"]["todo-b"]["claimed_by"] == "agent-1"
+    assert independent_head["coordination"]["leases"]["todo-a"]["owner"] == "agent-0"
+    assert independent_head["coordination"]["leases"]["todo-b"]["owner"] == "agent-1"
+    assert set(independent_head["receipt_index"]) == {
+        "op-independent-0",
+        "op-independent-1",
+    }
+    assert independent_head["receipt_index"]["op-independent-0"][
+        "original_receipt"
+    ]["todo_id"] == "todo-a"
+    assert independent_head["receipt_index"]["op-independent-1"][
+        "original_receipt"
+    ]["todo_id"] == "todo-b"
+    assert independent_generation == 87
+    replayed = CoordinationAuthority(
+        independent_provider,
+        "goal-independent",
+        fixed_clock(9000),
+    ).apply(independent_envelopes[0])
+    assert_exact_replay(independent_results[0], replayed)
+    assert load_head(independent_provider, "goal-independent") == (
+        independent_head,
+        independent_generation,
+    )
     out(
         "contract.competing_claims",
         ok=True,
-        applied=1,
-        conflicts=1,
-        authority_revision=1,
-        provider_generation=generation,
+        same_todo_applied=1,
+        same_todo_conflicts=1,
+        independent_todos_applied=2,
+        independent_authority_revision=2,
+        independent_replay_exact=True,
+        claim_preserves_open_status=True,
     )
 
 
 def probe_crash_windows_and_ambiguity() -> None:
     provider = DeterministicProvider()
     bootstrap(provider, "goal-faults", ["todo-before", "todo-after", "todo-ambiguous"])
-    before = sample_envelope(
-        operation_id="op-before",
-        goal_id="goal-faults",
-        todo_id="todo-before",
-    )
+    before = claim("op-before", "goal-faults", "todo-before")
     provider.arm_fault("failed_before")
     failed = CoordinationAuthority(provider, "goal-faults", fixed_clock(1400)).apply(
         before
@@ -394,11 +502,7 @@ def probe_crash_windows_and_ambiguity() -> None:
     assert head["authority_revision"] == 0 and head["receipt_index"] == {}
     assert generation == 17
 
-    after = sample_envelope(
-        operation_id="op-after",
-        goal_id="goal-faults",
-        todo_id="todo-after",
-    )
+    after = claim("op-after", "goal-faults", "todo-after")
     provider.arm_fault("crash_after")
     try:
         CoordinationAuthority(provider, "goal-faults", fixed_clock(1500)).apply(after)
@@ -413,12 +517,7 @@ def probe_crash_windows_and_ambiguity() -> None:
     assert replay["original_receipt"] == durable_receipt
     assert load_head(provider, "goal-faults") == (committed, committed_generation)
 
-    ambiguous = sample_envelope(
-        operation_id="op-ambiguous",
-        goal_id="goal-faults",
-        todo_id="todo-ambiguous",
-        expected_authority_revision=1,
-    )
+    ambiguous = claim("op-ambiguous", "goal-faults", "todo-ambiguous")
     provider.arm_fault("ambiguous_after")
     reconciled = CoordinationAuthority(provider, "goal-faults", fixed_clock(1600)).apply(
         ambiguous
@@ -426,6 +525,62 @@ def probe_crash_windows_and_ambiguity() -> None:
     final_head, _ = load_head(provider, "goal-faults")
     assert reconciled["result"] == "already_applied"
     assert final_head["authority_revision"] == 2 and len(final_head["receipt_index"]) == 2
+
+    ambiguous_before_provider = DeterministicProvider()
+    bootstrap(ambiguous_before_provider, "goal-ambiguous-before", ["todo-target"])
+    before_head = load_head(ambiguous_before_provider, "goal-ambiguous-before")
+    ambiguous_before_provider.arm_fault("ambiguous_before")
+    unproved = CoordinationAuthority(
+        ambiguous_before_provider,
+        "goal-ambiguous-before",
+        fixed_clock(1650),
+    ).apply(claim("op-unproved", "goal-ambiguous-before", "todo-target"))
+    assert unproved["result"] == "failed"
+    assert unproved["reason"] == "provider_outcome_unproved"
+    assert load_head(ambiguous_before_provider, "goal-ambiguous-before") == before_head
+
+    ambiguous_advance_provider = DeterministicProvider()
+    bootstrap(ambiguous_advance_provider, "goal-ambiguous-advance", ["todo-target"])
+    ambiguous_advance_provider.arm_fault("ambiguous_with_unrelated_advance")
+    retried = CoordinationAuthority(
+        ambiguous_advance_provider,
+        "goal-ambiguous-advance",
+        fixed_clock(1675),
+    ).apply(claim("op-retried", "goal-ambiguous-advance", "todo-target"))
+    retried_head, _ = load_head(ambiguous_advance_provider, "goal-ambiguous-advance")
+    assert retried["result"] == "applied"
+    assert retried_head["authority_revision"] == 1
+    assert set(retried_head["receipt_index"]) == {"op-retried"}
+
+    ambiguous_committed_provider = DeterministicProvider()
+    bootstrap(ambiguous_committed_provider, "goal-ambiguous-committed", ["todo-target"])
+    ambiguous_committed_provider.arm_fault("ambiguous_after_with_unrelated_advance")
+    recovered = CoordinationAuthority(
+        ambiguous_committed_provider,
+        "goal-ambiguous-committed",
+        fixed_clock(1685),
+    ).apply(claim("op-recovered", "goal-ambiguous-committed", "todo-target"))
+    recovered_head, _ = load_head(
+        ambiguous_committed_provider,
+        "goal-ambiguous-committed",
+    )
+    assert recovered["result"] == "already_applied"
+    assert recovered_head["authority_revision"] == 1
+    assert set(recovered_head["receipt_index"]) == {"op-recovered"}
+
+    contention_provider = DeterministicProvider()
+    bootstrap(contention_provider, "goal-contention", ["todo-target"])
+    contention_provider.arm_contention(8)
+    exhausted = CoordinationAuthority(
+        contention_provider,
+        "goal-contention",
+        fixed_clock(1700),
+    ).apply(claim("op-contention", "goal-contention", "todo-target"))
+    contention_head, _ = load_head(contention_provider, "goal-contention")
+    assert exhausted["result"] == "failed"
+    assert exhausted["reason"] == "provider_contention_exhausted"
+    assert "op-contention" not in contention_head["receipt_index"]
+    assert contention_head["coordination"]["todos"]["todo-target"]["status"] == "open"
     out(
         "contract.crash_windows_and_ambiguity",
         ok=True,
@@ -433,6 +588,10 @@ def probe_crash_windows_and_ambiguity() -> None:
         failed_before_cas_no_write=True,
         after_cas_exact_receipt_recovered=True,
         ambiguous_reconciled_from_receipt=True,
+        ambiguous_same_generation_failed_unproved=True,
+        ambiguous_after_unrelated_advance_retried=True,
+        ambiguous_committed_then_advanced_replayed=True,
+        bounded_contention_failed_without_receipt=True,
         no_double_apply=True,
     )
 
@@ -441,17 +600,8 @@ def probe_version_domains_and_retain_all() -> None:
     provider = DeterministicProvider(generation_step=101)
     bootstrap(provider, "goal-versions", ["todo-a", "todo-b"])
     authority = CoordinationAuthority(provider, "goal-versions", fixed_clock(1700))
-    first = authority.apply(sample_envelope(
-        operation_id="op-a",
-        goal_id="goal-versions",
-        todo_id="todo-a",
-    ))
-    second = authority.apply(sample_envelope(
-        operation_id="op-b",
-        goal_id="goal-versions",
-        todo_id="todo-b",
-        expected_authority_revision=1,
-    ))
+    first = authority.apply(claim("op-a", "goal-versions", "todo-a"))
+    second = authority.apply(claim("op-b", "goal-versions", "todo-b"))
     head, generation = load_head(provider, "goal-versions")
     assert generation == 303 and head["authority_revision"] == 2
     assert first["original_receipt"]["lease_epoch"] == 1

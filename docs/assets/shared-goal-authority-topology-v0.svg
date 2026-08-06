@@ -42,7 +42,7 @@
     <rect x="450" y="230" width="220" height="26" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
     <text x="560" y="247" text-anchor="middle" font-size="10.5" fill="#3730a3">受控命令 loopx_command_v0</text>
     <rect x="450" y="264" width="220" height="26" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
-    <text x="560" y="281" text-anchor="middle" font-size="10.5" fill="#3730a3">expected_authority_revision · 原始回执</text>
+    <text x="560" y="281" text-anchor="middle" font-size="10.5" fill="#3730a3">target preconditions · 原始回执</text>
     <rect x="450" y="298" width="220" height="26" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
     <text x="560" y="315" text-anchor="middle" font-size="10.5" fill="#3730a3">租约 lease / epoch · pull 认领</text>
 

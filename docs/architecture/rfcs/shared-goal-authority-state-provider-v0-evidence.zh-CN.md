@@ -2,7 +2,8 @@
 
 - 配套 RFC：[多端共享 Goal 的在线权威与可插拔状态 Provider (v0)](./shared-goal-authority-state-provider-v0.zh-CN.md)
 - 参考实现与探针：[`examples/nokv-shadow-provider/`](../../../examples/nokv-shadow-provider/)
-- 证据范围：canonical coordination aggregate 与历史 operation receipt 重放
+- 证据范围：canonical coordination aggregate、target-scoped conflict、内部 CAS
+  rebase 与历史 operation receipt 重放
 
 ## 1. 当前合并证据回答什么
 
@@ -20,10 +21,13 @@
 | 场景 | 必须满足的不变量 |
 |---|---|
 | A 首次提交 | coordination state 与 A 的 receipt-index entry 同一次 CAS 生效 |
-| B 推进 head | 当前 authority revision 前进，A 的历史回执仍可定位 |
+| B 推进独立 todo | 当前 authority revision 前进，A 的历史回执仍可定位；B 不接管 A 的 todo |
 | 重建 authority 后重放 A | 返回 `already_applied` 与 A 的原始回执；逐字段相同 |
 | 重放后的 head | revision、coordination state 与 receipt index 均不发生第二次变化 |
 | 相同 operation identity、不同请求 | request digest 不匹配，显式 fail closed |
+| 两个独立 todo 并发 claim | 在 `write_scopes=[]` 且目标 precondition 未变的边界内，第一次 CAS 的 loser reload 并重验，内部 rebase 后两者都 `applied` |
+| 同一 todo 并发 claim | 恰好一胜；loser 得到 target-specific conflict 且没有 receipt |
+| 无关 contention 耗尽预算 | 返回 `failed/provider_contention_exhausted`，不生成当前 operation receipt |
 
 本轮候选已从仓库根目录复跑：
 
@@ -74,13 +78,22 @@ authority 后比较完整原始回执。
 
 - coordination aggregate 与 receipt index 的原子提交模型；
 - 未 bootstrap、未知 todo、stale todo revision 与不合格 actor 均不能隐式建账；
+- stale authorization/dependency/gate precondition 明确 conflict，不会被无关 head
+  revision 混淆；
 - bootstrap 只接受 allowlist 字段、portable repository identity 与 digest，
   不接收本地路径；
 - historical replay 不依赖当前 head 的最后一个 command；
 - 相同 operation identity 的 semantic request-digest 绑定，同时排除 transport-only
   retry metadata；
-- competing claim 只接受一个 winner；
-- CAS 前后故障及 ambiguous result 只依据 reload 后的 receipt index 认定成功；
+- 同一 todo 的 competing claim 只接受一个 winner；独立 todo 的并发 claim 在内部
+  CAS rebase 后都能成功；这里的 independent 限定为 reference 的空 write scope；
+- accepted claim 后 todo 仍为 `open`，由 `claimed_by` 与 lease 表达 ownership，和
+  当前 LoopX 本地 claim 语义一致；
+- `authority_revision` 只作为 Goal-wide commit/audit sequence，不作为所有客户端
+  command 共用的业务前置条件；
+- CAS 前后故障及 ambiguous result 不会把 receipt 缺失当作成功：同 generation 下
+  缺失时 fail unproved，generation 前进后也必须重验并由新 CAS 成功才返回 applied；
+- 持续无关 contention 耗尽内部 retry budget 时 fail closed 且不创建 receipt；
 - replay 不产生第二次 coordination state 变更；
 - reference head 在连续推进时携带 `retain_all_v0` 与既有 receipt entry。
 
@@ -92,6 +105,8 @@ authority 后比较完整原始回执。
 - Agent IM、wake、presence 或 offline delivery 已实现；
 - NoKV 的 HA、owner failover、receipt compaction/GC 或自动晋升；
 - `renew_lease`、`release_lease` 与完整生产 lease lifecycle；
+- 不同 todo 的非空 write-scope overlap 检测，以及动态 eligibility projection
+  publisher 的 coverage/no-ABA 资格化；
 - 生产性能、跨区域延迟、容量上限或生产可用性。
 
 上述项目需要各自的实现、故障注入和独立 reviewed gate，不能从一个

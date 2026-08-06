@@ -33,6 +33,19 @@ operation are published in the **same head CAS**. The reference does not use a
 last-envelope shortcut or a separate `pending -> head -> finalize` receipt
 protocol.
 
+The one-head CAS is a physical serialization point, not a goal-wide domain
+conflict boundary. Commands name the target todo revision and the compact
+authorization, dependency, and gate preconditions they actually observed.
+After a CAS miss, the authority reloads and checks those facts again. If an
+independent todo advanced the head, it rebases and retries internally; if the
+target todo or a named precondition changed, it returns a domain conflict.
+`authority_revision` remains a goal-wide commit and audit sequence, not a
+required client precondition. In this reference, independent claims use
+`write_scopes=[]`; non-empty cross-todo scope overlap is not qualified here.
+Internal rebase also assumes the publisher never reuses a target-scoped token
+for a different authorization, dependency, or gate snapshot. The deterministic
+probe uses static bootstrap inputs and does not qualify that dynamic publisher.
+
 This matters for a historical retry:
 
 1. operation A commits and returns receipt A;
@@ -102,9 +115,15 @@ It must prove all of the following:
 - replay leaves the current revision and aggregate unchanged;
 - the same operation identity with a different semantic request is rejected;
 - transport-only retry metadata does not change operation identity;
-- competing claims have one winner;
-- pre/post-CAS faults and an ambiguous result recover only from the durable
-  receipt index.
+- competing claims on the same todo have one winner;
+- concurrent claims on independent todos both succeed after internal CAS
+  revalidation and rebase, within the reference's empty-write-scope boundary;
+- stale target or named preconditions return a domain conflict;
+- bounded unrelated contention fails without creating a receipt or pretending
+  that the target todo conflicted;
+- pre/post-CAS faults and ambiguous results recover success only from a stored
+  receipt or a later successful CAS after target revalidation; same-generation
+  receipt absence fails unproved.
 
 The six current result tags are
 `contract.bootstrap_and_preconditions`,
@@ -121,4 +140,5 @@ promotion conclusions for this implementation.
 
 The reference does not establish lease renewal/release, multi-host wake
 delivery, automatic provider promotion, HA/failover, receipt compaction or GC,
-production performance, or a full LoopX state migration.
+production performance, a dynamic eligibility-projection publisher, non-empty
+write-scope overlap enforcement, or a full LoopX state migration.

@@ -50,9 +50,9 @@ delivery plane.
 
 Think of the authority as the only bookkeeper. Endpoints never edit the ledger
 directly; they submit a request saying, "I want to claim this work." The
-bookkeeper checks the version, identity, dependencies, and gates. If the request
-passes, the claim, lease, and receipt are written together. If it fails, the
-requester gets an explicit reason.
+bookkeeper checks the target todo, identity, named dependencies, and gates. If
+the request passes, the claim, lease, and receipt are written together. If it
+fails, the requester gets an explicit reason.
 
 This time the bookkeeper gets one small ledger. We are not moving every LoopX
 file into a remote store:
@@ -75,19 +75,31 @@ answers the two questions most likely to cause an incident—who wins when two
 endpoints claim at once, and how a lost response recovers its original
 receipt—without pretending that the complete lease lifecycle already ships.
 
+The contention unit is `(goal_id, todo_id)` plus the preconditions actually
+referenced by that todo, not the whole goal. Two endpoints claiming the same
+todo yield one winner. Two endpoints claiming independent todos under one goal,
+with unchanged target-scoped authorization, dependency, and gate facts, should
+both succeed even if their first writes compete for the same aggregate CAS. The
+authority reloads, revalidates, and retries internally instead of exposing an
+unrelated provider-head advance as a domain conflict. This preserves the
+todo-level concurrency shape in LoopX's current public contract in
+[`architecture.md`](../../architecture.md).
+
 Here is the failure sequence that matters most. Operation A succeeds with lease
-`L1`, epoch `7`, but its response is lost. Operation B then advances the ledger.
-When A restarts and retries the same request, it must recover its original
-receipt field for field. "This was already applied" plus B's current revision
-is not enough: without `L1`, epoch `7`, and its expiry, A still cannot prove
-that it was authorized to do the work.
+`L1`, epoch `7`, but its response is lost. Operation B then advances another
+independent todo in the same goal; B does not take over A's todo. When A
+restarts and retries the same request, it must recover its original receipt
+field for field. "This was already applied" plus B's current revision is not
+enough: without `L1`, epoch `7`, and its expiry, A still cannot prove that it
+was authorized to do the work.
 
 ## 2. What We Will Do, and What We Will Not
 
 **What this version will do**
 
 - give one shared goal an online, provider-neutral coordination authority;
-- make concurrent claims resolve to one accepted owner;
+- make concurrent claims on the same todo resolve to one accepted owner while
+  allowing independent todos to succeed after an internal CAS rebase;
 - bind each operation identity to one normalized request digest and reject the
   same id when it is reused with different semantics;
 - recover the original receipt after later operations advance the ledger;
@@ -175,7 +187,7 @@ One provider key stores one goal's v0 aggregate. The illustrative shape is:
     "todos": {
       "todo_review": {
         "todo_revision": 9,
-        "status": "claimed",
+        "status": "open",
         "claimed_by": "laptop-reviewer",
         "eligibility": {
           "authorization_projection_revision": 3,
@@ -197,7 +209,7 @@ One provider key stores one goal's v0 aggregate. The illustrative shape is:
         "owner": "laptop-reviewer",
         "lease_epoch": 7,
         "expires_at": "2026-08-06T03:30:00Z",
-        "write_scopes": ["src/review/**"]
+        "write_scopes": []
       }
     }
   },
@@ -226,7 +238,27 @@ One provider key stores one goal's v0 aggregate. The illustrative shape is:
 
 The schema contains no raw todo body, transcript, credential, absolute path,
 or raw evidence. It contains only the facts needed to adjudicate the command
-slice and recover its proof.
+slice and recover its proof. As in current LoopX, a claimed todo remains `open`:
+`claimed_by` carries soft ownership and the lease/fence carries execution
+authority, without inventing a `claimed` lifecycle status that local mode does
+not have.
+
+Each eligibility revision or digest is scoped to the snapshot referenced by the
+target todo: authorization covers only that todo's actor scope, dependency
+covers only its transitive dependency closure, and gate covers only gates that
+actually constrain it. These are not goal-wide revisions under new names. The
+reference slice fixes `write_scopes=[]`. When non-empty scopes are introduced,
+overlap with another active lease is a real cross-todo precondition: an internal
+rebase must revalidate it and reject the claim on overlap.
+
+Those target-scoped tokens have a coverage and no-ABA obligation. Any semantic
+change to the target's claim state or lease epoch must advance `todo_revision`.
+Any change to its allowed actors, dependency closure or satisfaction decision,
+or constraining gate set or decision must advance the corresponding revision
+and digest where present. A token must never be reused for a different snapshot.
+If the authority cannot prove this coverage, it must not internally rebase. The
+deterministic reference validates a static bootstrap snapshot; it does not yet
+qualify a dynamic publisher for these projections.
 
 The original receipt proves that an operation was accepted at one authority
 revision. It does not prove that its lease remains current. A replay response
@@ -245,19 +277,28 @@ uses of `command_id`:
   "operation_id": "op_claim_review_01",
   "actor": {"agent_id": "laptop-reviewer", "device_id": "laptop"},
   "goal_id": "shared-rust-review",
-  "expected_authority_revision": 42,
   "command": {
     "type": "claim_work",
     "todo_id": "todo_review",
     "expected_todo_revision": 8,
+    "expected_preconditions": {
+      "authorization_projection_revision": 3,
+      "authorization_projection_digest": "sha256:...",
+      "dependency_revision": 12,
+      "gate_revision": 5
+    },
     "lease_ttl_seconds": 600
   }
 }
 ```
 
 The authority normalizes the complete semantic request and computes
-`request_digest`. Actor, goal, expected revisions, command type, target, and
-command parameters are covered. Transport retry metadata is not.
+`request_digest`. Actor, goal, command type, target todo revision, named
+authorization/dependency/gate preconditions, and command parameters are
+covered. Transport retry metadata is not. The goal-wide `authority_revision`
+is not a client domain precondition and is not part of the request digest. A
+caller may carry a previously observed head revision only as transport
+metadata; changing that observation does not create a new semantic operation.
 
 For every request, the authority performs this sequence:
 
@@ -267,13 +308,23 @@ For every request, the authority performs this sequence:
    stored original receipt without writing;
 4. if the id exists with a different digest, return typed
    `operation_identity_mismatch` and do not write;
-5. validate actor scope, authority revision, todo revision, eligibility,
-   claim state, and lease rules;
+5. validate actor scope, target todo revision, named preconditions,
+   eligibility, claim state, and the empty-scope lease rules implemented by this
+   reference slice;
 6. compute the next coordination state and original receipt in the authority;
 7. add both the transition and receipt-index entry to one deterministic
    envelope and submit one provider CAS;
 8. after a conflict or ambiguous provider response, reload and repeat the
-   receipt lookup before classifying the result.
+   receipt lookup before classifying the result;
+9. if no receipt exists and the generation did not advance, fail closed with
+   `provider_outcome_unproved`. If the generation advanced, revalidate the
+   target todo and named preconditions; when those facts are unchanged, retry
+   against the latest head. Receipt absence never proves success: an eventual
+   `applied` requires a new successful CAS; and
+10. after a CAS miss, stop rebasing when relevant facts no longer permit the
+    command. Initial invalid requests still follow ordinary domain validation.
+    An unrelated head advance is not a domain conflict. Exhausting the bounded
+    contention retry budget returns typed `failed` and creates no receipt.
 
 The API result classes are:
 
@@ -281,9 +332,9 @@ The API result classes are:
 | --- | --- |
 | `applied` | State and original receipt committed together. |
 | `already_applied` | The same operation and digest committed earlier; the stored original receipt is returned. |
-| `conflict` | No receipt exists for this operation and the expected authority state is stale or contested. |
+| `conflict` | No receipt exists for this operation and the target todo or a named precondition is stale. |
 | `rejected` | Identity, eligibility, gate, or command validation failed without a state change. |
-| `failed` | No accepted result can be proved. Retry only under bounded infrastructure policy. |
+| `failed` | No accepted result can be proved, or unrelated provider contention exhausted the internal retry budget. Retry only under bounded infrastructure policy. |
 
 `conflict`, `rejected`, and `failed` are not success proofs and do not receive
 fabricated applied receipts.
@@ -292,8 +343,8 @@ fabricated applied receipts.
 
 - `claim_work`: in one transition, verify an existing runnable todo, set its
   claimant, create a lease, mint the next lease epoch, and store the original
-  receipt. Its required fields are `todo_id`, `expected_todo_revision`, and
-  `lease_ttl_seconds`.
+  receipt. Its required fields are `todo_id`, `expected_todo_revision`,
+  `expected_preconditions`, and `lease_ttl_seconds`.
 
 An accepted claim advances both `authority_revision` and the target
 `todo_revision`. It operates only on a todo installed by explicit
@@ -302,13 +353,22 @@ deterministic reference eligibility input is the compact tuple
 `allowed_agent_ids`, `dependencies_satisfied`, and `gates_open`, bound to the
 named authorization, dependency, and gate revisions and digest.
 
+`authority_revision` is the goal-wide commit sequence for accepted commands.
+It serves audit, read-model, and receipt ordering; it is not a shared optimistic
+concurrency precondition for every command. The aggregate still commits
+serially through `provider_generation`. A CAS loser decides whether to rebase
+from its target todo and named preconditions, rather than requiring a caller to
+mint a new operation merely because an independent todo committed first.
+
 Unknown command types fail closed. `renew_lease`, `release_lease`, expired-lease
 reclaim, stale-fence writeback validation, `complete_todo_with_successor`,
 transfer or delegated assignment, arbitrary todo/gate mutation, quota
 reservation, and external effects require later runtime contracts and
 qualification. Renew/release/reclaim and stale-fence validation are required
 before production shared-mode operation; their omission here is scope control,
-not a claim that a claim-only runtime is complete. Completion plus successor
+not a claim that a claim-only runtime is complete. Non-empty write scopes and
+cross-todo scope-overlap rejection likewise require a later command contract and
+qualification. Completion plus successor
 creation may join a later slice only when source completion, successor
 creation/assignment, evidence pointer, and receipt commit atomically.
 
@@ -320,7 +380,9 @@ The LoopX authority owns:
 
 - request normalization and digesting;
 - actor, todo, dependency, gate, and authorization validation;
-- `authority_revision` and todo revision transitions;
+- domain-conflict decisions over the target todo and named preconditions, plus
+  bounded CAS rebase after unrelated head advances;
+- the `authority_revision` commit sequence and todo revision transitions;
 - time, lease id, lease epoch, and expiry minting;
 - receipt contents and replay classification;
 - privacy filtering and command-specific invariants.
@@ -368,7 +430,7 @@ or commit-marker protocol and a new reviewed contract.
 | Domain | Owner | Meaning | Consumer |
 | --- | --- | --- | --- |
 | `provider_generation` | Provider | Opaque token for conditional replacement of stored bytes | Authority/provider seam only |
-| `authority_revision` | LoopX authority | Per-goal logical coordination revision after an accepted command | Clients and command validation |
+| `authority_revision` | LoopX authority | Per-goal logical commit sequence after an accepted command | Audit, receipts, and read models; not a shared precondition for every domain command |
 | `lease_epoch` | LoopX authority | Per-todo fencing generation for ownership; advances on a new lease generation, not ordinary renewal | Executors and accepted writeback |
 
 A backend may often advance its generation once per accepted command, but
@@ -457,26 +519,39 @@ evidence, raw todo prose, transcripts, raw logs, or local absolute paths.
 
 All checks are machine-verifiable:
 
-1. two actors claiming the same todo from one authority revision yield exactly
-   one `applied`; the loser receives `conflict` and no lease;
-2. immediate replay with the same operation id and digest returns the original
+1. two actors claiming the same todo from one provider generation yield exactly
+   one `applied`; the loser receives a target-specific `conflict` and no lease;
+   the winner's todo remains `open`, with ownership expressed by `claimed_by`
+   and its lease;
+2. two actors claiming two independent todos in the same goal from one provider
+   generation, with `write_scopes=[]` and unchanged target-scoped authorization,
+   dependency, and gate facts, both receive `applied`; the first CAS loser
+   reloads, revalidates its relevant preconditions, and rebases internally,
+   while the goal audit sequence, both todo revisions, and both receipts each
+   advance only once;
+3. immediate replay with the same operation id and digest returns the original
    receipt without changing state;
-3. historical A/B/A replay survives authority/provider reconstruction from
-   durable provider state and returns A's original receipt field for field
-   after B advances the head;
-4. the same operation id with a different normalized digest is rejected and
+4. historical A/B/A replay survives reconstruction of the authority handle
+   while the same deterministic provider fake retains its aggregate, and
+   returns A's original receipt field for field after B advances the head;
+5. the same operation id with a different normalized digest is rejected and
    changes neither state nor receipt index;
-5. fault injection around the provider CAS never exposes state without its
+6. fault injection around the provider CAS never exposes state without its
    receipt or a receipt without its state;
-6. ambiguous provider responses reconcile by reloading the receipt index;
-   absence is never converted into success;
-7. claim rejects an unknown, stale-revision, ineligible, dependency-blocked,
-   or gate-blocked todo without creating state or a receipt;
-8. retained receipts survive reload fixtures with no receipt GC;
-9. provider generation, authority revision, and lease epoch are tested as
+7. ambiguous provider responses reconcile by reloading the receipt index: a
+   stored receipt recovers success, same-generation absence fails unproved, and
+   absence after a generation advance can only succeed through a new successful
+   CAS after revalidation;
+8. claim rejects an unknown, stale target/precondition, ineligible,
+   dependency-blocked, or gate-blocked todo without creating state or a receipt;
+9. sustained unrelated provider contention that exhausts the internal retry
+   budget returns typed `failed`, creates no receipt for the operation, and is
+   not mislabeled as a domain conflict;
+10. retained receipts survive reload fixtures with no receipt GC;
+11. provider generation, authority revision, and lease epoch are tested as
    distinct domains;
-10. privacy scans find no credential, raw body, transcript, or absolute path;
-11. default local mode remains behaviorally unchanged, and shared mode never
+12. privacy scans find no credential, raw body, transcript, or absolute path;
+13. default local mode remains behaviorally unchanged, and shared mode never
     falls back to an unfenced local writer.
 
 The companion provider probes are evidence for a candidate implementation, not
@@ -491,6 +566,8 @@ particular deployment topology are deliberately non-normative.
 - deterministic `loopx_command_v0` normalization and request digest;
 - the `claim_work` authority transition over explicitly bootstrapped todos;
 - one-head state-plus-receipt CAS;
+- target/precondition-scoped conflicts and internal CAS rebase after unrelated
+  head advances;
 - deterministic and NoKV provider candidates behind the same seam;
 - A/B/A, identity-mismatch, crash-window, eligibility, privacy, and no-GC
   checks within the stated evidence boundary.
