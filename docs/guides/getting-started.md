@@ -75,7 +75,8 @@ can discover user-installed skills:
   through `$loopx` or `/skills`. The primary `LoopX` command facade and
   `LoopX Project` workflow skill are separate entries: command facades set
   `allow_implicit_invocation: false`, while richer workflow skills such as
-  `loopx-project` and `loopx-pr-review` keep their normal implicit behavior.
+  `loopx-project`, `loopx-pr-program`, and `loopx-pr-review` keep their normal
+  implicit behavior.
 - Claude Code: lightweight user skills under `~/.claude/skills/loopx*`, so the
   command family can appear as Claude Code slash commands without enabling the
   opt-in MCP/hook adapter.
@@ -463,11 +464,23 @@ The reusable skills have intentionally narrow jobs:
 | Skill | Use it for | Do not use it for |
 | --- | --- | --- |
 | `loopx-project` | Connecting projects, reading status/quota/history, diagnosing LoopX, generating heartbeat/review packets, and refreshing state. | Reading private project documents by default or replacing the CLI as source of truth. |
+| `loopx-pr-program` | Reconciling a multi-PR/MR delivery program, preserving requirement/dependency priority, maintaining a roadmap, and monitoring material changes. | Deep per-PR review, provider-specific acquisition, approval, commenting, retargeting, closing, or merging. |
 | `loopx-pr-review` | Running `/loopx-pr-review`, preserving the `loopx pr-review` packet, and guiding per-PR five-block reviews. | Approving, commenting on, merging, self-merging, or admin-bypassing a PR. |
 | `loopx-doc-registry` | Registering durable project material and redacted authority-source metadata. | Copying raw doc bodies, internal URLs, or private comments into public repo docs. |
 | `loopx-material` | Operating an explicitly activated project's lossless material inventory, lifecycle, ranked-entry rebuild, bounded rerank, owner-gated apply, and rollback. | Ordinary one-off reading, project-specific source discovery, or mutating a material store merely because the project skill is discoverable. |
 | `loopx-change-quality` | Reviewing one exact final diff, optionally applying one bounded safe fix, and recording a policy-enforced receipt. | Acting when the goal policy is disabled, recursively reviewing reviewers, or replacing project-native validators. |
 | `loopx-self-repair` | Repairing surprising control-plane behavior, stale projection, tiny turns, or contradictory guard payloads. | Lowering gates, guessing around missing authority, or committing private runtime state. |
+
+Invoke `$loopx-pr-program` when one delivery goal spans several PRs or MRs and
+the queue must be reconciled over time. The skill accepts a provider-neutral
+snapshot, keeps one grouped LoopX monitor, and updates roadmap projections only
+for material changes. Run `loopx doctor` to read back the installed skill, and
+use its bundled `scripts/diff_snapshot.py --current <snapshot.json>` command to
+validate a first baseline. Installing the skill grants no source-control read or
+write authority and installs no provider adapter; acquisition stays with the
+authorized host environment. To disable the workflow, stop invoking it and
+remove only `~/.codex/skills/loopx-pr-program`; rerun the installer to restore
+the release-owned copy.
 
 Auto-research role guidance is worker-local: the visible worker launcher owns
 the `loopx-auto-research` playbook after it has projected a role profile,
@@ -552,6 +565,7 @@ the pieces you intend to drop:
 ```bash
 rm -f ~/.local/bin/loopx ~/.local/bin/loopx-canary
 rm -rf ~/.codex/skills/loopx-project \
+       ~/.codex/skills/loopx-pr-program \
        ~/.codex/skills/loopx-pr-review \
        ~/.codex/skills/loopx-doc-registry \
        ~/.codex/skills/loopx-self-repair
