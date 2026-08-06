@@ -122,6 +122,36 @@ def test_gate_order_and_short_circuit_are_enforced() -> None:
         build_finance_case_evaluation(premature_not_run)
 
 
+@pytest.mark.parametrize(
+    ("index", "observation_state", "evidence_refs", "message"),
+    [
+        (0, "observed", [], "observed values require evidence_refs"),
+        (
+            2,
+            "conflict",
+            ["filing-primary"],
+            "conflicts require at least two evidence_refs",
+        ),
+        (4, "not_run", ["valuation-bridge"], "not_run cannot include evidence_refs"),
+    ],
+)
+def test_gate_observation_states_enforce_evidence_ref_invariants(
+    index: int,
+    observation_state: str,
+    evidence_refs: list[str],
+    message: str,
+) -> None:
+    payload = _example()
+    observation = payload["observations"][index]
+    observation["observation_state"] = observation_state
+    if observation_state != "observed":
+        observation["value"] = None
+    observation["evidence_refs"] = evidence_refs
+
+    with pytest.raises(ValueError, match=message):
+        build_finance_case_evaluation(payload)
+
+
 def test_provider_cannot_declare_pass_fail_or_change_value_type() -> None:
     declared_result = _example()
     declared_result["observations"][0]["state"] = "passed"
