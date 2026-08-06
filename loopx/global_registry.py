@@ -9,6 +9,7 @@ from typing import Any
 
 from .authority import compact_authority_registry
 from .control_plane.runtime.time import now_local_iso
+from .file_lock import exclusive_file_lock
 from .history import load_registry
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from .registry import registry_goals
@@ -237,6 +238,40 @@ def merge_goal_entries(
     return merged, actions, synced_ids, collisions
 
 
+def merge_into_global_registry(
+    global_path: Path,
+    incoming: list[dict[str, Any]],
+    *,
+    allow_route_replacement: bool,
+    schema_version_fallback: str,
+    runtime_root: Path,
+    synced_at: str,
+) -> tuple[dict[str, Any], dict[str, Any], list[Any], list[str], list[str], list[dict[str, Any]]]:
+    """Read the global registry and merge `incoming` into a writable payload.
+
+    Returned as `(existing, payload, merged_goals, actions, synced_ids,
+    collisions)`. Callers that intend to write must run this inside the global
+    registry write lock so the read and the write observe the same file.
+    """
+
+    existing = read_json_if_exists(global_path)
+    existing_goals = existing.get("goals")
+    if not isinstance(existing_goals, list):
+        existing_goals = []
+    merged_goals, actions, synced_ids, collisions = merge_goal_entries(
+        existing_goals,
+        incoming,
+        allow_route_replacement=allow_route_replacement,
+    )
+    payload = dict(existing)
+    payload["schema_version"] = str(payload.get("schema_version") or schema_version_fallback or "0.1")
+    payload["updated_at"] = synced_at
+    payload["common_runtime_root"] = str(runtime_root or DEFAULT_RUNTIME_ROOT)
+    payload["registry_role"] = "global-local"
+    payload["goals"] = merged_goals
+    return existing, payload, merged_goals, actions, synced_ids, collisions
+
+
 def write_recovery_backup(global_path: Path, payload: dict[str, Any], *, dry_run: bool) -> str | None:
     timestamp = now_local().replace(":", "").replace("-", "")
     backup_path = global_path.with_name(f"{global_path.name}.route-collision-backup-{timestamp}.bak")
@@ -362,11 +397,25 @@ def retire_global_registry_goals(
                 "recommended_action": writability.get("recommended_action"),
             }
 
-        updated = dict(existing)
-        updated["updated_at"] = updated_at
-        updated["goals"] = retained_goals
-        write_json(backup_path, existing)
-        write_json(global_path, updated)
+        # Serialize the read-modify-write against concurrent global syncs. The
+        # inspection above ran unlocked, so re-read here and drop the retired ids
+        # from the current file rather than writing back the earlier snapshot,
+        # which would silently resurrect or erase goals another project synced.
+        with exclusive_file_lock(global_path, operation="retire_global_registry_goals"):
+            current = load_registry(global_path)
+            current_goals = current.get("goals")
+            if not isinstance(current_goals, list):
+                current_goals = []
+            retained_goals = [
+                goal
+                for goal in current_goals
+                if not (isinstance(goal, dict) and str(goal.get("id") or "") in retired)
+            ]
+            updated = dict(current)
+            updated["updated_at"] = updated_at
+            updated["goals"] = retained_goals
+            write_json(backup_path, current)
+            write_json(global_path, updated)
 
     return {
         "ok": True,
@@ -447,23 +496,18 @@ def sync_project_registry_to_global(
         sanitize_goal_for_global(goal, source_registry=registry_path, synced_at=synced_at)
         for goal in goals
     ]
-    existing = read_json_if_exists(global_path)
-    existing_goals = existing.get("goals")
-    if not isinstance(existing_goals, list):
-        existing_goals = []
-
-    merged_goals, actions, synced_ids, collisions = merge_goal_entries(
-        existing_goals,
+    merge_kwargs: dict[str, Any] = {
+        "allow_route_replacement": allow_route_replacement,
+        "schema_version_fallback": str(project_registry.get("schema_version") or "0.1"),
+        "runtime_root": runtime_root,
+        "synced_at": synced_at,
+    }
+    existing, payload, merged_goals, actions, synced_ids, collisions = merge_into_global_registry(
+        global_path,
         incoming,
-        allow_route_replacement=allow_route_replacement,
+        **merge_kwargs,
     )
     backup_path = None
-    payload = dict(existing)
-    payload["schema_version"] = str(payload.get("schema_version") or project_registry.get("schema_version") or "0.1")
-    payload["updated_at"] = synced_at
-    payload["common_runtime_root"] = str(runtime_root or DEFAULT_RUNTIME_ROOT)
-    payload["registry_role"] = "global-local"
-    payload["goals"] = merged_goals
 
     writability = None
     if not dry_run:
@@ -492,13 +536,33 @@ def sync_project_registry_to_global(
             )
 
     try:
-        backup_path = (
-            write_recovery_backup(global_path, existing, dry_run=dry_run)
-            if collisions and allow_route_replacement
-            else None
-        )
-        if not dry_run:
-            write_json(global_path, payload)
+        if dry_run:
+            backup_path = (
+                write_recovery_backup(global_path, existing, dry_run=True)
+                if collisions and allow_route_replacement
+                else None
+            )
+        else:
+            # Serialize the read-modify-write. The merge above ran unlocked so a
+            # write-denied preflight can still report a merge preview, but it is
+            # not authoritative: another project syncing the same shared runtime
+            # root may have added or updated goals since then. Re-merge under the
+            # lock so a concurrent sync cannot be overwritten with a stale copy.
+            with exclusive_file_lock(global_path, operation="sync_global_registry"):
+                (
+                    existing,
+                    payload,
+                    merged_goals,
+                    actions,
+                    synced_ids,
+                    collisions,
+                ) = merge_into_global_registry(global_path, incoming, **merge_kwargs)
+                backup_path = (
+                    write_recovery_backup(global_path, existing, dry_run=False)
+                    if collisions and allow_route_replacement
+                    else None
+                )
+                write_json(global_path, payload)
     except OSError as exc:
         if not is_write_denied_error(exc):
             raise
