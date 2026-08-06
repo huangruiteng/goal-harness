@@ -68,6 +68,7 @@ from .cli_commands import (
     handle_evidence_log_command,
     handle_extension_command,
     handle_explore_command,
+    handle_goal_channel_command,
     handle_history_command,
     handle_lark_inbox_command,
     handle_lark_kanban_command,
@@ -102,6 +103,7 @@ from .cli_commands import (
     register_evidence_log_command,
     register_extension_commands,
     register_explore_commands,
+    register_goal_channel_commands,
     register_history_command,
     register_lark_inbox_commands,
     build_lark_issue_fix_reviewer_provider_hooks,
@@ -266,6 +268,7 @@ def build_parser() -> LoopXArgumentParser:
     register_benchmark_command_group(sub, add_subcommand_format)
 
     register_project_lifecycle_commands(sub, add_subcommand_format)
+    register_goal_channel_commands(sub, add_subcommand_format)
     register_lark_inbox_commands(sub, add_subcommand_format)
     register_lark_kanban_commands(sub, add_subcommand_format)
 
@@ -618,6 +621,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if project_lifecycle_result is not None:
         return project_lifecycle_result
+
+    goal_channel_result = handle_goal_channel_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        print_payload=print_payload,
+        output_format=output_format,
+    )
+    if goal_channel_result is not None:
+        return goal_channel_result
 
     lark_kanban_result = handle_lark_kanban_command(
         args,

@@ -10,6 +10,7 @@ permissions = [
   "lark.reviewer_notification.send",
   "lark.projection_sink.use",
   "lark.miaoda_html.publish",
+  "lark.goal_channel.manage",
 ]
 
 [runtime]
@@ -52,6 +53,17 @@ real_world_anchor = "LoopX todo and control-plane projections rendered into a co
 user_value = "Give operators a bounded, lineage-preserving Kanban view without making Lark the control-plane source of truth."
 entry_command = "loopx lark-kanban sync-projection --projection-file <projection.json>"
 next_real_step = "Install or upgrade and explicitly enable the bundled provider before configuring a Lark Kanban sink."
+
+[[provides]]
+id = "lark-goal-channel"
+kind = "collaboration_channel"
+title = "Lark Goal Channel"
+status = "active-preview"
+visibility = "public"
+real_world_anchor = "one verified Lark group and Kanban projection bound to one LoopX goal"
+user_value = "Keep goal progress and human gates visible in one collaboration channel while LoopX remains the source of truth."
+entry_command = "loopx goal-channel setup --provider lark --goal-id <goal-id>"
+next_real_step = "Install or upgrade and explicitly enable the bundled provider before configuring a Goal Channel."
 
 [[provides]]
 id = "lark-explore-projection"

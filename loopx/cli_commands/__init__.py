@@ -91,6 +91,7 @@ from .dreaming import handle_dreaming_command, register_dreaming_commands
 from .evidence_log import handle_evidence_log_command, register_evidence_log_command
 from .explore import handle_explore_command, register_explore_commands
 from .history import handle_history_command, register_history_command
+from .goal_channel import handle_goal_channel_command, register_goal_channel_commands
 from .lark_inbox import (
     build_lark_issue_fix_reviewer_provider_hooks,
     handle_lark_inbox_command,
@@ -230,6 +231,8 @@ __all__ = [
     "handle_evidence_log_command",
     "handle_explore_command",
     "handle_history_command",
+    "handle_goal_channel_command",
+    "build_lark_issue_fix_reviewer_provider_hooks",
     "handle_lark_inbox_command",
     "handle_lark_kanban_command",
     "handle_ml_experiment_command",
@@ -287,6 +290,7 @@ __all__ = [
     "register_evidence_log_command",
     "register_explore_commands",
     "register_history_command",
+    "register_goal_channel_commands",
     "register_lark_inbox_commands",
     "register_lark_kanban_commands",
     "register_ml_experiment_commands",

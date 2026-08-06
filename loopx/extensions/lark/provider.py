@@ -23,6 +23,12 @@ REQUIRED_EXPORTS = {
     "loopx.extensions.lark.reviewer_notification": (
         "lark_reviewer_notification_sink",
     ),
+    "loopx.extensions.lark.goal_channel": (
+        "doctor_lark_goal_channel",
+        "notify_lark_goal_channel_gate",
+        "setup_lark_goal_channel",
+        "sync_lark_goal_channel",
+    ),
     "loopx.extensions.lark.presentation.periodic_report": (
         "periodic_report_lark_sink_adapter",
         "periodic_report_miaoda_html_sink_adapter",
