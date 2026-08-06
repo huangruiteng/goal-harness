@@ -507,15 +507,15 @@ runtime adapters, stronger terminal acceptance across repeated public loops,
 independent adoption and outcome evidence, and a more polished management
 surface.
 
-## License
-
-MIT. See [LICENSE](LICENSE).
-
 ## Star History
 
 <p align="center">
   <a href="https://github.com/huangruiteng/loopx/stargazers"><img src="https://huangruiteng.github.io/loopx/site-assets/star-history.svg" alt="LoopX GitHub star history, updated daily" width="900"></a><br>
-  <sub>Updated daily from public GitHub stargazer timestamps. GitHub's image cache may delay refreshes.</sub>
+  <sub>Generated daily from public GitHub stargazer timestamps and served from LoopX GitHub Pages. GitHub's image cache may delay refreshes.</sub>
 </p>
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 [osai-verify: eb42dd9cf910399988f0]: #

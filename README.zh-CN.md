@@ -459,13 +459,13 @@ integration 和进阶路径仍是 optional、default-off 或 experimental。Loop
 下一阶段会继续改善安装与 host packaging、扩展 typed runtime adapter、加强重复公开
 Loop 的 terminal acceptance、补足独立采用与 outcome evidence，并打磨管理面。
 
-## License
-
-MIT，见 [LICENSE](LICENSE)。
-
 ## Star 趋势
 
 <p align="center">
   <a href="https://github.com/huangruiteng/loopx/stargazers"><img src="https://huangruiteng.github.io/loopx/site-assets/star-history.svg" alt="LoopX GitHub Star 历史趋势，每日更新" width="900"></a><br>
-  <sub>根据 GitHub 公开 stargazer 时间戳每日更新；GitHub 图片缓存可能导致显示延迟。</sub>
+  <sub>根据 GitHub 公开 stargazer 时间戳每日生成，并由 LoopX GitHub Pages 托管；GitHub 图片缓存可能导致显示延迟。</sub>
 </p>
+
+## License
+
+MIT，见 [LICENSE](LICENSE)。
