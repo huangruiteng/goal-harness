@@ -123,26 +123,35 @@ def test_gate_order_and_short_circuit_are_enforced() -> None:
 
 
 @pytest.mark.parametrize(
-    ("index", "observation_state", "evidence_refs", "message"),
+    ("gate_id", "observation_state", "evidence_refs", "message"),
     [
-        (0, "observed", [], "observed values require evidence_refs"),
+        ("universe", "observed", [], "observed values require evidence_refs"),
         (
-            2,
+            "evidence_quality",
             "conflict",
             ["filing-primary"],
             "conflicts require at least two evidence_refs",
         ),
-        (4, "not_run", ["valuation-bridge"], "not_run cannot include evidence_refs"),
+        (
+            "de_beta_residual",
+            "not_run",
+            ["valuation-bridge"],
+            "not_run cannot include evidence_refs",
+        ),
     ],
 )
 def test_gate_observation_states_enforce_evidence_ref_invariants(
-    index: int,
+    gate_id: str,
     observation_state: str,
     evidence_refs: list[str],
     message: str,
 ) -> None:
     payload = _example()
-    observation = payload["observations"][index]
+    observation = next(
+        observation
+        for observation in payload["observations"]
+        if observation["gate_id"] == gate_id
+    )
     observation["observation_state"] = observation_state
     if observation_state != "observed":
         observation["value"] = None
