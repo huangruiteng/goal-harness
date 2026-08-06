@@ -8,6 +8,8 @@
 
 <sub>Codex、Claude Code、Cursor 或自有 runtime 负责一次次有界执行；LoopX 让目标、gate、todo、证据、quota 和交接跨轮次保持稳定。</sub>
 
+<a href="https://trendshift.io/repositories/102379?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-102379"><img src="https://trendshift.io/api/badge/repositories/102379" alt="huangruiteng/loopx 在 Trendshift 的趋势排名" width="220" height="48"></a>
+
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
 
 [产品首页](https://huangruiteng.github.io/loopx/) · [文档](https://huangruiteng.github.io/loopx/docs/) · [试用 LoopX](#试用-loopx) · [查看真实 Loop](#证据) · [理解工作原理](#为什么需要-loopx) · [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [English](README.md)
@@ -458,6 +460,10 @@ integration 和进阶路径仍是 optional、default-off 或 experimental。Loop
 
 下一阶段会继续改善安装与 host packaging、扩展 typed runtime adapter、加强重复公开
 Loop 的 terminal acceptance、补足独立采用与 outcome evidence，并打磨管理面。
+
+## Star 趋势
+
+[![LoopX Star 趋势](https://star-history.dera.page/svg?repos=huangruiteng/loopx&type=date&legend=top-left)](https://star-history.dera.page/#huangruiteng/loopx&type=date&legend=top-left)
 
 ## License
 
