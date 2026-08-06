@@ -118,6 +118,7 @@ def main() -> None:
 
         for skill in (
             "loopx-project",
+            "loopx-pr-program",
             "loopx-pr-review",
             "loopx-doc-registry",
             "loopx-self-repair",
