@@ -104,8 +104,14 @@ A durable smoke should protect shipped behavior, a reusable contract, a
 public/private boundary, or a regression that previously stranded automation.
 It should not preserve dated research prose or raw execution evidence.
 
+Use [What counts as a good smoke](good-smokes.md) for the contributor checklist,
+semantic-oracle examples, public-safe fixture rules, and consolidation process.
+
 Durable smoke 应保护已交付行为、可复用合同、公开/私有边界，或曾让自动化卡死的
 回归；不应固化某次研究文案或原始执行证据。
+
+贡献者检查项、语义 oracle 示例、公开安全 fixture 规则和合并流程见
+[什么是好的 Smoke](good-smokes.md)。
 
 Run one focused smoke while developing, then let the canary planner select the
 smallest cross-surface set from the Git diff:

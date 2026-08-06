@@ -50,6 +50,9 @@ Use the [developer guide](docs/development/README.md) as the stable entry point.
 Before changing scheduler, quota, todo/gate, onboarding, agent-facing output,
 or release behavior, read the bilingual
 [testing and quality guide](docs/development/testing-and-quality.md).
+Before adding or consolidating a public smoke, use the bilingual
+[good smoke guide](docs/development/good-smokes.md) to define its durable
+invariant, independent oracle, cadence, and public-safe fixture boundary.
 
 Install and verify the checkout:
 
