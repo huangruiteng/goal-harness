@@ -97,7 +97,7 @@ def build_goal_configuration_catalog(
         "features": [
             {
                 "feature_id": "multi_subagent",
-                "display_name": "Bounded child agents",
+                "display_name": "Adaptive child capacity",
                 "availability": "supported_opt_in",
                 "default": {"enabled": False},
                 "current": {
@@ -115,8 +115,13 @@ def build_goal_configuration_catalog(
                     "The goal has at least two independent, non-overlapping work items and "
                     "the host can run child agents."
                 ),
-                "effect": "Allows bounded host child-agent orchestration for this goal.",
+                "effect": (
+                    "Sets the hard capacity and responsibility-domain boundary for "
+                    "adaptive child orchestration; the task coordinator still decides "
+                    "whether, what, and how to parallelize."
+                ),
                 "does_not": [
+                    "force single-agent or multi-agent execution",
                     "create an agent hierarchy or durable authority",
                     "bypass todo claims, quota, gates, capabilities, or write scope",
                 ],

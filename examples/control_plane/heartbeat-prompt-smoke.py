@@ -223,7 +223,7 @@ def main() -> int:
         "status/log/metric/marker poll",
         "heartbeat_recommendation",
         "task_orchestration_contract",
-        "activate/resume eligible peer lanes",
+        "spawn admitted child lanes",
         "goal_boundary",
         "delivery_batch_scale",
         "delivery_outcome",

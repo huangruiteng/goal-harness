@@ -143,6 +143,19 @@ VISIBLE_OPENCODE_ALIASES: dict[str, str] = {
     "open-code": "generic-cli",
 }
 
+# Pi runs its visible goal loop through the generic-cli Turn host, same as
+# OpenCode, but keeps its own goal-loop connector identity.
+VISIBLE_PI_ALIASES: dict[str, str] = {
+    "pi": "generic-cli",
+}
+
+# Connector id override for source host identities that alias onto the
+# generic-cli Turn host. The normalized Turn host stays generic-cli while the
+# visible connector keeps naming the real host loop.
+VISIBLE_CONNECTOR_OVERRIDES: dict[str, str] = {
+    "pi": "pi_goal_loop",
+}
+
 
 CAPABILITY_GUIDANCE = {
     CAP_VISIBLE_SESSION: "A visible session is required so the user can watch, steer, or take over safely.",
@@ -504,6 +517,7 @@ def _build_mode_option(
     cli_bin: str,
     available_capabilities: list[str] | None,
     host_identity: str | None,
+    connector_override_identity: str | None = None,
 ) -> dict[str, Any]:
     meta = _MODE_METADATA[mode]
     visible_unresolved = (
@@ -530,7 +544,9 @@ def _build_mode_option(
         host_identity=host_identity if host_identity in VISIBLE_HOST_CONNECTOR_IDS else None,
     )
     if mode == MODE_VISIBLE_TUI:
-        connector_id = VISIBLE_HOST_CONNECTOR_IDS.get(host_identity or "")
+        connector_id = VISIBLE_CONNECTOR_OVERRIDES.get(
+            connector_override_identity or ""
+        ) or VISIBLE_HOST_CONNECTOR_IDS.get(host_identity or "")
         effective_turn_host = host_identity if connector_id else None
         host_resolution = (
             "resolved"
@@ -715,12 +731,15 @@ def build_host_mode_plan(
     )
     available = _normalize_tokens(available_capabilities)
     normalized_host_identity = None
+    connector_override_identity = None
     if host_identity:
         # Host identities are Turn host kinds and already use dashes
         # (codex-cli, claude-code, generic-cli); normalize case without
-        # converting dashes to underscores.
-        candidate = str(host_identity).strip().lower()
-        candidate = VISIBLE_OPENCODE_ALIASES.get(candidate, candidate)
+        # converting dashes to underscores. OpenCode and Pi alias onto the
+        # generic-cli Turn host while keeping their own connector identity.
+        raw_identity = str(host_identity).strip().lower()
+        candidate = VISIBLE_OPENCODE_ALIASES.get(raw_identity, raw_identity)
+        candidate = VISIBLE_PI_ALIASES.get(candidate, candidate)
         if candidate not in SUPPORTED_TURN_HOST_IDENTITIES:
             raise HostModePlanError(
                 reason=f"unsupported host_identity: {candidate}",
@@ -728,7 +747,16 @@ def build_host_mode_plan(
                 suggestions=SUPPORTED_TURN_HOST_IDENTITIES,
             )
         normalized_host_identity = candidate
-    identity = _identity_state(agent_id=agent_id, registered_agents=registered_agents)
+        connector_override_identity = (
+            raw_identity if raw_identity in VISIBLE_CONNECTOR_OVERRIDES else None
+        )
+    # Host-mode planning continues an existing goal; fresh identity creation
+    # belongs to the onboarding entry points that opt into that policy.
+    identity = _identity_state(
+        agent_id=agent_id,
+        registered_agents=registered_agents,
+        fresh_agent_default=False,
+    )
     raw_scoped = identity.get("selected_agent_id")
     scoped_agent_id = str(raw_scoped) if raw_scoped else None
 
@@ -743,6 +771,7 @@ def build_host_mode_plan(
             cli_bin=cli_bin,
             available_capabilities=available,
             host_identity=normalized_host_identity,
+            connector_override_identity=connector_override_identity,
         )
         for mode in ordered_modes
     ]

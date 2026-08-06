@@ -142,6 +142,7 @@ def test_codex_cli_host_starts_then_resumes_opaque_session(
         runtime_root=runtime_root,
         project=project,
         codex_bin=str(executable),
+        sandbox="workspace-write",
         timeout_seconds=5,
     )
     with pytest.raises(RuntimeError, match="binding changed after planning"):
@@ -161,6 +162,7 @@ def test_codex_cli_host_starts_then_resumes_opaque_session(
         runtime_root=runtime_root,
         project=project,
         codex_bin=str(executable),
+        sandbox="workspace-write",
         timeout_seconds=5,
     )
 
@@ -172,6 +174,12 @@ def test_codex_cli_host_starts_then_resumes_opaque_session(
     assert "resume" not in argv_rows[0]
     assert "resume" in argv_rows[1]
     assert "session-fixture-0001" in argv_rows[1]
+    resume_argv = argv_rows[1]
+    assert resume_argv[resume_argv.index("-c") + 1] == (
+        'sandbox_mode="workspace-write"'
+    )
+    assert resume_argv[resume_argv.index("-C") + 1] == str(project)
+    assert resume_argv.index("-C") < resume_argv.index("resume")
 
     envelope = first_request["turn_envelope"]
     assert isinstance(envelope, dict)

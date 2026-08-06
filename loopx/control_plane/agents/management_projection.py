@@ -344,6 +344,7 @@ def _todo_row(todo: dict[str, Any]) -> dict[str, Any]:
         "title": _compact(todo.get("title") or todo.get("text"), limit=96),
         "task_class": _compact(todo.get("task_class"), limit=80),
         "action_kind": _compact(todo.get("action_kind"), limit=100),
+        "task_domain": _compact(todo.get("task_domain"), limit=100),
         "claimed_by": normalize_todo_claimed_by(todo.get("claimed_by")),
     }
     for key in (

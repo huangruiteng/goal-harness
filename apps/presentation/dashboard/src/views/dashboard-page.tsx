@@ -100,21 +100,21 @@ type LaneDefinition = {
 const laneConfig: LaneDefinition[] = [
   {
     key: "user",
-    label: "User / Controller",
+    label: "用户 / 控制者",
     icon: Users,
     waitingOn: ["user_or_controller", "controller"],
     accent: "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100",
   },
   {
     key: "codex",
-    label: "Codex Ready",
+    label: "Codex 可执行",
     icon: Bot,
     waitingOn: ["codex"],
     accent: "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100",
   },
   {
     key: "watch",
-    label: "Watching Evidence",
+    label: "等待外部证据",
     icon: Radar,
     waitingOn: ["external_evidence"],
     accent: "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-100",
@@ -128,25 +128,33 @@ const severityVariant: Record<string, "neutral" | "success" | "warning" | "info"
 };
 
 const waitingLabel: Record<string, string> = {
-  user_or_controller: "User / Controller",
-  controller: "Controller",
+  user_or_controller: "用户 / 控制者",
+  controller: "控制者",
   codex: "Codex",
-  external_evidence: "Evidence",
+  external_evidence: "外部证据",
+  clear: "无需等待",
+};
+
+const severityLabel: Record<string, string> = {
+  high: "高优先级",
+  action: "需处理",
+  watch: "观察中",
+  clear: "正常",
 };
 
 const lifecycleLabel: Record<string, string> = {
-  connected: "Connected",
-  mapped: "Mapped",
-  refreshed: "Refreshed",
-  adapter_inspected: "Adapter inspected",
-  reward_judged: "Reward judged",
-  operator_approved: "Operator approved",
-  operator_gated: "Operator gated",
-  controller_gated: "Controller gated",
-  controller_ready: "Controller ready",
-  registered: "Registered",
-  planned: "Planned",
-  run_recorded: "Run recorded",
+  connected: "已连接",
+  mapped: "已映射",
+  refreshed: "已刷新",
+  adapter_inspected: "适配器已检查",
+  reward_judged: "人工评价已记录",
+  operator_approved: "操作者已批准",
+  operator_gated: "等待操作者",
+  controller_gated: "等待控制者",
+  controller_ready: "控制者已就绪",
+  registered: "已登记",
+  planned: "已计划",
+  run_recorded: "运行已记录",
 };
 
 const lifecycleVariant: Record<string, "neutral" | "success" | "warning" | "info" | "danger"> = {
@@ -165,7 +173,7 @@ const lifecycleVariant: Record<string, "neutral" | "success" | "warning" | "info
 };
 
 type DataSource =
-  | { kind: "example"; label: "bundled example" }
+  | { kind: "example"; label: "内置示例" }
   | { kind: "url"; label: string }
   | { kind: "file"; label: string };
 
@@ -174,6 +182,12 @@ const defaultGlobalStatusUrl = "http://127.0.0.1:8766/status.json";
 const expectedStatusContractSchemaVersion = 2;
 const fallbackStatusContractReloadHint = "scripts/macos-dashboard-launchagent.sh restart";
 const rewardOptions = ["positive", "mixed", "neutral", "negative"] as const;
+const rewardOptionLabel: Record<(typeof rewardOptions)[number], string> = {
+  positive: "正向",
+  mixed: "混合",
+  neutral: "中性",
+  negative: "负向",
+};
 const inputClassName =
   "h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500";
 
@@ -232,8 +246,8 @@ function StatusContractFreshnessWarning({
         <Badge variant="warning">schema v{issue.schemaVersion}</Badge>
       </div>
       <p className="mt-1">
-        这个 loopback live feed 低于 dashboard 期望的 schema v{expectedStatusContractSchemaVersion}；
-        可能是 `127.0.0.1:8766` 仍在运行旧 daemon。演示前运行
+        这个本机实时状态源低于看板期望的 schema v{expectedStatusContractSchemaVersion}；
+        可能是 `127.0.0.1:8766` 仍在运行旧状态服务。使用前运行
         <span className="mx-1 font-mono">{issue.reloadHint}</span>
         后刷新页面。
       </p>
@@ -320,6 +334,14 @@ type AgentManagementRow = {
   workspaceRef?: AgentManagementWorkspaceRef | null;
 };
 
+function todoExplorerIdentityKey(goalId: string, role: TodoExplorerRole, todo: TodoItem) {
+  const stableId = todo.todo_id?.trim();
+  if (stableId) {
+    return `${goalId}:${role}:${stableId}`;
+  }
+  return `${goalId}:${role}:index:${todo.index}:${todo.text}`;
+}
+
 function laneFor(item: QueueItem) {
   return laneConfig.find((lane) => lane.waitingOn.includes(item.waiting_on));
 }
@@ -329,7 +351,7 @@ function ShortText({ children }: { children: string }) {
 }
 
 function StatusBadge({ value }: { value: string }) {
-  return <Badge variant={severityVariant[value] ?? "neutral"}>{value}</Badge>;
+  return <Badge variant={severityVariant[value] ?? "neutral"}>{severityLabel[value] ?? value}</Badge>;
 }
 
 function inferLifecyclePhase(status?: string | null, run?: RunRecord) {
@@ -640,13 +662,13 @@ function GoalDirectory({
         <div>
           <CardTitle className="flex items-center gap-2">
             <GitBranch className="h-4 w-4" />
-            Goal Directory
+            Goal 目录
           </CardTitle>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant="warning">{actionCount} action</Badge>
-          <Badge variant="info">{watchCount} watch</Badge>
-          <Badge variant="success">{clearCount} clear</Badge>
+          <Badge variant="warning">{actionCount} 个需处理</Badge>
+          <Badge variant="info">{watchCount} 个观察中</Badge>
+          <Badge variant="success">{clearCount} 个正常</Badge>
         </div>
       </CardHeader>
       <CardContent>
@@ -665,29 +687,29 @@ function GoalDirectory({
                 <div className="min-w-0">
                   <div className="break-all text-sm font-semibold text-slate-950 dark:text-zinc-50">{row.goal.id}</div>
                   <div className="mt-1 line-clamp-1 text-xs text-slate-500 dark:text-zinc-400">
-                    {row.goal.domain ?? "No domain"}
+                    {row.goal.domain ?? "未设置领域"}
                   </div>
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge>{row.status}</Badge>
-                    {row.severity === "clear" ? <Badge variant="success">Clear</Badge> : <StatusBadge value={row.severity} />}
+                    {row.severity === "clear" ? <Badge variant="success">正常</Badge> : <StatusBadge value={row.severity} />}
                     <QuotaChip quota={row.queueItem?.quota ?? row.goal.quota} />
                   </div>
                   <div className="mt-1">
                     <PhaseBadges compact flags={row.lifecycleFlags} phase={row.lifecyclePhase} />
                   </div>
                   <div className="mt-1 line-clamp-1 text-xs text-slate-500 dark:text-zinc-400">
-                    {row.waitingOn === "clear" ? "No attention item" : waitingLabel[row.waitingOn] ?? row.waitingOn}
+                    {row.waitingOn === "clear" ? "没有待处理事项" : waitingLabel[row.waitingOn] ?? row.waitingOn}
                   </div>
                   <QueueGateSummary compact item={row.queueItem} />
                 </div>
                 <div className="min-w-0 md:text-right">
                   <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">
-                    {row.goal.unique_runs} runs · {row.goal.raw_index_records} records
+                    {row.goal.unique_runs} 次运行 · {row.goal.raw_index_records} 条记录
                   </div>
                   <div className="mt-1 break-all text-xs text-slate-500 dark:text-zinc-400">
-                    {row.latestRun?.generated_at ?? "No run yet"}
+                    {row.latestRun?.generated_at ?? "尚无运行记录"}
                   </div>
                 </div>
               </button>
@@ -726,12 +748,12 @@ function QueueTable({
       },
       {
         accessorKey: "status",
-        header: "Status",
+        header: "状态",
         cell: ({ row }) => <Badge>{row.original.status}</Badge>,
       },
       {
         accessorKey: "lifecycle_phase",
-        header: "Phase",
+        header: "阶段",
         cell: ({ row }) => (
           <PhaseBadges
             compact
@@ -742,22 +764,22 @@ function QueueTable({
       },
       {
         accessorKey: "waiting_on",
-        header: "Waiting",
+        header: "等待对象",
         cell: ({ row }) => waitingLabel[row.original.waiting_on] ?? row.original.waiting_on,
       },
       {
         accessorKey: "severity",
-        header: "Severity",
+        header: "优先级",
         cell: ({ row }) => <StatusBadge value={row.original.severity} />,
       },
       {
         accessorKey: "quota",
-        header: "Quota",
+        header: "配额",
         cell: ({ row }) => <QuotaChip quota={row.original.quota} />,
       },
       {
         accessorKey: "recommended_action",
-        header: "Action",
+        header: "下一步",
         cell: ({ row }) => (
           <div className="min-w-0">
             <ShortText>{row.original.recommended_action}</ShortText>
@@ -778,7 +800,7 @@ function QueueTable({
   });
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <div className="min-w-0 overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
@@ -822,7 +844,7 @@ function QueueTable({
   );
 }
 
-function formatNullable(value: unknown, fallback = "None") {
+function formatNullable(value: unknown, fallback = "无") {
   if (value === null || value === undefined || value === "") {
     return fallback;
   }
@@ -920,11 +942,11 @@ type UserActionSummaryItem = {
 
 const userActionKindOrder: UserActionKind[] = ["reward", "controller", "codex", "evidence", "health"];
 const userActionKindConfig: Record<UserActionKind, { label: string; variant: BadgeVariant }> = {
-  reward: { label: "Reward", variant: "warning" },
-  controller: { label: "Controller", variant: "warning" },
+  reward: { label: "人工评价", variant: "warning" },
+  controller: { label: "控制者", variant: "warning" },
   codex: { label: "Codex", variant: "success" },
-  evidence: { label: "Evidence", variant: "info" },
-  health: { label: "Health", variant: "danger" },
+  evidence: { label: "证据", variant: "info" },
+  health: { label: "健康状态", variant: "danger" },
 };
 
 function firstOpenTodo(todos?: TodoGroup | null) {
@@ -966,7 +988,7 @@ function todoCountLabel(todos?: TodoGroup | null) {
   if (!todos || todos.total_count === 0) {
     return null;
   }
-  return `${todos.open_count}/${todos.total_count} open`;
+  return `${todos.open_count}/${todos.total_count} 未完成`;
 }
 
 type HandoffReadinessView = {
@@ -987,8 +1009,8 @@ function buildHandoffReadinessView(readiness?: ProjectAssetHandoffReadiness | nu
   const checks = readiness.checks ?? {};
   const failed = Object.entries(checks)
     .filter(([, value]) => value === false)
-    .map(([key]) => humanizeIdentifier(key));
-  const failedLabel = failed.length ? failed.join(", ") : "none";
+    .map(([key]) => key);
+  const failedLabel = failed.length ? failed.join(", ") : "无";
   const ready = Boolean(readiness.ready);
   const postRunSeen = Boolean(readiness.post_handoff_run_seen);
   const handoffStatus = readiness.handoff_status ?? (ready ? "ready_waiting_for_run" : "not_ready");
@@ -999,31 +1021,31 @@ function buildHandoffReadinessView(readiness?: ProjectAssetHandoffReadiness | nu
   return {
     ready,
     shortLine: [
-      ready ? "ready" : "not ready",
-      `codex_ready=${Boolean(readiness.codex_ready)}`,
-      `source=${readiness.source ?? "unknown"}`,
-      `quota=${readiness.quota_state ?? "unknown"}`,
-      `failed=${failedLabel}`,
-    ].join("; "),
+      ready ? "已就绪" : "未就绪",
+      `Codex 就绪=${Boolean(readiness.codex_ready)}`,
+      `来源=${readiness.source ?? "未知"}`,
+      `配额状态=${quotaStateLabel[readiness.quota_state ?? ""] ?? readiness.quota_state ?? "未知"}`,
+      `未通过=${failedLabel}`,
+    ].join("；"),
     stateLine: [
-      `status=${handoffStatus}`,
-      `post_handoff_run_seen=${postRunSeen}`,
-      readiness.handoff_ready_at ? `ready_at=${readiness.handoff_ready_at}` : null,
-    ].filter(Boolean).join("; "),
+      `状态=${handoffStatus}`,
+      `已看到交接后运行=${postRunSeen}`,
+      readiness.handoff_ready_at ? `就绪时间=${readiness.handoff_ready_at}` : null,
+    ].filter(Boolean).join("；"),
     latestRunLine: latestRun
       ? [
-        latestRun.classification ?? "unknown",
-        latestRun.generated_at ? `at=${latestRun.generated_at}` : null,
-        latestRun.delivery_batch_scale ? `scale=${latestRun.delivery_batch_scale}` : null,
-        latestRun.json_exists !== undefined ? `json=${Boolean(latestRun.json_exists)}` : null,
-        latestRun.markdown_exists !== undefined ? `markdown=${Boolean(latestRun.markdown_exists)}` : null,
-      ].filter(Boolean).join("; ")
+        latestRun.classification ?? "未知",
+        latestRun.generated_at ? `时间=${latestRun.generated_at}` : null,
+        latestRun.delivery_batch_scale ? `批次规模=${latestRun.delivery_batch_scale}` : null,
+        latestRun.json_exists !== undefined ? `JSON=${Boolean(latestRun.json_exists)}` : null,
+        latestRun.markdown_exists !== undefined ? `Markdown=${Boolean(latestRun.markdown_exists)}` : null,
+      ].filter(Boolean).join("；")
       : null,
     recentRunLine: recentScales.length
       ? [
         recentScales.join(","),
-        `small_streak=${readiness.post_handoff_small_scale_streak ?? 0}`,
-      ].join("; ")
+        `连续小规模运行=${readiness.post_handoff_small_scale_streak ?? 0}`,
+      ].join("；")
       : null,
     failedLabel,
     probe: readiness.next_probe,
@@ -1056,28 +1078,28 @@ function HandoffReadinessPanel({
       data-testid={testId}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={view.variant}>{view.ready ? "Handoff ready" : "Handoff blocked"}</Badge>
+        <Badge variant={view.variant}>{view.ready ? "交接已就绪" : "交接受阻"}</Badge>
         <span className="break-words font-medium">{view.shortLine}</span>
       </div>
       <p className="mt-2 break-words">
-        <span className="font-medium">Failed checks:</span> {view.failedLabel}
+        <span className="font-medium">未通过检查：</span> {view.failedLabel}
       </p>
       <p className="mt-1 break-words">
-        <span className="font-medium">Handoff state:</span> {view.stateLine}
+        <span className="font-medium">交接状态：</span> {view.stateLine}
       </p>
       {view.latestRunLine ? (
         <p className="mt-1 break-words">
-          <span className="font-medium">Post-handoff run:</span> {view.latestRunLine}
+          <span className="font-medium">交接后运行：</span> {view.latestRunLine}
         </p>
       ) : null}
       {view.recentRunLine ? (
         <p className="mt-1 break-words">
-          <span className="font-medium">Recent scales:</span> {view.recentRunLine}
+          <span className="font-medium">近期规模：</span> {view.recentRunLine}
         </p>
       ) : null}
       {view.probe ? (
         <p className="mt-1 break-words">
-          <span className="font-medium">Probe:</span> {view.probe}
+          <span className="font-medium">检查入口：</span> {view.probe}
         </p>
       ) : null}
     </div>
@@ -1169,6 +1191,16 @@ function todoDisplayStatus(todo: TodoItem) {
   return todo.status?.trim() || (todo.done ? "done" : "open");
 }
 
+function todoDisplayStatusLabel(todo: TodoItem) {
+  const status = todoDisplayStatus(todo);
+  return {
+    blocked: "已阻塞",
+    deferred: "已推迟",
+    done: "已完成",
+    open: "未完成",
+  }[status] ?? status;
+}
+
 function todoExplorerStatusVariant(item: TodoExplorerItem): BadgeVariant {
   const todo = item.todo;
   const status = todoDisplayStatus(todo);
@@ -1185,7 +1217,7 @@ function todoExplorerStatusVariant(item: TodoExplorerItem): BadgeVariant {
 }
 
 function todoRoleLabel(role: TodoExplorerRole) {
-  return role === "user" ? "User" : "Agent";
+  return role === "user" ? "用户" : "Agent";
 }
 
 function collectTodoExplorerItems(rows: GoalDirectoryRow[], todoIndex?: TodoIndexSummary | null): TodoExplorerItem[] {
@@ -1200,6 +1232,10 @@ function collectTodoExplorerItems(rows: GoalDirectoryRow[], todoIndex?: TodoInde
     ];
     for (const [role, group] of groups) {
       for (const [sourceOrder, todo] of (group?.items ?? []).entries()) {
+        const key = todoExplorerIdentityKey(row.goal.id, role, todo);
+        if (seenKeys.has(key)) {
+          continue;
+        }
         items.push({
           goalId: row.goal.id,
           role,
@@ -1213,7 +1249,7 @@ function collectTodoExplorerItems(rows: GoalDirectoryRow[], todoIndex?: TodoInde
           phase: row.lifecyclePhase,
           sourceOrder,
         });
-        seenKeys.add(`${row.goal.id}:${role}:${todo.todo_id ?? todo.index}:${todo.text}`);
+        seenKeys.add(key);
       }
     }
   }
@@ -1222,7 +1258,7 @@ function collectTodoExplorerItems(rows: GoalDirectoryRow[], todoIndex?: TodoInde
   for (const [sourceOrder, todo] of (todoIndex?.items ?? []).entries()) {
     const goalId = todo.goal_id;
     const rawRole = todo.role === "user" || todo.role === "agent" ? todo.role : "agent";
-    const key = `${goalId}:${rawRole}:${todo.todo_id ?? todo.index}:${todo.text}`;
+    const key = todoExplorerIdentityKey(goalId, rawRole, todo);
     if (seenKeys.has(key)) {
       continue;
     }
@@ -1277,43 +1313,43 @@ function timestampValue(value?: string | null) {
 
 function formatAgentActivity(value?: string | null) {
   if (!value) {
-    return "No activity timestamp";
+    return "没有活动时间";
   }
   return value.replace("T", " ").replace("+00:00", " UTC").replace("Z", " UTC");
 }
 
 function agentManagementStatus(openTodos: TodoExplorerItem[], claimedTodos: TodoExplorerItem[]): AgentManagementStatus {
   if (openTodos.some((item) => todoDisplayStatus(item.todo) === "blocked")) {
-    return { label: "blocked", variant: "danger" };
+    return { label: "已阻塞", variant: "danger" };
   }
   if (openTodos.some((item) => item.todo.task_class === "continuous_monitor" || item.todo.action_kind?.includes("monitor"))) {
-    return { label: "monitoring", variant: "info" };
+    return { label: "监控中", variant: "info" };
   }
   if (openTodos.length > 0) {
-    return { label: "active", variant: "success" };
+    return { label: "执行中", variant: "success" };
   }
   if (claimedTodos.length > 0) {
-    return { label: "clear", variant: "neutral" };
+    return { label: "空闲", variant: "neutral" };
   }
-  return { label: "waiting", variant: "warning" };
+  return { label: "等待中", variant: "warning" };
 }
 
 function agentManagementProjectionStatus(state?: string | null): AgentManagementStatus {
   const normalized = state?.trim().toLowerCase();
   if (!normalized) {
-    return { label: "waiting", variant: "warning" };
+    return { label: "等待中", variant: "warning" };
   }
   if (normalized.includes("block")) {
-    return { label: "blocked", variant: "danger" };
+    return { label: "已阻塞", variant: "danger" };
   }
   if (normalized.includes("monitor")) {
-    return { label: "monitoring", variant: "info" };
+    return { label: "监控中", variant: "info" };
   }
   if (normalized.includes("active") || normalized.includes("running") || normalized.includes("claimed")) {
-    return { label: "active", variant: "success" };
+    return { label: "执行中", variant: "success" };
   }
   if (normalized.includes("done") || normalized.includes("clear") || normalized.includes("idle")) {
-    return { label: normalized.includes("idle") ? "idle" : "clear", variant: "neutral" };
+    return { label: normalized.includes("idle") ? "空闲" : "正常", variant: "neutral" };
   }
   return { label: normalized, variant: "neutral" };
 }
@@ -1327,9 +1363,9 @@ function evidenceRefsForTodo(item: TodoExplorerItem) {
     ? `${todo.latest_event_kind}${todo.latest_event_at ? ` @ ${todo.latest_event_at}` : ""}`
     : null;
   return [
-    todo.evidence ? `evidence=${todo.evidence}` : null,
-    eventRef ? `event=${eventRef}` : null,
-    item.source ? `source=${item.source}` : null,
+    todo.evidence ? `证据=${todo.evidence}` : null,
+    eventRef ? `事件=${eventRef}` : null,
+    item.source ? `来源=${item.source}` : null,
     ...todo.review_materials.map((material) => material.label || material.path),
   ];
 }
@@ -1354,21 +1390,21 @@ function handoffNoteSummary(note: AgentManagementHandoffNote) {
   return note.summary?.trim()
     || note.suggested_next_action?.trim()
     || note.intent?.trim()
-    || "Typed handoff context is available for this agent.";
+    || "这个 Agent 已有结构化交接信息。";
 }
 
 function handoffNoteBadges(note: AgentManagementHandoffNote) {
   const route = note.from_agent || note.to_agent
-    ? `${note.from_agent ?? "unknown"} -> ${note.to_agent ?? "unknown"}`
+    ? `${note.from_agent ?? "未知"} -> ${note.to_agent ?? "未知"}`
     : null;
-  const intent = note.intent ? `intent=${note.intent.replace(/_/g, " ").slice(0, 36)}` : null;
+  const intent = note.intent ? `意图=${note.intent.replace(/_/g, " ").slice(0, 36)}` : null;
   const evidenceCount = note.evidence_refs.length > 0
-    ? `${note.evidence_refs.length} evidence ${note.evidence_refs.length === 1 ? "ref" : "refs"}`
+    ? `${note.evidence_refs.length} 条证据引用`
     : null;
   return compactUnique([
     note.schema_version ?? "handoff_note_v0",
     intent,
-    note.blocker ? `blocked=${note.blocker}` : null,
+    note.blocker ? `阻塞=${note.blocker}` : null,
     route,
     evidenceCount,
   ], 4);
@@ -1388,7 +1424,7 @@ function normalizeWorkspaceRef(ref?: AgentManagementWorkspaceRef | null): AgentM
 }
 
 function workspaceRefSummary(ref: AgentManagementWorkspaceRef) {
-  const kind = ref.kind?.trim() || "unknown workspace";
+  const kind = ref.kind?.trim() || "未知工作区";
   const label = ref.label?.trim() || ref.branch?.trim();
   if (label) {
     return `${kind.replace(/_/g, " ")} · ${label}`;
@@ -1398,9 +1434,9 @@ function workspaceRefSummary(ref: AgentManagementWorkspaceRef) {
 
 function workspaceRefBadges(ref: AgentManagementWorkspaceRef) {
   return compactUnique([
-    ref.path_safe ? "path safe" : "path hidden",
-    ref.branch ? `branch=${ref.branch}` : null,
-    ...(ref.write_scope ?? []).slice(0, 3).map((scope) => `scope=${scope}`),
+    ref.path_safe ? "路径可显示" : "路径已隐藏",
+    ref.branch ? `分支=${ref.branch}` : null,
+    ...(ref.write_scope ?? []).slice(0, 3).map((scope) => `范围=${scope}`),
   ], 4);
 }
 
@@ -1421,14 +1457,14 @@ function normalizeStaleClaimHint(hint?: AgentManagementStaleClaimHint | null): A
 function staleClaimSummary(hint: AgentManagementStaleClaimHint) {
   return hint.reason?.trim()
     || hint.recommended_operator_action?.trim()
-    || "Claim freshness needs operator attention before manual handoff.";
+    || "手动交接前，需要操作者检查认领状态是否仍然有效。";
 }
 
 function staleClaimBadges(hint: AgentManagementStaleClaimHint) {
   return compactUnique([
-    hint.state ?? "claim freshness",
-    hint.claimed_by ? `claimed_by=${hint.claimed_by}` : null,
-    hint.last_activity_at ? `last=${formatAgentActivity(hint.last_activity_at)}` : null,
+    hint.state ?? "认领新鲜度",
+    hint.claimed_by ? `认领者=${hint.claimed_by}` : null,
+    hint.last_activity_at ? `最后活动=${formatAgentActivity(hint.last_activity_at)}` : null,
     hint.threshold_hours ? `>${hint.threshold_hours}h` : null,
   ], 4);
 }
@@ -1542,7 +1578,7 @@ function buildAgentManagementRows(
       handoffNote,
       lastActivity: latestActivity,
       nextSafeAction: projected?.next_action?.trim()
-        || (primaryTodo ? todoDisplayTitle(primaryTodo.todo) : "Inspect status projection before taking work"),
+        || (primaryTodo ? todoDisplayTitle(primaryTodo.todo) : "执行前先检查当前状态投影"),
       primaryGoalId,
       quotaHints,
       staleClaimHint,
@@ -1649,18 +1685,18 @@ function ProjectTodoExplorer({
         <div>
           <CardTitle className="flex items-center gap-2">
             <Search className="h-4 w-4" />
-            Project Todo Explorer
+            项目 Todo 浏览器
           </CardTitle>
           <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
-            Search current projected and indexed todos by project, id, text, owner, action kind, or claimed agent.
+            按项目、ID、文字、负责人、动作类型或认领 Agent 搜索当前 Todo。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant="info">{filteredItems.length}/{allItems.length} shown</Badge>
-          <Badge variant="neutral">{projectOptions.length} projects</Badge>
-          <Badge variant={openCount > 0 ? "warning" : "success"}>{openCount} open</Badge>
-          <Badge variant="neutral">{agentCount} agent</Badge>
-          {todoIndex ? <Badge variant="neutral">{todoIndex.rollout_event_count} events</Badge> : null}
+          <Badge variant="info">显示 {filteredItems.length}/{allItems.length}</Badge>
+          <Badge variant="neutral">{projectOptions.length} 个项目</Badge>
+          <Badge variant={openCount > 0 ? "warning" : "success"}>{openCount} 个未完成</Badge>
+          <Badge variant="neutral">{agentCount} 个 Agent Todo</Badge>
+          {todoIndex ? <Badge variant="neutral">{todoIndex.rollout_event_count} 个事件</Badge> : null}
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -1668,20 +1704,20 @@ function ProjectTodoExplorer({
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400 dark:text-zinc-500" />
             <input
-              aria-label="Search project todos"
+              aria-label="搜索项目 Todo"
               className={cn(inputClassName, "pl-9")}
               data-testid="project-todo-search-input"
               onChange={(event) => onQueryChange(event.target.value)}
-              placeholder="todo_f2760d7e328f, benchmark, claimed_by, action_kind..."
+              placeholder="输入 Todo ID、关键词、负责人或动作类型"
               value={query}
             />
           </div>
           <Select
-            aria-label="Todo project"
+            aria-label="Todo 所属项目"
             onChange={(event) => onProjectChange(event.target.value)}
             value={selectedProject}
           >
-            <option value="all">All projects</option>
+            <option value="all">全部项目</option>
             {projectOptions.map((goalId) => (
               <option key={goalId} value={goalId}>
                 {goalId}
@@ -1689,36 +1725,36 @@ function ProjectTodoExplorer({
             ))}
           </Select>
           <Select
-            aria-label="Todo role"
+            aria-label="Todo 负责人"
             onChange={(event) => onRoleChange(event.target.value as "all" | TodoExplorerRole)}
             value={role}
           >
-            <option value="all">All roles</option>
-            <option value="user">User todos</option>
-            <option value="agent">Agent todos</option>
+            <option value="all">全部负责人</option>
+            <option value="user">用户 Todo</option>
+            <option value="agent">Agent Todo</option>
           </Select>
           <Select
-            aria-label="Todo status"
+            aria-label="Todo 状态"
             onChange={(event) => onStatusChange(event.target.value as "all" | "open" | "done" | "blocked" | "deferred")}
             value={status}
           >
-            <option value="all">All status</option>
-            <option value="open">Open</option>
-            <option value="blocked">Blocked</option>
-            <option value="deferred">Deferred</option>
-            <option value="done">Done</option>
+            <option value="all">全部状态</option>
+            <option value="open">未完成</option>
+            <option value="blocked">已阻塞</option>
+            <option value="deferred">已推迟</option>
+            <option value="done">已完成</option>
           </Select>
         </div>
 
         {visibleItems.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-zinc-700 dark:text-zinc-400">
-            No projected todo matches {query ? <span className="font-mono">{query}</span> : "the current filters"}.
+            没有 Todo 匹配{query ? <span className="font-mono">“{query}”</span> : "当前筛选条件"}。
           </div>
         ) : (
           <div className="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">
             {visibleItems.map((item) => {
               const todo = item.todo;
-              const statusLabel = todoDisplayStatus(todo);
+              const statusLabel = todoDisplayStatusLabel(todo);
               const todoEventFields = todo as unknown as { latest_event_kind?: unknown };
               const latestEventKind = typeof todoEventFields.latest_event_kind === "string"
                 ? todoEventFields.latest_event_kind
@@ -1773,7 +1809,7 @@ function ProjectTodoExplorer({
 
         {filteredItems.length > visibleItems.length ? (
           <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Showing first {visibleItems.length} matches. Narrow the search to inspect the rest.
+            当前只显示前 {visibleItems.length} 条结果，请缩小搜索范围查看其余内容。
           </p>
         ) : null}
       </CardContent>
@@ -1806,7 +1842,7 @@ function TodoFocusColumn({
         <Badge variant={items.length > 0 ? variant : "success"}>{items.length}</Badge>
       </div>
       {items.length === 0 ? (
-        <div className="p-3 text-sm text-slate-500 dark:text-zinc-400">No open todo.</div>
+        <div className="p-3 text-sm text-slate-500 dark:text-zinc-400">没有未完成的 Todo。</div>
       ) : (
         <div className="divide-y divide-slate-200 dark:divide-zinc-800">
           {items.slice(0, 5).map((item) => (
@@ -1825,16 +1861,16 @@ function TodoFocusColumn({
               </div>
               <p className="line-clamp-2 break-words text-sm leading-6 text-slate-700 dark:text-zinc-300">{item.text}</p>
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
-                <Badge variant={severityVariant[item.severity] ?? "neutral"}>{item.severity}</Badge>
+                <Badge variant={severityVariant[item.severity] ?? "neutral"}>{severityLabel[item.severity] ?? item.severity}</Badge>
                 <Badge variant="neutral">{waitingLabel[item.waitingOn] ?? item.waitingOn}</Badge>
-                <Badge variant="info">{item.openCount}/{item.totalCount} open</Badge>
+                <Badge variant="info">{item.openCount}/{item.totalCount} 未完成</Badge>
                 <PhaseBadges compact phase={item.phase} />
               </div>
             </button>
           ))}
           {items.length > 5 ? (
             <div className="px-3 py-2 text-xs font-medium text-slate-500 dark:text-zinc-400">
-              +{items.length - 5} more
+              另有 {items.length - 5} 项
             </div>
           ) : null}
         </div>
@@ -1880,27 +1916,27 @@ function AgentManagementPanel({
           <div className="min-w-0">
             <div className="flex items-center gap-2 font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-100/60">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-100 shadow-[0_0_12px_rgba(209,250,229,0.8)]" />
-              Live control plane
+              实时控制面
             </div>
             <h2 className="mt-2 flex items-center gap-2 text-sm font-semibold text-[#fff7e8]">
               <Users className="h-4 w-4 text-emerald-100" />
-              Agent Management
+              Agent 管理
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-emerald-50/58">
-              Read-only board for agent lanes, handoff notes, evidence refs, and quota hints.
+              只读展示 Agent 工作线、交接信息、证据引用和配额提示。
             </p>
           </div>
           <div className="grid min-w-[min(100%,24rem)] grid-cols-3 gap-2">
             <div className="rounded-xl border border-emerald-100/15 bg-emerald-100/[0.04] px-3 py-2">
-              <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100/45">agents</div>
+              <div className="font-mono text-[10px] font-semibold tracking-normal text-emerald-100/45">Agent</div>
               <div className="mt-1 text-lg font-semibold tabular-nums text-[#fff7e8]">{agentRows.length}</div>
             </div>
             <div className="rounded-xl border border-[#e8c48e]/25 bg-[#e8c48e]/[0.08] px-3 py-2">
-              <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#f4d8ad]/70">claimed</div>
+              <div className="font-mono text-[10px] font-semibold tracking-normal text-[#f4d8ad]/70">已认领</div>
               <div className="mt-1 text-lg font-semibold tabular-nums text-[#ffe8bd]">{claimedTodoCount}</div>
             </div>
             <div className="rounded-xl border border-cyan-100/20 bg-cyan-100/[0.06] px-3 py-2">
-              <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100/70">events</div>
+              <div className="font-mono text-[10px] font-semibold tracking-normal text-cyan-100/70">事件</div>
               <div className="mt-1 text-lg font-semibold tabular-nums text-cyan-50">
                 {todoIndex ? todoIndex.rollout_event_count : "-"}
               </div>
@@ -1911,10 +1947,10 @@ function AgentManagementPanel({
       <div className="bg-[radial-gradient(circle_at_70%_-10%,rgba(20,184,166,0.12),transparent_34%),linear-gradient(180deg,rgba(6,39,35,0.94),rgba(3,18,17,1))] p-3 sm:p-4">
         {agentRows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-emerald-100/20 bg-emerald-100/[0.035] p-4 text-sm text-emerald-50/60">
-            No claimed agent rows yet. Add `claimed_by` or `agent_id` to projected agent todos to light up this panel.
+            目前没有 Agent 认领记录。给 Agent Todo 补充 `claimed_by` 或 `agent_id` 后会显示在这里。
           </div>
         ) : (
-          <div className="grid items-start gap-3 xl:grid-cols-3">
+          <div className="grid items-start gap-3 xl:grid-cols-2 2xl:grid-cols-3">
             {agentRows.map((row) => {
               const openCount = row.claimedTodos.filter((item) => !item.todo.done).length;
               const statusTone = agentStatusTone(row.status.variant);
@@ -1969,7 +2005,7 @@ function AgentManagementPanel({
                       </div>
                     </button>
                     <Button
-                      aria-label={`copy read-only command for ${row.agentId}`}
+                      aria-label={`复制 ${row.agentId} 的只读命令`}
                       className="h-8 shrink-0 border border-emerald-100/15 bg-emerald-100/[0.04] px-2 text-xs text-emerald-50/70 hover:bg-emerald-100/10 hover:text-[#fff7e8]"
                       data-testid="agent-management-copy-command"
                       onClick={() => void copyReadOnlyCommand(row)}
@@ -1977,20 +2013,20 @@ function AgentManagementPanel({
                       variant="ghost"
                     >
                       <Copy className="h-4 w-4" />
-                      {copiedAgentId === row.agentId ? "copied" : "copy"}
+                      {copiedAgentId === row.agentId ? "已复制" : "复制"}
                     </Button>
                   </div>
 
                   <div className="mt-4 grid gap-3 text-sm">
                     <div className="grid grid-cols-2 gap-2">
                       <div className="rounded-lg border border-emerald-100/12 bg-emerald-100/[0.035] p-2">
-                        <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.17em] text-emerald-50/40">claimed todos</div>
-                        <div className="mt-1 text-sm font-semibold tabular-nums text-[#fff7e8]">{openCount}/{row.claimedTodos.length} open</div>
+                        <div className="font-mono text-[10px] font-semibold tracking-normal text-emerald-50/40">已认领 Todo</div>
+                        <div className="mt-1 text-sm font-semibold tabular-nums text-[#fff7e8]">{openCount}/{row.claimedTodos.length} 未完成</div>
                       </div>
                       <div className="rounded-lg border border-emerald-100/12 bg-emerald-100/[0.035] p-2">
                         <div className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.17em] text-emerald-50/40">
                           <Clock3 className="h-3 w-3" />
-                          last activity
+                          最近活动
                         </div>
                         <div className="mt-1 line-clamp-1 break-words text-sm font-medium text-emerald-50/80">
                           {formatAgentActivity(row.lastActivity)}
@@ -2000,7 +2036,7 @@ function AgentManagementPanel({
                     <div className="rounded-lg border border-emerald-100/12 bg-black/18 p-3">
                       <div className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-50/40">
                         <Terminal className="h-3.5 w-3.5" />
-                        next safe action
+                        下一步安全动作
                       </div>
                       <p className="mt-2 line-clamp-2 break-words leading-6 text-emerald-50/85">{row.nextSafeAction}</p>
                     </div>
@@ -2015,9 +2051,9 @@ function AgentManagementPanel({
                           </span>
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-teal-50/[0.78]">
-                              workspace hint
+                              工作区提示
                               <span className="rounded-full border border-teal-100/20 px-1.5 py-0.5 text-[9px] tracking-normal text-teal-50/[0.62]">
-                                read-only
+                                只读
                               </span>
                             </div>
                             <p className="mt-1 line-clamp-2 break-words text-sm leading-6 text-teal-50/[0.88]">
@@ -2048,9 +2084,9 @@ function AgentManagementPanel({
                           </span>
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#ffe6bd]/[0.78]">
-                              stale claim hint
+                              认领状态可能过期
                               <span className="rounded-full border border-[#f3d7aa]/[0.25] px-1.5 py-0.5 text-[9px] tracking-normal text-[#ffe6bd]/[0.68]">
-                                warning only
+                                仅提醒
                               </span>
                             </div>
                             <p className="mt-1 line-clamp-2 break-words text-sm leading-6 text-[#ffe6bd]/90">
@@ -2081,9 +2117,9 @@ function AgentManagementPanel({
                           </span>
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-50/80">
-                              handoff note
+                              交接信息
                               <span className="rounded-full border border-cyan-100/20 px-1.5 py-0.5 text-[9px] tracking-normal text-cyan-50/65">
-                                read-only
+                                只读
                               </span>
                             </div>
                             <p className="mt-1 line-clamp-2 break-words text-sm leading-6 text-cyan-50/90">
@@ -2104,12 +2140,13 @@ function AgentManagementPanel({
                       </div>
                     ) : null}
                     <div>
-                      <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-50/40">evidence refs</div>
-                      <div className="mt-1 flex flex-wrap gap-1.5">
-                        {(row.evidenceRefs.length > 0 ? row.evidenceRefs : ["status projection"]).map((ref) => (
+                      <div className="font-mono text-[10px] font-semibold tracking-normal text-emerald-50/40">证据引用</div>
+                      <div className="mt-1 grid min-w-0 gap-1.5">
+                        {(row.evidenceRefs.length > 0 ? row.evidenceRefs : ["状态投影"]).map((ref) => (
                           <span
-                            className="rounded-full border border-emerald-100/12 bg-emerald-100/[0.04] px-2 py-0.5 text-[11px] font-medium text-emerald-50/70"
+                            className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-emerald-100/12 bg-emerald-100/[0.04] px-2 py-0.5 text-[11px] font-medium text-emerald-50/70"
                             key={ref}
+                            title={ref}
                           >
                             {ref}
                           </span>
@@ -2157,11 +2194,11 @@ function TodoFocusPanel({
       <CardHeader className="flex-wrap">
         <CardTitle className="flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4" />
-          Todo Focus
+          Todo 重点
         </CardTitle>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={userItems.length > 0 ? "warning" : "success"}>{userItems.length} user</Badge>
-          <Badge variant={agentItems.length > 0 ? "info" : "success"}>{agentItems.length} agent</Badge>
+          <Badge variant={userItems.length > 0 ? "warning" : "success"}>{userItems.length} 个用户 Todo</Badge>
+          <Badge variant={agentItems.length > 0 ? "info" : "success"}>{agentItems.length} 个 Agent Todo</Badge>
         </div>
       </CardHeader>
       <CardContent>
@@ -2171,7 +2208,7 @@ function TodoFocusPanel({
             items={userItems}
             onSelectGoal={onSelectGoal}
             selectedGoalId={selectedGoalId}
-            title="User Todo"
+            title="用户 Todo"
             variant="warning"
           />
           <TodoFocusColumn
@@ -2179,7 +2216,7 @@ function TodoFocusPanel({
             items={agentItems}
             onSelectGoal={onSelectGoal}
             selectedGoalId={selectedGoalId}
-            title="Agent Priority Todo"
+            title="Agent 优先 Todo"
             variant="info"
           />
         </div>
@@ -2215,7 +2252,7 @@ function UserTodoCallout({
   async function readMaterial(material: ReviewMaterial) {
     const url = buildReviewMaterialUrl(source, goalId, material);
     if (!url) {
-      setMaterialError("Review material reader is only available for loopback live status URLs.");
+      setMaterialError("审阅材料只支持本机实时状态地址。");
       setActiveMaterial(material);
       setMaterialContent(null);
       return;
@@ -2242,7 +2279,7 @@ function UserTodoCallout({
     <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">
       <div className="flex flex-wrap items-center gap-2">
         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
-        <Badge variant="success">{blocksGate ? "先做用户待办" : focusWait ? "Owner blocker" : "Next user todo"}</Badge>
+        <Badge variant="success">{blocksGate ? "先做用户待办" : focusWait ? "负责人阻塞" : "下一个用户 Todo"}</Badge>
         {count ? <Badge variant="neutral">{count}</Badge> : null}
       </div>
       <p className="mt-2 line-clamp-3 break-words text-sm font-medium leading-6 text-emerald-950 dark:text-emerald-100">
@@ -2250,17 +2287,17 @@ function UserTodoCallout({
       </p>
       {blocksGate ? (
         <p className="mt-1 text-xs font-medium leading-5 text-emerald-800 dark:text-emerald-200">
-          完成或明确暂缓这个用户待办后，再审批下面的 gate。
+          完成或明确暂缓这个用户待办后，再审批下面的确认项。
         </p>
       ) : null}
       {focusWait ? (
         <p className="mt-1 text-xs font-medium leading-5 text-emerald-800 dark:text-emerald-200">
-          有新 owner evidence、clean baseline 或外部 eval 前保持 focus wait，不恢复 delivery。
+          有新的负责人证据、干净基线或外部评估前保持重点等待，不恢复交付。
         </p>
       ) : null}
       {materials.length > 0 ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Badge variant="info">Review material</Badge>
+          <Badge variant="info">审阅材料</Badge>
           {materials.map((material) => {
             const label = material.label || material.path;
             const canRead = Boolean(material.exists && buildReviewMaterialUrl(source, goalId, material));
@@ -2284,10 +2321,10 @@ function UserTodoCallout({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="break-all text-xs font-semibold text-emerald-950 dark:text-emerald-100">
-                {activeMaterial?.label || activeMaterial?.path || "Review material"}
+                {activeMaterial?.label || activeMaterial?.path || "审阅材料"}
               </div>
               {materialContent?.bytes ? (
-                <div className="text-[11px] text-emerald-800 dark:text-emerald-200">{materialContent.bytes} bytes</div>
+                <div className="text-[11px] text-emerald-800 dark:text-emerald-200">{materialContent.bytes} 字节</div>
               ) : null}
             </div>
             <Button
@@ -2299,11 +2336,11 @@ function UserTodoCallout({
               size="sm"
               variant="ghost"
             >
-              Close
+              关闭
             </Button>
           </div>
           {isReadingMaterial ? (
-            <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-200">Loading review material...</p>
+            <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-200">正在读取审阅材料...</p>
           ) : null}
           {materialError ? <Badge variant="danger">{materialError.slice(0, 120)}</Badge> : null}
           {materialContent?.content ? (
@@ -2359,85 +2396,85 @@ async function copyTextToClipboard(value: string) {
 function humanReviewPrompt(kind?: UserActionKind) {
   if (kind === "reward") {
     return {
-      question: "是否把这次判断记录为 run-bound human_reward？",
+      question: "是否把这次判断记录为与本次运行绑定的人工评价？",
       reply: "同意记录 / 暂不同意 + 一句话原因。",
-      boundary: "只有去掉 --dry-run 才会写 human_reward 和 active-state 摘要；这不是 write-control、controller opt-in 或生产动作授权。",
+      boundary: "只有去掉 --dry-run 参数才会写入人工评价和当前状态摘要；这不是写入控制、控制者接管或生产动作授权。",
     };
   }
   if (kind === "controller") {
     return {
-      question: "是否允许目标项目进入 read-only/controller opt-in？",
-      reply: "同意先做 read-only map dry-run / 暂不同意 + 一句话原因。",
-      boundary: "这只授权项目 Agent 预览 dry-run 路径；不写 operator gate、run history、write-control、实验控制或生产动作。",
+      question: "是否允许目标项目进入只读控制者接管阶段？",
+      reply: "同意先做只读映射预演 / 暂不同意 + 一句话原因。",
+      boundary: "这只授权项目 Agent 预览执行路径；不写操作者确认、运行历史、写入控制、实验控制，也不执行生产动作。",
     };
   }
   if (kind === "codex") {
     return {
-      question: "是否让项目 Agent 沿 safe local path 继续？",
+      question: "是否让项目 Agent 沿安全的本地路径继续？",
       reply: "同意继续 / 暂不同意 + 一句话原因。",
-      boundary: "如果下一步需要写入、reward append、approval 或 write-control，项目 Agent 必须先停下等明确授权。",
+      boundary: "如果下一步需要写入、追加评价、审批或写入控制，项目 Agent 必须先停下等明确授权。",
     };
   }
   if (kind === "evidence") {
     return {
       question: "是否继续等待外部证据，而不升级成决策建议？",
       reply: "继续等待 / 不继续等待 + 一句话原因。",
-      boundary: "观察状态不是 reward、approval 或 controller opt-in。",
+      boundary: "观察状态不是人工评价、审批或控制者接管许可。",
     };
   }
   if (kind === "health") {
     return {
-      question: "是否先修健康阻塞，再讨论 reward/controller/codex handoff？",
+      question: "是否先修健康阻塞，再讨论人工评价、控制者或 Codex 交接？",
       reply: "先修阻塞 / 暂不处理 + 一句话原因。",
-      boundary: "健康修复不等于授权 reward append、approval 或 write-control。",
+      boundary: "健康修复不等于授权追加评价、审批或写入控制。",
     };
   }
   return {
     question: "当前是否需要转给项目 Agent 继续处理？",
     reply: "继续 / 不继续 / 继续观察 + 一句话原因。",
-    boundary: "本回复不自动写 reward、approval、controller opt-in 或 write-control。",
+    boundary: "本回复不自动写入人工评价、审批、控制者接管许可或写入控制。",
   };
 }
 
 function controllerReplyLine(goalId: string) {
-  return `同意 ${goalId} 先做 read-only map dry-run / 暂不同意 + 一句话原因。`;
+  return `同意 ${goalId} 先做只读映射预演 / 暂不同意 + 一句话原因。`;
 }
 
 function controllerApprovalReason(goalId: string) {
-  return `同意 ${goalId} 先做 read-only map dry-run，不授权写入或生产动作`;
+  return `同意 ${goalId} 先做只读映射预演，不授权写入或生产动作`;
 }
 
 function durableOperatorGateRecordRule(kind?: UserActionKind) {
   if (kind !== "controller") {
     return null;
   }
-  return "记录规则：如需持久记录本次判断，先用本地 operator-gate dry-run 预览；确认写入时去掉 --dry-run；写入会生成 operator_gate_resume_contract_v0，只在该决策点 rebase 当前权威状态，不回滚或带回整个仓库；拒绝/暂缓用 reject/defer + public-safe 原因。";
+  return "记录规则：如需持久记录本次判断，先用本地操作者确认预演；确认写入时去掉 --dry-run 参数；写入会生成操作者确认恢复合同（operator_gate_resume_contract_v0），只在该决策点重新对齐当前权威状态，不回滚或带回整个仓库；拒绝或暂缓时填写可公开的原因。";
 }
 
 function suggestedDecisionLine(kind?: UserActionKind, item?: UserActionSummaryItem, goalId?: string) {
   if (kind === "controller") {
     if (item?.operatorQuestion && firstOpenTodo(item.userTodos)) {
-      return "先完成/确认用户待办，再判断是否同意 gate；不授权写入或生产动作。";
+      return "先完成或确认用户待办，再判断是否同意放行；不授权写入或生产动作。";
     }
     const targetGoalId = goalId ?? item?.goalId;
     const lead = targetGoalId ? `同意 ${targetGoalId} 先做` : "同意先做";
     const question = item?.operatorQuestion ?? "";
     if (question.includes("read-only map")) {
-      return `${lead} read-only map dry-run；不授权写入或生产动作。`;
+      return `${lead}只读映射预演；不授权写入或生产动作。`;
     }
-    return `${lead}只读 controller dry-run；不授权写入或生产动作。`;
+    return `${lead}只读控制者预演；不授权写入或生产动作。`;
   }
   if (kind === "reward") {
-    return "同意记录这次 human reward / 暂不同意，原因是...";
+    return "同意记录这次人工评价 / 暂不同意，原因是...";
   }
   if (kind === "codex") {
-    return "同意让 Codex 沿 safe path 继续；如需写入再单独请求授权。";
+    return "同意让 Codex 沿安全路径继续；如需写入再单独请求授权。";
   }
   if (kind === "evidence") {
     return "继续等待外部证据；暂不升级成决策建议。";
   }
   if (kind === "health") {
-    return "先修健康阻塞；暂不处理 reward/controller/codex handoff。";
+    return "先修健康阻塞；暂不处理人工评价、控制者或 Codex 交接。";
   }
   return "继续 / 不继续 / 继续观察，并补一句原因。";
 }
@@ -2523,31 +2560,31 @@ function buildAuthorityCoverageFromCounts({
   const materialCurrentAuthorityCount = materialCurrentAuthority ?? 0;
   const deprecated = deprecatedCount ?? 0;
   const risk = normalizeConflictRisk(conflictRisk);
-  const pathText = pathExists == null ? "path unchecked" : pathExists ? "path ok" : "path missing";
-  const entryText = totalCount > 0 ? `default entries ${presentCount}/${totalCount}` : "default entries not declared";
-  const riskText = risk === "unknown" ? "risk unknown" : `risk ${risk}`;
+  const pathText = pathExists == null ? "路径未检查" : pathExists ? "路径正常" : "路径缺失";
+  const entryText = totalCount > 0 ? `默认条目 ${presentCount}/${totalCount}` : "未声明默认条目";
+  const riskText = risk === "unknown" ? "风险未知" : `风险 ${risk}`;
   const materialText =
     materialCount > 0
-      ? `materials ${materialCount}; repos ${materialRepoCount}; owner review ${materialOwnerReviewCount}; stale ${materialStaleCount}; current ${materialCurrentAuthorityCount}`
+      ? `材料 ${materialCount}；仓库 ${materialRepoCount}；需负责人审阅 ${materialOwnerReviewCount}；过期 ${materialStaleCount}；当前有效 ${materialCurrentAuthorityCount}`
       : "";
   const badge = !isDeclared
-    ? "No registry"
+    ? "未配置注册表"
     : risk === "high" ||
         risk === "medium" ||
         deprecated > 0 ||
         materialOwnerReviewCount > 0 ||
         materialStaleCount > 0 ||
         (totalCount > 0 && presentCount < totalCount)
-      ? "Needs review"
-      : "Covered";
+      ? "需要审阅"
+      : "已覆盖";
   return {
     badge,
     reviewLine: isDeclared
-      ? `权威源：已声明；${pathText}；${entryText}；topic ${topicCount}；${riskText}${materialText ? `；${materialText}` : ""}${deprecated ? `；deprecated ${deprecated}` : ""}。`
-      : "权威源：未声明 authority registry；只能看到普通 authority sources。",
+      ? `权威源：已声明；${pathText}；${entryText}；主题 ${topicCount}；${riskText}${materialText ? `；${materialText}` : ""}${deprecated ? `；已弃用 ${deprecated}` : ""}。`
+      : "权威源：未声明权威注册表；目前只能看到普通权威来源。",
     shortLine: isDeclared
-      ? `${entryText}; topic ${topicCount}; ${materialText ? `${materialText}; ` : ""}${riskText}`
-      : "authority registry not declared",
+      ? `${entryText}；主题 ${topicCount}；${materialText ? `${materialText}；` : ""}${riskText}`
+      : "未声明权威注册表",
     variant: authorityCoverageVariant({
       declared: isDeclared,
       conflictRisk: risk,
@@ -2620,21 +2657,21 @@ function buildAuthorityCoverageFromProjectMap(projectMap: ProjectMap): Authority
 }
 
 const quotaStateLabel: Record<string, string> = {
-  blocked_health: "Health blocked",
-  eligible: "Eligible",
-  focus_wait: "Focus wait",
-  operator_gate: "Operator gate",
-  paused: "Paused",
-  throttled: "Throttled",
-  waiting: "Waiting",
+  blocked_health: "健康检查阻塞",
+  eligible: "可以执行",
+  focus_wait: "重点等待",
+  operator_gate: "等待操作确认",
+  paused: "已暂停",
+  throttled: "已限流",
+  waiting: "等待中",
 };
 
 const quotaStateReviewLabel: Record<string, string> = {
   blocked_health: "先修健康阻塞",
   eligible: "可自动推进",
-  focus_wait: "等待 owner evidence / clean baseline / external eval",
+  focus_wait: "等待负责人证据、干净基线或外部评估",
   operator_gate: "等待人或控制器决策",
-  paused: "自动 compute 已暂停",
+  paused: "自动计算已暂停",
   throttled: "本窗口配额已用完",
   waiting: "等待证据或下一步",
 };
@@ -2669,14 +2706,14 @@ function buildQuotaView(quota?: ComputeQuota | null): QuotaView | undefined {
   const allowed = quota.allowed_slots ?? 0;
   const computeText = formatQuotaCompute(compute);
   const recovery = isOutcomeFloorRecoveryQuota(quota);
-  const stateLabel = recovery ? "Recovery allowed" : quotaStateLabel[state] ?? state;
+  const stateLabel = recovery ? "允许恢复" : quotaStateLabel[state] ?? state;
   const reviewState = recovery
-    ? `需要 Codex 做一次 ${recoveryEvidenceLabel(quota)} recovery`
+    ? `需要 Codex 做一次${recoveryEvidenceLabel(quota)}恢复任务`
     : quotaStateReviewLabel[state] ?? state;
   return {
-    label: `Quota ${computeText}`,
-    shortLine: `${stateLabel}; ${spent}/${allowed} slots`,
-    reviewLine: `配额：compute ${computeText}；${reviewState}；${spent}/${allowed} slots。`,
+    label: `配额 ${computeText}`,
+    shortLine: `${stateLabel}；${spent}/${allowed} 个执行槽位`,
+    reviewLine: `配额：计算量 ${computeText}；${reviewState}；${spent}/${allowed} 个执行槽位。`,
     variant: quotaVariant(state),
   };
 }
@@ -2725,6 +2762,7 @@ function QuotaChip({ quota }: { quota?: ComputeQuota | null }) {
 }
 
 type OperatorMentalModelItem = {
+  id: string;
   label: string;
   badge: string;
   value: string;
@@ -2751,45 +2789,45 @@ function buildCanContinueView({
   const state = quota?.state ?? row.waitingOn;
   if (state === "eligible") {
     return {
-      value: agentTodo ? "Agent can continue" : "Ready, needs next todo",
+      value: agentTodo ? "Agent 可以继续" : "已就绪，需要下一个 Todo",
       detail: agentTodo
-        ? "There is runnable agent work and the quota guard is open."
-        : "The guard is open, but no first agent todo is projected for this goal.",
+        ? "存在可执行的 Agent 工作，配额限制也已放行。"
+        : "当前允许执行，但还没有为这个 Goal 生成第一个 Agent Todo。",
       variant: agentTodo ? "success" : "warning",
     } as const;
   }
   if (state === "operator_gate" || row.waitingOn === "user_or_controller" || row.waitingOn === "controller") {
     return {
-      value: "Needs judgment first",
+      value: "需要先做判断",
       detail: userTodo
-        ? "The next safe transition starts with the user/controller todo."
-        : "A human or controller gate is active before delivery can continue.",
+        ? "下一次安全推进要先完成用户或控制者 Todo。"
+        : "继续交付前需要通过人工或控制者确认。",
       variant: "warning",
     } as const;
   }
   if (row.waitingOn === "external_evidence" || state === "waiting") {
     return {
-      value: "Watching evidence",
-      detail: "Continue only after the external evidence or terminal marker changes.",
+      value: "正在等待证据",
+      detail: "外部证据或结束标记发生变化后才能继续。",
       variant: "info",
     } as const;
   }
   if (state === "blocked_health") {
     return {
-      value: "Repair first",
-      detail: "The control plane is asking for a health repair before delivery.",
+      value: "需要先修复",
+      detail: "控制面要求先修复健康问题，再继续交付。",
       variant: "danger",
     } as const;
   }
   if (state === "throttled" || state === "paused" || state === "focus_wait") {
     return {
-      value: "Hold",
-      detail: buildQuotaView(quota)?.shortLine ?? "The current control-plane state is not open for delivery.",
+      value: "暂时保持等待",
+      detail: buildQuotaView(quota)?.shortLine ?? "当前控制面状态不允许继续交付。",
       variant: state === "paused" ? "neutral" : "warning",
     } as const;
   }
   return {
-    value: "Check control plane",
+    value: "检查控制面",
     detail: buildQuotaView(quota)?.shortLine ?? row.status,
     variant: "neutral",
   } as const;
@@ -2827,40 +2865,45 @@ function buildOperatorMentalModelItems(row?: GoalDirectoryRow): OperatorMentalMo
 
   return [
     {
-      label: "Goal",
-      badge: row.severity === "clear" ? "clear" : row.severity,
+      id: "goal",
+      label: "目标",
+      badge: severityLabel[row.severity] ?? row.severity,
       value: row.goal.id,
       detail: `${row.status}; ${waitingLabel[row.waitingOn] ?? row.waitingOn}; ${row.lifecyclePhase}`,
       icon: GitBranch,
       variant: row.severity === "clear" ? "success" : severityVariant[row.severity] ?? "neutral",
     },
     {
-      label: "Next step",
-      badge: agentTodo ? "todo" : "fallback",
-      value: nextStep || "No next step projected",
-      detail: agentTodo ? "From projected agent todo." : "From project asset, queue recommendation, or latest run.",
+      id: "next-step",
+      label: "下一步",
+      badge: agentTodo ? "Todo" : "备用信息",
+      value: nextStep || "尚未生成下一步",
+      detail: agentTodo ? "来自已生成的 Agent Todo。" : "来自项目资产、队列建议或最近运行记录。",
       icon: Terminal,
       variant: agentTodo ? "info" : "neutral",
     },
     {
-      label: "Needs your judgment",
-      badge: judgment ? "gate" : "clear",
-      value: judgment || "No human judgment queued",
-      detail: userTodo ? "User/controller todo is the first handoff." : "No user gate is projected for this goal.",
+      id: "needs-your-judgment",
+      label: "需要你判断",
+      badge: judgment ? "需要确认" : "无需处理",
+      value: judgment || "没有等待人工判断的事项",
+      detail: userTodo ? "用户或控制者 Todo 是当前第一个交接项。" : "这个 Goal 当前没有用户确认环节。",
       icon: ShieldCheck,
       variant: judgment ? "warning" : "success",
     },
     {
-      label: "Evidence",
-      badge: evidence ? "seen" : "empty",
-      value: evidence || "No compact evidence yet",
-      detail: evidence ? "Latest validation or run-history signal." : "Open the run history or status source when debugging.",
+      id: "evidence",
+      label: "证据",
+      badge: evidence ? "已有" : "暂无",
+      value: evidence || "暂无摘要证据",
+      detail: evidence ? "来自最近的验证或运行记录。" : "排查问题时请打开运行历史或状态来源。",
       icon: FileCheck2,
       variant: evidence ? "info" : "neutral",
     },
     {
-      label: "Can continue",
-      badge: "guard",
+      id: "can-continue",
+      label: "是否可继续",
+      badge: "执行限制",
       value: canContinue.value,
       detail: canContinue.detail,
       icon: Gauge,
@@ -2886,15 +2929,15 @@ function OperatorMentalModelPanel({
         <div>
           <CardTitle className="flex items-center gap-2">
             <LayoutDashboard className="h-4 w-4" />
-            Operator Model
+            操作者概览
           </CardTitle>
           <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
-            The first screen folds kernel state into five operator questions.
+            首屏把控制面状态整理成五个需要关注的问题。
           </p>
         </div>
         <Button onClick={() => onSelectGoal(row.goal.id)} size="sm" variant="secondary">
           <Search className="h-4 w-4" />
-          Inspect
+          查看详情
         </Button>
       </CardHeader>
       <CardContent>
@@ -2904,8 +2947,8 @@ function OperatorMentalModelPanel({
             return (
               <div
                 className="min-h-32 rounded-lg border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
-                data-testid={`operator-model-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
-                key={item.label}
+                data-testid={`operator-model-${item.id}`}
+                key={item.id}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-950 dark:text-zinc-50">
@@ -2938,7 +2981,7 @@ function orchestrationForTarget(goal?: RunGoal, queueItem?: QueueItem): Orchestr
 }
 
 function flagValue(value?: boolean | null) {
-  return value ? "on" : "off";
+  return value ? "开启" : "关闭";
 }
 
 function orchestrationMode(policy?: OrchestrationPolicy | null) {
@@ -2969,35 +3012,35 @@ function buildHeartbeatInstallView(goal?: RunGoal, queueItem?: QueueItem): {
   const status = [queueItem?.status, goal?.status, goal?.adapter_status].filter(Boolean).join(" ").toLowerCase();
   if (status.includes("not_installed")) {
     return {
-      badge: "not installed",
-      detail: "status includes not_installed",
+      badge: "未安装",
+      detail: "状态中包含 not_installed",
       variant: "warning",
     };
   }
   if (status.includes("paused")) {
     return {
-      badge: "paused",
-      detail: "status includes paused",
+      badge: "已暂停",
+      detail: "状态中包含 paused",
       variant: "neutral",
     };
   }
   if (status.includes("stage_deferred") || status.includes("deferred")) {
     return {
-      badge: "deferred",
-      detail: "status includes deferred",
+      badge: "已推迟",
+      detail: "状态中包含 deferred",
       variant: "warning",
     };
   }
   if (queueItem || goal?.registry_member) {
     return {
-      badge: "observed",
-      detail: queueItem?.source ? `queue source=${queueItem.source}` : "registry member observed in live status",
+      badge: "已观测到",
+      detail: queueItem?.source ? `队列来源=${queueItem.source}` : "实时状态中已观测到注册表成员",
       variant: "success",
     };
   }
   return {
-    badge: "unknown",
-    detail: "no queue or registry heartbeat signal",
+    badge: "未知",
+    detail: "没有队列或注册表心跳信号",
     variant: "neutral",
   };
 }
@@ -3191,13 +3234,13 @@ function ControlPlaneSettingsPanel({
   const heartbeat = buildHeartbeatInstallView(goal, queueItem);
   const orchestration = orchestrationForTarget(goal, queueItem);
   const mode = orchestrationMode(orchestration);
-  const domains = orchestration?.allowed_domains?.length ? `; domains=${orchestration.allowed_domains.join(",")}` : "";
+  const domains = orchestration?.allowed_domains?.length ? `；允许的领域=${orchestration.allowed_domains.join(",")}` : "";
 
   const selfRepairEnabled = Boolean(selfRepair?.enabled);
-  const selfRepairBadge = selfRepair ? `self_repair ${selfRepairEnabled ? "on" : "off"}` : "self_repair default_off";
+  const selfRepairBadge = selfRepair ? `自动修复${selfRepairEnabled ? "已开启" : "已关闭"}` : "自动修复默认关闭";
   const selfRepairDetail = selfRepair
-    ? `health=${flagValue(selfRepair.allow_health_blocker_repair)}; waiting_projection=${flagValue(selfRepair.allow_waiting_projection_repair)}`
-    : "no per-goal self-repair override";
+    ? `健康问题修复=${flagValue(selfRepair.allow_health_blocker_repair)}；等待状态修复=${flagValue(selfRepair.allow_waiting_projection_repair)}`
+    : "这个 Goal 没有单独设置自动修复";
   const orchestrationVariant: BadgeVariant = mode === "multi_subagent" ? "info" : "neutral";
   const currentDraft = useMemo(
     () => buildControlPlaneSettingsDraft(goal, queueItem),
@@ -3232,7 +3275,7 @@ function ControlPlaneSettingsPanel({
   const canCopy = Boolean(goalId && dirty);
   const canDryRun = Boolean(dryRunUrl && dirty && requestBody);
   const canApply = Boolean(applyUrl && dryRunBody && dryRunResult?.ok && dryRunResult.preview_id && !applyResult?.written);
-  const writeApiLabel = writeEnabled === true ? "write API on" : writeEnabled === false ? "write API off" : "write API unknown";
+  const writeApiLabel = writeEnabled === true ? "写入接口已开启" : writeEnabled === false ? "写入接口已关闭" : "写入接口状态未知";
   const writeApiVariant: BadgeVariant = writeEnabled === true ? "success" : writeEnabled === false ? "warning" : "neutral";
 
   useEffect(() => {
@@ -3323,50 +3366,50 @@ function ControlPlaneSettingsPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Gauge className="h-4 w-4 text-slate-600 dark:text-zinc-300" />
-          <h3 className="text-sm font-semibold text-slate-950 dark:text-zinc-50">Control Plane Settings</h3>
+          <h3 className="text-sm font-semibold text-slate-950 dark:text-zinc-50">控制面设置</h3>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={selfRepairEnabled ? "success" : "neutral"}>{selfRepairEnabled ? "repair enabled" : "repair off"}</Badge>
-          <Badge variant={orchestrationVariant}>{mode}</Badge>
-          <Badge variant={dirty ? "warning" : "success"}>{dirty ? "dirty" : "clean"}</Badge>
-          <Badge variant={dryRunUrl ? "info" : "neutral"}>{dryRunUrl ? "local API" : "copy only"}</Badge>
+          <Badge variant={selfRepairEnabled ? "success" : "neutral"}>{selfRepairEnabled ? "自动修复已开启" : "自动修复已关闭"}</Badge>
+          <Badge variant={orchestrationVariant}>{mode === "multi_subagent" ? "多 Agent" : "默认编排"}</Badge>
+          <Badge variant={dirty ? "warning" : "success"}>{dirty ? "有未保存修改" : "配置未修改"}</Badge>
+          <Badge variant={dryRunUrl ? "info" : "neutral"}>{dryRunUrl ? "本机接口" : "仅可复制命令"}</Badge>
           <Badge variant={writeApiVariant}>{writeApiLabel}</Badge>
-          {applyResult?.written ? <Badge variant="success">applied</Badge> : null}
+          {applyResult?.written ? <Badge variant="success">已应用</Badge> : null}
         </div>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <ControlPlaneSettingRow
-          badge={quotaView?.label ?? "quota unknown"}
-          detail={quotaView?.shortLine ?? "quota not projected"}
+          badge={quotaView?.label ?? "配额未知"}
+          detail={quotaView?.shortLine ?? "尚未生成配额信息"}
           icon={Gauge}
-          label="Compute quota"
+          label="计算配额"
           variant={quotaView?.variant ?? "neutral"}
         />
         <ControlPlaneSettingRow
           badge={selfRepairBadge}
           detail={selfRepairDetail}
           icon={ShieldCheck}
-          label="Self repair"
+          label="自动修复"
           variant={selfRepairEnabled ? "success" : "neutral"}
         />
         <ControlPlaneSettingRow
           badge={heartbeat.badge}
           detail={heartbeat.detail}
           icon={Terminal}
-          label="Heartbeat install"
+          label="心跳安装"
           variant={heartbeat.variant}
         />
         <ControlPlaneSettingRow
-          badge={mode}
-          detail={`spawn_allowed=${flagValue(Boolean(orchestration?.spawn_allowed || orchestration?.allowed))}; max_children=${orchestration?.max_children ?? 0}${domains}`}
+          badge={mode === "multi_subagent" ? "多 Agent" : "默认编排"}
+          detail={`允许创建子 Agent=${flagValue(Boolean(orchestration?.spawn_allowed || orchestration?.allowed))}；最多子 Agent=${orchestration?.max_children ?? 0}${domains}`}
           icon={Bot}
-          label="Orchestration"
+          label="Agent 编排"
           variant={orchestrationVariant}
         />
       </div>
       <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 lg:grid-cols-2">
         <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
-          <span>Quota compute</span>
+          <span>配额计算量</span>
           <input
             className={inputClassName}
             data-testid="control-plane-quota-compute"
@@ -3376,7 +3419,7 @@ function ControlPlaneSettingsPanel({
           />
         </label>
         <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
-          <span>Quota window hours</span>
+          <span>配额窗口（小时）</span>
           <input
             className={inputClassName}
             inputMode="decimal"
@@ -3385,7 +3428,7 @@ function ControlPlaneSettingsPanel({
           />
         </label>
         <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
-          <span>Orchestration mode</span>
+          <span>编排模式</span>
           <Select
             className="w-full"
             data-testid="control-plane-orchestration-mode"
@@ -3397,12 +3440,12 @@ function ControlPlaneSettingsPanel({
             }
             value={draft.orchestrationMode}
           >
-            <option value="default">default</option>
-            <option value="multi_subagent">multi_subagent</option>
+            <option value="default">默认</option>
+            <option value="multi_subagent">多 Agent</option>
           </Select>
         </label>
         <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
-          <span>Max children</span>
+          <span>最多子 Agent 数</span>
           <input
             className={inputClassName}
             inputMode="numeric"
@@ -3411,7 +3454,7 @@ function ControlPlaneSettingsPanel({
           />
         </label>
         <label className="block space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400 lg:col-span-2">
-          <span>Allowed domains</span>
+          <span>允许的工作领域</span>
           <input
             className={inputClassName}
             onChange={(event) => setDraft((value) => ({ ...value, allowedDomains: event.target.value }))}
@@ -3425,7 +3468,7 @@ function ControlPlaneSettingsPanel({
               onChange={(event) => setDraft((value) => ({ ...value, selfRepairEnabled: event.target.checked }))}
               type="checkbox"
             />
-            self repair
+            自动修复
           </label>
           <label className="inline-flex items-center gap-2">
             <input
@@ -3433,7 +3476,7 @@ function ControlPlaneSettingsPanel({
               onChange={(event) => setDraft((value) => ({ ...value, selfRepairHealth: event.target.checked }))}
               type="checkbox"
             />
-            health repair
+            健康问题修复
           </label>
           <label className="inline-flex items-center gap-2">
             <input
@@ -3441,7 +3484,7 @@ function ControlPlaneSettingsPanel({
               onChange={(event) => setDraft((value) => ({ ...value, selfRepairWaitingProjection: event.target.checked }))}
               type="checkbox"
             />
-            waiting projection
+            等待状态修复
           </label>
           <label className="inline-flex items-center gap-2">
             <input
@@ -3449,32 +3492,32 @@ function ControlPlaneSettingsPanel({
               onChange={(event) => setDraft((value) => ({ ...value, spawnAllowed: event.target.checked }))}
               type="checkbox"
             />
-            spawn allowed
+            允许创建子 Agent
           </label>
         </div>
         <div className="flex flex-wrap items-center gap-2 lg:col-span-2">
           <Button disabled={!dirty} onClick={() => setDraft(currentDraft)} size="sm" variant="ghost">
             <RotateCcw className="h-4 w-4" />
-            Reset
+            重置
           </Button>
           <Button disabled={!canDryRun || isDryRunning} onClick={() => void runDryRunCheck()} size="sm">
             {isDryRunning ? <RefreshCw className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-            Dry-run Check
+            试运行检查
           </Button>
           <Button disabled={!canApply || isApplying} onClick={() => void applySettings()} size="sm" variant="primary">
             {isApplying ? <RefreshCw className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-            Apply registry settings
+            应用注册表设置
           </Button>
           <Button disabled={!canCopy} onClick={() => void copyCommand(dryRunCommand)} size="sm">
             <Copy className="h-4 w-4" />
-            Copy dry-run
+            复制试运行命令
           </Button>
           <Button disabled={!canCopy} onClick={() => void copyCommand(applyCommand)} size="sm" variant="primary">
             <Copy className="h-4 w-4" />
-            Copy apply
+            复制应用命令
           </Button>
-          {copyState === "copied" ? <Badge variant="success">copied</Badge> : null}
-          {copyState === "failed" ? <Badge variant="danger">copy failed</Badge> : null}
+          {copyState === "copied" ? <Badge variant="success">已复制</Badge> : null}
+          {copyState === "failed" ? <Badge variant="danger">复制失败</Badge> : null}
           {dryRunError ? <Badge variant="danger">{dryRunError.slice(0, 96)}</Badge> : null}
           {applyError ? <Badge variant="danger">{applyError.slice(0, 96)}</Badge> : null}
         </div>
@@ -3484,10 +3527,10 @@ function ControlPlaneSettingsPanel({
             data-testid="control-plane-settings-dry-run-result"
           >
             <div>
-              changed={String(Boolean(dryRunResult.changed))} · written={String(Boolean(dryRunResult.written))}
-              {dryRunResult.preview_id ? ` · preview=${dryRunResult.preview_id}` : ""}
+              有变更={String(Boolean(dryRunResult.changed))} · 已写入={String(Boolean(dryRunResult.written))}
+              {dryRunResult.preview_id ? ` · 预览编号=${dryRunResult.preview_id}` : ""}
             </div>
-            {dryRunResult.changed_fields?.length ? <div>fields={dryRunResult.changed_fields.join(", ")}</div> : null}
+            {dryRunResult.changed_fields?.length ? <div>变更字段={dryRunResult.changed_fields.join(", ")}</div> : null}
             {dryRunResult.control_plane_summary ? <div>{dryRunResult.control_plane_summary}</div> : null}
             {dryRunResult.orchestration_summary ? <div>{dryRunResult.orchestration_summary}</div> : null}
           </div>
@@ -3496,7 +3539,7 @@ function ControlPlaneSettingsPanel({
           className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-50 dark:border-zinc-800 lg:col-span-2"
           data-testid="control-plane-settings-command-preview"
         >
-          {dryRunCommand || "select a goal"}
+          {dryRunCommand || "请选择一个 Goal"}
         </pre>
       </div>
     </div>
@@ -3527,33 +3570,33 @@ type ShareGoalView = {
 const shareGoalSpecs: ShareGoalSpec[] = [
   {
     id: "showcase-user-gate-safe-side-path",
-    label: "0617 User Gate",
-    subtitle: "公开 showcase / safe side path",
+    label: "0617 用户确认",
+    subtitle: "公开演示 / 安全侧路",
     emphasis: "把用户决策、Agent 待办和安全侧路拆开管理：该等人的地方明确等人。",
     accent: "border-t-emerald-500",
     icon: GitBranch,
   },
   {
     id: "showcase-creator-operator",
-    label: "Creator Operator",
+    label: "创作者运营",
     subtitle: "合成案例 / 长程内容运营",
-    emphasis: "让多个 Agent 围绕热点、素材、洞察和创作 backlog 持续推进，但只展示脱敏 showcase 数据。",
+    emphasis: "让多个 Agent 围绕热点、素材、洞察和创作待办持续推进，但只展示脱敏演示数据。",
     accent: "border-t-amber-500",
     icon: Gauge,
   },
   {
     id: "showcase-side-agent-self-iteration",
-    label: "Peer Agent 自迭代",
-    subtitle: "公开 repo 事实 / 平级协作",
-    emphasis: "平级 Agent 通过 claim、边界和独立 worktree 推进产品化、文档与验证。",
+    label: "平级 Agent 自迭代",
+    subtitle: "公开仓库事实 / 平级协作",
+    emphasis: "平级 Agent 通过认领、边界和独立工作区推进产品化、文档与验证。",
     accent: "border-t-rose-500",
     icon: ShieldCheck,
   },
   {
     id: "loopx-meta",
-    label: "LoopX Meta",
+    label: "LoopX 自举",
     subtitle: "控制面自举与稳定性",
-    emphasis: "把观察循环转成状态、配额、active-state 的可验证产品改动。",
+    emphasis: "把观察循环转成状态、配额和活动状态的可验证产品改动。",
     accent: "border-t-sky-500",
     icon: Radar,
   },
@@ -3588,7 +3631,7 @@ const shareQuotaLabel: Record<string, string> = {
   focus_wait: "暂缓不花配额",
   operator_gate: "等待用户决策",
   paused: "已暂停",
-  throttled: "quota 已满",
+  throttled: "配额已满",
   waiting: "等待下一步",
 };
 
@@ -3670,25 +3713,25 @@ function shareDecisionFreshnessById(summary?: DecisionFreshnessSummary | null) {
 
 function shareDecisionKindLabel(kind?: string | null) {
   if (kind === "human_reward") {
-    return "reward";
+    return "人工评价";
   }
   if (kind === "operator_gate") {
-    return "gate";
+    return "操作者确认";
   }
   if (kind === "operator_gate_resume_contract") {
-    return "resume contract";
+    return "恢复合同";
   }
-  return kind ? shareMachineLabel(kind) : "decision";
+  return kind ? shareMachineLabel(kind) : "决策";
 }
 
 function shareDecisionFreshnessStateLabel(state?: string | null) {
   if (state === "stale_rebase_required") {
-    return "已过期，需 rebase";
+    return "已过期，需重新确认";
   }
   if (state === "rebase_required") {
-    return "有后续事件，需 rebase";
+    return "有后续事件，需重新确认";
   }
-  return shareMachineLabel(state) || "需 rebase";
+  return shareMachineLabel(state) || "需重新确认";
 }
 
 function getShareTodos(row: GoalDirectoryRow | undefined, role: "user" | "agent") {
@@ -3772,7 +3815,7 @@ function ShareTopTodoList({
   if (todos.length === 0) {
     return (
       <div className={cn("rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500", className)}>
-        当前没有可展示的项目 todo。
+        当前没有可展示的项目 Todo。
       </div>
     );
   }
@@ -3872,7 +3915,7 @@ function ShareDecisionFreshnessWarning({
           key={`${item.decision_kind ?? "decision"}-${item.decision_at ?? itemIndex}`}
         >
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="warning">决策需 rebase</Badge>
+            <Badge variant="warning">决策需重新确认</Badge>
             <span className="text-[11px] font-semibold text-amber-700">
               {shareDecisionKindLabel(item.decision_kind)}
             </span>
@@ -3883,7 +3926,7 @@ function ShareDecisionFreshnessWarning({
           <p className={cn("mt-1 break-words text-sm leading-6 text-amber-950", compact ? "line-clamp-2" : "line-clamp-3")}>
             {compact
               ? "审批或转交前先重读当前控制面状态；这不是仓库回滚。"
-              : "审批或转交前先重读 registry / active state / quota / run status；旧聊天或旧 gate 不能直接当当前授权，这不是仓库回滚。"}
+              : "审批或转交前先重读注册表、当前状态、配额和运行状态；旧聊天或旧确认不能直接当作当前授权，这不是仓库回滚。"}
           </p>
           <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-medium text-amber-700">
             <span>7d 新事件 {item.newer_event_count_7d ?? 0}</span>
@@ -3893,7 +3936,7 @@ function ShareDecisionFreshnessWarning({
       ))}
       {items.length > visible.length ? (
         <div className="text-[11px] font-medium text-amber-700">
-          另有 {items.length - visible.length} 个旧决策需要 rebase。
+          另有 {items.length - visible.length} 个旧决策需要重新确认。
         </div>
       ) : null}
     </div>
@@ -3927,14 +3970,14 @@ function shareStatusForGoal(view: ShareGoalView): { label: string; summary: stri
   if (!view.row) {
     return {
       label: "未接入",
-      summary: "全局状态里还没有这个目标的 current projection。",
+      summary: "全局状态里还没有这个目标的当前投影。",
       variant: "neutral",
     };
   }
   if (isOutcomeFloorRecoveryQuota(quota)) {
     const gap = view.row.queueItem?.handoff_readiness?.post_handoff_outcome_gap_streak ?? quota?.post_handoff_outcome_gap_streak ?? 0;
     return {
-      label: "需要 Codex recovery",
+      label: "需要 Codex 恢复",
       summary: `连续 ${gap || 1} 次产出差距；下一步只做 ${recoveryEvidenceLabel(quota)}，或写回具体阻塞。`,
       variant: "warning",
     };
@@ -3942,21 +3985,21 @@ function shareStatusForGoal(view: ShareGoalView): { label: string; summary: stri
   if (view.spec.id === "showcase-user-gate-safe-side-path" && (view.userTodos?.open_count ?? 0) > 0) {
     return {
       label: "用户待办已捕获",
-      summary: "用户决策被单独留给 owner；Agent 只推进与该决策独立的安全侧路。",
+      summary: "用户决策被单独留给负责人；Agent 只推进与该决策独立的安全侧路。",
       variant: "warning",
     };
   }
   if (view.spec.id === "showcase-creator-operator") {
     return {
       label: "合成场景主动推进",
-      summary: "创作运营 backlog 可持续推进，但前台只呈现公开 showcase 和合成数据。",
+      summary: "创作运营待办可持续推进，但前台只呈现公开演示和合成数据。",
       variant: "info",
     };
   }
   if (view.spec.id === "loopx-meta") {
     return {
       label: "控制面健康",
-      summary: "全局注册表、配额守卫、active-state 刷新处于可观测闭环。",
+      summary: "全局注册表、配额守卫和活动状态刷新处于可观测闭环。",
       variant: "success",
     };
   }
@@ -3987,7 +4030,7 @@ function ShareDecisionFrame({
   const recommendedAction = projectAsset?.next_action ?? view.row?.queueItem?.recommended_action ?? status.summary;
   const safetyBoundary = projectAsset?.stop_condition
     ?? view.row?.queueItem?.next_handoff_condition
-    ?? "未显式授权写入或生产动作；只按当前 quota / handoff 边界推进。";
+    ?? "未显式授权写入或生产动作；只按当前配额和交接边界推进。";
   const firstUserTodo = firstOpenTodo(view.userTodos);
   const firstAgentTodo = firstOpenTodo(view.agentTodos);
   const missingTodoRoles = projectAsset?.todo_projection_gap?.missing_roles?.length
@@ -4002,7 +4045,7 @@ function ShareDecisionFrame({
     ["最高优 Agent Todo", compactShareText(firstAgentTodo?.text, 108)],
   ];
   if (missingTodoRoles) {
-    rows.push(["Todo 投影缺口", `missing roles: ${missingTodoRoles}`]);
+    rows.push(["Todo 投影缺口", `缺少角色：${missingTodoRoles}`]);
   }
 
   return (
@@ -4121,7 +4164,7 @@ function ShareProjectCard({ view }: { view: ShareGoalView }) {
 
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <div className="text-xs font-semibold text-slate-500">Top-4 Todo</div>
+            <div className="text-xs font-semibold text-slate-500">前 4 个 Todo</div>
             <div className="flex flex-wrap gap-1">
               <Badge variant="warning">待用户</Badge>
               <Badge variant="info">待 Agent</Badge>
@@ -4139,7 +4182,7 @@ function ShareProjectCard({ view }: { view: ShareGoalView }) {
         <Badge variant={quotaVariant(quota?.state)}>{shareQuotaLabel[quota?.state ?? "waiting"] ?? (shareMachineLabel(quota?.state) || "等待下一步")}</Badge>
         <Badge variant="neutral">{shareWaitingLabel[view.row?.waitingOn ?? "clear"] ?? shareMachineLabel(view.row?.waitingOn)}</Badge>
         <Badge variant={view.row?.queueItem?.handoff_readiness?.ready ? "success" : "warning"}>
-          {view.row?.queueItem?.handoff_readiness?.ready ? "handoff 可执行" : "handoff 受控"}
+          {view.row?.queueItem?.handoff_readiness?.ready ? "交接可执行" : "交接受控"}
         </Badge>
         <span className="line-clamp-1 min-w-0 flex-1 text-xs text-slate-500">{lastEvidence}</span>
       </div>
@@ -4169,7 +4212,7 @@ function ShareTodoMatrix({ views }: { views: ShareGoalView[] }) {
       <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
         <div className="grid grid-cols-[170px_minmax(0,1fr)_220px] gap-0 bg-slate-50 text-xs font-semibold text-slate-500">
           <div className="px-3 py-2">项目</div>
-          <div className="px-3 py-2">Top-4 Todo（含状态）</div>
+          <div className="px-3 py-2">前 4 个 Todo（含状态）</div>
           <div className="px-3 py-2 text-right">控制状态</div>
         </div>
         <div className="divide-y divide-slate-200">
@@ -4319,7 +4362,7 @@ function ShareGuardEvidence({
     >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-normal text-slate-950">Guard / Evidence 控制信号</h2>
+          <h2 className="text-2xl font-semibold tracking-normal text-slate-950">限制条件与证据控制信号</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
             控制面的价值不是继续制造 todo，而是把何时停、何时推进、何时写回变成同一套证据。
           </p>
@@ -4340,13 +4383,13 @@ function ShareGuardEvidence({
             { label: "禁止路径", value: "单面改动" },
             { label: "允许输出", value: "阻塞说明" },
           ]}
-          status={{ label: "no-spend 暂缓", variant: "warning" }}
+          status={{ label: "暂缓且不花配额", variant: "warning" }}
           steps={[
             { label: "触发", value: "表层小步重复" },
-            { label: "控制", value: "暂缓不花 quota" },
-            { label: "写回", value: "证据或 blocker" },
+            { label: "控制", value: "暂缓不花配额" },
+            { label: "写回", value: "证据或阻塞说明" },
           ]}
-          title="独立 peer：防止重复小步"
+          title="独立同级 Agent：防止重复小步"
           tone="rose"
         />
 
@@ -4354,35 +4397,35 @@ function ShareGuardEvidence({
           body={`24h 已花 ${creatorUsage?.quota_spend_slots_24h ?? 0} 个配额槽，进展信号 ${creatorUsage?.progress_signal_run_count_24h ?? 0}；创作运营推进必须落到任务、证据、回顾或可展示产物。`}
           icon={Gauge}
           metrics={[
-            { label: "24h quota", value: `${creatorUsage?.quota_spend_slots_24h ?? 0} slots` },
-            { label: "素材 backlog", value: "热点 / 洞察 / 语料" },
-            { label: "展示边界", value: "synthetic-only" },
+            { label: "24 小时配额", value: `${creatorUsage?.quota_spend_slots_24h ?? 0} 个槽位` },
+            { label: "素材待办", value: "热点 / 洞察 / 语料" },
+            { label: "展示边界", value: "仅合成数据" },
           ]}
           status={{ label: "主动推进", variant: "info" }}
           steps={[
             { label: "触发", value: "长期创作目标" },
             { label: "控制", value: "配额 + 证据边界" },
-            { label: "写回", value: "showcase + backlog" },
+            { label: "写回", value: "演示结果 + 待办" },
           ]}
-          title="Creator Operator：昼夜不断的合成运营队列"
+          title="创作者运营：持续运行的合成运营队列"
           tone="amber"
         />
 
         <ShareSignalCard
-          body={`User-gate showcase 保留 ${gate?.userTodos?.open_count ?? 0} 个 owner 决策；Meta 24h 进展信号 ${metaUsage?.progress_signal_run_count_24h ?? 0}，当前合约错误 ${payload.contract.summary.errors}。`}
+          body={`用户确认演示保留 ${gate?.userTodos?.open_count ?? 0} 个负责人决策；自举项目 24 小时进展信号 ${metaUsage?.progress_signal_run_count_24h ?? 0}，当前合约错误 ${payload.contract.summary.errors}。`}
           icon={FileCheck2}
           metrics={[
-            { label: "公开 user gate", value: `${gate?.userTodos?.open_count ?? 0} open` },
-            { label: "Meta 进展", value: `${metaUsage?.progress_signal_run_count_24h ?? 0} signals` },
-            { label: "全局发现", value: `${payload.global_registry.summary.findings} findings` },
+            { label: "公开用户确认", value: `${gate?.userTodos?.open_count ?? 0} 个未完成` },
+            { label: "自举进展", value: `${metaUsage?.progress_signal_run_count_24h ?? 0} 个信号` },
+            { label: "全局发现", value: `${payload.global_registry.summary.findings} 项` },
           ]}
           status={{ label: "已验证", variant: "success" }}
           steps={[
             { label: "触发", value: "状态刷新" },
-            { label: "控制", value: "registry 真相源" },
-            { label: "写回", value: "active-state 写回" },
+            { label: "控制", value: "注册表事实来源" },
+            { label: "写回", value: "活动状态写回" },
           ]}
-          title="Showcase + Meta：状态真相"
+          title="公开演示与自举：状态事实"
           tone="emerald"
         />
       </div>
@@ -4460,13 +4503,13 @@ function ShareEventLedgerStrip({ summary }: { summary?: EventLedgerSummary | nul
           <div>
             <div className="text-sm font-semibold text-slate-950">控制面事件账本投影</div>
             <p className="mt-0.5 text-xs leading-5 text-slate-500">
-              Chat thread 只是 worker；这里展示的是 run history 的 compact 事件投影。
+              对话任务只是工作入口；这里展示的是运行历史的精简事件投影。
             </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="neutral">{summary.source}</Badge>
-          <Badge variant="info">{summary.sample_run_count} samples</Badge>
+          <Badge variant="info">{summary.sample_run_count} 个样本</Badge>
           <Badge variant="success">24h {totals.events_24h}</Badge>
         </div>
       </div>
@@ -4533,14 +4576,17 @@ function ShareEvidenceView({
               <div className="max-w-3xl">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="success">LoopX 控制面</Badge>
-                  <Badge variant="neutral">公开 showcase</Badge>
+                  <Badge variant="neutral">公开演示</Badge>
+                  <Badge data-testid="share-source-label" title={source.label} variant="neutral">
+                    {source.kind === "example" ? "内置示例" : source.kind === "url" ? "实时状态" : "导入文件"}
+                  </Badge>
                   <Badge variant={payload.ok ? "success" : "danger"}>{payload.ok ? "状态健康" : "健康阻塞"}</Badge>
                 </div>
                 <h1 className="mt-3 text-3xl font-semibold leading-tight tracking-normal text-slate-950 sm:text-4xl sm:leading-tight">
                   把多项目 Agent 工作变成可管理的 Todo、证据和配额
                 </h1>
                 <p className="mt-3 max-w-3xl text-base leading-7 text-slate-600">
-                  这个看板只展示公开 showcases：user gate、peer-agent 自迭代、creator operator 和 LoopX Meta 统一到同一套控制面。
+                  这个看板只展示公开演示：用户确认、平级 Agent 自迭代、创作者运营和 LoopX 自举统一到同一套控制面。
                   用户待办单独挂起，Agent 高优任务继续推进，配额守卫和交接合约负责防止重复空转。
                 </p>
               </div>
@@ -4582,7 +4628,7 @@ function ShareEvidenceView({
                 value={`${agentOpenTotal.open}/${agentOpenTotal.total}`}
               />
               <ShareKpi
-                detail={`${progress} 个进展信号；ledger work ${ledgerWork}`}
+                detail={`${progress} 个进展信号；账本工作项 ${ledgerWork}`}
                 icon={Gauge}
                 label="24h 自动回合"
                 tone="info"
@@ -4642,14 +4688,14 @@ function buildHumanFriendlyActionPacket({
       title: item.title,
       summary: item.summary,
       userTodoText: todo?.text,
-      agentTodoText: agentTodo?.text ?? `只做一次 ${evidenceLabel} recovery；如果证据范围不可用，写回具体 blocker 后停止。`,
+      agentTodoText: agentTodo?.text ?? `只做一次${evidenceLabel}恢复任务；如果证据范围不可用，写回具体阻塞原因后停止。`,
       todoBlocksGate: false,
       operatorQuestion: null,
-      suggestedReply: `执行一次 outcome-floor recovery：只做 ${evidenceLabel} 或具体 blocker 写回；完成验证和状态写回后再记一次 quota。`,
-      gateFallbackDecision: `执行一次 outcome-floor recovery：只做 ${evidenceLabel} 或具体 blocker 写回。`,
-      boundary: "普通 delivery 仍被 outcome floor 阻塞；不要继续 summary/queue/contract 等表层传播，也不要做 synthetic-only 测试链。",
-      durableRecordRule: "记录规则：validated evidence/blocker -> refresh-state/run event -> quota spend once；没有完成 recovery artifact 就不 spend。",
-      safePathLabel: item.safePathLabel || "Recovery handoff",
+      suggestedReply: `执行一次结果下限恢复任务：只做${evidenceLabel}或写回具体阻塞原因；完成验证和状态写回后再记一次配额。`,
+      gateFallbackDecision: `执行一次结果下限恢复任务：只做${evidenceLabel}或写回具体阻塞原因。`,
+      boundary: "普通交付仍被结果下限阻塞；不要继续摘要、队列、合同等表层传播，也不要做仅含合成数据的测试链。",
+      durableRecordRule: "记录规则：已验证证据或阻塞原因 -> 刷新状态或运行事件 -> 只记一次配额；没有完成恢复产物就不记配额。",
+      safePathLabel: item.safePathLabel || "恢复任务交接",
       command: item.safePathCommand ?? command,
       quotaShortLine: quotaView?.shortLine,
       authorityShortLine: item.authorityCoverage?.shortLine,
@@ -4667,14 +4713,14 @@ function buildHumanFriendlyActionPacket({
       title: item.title,
       summary: item.summary,
       userTodoText: todo?.text,
-      agentTodoText: agentTodo?.text ?? "只检查当前 state/status/history；保持 focus_wait 并用中文回报仍在等待什么。",
+      agentTodoText: agentTodo?.text ?? "只检查当前状态和历史；保持重点等待，并用中文回报仍在等待什么。",
       todoBlocksGate: false,
       operatorQuestion: null,
-      suggestedReply: "继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。",
-      gateFallbackDecision: "继续保持 focus wait；有新 owner evidence、clean baseline 或外部 eval 后再恢复 delivery。",
-      boundary: "这不是 delivery approval；项目 Agent 只做 status/history inspection，不执行交付路径、写入、reward append 或生产动作。",
+      suggestedReply: "继续保持重点等待；有新的负责人证据、干净基线或外部评估后再恢复交付。",
+      gateFallbackDecision: "继续保持重点等待；有新的负责人证据、干净基线或外部评估后再恢复交付。",
+      boundary: "这不是交付审批；项目 Agent 只做状态和历史检查，不执行交付路径、写入、追加评价或生产动作。",
       durableRecordRule: null,
-      safePathLabel: "Status/history inspection only",
+      safePathLabel: "只检查状态和历史",
       command,
       quotaShortLine: quotaView?.shortLine,
       authorityShortLine: item.authorityCoverage?.shortLine,
@@ -4715,10 +4761,10 @@ function buildHumanFriendlyActionPacket({
       ? "直接转发给已认领的项目 Agent；不追加写权限、全局接管或生产动作授权。"
       : suggestedDecisionLine(item.kind, item, item.goalId),
     boundary: approvedAgentCommand
-      ? "只执行已批准的只读/dry-run agent_command；如需写入或更高权限，项目 Agent 必须再次停下。"
+      ? "只执行已批准的只读预演命令（agent_command）；如需写入或更高权限，项目 Agent 必须再次停下。"
       : prompt.boundary,
     durableRecordRule: durableOperatorGateRecordRule(item.kind),
-    safePathLabel: approvedAgentCommand ? "Approved agent command" : item.safePathLabel,
+    safePathLabel: approvedAgentCommand ? "已批准 Agent 命令" : item.safePathLabel,
     command,
     quotaShortLine: quotaView?.shortLine,
     authorityShortLine: item.authorityCoverage?.shortLine,
@@ -4741,21 +4787,13 @@ function readinessVariant(readiness: ControllerReadiness): "success" | "warning"
   return "warning";
 }
 
-function humanizeIdentifier(value: string) {
-  return value
-    .split(/[_-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function gateLabel(value: string) {
   const labels: Record<string, string> = {
-    human_reward_capture: "Record human reward",
-    aligned_eval_decision_evidence: "Wait for comparable evidence",
-    durable_goal_context: "Keep durable goal context",
+    human_reward_capture: "记录人工评价",
+    aligned_eval_decision_evidence: "等待可比较的证据",
+    durable_goal_context: "保留持久 Goal 上下文",
   };
-  return labels[value] ?? humanizeIdentifier(value);
+  return labels[value] ?? value;
 }
 
 function buildStatusCommand({
@@ -4869,15 +4907,15 @@ function buildOperatorDecision({
   const missingGates = queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? [];
   const action = queueItem?.recommended_action
     ?? latestRun?.recommended_action
-    ?? "No immediate operator action.";
+    ?? "当前不需要操作者立即处理。";
 
   if (queueItem?.severity === "high") {
     return {
-      title: "Fix health first",
-      badge: "Blocking",
+      title: "先修复健康问题",
+      badge: "正在阻塞",
       variant: "danger" as BadgeVariant,
       action,
-      reason: "A high-severity status item is active, so other decisions should wait.",
+      reason: "当前存在高严重级别问题，其他决策需要先等待。",
       needs: missingGates.map(gateLabel),
       phase,
       waitingOn,
@@ -4886,13 +4924,13 @@ function buildOperatorDecision({
 
   if (waitingOn === "external_evidence") {
     return {
-      title: "Wait for evidence",
-      badge: phase === "controller_gated" ? "Gate missing" : "Watching",
+      title: "等待证据",
+      badge: phase === "controller_gated" ? "缺少确认条件" : "观察中",
       variant: "info" as BadgeVariant,
       action,
       reason: phase === "controller_gated"
-        ? "Controller evidence exists, but the goal is still missing a decision gate."
-        : "The next useful signal is outside the agent loop.",
+        ? "已有控制者证据，但这个 Goal 仍缺少决策确认。"
+        : "下一条有用信号来自 Agent 循环之外。",
       needs: missingGates.map(gateLabel),
       phase,
       waitingOn,
@@ -4902,14 +4940,14 @@ function buildOperatorDecision({
   if (waitingOn === "user_or_controller" || waitingOn === "controller") {
     const controllerCopy = phase === "planned"
       ? {
-          title: "Review controller opt-in",
-          badge: "Needs approval",
-          reason: "The goal is known, but controller connection has not been authorized yet.",
+          title: "审阅控制者接入",
+          badge: "需要批准",
+          reason: "已经识别这个 Goal，但尚未授权控制者接入。",
         }
       : {
-          title: "Review or authorize",
-          badge: "User decision",
-          reason: "A human or target controller decision is the next gate.",
+          title: "审阅或授权",
+          badge: "等待用户决定",
+          reason: "下一步需要人工或目标控制者作出决定。",
         };
     return {
       ...controllerCopy,
@@ -4924,11 +4962,27 @@ function buildOperatorDecision({
   if (waitingOn === "codex") {
     if (isOutcomeFloorRecoveryQuota(quota)) {
       return {
-        title: "Run recovery evidence",
-        badge: "Codex recovery",
+        title: "执行恢复证据任务",
+        badge: "Codex 恢复",
         variant: "warning" as BadgeVariant,
         action,
-        reason: `Outcome floor blocks ordinary delivery; Codex should do one bounded ${recoveryEvidenceLabel(quota)} recovery or write back the concrete blocker.`,
+        reason: `结果下限阻止了普通交付；Codex 应执行一次有边界的${recoveryEvidenceLabel(quota)}恢复任务，或写回具体阻塞原因。`,
+        needs: missingGates.map(gateLabel),
+        phase,
+        waitingOn,
+      };
+    }
+    if (quota?.state === "throttled" || quota?.state === "paused" || quota?.state === "focus_wait") {
+      const restrictedCopy = quota.state === "throttled"
+        ? { title: "等待配额恢复", badge: "已限流" }
+        : quota.state === "paused"
+          ? { title: "自动推进已暂停", badge: "已暂停" }
+          : { title: "保持重点等待", badge: "重点等待" };
+      return {
+        ...restrictedCopy,
+        variant: quota.state === "paused" ? "neutral" as BadgeVariant : "warning" as BadgeVariant,
+        action,
+        reason: buildQuotaView(quota)?.reviewLine ?? "当前控制面状态不允许开始新的 Agent 回合。",
         needs: missingGates.map(gateLabel),
         phase,
         waitingOn,
@@ -4936,32 +4990,32 @@ function buildOperatorDecision({
     }
     const codexCopy = queueItem?.agent_command
       ? {
-          title: "Run approved agent command",
-          badge: "Approved handoff",
-          reason: "quota should-run can expose this agent command because an operator gate was approved.",
+          title: "执行已批准的 Agent 命令",
+          badge: "已批准交接",
+          reason: "操作者已经批准，因此配额判断可以放行这条 Agent 命令。",
         }
       : phase === "mapped"
       ? {
-          title: "Let Codex use the map",
-          badge: "Codex can continue",
-          reason: "The project has a read-only map; the next agent turn can choose the handoff.",
+          title: "让 Codex 使用项目映射",
+          badge: "Codex 可以继续",
+          reason: "项目已有只读映射；下一个 Agent 回合可以选择交接方式。",
         }
       : phase === "refreshed"
         ? {
-            title: "Let Codex continue",
-            badge: "State refreshed",
-            reason: "Goal state changed and the agent can resume from the refreshed action.",
+            title: "让 Codex 继续",
+            badge: "状态已刷新",
+            reason: "Goal 状态已经变化，Agent 可以从刷新后的动作继续。",
           }
         : phase === "connected"
           ? {
-              title: "Let Codex create the first run",
-              badge: "Needs first run",
-              reason: "The goal is connected but has not produced a compact run yet.",
+              title: "让 Codex 创建第一次运行",
+              badge: "需要首次运行",
+              reason: "这个 Goal 已接入，但还没有产生精简运行记录。",
             }
           : {
-              title: "Let Codex continue",
-              badge: "Codex can act",
-              reason: "No human decision gate is active for this goal.",
+              title: "让 Codex 继续",
+              badge: "Codex 可以执行",
+              reason: "这个 Goal 当前没有等待人工决策。",
             };
     return {
       ...codexCopy,
@@ -4975,11 +5029,11 @@ function buildOperatorDecision({
 
   if (phase === "reward_judged") {
     return {
-      title: "Reward captured",
-      badge: "Judged",
+      title: "已记录评价",
+      badge: "已评价",
       variant: "success" as BadgeVariant,
       action,
-      reason: "Human feedback is attached to the latest run.",
+      reason: "人工反馈已附加到最近一次运行。",
       needs: missingGates.map(gateLabel),
       phase,
       waitingOn,
@@ -4987,11 +5041,11 @@ function buildOperatorDecision({
   }
 
   return {
-    title: "No immediate user action",
-    badge: "Clear",
+    title: "用户无需立即操作",
+    badge: "无需处理",
     variant: "neutral" as BadgeVariant,
     action,
-    reason: "The selected goal has no active attention item.",
+    reason: "所选 Goal 当前没有需要关注的事项。",
     needs: missingGates.map(gateLabel),
     phase,
     waitingOn,
@@ -5012,6 +5066,7 @@ function buildRewardDraftDefaults({
 }): RewardDraftDefaults {
   const latestRun = goal?.latest_runs[0];
   const operatorDecision = buildOperatorDecision({ goal, queueItem });
+  const quota = queueItem?.project_asset?.quota ?? queueItem?.quota ?? goal?.quota;
   const missingGates = new Set(queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []);
   const handoffCondition = queueItem?.next_handoff_condition
     ?? latestRun?.controller_readiness?.next_handoff_condition
@@ -5021,9 +5076,9 @@ function buildRewardDraftDefaults({
     return {
       decision: "review_existing_reward",
       reward: existingRewardValue(latestRun.human_reward),
-      reasonSummary: "Human reward already exists; review it before adding another overlay.",
-      followUp: "Use the latest rewarded run as the next agent-facing context.",
-      label: "existing reward",
+      reasonSummary: "已经存在人工评价；添加新评价前请先审阅。",
+      followUp: "把最近一次已评价运行作为下一轮 Agent 上下文。",
+      label: "已有评价",
     };
   }
 
@@ -5031,9 +5086,9 @@ function buildRewardDraftDefaults({
     return {
       decision: "fix_health_first",
       reward: "negative",
-      reasonSummary: "Blocking health issue prevents approval or handoff.",
-      followUp: "Fix the blocking status item before recording approval or launching follow-up work.",
-      label: "blocking status",
+      reasonSummary: "健康问题正在阻止批准或交接。",
+      followUp: "先修复阻塞状态，再记录批准或启动后续工作。",
+      label: "阻塞状态",
     };
   }
 
@@ -5043,10 +5098,10 @@ function buildRewardDraftDefaults({
       decision: needsReward ? "record_human_reward_gate" : "watch_external_evidence",
       reward: "neutral",
       reasonSummary: needsReward
-        ? "Operator judgment is required before controller decision advice."
-        : "External evidence is still pending; no approval is implied.",
-      followUp: handoffCondition || "Wait for comparable evidence before decision advice or write control.",
-      label: needsReward ? "reward gate" : "evidence watch",
+        ? "提供控制者决策建议前，需要操作者先做判断。"
+        : "外部证据仍在等待中；这不代表已经批准。",
+      followUp: handoffCondition || "先等待可比较的证据，再给出决策建议或启用写入控制。",
+      label: needsReward ? "评价确认" : "证据观察",
     };
   }
 
@@ -5054,9 +5109,30 @@ function buildRewardDraftDefaults({
     return {
       decision: operatorDecision.phase === "planned" ? "review_controller_opt_in" : "review_or_authorize",
       reward: "neutral",
-      reasonSummary: "Operator is reviewing a controller gate; reward does not grant write approval.",
-      followUp: "Run the safe dry-run path before appending controller or write-control state.",
-      label: operatorDecision.phase === "planned" ? "controller opt-in" : "operator gate",
+      reasonSummary: "操作者正在审阅控制者确认；评价本身不会授予写入权限。",
+      followUp: "追加控制者或写入控制状态前，先执行安全的试运行路径。",
+      label: operatorDecision.phase === "planned" ? "控制者接入" : "操作者确认",
+    };
+  }
+
+  if (isOutcomeFloorRecoveryQuota(quota)) {
+    const evidenceLabel = recoveryEvidenceLabel(quota);
+    return {
+      decision: "run_outcome_floor_recovery",
+      reward: "neutral",
+      reasonSummary: `普通交付仍被结果下限阻塞；只允许一次${evidenceLabel}恢复任务或写回具体阻塞原因。`,
+      followUp: "完成恢复证据和状态写回后，再重新判断是否允许普通交付。",
+      label: "结果恢复",
+    };
+  }
+
+  if (quota?.state === "throttled" || quota?.state === "paused" || (quota?.state === "focus_wait" && !isOutcomeFloorRecoveryQuota(quota))) {
+    return {
+      decision: "wait_for_control_plane",
+      reward: "neutral",
+      reasonSummary: buildQuotaView(quota)?.reviewLine ?? "当前控制面状态要求继续等待。",
+      followUp: "配额或等待条件变化后，重新读取状态再决定是否继续。",
+      label: quota.state === "throttled" ? "配额等待" : quota.state === "paused" ? "已暂停" : "重点等待",
     };
   }
 
@@ -5065,35 +5141,35 @@ function buildRewardDraftDefaults({
       return {
         decision: "run_approved_agent_command",
         reward: "positive",
-        reasonSummary: "Operator gate is approved; Codex can use the approved agent command.",
-        followUp: "Execute only the approved read-only or dry-run command; stop before writes or higher permissions.",
-        label: "approved command",
+        reasonSummary: "操作者已经批准；Codex 可以使用已批准的 Agent 命令。",
+        followUp: "只执行已批准的只读或试运行命令；写入或提高权限前必须停止。",
+        label: "已批准命令",
       };
     }
     if (operatorDecision.phase === "mapped") {
       return {
         decision: "use_read_only_map",
         reward: "positive",
-        reasonSummary: "Read-only map is useful enough for the next Codex handoff.",
-        followUp: "Let Codex use the latest map and history; keep writes separately approved.",
-        label: "map handoff",
+        reasonSummary: "只读映射已经足够支持下一次 Codex 交接。",
+        followUp: "让 Codex 使用最新映射和历史；写入仍需单独批准。",
+        label: "映射交接",
       };
     }
     if (operatorDecision.phase === "refreshed") {
       return {
         decision: "continue_from_refreshed_state",
         reward: "positive",
-        reasonSummary: "Refreshed goal state gives Codex a usable next action.",
-        followUp: "Let Codex continue from the refreshed state before asking for approval.",
-        label: "state refresh",
+        reasonSummary: "刷新后的 Goal 状态为 Codex 提供了可用的下一步。",
+        followUp: "让 Codex 先从刷新后的状态继续，再请求批准。",
+        label: "状态刷新",
       };
     }
     return {
       decision: "continue_codex_action",
       reward: "neutral",
-      reasonSummary: "Codex can continue, but this reward is only a dry-run draft.",
-      followUp: "Use the safe CLI path as the next agent-facing context.",
-      label: "codex handoff",
+      reasonSummary: "Codex 可以继续，但这份评价只是试运行草稿。",
+      followUp: "把安全命令路径作为下一轮 Agent 上下文。",
+      label: "Codex 交接",
     };
   }
 
@@ -5101,8 +5177,8 @@ function buildRewardDraftDefaults({
     decision: "review_latest_run",
     reward: "neutral",
     reasonSummary: operatorDecision.reason,
-    followUp: "Inspect status before recording a real reward.",
-    label: "operator default",
+    followUp: "记录真实评价前先检查状态。",
+    label: "操作者默认项",
   };
 }
 
@@ -5147,11 +5223,11 @@ function buildUserActionSummaryItems({
       waitingOn: decision.waitingOn,
       operatorQuestion: row.queueItem?.operator_question ?? undefined,
       agentCommand: row.queueItem?.agent_command ?? undefined,
-      safePathLabel: bridgeItem?.label ?? bridge?.badge ?? "Inspect status",
+      safePathLabel: bridgeItem?.label ?? bridge?.badge ?? "检查状态",
       safePathCommand: bridgeItem?.command,
       rewardHint: latestRun
         ? `${draftDefaults.decision} / ${draftDefaults.reward}`
-        : `${draftDefaults.label} / needs run`,
+        : `${draftDefaults.label} / 需要运行记录`,
       authorityCoverage,
       quota,
       userTodos,
@@ -5169,8 +5245,8 @@ function buildUserActionSummaryItems({
       return [{
         ...base,
         kind: "health",
-        title: "Fix health first",
-        badge: "Blocking",
+        title: "先修复健康问题",
+        badge: "正在阻塞",
         variant: "danger",
         summary: nextAction,
         detail: decision.reason,
@@ -5182,8 +5258,8 @@ function buildUserActionSummaryItems({
       return [{
         ...base,
         kind: "reward",
-        title: "Record human reward",
-        badge: "Reward gate",
+        title: "记录人工评价",
+        badge: "评价确认",
         variant: "warning",
         summary: draftDefaults.reasonSummary,
         detail: draftDefaults.followUp || stopCondition,
@@ -5210,7 +5286,7 @@ function buildUserActionSummaryItems({
       return [{
         ...base,
         kind: "evidence",
-        title: "Watch evidence",
+        title: "观察证据",
         badge: decision.badge,
         variant: "info",
         summary: decision.reason,
@@ -5226,14 +5302,14 @@ function buildUserActionSummaryItems({
         return [{
           ...base,
           kind: "codex",
-          title: "Run Codex recovery",
-          badge: "Recovery",
+          title: "执行 Codex 恢复任务",
+          badge: "恢复任务",
           variant: "warning",
-          summary: `普通 delivery 被 outcome floor 阻塞；下一步只做一次 ${evidenceLabel}，或写回具体 blocker。`,
+          summary: `普通交付被结果下限阻塞；下一步只做一次${evidenceLabel}，或写回具体阻塞原因。`,
           detail: quota?.safe_bypass_policy ?? stopCondition,
-          safePathLabel: "Recovery handoff",
+          safePathLabel: "恢复任务交接",
           safePathCommand: buildHistoryCommand({ goalId: row.goal.id, registry, runtimeRoot }),
-          draftLabel: "outcome recovery",
+          draftLabel: "结果恢复",
           priority: 3,
         }];
       }
@@ -5241,21 +5317,21 @@ function buildUserActionSummaryItems({
       return [{
         ...base,
         kind: "evidence",
-        title: "Focus wait owner blocker",
-        badge: "Focus wait",
+        title: "重点等待负责人处理",
+        badge: "重点等待",
         variant: "info",
         summary: ownerTodo
-          ? `Waiting on owner blocker: ${ownerTodo.text}`
-          : "Waiting for owner evidence, a clean baseline, or external eval before delivery resumes.",
+          ? `正在等待负责人处理：${ownerTodo.text}`
+          : "恢复交付前，正在等待负责人证据、干净基线或外部评估。",
         detail: stopCondition,
-        safePathLabel: "Status/history inspection only",
+        safePathLabel: "只检查状态和历史",
         safePathCommand: buildStatusCommand({ registry, runtimeRoot }),
-        draftLabel: "focus wait",
+        draftLabel: "重点等待",
         priority: 3,
       }];
     }
 
-    if (decision.waitingOn === "codex" && quotaState === "throttled") {
+    if (decision.waitingOn === "codex" && (quotaState === "throttled" || quotaState === "paused")) {
       return [];
     }
 
@@ -5277,8 +5353,8 @@ function buildUserActionSummaryItems({
       return [{
         ...base,
         kind: "reward",
-        title: "Reward captured",
-        badge: "Judged",
+        title: "已记录评价",
+        badge: "已评价",
         variant: "success",
         summary: decision.reason,
         detail: draftDefaults.followUp || stopCondition,
@@ -5328,7 +5404,7 @@ function UserActionSummary({
   const visibleItems = selectedKind === "all" ? items : items.filter((item) => item.kind === selectedKind);
   const showAllForEmptyFilter = selectedKind !== "all" && selectedKindCount === 0 && items.length > 0;
   const displayedItems = showAllForEmptyFilter ? items : visibleItems;
-  const selectedKindLabel = selectedKind === "all" ? "All" : userActionKindConfig[selectedKind].label;
+  const selectedKindLabel = selectedKind === "all" ? "全部" : userActionKindConfig[selectedKind].label;
   const [actionCopyState, setActionCopyState] = useState<{ key: string; state: CopyState } | null>(null);
 
   useEffect(() => {
@@ -5351,14 +5427,14 @@ function UserActionSummary({
         <div>
           <CardTitle className="flex items-center gap-2">
             <Users className="h-4 w-4" />
-            User Actions
+            用户操作
           </CardTitle>
           <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
-            First-screen operator actions derived from status, gates, and reward defaults.
+            根据状态、确认条件和评价默认值生成的首屏操作建议。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={items.length > 0 ? "warning" : "success"}>{items.length} actions</Badge>
+          <Badge variant={items.length > 0 ? "warning" : "success"}>{items.length} 个操作</Badge>
           {selectedKind !== "all" ? (
             <Badge variant={userActionKindConfig[selectedKind].variant}>{userActionKindConfig[selectedKind].label}</Badge>
           ) : null}
@@ -5367,18 +5443,18 @@ function UserActionSummary({
       <CardContent>
         {items.length === 0 ? (
           <div className="rounded-lg border border-slate-200 p-4 text-sm text-slate-500 dark:border-zinc-800 dark:text-zinc-400">
-            No user-facing action is active.
+            当前没有需要用户处理的操作。
           </div>
         ) : (
           <div className="space-y-3">
-            <div aria-label="User action kind filter" className="flex flex-wrap gap-2">
+            <div aria-label="用户操作类型筛选" className="flex flex-wrap gap-2">
               <Button
                 aria-pressed={selectedKind === "all"}
                 onClick={() => onSelectKind("all")}
                 size="sm"
                 variant={selectedKind === "all" ? "primary" : "secondary"}
               >
-                All
+                全部
                 <Badge variant="neutral">{items.length}</Badge>
               </Button>
               {kindOptions.map((kind) => (
@@ -5396,12 +5472,12 @@ function UserActionSummary({
             </div>
             {showAllForEmptyFilter ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-                No {selectedKindLabel.toLowerCase()} action is active; showing all active actions.
+                当前没有“{selectedKindLabel}”操作，已显示全部活动操作。
               </div>
             ) : null}
             {displayedItems.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-zinc-800 dark:text-zinc-400">
-                No {selectedKindLabel.toLowerCase()} action is active for this status source.
+                这个状态来源中没有“{selectedKindLabel}”操作。
               </div>
             ) : (
               <div className="grid gap-3 xl:grid-cols-2">
@@ -5411,12 +5487,12 @@ function UserActionSummary({
                   const isGateAction = item.kind === "controller" || item.waitingOn === "user_or_controller" || item.waitingOn === "controller";
                   const handoffReadiness = buildHandoffReadinessView(item.handoffReadiness);
                   const copyLabel = copyState === "copied"
-                    ? "Copied"
+                    ? "已复制"
                     : item.kind === "codex" && item.agentCommand
-                      ? "Copy Handoff"
+                      ? "复制交接信息"
                       : isFocusWaitQuota(item.quota)
-                        ? "Copy Focus Packet"
-                      : "Copy";
+                        ? "复制重点等待信息"
+                      : "复制操作信息";
                   const agentTodo = firstOpenTodo(item.agentTodos);
                   return (
                   <article
@@ -5436,16 +5512,16 @@ function UserActionSummary({
                         type="button"
                       >
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="neutral">Project</Badge>
-                          {item.goalId === selectedGoalId ? <Badge variant="success">Selected</Badge> : null}
+                          <Badge variant="neutral">项目</Badge>
+                          {item.goalId === selectedGoalId ? <Badge variant="success">已选择</Badge> : null}
                         </div>
                         <div className="mt-1 break-all text-base font-semibold leading-6 text-slate-950 dark:text-zinc-50">{item.goalId}</div>
                         <div className="mt-1 break-words text-sm font-medium text-slate-600 dark:text-zinc-300">{item.title}</div>
                       </button>
                       <div className="flex flex-wrap items-center gap-2">
-                        {copyState === "failed" ? <Badge variant="danger">Copy failed</Badge> : null}
+                        {copyState === "failed" ? <Badge variant="danger">复制失败</Badge> : null}
                         <Button
-                          aria-label={`Copy action packet for ${item.goalId}`}
+                          aria-label={`复制 ${item.goalId} 的操作信息`}
                           onClick={(event) => {
                             event.stopPropagation();
                             void copyActionPacket(item);
@@ -5468,7 +5544,7 @@ function UserActionSummary({
                       <QuotaChip quota={item.quota} />
                       {handoffReadiness ? (
                         <Badge variant={handoffReadiness.variant}>
-                          {handoffReadiness.ready ? "Handoff ready" : "Handoff blocked"}
+                          {handoffReadiness.ready ? "交接已就绪" : "交接被阻塞"}
                         </Badge>
                       ) : null}
                       {item.draftLabel ? <Badge variant="info">{item.draftLabel}</Badge> : null}
@@ -5477,44 +5553,44 @@ function UserActionSummary({
                       <div className="mt-3 border-t border-slate-200 pt-3 text-xs leading-5 text-slate-600 dark:border-zinc-800 dark:text-zinc-300">
                         <div className="flex flex-wrap items-center gap-2">
                           {item.projectAssetSource === "legacy_raw_fallback" ? (
-                            <Badge variant="warning">Legacy/raw fallback</Badge>
+                            <Badge variant="warning">旧版原始数据备用</Badge>
                           ) : (
-                            <Badge variant="neutral">Project asset</Badge>
+                            <Badge variant="neutral">项目资产</Badge>
                           )}
-                          {item.projectAssetSource !== "legacy_raw_fallback" && item.projectOwner ? <Badge variant="info">Owner {item.projectOwner}</Badge> : null}
-                          {item.projectAssetSource !== "legacy_raw_fallback" && item.projectGate ? <Badge variant="warning">Gate {item.projectGate}</Badge> : null}
+                          {item.projectAssetSource !== "legacy_raw_fallback" && item.projectOwner ? <Badge variant="info">负责人 {item.projectOwner}</Badge> : null}
+                          {item.projectAssetSource !== "legacy_raw_fallback" && item.projectGate ? <Badge variant="warning">确认条件 {item.projectGate}</Badge> : null}
                         </div>
                         {item.projectAssetSource === "legacy_raw_fallback" ? (
                           <p className="mt-2 break-words font-medium text-amber-700 dark:text-amber-200">
-                            Owner/Gate/Stop are not project_asset-backed; below uses raw status fallback.
+                            负责人、确认条件和停止条件没有项目资产支持；下方使用原始状态备用数据。
                           </p>
                         ) : null}
                         {item.projectNextAction ? (
                           <p className="mt-2 line-clamp-2 break-words">
-                            <span className="font-medium">{item.projectAssetSource === "legacy_raw_fallback" ? "Fallback next:" : "Next:"}</span> {item.projectNextAction}
+                            <span className="font-medium">{item.projectAssetSource === "legacy_raw_fallback" ? "备用下一步：" : "下一步："}</span> {item.projectNextAction}
                           </p>
                         ) : null}
                         {item.projectStopCondition ? (
                           <p className="mt-1 line-clamp-2 break-words">
-                            <span className="font-medium">{item.projectAssetSource === "legacy_raw_fallback" ? "Fallback stop:" : "Stop:"}</span> {item.projectStopCondition}
+                            <span className="font-medium">{item.projectAssetSource === "legacy_raw_fallback" ? "备用停止条件：" : "停止条件："}</span> {item.projectStopCondition}
                           </p>
                         ) : null}
                         {handoffReadiness ? (
                           <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs leading-5 dark:border-zinc-800 dark:bg-zinc-900">
                             <p className="break-words">
-                              <span className="font-medium">Handoff readiness:</span> {handoffReadiness.shortLine}
+                              <span className="font-medium">交接就绪度：</span> {handoffReadiness.shortLine}
                             </p>
                             <p className="mt-1 break-words">
-                              <span className="font-medium">Handoff state:</span> {handoffReadiness.stateLine}
+                              <span className="font-medium">交接状态：</span> {handoffReadiness.stateLine}
                             </p>
                             {handoffReadiness.latestRunLine ? (
                               <p className="mt-1 break-words">
-                                <span className="font-medium">Post-handoff run:</span> {handoffReadiness.latestRunLine}
+                                <span className="font-medium">交接后运行：</span> {handoffReadiness.latestRunLine}
                               </p>
                             ) : null}
                             {handoffReadiness.probe ? (
                               <p className="mt-1 break-words">
-                                <span className="font-medium">Probe:</span> {handoffReadiness.probe}
+                                <span className="font-medium">探测结果：</span> {handoffReadiness.probe}
                               </p>
                             ) : null}
                           </div>
@@ -5532,7 +5608,7 @@ function UserActionSummary({
                       <div className="mt-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <CircleAlert className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" />
-                          <Badge variant="warning">Operator question</Badge>
+                          <Badge variant="warning">需要操作者回答</Badge>
                         </div>
                         <p className="mt-2 line-clamp-3 break-words text-sm font-medium leading-6 text-amber-950 dark:text-amber-100">
                           {item.operatorQuestion}
@@ -5544,31 +5620,31 @@ function UserActionSummary({
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.detail}</p>
                     {item.agentCommand ? (
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
-                        <Badge variant="info">{item.operatorQuestion ? "Agent command ready after approval" : "Approved agent command"}</Badge>
+                        <Badge variant="info">{item.operatorQuestion ? "批准后可执行 Agent 命令" : "已批准 Agent 命令"}</Badge>
                       </div>
                     ) : null}
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3 text-xs text-slate-600 dark:border-zinc-800 dark:text-zinc-300">
-                      <Badge variant="neutral">Safe path</Badge>
+                      <Badge variant="neutral">安全路径</Badge>
                       <span className="line-clamp-1 break-words font-medium">{item.safePathLabel}</span>
-                      <Badge variant="info">Reward</Badge>
+                      <Badge variant="info">评价</Badge>
                       <span className="font-medium">{item.rewardHint}</span>
                       {item.authorityCoverage ? (
                         <>
-                          <Badge variant={item.authorityCoverage.variant}>Authority</Badge>
+                          <Badge variant={item.authorityCoverage.variant}>权威来源</Badge>
                           <span className="line-clamp-1 break-words font-medium">{item.authorityCoverage.shortLine}</span>
                         </>
                       ) : null}
                       {buildQuotaView(item.quota) ? (
                         <>
                           <Gauge className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
-                          <Badge variant={buildQuotaView(item.quota)?.variant}>Quota</Badge>
+                          <Badge variant={buildQuotaView(item.quota)?.variant}>配额</Badge>
                           <span className="font-medium">{buildQuotaView(item.quota)?.shortLine}</span>
                         </>
                       ) : null}
                       {formatLatestValidation(item.latestValidation) ? (
                         <>
                           <FileCheck2 className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
-                          <Badge variant="neutral">Validation</Badge>
+                          <Badge variant="neutral">验证</Badge>
                           <span className="line-clamp-1 break-words font-medium">
                             {formatLatestValidation(item.latestValidation)}
                           </span>
@@ -5577,7 +5653,7 @@ function UserActionSummary({
                       {agentTodo ? (
                         <>
                           <Bot className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
-                          <Badge variant="info">Agent todo</Badge>
+                          <Badge variant="info">Agent Todo</Badge>
                           <span className="line-clamp-1 break-words font-medium">{agentTodo.text}</span>
                         </>
                       ) : null}
@@ -5620,14 +5696,14 @@ function buildOperatorActionBridge({
 
   if (queueItem?.severity === "high") {
     return {
-      title: "Safe CLI Path",
-      badge: "inspect",
+      title: "安全命令路径",
+      badge: "检查",
       variant: "danger",
-      body: "Resolve the blocking health item before rewarding, approving, or handing off this goal.",
+      body: "评价、批准或交接这个 Goal 前，先解决阻塞健康问题。",
       items: [
         {
-          label: "Inspect status",
-          body: "Use the machine-readable status contract to identify the active blocker.",
+          label: "检查状态",
+          body: "使用机器可读状态合同定位当前阻塞项。",
           command: statusCommand,
           variant: "danger",
         },
@@ -5638,31 +5714,31 @@ function buildOperatorActionBridge({
   if (waitingOn === "external_evidence") {
     const items: OperatorActionBridgeItem[] = [
       {
-        label: "Watch gate",
-        body: "Keep this goal in observation until comparable evidence arrives.",
+        label: "观察确认条件",
+        body: "在可比较的证据到达前，保持观察这个 Goal。",
         command: statusCommand,
         variant: "info",
       },
     ];
     if (missingGates.has("human_reward_capture")) {
       items.push({
-        label: "Reward gate",
-        body: "Use the Reward CLI Draft below after judging the selected run; keep the draft in dry-run until the operator intentionally records it.",
+        label: "评价确认",
+        body: "判断所选运行后使用下方评价命令草稿；操作者明确记录前保持试运行。",
         variant: "warning",
       });
     }
     if (queueItem?.next_handoff_condition) {
       items.push({
-        label: "Handoff condition",
+        label: "交接条件",
         body: queueItem.next_handoff_condition,
         variant: "neutral",
       });
     }
     return {
-      title: "Safe CLI Path",
-      badge: "watch",
+      title: "安全命令路径",
+      badge: "观察",
       variant: "info",
-      body: "The dashboard can validate the next reward draft, but it should not turn missing evidence into approval.",
+      body: "看板可以验证下一份评价草稿，但不能把缺少证据当成批准。",
       items,
     };
   }
@@ -5672,26 +5748,26 @@ function buildOperatorActionBridge({
       ?? buildReadOnlyMapDryRunCommand({ goalId, registry, runtimeRoot });
     const gateDraftCommand = buildOperatorGateDryRunCommand({ goalId, registry, runtimeRoot });
     return {
-      title: "Safe CLI Path",
-      badge: phase === "planned" ? "opt-in" : "approval",
+      title: "安全命令路径",
+      badge: phase === "planned" ? "接入确认" : "批准",
       variant: "warning",
-      body: "Approval remains a human/controller decision outside the browser; the safe local command is a dry-run.",
+      body: "批准仍需人工或控制者在浏览器外决定；安全的本机命令是试运行。",
       items: [
         {
-          label: "Read-only map dry-run",
-          body: "Preview the controller handoff surface before any run is appended.",
+          label: "只读映射试运行",
+          body: "追加任何运行记录前，先预览控制者交接内容。",
           command,
           variant: "warning",
         },
         {
-          label: "Operator gate dry-run draft",
-          body: "User-owned preview after the human approves; keep --dry-run until intentionally recording the gate.",
+          label: "操作者确认试运行草稿",
+          body: "人工批准后由用户预览；明确记录确认前保留 --dry-run。",
           command: gateDraftCommand,
           variant: "neutral",
         },
         {
-          label: "Approval boundary",
-          body: "A reward signal or dashboard review does not grant write control by itself.",
+          label: "批准边界",
+          body: "评价信号或看板审阅本身不会授予写入控制权。",
           variant: "neutral",
         },
       ],
@@ -5699,6 +5775,46 @@ function buildOperatorActionBridge({
   }
 
   if (waitingOn === "codex") {
+    const quota = queueItem?.project_asset?.quota ?? queueItem?.quota ?? goal?.quota;
+    if (isOutcomeFloorRecoveryQuota(quota)) {
+      const evidenceLabel = recoveryEvidenceLabel(quota);
+      return {
+        title: "恢复任务路径",
+        badge: "限定恢复",
+        variant: "warning",
+        body: `普通交付仍被结果下限阻塞；只允许一次${evidenceLabel}恢复任务或写回具体阻塞原因。`,
+        items: [
+          {
+            label: "恢复任务边界",
+            body: quota?.safe_bypass_policy ?? `只做${evidenceLabel}，不能执行普通 Agent 交接。`,
+            variant: "warning",
+          },
+          {
+            label: "检查最近证据",
+            body: "开始恢复任务前先读取最近历史，确认没有重复消耗配额。",
+            command: buildHistoryCommand({ goalId, registry, runtimeRoot }),
+            variant: "neutral",
+          },
+        ],
+      };
+    }
+    if (quota?.state === "throttled" || quota?.state === "paused" || (quota?.state === "focus_wait" && !isOutcomeFloorRecoveryQuota(quota))) {
+      const quotaView = buildQuotaView(quota);
+      return {
+        title: "安全命令路径",
+        badge: quota.state === "paused" ? "已暂停" : "等待",
+        variant: quota.state === "paused" ? "neutral" : "warning",
+        body: "当前配额状态不允许开始新的 Agent 回合；这里只提供只读状态检查。",
+        items: [
+          {
+            label: "检查配额状态",
+            body: quotaView?.reviewLine ?? "确认配额或等待条件是否已经变化。",
+            command: statusCommand,
+            variant: quota.state === "paused" ? "neutral" : "warning",
+          },
+        ],
+      };
+    }
     const fallbackCommand = phase === "refreshed"
       ? buildRefreshStateDryRunCommand({ goalId, registry, runtimeRoot })
       : phase === "connected"
@@ -5708,18 +5824,18 @@ function buildOperatorActionBridge({
       ?? fallbackCommand;
     const commandIsGateApproved = Boolean(queueItem?.agent_command);
     return {
-      title: "Safe CLI Path",
-      badge: "handoff",
+      title: "安全命令路径",
+      badge: "交接",
       variant: "success",
-      body: "This goal is ready for an agent turn; the dashboard should hand off context, not perform the agent step.",
+      body: "这个 Goal 已准备好进入 Agent 回合；看板负责交接上下文，不直接执行 Agent 工作。",
       items: [
         {
-          label: commandIsGateApproved ? "Approved agent command" : phase === "mapped" ? "Read latest map" : "Preview next run",
+          label: commandIsGateApproved ? "已批准 Agent 命令" : phase === "mapped" ? "读取最新映射" : "预览下一次运行",
           body: commandIsGateApproved
-            ? "This command is valid because the operator gate was recorded as approved."
+            ? "这条命令有效，因为操作者确认已记录为批准。"
             : phase === "mapped"
-            ? "Use the compact map and recent history as the agent-facing context."
-            : "Dry-run the next state or map command before appending a run.",
+            ? "把精简映射和最近历史作为 Agent 上下文。"
+            : "追加运行记录前，先试运行下一状态或映射命令。",
           command,
           variant: "success",
         },
@@ -5729,14 +5845,14 @@ function buildOperatorActionBridge({
 
   if (phase === "reward_judged") {
     return {
-      title: "Safe CLI Path",
-      badge: "recorded",
+      title: "安全命令路径",
+      badge: "已记录",
       variant: "success",
-      body: "The selected run already has a compact human reward overlay.",
+      body: "所选运行已经附加精简人工评价。",
       items: [
         {
-          label: "Review history",
-          body: "Use recent history as the next agent-facing context.",
+          label: "审阅历史",
+          body: "把最近历史作为下一轮 Agent 上下文。",
           command: buildHistoryCommand({ goalId, registry, runtimeRoot }),
           variant: "success",
         },
@@ -5745,14 +5861,14 @@ function buildOperatorActionBridge({
   }
 
   return {
-    title: "Safe CLI Path",
-    badge: "status",
+    title: "安全命令路径",
+    badge: "状态",
     variant: "neutral",
-    body: "No direct user action is active; keep the current status contract as the source for agents.",
+    body: "当前没有直接用户操作；继续把当前状态合同作为 Agent 的信息来源。",
     items: [
       {
-        label: "Inspect status",
-        body: "Read the compact agent-facing status before starting a new action.",
+        label: "检查状态",
+        body: "开始新操作前，先读取面向 Agent 的精简状态。",
         command: statusCommand,
         variant: "neutral",
       },
@@ -5777,7 +5893,7 @@ function OperatorDecisionPanel({
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-medium uppercase text-slate-500 dark:text-zinc-400">Operator Decision</div>
+          <div className="text-xs font-medium uppercase text-slate-500 dark:text-zinc-400">操作者决策</div>
           <div className="mt-1 text-base font-semibold text-slate-950 dark:text-zinc-50">{decision.title}</div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -5812,7 +5928,7 @@ function OperatorDecisionPanel({
               <div className="rounded-md border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950" key={`${item.label}-${item.command ?? item.body}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={item.variant ?? "neutral"}>{item.label}</Badge>
-                  {item.command ? <Badge variant="info">dry path</Badge> : null}
+                  {item.command ? <Badge variant="info">试运行路径</Badge> : null}
                 </div>
                 <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-zinc-400">{item.body}</p>
                 {item.command ? (
@@ -5833,7 +5949,7 @@ function HumanRewardSummary({ reward }: { reward: HumanReward }) {
   return (
     <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900 dark:bg-emerald-950">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={rewardVariant(reward.reward)}>Human reward</Badge>
+        <Badge variant={rewardVariant(reward.reward)}>人工评价</Badge>
         {reward.decision ? <span className="font-medium text-emerald-950 dark:text-emerald-100">{reward.decision}</span> : null}
         {reward.recorded_at ? <span className="text-xs text-emerald-700 dark:text-emerald-300">{reward.recorded_at}</span> : null}
       </div>
@@ -5861,9 +5977,9 @@ function OperatorGateSummary({ gate }: { gate: OperatorGate }) {
   return (
     <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/30">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={operatorGateVariant(gate)}>Operator gate</Badge>
+        <Badge variant={operatorGateVariant(gate)}>操作者确认</Badge>
         {gate.gate ? <span className="font-medium text-amber-950 dark:text-amber-100">{gate.gate}</span> : null}
-        {gate.decision ? <Badge variant={operatorGateVariant(gate)}>{gate.decision}</Badge> : null}
+        {gate.decision ? <Badge variant={operatorGateVariant(gate)}>{gate.decision === "approve" ? "批准" : gate.decision === "reject" ? "拒绝" : gate.decision}</Badge> : null}
         {gate.recorded_at ? <Badge variant="neutral">{gate.recorded_at}</Badge> : null}
       </div>
       {gate.operator_question ? (
@@ -5894,7 +6010,7 @@ function OperatorGateResumeContractSummary({ contract }: { contract: OperatorGat
   return (
     <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900/60 dark:bg-emerald-950/30">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="success">Checkpointed resume</Badge>
+        <Badge variant="success">从检查点恢复</Badge>
         {contract.version ? <Badge variant="neutral">{contract.version}</Badge> : null}
         {contract.gate_id ? <span className="font-medium text-emerald-950 dark:text-emerald-100">{contract.gate_id}</span> : null}
         {contract.operator_decision ? <Badge variant="success">{contract.operator_decision}</Badge> : null}
@@ -5921,14 +6037,14 @@ function ControllerReadinessSummary({ readiness }: { readiness: ControllerReadin
   return (
     <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm dark:border-sky-900 dark:bg-sky-950">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={readinessVariant(readiness)}>Controller readiness</Badge>
+        <Badge variant={readinessVariant(readiness)}>控制者就绪度</Badge>
         {readiness.classification ? <span className="font-medium text-sky-950 dark:text-sky-100">{readiness.classification}</span> : null}
-        {missing.length > 0 ? <Badge variant="warning">{missing.length} missing</Badge> : <Badge variant="success">gates clear</Badge>}
+        {missing.length > 0 ? <Badge variant="warning">缺少 {missing.length} 项</Badge> : <Badge variant="success">确认条件已满足</Badge>}
       </div>
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
-        <Badge variant={readiness.read_only_observer_ready ? "success" : "neutral"}>Observer</Badge>
-        <Badge variant={readiness.decision_advisor_ready ? "success" : "neutral"}>Decision</Badge>
-        <Badge variant={readiness.write_controller_ready ? "success" : "neutral"}>Write</Badge>
+        <Badge variant={readiness.read_only_observer_ready ? "success" : "neutral"}>只读观察</Badge>
+        <Badge variant={readiness.decision_advisor_ready ? "success" : "neutral"}>决策建议</Badge>
+        <Badge variant={readiness.write_controller_ready ? "success" : "neutral"}>写入控制</Badge>
       </div>
       {readiness.review_judgment ? (
         <p className="mt-2 leading-6 text-sky-900 dark:text-sky-100">{readiness.review_judgment}</p>
@@ -5940,7 +6056,7 @@ function ControllerReadinessSummary({ readiness }: { readiness: ControllerReadin
         <div className="mt-3 space-y-1">
           {readiness.gates.map((gate) => (
             <div className="flex gap-2 text-xs leading-5 text-sky-900 dark:text-sky-100" key={`${gate.id}-${gate.ok}`}>
-              <Badge variant={gate.ok ? "success" : "warning"}>{gate.ok ? "PASS" : "MISS"}</Badge>
+              <Badge variant={gate.ok ? "success" : "warning"}>{gate.ok ? "通过" : "缺少"}</Badge>
               <span className="break-words">
                 {gate.id}
                 {gate.review ? `: ${gate.review}` : ""}
@@ -5960,18 +6076,18 @@ function ProjectMapSummary({ projectMap }: { projectMap: ProjectMap }) {
   return (
     <div className="mt-3 rounded-md border border-indigo-200 bg-indigo-50 p-3 text-sm dark:border-indigo-900 dark:bg-indigo-950">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="info">Project map</Badge>
+        <Badge variant="info">项目映射</Badge>
         {projectMap.adapter_kind ? (
           <span className="font-medium text-indigo-950 dark:text-indigo-100">{projectMap.adapter_kind}</span>
         ) : null}
         {projectMap.adapter_status ? <Badge variant="neutral">{projectMap.adapter_status}</Badge> : null}
       </div>
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
-        <Badge variant="neutral">sources {projectMap.authority_source_count ?? 0}</Badge>
+        <Badge variant="neutral">来源 {projectMap.authority_source_count ?? 0}</Badge>
         {authorityCoverage ? <Badge variant={authorityCoverage.variant}>{authorityCoverage.badge}</Badge> : null}
-        <Badge variant="neutral">guards {projectMap.guard_count ?? 0}</Badge>
-        <Badge variant="info">sections {sections}</Badge>
-        <Badge variant="info">files {files}</Badge>
+        <Badge variant="neutral">限制条件 {projectMap.guard_count ?? 0}</Badge>
+        <Badge variant="info">章节 {sections}</Badge>
+        <Badge variant="info">文件 {files}</Badge>
       </div>
       {authorityCoverage ? (
         <p className="mt-2 text-xs leading-5 text-indigo-900 dark:text-indigo-100">{authorityCoverage.reviewLine}</p>
@@ -5986,13 +6102,13 @@ function LatestRun({ run }: { run: RunRecord }) {
     <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">{run.generated_at}</span>
-        <Badge variant="info">{formatNullable(run.classification, "unclassified")}</Badge>
+        <Badge variant="info">{formatNullable(run.classification, "未分类")}</Badge>
         <PhaseBadges compact flags={run.lifecycle_flags} phase={lifecyclePhase} />
         {run.health_check ? <Badge variant="success">{run.health_check}</Badge> : null}
-        {run.human_reward ? <Badge variant={rewardVariant(run.human_reward.reward)}>Reward</Badge> : null}
-        {run.operator_gate ? <Badge variant={operatorGateVariant(run.operator_gate)}>Gate</Badge> : null}
-        {run.operator_gate_resume_contract ? <Badge variant="success">Resume contract</Badge> : null}
-        {run.controller_readiness ? <Badge variant={readinessVariant(run.controller_readiness)}>Readiness</Badge> : null}
+        {run.human_reward ? <Badge variant={rewardVariant(run.human_reward.reward)}>评价</Badge> : null}
+        {run.operator_gate ? <Badge variant={operatorGateVariant(run.operator_gate)}>确认</Badge> : null}
+        {run.operator_gate_resume_contract ? <Badge variant="success">恢复合同</Badge> : null}
+        {run.controller_readiness ? <Badge variant={readinessVariant(run.controller_readiness)}>就绪度</Badge> : null}
         <Badge variant={artifactVariant(run.json_exists)}>JSON</Badge>
         <Badge variant={artifactVariant(run.markdown_exists)}>Markdown</Badge>
       </div>
@@ -6028,6 +6144,8 @@ function RewardCommandDraft({
   onStatusRefresh: () => Promise<void>;
 }) {
   const latestRun = goal?.latest_runs[0];
+  const activeQuota = queueItem?.project_asset?.quota ?? queueItem?.quota ?? goal?.quota;
+  const activeQuotaMustAdvanceKey = (activeQuota?.must_advance ?? []).join("|");
   const missingGateKey = (queueItem?.missing_gates ?? latestRun?.controller_readiness?.missing_gates ?? []).join("|");
   const draftDefaults = useMemo(
     () => buildRewardDraftDefaults({ goal, queueItem }),
@@ -6049,6 +6167,15 @@ function RewardCommandDraft({
       queueItem?.recommended_action,
       queueItem?.lifecycle_phase,
       queueItem?.next_handoff_condition,
+      activeQuota?.state,
+      activeQuota?.compute,
+      activeQuota?.spent_slots,
+      activeQuota?.allowed_slots,
+      activeQuota?.handoff_outcome_floor_block,
+      activeQuota?.safe_bypass_allowed,
+      activeQuota?.safe_bypass_kind,
+      activeQuota?.safe_bypass_policy,
+      activeQuotaMustAdvanceKey,
       missingGateKey,
     ],
   );
@@ -6187,16 +6314,16 @@ function RewardCommandDraft({
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-wrap items-center gap-2">
         <Terminal className="h-4 w-4 text-slate-500 dark:text-zinc-400" />
-        <span className="font-medium">Reward CLI Draft</span>
-        <Badge variant="info">local-only</Badge>
-        <Badge variant={command ? "warning" : "neutral"}>{command ? "dry-run" : "needs run"}</Badge>
+        <span className="font-medium">评价命令草稿</span>
+        <Badge variant="info">仅限本机</Badge>
+        <Badge variant={command ? "warning" : "neutral"}>{command ? "试运行" : "需要运行记录"}</Badge>
         <Badge variant="neutral">{draftDefaults.label}</Badge>
-        {dryRunResult?.ok ? <Badge variant="success">validated</Badge> : null}
+        {dryRunResult?.ok ? <Badge variant="success">已验证</Badge> : null}
       </div>
       {command ? (
         <div className="mt-3 space-y-3">
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-            <span>Defaults derive from the selected Operator Decision and missing gates.</span>
+            <span>默认值来自所选操作者决策和缺少的确认条件。</span>
             <Button
               onClick={() => {
                 setDecision(draftDefaults.decision);
@@ -6212,47 +6339,47 @@ function RewardCommandDraft({
               size="sm"
               variant="ghost"
             >
-              Reset defaults
+              恢复默认值
             </Button>
           </div>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px]">
             <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
-              <span>Decision</span>
+              <span>决定</span>
               <input className={inputClassName} onChange={(event) => setDecision(event.target.value)} value={decision} />
             </label>
             <label className="space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
-              <span>Reward</span>
+              <span>评价</span>
               <Select className="w-full" value={reward} onChange={(event) => setReward(event.target.value as RewardValue)}>
                 {rewardOptions.map((option) => (
                   <option key={option} value={option}>
-                    {option}
+                    {rewardOptionLabel[option]}
                   </option>
                 ))}
               </Select>
             </label>
           </div>
           <label className="block space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
-            <span>Reason summary</span>
+            <span>原因摘要</span>
             <input className={inputClassName} onChange={(event) => setReasonSummary(event.target.value)} value={reasonSummary} />
           </label>
           <label className="block space-y-1 text-xs font-medium text-slate-500 dark:text-zinc-400">
-            <span>Follow-up</span>
+            <span>后续动作</span>
             <input className={inputClassName} onChange={(event) => setFollowUp(event.target.value)} value={followUp} />
           </label>
           <div className="flex flex-wrap items-center gap-2">
             <Button disabled={!canDryRun || isDryRunning} onClick={() => void runDryRunCheck()} size="sm">
               {isDryRunning ? <RefreshCw className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-              Dry-run Check
+              试运行检查
             </Button>
-            <Badge variant={dryRunUrl ? "info" : "neutral"}>{dryRunUrl ? "local API" : "manual CLI"}</Badge>
-            <Badge variant={appendUrl ? "warning" : "neutral"}>{appendUrl ? "append API" : "copy/CLI only"}</Badge>
+            <Badge variant={dryRunUrl ? "info" : "neutral"}>{dryRunUrl ? "本机接口" : "手动命令"}</Badge>
+            <Badge variant={appendUrl ? "warning" : "neutral"}>{appendUrl ? "追加接口" : "仅可复制或使用命令"}</Badge>
             {dryRunError ? <Badge variant="danger">{dryRunError.slice(0, 96)}</Badge> : null}
             {appendError ? <Badge variant="danger">{appendError.slice(0, 96)}</Badge> : null}
           </div>
           {dryRunResult?.ok ? (
             <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
               <div>
-                {dryRunResult.goal_id} · {dryRunResult.selected_run?.generated_at} · appended={String(dryRunResult.appended)}
+                {dryRunResult.goal_id} · {dryRunResult.selected_run?.generated_at} · 已追加={String(dryRunResult.appended)}
               </div>
               {dryRunResult.active_state_summary ? (
                 <p>{dryRunResult.active_state_summary}</p>
@@ -6264,16 +6391,16 @@ function RewardCommandDraft({
               ) : null}
               {dryRunResult.preview_id && !appendResult?.appended ? (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-emerald-200 bg-white/70 p-2 dark:border-emerald-900 dark:bg-zinc-950/50">
-                  <span>Preview locked to this goal/run/reward payload. Append writes one run-bound human_reward overlay.</span>
+                  <span>预览已绑定这个 Goal、运行记录和评价内容。追加操作会写入一条绑定运行记录的人工评价。</span>
                   <Button disabled={!canAppend || isAppending} onClick={() => void appendRewardOverlay()} size="sm">
                     {isAppending ? <RefreshCw className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-                    Append reward overlay
+                    追加人工评价
                   </Button>
                 </div>
               ) : null}
               {appendResult?.appended ? (
                 <div className="rounded border border-emerald-300 bg-emerald-100 p-2 font-medium dark:border-emerald-800 dark:bg-emerald-900">
-                  Reward appended and status refreshed. The next agent run can read it from run history.
+                  评价已追加，状态已刷新。下一次 Agent 运行可以从运行历史中读取。
                 </div>
               ) : null}
             </div>
@@ -6283,7 +6410,7 @@ function RewardCommandDraft({
           </pre>
         </div>
       ) : (
-        <p className="mt-3 text-sm text-slate-500 dark:text-zinc-400">No compact run record to reward.</p>
+        <p className="mt-3 text-sm text-slate-500 dark:text-zinc-400">没有可评价的精简运行记录。</p>
       )}
     </div>
   );
@@ -6320,12 +6447,12 @@ function RunHistoryPanel({
   const lifecyclePhase = goal?.lifecycle_phase ?? queueItem?.lifecycle_phase ?? inferLifecyclePhase(queueItem?.status, latestRuns[0]);
   const lifecycleFlags = goal?.lifecycle_flags?.length ? goal.lifecycle_flags : queueItem?.lifecycle_flags ?? [];
   return (
-    <Card>
+    <Card data-testid="selected-goal-detail">
       <CardHeader className="flex-wrap">
         <div>
           <CardTitle className="flex items-center gap-2">
             <History className="h-4 w-4" />
-            Run History
+            运行历史
           </CardTitle>
         </div>
         {queueItem ? <StatusBadge value={queueItem.severity} /> : null}
@@ -6333,12 +6460,12 @@ function RunHistoryPanel({
       <CardContent>
         <div className="space-y-4">
           <div>
-            <div className="break-all text-sm font-semibold">{goal?.id ?? queueItem?.goal_id ?? "No goal selected"}</div>
+            <div className="break-all text-sm font-semibold">{goal?.id ?? queueItem?.goal_id ?? "尚未选择 Goal"}</div>
             <div className="mt-2 flex flex-wrap gap-2">
               {goal?.status ? <Badge>{goal.status}</Badge> : null}
               {goal?.adapter_kind ? <Badge variant="neutral">{goal.adapter_kind}</Badge> : null}
               {goal?.adapter_status ? <Badge variant="info">{goal.adapter_status}</Badge> : null}
-              {goal?.legacy_runtime_goal ? <Badge variant="warning">Legacy runtime</Badge> : null}
+              {goal?.legacy_runtime_goal ? <Badge variant="warning">旧版运行时</Badge> : null}
             </div>
             <div className="mt-2">
               <PhaseBadges flags={lifecycleFlags} phase={lifecyclePhase} />
@@ -6346,7 +6473,7 @@ function RunHistoryPanel({
             {authorityCoverage ? (
               <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={authorityCoverage.variant}>Authority coverage</Badge>
+                  <Badge variant={authorityCoverage.variant}>权威来源覆盖</Badge>
                   <span className="text-xs font-medium text-slate-700 dark:text-zinc-300">{authorityCoverage.shortLine}</span>
                 </div>
                 <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-zinc-300">{authorityCoverage.reviewLine}</p>
@@ -6373,38 +6500,38 @@ function RunHistoryPanel({
 
           <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
-              <div className="text-xs text-slate-500 dark:text-zinc-400">Records</div>
+              <div className="text-xs text-slate-500 dark:text-zinc-400">原始记录</div>
               <div className="mt-1 text-lg font-semibold">{goal?.raw_index_records ?? 0}</div>
             </div>
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
-              <div className="text-xs text-slate-500 dark:text-zinc-400">Unique Runs</div>
+              <div className="text-xs text-slate-500 dark:text-zinc-400">独立运行</div>
               <div className="mt-1 text-lg font-semibold">{goal?.unique_runs ?? 0}</div>
             </div>
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
               <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-zinc-400">
                 <FileCheck2 className="h-3.5 w-3.5" />
-                Artifacts
+                产物
               </div>
               <div className="mt-1 text-lg font-semibold">{artifactReady}/{latestRuns.length}</div>
             </div>
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
-              <div className="text-xs text-slate-500 dark:text-zinc-400">Readiness</div>
+              <div className="text-xs text-slate-500 dark:text-zinc-400">就绪度</div>
               <div className="mt-1 text-lg font-semibold">{readinessReady}/{latestRuns.length}</div>
             </div>
             <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800 sm:col-span-4">
-              <div className="text-xs text-slate-500 dark:text-zinc-400">Human Reward</div>
+              <div className="text-xs text-slate-500 dark:text-zinc-400">人工评价</div>
               <div className="mt-1 text-lg font-semibold">{rewardReady}/{latestRuns.length}</div>
             </div>
           </div>
 
           {queueItem ? (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
-              <div className="font-medium">Queue action</div>
+              <div className="font-medium">队列建议动作</div>
               <p className="mt-1 leading-6 text-slate-700 dark:text-zinc-300">{queueItem.recommended_action}</p>
               {queueItem.operator_question ? (
                 <div className="mt-3">
                   <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-zinc-400">
-                    Operator gate
+                    操作者确认
                   </div>
                   <p className="mt-1 leading-6 text-slate-800 dark:text-zinc-200">{queueItem.operator_question}</p>
                 </div>
@@ -6412,7 +6539,7 @@ function RunHistoryPanel({
               {queueItem.agent_command ? (
                 <div className="mt-3">
                   <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-zinc-400">
-                    Agent command
+                    Agent 命令
                   </div>
                   <code className="mt-1 block overflow-x-auto whitespace-pre rounded-md bg-white px-2 py-1.5 text-xs text-slate-700 dark:bg-zinc-950 dark:text-zinc-300">
                     {queueItem.agent_command}
@@ -6441,7 +6568,7 @@ function RunHistoryPanel({
           <div className="space-y-2">
             {latestRuns.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-zinc-700 dark:text-zinc-400">
-                No compact run record yet.
+                还没有精简运行记录。
               </div>
             ) : (
               latestRuns.map((run) => <LatestRun key={`${run.goal_id}-${run.generated_at}`} run={run} />)
@@ -6493,28 +6620,28 @@ function ContractHealthPanel({ contract }: { contract: StatusPayload["contract"]
         <div>
           <CardTitle className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4" />
-            Contract Health
+            状态合同健康度
           </CardTitle>
           <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
-            {contract.ok ? "Public boundary clear" : "Blocking contract issue"}
+            {contract.ok ? "公开边界正常" : "存在阻塞合同问题"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={contract.ok ? "success" : "danger"}>{contract.ok ? "Healthy" : "Blocked"}</Badge>
+          <Badge variant={contract.ok ? "success" : "danger"}>{contract.ok ? "健康" : "已阻塞"}</Badge>
           <Badge variant={contract.errors.length > 0 ? "danger" : "neutral"}>
-            {contract.summary.errors} errors
+            {contract.summary.errors} 个错误
           </Badge>
           <Badge variant={contract.warnings.length > 0 ? "warning" : "neutral"}>
-            {contract.summary.warnings} warnings
+            {contract.summary.warnings} 个警告
           </Badge>
-          <Badge variant="info">{contract.summary.checks} checks</Badge>
+          <Badge variant="info">{contract.summary.checks} 项检查</Badge>
         </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="divide-y divide-slate-200 dark:divide-zinc-800 lg:grid lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-          <HealthFindingList emptyLabel="No blocking errors" items={contract.errors} title="Errors" variant="danger" />
-          <HealthFindingList emptyLabel="No warnings" items={contract.warnings} title="Warnings" variant="warning" />
-          <HealthFindingList emptyLabel="No recent checks" items={checks} title="Checks" variant="info" />
+          <HealthFindingList emptyLabel="没有阻塞错误" items={contract.errors} title="错误" variant="danger" />
+          <HealthFindingList emptyLabel="没有警告" items={contract.warnings} title="警告" variant="warning" />
+          <HealthFindingList emptyLabel="没有最近检查" items={checks} title="检查" variant="info" />
         </div>
       </CardContent>
     </Card>
@@ -6533,34 +6660,34 @@ function GlobalRegistryHealthPanel({ health }: { health: GlobalRegistryHealth })
         <div>
           <CardTitle className="flex items-center gap-2">
             <GitBranch className="h-4 w-4" />
-            Global Registry
+            全局注册表
           </CardTitle>
           <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
-            {health.available ? "Shared multi-project registry health" : "Global registry not found"}
+            {health.available ? "共享多项目注册表健康状态" : "没有找到全局注册表"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={health.ok ? "success" : "danger"}>{health.ok ? "Healthy" : "Blocked"}</Badge>
-          <Badge variant="info">{health.global_goal_count} goals</Badge>
-          <Badge variant={summary.action > 0 ? "warning" : "neutral"}>{summary.action} actions</Badge>
-          <Badge variant={summary.high > 0 ? "danger" : "neutral"}>{summary.high} high</Badge>
-          <Badge variant="neutral">{summary.info} info</Badge>
+          <Badge variant={health.ok ? "success" : "danger"}>{health.ok ? "健康" : "已阻塞"}</Badge>
+          <Badge variant="info">{health.global_goal_count} 个 Goal</Badge>
+          <Badge variant={summary.action > 0 ? "warning" : "neutral"}>{summary.action} 个需处理</Badge>
+          <Badge variant={summary.high > 0 ? "danger" : "neutral"}>{summary.high} 个高严重级别</Badge>
+          <Badge variant="neutral">{summary.info} 条信息</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 text-sm md:grid-cols-3">
           <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
-            <div className="text-xs text-slate-500 dark:text-zinc-400">Registry Scope</div>
+            <div className="text-xs text-slate-500 dark:text-zinc-400">注册表范围</div>
             <div className="mt-1 font-medium">
-              {health.current_registry_is_global ? "Global" : "Project-local"}
+              {health.current_registry_is_global ? "全局" : "项目本地"}
             </div>
           </div>
           <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
-            <div className="text-xs text-slate-500 dark:text-zinc-400">Source Registries</div>
+            <div className="text-xs text-slate-500 dark:text-zinc-400">来源注册表</div>
             <div className="mt-1 font-medium">{health.source_registry_count}</div>
           </div>
           <div className="rounded-lg border border-slate-200 p-3 dark:border-zinc-800">
-            <div className="text-xs text-slate-500 dark:text-zinc-400">Checks</div>
+            <div className="text-xs text-slate-500 dark:text-zinc-400">检查</div>
             <div className="mt-1 font-medium">{summary.checks}</div>
           </div>
         </div>
@@ -6573,7 +6700,7 @@ function GlobalRegistryHealthPanel({ health }: { health: GlobalRegistryHealth })
                 key={`${finding.kind}-${finding.goal_id ?? finding.goal_ids.join(",")}-${finding.message}`}
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={severityVariant[finding.severity] ?? "info"}>{finding.severity}</Badge>
+                  <Badge variant={severityVariant[finding.severity] ?? "info"}>{severityLabel[finding.severity] ?? finding.severity}</Badge>
                   <span className="font-medium">{finding.kind}</span>
                   {finding.goal_id ? <span className="break-all text-slate-500 dark:text-zinc-400">{finding.goal_id}</span> : null}
                 </div>
@@ -6594,7 +6721,7 @@ function GlobalRegistryHealthPanel({ health }: { health: GlobalRegistryHealth })
             ))}
           </div>
         ) : (
-          <p className="text-sm text-slate-500 dark:text-zinc-400">No stale source registry, missing state file, or duplicate goal id found.</p>
+          <p className="text-sm text-slate-500 dark:text-zinc-400">没有发现过期来源注册表、缺失状态文件或重复 Goal ID。</p>
         )}
 
         {checks.length > 0 ? (
@@ -6609,16 +6736,91 @@ function GlobalRegistryHealthPanel({ health }: { health: GlobalRegistryHealth })
   );
 }
 
+function StatusRequestView({
+  error,
+  isLoading,
+  onReset,
+  onRetry,
+  requestedUrl,
+  theme,
+  toggleTheme,
+}: {
+  error: string | null;
+  isLoading: boolean;
+  onReset: () => void;
+  onRetry: () => void;
+  requestedUrl: string;
+  theme: "light" | "dark";
+  toggleTheme: () => void;
+}) {
+  return (
+    <div className={theme === "dark" ? "dark" : ""}>
+      <main className="min-h-screen bg-[#f6f7f9] text-slate-950 dark:bg-[#09090b] dark:text-zinc-50">
+        <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
+          <div>
+            <h1 className="text-xl font-semibold">LoopX 看板</h1>
+            <p className="mt-1 break-all text-sm text-slate-500 dark:text-zinc-400">{requestedUrl}</p>
+          </div>
+          <Button aria-label="切换主题" onClick={toggleTheme} size="icon" variant="secondary">
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </Button>
+        </header>
+        <div className="mx-auto max-w-3xl p-4 sm:p-6">
+          <Card data-testid="initial-status-state">
+            <CardContent className="flex min-h-64 items-center justify-center p-6">
+              <div className="max-w-xl text-center">
+                {error ? (
+                  <CircleAlert className="mx-auto h-6 w-6 text-rose-600 dark:text-rose-300" />
+                ) : (
+                  <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-500 dark:text-zinc-400" />
+                )}
+                <p className="mt-3 text-sm font-medium">
+                  {error ? "无法加载实时状态" : "正在加载实时状态"}
+                </p>
+                {error ? (
+                  <>
+                    <p className="mt-2 break-words text-sm leading-6 text-slate-500 dark:text-zinc-400">{error}</p>
+                    <div className="mt-4 flex flex-wrap justify-center gap-2">
+                      <Button disabled={isLoading} onClick={onRetry}>
+                        <RefreshCw className="h-4 w-4" />
+                        重试
+                      </Button>
+                      <Button disabled={isLoading} onClick={onReset} variant="ghost">
+                        使用示例
+                      </Button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const search = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [payload, setPayload] = useState<StatusPayload>(exampleStatusPayload);
-  const [source, setSource] = useState<DataSource>({ kind: "example", label: "bundled example" });
+  const [source, setSource] = useState<DataSource>({ kind: "example", label: "内置示例" });
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [requestedStatusUrl, setRequestedStatusUrl] = useState<string | null>(
+    search.statusUrl.trim() || null,
+  );
+  const [exampleModeRequested, setExampleModeRequested] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const suppressedStatusUrlRef = useRef<string | null>(null);
+  const routeStatusRequestUrl = !exampleModeRequested && source.kind === "example"
+    ? search.statusUrl.trim()
+    : "";
+  const activeStatusRequestUrl = requestedStatusUrl ?? routeStatusRequestUrl;
+  const statusRequestActive = Boolean(activeStatusRequestUrl);
+  const refreshStatusUrl = source.kind === "url" ? source.label : search.statusUrl.trim();
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
   const goalRows = useMemo(
@@ -6631,15 +6833,18 @@ export function DashboardPage() {
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
     if (!trimmed) {
-      setLoadError("status URL is empty");
+      setLoadError("状态地址不能为空");
       return;
     }
+    suppressedStatusUrlRef.current = null;
+    setExampleModeRequested(false);
+    setRequestedStatusUrl(trimmed);
     setIsLoading(true);
     setLoadError(null);
     try {
       const response = await fetch(trimmed, { cache: "no-store" });
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} while loading ${trimmed}`);
+        throw new Error(`加载 ${trimmed} 时返回 HTTP ${response.status}`);
       }
       const nextPayload = parseStatusPayload(await response.json());
       setPayload(nextPayload);
@@ -6652,6 +6857,7 @@ export function DashboardPage() {
           view: routeViewForUrl(currentRouteView(current)),
         }),
       });
+      setRequestedStatusUrl(null);
     } catch (error) {
       setLoadError(formatStatusError(error));
     } finally {
@@ -6660,6 +6866,8 @@ export function DashboardPage() {
   }
 
   async function loadFromFile(file: File) {
+    suppressedStatusUrlRef.current = null;
+    setExampleModeRequested(false);
     setIsLoading(true);
     setLoadError(null);
     try {
@@ -6677,9 +6885,12 @@ export function DashboardPage() {
   }
 
   function resetToExample() {
+    suppressedStatusUrlRef.current = search.statusUrl.trim() || null;
+    setExampleModeRequested(true);
     setPayload(exampleStatusPayload);
-    setSource({ kind: "example", label: "bundled example" });
+    setSource({ kind: "example", label: "内置示例" });
     setStatusUrl("");
+    setRequestedStatusUrl(null);
     setLoadError(null);
     void navigate({
       search: (current) => ({
@@ -6693,15 +6904,22 @@ export function DashboardPage() {
   useEffect(() => {
     const trimmedStatusUrl = search.statusUrl.trim();
     if (trimmedStatusUrl) {
+      if (suppressedStatusUrlRef.current === trimmedStatusUrl) {
+        return;
+      }
       if (source.kind !== "url" || source.label !== trimmedStatusUrl) {
         void loadFromUrl(trimmedStatusUrl);
       }
       return;
     }
+    suppressedStatusUrlRef.current = null;
+    if (exampleModeRequested) {
+      return;
+    }
     if (search.view !== "ops" && source.kind === "example") {
       void loadFromUrl(defaultGlobalStatusUrl);
     }
-  }, [search.statusUrl, search.view, source.kind, source.label]);
+  }, [exampleModeRequested, search.statusUrl, search.view, source.kind, source.label]);
 
   useEffect(() => {
     if (search.statusUrl && source.kind === "example") {
@@ -6772,6 +6990,20 @@ export function DashboardPage() {
     });
   }
 
+  if (statusRequestActive) {
+    return (
+      <StatusRequestView
+        error={loadError}
+        isLoading={isLoading}
+        onReset={resetToExample}
+        onRetry={() => void loadFromUrl(activeStatusRequestUrl)}
+        requestedUrl={activeStatusRequestUrl}
+        theme={theme}
+        toggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+      />
+    );
+  }
+
   if (search.view !== "ops") {
     return (
       <ShareEvidenceView
@@ -6797,13 +7029,13 @@ export function DashboardPage() {
               </div>
               <div>
                 <div className="text-sm font-semibold">LoopX</div>
-                <div className="text-xs text-zinc-400">Local control plane</div>
+                <div className="text-xs text-zinc-400">本机控制面</div>
               </div>
             </div>
             <nav className="flex gap-1 px-3 pb-3 lg:block lg:space-y-1 lg:pb-0">
               <a className="flex items-center gap-2 rounded-md bg-white/10 px-3 py-2 text-sm font-medium text-white" href="/">
                 <LayoutDashboard className="h-4 w-4" />
-                Dashboard
+                看板
               </a>
             </nav>
           </aside>
@@ -6811,22 +7043,22 @@ export function DashboardPage() {
           <main className="min-w-0">
             <header className="sticky top-0 z-10 flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90 sm:px-6">
               <div>
-                <h1 className="text-2xl font-semibold">Goal Operations</h1>
-                <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">
-                  {payload.registry} · {payload.runtime_root}
+                <h1 className="text-2xl font-semibold">Goal 控制台</h1>
+                <p className="mt-1 break-all text-sm text-slate-500 dark:text-zinc-400">
+                  {`${payload.registry} · ${payload.runtime_root}`}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="icon" variant="secondary" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Toggle theme">
+                <Button size="icon" variant="secondary" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="切换主题">
                   {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </Button>
                 <Button
                   disabled={isLoading}
-                  onClick={() => (source.kind === "url" ? void loadFromUrl(source.label) : resetToExample())}
+                  onClick={() => (refreshStatusUrl ? void loadFromUrl(refreshStatusUrl) : resetToExample())}
                   variant="primary"
                 >
                   <RefreshCw className="h-4 w-4" />
-                  Refresh
+                  刷新
                 </Button>
               </div>
             </header>
@@ -6918,13 +7150,13 @@ export function DashboardPage() {
               </section>
 
               <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <MetricCard icon={payload.ok ? CheckCircle2 : CircleAlert} label="Status" value={payload.ok ? "Healthy" : "Blocked"} tone={payload.ok ? "success" : "danger"} />
-                <MetricCard icon={GitBranch} label="Goals" value={String(payload.goal_count)} tone="neutral" />
-                <MetricCard icon={Clock3} label="Runs" value={String(payload.run_count)} tone="info" />
-                <MetricCard icon={FileJson2} label="Queue" value={String(queue.item_count)} tone="warning" />
+                <MetricCard icon={payload.ok ? CheckCircle2 : CircleAlert} label="状态" value={payload.ok ? "健康" : "已阻塞"} tone={payload.ok ? "success" : "danger"} />
+                <MetricCard icon={GitBranch} label="Goal 数量" value={String(payload.goal_count)} tone="neutral" />
+                <MetricCard icon={Clock3} label="运行次数" value={String(payload.run_count)} tone="info" />
+                <MetricCard icon={FileJson2} label="队列项" value={String(queue.item_count)} tone="warning" />
               </section>
 
-              <div className="grid gap-4 xl:grid-cols-4">
+              <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                 <UsageStatsPanel usage={payload.usage_summary} />
                 <EventLedgerSummaryPanel summary={payload.event_ledger_summary} />
                 <PromotionReadinessSummaryPanel summary={payload.promotion_readiness_summary} />
@@ -6942,13 +7174,13 @@ export function DashboardPage() {
                 <CardContent className="pt-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={source.kind === "example" ? "neutral" : "success"}>Source</Badge>
+                      <Badge variant={source.kind === "example" ? "neutral" : "success"}>数据来源</Badge>
                       <span className="break-all text-sm font-medium">{source.label}</span>
                       {loadError ? <Badge variant="danger">{loadError.slice(0, 120)}</Badge> : null}
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                       <input
-                        aria-label="Status URL"
+                        aria-label="状态地址"
                         className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-slate-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-zinc-500 sm:min-w-72 sm:flex-1 lg:w-80 lg:flex-none"
                         onChange={(event) => setStatusUrl(event.target.value)}
                         placeholder={defaultLiveStatusUrl}
@@ -6956,7 +7188,7 @@ export function DashboardPage() {
                       />
                       <Button disabled={isLoading} onClick={() => void loadFromUrl(statusUrl)}>
                         <Link2 className="h-4 w-4" />
-                        Load URL
+                        加载地址
                       </Button>
                       <input
                         accept="application/json,.json"
@@ -6972,13 +7204,13 @@ export function DashboardPage() {
                       />
                       <Button disabled={isLoading} onClick={() => fileInputRef.current?.click()}>
                         <Upload className="h-4 w-4" />
-                        Import JSON
+                        导入 JSON
                       </Button>
                       <Button disabled={isLoading} onClick={resetToExample} variant="ghost">
-                        Example
+                        示例
                       </Button>
                       <Button disabled={isLoading} onClick={() => void loadFromUrl(defaultLiveStatusUrl)} variant="ghost">
-                        Live
+                        实时
                       </Button>
                     </div>
                   </div>
@@ -6988,7 +7220,7 @@ export function DashboardPage() {
               <Card>
                 <CardHeader>
                   <div>
-                    <CardTitle>Attention Lanes</CardTitle>
+                    <CardTitle>关注分区</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -7007,7 +7239,7 @@ export function DashboardPage() {
                           </div>
                           <div className="mt-3 space-y-2">
                             {items.length === 0 ? (
-                              <p className="text-sm opacity-70">Clear</p>
+                              <p className="text-sm opacity-70">无需处理</p>
                             ) : (
                               items.map((item) => (
                                 <button
@@ -7034,14 +7266,14 @@ export function DashboardPage() {
               </Card>
 
               <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-                <Card>
+                <Card className="min-w-0">
                   <CardHeader className="flex-wrap">
                     <div>
-                      <CardTitle>Attention Queue</CardTitle>
+                      <CardTitle>关注队列</CardTitle>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Select
-                        aria-label="Lane filter"
+                        aria-label="分区筛选"
                         value={search.lane}
                         onChange={(event) =>
                           navigate({
@@ -7052,13 +7284,13 @@ export function DashboardPage() {
                           })
                         }
                       >
-                        <option value="all">All lanes</option>
-                        <option value="user">User / Controller</option>
-                        <option value="codex">Codex Ready</option>
-                        <option value="watch">Watching Evidence</option>
+                        <option value="all">全部分区</option>
+                        <option value="user">用户 / 控制者</option>
+                        <option value="codex">Codex 可执行</option>
+                        <option value="watch">等待外部证据</option>
                       </Select>
                       <Select
-                        aria-label="Severity filter"
+                        aria-label="严重级别筛选"
                         value={search.severity}
                         onChange={(event) =>
                           navigate({
@@ -7069,10 +7301,10 @@ export function DashboardPage() {
                           })
                         }
                       >
-                        <option value="all">All severity</option>
-                        <option value="high">High</option>
-                        <option value="action">Action</option>
-                        <option value="watch">Watch</option>
+                        <option value="all">全部严重级别</option>
+                        <option value="high">高</option>
+                        <option value="action">需处理</option>
+                        <option value="watch">观察中</option>
                       </Select>
                     </div>
                   </CardHeader>
@@ -7081,9 +7313,9 @@ export function DashboardPage() {
                   </CardContent>
                 </Card>
 
-                <div className="space-y-3">
+                <div className="min-w-0 space-y-3">
                   {runHistoryOptions.length > 0 ? (
-                    <Select aria-label="Run history goal" onChange={(event) => selectGoal(event.target.value)} value={selectedGoalId}>
+                    <Select aria-label="运行历史 Goal" onChange={(event) => selectGoal(event.target.value)} value={selectedGoalId}>
                       {runHistoryOptions.map((goalId) => (
                         <option key={goalId} value={goalId}>
                           {goalId}
@@ -7135,7 +7367,7 @@ function UsageMetric({
   return (
     <div className="min-h-20 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="text-xs font-medium uppercase text-slate-500 dark:text-zinc-400">{label}</div>
-      <div className="mt-2 break-words text-2xl font-semibold text-slate-950 dark:text-zinc-50">{value}</div>
+      <div className="mt-2 break-words text-xl font-semibold text-slate-950 dark:text-zinc-50">{value}</div>
     </div>
   );
 }
@@ -7155,12 +7387,12 @@ function EventLedgerSummaryPanel({ summary }: { summary?: EventLedgerSummary | n
         </CardTitle>
         <div className="flex flex-wrap gap-2">
           <Badge variant="info">{summary.source}</Badge>
-          <Badge variant="neutral">{summary.sample_run_count} samples</Badge>
+          <Badge variant="neutral">{summary.sample_run_count} 个样本</Badge>
         </div>
       </CardHeader>
       <CardContent>
         <p className="mb-3 text-sm leading-6 text-slate-600 dark:text-zinc-300">
-          Chat thread 不是 source of truth；这里是 run history 的 compact 投影，用来判断最近事实是推进、证据、决策、状态还是花费。
+          对话任务不是事实来源；这里是运行历史的精简投影，用来判断最近变化属于推进、证据、决策、状态还是花费。
         </p>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {eventClassOrder.map((eventClass) => (
@@ -7172,12 +7404,15 @@ function EventLedgerSummaryPanel({ summary }: { summary?: EventLedgerSummary | n
           ))}
         </div>
         {topGoals.length ? (
-          <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-800">
+          <div
+            className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-800"
+            data-testid="event-ledger-goal-table"
+          >
             <div className="grid grid-cols-[minmax(0,1fr)_72px_72px_92px] gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
               <div>Goal</div>
               <div className="text-right">24h</div>
               <div className="text-right">7d</div>
-              <div className="text-right">Latest</div>
+              <div className="text-right">最近事件</div>
             </div>
             <div className="divide-y divide-slate-200 dark:divide-zinc-800">
               {topGoals.map((goal) => (
@@ -7188,7 +7423,7 @@ function EventLedgerSummaryPanel({ summary }: { summary?: EventLedgerSummary | n
                   <div className="min-w-0 break-all font-medium text-slate-900 dark:text-zinc-100">{goal.goal_id}</div>
                   <div className="text-right text-slate-600 dark:text-zinc-300">{goal.events_24h}</div>
                   <div className="text-right text-slate-600 dark:text-zinc-300">{goal.events_7d}</div>
-                  <div className="text-right text-slate-600 dark:text-zinc-300">{eventClassLabel[goal.latest_event_class as EventLedgerClass] ?? goal.latest_event_class ?? "unknown"}</div>
+                  <div className="text-right text-slate-600 dark:text-zinc-300">{eventClassLabel[goal.latest_event_class as EventLedgerClass] ?? goal.latest_event_class ?? "未知"}</div>
                 </div>
               ))}
             </div>
@@ -7222,40 +7457,59 @@ function promotionGateVariant(gate: PromotionGate): "success" | "warning" | "dan
   return "danger";
 }
 
+function promotionFreshnessLabel(value?: string | null) {
+  return {
+    fresh: "最新",
+    stale: "已过期",
+    missing: "缺失",
+    unknown: "未知",
+  }[value ?? "unknown"] ?? value ?? "未知";
+}
+
+function promotionGateStateLabel(value?: string | null) {
+  return {
+    clear: "可晋级",
+    ready: "可晋级",
+    blocked: "已阻塞",
+    warning: "需检查",
+    unknown: "未知",
+  }[value ?? "unknown"] ?? value ?? "未知";
+}
+
 function PromotionReadinessSummaryPanel({ summary }: { summary?: PromotionReadinessSummary | null }) {
   if (!summary) {
     return null;
   }
   const variant = promotionReadinessVariant(summary);
-  const status = summary.freshness_status ?? "unknown";
-  const age = summary.age_hours == null ? "n/a" : `${summary.age_hours}h`;
+  const status = promotionFreshnessLabel(summary.freshness_status);
+  const age = summary.age_hours == null ? "无" : `${summary.age_hours} 小时`;
   return (
     <Card>
       <CardHeader className="flex-wrap">
         <CardTitle className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4" />
-          Promotion readiness
+          晋级就绪度
         </CardTitle>
         <div className="flex flex-wrap gap-2">
           <Badge variant={variant}>{status}</Badge>
           <Badge variant={summary.requires_readiness_run ? "warning" : "success"}>
-            {summary.requires_readiness_run ? "rerun needed" : "ready"}
+            {summary.requires_readiness_run ? "需要重新运行" : "已就绪"}
           </Badge>
         </div>
       </CardHeader>
       <CardContent>
         <p className="mb-3 text-sm leading-6 text-slate-600 dark:text-zinc-300">
-          这里从同一份 append-only run history 观察 canary promotion readiness；chat thread 和安装器日志都不是 source of truth。
+          这里从同一份只追加运行历史中观察灰度版本的晋级就绪度；对话任务和安装器日志都不是事实来源。
         </p>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <UsageMetric label="Freshness" value={status} />
-          <UsageMetric label="Age" value={age} />
-          <UsageMetric label="Samples" value={formatUsageCount(summary.sample_run_count)} />
+          <UsageMetric label="新鲜度" value={status} />
+          <UsageMetric label="距今时间" value={age} />
+          <UsageMetric label="样本数" value={formatUsageCount(summary.sample_run_count)} />
         </div>
         <div className="mt-4 space-y-1 text-xs text-slate-500 dark:text-zinc-400">
-          <div className="break-all">goal={summary.goal_id ?? "none"}</div>
-          <div>window={summary.freshness_window_hours ?? 24}h · artifacts={String(Boolean(summary.json_exists))}/{String(Boolean(summary.markdown_exists))}</div>
-          {summary.generated_at ? <div>generated_at={summary.generated_at}</div> : null}
+          <div className="break-all">Goal={summary.goal_id ?? "无"}</div>
+          <div>检查窗口={summary.freshness_window_hours ?? 24} 小时 · 产物={String(Boolean(summary.json_exists))}/{String(Boolean(summary.markdown_exists))}</div>
+          {summary.generated_at ? <div>生成时间={summary.generated_at}</div> : null}
           {summary.reason ? <div>{summary.reason}</div> : null}
           {summary.proxy_note ? <div>{summary.proxy_note}</div> : null}
         </div>
@@ -7270,32 +7524,32 @@ function PromotionGatePanel({ gate }: { gate?: PromotionGate | null }) {
   }
   const readiness = gate.readiness;
   const variant = promotionGateVariant(gate);
-  const freshness = readiness?.freshness_status ?? "unknown";
-  const age = readiness?.age_hours == null ? "n/a" : `${readiness.age_hours}h`;
+  const freshness = promotionFreshnessLabel(readiness?.freshness_status);
+  const age = readiness?.age_hours == null ? "无" : `${readiness.age_hours} 小时`;
   return (
     <Card>
       <CardHeader className="flex-wrap">
         <CardTitle className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4" />
-          Promotion gate
+          晋级确认
         </CardTitle>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={variant}>{gate.gate_state ?? "unknown"}</Badge>
+          <Badge variant={variant}>{promotionGateStateLabel(gate.gate_state)}</Badge>
           <Badge variant={gate.can_promote ? "success" : "warning"}>
-            {gate.can_promote ? "promote ok" : "check first"}
+            {gate.can_promote ? "可以晋级" : "需要先检查"}
           </Badge>
         </div>
       </CardHeader>
       <CardContent>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <UsageMetric label="Can promote" value={gate.can_promote ? "yes" : "no"} />
-          <UsageMetric label="Freshness" value={freshness} />
-          <UsageMetric label="Age" value={age} />
+          <UsageMetric label="是否可晋级" value={gate.can_promote ? "是" : "否"} />
+          <UsageMetric label="新鲜度" value={freshness} />
+          <UsageMetric label="距今时间" value={age} />
         </div>
         <div className="mt-4 space-y-1 text-xs text-slate-500 dark:text-zinc-400">
-          <div>should_warn={String(gate.should_warn)} · non_blocking={String(gate.non_blocking)}</div>
-          {readiness?.generated_at ? <div>generated_at={readiness.generated_at}</div> : null}
-          {gate.recommended_action ? <div className="break-words">action={gate.recommended_action}</div> : null}
+          <div>需要警告={String(gate.should_warn)} · 非阻塞={String(gate.non_blocking)}</div>
+          {readiness?.generated_at ? <div>生成时间={readiness.generated_at}</div> : null}
+          {gate.recommended_action ? <div className="break-words">建议动作={gate.recommended_action}</div> : null}
           {gate.warning_message ? <div className="break-words text-amber-700 dark:text-amber-300">{gate.warning_message}</div> : null}
         </div>
       </CardContent>
@@ -7323,32 +7577,35 @@ function DecisionFreshnessSummaryPanel({ summary }: { summary?: DecisionFreshnes
       <CardHeader className="flex-wrap">
         <CardTitle className="flex items-center gap-2">
           <RotateCcw className="h-4 w-4" />
-          决策 freshness
+          决策新鲜度
         </CardTitle>
         <div className="flex flex-wrap gap-2">
           <Badge variant={counts.rebase_required_count > 0 ? "warning" : "success"}>
-            rebase {counts.rebase_required_count}
+            需重新确认 {counts.rebase_required_count}
           </Badge>
-          <Badge variant="neutral">{summary.window_days}d window</Badge>
+          <Badge variant="neutral">{summary.window_days} 天窗口</Badge>
         </div>
       </CardHeader>
       <CardContent>
         <p className="mb-3 text-sm leading-6 text-slate-600 dark:text-zinc-300">
-          这里看旧 reward / gate 是否需要在审批或转交前重读当前控制面状态；exact replay 仍回到 append-only run history。
+          这里检查旧评价或确认是否需要在审批、转交前重读当前控制面状态；精确回放仍以只追加运行历史为准。
         </p>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <UsageMetric label="Decisions" value={formatUsageCount(counts.decision_count)} />
-          <UsageMetric label="Stale" value={formatUsageCount(counts.stale_count)} />
-          <UsageMetric label="Rebase" value={formatUsageCount(counts.rebase_required_count)} />
-          <UsageMetric label="Fresh" value={formatUsageCount(counts.fresh_count)} />
+          <UsageMetric label="决策数" value={formatUsageCount(counts.decision_count)} />
+          <UsageMetric label="已过期" value={formatUsageCount(counts.stale_count)} />
+          <UsageMetric label="需重新确认" value={formatUsageCount(counts.rebase_required_count)} />
+          <UsageMetric label="仍然有效" value={formatUsageCount(counts.fresh_count)} />
         </div>
         {topItems.length ? (
-          <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-800">
+          <div
+            className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-800"
+            data-testid="decision-freshness-table"
+          >
             <div className="grid grid-cols-[minmax(0,1fr)_92px_72px_72px] gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
               <div>Goal</div>
-              <div className="text-right">State</div>
-              <div className="text-right">Events</div>
-              <div className="text-right">Age</div>
+              <div className="text-right">状态</div>
+              <div className="text-right">事件</div>
+              <div className="text-right">距今天数</div>
             </div>
             <div className="divide-y divide-slate-200 dark:divide-zinc-800">
               {topItems.map((item, index) => (
@@ -7375,7 +7632,7 @@ function DecisionFreshnessSummaryPanel({ summary }: { summary?: DecisionFreshnes
           </div>
         ) : (
           <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
-            当前样本里没有需要 rebase 的 checkpointed decision。
+            当前样本里没有需要重新确认的检查点决策。
           </div>
         )}
         {summary.proxy_note ? (
@@ -7397,38 +7654,41 @@ function UsageStatsPanel({ usage }: { usage?: UsageSummary | null }) {
       <CardHeader className="flex-wrap">
         <CardTitle className="flex items-center gap-2">
           <Gauge className="h-4 w-4" />
-          Usage Snapshot
+          使用情况快照
         </CardTitle>
         <div className="flex flex-wrap gap-2">
           <Badge variant="info">{usage.source}</Badge>
-          <Badge variant="neutral">{usage.sample_run_count} samples</Badge>
+          <Badge variant="neutral">{usage.sample_run_count} 个样本</Badge>
         </div>
       </CardHeader>
       <CardContent>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <UsageMetric label="24h turns" value={formatUsageCount(totals.runs_24h)} />
-          <UsageMetric label="7d turns" value={formatUsageCount(totals.runs_7d)} />
+          <UsageMetric label="24 小时运行" value={formatUsageCount(totals.runs_24h)} />
+          <UsageMetric label="7 天运行" value={formatUsageCount(totals.runs_7d)} />
           <UsageMetric
-            label="Quota slots"
+            label="配额槽位"
             value={`${formatUsageCount(totals.quota_spend_slots_24h)} / ${formatUsageCount(totals.quota_spend_slots_7d)}`}
           />
           <UsageMetric
-            label="Automation"
+            label="自动化运行"
             value={`${formatUsageCount(totals.automation_run_count_24h)} / ${formatUsageCount(totals.automation_run_count_7d)}`}
           />
           <UsageMetric
-            label="Progress"
+            label="有进展运行"
             value={`${formatUsageCount(totals.progress_signal_run_count_24h)} / ${formatUsageCount(totals.progress_signal_run_count_7d)}`}
           />
         </div>
         {topGoals.length ? (
-          <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-800">
+          <div
+            className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-800"
+            data-testid="usage-goal-table"
+          >
             <div className="grid grid-cols-[minmax(0,1fr)_70px_70px_80px_80px] gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
               <div>Goal</div>
               <div className="text-right">24h</div>
               <div className="text-right">7d</div>
-              <div className="text-right">Progress</div>
-              <div className="text-right">Share</div>
+              <div className="text-right">进展</div>
+              <div className="text-right">占比</div>
             </div>
             <div className="divide-y divide-slate-200 dark:divide-zinc-800">
               {topGoals.map((goal) => (

@@ -114,6 +114,13 @@ contract. Do not handle `/loopx-pr-review` from this broader project skill, and
 do not route it to `loopx-pr-merge` unless the user later asks to approve,
 comment on, merge, self-merge, or admin-bypass a specific PR.
 
+When the request asks to inventory, prioritize, document, or continuously
+monitor a delivery program spanning several PRs or MRs, load the narrower
+`loopx-pr-program` skill after the project goal transaction is established.
+That skill owns provider-neutral snapshots, grouped monitor state, material
+change detection, and roadmap projection. Keep deep per-change review in
+`loopx-pr-review` and provider mutations in the separately authorized workflow.
+
 When a user has just connected a project, receives a guided start packet, or
 receives a bootstrap command pack for the first time, briefly tell them the
 usable commands instead of assuming they will inspect CLI help:

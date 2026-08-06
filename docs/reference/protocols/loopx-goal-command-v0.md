@@ -39,6 +39,17 @@ When the user provides text after `/loopx`, the host should:
    - `opencode`: call `loopx_goal_activate` from the installed LoopX OpenCode
      bridge; the bridge gates idle continuation and timer wakes through
      `quota should-run` and completes only on validated terminal no-follow-up.
+   - `traex-cli`: set the visible TraeX TUI to `/goal <task_body>` through the
+     TraeX visible-goal renderer while quota remains bound to the generic
+     `generic_cli` runtime profile. TraeX `/goal` requires
+     `[features] goals = true` in `~/.trae/traecli.toml`; if goal mode is off,
+     show the pasteable `/goal <task_body>` gate. Do not route to `/loop`
+     unless a verified LoopX adapter is installed. LoopX ships no Codex App
+     automation and no slash-command installer for TraeX; it loads skills
+     from `~/.trae/skills`.
+   - `pi`: call `loopx_goal_activate` from the installed LoopX Pi extension;
+     the extension gates settled continuations and timer wakes through
+     `quota should-run` and stops only on validated terminal no-follow-up.
    - `manual` / `other-agent`: wire the external loop driver described by
      `loopx agent-onboard`.
 7. If the host cannot mutate that surface, report the exact pasteable gate

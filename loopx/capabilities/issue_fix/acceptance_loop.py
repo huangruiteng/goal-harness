@@ -153,6 +153,64 @@ def _git_status_lines(workspace: Path) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
+def _git_ref_oid(workspace: Path, ref: str) -> str:
+    result = _run_git_capture(
+        workspace, ["rev-parse", "--verify", f"{ref}^{{commit}}"]
+    )
+    oid = result.stdout.strip()
+    if not oid:
+        raise RuntimeError(f"git ref {ref} did not resolve to a commit")
+    return oid
+
+
+def _base_snapshot(workspace: Path, base_branch: str) -> dict[str, Any]:
+    base_revision = _git_ref_oid(workspace, base_branch)
+    upstream = _run_git_capture(
+        workspace,
+        [
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            f"refs/heads/{base_branch}",
+        ],
+    )
+    tracking_ref = upstream.stdout.strip() or None
+    tracking_revision = (
+        _git_ref_oid(workspace, tracking_ref) if tracking_ref is not None else None
+    )
+    if tracking_revision is None:
+        relation = "no_tracking_ref"
+    elif tracking_revision == base_revision:
+        relation = "current"
+    else:
+        base_is_ancestor = _run_git_capture(
+            workspace,
+            ["merge-base", "--is-ancestor", base_revision, tracking_revision],
+            expected_exit_codes=(0, 1),
+        ).returncode == 0
+        tracking_is_ancestor = _run_git_capture(
+            workspace,
+            ["merge-base", "--is-ancestor", tracking_revision, base_revision],
+            expected_exit_codes=(0, 1),
+        ).returncode == 0
+        if base_is_ancestor:
+            relation = "behind_tracking_ref"
+        elif tracking_is_ancestor:
+            relation = "ahead_of_tracking_ref"
+        else:
+            relation = "diverged_from_tracking_ref"
+    return {
+        "schema_version": "issue_fix_base_snapshot_v0",
+        "base_branch": base_branch,
+        "base_revision": base_revision,
+        "tracking_ref": tracking_ref,
+        "tracking_revision": tracking_revision,
+        "relation": relation,
+        "tracking_ref_refresh_performed": False,
+        "external_remote_used": False,
+        "local_path_captured": False,
+    }
+
+
 def _changed_files(workspace: Path, *, base_branch: str) -> tuple[list[str], bool]:
     files: list[str] = []
     truncated = False
@@ -603,6 +661,17 @@ def build_issue_fix_caller_repo_branch_packet(
         "local_path_captured": False,
     }
     branch_action = "dry_run"
+    base_snapshot: dict[str, Any] = {
+        "schema_version": "issue_fix_base_snapshot_v0",
+        "base_branch": base,
+        "base_revision": None,
+        "tracking_ref": None,
+        "tracking_revision": None,
+        "relation": "not_inspected",
+        "tracking_ref_refresh_performed": False,
+        "external_remote_used": False,
+        "local_path_captured": False,
+    }
     changed_files: list[str] = []
     changed_files_truncated = False
 
@@ -614,6 +683,8 @@ def build_issue_fix_caller_repo_branch_packet(
         dirty_before = bool(_git_status_lines(workspace))
         branch_exists = _git_branch_exists(workspace, branch)
         base_exists = _git_branch_exists(workspace, base)
+        if base_exists:
+            base_snapshot = _base_snapshot(workspace, base)
         if current_branch == branch:
             branch_action = "claimed_current"
         else:
@@ -630,13 +701,24 @@ def build_issue_fix_caller_repo_branch_packet(
             else:
                 if not base_exists:
                     raise RuntimeError("base_branch does not exist in the approved local repo")
-                if current_branch != base:
-                    step = _run_git_step(workspace, ["checkout", base], "git checkout approved base branch")
-                    git_steps.append(step)
-                    _require_passed(step)
-                step = _run_git_step(workspace, ["checkout", "-b", branch], "git create approved issue branch")
+                if base_snapshot["relation"] not in {"current", "no_tracking_ref"}:
+                    raise RuntimeError(
+                        "refusing to create an issue branch because base_branch does "
+                        "not match its local tracking ref; refresh or reconcile the "
+                        "approved base, then rerun"
+                    )
+                base_revision = str(base_snapshot["base_revision"])
+                step = _run_git_step(
+                    workspace,
+                    ["checkout", "-b", branch, base_revision],
+                    "git create approved issue branch from base snapshot",
+                )
                 git_steps.append(step)
                 _require_passed(step)
+                if _git_ref_oid(workspace, branch) != base_revision:
+                    raise RuntimeError(
+                        "created issue branch does not match the approved base snapshot"
+                    )
                 branch_action = "created"
         if not validation_command:
             raise ValueError("validation_command is required when --execute is used")
@@ -663,6 +745,7 @@ def build_issue_fix_caller_repo_branch_packet(
         "issue_branch": branch,
         "branch_action": branch_action,
         "branch_ready": execute and branch_action in {"claimed_current", "claimed_existing", "created"},
+        "base_snapshot": base_snapshot,
         "external_remote_used": False,
         "local_path_captured": False,
         "validation": validation_command_result,
@@ -842,6 +925,28 @@ def validate_issue_fix_caller_repo_branch_packet(packet: Mapping[str, Any]) -> d
         errors.append("caller repo branch must not use external remote")
     if artifact.get("local_path_captured") is not False:
         errors.append("caller repo branch local path must not be captured")
+    base_snapshot = (
+        artifact.get("base_snapshot")
+        if isinstance(artifact.get("base_snapshot"), Mapping)
+        else {}
+    )
+    if base_snapshot.get("schema_version") != "issue_fix_base_snapshot_v0":
+        errors.append("caller repo branch base snapshot has wrong schema")
+    if base_snapshot.get("relation") not in {
+        "not_inspected",
+        "no_tracking_ref",
+        "current",
+        "behind_tracking_ref",
+        "ahead_of_tracking_ref",
+        "diverged_from_tracking_ref",
+    }:
+        errors.append("caller repo branch base snapshot has invalid relation")
+    if base_snapshot.get("external_remote_used") is not False:
+        errors.append("caller repo branch base snapshot must not use an external remote")
+    if base_snapshot.get("tracking_ref_refresh_performed") is not False:
+        errors.append("caller repo branch base snapshot must not refresh tracking refs")
+    if base_snapshot.get("local_path_captured") is not False:
+        errors.append("caller repo branch base snapshot must not capture local paths")
     validation = (
         artifact.get("validation")
         if isinstance(artifact.get("validation"), Mapping)

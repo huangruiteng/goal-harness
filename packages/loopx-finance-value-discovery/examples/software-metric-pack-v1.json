@@ -1,0 +1,119 @@
+{
+  "schema_version": "finance_metric_pack_input_v1",
+  "pack_id": "software_platforms_v1",
+  "case_input": {
+    "schema_version": "finance_case_gate_input_v1",
+    "case_id": "illustrative-software-case",
+    "subject_ref": "illustrative-software-universe",
+    "contract": {
+      "schema_version": "finance_case_contract_v1",
+      "contract_id": "illustrative-software-contract-v1",
+      "method_revision": "candidate-v1",
+      "point_in_time": "2026-07-23",
+      "universe_id": "illustrative-software-universe",
+      "universe_frozen": true,
+      "identities_frozen": true,
+      "thresholds_frozen": true,
+      "outcome_blind": true,
+      "public_evidence_only": true,
+      "gates": [
+        {
+          "gate_id": "source_lineage",
+          "value_type": "boolean",
+          "operator": "eq",
+          "reference_value": true
+        },
+        {
+          "gate_id": "point_in_time",
+          "value_type": "boolean",
+          "operator": "eq",
+          "reference_value": true
+        },
+        {
+          "gate_id": "recurring_revenue_growth",
+          "value_type": "number",
+          "operator": "gte",
+          "reference_value": 0.1
+        },
+        {
+          "gate_id": "gross_margin",
+          "value_type": "number",
+          "operator": "gte",
+          "reference_value": 0.7
+        },
+        {
+          "gate_id": "free_cash_flow_conversion",
+          "value_type": "number",
+          "operator": "gte",
+          "reference_value": 0.8
+        },
+        {
+          "gate_id": "sbc_dilution",
+          "value_type": "number",
+          "operator": "lte",
+          "reference_value": 0.04
+        }
+      ],
+      "investment_advice_allowed": false,
+      "trading_allowed": false,
+      "automatic_promotion_allowed": false,
+      "evaluation_as_of": "2026-07-27"
+    },
+    "observations": [
+      {
+        "gate_id": "source_lineage",
+        "observation_state": "observed",
+        "value": true,
+        "evidence_refs": [
+          "filing-lineage"
+        ],
+        "reason": "Issuer and filing lineage are frozen."
+      },
+      {
+        "gate_id": "point_in_time",
+        "observation_state": "observed",
+        "value": true,
+        "evidence_refs": [
+          "cutoff-ledger"
+        ],
+        "reason": "Evidence is available at the declared cutoff."
+      },
+      {
+        "gate_id": "recurring_revenue_growth",
+        "observation_state": "observed",
+        "value": 0.14,
+        "evidence_refs": [
+          "revenue-filing"
+        ],
+        "reason": "Recurring revenue growth from frozen filing facts."
+      },
+      {
+        "gate_id": "gross_margin",
+        "observation_state": "observed",
+        "value": 0.76,
+        "evidence_refs": [
+          "margin-filing"
+        ],
+        "reason": "Gross margin from frozen filing facts."
+      },
+      {
+        "gate_id": "free_cash_flow_conversion",
+        "observation_state": "observed",
+        "value": 0.87,
+        "evidence_refs": [
+          "cash-flow-filing"
+        ],
+        "reason": "Free-cash-flow conversion from frozen filing facts."
+      },
+      {
+        "gate_id": "sbc_dilution",
+        "observation_state": "observed",
+        "value": 0.05,
+        "evidence_refs": [
+          "dilution-filing"
+        ],
+        "reason": "Dilution exceeds the contract-owned ceiling."
+      }
+    ]
+  }
+}

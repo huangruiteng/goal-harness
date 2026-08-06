@@ -13,6 +13,9 @@ from loopx.control_plane.quota.turn_envelope import (
     quota_action_signature_document,
     turn_envelope_action_signature_document,
 )
+from loopx.control_plane.quota.task_orchestration import (
+    apply_task_orchestration_contract,
+)
 from loopx.control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
@@ -316,6 +319,115 @@ def test_turn_envelope_preserves_action_boundary_and_writeback() -> None:
     assert envelope["compaction"]["envelope_json_bytes"] == len(
         json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
     )
+
+
+def test_turn_envelope_preserves_signed_adaptive_orchestration_contract() -> None:
+    source = _full_decision()
+    source["task_orchestration_contract"] = {
+        "schema_version": "task_orchestration_contract_v2",
+        "mode": "adaptive",
+        "coordinator_agent_id": "codex-fixture",
+        "strategy_owner": "task_coordinator",
+        "writeback_owner": "task_coordinator",
+        "max_children": 2,
+        "eligible_child_lanes": [
+            {
+                "todo_id": "todo_child001",
+                "task_domain": "validation",
+                "execution_kind": "ephemeral_child",
+                "child_brief": {
+                    "schema_version": "subagent_control_plane_handoff_v0",
+                    "parent_goal_id": "fixture-goal",
+                    "todo_id": "todo_child001",
+                    "objective": "Validate one independent fixture.",
+                    "task_domain": "validation",
+                    "required_capabilities": [],
+                    "task_repository": None,
+                    "required_write_scopes": [],
+                    "workspace_isolation": "not_required",
+                    "context_policy": {
+                        "selection_owner": "task_coordinator",
+                        "default": "fresh",
+                        "allowed": ["fresh"],
+                    },
+                    "expected_output": "public_safe_evidence",
+                    "acceptance": ["report validation result and residual risk"],
+                    "writeback_spend_contract": (
+                        "child reports evidence only; task coordinator accepts evidence, "
+                        "writes state, and spends once"
+                    ),
+                },
+            }
+        ],
+        "blocked_lanes": [],
+    }
+
+    envelope = build_turn_envelope(source)
+
+    assert envelope["task_orchestration_contract"] == source[
+        "task_orchestration_contract"
+    ]
+    assert envelope["action_signature"]["matches"] is True
+    assert quota_action_signature_document(
+        source
+    ) == turn_envelope_action_signature_document(envelope)
+
+
+def test_three_long_child_briefs_stay_within_turn_envelope_budget() -> None:
+    long_objective = "Validate " + "evidence " * 55
+    items = [
+        {
+            "todo_id": "todo_primary",
+            "status": "open",
+            "task_class": "advancement_task",
+            "action_kind": "implement",
+            "task_domain": "code",
+            "text": "Implement the primary slice.",
+                "required_write_scopes": ["loopx/**"],
+        },
+        *[
+            {
+                "todo_id": f"todo_child_{index}",
+                "status": "open",
+                "task_class": "advancement_task",
+                "action_kind": "validate",
+                "task_domain": "validation",
+                "text": long_objective,
+            }
+            for index in (1, 2, 3)
+        ],
+    ]
+    summary = {"items": items}
+    contract, _work_lane = apply_task_orchestration_contract(
+        fallback_work_lane_contract={"lane": "advancement_task"},
+        goal_boundary={
+            "write_scope": ["loopx/**"],
+            "orchestration": {
+                "mode": "multi_subagent",
+                "spawn_allowed": True,
+                "max_children": 3,
+                "allowed_domains": ["code", "validation"],
+            }
+        },
+        agent_identity={
+            "agent_id": "codex-fixture",
+            "registered_agents": ["codex-fixture"],
+        },
+        agent_todo_summary=summary,
+        raw_agent_todo_summary=summary,
+        available_capabilities=["subagent_spawn", "subagent_resume"],
+        parent_goal_id="fixture-goal",
+    )
+    source = _full_decision()
+    source["task_orchestration_contract"] = contract
+
+    envelope = build_turn_envelope(source)
+
+    assert contract is not None
+    assert len(contract["eligible_child_lanes"]) == 3
+    assert envelope["action_signature"]["matches"] is True
+    assert envelope["compaction"]["envelope_json_bytes"] < TURN_ENVELOPE_BUDGET_BYTES
+    assert envelope["compaction"]["within_budget"] is True
 
 
 def test_turn_envelope_full_decision_preserves_codex_app_profile() -> None:

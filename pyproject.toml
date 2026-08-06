@@ -36,6 +36,7 @@ include = ["loopx*"]
 "loopx.extensions.openviking_periodic_report" = ["extension.toml"]
 "loopx.extensions.openviking_semantic_preference" = ["extension.toml"]
 "loopx.opencode_goal_mode" = ["*.js", "*.mjs", "README.md"]
+"loopx.pi_goal_mode" = ["*.ts", "*.mjs", "README.md"]
 
 [tool.mypy]
 python_version = "3.11"

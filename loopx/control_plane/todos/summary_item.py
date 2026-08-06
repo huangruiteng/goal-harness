@@ -12,6 +12,7 @@ from .contract import (
     normalize_todo_id,
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
+    normalize_todo_task_domain,
     normalize_todo_task_repository,
 )
 from .handoff_gate import handoff_ready_successor_todo_ids
@@ -29,6 +30,7 @@ TODO_SUMMARY_COMPACT_FIELDS = (
     "source_section",
     "task_class",
     "action_kind",
+    "task_domain",
     "capability_binding_ref",
     "task_repository",
     "continuation_policy",
@@ -108,6 +110,11 @@ def compact_todo_summary_item(
     required_write_scopes = normalize_required_write_scopes(
         compact.get("required_write_scopes")
     )
+    task_domain = normalize_todo_task_domain(compact.get("task_domain"))
+    if task_domain:
+        compact["task_domain"] = task_domain
+    else:
+        compact.pop("task_domain", None)
     if required_write_scopes:
         compact["required_write_scopes"] = required_write_scopes
     else:

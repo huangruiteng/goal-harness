@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from itertools import product
@@ -22,11 +23,13 @@ from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint
 from loopx.control_plane.testing.quota_fixtures import (
     quota_status_payload,
     quota_todo_item,
+    quota_todo_summary,
 )
 from loopx.control_plane.todos.quota_summary import (
     compact_quota_todo_summary_for_payload,
 )
 from loopx.control_plane.work_items.interaction_contract import (
+    finalize_user_gate_notification_cooldown,
     interaction_next_cli_actions,
 )
 from loopx.quota import build_quota_should_run
@@ -925,6 +928,377 @@ def test_first_class_runtime_profiles_round_trip_to_compact_args(
         render_scheduler_execution_args(scheduler_execution_context=resolution)
         == expected_args
     )
+
+
+def test_codex_profile_does_not_admit_children_without_observed_spawn() -> None:
+    context = scheduler_execution_context_for_runtime_profile(
+        SchedulerRuntimeProfile.CODEX_CLI_VISIBLE
+    )
+    status = quota_status_payload(
+        goal_id="host-profile-no-spawn-fixture",
+        status="active",
+        recommended_action="Coordinate the public fixture bundle.",
+        agent_todo_items=[
+            quota_todo_item(
+                todo_id="todo_primary",
+                title="Inspect the primary fixture.",
+                claimed_by="codex-fixture",
+                action_kind="inspect",
+                task_domain="code",
+            ),
+            quota_todo_item(
+                todo_id="todo_child",
+                title="Inspect the child fixture.",
+                action_kind="inspect",
+                task_domain="code",
+            ),
+        ],
+        coordination={
+            "registered_agents": ["codex-fixture"],
+            "write_scope": ["loopx/**"],
+        },
+        claim_scope_agent_id="codex-fixture",
+        goal_extra={
+            "spawn_policy": {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 1,
+            }
+        },
+    )
+
+    quota = build_quota_should_run(
+        status,
+        goal_id="host-profile-no-spawn-fixture",
+        agent_id="codex-fixture",
+        scheduler_execution_context=context,
+    )
+
+    assert quota.get("task_orchestration_contract") is None
+    assert quota["scheduler_hint"]["execution_phase"]["host_surface"] == "codex_cli"
+
+
+def test_adaptive_admission_uses_todo_authority_beyond_display_items() -> None:
+    context = scheduler_execution_context_for_runtime_profile(
+        SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+    )
+    agent_items = [
+        quota_todo_item(
+            todo_id=f"todo_agent_{index}",
+            index=index,
+            title=f"Inspect agent fixture {index}.",
+            claimed_by="codex-fixture" if index == 1 else None,
+            action_kind="inspect",
+            task_domain="code",
+        )
+        for index in range(1, 19)
+    ]
+    agent_items[-1]["todo_id"] = "todo_blocked_child"
+    agent_todos = quota_todo_summary(
+        agent_items,
+        role="agent",
+        item_limit=12,
+        include_task_orchestration_authority=True,
+    )
+    user_items = [
+        quota_todo_item(
+            todo_id=f"todo_user_{index}",
+            index=index,
+            role="user",
+            title=f"Review user fixture {index}.",
+            task_class="user_action",
+        )
+        for index in range(1, 18)
+    ]
+    user_items.append(
+        quota_todo_item(
+            todo_id="todo_owner_gate",
+            index=18,
+            role="user",
+            title="Approve the blocked child fixture.",
+            task_class="user_gate",
+            unblocks_todo_id="todo_blocked_child",
+        )
+    )
+    user_todos = quota_todo_summary(
+        user_items,
+        role="user",
+        item_limit=12,
+        include_task_orchestration_authority=True,
+    )
+    status = quota_status_payload(
+        goal_id="untruncated-admission-authority-fixture",
+        status="active",
+        recommended_action="Coordinate the public fixture bundle.",
+        agent_todos=agent_todos,
+        user_todos=user_todos,
+        coordination={
+            "registered_agents": ["codex-fixture"],
+            "write_scope": ["loopx/**"],
+        },
+        claim_scope_agent_id="codex-fixture",
+        goal_extra={
+            "spawn_policy": {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 2,
+            }
+        },
+    )
+
+    quota = build_quota_should_run(
+        status,
+        goal_id="untruncated-admission-authority-fixture",
+        agent_id="codex-fixture",
+        available_capabilities=["subagent_spawn"],
+        scheduler_execution_context=context,
+    )
+
+    contract = quota["task_orchestration_contract"]
+    blocked_by_id = {
+        lane["todo_id"]: lane["reason_codes"] for lane in contract["blocked_lanes"]
+    }
+    assert blocked_by_id["todo_blocked_child"] == ["dependency_not_ready"]
+
+
+def _runtime_capabilities_from_cli_args(cli_args: list[str]) -> list[str]:
+    return [
+        cli_args[index + 1]
+        for index, token in enumerate(cli_args[:-1])
+        if token == "--available-capability"
+    ]
+
+
+def _child_capability_surface_case(
+    *,
+    available_capabilities: list[str] | None = None,
+    persisted_capabilities: list[str] | None = None,
+) -> tuple[dict, dict, object]:
+    context = scheduler_execution_context_for_runtime_profile(
+        SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+    )
+    status = quota_status_payload(
+        goal_id="child-capability-surface-fixture",
+        status="active",
+        recommended_action="Coordinate the public fixture bundle.",
+        agent_todo_items=[
+            quota_todo_item(
+                todo_id="todo_primary",
+                title="Inspect the primary fixture.",
+                claimed_by="codex-fixture",
+                action_kind="inspect",
+                task_domain="code",
+            ),
+            quota_todo_item(
+                todo_id="todo_child",
+                title="Inspect the child fixture.",
+                action_kind="inspect",
+                task_domain="code",
+            ),
+        ],
+        coordination={
+            "registered_agents": ["codex-fixture"],
+            "write_scope": ["loopx/**"],
+        },
+        claim_scope_agent_id="codex-fixture",
+        goal_extra={
+            "spawn_policy": {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 1,
+            }
+        },
+        project_asset_extra={
+            "available_capabilities": persisted_capabilities,
+        }
+        if persisted_capabilities is not None
+        else None,
+    )
+    quota = build_quota_should_run(
+        status,
+        goal_id="child-capability-surface-fixture",
+        agent_id="codex-fixture",
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=context,
+    )
+    return status, quota, context
+
+
+def test_persisted_capabilities_do_not_enter_next_cli_actions_or_replay() -> None:
+    status, first_quota, context = _child_capability_surface_case(
+        persisted_capabilities=["subagent_spawn", "subagent_resume"],
+    )
+    next_cli_actions = first_quota["interaction_contract"]["cli_channel"][
+        "next_cli_actions"
+    ]
+    replayed_capabilities = [
+        capability
+        for action in next_cli_actions
+        for capability in _runtime_capabilities_from_cli_args(shlex.split(action))
+    ]
+    replayed_quota = build_quota_should_run(
+        status,
+        goal_id="child-capability-surface-fixture",
+        agent_id="codex-fixture",
+        available_capabilities=replayed_capabilities,
+        scheduler_execution_context=context,
+    )
+
+    assert first_quota.get("task_orchestration_contract") is None
+    assert first_quota["goal_boundary"]["available_capabilities"] == [
+        "subagent_spawn",
+        "subagent_resume",
+    ]
+    assert replayed_capabilities == []
+    assert replayed_quota.get("task_orchestration_contract") is None
+
+
+def test_observed_spawn_enters_next_cli_action_and_replay_admits_child() -> None:
+    status, first_quota, context = _child_capability_surface_case(
+        available_capabilities=["subagent_spawn"],
+    )
+    next_cli_actions = first_quota["interaction_contract"]["cli_channel"][
+        "next_cli_actions"
+    ]
+
+    assert next_cli_actions == [
+        (
+            "loopx --format json quota should-run --goal-id "
+            "child-capability-surface-fixture --agent-id codex-fixture "
+            "--available-capability subagent_spawn --codex-app"
+        )
+    ]
+    replay_tokens = shlex.split(next_cli_actions[0])
+    replayed_capabilities = _runtime_capabilities_from_cli_args(replay_tokens)
+    replayed_quota = build_quota_should_run(
+        status,
+        goal_id=replay_tokens[replay_tokens.index("--goal-id") + 1],
+        agent_id=replay_tokens[replay_tokens.index("--agent-id") + 1],
+        available_capabilities=replayed_capabilities,
+        scheduler_execution_context=context,
+    )
+
+    assert replay_tokens[:6] == [
+        "loopx",
+        "--format",
+        "json",
+        "quota",
+        "should-run",
+        "--goal-id",
+    ]
+    assert replay_tokens[-1] == "--codex-app"
+    assert replayed_capabilities == ["subagent_spawn"]
+    for quota in (first_quota, replayed_quota):
+        contract = quota["task_orchestration_contract"]
+        assert contract["mode"] == "adaptive"
+        assert contract["primary_todo_id"] == "todo_primary"
+        assert contract["eligible_child_lanes"][0]["todo_id"] == "todo_child"
+
+
+def test_persisted_capabilities_do_not_enter_scheduler_ack() -> None:
+    _status, quota, _context = _child_capability_surface_case(
+        persisted_capabilities=["subagent_spawn", "subagent_resume"],
+    )
+
+    ack_cli_args = quota["scheduler_hint"]["codex_app"]["ack_hint"]["cli_args"]
+
+    assert _runtime_capabilities_from_cli_args(ack_cli_args) == []
+
+
+def test_observed_spawn_enters_scheduler_ack() -> None:
+    _status, quota, _context = _child_capability_surface_case(
+        available_capabilities=["subagent_spawn"],
+    )
+
+    ack_cli_args = quota["scheduler_hint"]["codex_app"]["ack_hint"]["cli_args"]
+
+    assert _runtime_capabilities_from_cli_args(ack_cli_args) == ["subagent_spawn"]
+
+
+def test_persisted_capabilities_do_not_enter_scheduler_failure() -> None:
+    _status, quota, _context = _child_capability_surface_case(
+        persisted_capabilities=["subagent_spawn", "subagent_resume"],
+    )
+
+    failure_cli_args = quota["scheduler_hint"]["codex_app"]["failure_hint"]["cli_args"]
+
+    assert _runtime_capabilities_from_cli_args(failure_cli_args) == []
+
+
+def test_observed_spawn_enters_scheduler_failure() -> None:
+    _status, quota, _context = _child_capability_surface_case(
+        available_capabilities=["subagent_spawn"],
+    )
+
+    failure_cli_args = quota["scheduler_hint"]["codex_app"]["failure_hint"]["cli_args"]
+
+    assert _runtime_capabilities_from_cli_args(failure_cli_args) == [
+        "subagent_spawn"
+    ]
+
+
+def test_persisted_capabilities_do_not_enter_cooldown_rebuild() -> None:
+    _status, quota, context = _child_capability_surface_case(
+        persisted_capabilities=["subagent_spawn", "subagent_resume"],
+    )
+    cooldown_payload = deepcopy(quota)
+
+    finalize_user_gate_notification_cooldown(
+        cooldown_payload,
+        available_capabilities=None,
+        scheduler_execution_context=context,
+    )
+    cooldown_actions = cooldown_payload["interaction_contract"]["cli_channel"][
+        "next_cli_actions"
+    ]
+
+    assert all("--available-capability" not in action for action in cooldown_actions)
+
+
+def test_observed_spawn_enters_cooldown_rebuild() -> None:
+    _status, quota, context = _child_capability_surface_case(
+        available_capabilities=["subagent_spawn"],
+    )
+    cooldown_payload = deepcopy(quota)
+
+    finalize_user_gate_notification_cooldown(
+        cooldown_payload,
+        available_capabilities=["subagent_spawn"],
+        scheduler_execution_context=context,
+    )
+    cooldown_actions = cooldown_payload["interaction_contract"]["cli_channel"][
+        "next_cli_actions"
+    ]
+
+    assert cooldown_actions == [
+        (
+            "loopx --format json quota should-run --goal-id "
+            "child-capability-surface-fixture --agent-id codex-fixture "
+            "--available-capability subagent_spawn --codex-app"
+        )
+    ]
+
+
+def test_registered_peer_v1_keeps_non_runtime_orchestration_followup() -> None:
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": "registered-peer-fixture",
+            "agent_identity": {"agent_id": "codex-fixture"},
+            "task_orchestration_contract": {
+                "schema_version": "task_orchestration_contract_v1",
+                "mode": "task_scoped_peer",
+            },
+        },
+        mode="task_orchestration",
+        available_capabilities=[],
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+        ),
+    )
+
+    assert actions == [
+        "no quota spend without validated transition/blocker writeback"
+    ]
 
 
 def test_advanced_scheduler_context_keeps_explicit_context_args() -> None:

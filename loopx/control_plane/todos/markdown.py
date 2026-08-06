@@ -70,6 +70,7 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
                     "status",
                     "task_class",
                     "action_kind",
+                    "task_domain",
                     "task_repository",
                     "continuation_policy",
                     "claimed_by",

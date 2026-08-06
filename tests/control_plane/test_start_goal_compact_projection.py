@@ -809,6 +809,8 @@ def test_cli_without_host_returns_read_only_host_selection_gate(
         "codex-cli-tui",
         "claude-code",
         "opencode",
+        "traex-cli",
+        "pi",
         "ark-managed-agent",
         "shell",
         "other-agent",

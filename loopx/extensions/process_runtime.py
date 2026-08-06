@@ -7,6 +7,7 @@ import signal
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import BinaryIO
 
 
@@ -85,9 +86,10 @@ def run_capped_process(
     argv: Sequence[str],
     *,
     stdin: bytes,
-    timeout_seconds: int,
+    timeout_seconds: float,
     output_limit_bytes: int,
     env: Mapping[str, str] | None = None,
+    cwd: str | Path | None = None,
 ) -> CappedProcessResult:
     """Run a provider while bounding both output streams during execution."""
 
@@ -103,6 +105,7 @@ def run_capped_process(
         stderr=subprocess.PIPE,
         bufsize=0,
         env=dict(env) if env is not None else None,
+        cwd=cwd,
         **process_options,
     )
     assert process.stdin is not None

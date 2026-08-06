@@ -115,7 +115,7 @@ def build_loopx_turn_host_request(plan: Mapping[str, Any]) -> dict[str, Any]:
     route = plan.get("route") if isinstance(plan.get("route"), dict) else {}
     if route.get("would_invoke_host") is not True:
         raise ValueError("LoopX Turn route is not host executable")
-    return {
+    request = {
         "schema_version": LOOPX_TURN_HOST_REQUEST_SCHEMA_VERSION,
         "turn_key": turn_key,
         "route": route.get("kind"),
@@ -127,6 +127,10 @@ def build_loopx_turn_host_request(plan: Mapping[str, Any]) -> dict[str, Any]:
             "stdout": "one public-safe JSON object",
         },
     }
+    child_operations = plan.get("child_operations")
+    if isinstance(child_operations, list) and child_operations:
+        request["child_operations"] = child_operations
+    return request
 
 
 def _bounded_public_text(

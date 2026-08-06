@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from ipaddress import ip_address
 from typing import Any
 from urllib.parse import urlsplit
+
+from .boundary import reject_forbidden_material
 
 
 FINANCE_VALUE_DISCOVERY_INPUT_SCHEMA_VERSION = "finance_value_discovery_input_v0"
@@ -47,59 +48,6 @@ EVIDENCE_AXES = (
     "price_implied_expectations",
 )
 
-FORBIDDEN_KEY_TOKENS = {
-    "account",
-    "auth",
-    "body",
-    "cookie",
-    "credential",
-    "holding",
-    "local",
-    "password",
-    "portfolio",
-    "private",
-    "raw",
-    "secret",
-    "token",
-    "trade",
-    "transcript",
-}
-FORBIDDEN_VALUE_PATTERNS = (
-    re.compile(r"\bBearer\s+", re.IGNORECASE),
-    re.compile(r"/Users/[A-Za-z0-9._-]+/"),
-    re.compile(r"/home/[A-Za-z0-9._-]+/"),
-    re.compile(r"[A-Za-z]:\\\\Users\\\\", re.IGNORECASE),
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-)
-
-
-def _key_tokens(value: object) -> set[str]:
-    return {part for part in re.split(r"[^a-z0-9]+", str(value).lower()) if part}
-
-
-def _reject_forbidden_material(value: object, *, path: str = "input") -> None:
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            forbidden = _key_tokens(key) & FORBIDDEN_KEY_TOKENS
-            if forbidden:
-                raise ValueError(
-                    f"{path} contains forbidden key token(s): "
-                    + ", ".join(sorted(forbidden))
-                )
-            _reject_forbidden_material(item, path=f"{path}.{key}")
-        return
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        for index, item in enumerate(value):
-            _reject_forbidden_material(item, path=f"{path}[{index}]")
-        return
-    if isinstance(value, str) and any(
-        pattern.search(value) for pattern in FORBIDDEN_VALUE_PATTERNS
-    ):
-        raise ValueError(
-            f"{path} contains private path, auth material, or credential-like text"
-        )
-
-
 def _mapping(value: object, *, field: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{field} must be an object")
@@ -112,7 +60,7 @@ def _text(value: object, *, field: str, limit: int = 320) -> str:
         raise ValueError(f"{field} is required")
     if len(result) > limit:
         raise ValueError(f"{field} exceeds {limit} characters")
-    _reject_forbidden_material(result, path=field)
+    reject_forbidden_material(result, path=field)
     return result
 
 
@@ -376,7 +324,7 @@ def _card(value: object, *, index: int) -> dict[str, Any]:
 
 
 def build_finance_value_discovery_packet(payload: Mapping[str, Any]) -> dict[str, Any]:
-    _reject_forbidden_material(payload)
+    reject_forbidden_material(payload)
     allowed = {
         "schema_version",
         "as_of",

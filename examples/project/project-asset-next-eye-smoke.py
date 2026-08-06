@@ -239,17 +239,17 @@ def assert_dashboard_first_screen_render_contract() -> None:
         encoding="utf-8"
     )
     for marker in (
-        "Project asset",
-        "Owner {item.projectOwner}",
-        "Gate {item.projectGate}",
-        "Next:",
-        "Stop:",
-        "UserTodoCallout",
-        "Agent todo",
-        "Validation",
-        "Quota",
-        "Agent command",
-        "Safe CLI Path",
+        'item.projectAssetSource === "legacy_raw_fallback"',
+        "item.projectOwner ?",
+        "item.projectGate ?",
+        "item.projectNextAction ?",
+        "item.projectStopCondition ?",
+        "<UserTodoCallout",
+        "{agentTodo.text}",
+        "formatLatestValidation(item.latestValidation)",
+        "buildQuotaView(item.quota)",
+        "{item.agentCommand ?",
+        "{item.safePathLabel}",
     ):
         assert marker in dashboard, marker
 

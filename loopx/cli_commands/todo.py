@@ -124,6 +124,13 @@ def register_todo_command(
         ),
     )
     todo_parser.add_argument(
+        "--task-domain",
+        help=(
+            "For agent todo add/update, declare the bounded responsibility domain "
+            "used by adaptive child admission, such as code, docs, or validation."
+        ),
+    )
+    todo_parser.add_argument(
         "--capability-binding-ref",
         help=(
             "For agent todo add, persist the opaque capability admission binding "
@@ -432,6 +439,7 @@ def handle_todo_command(
                 status=args.status,
                 task_class=args.task_class,
                 action_kind=args.action_kind,
+                task_domain=args.task_domain,
                 capability_binding_ref=args.capability_binding_ref,
                 task_repository=args.task_repository,
                 continuation_policy=args.continuation_policy,
@@ -486,6 +494,7 @@ def handle_todo_command(
                 reason=args.reason,
                 task_class=args.task_class,
                 action_kind=args.action_kind,
+                task_domain=args.task_domain,
                 task_repository=args.task_repository,
                 continuation_policy=args.continuation_policy,
                 required_write_scopes=args.required_write_scopes,

@@ -9,7 +9,7 @@ not need these documents to start LoopX.
 
 ## Start Here / 从这里开始
 
-1. Read [Contributing](../../CONTRIBUTING.md) for repository boundaries and the
+1. Read [Contributing](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTING.md) for repository boundaries and the
    pull-request checklist.
 2. Follow the [control-plane developer course](control-plane-course/README.md)
    for a nine-lecture, code-led path through the real CLI, state machine, and
@@ -25,7 +25,7 @@ not need these documents to start LoopX.
 6. Follow the [documentation layout policy](documentation-layout.md) before
    adding or moving public documentation.
 
-1. 先阅读[贡献指南](../../CONTRIBUTING.md)，了解仓库边界和 PR 检查项。
+1. 先阅读[贡献指南](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTING.md)，了解仓库边界和 PR 检查项。
 2. 按顺序学习[控制面开发者 9 讲](control-plane-course/README.md)，沿真实 CLI、
    状态机、核心函数和分层质量门禁建立代码心智模型。
 3. 修改 agent-facing 输出、调度决策、todo/gate 语义、新用户接入或发布流程前，

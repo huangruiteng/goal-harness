@@ -66,6 +66,7 @@ QUOTA_PAYLOAD_ITEM_FIELDS = (
     "priority",
     "task_class",
     "action_kind",
+    "task_domain",
     "decision_scope",
     "required_decision_scopes",
     "task_repository",
@@ -141,6 +142,7 @@ AGENT_LANE_STATUS_TODO_ITEM_FIELDS = (
     "priority",
     "task_class",
     "action_kind",
+    "task_domain",
     "claimed_by",
     "bound_agent",
     "blocks_agent",
@@ -1054,3 +1056,51 @@ def select_quota_todo_source_items(
     if is_canonical_attention_todo_summary(canonical_value):
         return canonical_items if canonical_items is not None else project_asset_items or []
     return project_asset_items if project_asset_items is not None else canonical_items or []
+
+
+def _task_orchestration_authority_items(
+    value: Any,
+    *,
+    role: str,
+) -> list[dict[str, Any]] | None:
+    if not isinstance(value, dict):
+        return None
+    authority = value.get("task_orchestration_authority")
+    if (
+        not isinstance(authority, dict)
+        or authority.get("schema_version") != "task_orchestration_authority_v0"
+        or authority.get("role") != role
+    ):
+        return None
+    key = "candidate_items" if role == "agent" else "user_blocker_items"
+    items = authority.get(key)
+    if not isinstance(items, list):
+        return None
+    return [item for item in items if isinstance(item, dict)]
+
+
+def select_task_orchestration_authority_items(
+    canonical_value: Any,
+    project_asset_value: Any,
+    *,
+    role: str,
+) -> list[dict[str, Any]]:
+    canonical_items = _task_orchestration_authority_items(
+        canonical_value,
+        role=role,
+    )
+    project_asset_items = _task_orchestration_authority_items(
+        project_asset_value,
+        role=role,
+    )
+    if is_canonical_attention_todo_summary(canonical_value):
+        selected = (
+            canonical_items if canonical_items is not None else project_asset_items
+        )
+    else:
+        selected = (
+            project_asset_items if project_asset_items is not None else canonical_items
+        )
+    if selected is not None:
+        return selected
+    return select_quota_todo_source_items(canonical_value, project_asset_value)

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Template launchd agent for the LoopX external shell_worker.
+
+  Replace every __PLACEHOLDER__ before loading:
+    __LABEL__         unique launchd label, e.g. com.loopx.traex-goal-watcher
+    __WORKER__        absolute path to scripts/external_scheduler_worker.py
+    __LOOPX_BIN__     absolute path to the loopx executable (run `which loopx`)
+    __REGISTRY__      absolute path to the registry (global or project-local)
+    __RUNTIME_ROOT__  common runtime root (optional; remove the key if unused)
+    __GOAL_ID__       registered goal id
+    __AGENT_ID__      registered agent id scoped to that goal
+    __STATE__         writable path for the unchanged-poll progression state
+    __LOG__           writable path for the one-line status log
+
+  This is observe-only by default: it projects wait/backoff status without
+  driving the host TUI. To also trigger a bounded headless turn, add an
+  argument pair for the worker's wake-cmd option and a complete LoopX
+  turn run-once shell command. The nested command, not the worker itself,
+  owns the project path and the generic-cli host, isolated-headless execution,
+  host adapter, validation command, and execute options.
+
+  Install:
+    cp this-file ~/Library/LaunchAgents/__LABEL__.plist
+    launchctl load ~/Library/LaunchAgents/__LABEL__.plist
+  Tail the log to watch queueing/backoff status:
+    tail -f __LOG__
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>__WORKER__</string>
+    <string>--cli-bin</string>
+    <string>__LOOPX_BIN__</string>
+    <string>--registry</string>
+    <string>__REGISTRY__</string>
+    <string>--runtime-root</string>
+    <string>__RUNTIME_ROOT__</string>
+    <string>--goal-id</string>
+    <string>__GOAL_ID__</string>
+    <string>--agent-id</string>
+    <string>__AGENT_ID__</string>
+    <string>--state-file</string>
+    <string>__STATE__</string>
+  </array>
+
+  <!-- launchd starts it once; the worker self-schedules by sleeping per the
+       scheduler_hint interval and exits intentionally on terminal/no-followup
+       or after the unchanged-poll limit. Restart only on an unexpected crash,
+       not after a clean exit 0. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG__</string>
+</dict>
+</plist>

@@ -162,7 +162,7 @@ def main() -> int:
     assert "复制后直接发给对应项目 Agent；人只补一句判断。" not in source
     assert "【GH Packet】" in action_packet_source
     assert "【用户/Gate】" in action_packet_source
-    assert "Copy action packet for" in source
+    assert "复制 ${item.goalId} 的操作信息" in source
     assert "需授权则停" in action_packet_source
     assert "input.command ? `命令：" in action_packet_source
     assert_order(
@@ -181,12 +181,12 @@ def main() -> int:
     assert "const agentTodo = firstOpenTodo(item.agentTodos);" in packet_builder
     assert "agentTodoText: agentTodo?.text" in packet_builder
     assert "projectAssetSource: item.projectAssetSource" in packet_builder
-    assert "Status/history inspection only" in packet_builder
-    assert "保持 focus_wait 并用中文回报仍在等待什么" in packet_builder
-    assert "不执行交付路径、写入、reward append 或生产动作" in packet_builder
+    assert "只检查状态和历史" in packet_builder
+    assert "保持重点等待，并用中文回报仍在等待什么" in packet_builder
+    assert "不执行交付路径、写入、追加评价或生产动作" in packet_builder
     assert "直接转发给已认领的项目 Agent；不追加写权限、全局接管或生产动作授权。" in packet_builder
-    assert "只执行已批准的只读/dry-run agent_command" in packet_builder
-    assert "Approved agent command" in packet_builder
+    assert "只执行已批准的只读预演命令（agent_command）" in packet_builder
+    assert "已批准 Agent 命令" in packet_builder
     assert_order(action_packet_source, ["【GH Packet】", "【用户/Gate】", "【给项目 Agent】"])
     assert "operatorGateDraftCommand" not in packet_builder
     assert "待办：" in action_packet_source
@@ -195,20 +195,20 @@ def main() -> int:
     assert "先确认待办" in action_packet_source
 
     controller_prompt = source_between(source, "if (kind === \"controller\")", "if (kind === \"codex\")")
-    assert "是否允许目标项目进入 read-only/controller opt-in？" in controller_prompt
-    assert "同意先做 read-only map dry-run / 暂不同意 + 一句话原因。" in controller_prompt
-    assert "不写 operator gate、run history、write-control、实验控制或生产动作" in controller_prompt
+    assert "是否允许目标项目进入只读控制者接管阶段？" in controller_prompt
+    assert "同意先做只读映射预演 / 暂不同意 + 一句话原因。" in controller_prompt
+    assert "不写操作者确认、运行历史、写入控制、实验控制，也不执行生产动作" in controller_prompt
 
     controller_reply = source_between(source, "function controllerReplyLine", "function suggestedDecisionLine")
-    assert "同意 ${goalId} 先做 read-only map dry-run / 暂不同意 + 一句话原因。" in controller_reply
-    assert "同意 ${goalId} 先做 read-only map dry-run，不授权写入或生产动作" in controller_reply
+    assert "同意 ${goalId} 先做只读映射预演 / 暂不同意 + 一句话原因。" in controller_reply
+    assert "同意 ${goalId} 先做只读映射预演，不授权写入或生产动作" in controller_reply
     record_rule = source_between(source, "function durableOperatorGateRecordRule", "function suggestedDecisionLine")
     assert "记录规则：如需持久记录本次判断" in record_rule
-    assert "operator-gate dry-run 预览" in record_rule
+    assert "本地操作者确认预演" in record_rule
     assert "operator_gate_resume_contract_v0" in record_rule
-    assert "只在该决策点 rebase 当前权威状态" in record_rule
+    assert "只在该决策点重新对齐当前权威状态" in record_rule
     assert "不回滚或带回整个仓库" in record_rule
-    assert "reject/defer + public-safe 原因" in record_rule
+    assert "拒绝或暂缓时填写可公开的原因" in record_rule
     assert "durableOperatorGateRecordRule(item.kind)" in packet_builder
 
     gate_builder = source_between(source, "function buildOperatorGateDryRunCommand", "function buildOperatorDecision")
@@ -222,9 +222,9 @@ def main() -> int:
     assert "--dry-run" in read_only_builder
 
     quota_state_labels = source_between(source, "const quotaStateLabel", "function quotaVariant")
-    assert "Focus wait" in quota_state_labels
-    assert "等待 owner evidence / clean baseline / external eval" in quota_state_labels
-    assert "Throttled" in quota_state_labels
+    assert "重点等待" in quota_state_labels
+    assert "等待负责人证据、干净基线或外部评估" in quota_state_labels
+    assert "已限流" in quota_state_labels
     assert "本窗口配额已用完" in quota_state_labels
 
     user_action_builder = source_between(source, "function buildUserActionSummaryItems", "function UserActionSummary")
@@ -238,38 +238,38 @@ def main() -> int:
     assert "projectAssetSource," in user_action_builder
     assert "const quotaState = quota?.state ?? \"waiting\";" in user_action_builder
     assert "decision.waitingOn === \"codex\" && quotaState === \"focus_wait\"" in user_action_builder
-    assert "Focus wait owner blocker" in user_action_builder
-    assert "Status/history inspection only" in user_action_builder
-    assert "decision.waitingOn === \"codex\" && quotaState === \"throttled\"" in user_action_builder
+    assert "重点等待负责人处理" in user_action_builder
+    assert "只检查状态和历史" in user_action_builder
+    assert 'decision.waitingOn === "codex" && (quotaState === "throttled" || quotaState === "paused")' in user_action_builder
     assert_order(
         user_action_builder,
         [
             "if (decision.waitingOn === \"external_evidence\")",
             "decision.waitingOn === \"codex\" && quotaState === \"focus_wait\"",
-            "decision.waitingOn === \"codex\" && quotaState === \"throttled\"",
+            'decision.waitingOn === "codex" && (quotaState === "throttled" || quotaState === "paused")',
             "if (decision.waitingOn === \"codex\")",
         ],
     )
     user_action_surface = source_between(source, "function UserActionSummary", "function buildOperatorActionBridge")
-    assert "Legacy/raw fallback" in user_action_surface
-    assert "Owner/Gate/Stop are not project_asset-backed" in user_action_surface
-    assert "Fallback next:" in user_action_surface
-    assert "Fallback stop:" in user_action_surface
+    assert "旧版原始数据备用" in user_action_surface
+    assert "负责人、确认条件和停止条件没有项目资产支持" in user_action_surface
+    assert "备用下一步：" in user_action_surface
+    assert "备用停止条件：" in user_action_surface
     user_action_summary = source_between(source, "function UserActionSummary", "function OperatorDecisionPanel")
     assert "buildHumanFriendlyActionPacket({ item, registry, runtimeRoot })" in user_action_summary
-    assert "aria-label={`Copy action packet for ${item.goalId}`}" in user_action_summary
-    assert "Copy Focus Packet" in user_action_summary
+    assert "aria-label={`复制 ${item.goalId} 的操作信息`}" in user_action_summary
+    assert "复制重点等待信息" in user_action_summary
     assert "const primaryOperatorGate" not in user_action_summary
     assert "Needs decision" not in user_action_summary
     assert "blocksGate={Boolean(item.operatorQuestion && firstOpenTodo(item.userTodos))}" in user_action_summary
     assert "focusWait={isFocusWaitQuota(item.quota)}" in user_action_summary
     assert "formatLatestValidation(item.latestValidation)" in user_action_summary
     assert "const agentTodo = firstOpenTodo(item.agentTodos);" in user_action_summary
-    assert "Agent todo" in user_action_summary
+    assert "Agent Todo" in user_action_summary
     assert "先做用户待办" in source
-    assert "完成或明确暂缓这个用户待办后，再审批下面的 gate。" in source
-    assert "Owner blocker" in source
-    assert "有新 owner evidence、clean baseline 或外部 eval 前保持 focus wait" in source
+    assert "完成或明确暂缓这个用户待办后，再审批下面的确认项。" in source
+    assert "负责人阻塞" in source
+    assert "有新的负责人证据、干净基线或外部评估前保持重点等待" in source
 
     packet = build_sanitized_controller_packet()
     assert_order(

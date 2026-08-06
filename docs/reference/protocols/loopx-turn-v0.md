@@ -82,6 +82,11 @@ Turn request/result objects and that CLI's prompt, session, and output model.
 Raw transcript text, process exit zero, and the host's own completion claim are
 never sufficient validation.
 
+A reference headless adapter for TraeX (`traex exec`) lives at
+`scripts/traex_turn_host_adapter.py`; it reads the bounded action text from the
+Turn envelope and writes one typed result, leaving goal/todo authority and
+validation to LoopX.
+
 ### Five Questions For Any Agent CLI
 
 Before wiring Trae CLI, Codex CLI, or another host, answer these five questions:

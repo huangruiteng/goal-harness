@@ -503,7 +503,7 @@ compatibility facade.
 | Explore progress graph | `explore_graph.enabled` + material `refresh-state` | Idempotently project material issue selection, reproduction, PR publication/terminal state, capability-gap lifecycle, and todo supersession into the two delivery/capability graph lanes; update configured row/visual sinks only when their semantic digests change. |
 | Acceptance fixture | `loopx issue-fix acceptance-fixture` | Prove failure-before, minimal patch, and pass-after in a deterministic fixture. |
 | Git branch fixture | `loopx issue-fix repo-branch-fixture` | Exercise the same repair contract through a temporary git branch. |
-| Caller repo branch | `loopx issue-fix caller-repo-branch` | Inspect an approved local repo, create/claim an issue branch, and run caller-declared validation. |
+| Caller repo branch | `loopx issue-fix caller-repo-branch` | Inspect an approved local repo, require a current local base snapshot before creating an issue branch, and run caller-declared validation without implicit remote refresh. |
 | Content bridge | `loopx content-ops issue-fix-*` | Reuse body-free public metadata/intake boundaries. |
 | Visible projection | `status`, `lark-kanban`, dashboard | Derive human-visible issue work, outcomes, gates, and Monthly Impact from the same kernel/domain state without becoming a second source of truth. |
 | Projection source reconcile | `lark-kanban sync-projection --reconcile-source` | Keep normal sync non-destructive; only a caller-attested complete source snapshot may preview and explicitly retire remote orphan rows plus stale local record mappings within that exact namespace. |

@@ -197,6 +197,7 @@ def render_heartbeat_prompt_command(
     available_capabilities: Any = None,
     runtime_profile: str | None = None,
     scheduler_execution_context: dict[str, Any] | None = None,
+    visible_goal_host: str | None = None,
 ) -> str:
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
     scope_arg = f" --agent-scope {shell_arg(agent_scope)}" if agent_id else ""
@@ -205,10 +206,15 @@ def render_heartbeat_prompt_command(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
     )
+    visible_goal_arg = (
+        f" --visible-goal-host {shell_arg(visible_goal_host)}"
+        if visible_goal_host
+        else ""
+    )
     return (
         f"{shell_arg(cli_bin)} heartbeat-prompt --{shell_arg(body)} "
         f"--goal-id {shell_arg(goal_id)}{agent_arg}{scope_arg}{capability_args}"
-        f"{scheduler_args}"
+        f"{scheduler_args}{visible_goal_arg}"
     )
 
 
@@ -222,6 +228,7 @@ def render_heartbeat_prompt_json_command(
     available_capabilities: Any = None,
     runtime_profile: str | None = None,
     scheduler_execution_context: dict[str, Any] | None = None,
+    visible_goal_host: str | None = None,
 ) -> str:
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
     scope_arg = f" --agent-scope {shell_arg(agent_scope)}" if agent_id else ""
@@ -230,10 +237,15 @@ def render_heartbeat_prompt_json_command(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
     )
+    visible_goal_arg = (
+        f" --visible-goal-host {shell_arg(visible_goal_host)}"
+        if visible_goal_host
+        else ""
+    )
     return (
         f"{shell_arg(cli_bin)} --format json heartbeat-prompt --{shell_arg(body)} "
         f"--goal-id {shell_arg(goal_id)}{agent_arg}{scope_arg}{capability_args}"
-        f"{scheduler_args}"
+        f"{scheduler_args}{visible_goal_arg}"
     )
 
 

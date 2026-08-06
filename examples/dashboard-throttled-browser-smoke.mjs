@@ -1,21 +1,19 @@
 #!/usr/bin/env node
 // Browser-level smoke for the dashboard throttled-quota quiet state.
 
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupBrowserSmoke, launchBrowser, loadPlaywright } from "./dashboard-browser-smoke-support.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dashboardDir = resolve(repoRoot, "apps/presentation/dashboard");
 const fixtureName = "status.throttled.browser-smoke.json";
 const fixturePath = resolve(dashboardDir, "public", fixtureName);
-const playwrightCliOutputDir = resolve(repoRoot, ".playwright-cli");
+const pausedFixtureName = "status.paused.browser-smoke.json";
+const pausedFixturePath = resolve(dashboardDir, "public", pausedFixtureName);
 const port = Number(process.env.LOOPX_DASHBOARD_SMOKE_PORT ?? "5191");
-const session = `ght${process.pid}`;
-const pwcli = process.env.PWCLI ?? resolve(homedir(), ".codex/skills/playwright/scripts/playwright_cli.sh");
 
 const statusFixture = {
   ok: true,
@@ -136,21 +134,34 @@ const statusFixture = {
   },
 };
 
-function runPw(args, { allowFailure = false } = {}) {
-  const result = spawnSync("bash", [pwcli, ...args], {
-    cwd: repoRoot,
-    encoding: "utf-8",
-    env: { ...process.env, PLAYWRIGHT_CLI_SESSION: session },
-  });
-  if (!allowFailure && result.status !== 0) {
-    throw new Error([
-      `playwright-cli ${args.join(" ")} failed with ${result.status}`,
-      result.stdout,
-      result.stderr,
-    ].filter(Boolean).join("\n"));
-  }
-  return result;
-}
+const pausedGoalId = "paused-codex";
+const pausedStatusFixture = structuredClone(statusFixture);
+pausedStatusFixture.attention_queue.items[0] = {
+  ...pausedStatusFixture.attention_queue.items[0],
+  goal_id: pausedGoalId,
+  recommended_action: "wait until automatic compute resumes",
+  quota: {
+    ...pausedStatusFixture.attention_queue.items[0].quota,
+    spent_slots: 12,
+    state: "paused",
+    reason: "automatic compute paused by fixture",
+  },
+};
+pausedStatusFixture.run_history.goals[0] = {
+  ...pausedStatusFixture.run_history.goals[0],
+  id: pausedGoalId,
+  quota: pausedStatusFixture.attention_queue.items[0].quota,
+  latest_runs: pausedStatusFixture.run_history.goals[0].latest_runs.map((run) => ({
+    ...run,
+    goal_id: pausedGoalId,
+    recommended_action: "wait until automatic compute resumes",
+  })),
+};
+pausedStatusFixture.run_history.recent_runs = pausedStatusFixture.run_history.recent_runs.map((run) => ({
+  ...run,
+  goal_id: pausedGoalId,
+  recommended_action: "wait until automatic compute resumes",
+}));
 
 async function waitForDashboard(url) {
   const deadline = Date.now() + 20_000;
@@ -170,26 +181,10 @@ async function waitForDashboard(url) {
   throw lastError ?? new Error(`Timed out waiting for ${url}`);
 }
 
-async function removeWithRetry(path) {
-  let lastError;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      await rm(path, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 200));
-    }
-  }
-  throw lastError;
-}
-
 async function main() {
-  if (!existsSync(pwcli)) {
-    throw new Error(`Playwright CLI wrapper not found: ${pwcli}`);
-  }
-
+  const { chromium } = loadPlaywright();
   await writeFile(fixturePath, JSON.stringify(statusFixture, null, 2) + "\n", "utf-8");
+  await writeFile(pausedFixturePath, JSON.stringify(pausedStatusFixture, null, 2) + "\n", "utf-8");
 
   const server = spawn("npm", ["run", "dev", "--", "--port", String(port), "--strictPort"], {
     cwd: dashboardDir,
@@ -197,51 +192,69 @@ async function main() {
     stdio: "ignore",
   });
 
+  let browser;
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForDashboard(baseUrl);
-    runPw(["open", `${baseUrl}/?statusUrl=/${fixtureName}&goalId=throttled-codex&actionKind=all`]);
-    runPw(["resize", "1280", "900"]);
-    runPw([
-      "run-code",
-      String.raw`async (page) => {
-        await page.waitForLoadState("networkidle");
-        await page.getByText("User Actions").waitFor();
-        const body = await page.locator("body").innerText();
-        const required = [
-          "0 actions",
-          "No user-facing action is active.",
-          "Quota 0.5",
-          "本窗口配额已用完",
-          "12/12 slots",
-        ];
-        const missing = required.filter((text) => !body.includes(text));
-        if (missing.length) {
-          throw new Error("Missing dashboard text: " + missing.join(", "));
-        }
-        const forbidden = [
-          "1 actions",
-          "Let Codex continue",
-          "Codex can continue",
-          "continue_from_refreshed_state",
-        ];
-        const present = forbidden.filter((text) => body.includes(text));
-        if (present.length) {
-          throw new Error("Throttled goal leaked into user actions: " + present.join(", "));
-        }
-        return {
-          ok: true,
-          bodyIncludesQuota: body.includes("Quota 0.5"),
-          bodyIncludesNoAction: body.includes("No user-facing action is active."),
-        };
-      }`,
-    ]);
+    browser = await launchBrowser(chromium);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto(`${baseUrl}/?view=ops&statusUrl=/${fixtureName}&goalId=throttled-codex&actionKind=all`, { waitUntil: "networkidle" });
+    await page.getByText("用户操作").waitFor();
+    const body = await page.locator("body").innerText();
+    const required = [
+      "0 个操作",
+      "当前没有需要用户处理的操作。",
+      "配额 0.5",
+      "本窗口配额已用完",
+      "720/720 个执行槽位",
+    ];
+    const missing = required.filter((text) => !body.includes(text));
+    if (missing.length) {
+      throw new Error(`Missing dashboard text: ${missing.join(", ")}\n${body.slice(0, 4_000)}`);
+    }
+    const forbidden = [
+      "1 个操作",
+      "让 Codex 继续",
+      "Codex 可以继续",
+      "continue_from_refreshed_state",
+    ];
+    const present = forbidden.filter((text) => body.includes(text));
+    if (present.length) {
+      throw new Error("Throttled goal leaked into user actions: " + present.join(", "));
+    }
+
+    await page.goto(`${baseUrl}/?view=ops&statusUrl=/${pausedFixtureName}&goalId=${pausedGoalId}&actionKind=all`, { waitUntil: "networkidle" });
+    await page.getByText("用户操作").waitFor();
+    const pausedBody = await page.locator("body").innerText();
+    const pausedRequired = [
+      "0 个操作",
+      "自动推进已暂停",
+      "自动计算已暂停",
+      "wait_for_control_plane",
+    ];
+    const pausedMissing = pausedRequired.filter((text) => !pausedBody.includes(text));
+    if (pausedMissing.length) {
+      throw new Error(`Missing paused dashboard text: ${pausedMissing.join(", ")}\n${pausedBody.slice(0, 4_000)}`);
+    }
+    const pausedForbidden = [
+      "让 Codex 继续",
+      "Codex 可以继续",
+      "Codex 可以执行",
+      "continue_from_refreshed_state",
+      "continue_codex_action",
+    ];
+    const pausedPresent = pausedForbidden.filter((text) => pausedBody.includes(text));
+    if (pausedPresent.length) {
+      throw new Error(`Paused goal leaked into executable actions: ${pausedPresent.join(", ")}`);
+    }
+    if (pageErrors.length) {
+      throw new Error(`Dashboard page errors: ${pageErrors.join(" | ")}`);
+    }
     console.log("dashboard-throttled-browser-smoke ok");
   } finally {
-    server.kill("SIGTERM");
-    await rm(fixturePath, { force: true });
-    runPw(["close"], { allowFailure: true });
-    await removeWithRetry(playwrightCliOutputDir);
+    await cleanupBrowserSmoke({ browser, fixturePaths: [fixturePath, pausedFixturePath], server });
   }
 }
 

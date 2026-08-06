@@ -14,6 +14,9 @@ from loopx.control_plane.scheduler.monitor_poll_writeback import (
 from loopx.event_sourced_state import (
     AppendOnlyStateEventStore,
     TODO_ADDED,
+    TODO_UPDATED,
+    StateEventError,
+    backfill_todo_events_from_markdown,
     build_state_projection,
     make_state_event,
 )
@@ -357,6 +360,119 @@ def test_capability_binding_follows_event_projected_successor(tmp_path: Path) ->
     assert successor["capability_binding_ref"] == (
         "issue-fix:feasibility-a1b2c3d4"
     )
+
+
+def test_task_domain_survives_markdown_event_projection() -> None:
+    events = backfill_todo_events_from_markdown(
+        "\n".join(
+            [
+                "## Agent Todo",
+                "",
+                "- [ ] [P0] Validate one adaptive lane.",
+                (
+                    "  <!-- loopx:todo todo_id=todo_domain001 status=open "
+                    "task_class=advancement_task action_kind=validate "
+                    "task_domain=validation -->"
+                ),
+            ]
+        ),
+        goal_id=GOAL_ID,
+    )
+
+    projection = build_state_projection(events)
+
+    assert projection["agent_todos"]["items"][0]["task_domain"] == "validation"
+
+
+def test_task_domain_event_update_is_normalized_and_invalid_values_fail() -> None:
+    added = make_state_event(
+        event_id="evt-domain-add",
+        goal_id=GOAL_ID,
+        event_type=TODO_ADDED,
+        refs={"todo_id": "todo_domain_update"},
+        payload={
+            "role": "agent",
+            "title": "Validate one adaptive lane.",
+            "task_class": "advancement_task",
+            "task_domain": "validation",
+        },
+        recorded_at="2026-07-18T00:00:00+00:00",
+    )
+    updated = make_state_event(
+        event_id="evt-domain-update",
+        goal_id=GOAL_ID,
+        event_type=TODO_UPDATED,
+        refs={"todo_id": "todo_domain_update"},
+        payload={"task_domain": "docs.review"},
+        recorded_at="2026-07-18T00:01:00+00:00",
+    )
+
+    projection = build_state_projection([added, updated])
+
+    assert projection["agent_todos"]["items"][0]["task_domain"] == "docs.review"
+    with pytest.raises(StateEventError, match="task_domain"):
+        make_state_event(
+            event_id="evt-domain-invalid",
+            goal_id=GOAL_ID,
+            event_type=TODO_UPDATED,
+            refs={"todo_id": "todo_domain_update"},
+            payload={"task_domain": "../private"},
+            recorded_at="2026-07-18T00:02:00+00:00",
+        )
+
+
+def test_duplicate_todo_add_rejects_invalid_task_domain_atomically(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Validate one adaptive lane.",
+        task_class="advancement_task",
+        task_domain="validation",
+    )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="task_domain"):
+        add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="Validate one adaptive lane.",
+            task_class="advancement_task",
+            task_domain="../private",
+        )
+
+    assert state.read_text(encoding="utf-8") == before
+    assert _agent_todo(state, todo["todo_id"])["task_domain"] == "validation"
+
+
+def test_todo_update_rejects_invalid_task_domain_atomically(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Validate one adaptive lane.",
+        task_class="advancement_task",
+        task_domain="validation",
+        claimed_by=AUTHOR_AGENT,
+    )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="task_domain"):
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            task_domain="../private",
+            agent_id=AUTHOR_AGENT,
+        )
+
+    assert state.read_text(encoding="utf-8") == before
+    assert _agent_todo(state, todo["todo_id"])["task_domain"] == "validation"
 
 
 def test_monitor_schedule_fields_remain_monitor_only(tmp_path: Path) -> None:

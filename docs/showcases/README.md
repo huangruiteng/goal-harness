@@ -41,20 +41,15 @@ cd apps/presentation/dashboard
 npm run export:frontstage-share
 ```
 
-This writes `/tmp/loopx-frontstage-share-bundle` with the compiled
-dashboard, a sanitized `goal_channel_projection_v0` status fixture, direct
-`/frontstage/` static-route support, and a manifest. It is the foundation for a
-future GitHub Pages showcase: Pages should publish this generated artifact, not
-live registry files or local status exports.
-Once repository Pages is enabled for GitHub Actions, the same generated bundle
-is available as the
-[hosted frontstage](https://huangruiteng.github.io/loopx/frontstage/).
-That hosted route is intentionally case-first. It should help a new user or
-developer understand the showcased patterns before reading CLI output: public
-cases, efficiency evidence, and the public boundary come from this directory;
+This writes `/tmp/loopx-frontstage-share-bundle` with the static
+[public homepage](https://huangruiteng.github.io/loopx/), compiled dashboard, a
+sanitized `goal_channel_projection_v0` status fixture, direct `/frontstage/`
+static-route support, and a manifest. GitHub Pages publishes this generated
+artifact, not live registry files or local status exports. The interactive
+dashboard route remains an exporter compatibility surface, not a promoted
+public entry. New users should start from the homepage; public cases,
+efficiency evidence, and the public boundary come from this directory, while
 live local `statusUrl` feeds belong only to explicit ops-mode inspection.
-For a short external walkthrough, use the
-[frontstage demo script](../outreach/frontstage-demo-script.md).
 For animated outreach assets, start from the
 [showcase animation skill spike](../outreach/showcase-animation-skill-spike.md)
 and the

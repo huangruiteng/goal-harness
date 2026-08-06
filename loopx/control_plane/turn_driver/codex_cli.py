@@ -21,6 +21,7 @@ from .executor import (
     BuiltInHostError,
     LOOPX_TURN_HOST_REQUEST_SCHEMA_VERSION,
 )
+from .driver import selected_turn_todo
 from .transaction import LOOPX_TURN_RESULT_SCHEMA_VERSION, TRANSACTION_PHASES
 
 
@@ -49,8 +50,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _lineage(request: Mapping[str, Any]) -> dict[str, str]:
     envelope = _mapping(request.get("turn_envelope"))
-    action = _mapping(envelope.get("action"))
-    todo = _mapping(action.get("selected_todo"))
+    todo = selected_turn_todo(envelope)
     lineage = {
         "goal_id": str(envelope.get("goal_id") or "").strip(),
         "agent_id": str(envelope.get("agent_id") or "").strip(),
@@ -341,8 +341,12 @@ def _codex_command(
         command = [
             codex_bin,
             "exec",
-            "resume",
             "--skip-git-repo-check",
+            "-C",
+            str(project),
+            "resume",
+            "-c",
+            f'sandbox_mode="{sandbox}"',
             "--output-schema",
             str(schema_path),
             "--output-last-message",

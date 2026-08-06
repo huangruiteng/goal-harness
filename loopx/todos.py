@@ -45,6 +45,7 @@ from .control_plane.todos.contract import (
     normalize_todo_resume_when,
     normalize_supported_todo_resume_when,
     normalize_todo_status,
+    normalize_todo_task_domain,
     normalize_todo_task_repository,
     parse_todo_metadata_line,
     require_todo_excluded_agents,
@@ -629,6 +630,7 @@ def add_todo_to_lines(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    task_domain: str | None = None,
     capability_binding_ref: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
@@ -706,6 +708,7 @@ def add_todo_to_lines(
             status=normalized_status,
             task_class=task_class,
             action_kind=action_kind,
+            task_domain=task_domain,
             capability_binding_ref=capability_binding_ref,
             task_repository=task_repository,
             continuation_policy=continuation_policy,
@@ -745,6 +748,8 @@ def add_todo_to_lines(
             updates["task_class"] = task_class
         if action_kind:
             updates["action_kind"] = action_kind
+        if task_domain:
+            updates["task_domain"] = task_domain
         if capability_binding_ref:
             requested_binding_ref = normalize_todo_capability_binding_ref(
                 capability_binding_ref
@@ -821,6 +826,9 @@ def add_todo_to_lines(
         "status": normalize_todo_status(effective_metadata.get("status")) or normalized_status,
         "task_class": effective_metadata.get("task_class") or task_class,
         "action_kind": effective_metadata.get("action_kind") or action_kind,
+        "task_domain": normalize_todo_task_domain(
+            effective_metadata.get("task_domain") or task_domain
+        ),
         "capability_binding_ref": effective_metadata.get("capability_binding_ref")
         or capability_binding_ref,
         "task_repository": normalize_todo_task_repository(
@@ -875,6 +883,7 @@ def add_goal_todo(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    task_domain: str | None = None,
     capability_binding_ref: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
@@ -920,6 +929,8 @@ def add_goal_todo(
         )
     if task_repository and role != "agent":
         raise ValueError("task_repository is only valid for agent todos")
+    if task_domain and role != "agent":
+        raise ValueError("task_domain is only valid for agent todos")
     if capability_binding_ref and role != "agent":
         raise ValueError("capability_binding_ref is only valid for agent todos")
     normalized_status = normalize_todo_status(status) if status else TODO_STATUS_OPEN
@@ -1048,6 +1059,7 @@ def add_goal_todo(
             status=normalized_status,
             task_class=task_class,
             action_kind=action_kind,
+            task_domain=task_domain,
             capability_binding_ref=capability_binding_ref,
             task_repository=task_repository,
             continuation_policy=continuation_policy,
@@ -1159,6 +1171,7 @@ def update_goal_todo(
     reason: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    task_domain: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
     required_write_scopes: list[str] | None = None,
@@ -1268,6 +1281,7 @@ def update_goal_todo(
             clear_claim=clear_claim,
             other_values=(
                 text, status, note, evidence, reason, task_class, action_kind,
+                task_domain,
                 task_repository, continuation_policy, required_write_scopes,
                 required_capabilities, target_capabilities,
                 explore_result_node_refs, decision_scope,
@@ -1302,6 +1316,8 @@ def update_goal_todo(
             )
         if task_repository and target_role != "agent":
             raise ValueError("task_repository is only valid for agent todos")
+        if task_domain and target_role != "agent":
+            raise ValueError("task_domain is only valid for agent todos")
         effective_excluded_agents = (
             []
             if clear_excluded_agents
@@ -1439,6 +1455,7 @@ def update_goal_todo(
             reason=reason,
             task_class=task_class,
             action_kind=action_kind,
+            task_domain=task_domain,
             task_repository=task_repository,
             continuation_policy=continuation_policy,
             required_write_scopes=required_write_scopes,

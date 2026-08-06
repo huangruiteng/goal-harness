@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,9 @@ from .control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     resolve_scheduler_execution_context,
 )
+from .control_plane.agents.capability_gate import (
+    runtime_capabilities_for_cli_projection,
+)
 from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
     VISIBLE_GOAL_SLOT_SPEND_SOURCE,
@@ -34,6 +38,9 @@ from .control_plane.todos.contract import (
 from .control_plane.agents.runtime_model import (
     AgentRuntimeModel,
     PEER_AGENT_PROFILE_SCHEMA_VERSION,
+)
+from .control_plane.work_items.runtime_capability_reentry import (
+    RUNTIME_CAPABILITY_REENTRY_SCHEMA_VERSION,
 )
 
 
@@ -81,6 +88,34 @@ INTERFACE_BUDGET_CHARS = {
     "visible_goal": 4_000,
 }
 NATIVE_GOAL_HOST_MAX_CHARS = INTERFACE_BUDGET_CHARS["visible_goal"]
+VISIBLE_GOAL_INITIAL_RUNTIME_CAPABILITY_PROJECTION_SCHEMA_VERSION = (
+    "visible_goal_initial_runtime_capability_projection_v0"
+)
+VISIBLE_GOAL_INITIAL_RUNTIME_CAPABILITY_LIMIT = 8
+VISIBLE_GOAL_HOST_CONTROL_CAPABILITIES = frozenset(
+    {
+        "automation_update",
+        "current_time",
+        "first_turn_receipt",
+        "heartbeat_prequota",
+        "loop",
+        "loopx_turn",
+        "rrule",
+        "scheduler_execution_context",
+        "turn_instance_id",
+    }
+)
+VISIBLE_GOAL_HEARTBEAT_ONLY_POLICY_PATTERNS = (
+    re.compile(r"(?<![a-z0-9_/])/loop(?![a-z0-9_-])", re.IGNORECASE),
+    re.compile(r"\bautomation(?:[\s_-]+update)?\b", re.IGNORECASE),
+    re.compile(r"\bheartbeat(?:[\s_-]+prequota)?\b", re.IGNORECASE),
+    re.compile(r"\brrule\b", re.IGNORECASE),
+    re.compile(r"\breceipt\b|\bfirst[\s_-]*turn[\s_-]*receipt\b", re.IGNORECASE),
+    re.compile(r"\bcurrent[\s_-]*time(?:[\s_-]*iso)?\b", re.IGNORECASE),
+    re.compile(r"\bloopx[\s_-]*turn\b", re.IGNORECASE),
+    re.compile(r"\bturn[\s_-]*instance[\s_-]*id\b", re.IGNORECASE),
+    re.compile(r"\bscheduler(?:[\s_-]*execution[\s_-]*context)?\b", re.IGNORECASE),
+)
 
 
 def uses_native_goal_host_loop(
@@ -171,6 +206,49 @@ def normalize_agent_scopes(values: list[str] | tuple[str, ...] | None) -> list[s
         if scope and scope not in scopes:
             scopes.append(scope)
     return scopes
+
+
+def build_visible_goal_initial_runtime_capability_projection(
+    available_capabilities: Any,
+) -> dict[str, Any] | None:
+    capabilities = [
+        capability
+        for capability in runtime_capabilities_for_cli_projection(
+            available_capabilities
+        )
+        if capability not in VISIBLE_GOAL_HOST_CONTROL_CAPABILITIES
+    ]
+    if not capabilities:
+        return None
+    if len(capabilities) > VISIBLE_GOAL_INITIAL_RUNTIME_CAPABILITY_LIMIT:
+        raise ValueError(
+            "visible Goal initial runtime capabilities exceed the limit of "
+            f"{VISIBLE_GOAL_INITIAL_RUNTIME_CAPABILITY_LIMIT}"
+        )
+    return {
+        "schema_version": (
+            VISIBLE_GOAL_INITIAL_RUNTIME_CAPABILITY_PROJECTION_SCHEMA_VERSION
+        ),
+        "source": "activation_available_capabilities",
+        "scope": "visible_goal_session",
+        "capabilities": capabilities,
+        "capability_count": len(capabilities),
+        "max_capabilities": VISIBLE_GOAL_INITIAL_RUNTIME_CAPABILITY_LIMIT,
+        "first_quota_path": "task_body.quota_guard_command",
+        "user_gate": False,
+        "durable_grant_written": False,
+        "dynamic_reentry_schema_version": RUNTIME_CAPABILITY_REENTRY_SCHEMA_VERSION,
+    }
+
+
+def validate_visible_goal_policy_rule(*, field: str, value: str) -> None:
+    if any(
+        pattern.search(value)
+        for pattern in VISIBLE_GOAL_HEARTBEAT_ONLY_POLICY_PATTERNS
+    ):
+        raise ValueError(
+            f"visible Goal {field} contains heartbeat-only control vocabulary"
+        )
 
 
 def agent_profile_scopes(profile: dict[str, Any] | None) -> list[str]:
@@ -368,13 +446,25 @@ def build_heartbeat_prompt(
     available_capabilities: list[str] | tuple[str, ...] | None = None,
     runtime_profile: str | None = None,
     scheduler_execution_context: dict[str, Any] | None = None,
+    visible_goal_host: str | None = None,
 ) -> dict[str, Any]:
     if not (full or compact or brief or thin):
         thin = True
+    if visible_goal_host not in {None, "traex-cli"}:
+        raise ValueError(f"unsupported visible goal host: {visible_goal_host}")
+    if visible_goal_host == "traex-cli" and (
+        runtime_profile != SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP.value
+        or scheduler_execution_context is not None
+    ):
+        raise ValueError(
+            "visible_goal_host='traex-cli' requires runtime_profile='generic_cli' "
+            "without scheduler_execution_context"
+        )
+    traex_visible_goal = visible_goal_host == "traex-cli"
     native_goal_host = uses_native_goal_host_loop(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
-    )
+    ) or traex_visible_goal
     ark_managed_agent_goal = uses_ark_managed_agent_goal_host(
         runtime_profile=runtime_profile,
         scheduler_execution_context=scheduler_execution_context,
@@ -388,12 +478,24 @@ def build_heartbeat_prompt(
     active_state_arg = f" --active-state {active_state_text}" if active_state else ""
     resolved_material_rule = material_queue_rule or DEFAULT_MATERIAL_QUEUE_RULE
     resolved_permission_rule = permission_rule or DEFAULT_PERMISSION_RULE
+    if traex_visible_goal:
+        validate_visible_goal_policy_rule(
+            field="material_queue_rule",
+            value=resolved_material_rule,
+        )
+        validate_visible_goal_policy_rule(
+            field="permission_rule",
+            value=resolved_permission_rule,
+        )
     normalized_agent_id = normalize_todo_claimed_by(agent_id) if agent_id else None
     if agent_id and not normalized_agent_id:
         raise ValueError("agent_id must be a public-safe token such as codex-main-control")
     explicit_agent_scopes = normalize_agent_scopes(agent_scopes)
     profile_agent_scopes = agent_profile_scopes(agent_profile)
     normalized_agent_scopes = explicit_agent_scopes or profile_agent_scopes
+    if traex_visible_goal:
+        for scope in normalized_agent_scopes:
+            validate_visible_goal_policy_rule(field="agent_scope", value=scope)
     agent_scope_source = "argument" if explicit_agent_scopes else "agent_profile_v1" if profile_agent_scopes else None
     if normalized_agent_scopes and not normalized_agent_id:
         raise ValueError("--agent-scope requires --agent-id so claimed_by uses a registered agent")
@@ -428,6 +530,21 @@ def build_heartbeat_prompt(
     normalized_available_capabilities = normalize_required_capabilities(
         available_capabilities
     )
+    initial_runtime_capability_projection = (
+        build_visible_goal_initial_runtime_capability_projection(
+            normalized_available_capabilities
+        )
+        if traex_visible_goal
+        else None
+    )
+    if initial_runtime_capability_projection:
+        task_body_available_capabilities = initial_runtime_capability_projection[
+            "capabilities"
+        ]
+    elif traex_visible_goal:
+        task_body_available_capabilities = []
+    else:
+        task_body_available_capabilities = normalized_available_capabilities
     capability_args = render_available_capability_args(
         normalized_available_capabilities
     )
@@ -459,6 +576,23 @@ def build_heartbeat_prompt(
         agent_id=normalized_agent_id,
         available_capabilities=normalized_available_capabilities,
     )
+    task_body_quota_guard_command = quota_guard_command
+    task_body_quota_spend_command = quota_spend_command
+    if traex_visible_goal:
+        task_body_quota_guard_command = render_quota_guard_command(
+            goal_id,
+            cli_bin=cli_bin,
+            agent_id=normalized_agent_id,
+            available_capabilities=task_body_available_capabilities,
+            runtime_profile=runtime_profile,
+            scheduler_execution_context=scheduler_execution_context,
+        )
+        task_body_quota_spend_command = render_quota_spend_command(
+            goal_id,
+            source=VISIBLE_GOAL_SLOT_SPEND_SOURCE,
+            cli_bin=cli_bin,
+            agent_id=normalized_agent_id,
+        )
     refresh_state_command = render_refresh_state_command(
         goal_id,
         cli_bin=cli_bin,
@@ -485,7 +619,9 @@ def build_heartbeat_prompt(
     compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
-    if ark_managed_agent_goal:
+    if traex_visible_goal:
+        task_body_renderer = render_traex_visible_goal_task_body
+    elif ark_managed_agent_goal:
         task_body_renderer = render_ark_managed_agent_goal_task_body
     elif native_goal_host:
         task_body_renderer = render_visible_goal_task_body
@@ -501,9 +637,11 @@ def build_heartbeat_prompt(
         goal_id=goal_id,
         active_state=active_state_text,
         cli_preflight=cli_preflight,
-        pr_review_pre_quota_command=pr_review_pre_quota_command,
-        quota_guard_command=quota_guard_command,
-        quota_spend_command=quota_spend_command,
+        pr_review_pre_quota_command=(
+            "" if traex_visible_goal else pr_review_pre_quota_command
+        ),
+        quota_guard_command=task_body_quota_guard_command,
+        quota_spend_command=task_body_quota_spend_command,
         refresh_state_command=refresh_state_command,
         progress_refresh_state_command=progress_refresh_state_command,
         material_queue_rule=resolved_material_rule,
@@ -519,6 +657,8 @@ def build_heartbeat_prompt(
         host_limit = (
             "Ark Managed Agent goal prompt"
             if ark_managed_agent_goal
+            else "visible TraeX /goal task body"
+            if traex_visible_goal
             else "visible Codex /goal task body"
         )
         raise ValueError(
@@ -545,6 +685,20 @@ def build_heartbeat_prompt(
         "registered_agents": normalized_registered_agents,
         "runtime_profile": runtime_profile,
         "scheduler_execution_context": scheduler_execution_context,
+        **(
+            {"visible_goal_host": visible_goal_host}
+            if visible_goal_host
+            else {}
+        ),
+        **(
+            {
+                "initial_runtime_capability_projection": (
+                    initial_runtime_capability_projection
+                )
+            }
+            if initial_runtime_capability_projection
+            else {}
+        ),
         **(
             {"host_contract": build_ark_managed_agent_host_contract()}
             if ark_managed_agent_goal
@@ -906,7 +1060,7 @@ Guard/retry; `LOOPX_TURN=<current_time_iso>`:
 {pr_review_pre_quota_block}{quota_guard_command}
 ```
 
-Fail: quiet.
+Fail:quiet.
 
 User NOTIFY: Chinese actions incl. non_blocking at false/0; never only "owner
 gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
@@ -1018,8 +1172,8 @@ If `should_run=true`:
    `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if no new instruction/evidence/
    todo/stale source/safe handoff.
-   `task_orchestration_contract`: activate/resume eligible peer lanes; the
-   task-scoped coordinator reviews accepted evidence and writes this bundle.
+   `task_orchestration_contract`: spawn admitted child lanes or resume peers;
+   the coordinator alone accepts evidence and writes/spends once.
    Check `delivery_batch_scale`, `delivery_outcome`,
    `post_handoff_outcome_gap_streak`, `handoff_delivery_contract`; obey
    repeated-small/surface-loop contracts.
@@ -1099,6 +1253,53 @@ def render_visible_goal_task_body(
         permission_rule=permission_rule,
         agent_scope_instruction=agent_scope_instruction,
         host_wait_rule=CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE,
+    )
+
+
+def render_traex_visible_goal_task_body(
+    *,
+    goal_id: str,
+    active_state: str,
+    cli_preflight: str,
+    pr_review_pre_quota_command: str,
+    quota_guard_command: str,
+    quota_spend_command: str,
+    refresh_state_command: str,
+    progress_refresh_state_command: str,
+    material_queue_rule: str,
+    permission_rule: str,
+    cli_bin: str,
+    agent_scope_instruction: str,
+    expanded_prompt_command: str,
+    compact_prompt_command: str,
+    brief_prompt_command: str,
+    thin_prompt_command: str,
+) -> str:
+    del (
+        cli_preflight,
+        refresh_state_command,
+        cli_bin,
+        expanded_prompt_command,
+        compact_prompt_command,
+        brief_prompt_command,
+        thin_prompt_command,
+    )
+    return _render_goal_task_body(
+        goal_id=goal_id,
+        active_state=active_state,
+        host_preamble=(
+            "in this visible\nTraeX `/goal` task. The visible TraeX Goal owns "
+            "interactive continuation."
+        ),
+        completion_subject="visible\nGoal",
+        pr_review_pre_quota_command=pr_review_pre_quota_command,
+        quota_guard_command=quota_guard_command,
+        quota_spend_command=quota_spend_command,
+        progress_refresh_state_command=progress_refresh_state_command,
+        material_queue_rule=material_queue_rule,
+        permission_rule=permission_rule,
+        agent_scope_instruction=agent_scope_instruction,
+        host_wait_rule="",
     )
 
 
@@ -1333,6 +1534,16 @@ No heartbeat task body was generated.
 def render_heartbeat_prompt_markdown(payload: dict[str, Any]) -> str:
     if payload.get("ok") is False:
         return render_heartbeat_prompt_error_markdown(payload)
+    if payload.get("visible_goal_host") == "traex-cli":
+        return f"""# Visible TraeX Goal Prompt
+
+Paste this task body into the visible TraeX `/goal` task.
+
+````text
+{payload.get("task_body", "")}
+````
+
+{render_heartbeat_generator_inputs_markdown(payload)}"""
     if payload.get("thin"):
         style = "thin "
     elif payload.get("brief"):

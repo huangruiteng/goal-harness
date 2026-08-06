@@ -66,6 +66,7 @@ def quota_todo_summary(
     role: str = "agent",
     claim_scope_agent_id: str | None = None,
     item_limit: int | None = None,
+    include_task_orchestration_authority: bool = False,
 ) -> dict[str, Any]:
     source_section = "Agent Todo" if role == "agent" else "User Todo"
     summary = compact_todo_group(
@@ -73,6 +74,7 @@ def quota_todo_summary(
         source_section=source_section,
         role=role,
         item_limit=item_limit,
+        include_task_orchestration_authority=include_task_orchestration_authority,
     )
     if summary is None:
         summary = {

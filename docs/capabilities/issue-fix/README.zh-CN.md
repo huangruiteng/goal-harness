@@ -462,7 +462,7 @@ Merged PR 不会直接执行任意 callback，rollout event 也不会授予新�
 | Projection source reconcile | `lark-kanban sync-projection --reconcile-source` | 普通 sync 保持非破坏；只有调用方声明输入是完整 source snapshot 后，才能先预览、再显式退役该 namespace 内的远端 orphan row 和本地 stale record mapping。 |
 | Acceptance fixture | `loopx issue-fix acceptance-fixture` | 在 deterministic fixture 中证明 failure-before、minimal patch、pass-after。 |
 | Git branch fixture | `loopx issue-fix repo-branch-fixture` | 在临时 git branch 中运行同一修复 contract。 |
-| Caller repo branch | `loopx issue-fix caller-repo-branch` | 检查获批本地 repo、创建/认领 issue branch、运行 caller-declared validation。 |
+| Caller repo branch | `loopx issue-fix caller-repo-branch` | 检查获批本地 repo；创建 issue branch 前要求本地 base snapshot 与 tracking ref 一致；不隐式刷新远端，并运行 caller-declared validation。 |
 | Content bridge | `loopx content-ops issue-fix-*` | 复用 body-free public metadata/intake 边界。 |
 | 可见投影 | `status`、`lark-kanban`、dashboard | 从同一 kernel/domain state 派生人可读 issue、outcome、gate 与 `Monthly Impact`，不建立第二套事实源。 |
 

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import subprocess
+
 from loopx.boundary_authority import build_checkpointed_boundary_authority_entry
 from loopx.control_plane.quota.goal_boundary import (
     declared_available_capabilities,
     goal_boundary,
+)
+from loopx.control_plane.quota.task_orchestration import (
+    apply_task_orchestration_contract,
 )
 
 
@@ -48,6 +53,96 @@ def test_goal_boundary_uses_registry_goal_for_scope_and_capability_projection() 
     ]
     assert boundary["requires_parent_approval"] == ["write", "publish"]
     assert boundary["guards"] == ["stay public"]
+
+
+def test_goal_boundary_projects_credential_free_repository_identity(
+    tmp_path,
+) -> None:
+    project = tmp_path / "repo"
+    project.mkdir()
+    subprocess.run(["git", "init", str(project)], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/owner/loopx.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    boundary = goal_boundary(
+        {
+            "id": "repository-boundary-fixture",
+            "repo": str(project),
+            "spawn_policy": {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 2,
+            },
+        }
+    )
+
+    assert boundary is not None
+    assert boundary["task_repository"] == "git:github.com/owner/loopx"
+
+    summary = {
+        "items": [
+            {
+                "todo_id": "todo_primary",
+                "status": "open",
+                "task_class": "advancement_task",
+                "action_kind": "inspect",
+                "task_domain": "code",
+                "text": "Inspect the primary lane.",
+            },
+            {
+                "todo_id": "todo_same_repo",
+                "status": "open",
+                "task_class": "advancement_task",
+                "action_kind": "inspect",
+                "task_domain": "code",
+                "task_repository": "git:github.com/owner/loopx",
+                "text": "Inspect the same repository.",
+            },
+            {
+                "todo_id": "todo_other_repo",
+                "status": "open",
+                "task_class": "advancement_task",
+                "action_kind": "inspect",
+                "task_domain": "code",
+                "task_repository": "git:github.com/owner/private",
+                "text": "Inspect another repository.",
+            },
+        ]
+    }
+    contract, _work_lane = apply_task_orchestration_contract(
+        fallback_work_lane_contract={"lane": "advancement_task"},
+        goal_boundary=boundary,
+        agent_identity={
+            "agent_id": "codex-fixture",
+            "registered_agents": ["codex-fixture"],
+        },
+        agent_todo_summary=summary,
+        raw_agent_todo_summary=summary,
+        available_capabilities=["subagent_spawn"],
+    )
+
+    assert contract is not None
+    assert [lane["todo_id"] for lane in contract["eligible_child_lanes"]] == [
+        "todo_same_repo"
+    ]
+    assert contract["blocked_lanes"] == [
+        {
+            "todo_id": "todo_other_repo",
+            "task_domain": "code",
+            "reason_codes": ["task_repository_not_allowed"],
+        }
+    ]
 
 
 def test_goal_boundary_appends_only_active_checkpointed_write_scopes() -> None:

@@ -1,0 +1,4 @@
+interface:
+  display_name: "LoopX PR Program"
+  short_description: "Track cross-repository PR programs and material changes"
+  default_prompt: "Use $loopx-pr-program to reconcile a provider-neutral PR/MR snapshot, preserve requirement and dependency priorities, and write back only material changes."

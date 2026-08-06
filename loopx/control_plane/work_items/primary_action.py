@@ -268,11 +268,18 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
             if isinstance(payload.get("task_orchestration_contract"), dict)
             else {}
         )
-        lanes = (
-            contract.get("eligible_peer_lanes")
-            if isinstance(contract.get("eligible_peer_lanes"), list)
-            else []
-        )
+        lanes = contract.get("eligible_child_lanes")
+        if not isinstance(lanes, list):
+            lanes = (
+                contract.get("eligible_peer_lanes")
+                if isinstance(contract.get("eligible_peer_lanes"), list)
+                else []
+            )
+        if contract.get("mode") == "adaptive":
+            return (
+                f"choose whether to spawn admitted child lanes ({len(lanes)} eligible); "
+                "the task coordinator reviews evidence and writes back this bundle once"
+            )
         return (
             f"activate/resume peer lanes ({len(lanes)} eligible); "
             "the task coordinator reviews evidence and writes back this bundle"

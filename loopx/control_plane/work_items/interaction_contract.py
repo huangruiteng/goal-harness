@@ -615,6 +615,13 @@ def interaction_next_cli_actions(
             typed_monitor_poll,
             typed_quota_guard,
         ]
+    task_orchestration_contract = payload.get("task_orchestration_contract")
+    if (
+        mode == "task_orchestration"
+        and isinstance(task_orchestration_contract, Mapping)
+        and task_orchestration_contract.get("mode") == "adaptive"
+    ):
+        return [typed_quota_guard]
     if mode == AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value:
         agent_scope_frontier = (
             payload.get("agent_scope_frontier")

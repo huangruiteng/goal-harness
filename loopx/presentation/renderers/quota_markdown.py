@@ -487,12 +487,18 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
                 )
     task_orchestration = as_dict(payload.get("task_orchestration_contract"))
     if task_orchestration:
-        peer_lanes = as_list(task_orchestration.get("eligible_peer_lanes"))
+        lanes = as_list(task_orchestration.get("eligible_child_lanes"))
+        if not lanes:
+            lanes = as_list(task_orchestration.get("eligible_peer_lanes"))
+        blocked_lanes = as_list(task_orchestration.get("blocked_lanes"))
+        if not blocked_lanes:
+            blocked_lanes = as_list(task_orchestration.get("blocked_peer_lanes"))
         lines.append(
             "- task_orchestration: "
             f"mode={task_orchestration.get('mode')} "
             f"activation_required={task_orchestration.get('activation_required')} "
-            f"peer_lanes={len(peer_lanes)} "
+            f"lanes={len(lanes)} "
+            f"blocked_lanes={len(blocked_lanes)} "
             f"writeback_owner={task_orchestration.get('writeback_owner')}"
         )
     replan_decision = as_dict(payload.get("autonomous_replan_decision"))

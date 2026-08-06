@@ -399,6 +399,7 @@ def scheduler_execution_context_for_turn(
         "codex-cli": HostSurface.CODEX_CLI.value,
         "generic-cli": HostSurface.GENERIC_CLI.value,
         "claude-code": HostSurface.CLAUDE_CODE.value,
+        "pi": HostSurface.GENERIC_CLI.value,
     }.get(host, host)
     normalized_mode = {
         "interactive-visible": ExecutionMode.INTERACTIVE.value,

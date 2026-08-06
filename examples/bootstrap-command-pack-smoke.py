@@ -81,6 +81,49 @@ def assert_packet_summary_refs(
     return summary
 
 
+def write_connected_goal_fixture(
+    project: Path,
+    *,
+    goal_id: str,
+    agent_id: str,
+) -> dict[Path, str]:
+    state_file = project / ".codex" / "goals" / goal_id / "ACTIVE_GOAL_STATE.md"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_text = "# Active Goal State\n"
+    state_file.write_text(state_text, encoding="utf-8")
+
+    registry = project / ".loopx" / "registry.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = (
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "goals": [
+                    {
+                        "id": goal_id,
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": str(state_file.relative_to(project)),
+                        "coordination": {
+                            "agent_model": "peer_v1",
+                            "registered_agents": [agent_id],
+                        },
+                    }
+                ],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    registry.write_text(registry_text, encoding="utf-8")
+    return {registry: registry_text, state_file: state_text}
+
+
+def assert_fixture_unchanged(snapshot: dict[Path, str]) -> None:
+    for path, expected in snapshot.items():
+        assert path.read_text(encoding="utf-8") == expected
+
+
 def test_missing_project_stops_before_mutation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project = Path(tmp) / "fresh-project"
@@ -140,6 +183,11 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project = Path(tmp) / "goal-start-project"
         project.mkdir()
+        snapshot = write_connected_goal_fixture(
+            project,
+            goal_id="goal-start",
+            agent_id="codex-test-agent",
+        )
         payload = run_json(
             "bootstrap-command-pack",
             "--project",
@@ -259,14 +307,18 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
             "issue_fix_workflow"
         ]["writeback"]
         assert "domain-state" in domain_routes["issue_fix_workflow"]["writeback"]
-        assert not (project / ".loopx").exists()
-        assert not (project / ".codex").exists()
+        assert_fixture_unchanged(snapshot)
 
 
 def test_start_goal_guided_previews_transaction_without_mutation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project = Path(tmp) / "guided-project"
         project.mkdir()
+        snapshot = write_connected_goal_fixture(
+            project,
+            goal_id="guided-goal",
+            agent_id="codex-test-agent",
+        )
         start_args = (
             "start-goal",
             "--guided",
@@ -353,8 +405,7 @@ def test_start_goal_guided_previews_transaction_without_mutation() -> None:
         assert command_pack["projection_mode"] == "guided_start_compatibility"
         assert "--include-command-pack-detail" in str(command_pack["detail_command"])
         assert command_pack["goal_start_contract"]["planner"]["required_before_todo_write"] is True
-        assert not (project / ".loopx").exists()
-        assert not (project / ".codex").exists()
+        assert_fixture_unchanged(snapshot)
 
 
 def test_start_goal_guided_requires_explicit_goal_for_multi_goal_project() -> None:

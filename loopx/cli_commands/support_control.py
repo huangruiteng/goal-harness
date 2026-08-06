@@ -194,6 +194,14 @@ def register_support_control_commands(
         ),
     )
     heartbeat_prompt_parser.add_argument(
+        "--visible-goal-host",
+        choices=["traex-cli"],
+        help=(
+            "Render the visible Goal task contract for an explicitly verified "
+            "host while preserving its scheduler runtime profile."
+        ),
+    )
+    heartbeat_prompt_parser.add_argument(
         "-H",
         "--host-surface",
         choices=[
@@ -566,6 +574,7 @@ def handle_support_control_command(
                     if any(explicit_scheduler_fields)
                     else None
                 ),
+                visible_goal_host=args.visible_goal_host,
             )
         except Exception as exc:
             fallback_active_state = active_state

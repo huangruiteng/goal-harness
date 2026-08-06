@@ -1,18 +1,33 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from enum import Enum
+from hashlib import sha256
 from typing import Any
 
-from ..scheduler.execution_context import scheduler_execution_context_for_turn
+from ..quota.turn_envelope import turn_envelope_action_signature_document
+from ..scheduler.execution_context import (
+    scheduler_execution_context_for_turn,
+)
 from .transaction import build_loopx_turn_transaction_plan
 
 
 LOOPX_TURN_PLAN_SCHEMA_VERSION = "loopx_turn_plan_v0"
 LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION = "loopx_turn_session_binding_v0"
+LOOPX_CHILD_HOST_OPERATION_SCHEMA_VERSION = "loopx_child_host_operation_v0"
 TURN_ENVELOPE_SCHEMA_VERSION = "loopx_turn_envelope_v0"
 SUPPORTED_HOSTS = {"codex-cli", "claude-code", "generic-cli"}
 SUPPORTED_EXECUTION_MODES = {"interactive-visible", "isolated-headless"}
+HOST_CHILD_CONTEXT_OPERATIONS = {
+    "codex-cli": {
+        "fresh": ("spawn_agent", False),
+        "resume": ("resume_agent", True),
+    },
+    "claude-code": {
+        "fresh": ("Task", False),
+    },
+}
 REPLAN_ACTIONS = {
     "autonomous_replan",
     "autonomous_replan_required",
@@ -81,15 +96,48 @@ def _typed_route(envelope: Mapping[str, Any]) -> LoopXTurnRoute:
     return LoopXTurnRoute.BLOCKED
 
 
-def _turn_lineage(envelope: Mapping[str, Any]) -> dict[str, str]:
+def selected_turn_todo(envelope: Mapping[str, Any]) -> dict[str, Any]:
+    """Resolve the todo that owns one Turn across adaptive bundle execution."""
+
+    orchestration = _mapping(envelope.get("task_orchestration_contract"))
+    primary_todo_id = str(orchestration.get("primary_todo_id") or "").strip()
+    if (
+        orchestration.get("schema_version") == "task_orchestration_contract_v2"
+        and orchestration.get("mode") == "adaptive"
+        and primary_todo_id
+    ):
+        return {
+            "todo_id": primary_todo_id,
+            "source": "task_orchestration_contract.primary_todo_id",
+        }
     action = _mapping(envelope.get("action"))
-    selected_todo = _mapping(action.get("selected_todo"))
-    signature = _mapping(envelope.get("action_signature"))
+    return _mapping(action.get("selected_todo"))
+
+
+def _turn_lineage(
+    envelope: Mapping[str, Any],
+    *,
+    selected_todo: Mapping[str, Any],
+) -> dict[str, str]:
+    signature_document = turn_envelope_action_signature_document(envelope)
+    action = _mapping(signature_document.get("action"))
+    signature_document["action"] = {
+        **action,
+        "selected_todo": dict(selected_todo),
+    }
+    action_hash = "sha256:" + sha256(
+        json.dumps(
+            signature_document,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     return {
         "goal_id": str(envelope.get("goal_id") or ""),
         "agent_id": str(envelope.get("agent_id") or ""),
         "todo_id": str(selected_todo.get("todo_id") or ""),
-        "action_hash": str(signature.get("source_hash") or ""),
+        "action_hash": action_hash,
     }
 
 
@@ -145,6 +193,70 @@ def _session_plan(
     }, None
 
 
+def _child_host_operations(
+    envelope: Mapping[str, Any],
+    *,
+    host: str,
+) -> list[dict[str, Any]]:
+    orchestration = _mapping(envelope.get("task_orchestration_contract"))
+    if (
+        orchestration.get("schema_version") != "task_orchestration_contract_v2"
+        or orchestration.get("mode") != "adaptive"
+    ):
+        return []
+    lanes = orchestration.get("eligible_child_lanes")
+    if not isinstance(lanes, list):
+        return []
+    brief_defaults = _mapping(orchestration.get("child_brief_defaults"))
+    if brief_defaults.get("schema_version") != "subagent_control_plane_handoff_v0":
+        return []
+    operations = HOST_CHILD_CONTEXT_OPERATIONS.get(host, {})
+    child_operations: list[dict[str, Any]] = []
+    for lane in lanes:
+        if not isinstance(lane, Mapping):
+            continue
+        brief = {**brief_defaults, **_mapping(lane.get("child_brief"))}
+        brief["evidence_boundary"] = {
+            "task_domain": brief.get("task_domain"),
+            "task_repository": brief.get("task_repository"),
+            "required_write_scopes": list(brief.get("required_write_scopes") or []),
+        }
+        context_policy = _mapping(brief.get("context_policy"))
+        recommended = str(context_policy.get("default") or "fresh")
+        allowed_contexts = context_policy.get("allowed")
+        if not isinstance(allowed_contexts, list):
+            allowed_contexts = [recommended]
+        available_contexts = [
+            {
+                "context": context,
+                "native_operation": operations[context][0],
+                "requires_session": operations[context][1],
+            }
+            for context in allowed_contexts
+            if context in operations
+        ]
+        if not available_contexts:
+            continue
+        if recommended not in {item["context"] for item in available_contexts}:
+            recommended = str(available_contexts[0]["context"])
+        child_operations.append(
+            {
+                "schema_version": LOOPX_CHILD_HOST_OPERATION_SCHEMA_VERSION,
+                "todo_id": str(lane.get("todo_id") or "") or None,
+                "host": host,
+                "selection_owner": "task_coordinator",
+                "recommended_context": recommended,
+                "available_contexts": available_contexts,
+                "brief": brief,
+                "result_channel": "public_safe_typed_evidence",
+                "writeback_owner": str(
+                    orchestration.get("writeback_owner") or "task_coordinator"
+                ),
+            }
+        )
+    return child_operations
+
+
 def build_loopx_turn_plan(
     turn_envelope: Mapping[str, Any],
     *,
@@ -172,7 +284,8 @@ def build_loopx_turn_plan(
         if execution_context.ok
         else LoopXTurnRoute.CONTRACT_ERROR
     )
-    lineage = _turn_lineage(envelope)
+    selected_todo = selected_turn_todo(envelope)
+    lineage = _turn_lineage(envelope, selected_todo=selected_todo)
     session, session_error = _session_plan(
         route=route,
         lineage=lineage,
@@ -180,15 +293,16 @@ def build_loopx_turn_plan(
     )
     if session_error:
         route = LoopXTurnRoute.CONTRACT_ERROR
-    action = _mapping(envelope.get("action"))
-    selected_todo = _mapping(action.get("selected_todo"))
     would_invoke_host = route in {
         LoopXTurnRoute.READY_FOR_HOST,
         LoopXTurnRoute.REPAIR_REQUIRED,
         LoopXTurnRoute.REPLAN_REQUIRED,
     }
+    child_operations = (
+        _child_host_operations(envelope, host=host) if would_invoke_host else []
+    )
     context_projection = execution_context.projection()
-    return {
+    payload = {
         "ok": route is not LoopXTurnRoute.CONTRACT_ERROR,
         "schema_version": LOOPX_TURN_PLAN_SCHEMA_VERSION,
         "mode": "plan",
@@ -236,3 +350,6 @@ def build_loopx_turn_plan(
             else {}
         ),
     }
+    if child_operations:
+        payload["child_operations"] = child_operations
+    return payload

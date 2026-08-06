@@ -31,6 +31,112 @@ These should stay in project-local ignored files:
 - raw sub-agent prompts and traces,
 - child run evidence that contains local paths or private artifacts.
 
+## Example Boundaries
+
+Use examples that describe the shape of private material without copying the
+material itself. A good public fixture should let a contributor understand the
+contract, rerun the validation, and inspect the failure mode without learning
+anything about the original private run.
+
+### Benchmark Traces
+
+Safe public summary:
+
+```json
+{
+  "case_id": "synthetic-benchmark-case",
+  "adapter": "terminal-bench",
+  "attempts": 2,
+  "terminal_status": "blocked",
+  "blocker_class": "missing-public-fixture",
+  "validation": ["python3 examples/benchmark-run-ledger-smoke.py"]
+}
+```
+
+Unsafe public trace:
+
+```text
+task text copied from a private benchmark, verifier tail, raw model transcript,
+upload URL, host log path, or unreleased scoring artifact
+```
+
+### Active State
+
+Safe public fixture:
+
+```markdown
+# ACTIVE_GOAL_STATE example
+
+- Goal: Improve a synthetic fixture.
+- User gate: Choose whether to publish the sanitized example.
+- Agent todo: Run the public smoke and report the result.
+- Evidence: `examples/example-smoke.py` passed.
+```
+
+Unsafe public state:
+
+```markdown
+- Goal: Finish the user's current private project.
+- Evidence: copied owner notes, private document URL, local runtime file, raw
+  child-agent prompt, or private repository branch.
+```
+
+### Local Paths
+
+Safe path shape:
+
+```text
+<project-root>/examples/example-smoke.py
+<runtime-root>/archived-goals/<goal-id>/
+```
+
+Unsafe path:
+
+```text
+a real workstation home directory, private mounted volume, local registry
+database, or host-specific benchmark output directory
+```
+
+### Credentials
+
+Safe credential boundary:
+
+```json
+{
+  "provider": "example-provider",
+  "credential_source": "environment",
+  "credential_values_recorded": false,
+  "missing_credential_blocker": "configure provider credentials locally"
+}
+```
+
+Unsafe credential material:
+
+```text
+token value, cookie, authorization header, private SSH key, session dump, or
+redaction that still preserves enough characters to reconstruct the secret
+```
+
+### Compact Artifacts
+
+Safe compact artifact:
+
+```json
+{
+  "artifact_kind": "status_projection",
+  "public_safe": true,
+  "source_refs": ["synthetic-fixture"],
+  "next_action": "rerun the public smoke after changing the fixture"
+}
+```
+
+Unsafe artifact:
+
+```text
+raw uploaded files, screenshots with private data, unredacted logs, hidden
+provider payloads, or a public artifact that points back to private storage
+```
+
 ## Sub-Agent Data
 
 Sub-agent orchestration increases leakage risk because child prompts often

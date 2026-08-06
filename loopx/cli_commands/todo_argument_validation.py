@@ -18,6 +18,7 @@ TODO_OPTION_FIELDS = (
     ("--authority-reason", "authority_reason"),
     ("--task-class", "task_class"),
     ("--action-kind", "action_kind"),
+    ("--task-domain", "task_domain"),
     ("--capability-binding-ref", "capability_binding_ref"),
     ("--task-repository", "task_repository"),
     ("--continuation-policy", "continuation_policy"),
@@ -70,7 +71,7 @@ TODO_OPTION_FIELDS = (
 
 _TODO_UPDATE_MUTABLE_FIELDS = (
     "text", "followups", "status", "note", "evidence", "reason", "task_class",
-    "action_kind", "task_repository", "continuation_policy", "required_write_scopes",
+    "action_kind", "task_domain", "task_repository", "continuation_policy", "required_write_scopes",
     "required_capabilities", "target_capabilities", "capability_gap_status",
     "explore_result_node_refs", "clear_explore_result_node_refs", "decision_scope",
     "required_decision_scopes", "claimed_by", "bound_agent", "goal_bound",

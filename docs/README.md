@@ -9,6 +9,7 @@ material available without putting all of it on one page.
 
 | You want to... | Start here | Continue with |
 | --- | --- | --- |
+| Understand LoopX before installing | [Public homepage](https://huangruiteng.github.io/loopx/) | [Project README](../README.md) |
 | Try LoopX in a repository | [Getting started](guides/getting-started.md) | [Newcomer command path](guides/newcomer-command-path.md) |
 | Run or recover a long-lived goal | [Operations](operations/README.md) | [Integration guide](integration.md) |
 | Understand the control plane | [Architecture](architecture.md) | [Concepts](concepts/README.md) |
@@ -16,9 +17,11 @@ material available without putting all of it on one page.
 | Build or review LoopX | [Developer guide](development/README.md) | [Testing and quality](development/testing-and-quality.md) |
 | Inspect real outcomes | [Showcases](showcases/README.md) | [Research and evidence](research/README.md) |
 
-The [project README](../README.md) is the product overview and shortest public
-quick start. The [public user manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg)
-provides a longer onboarding path.
+The [public homepage](https://huangruiteng.github.io/loopx/) is the shortest
+product overview. The [project README](../README.md) keeps the source-linked
+quick start and capability map, while the
+[public user manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) provides
+a longer onboarding path.
 
 ## Core References
 

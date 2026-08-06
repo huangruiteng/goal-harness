@@ -11,6 +11,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from loopx.control_plane.quota.turn_envelope import build_turn_envelope  # noqa: E402
+from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
+    SchedulerRuntimeProfile,
+    scheduler_execution_context_for_runtime_profile,
+)
+from loopx.control_plane.turn_driver import (  # noqa: E402
+    build_loopx_turn_host_request,
+    build_loopx_turn_plan,
+)
 from loopx.quota import build_quota_should_run, render_quota_should_run_markdown  # noqa: E402
 
 
@@ -95,6 +104,83 @@ def payload(*, reverse_agents: bool = False) -> dict:
     }
 
 
+def adaptive_payload() -> dict:
+    coordinator = "codex-alpha"
+    coordination = {
+        "agent_model": "peer_v1",
+        "registered_agents": [coordinator],
+        "write_scope": ["loopx/**", "tests/**"],
+    }
+    todos = [
+        {
+            "index": 1,
+            "status": "open",
+            "todo_id": "todo_primary",
+            "task_class": "advancement_task",
+            "action_kind": "implement",
+            "task_domain": "code",
+            "priority": "P0",
+            "text": "Implement the primary adaptive slice.",
+            "required_write_scopes": ["loopx/**"],
+        },
+        {
+            "index": 2,
+            "status": "open",
+            "todo_id": "todo_validation",
+            "task_class": "advancement_task",
+            "action_kind": "validate",
+            "task_domain": "validation",
+            "priority": "P1",
+            "text": "Validate the independent adaptive slice.",
+            "required_write_scopes": ["tests/**"],
+        },
+    ]
+    goal = {
+        "id": GOAL_ID,
+        "status": "active",
+        "registry_member": True,
+        "adapter_kind": "read_only_project_map_v0",
+        "adapter_status": "connected-read-only",
+        "quota": {
+            "compute": 1.0,
+            "window_hours": 24,
+            "slot_minutes": 1,
+            "allowed_slots": 1440,
+            "spent_slots": 0,
+        },
+        "coordination": coordination,
+        "spawn_policy": {
+            "mode": "multi_subagent",
+            "allowed": True,
+            "max_children": 2,
+            "allowed_domains": ["code", "validation"],
+        },
+    }
+    attention = {
+        "goal_id": GOAL_ID,
+        "status": "state_refreshed",
+        "waiting_on": "codex",
+        "severity": "action",
+        "source": "fixture",
+        "recommended_action": "coordinate the adaptive task bundle",
+        "coordination": coordination,
+        "quota": {**goal["quota"], "state": "eligible", "reason": "eligible fixture"},
+        "agent_todos": {
+            "schema_version": "todo_summary_v0",
+            "source_section": "Agent Todo",
+            "total": len(todos),
+            "open": len(todos),
+            "done": 0,
+            "items": todos,
+        },
+    }
+    return {
+        "ok": True,
+        "attention_queue": {"items": [attention]},
+        "run_history": {"goals": [goal]},
+    }
+
+
 def main() -> int:
     decisions = {
         agent_id: build_quota_should_run(
@@ -139,6 +225,62 @@ def main() -> int:
     assert reversed_decision["task_orchestration_contract"][
         "coordinator_agent_id"
     ] == coordinator, reversed_decision
+
+    adaptive_decision = build_quota_should_run(
+        adaptive_payload(),
+        goal_id=GOAL_ID,
+        agent_id="codex-alpha",
+        available_capabilities=["subagent_spawn", "subagent_resume"],
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_CLI_VISIBLE
+        ),
+    )
+    adaptive_contract = adaptive_decision["task_orchestration_contract"]
+    assert adaptive_contract["schema_version"] == "task_orchestration_contract_v2"
+    assert adaptive_contract["mode"] == "adaptive"
+    assert adaptive_contract["primary_todo_id"] == "todo_primary"
+    assert adaptive_contract["eligible_child_lanes"][0]["todo_id"] == (
+        "todo_validation"
+    )
+    assert adaptive_contract["child_brief_defaults"]["context_policy"]["allowed"] == [
+        "fresh",
+        "resume",
+    ]
+
+    turn_envelope = build_turn_envelope(adaptive_decision)
+    assert turn_envelope["action_signature"]["matches"] is True
+    codex_plan = build_loopx_turn_plan(
+        turn_envelope,
+        host="codex-cli",
+        execution_mode="interactive-visible",
+    )
+    codex_request = build_loopx_turn_host_request(codex_plan)
+    assert [
+        item["context"]
+        for item in codex_request["child_operations"][0]["available_contexts"]
+    ] == ["fresh", "resume"]
+
+    claude_decision = build_quota_should_run(
+        adaptive_payload(),
+        goal_id=GOAL_ID,
+        agent_id="codex-alpha",
+        available_capabilities=["subagent_spawn"],
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CLAUDE_CODE_VISIBLE
+        ),
+    )
+    claude_plan = build_loopx_turn_plan(
+        build_turn_envelope(claude_decision),
+        host="claude-code",
+        execution_mode="interactive-visible",
+    )
+    assert claude_plan["child_operations"][0]["available_contexts"] == [
+        {
+            "context": "fresh",
+            "native_operation": "Task",
+            "requires_session": False,
+        }
+    ]
     print("task-orchestration-smoke ok")
     return 0
 

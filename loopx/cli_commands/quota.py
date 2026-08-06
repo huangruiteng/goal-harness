@@ -437,6 +437,11 @@ def _prepare_quota_command_context(
     projection_cache_ttl_seconds = int(
         getattr(args, "projection_cache_ttl_seconds", 120)
     )
+    scheduler_context = (
+        _scheduler_execution_context_from_args(args)
+        if command in QUOTA_SCHEDULER_COMMANDS
+        else None
+    )
     status_payload = None
     cache_metadata = None
     if bool(getattr(args, "use_projection_cache", False)):
@@ -474,11 +479,6 @@ def _prepare_quota_command_context(
     elif isinstance(status_payload.get("projection_cache"), dict):
         cache_metadata = dict(status_payload["projection_cache"])
 
-    scheduler_context = (
-        _scheduler_execution_context_from_args(args)
-        if command in QUOTA_SCHEDULER_COMMANDS
-        else None
-    )
     validate_quota_command_request(args)
     return _QuotaCommandContext(
         runtime_root=runtime_root,

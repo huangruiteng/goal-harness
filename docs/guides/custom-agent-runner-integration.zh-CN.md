@@ -67,8 +67,8 @@ packet 会返回当前 doctor/install、bootstrap command pack、quota guard 和
 
 对于 `other-agent`，doctor 会有意跳过 `~/.codex/skills` 检查。CLI 健康与 workflow
 交付是两件事：custom host 仍需通过自己的 skill manifest 或等价 prompt injection，
-从同一 LoopX revision 交付 `loopx-project`、`loopx-pr-review`、
-`loopx-doc-registry` 和 `loopx-self-repair`。当当前 goal 启用
+从同一 LoopX revision 交付 `loopx-project`、`loopx-pr-program`、
+`loopx-pr-review`、`loopx-doc-registry` 和 `loopx-self-repair`。当当前 goal 启用
 `change_quality_qualification` 时，onboarding packet 会额外把
 `loopx-change-quality` 列为 active project skill；host 需要交付该 workflow，
 或注入等价的自包含 prepare packet 指令。随后 readback integration mode、

@@ -34,6 +34,7 @@ from .contract import (
     normalize_todo_required_decision_scopes,
     normalize_todo_resume_when,
     normalize_todo_status,
+    normalize_todo_task_domain,
     normalize_todo_task_repository,
     parse_todo_metadata_line,
     require_supported_todo_resume_when,
@@ -72,6 +73,7 @@ def apply_todo_update_to_lines(
     reason: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    task_domain: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
     required_write_scopes: list[str] | None = None,
@@ -174,6 +176,7 @@ def apply_todo_update_to_lines(
         ("reason", reason),
         ("task_class", task_class),
         ("action_kind", action_kind),
+        ("task_domain", task_domain),
         ("task_repository", task_repository),
         ("continuation_policy", continuation_policy),
     ):
@@ -258,6 +261,9 @@ def apply_todo_update_to_lines(
         "goal_bound": normalize_todo_goal_bound(effective_metadata.get("goal_bound")),
         "task_class": effective_metadata.get("task_class"),
         "action_kind": effective_metadata.get("action_kind"),
+        "task_domain": normalize_todo_task_domain(
+            effective_metadata.get("task_domain")
+        ),
         "capability_binding_ref": effective_metadata.get("capability_binding_ref"),
         "task_repository": normalize_todo_task_repository(
             effective_metadata.get("task_repository")

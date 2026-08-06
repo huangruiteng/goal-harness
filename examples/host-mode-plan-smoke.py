@@ -23,7 +23,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from loopx.host_mode_planner import (  # noqa: E402
     CANONICAL_MODES,
-    SUPPORTED_TURN_HOST_IDENTITIES,
     MODE_HYBRID_HANDOFF,
     MODE_IM_GATEWAY,
     MODE_ISOLATED_HEADLESS_TURN,
@@ -207,6 +206,18 @@ def test_opencode_alias_resolves_to_goal_loop_connector() -> None:
     assert "--host generic-cli" in plan["next_preview_command"], plan
 
 
+def test_pi_alias_resolves_to_goal_loop_connector() -> None:
+    plan = build_workflow_identity_plan("watch_each_turn", host_identity="pi")
+    visible = option(plan, MODE_VISIBLE_TUI)
+    assert visible["capability_ready"] is True, visible
+    assert visible["connector_id"] == "pi_goal_loop", visible
+    assert visible["host_resolution"] == "resolved", visible
+    assert plan["selected_connector_id"] == "pi_goal_loop", plan
+    # Pi runs through the generic-cli Turn host, same as OpenCode.
+    assert plan["selected_turn_mapping"]["host"] == "generic-cli", plan
+    assert "--host generic-cli" in plan["next_preview_command"], plan
+
+
 def test_visible_mode_fails_closed_for_unknown_host_identity() -> None:
     try:
         build_workflow_identity_plan("watch_each_turn", host_identity="not-a-host")
@@ -221,7 +232,7 @@ def test_visible_mode_fails_closed_for_unknown_host_identity() -> None:
 def test_emitted_connector_ids_exist_in_catalog() -> None:
     catalog = CONNECTOR_CATALOG_PATH.read_text()
     # Resolved identities emit only catalog-registered connector ids.
-    for host_identity in ["codex-cli", "claude-code", "generic-cli", "opencode"]:
+    for host_identity in ["codex-cli", "claude-code", "generic-cli", "opencode", "pi"]:
         plan = build_workflow_identity_plan("watch_each_turn", host_identity=host_identity)
         connector = plan["selected_connector_id"]
         assert connector is not None, (host_identity, plan)

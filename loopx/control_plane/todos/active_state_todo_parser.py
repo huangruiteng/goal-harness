@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from ...materials import extract_review_materials
+from ...orchestration import compact_orchestration_policy
 from ..goals.active_state_metadata import (
     TODO_ARCHIVE_HEADER_MARKERS,
     todo_role_for_heading,
@@ -32,6 +33,14 @@ def parse_active_state_todos(
     rollout_events: list[dict[str, Any]] | None = None,
     item_limit: int | None = MAX_STATUS_TODOS_PER_ROLE,
 ) -> dict[str, Any]:
+    orchestration = compact_orchestration_policy(
+        goal.get("spawn_policy") if isinstance(goal, dict) else None
+    )
+    include_task_orchestration_authority = bool(
+        orchestration.get("mode") == "multi_subagent"
+        and orchestration.get("spawn_allowed") is True
+        and int(orchestration.get("max_children") or 0) > 0
+    )
     role: str | None = None
     source_sections: dict[str, str | None] = {"user": None, "agent": None}
     items: dict[str, list[dict[str, Any]]] = {"user": [], "agent": []}
@@ -106,6 +115,7 @@ def parse_active_state_todos(
         resume_source_items=resume_source_items,
         rollout_events=rollout_events,
         item_limit=item_limit,
+        include_task_orchestration_authority=include_task_orchestration_authority,
     )
     agent = compact_todo_group(
         items["agent"],
@@ -116,6 +126,7 @@ def parse_active_state_todos(
         resume_source_items=resume_source_items,
         rollout_events=rollout_events,
         item_limit=item_limit,
+        include_task_orchestration_authority=include_task_orchestration_authority,
     )
     if user:
         result["user_todos"] = user

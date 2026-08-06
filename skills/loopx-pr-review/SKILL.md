@@ -210,6 +210,42 @@ or bridge changes, include both:
 - one concrete negative or failure walkthrough showing rejection, fallback,
   stale state, malformed input, or missing capability behavior.
 
+The two chains below are the minimum interpretation of the packet's canonical
+depth contract. They do not add output headings or compete with packet-specific
+instructions; use the same evidence to satisfy both when they overlap.
+
+### Motivation Causal Chain
+
+Under `动机`, connect the feature objective to the real workflow:
+
+1. name the old caller or operator path and the action that enters it;
+2. explain the failure, ambiguity, repeated work, or unsafe default;
+3. state who pays the cost and how it compounds in a long-running loop;
+4. explain why the nearest existing mechanism or a smaller call-site fix is
+   insufficient, or say explicitly when it would be sufficient;
+5. name the intended observable outcome, non-goals, and active-call-site
+   evidence that makes the need real rather than hypothetical.
+
+Include one compact before/after scenario. Distinguish the PR author's claim
+from behavior independently proven by the diff, call sites, tests, or a
+reproduction.
+
+### Implementation Execution Chain
+
+Across `改动思路` and `具体改动`, describe an executable model rather than a
+file inventory. Identify the caller and public entry point, authoritative
+input or state, decision symbol, resulting transition or provider call,
+observable receipt or projection, and the component that owns failure,
+fallback, or retry.
+
+Trace at least one concrete input through those symbols to the final output.
+Map important changed files to their role in that chain and distinguish
+production behavior from adapters, compatibility plumbing, fixtures, and
+validation. For a related multi-PR set, add a compact relationship map after
+the standalone five-block cards explaining whether the PRs compose, overlap,
+depend on one another, or solve different layers. The map never replaces the
+per-PR evidence pass or five required headings.
+
 For a blocking finding, name the triggering input or state, trace it to the
 incorrect outcome, cite the narrowest file/line or symbol, and state the minimum
 repair plus regression test. When no blocker is found, say so explicitly and

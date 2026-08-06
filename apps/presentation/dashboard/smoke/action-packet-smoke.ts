@@ -173,12 +173,12 @@ const firstScreenRequiredSource = [
   "goalId={queueItem.goal_id}",
   "const userTodos = todosFromProjectAssetSummary(projectAsset?.user_todos",
   "const agentTodos = todosFromProjectAssetSummary(projectAsset?.agent_todos",
-  "<Badge variant=\"neutral\">Project asset</Badge>",
-  "Handoff readiness:",
-  "Handoff state:",
-  "Post-handoff run:",
-  "Failed checks:",
-  "Owner/Gate/Stop are not project_asset-backed; below uses raw status fallback.",
+  "<Badge variant=\"neutral\">项目资产</Badge>",
+  "交接就绪度：",
+  "交接状态：",
+  "交接后运行：",
+  "未通过检查：",
+  "负责人、确认条件和停止条件没有项目资产支持；下方使用原始状态备用数据。",
   "<span className=\"font-medium\">{buildQuotaView(item.quota)?.shortLine}</span>",
 ];
 for (const snippet of firstScreenRequiredSource) {

@@ -143,6 +143,7 @@ def _compact_handoff_gate(
         "role",
         "task_class",
         "action_kind",
+        "task_domain",
         "task_repository",
         "continuation_policy",
         "claimed_by",

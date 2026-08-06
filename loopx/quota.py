@@ -172,6 +172,7 @@ from .control_plane.todos.quota_summary import (
     compact_quota_todo_summary_for_payload,
     select_quota_todo_source_items,
     select_quota_todo_summary,
+    select_task_orchestration_authority_items,
 )
 from .control_plane.todos.user_gate import (
     apply_scoped_user_gate_fallback_projection as _apply_scoped_user_gate_fallback_projection,
@@ -1184,6 +1185,9 @@ def _build_agent_work_lane(
     goal_boundary: Mapping[str, Any],
     agent_identity: Mapping[str, Any] | None,
     agent_todo_summary: Mapping[str, Any],
+    agent_todo_source_items: list[dict[str, Any]],
+    user_todo_source_items: list[dict[str, Any]],
+    available_capabilities: Any,
     monitor_debt_arbitration: Mapping[str, Any] | None,
 ) -> tuple[bool, dict[str, Any], dict[str, Any] | None]:
     monitor_only = _agent_monitor_only(agent_identity)
@@ -1211,6 +1215,17 @@ def _build_agent_work_lane(
             if isinstance(project_asset.get("agent_todos"), dict)
             else None
         ),
+        raw_user_todo_summary=(
+            item.get("user_todos")
+            if isinstance(item.get("user_todos"), dict)
+            else project_asset.get("user_todos")
+            if isinstance(project_asset.get("user_todos"), dict)
+            else None
+        ),
+        agent_todo_source_items=agent_todo_source_items,
+        user_todo_source_items=user_todo_source_items,
+        available_capabilities=available_capabilities,
+        parent_goal_id=goal_id,
     )
     return monitor_only, work_lane, task_orchestration
 
@@ -1456,6 +1471,7 @@ class _QuotaDecisionPreparation:
     project_asset: dict[str, Any]
     agent_lane_recommendation: Any
     effective_available_capabilities: Any
+    runtime_available_capabilities: Any
     user_todo_summary: dict[str, Any] | None
     agent_todo_summary: dict[str, Any] | None
     agent_scoped_user_todo_override: dict[str, Any] | None
@@ -1570,6 +1586,16 @@ def _prepare_quota_should_run_item(
         item.get("agent_todos"),
         project_asset.get("agent_todos") if project_asset else None,
     )
+    task_orchestration_agent_items = select_task_orchestration_authority_items(
+        item.get("agent_todos"),
+        project_asset.get("agent_todos") if project_asset else None,
+        role="agent",
+    )
+    task_orchestration_user_blockers = select_task_orchestration_authority_items(
+        item.get("user_todos"),
+        project_asset.get("user_todos") if project_asset else None,
+        role="user",
+    )
     agent_scoped_user_todo_override = _agent_scoped_user_todo_override(
         state=state,
         item=item,
@@ -1669,6 +1695,9 @@ def _prepare_quota_should_run_item(
             goal_boundary=goal_boundary,
             agent_identity=agent_identity,
             agent_todo_summary=agent_todo_summary,
+            agent_todo_source_items=task_orchestration_agent_items,
+            user_todo_source_items=task_orchestration_user_blockers,
+            available_capabilities=available_capabilities,
             monitor_debt_arbitration=monitor_debt_arbitration,
         )
     )
@@ -1794,6 +1823,7 @@ def _prepare_quota_should_run_item(
         project_asset=project_asset,
         agent_lane_recommendation=agent_lane_recommendation,
         effective_available_capabilities=effective_available_capabilities,
+        runtime_available_capabilities=available_capabilities,
         user_todo_summary=user_todo_summary,
         agent_todo_summary=agent_todo_summary,
         agent_scoped_user_todo_override=agent_scoped_user_todo_override,
@@ -2401,13 +2431,13 @@ def _build_quota_should_run_payload(
     payload["automation_liveness"] = build_automation_liveness(payload)
     payload["interaction_contract"] = build_interaction_contract(
         payload,
-        available_capabilities=prepared.effective_available_capabilities,
+        available_capabilities=prepared.runtime_available_capabilities,
         scheduler_execution_context=prepared.resolved_scheduler_context,
     )
     payload["scheduler_hint"] = _scheduler_hint(
         payload,
         include_detail=prepared.include_scheduler_detail,
-        available_capabilities=prepared.effective_available_capabilities,
+        available_capabilities=prepared.runtime_available_capabilities,
         codex_app_scheduler_state=(
             _load_codex_app_scheduler_state(
                 prepared.status_payload,
@@ -2425,7 +2455,7 @@ def _build_quota_should_run_payload(
     )
     finalize_user_gate_notification_cooldown(
         payload,
-        available_capabilities=prepared.effective_available_capabilities,
+        available_capabilities=prepared.runtime_available_capabilities,
         scheduler_execution_context=prepared.resolved_scheduler_context,
     )
     payload["protocol_action_packet"] = build_protocol_action_packet(payload)

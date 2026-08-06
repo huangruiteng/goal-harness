@@ -4,10 +4,11 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupBrowserSmoke, launchBrowser } from "./dashboard-browser-smoke-support.mjs";
 
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -164,6 +165,17 @@ const goalSpecs = [
         task_class: "advancement_task",
         action_kind: "dashboard_todo_search_fixture",
         claimed_by: "codex-side-bypass",
+        evidence: "A deliberately long public-safe evidence reference proves that Agent cards keep metadata inside their responsive column without widening the card or the page.",
+      },
+      {
+        done: false,
+        text: "重复来源不应生成第二张 Todo 卡片。",
+        todo_id: "todo_dashboard_search_meta_backlog",
+        priority: "P1",
+        status: "open",
+        task_class: "advancement_task",
+        action_kind: "dashboard_todo_search_fixture",
+        claimed_by: "codex-side-bypass",
       },
       { done: false, text: "统一多项目看板的 serve-status --global-registry 命令说明。" },
       { done: true, text: "已硬化 heartbeat prompt，依赖项目 todo 不再吃掉当前 goal turn。" },
@@ -230,6 +242,7 @@ function todoGroupFor(spec, role) {
       task_class: item.task_class,
       action_kind: item.action_kind,
       claimed_by: item.claimed_by,
+      evidence: item.evidence,
       review_materials: [],
     })),
   };
@@ -389,11 +402,29 @@ const statusFixture = {
   todo_index: {
     schema_version: "todo_index_v0",
     source: "attention_queue_and_rollout_event_log",
-    total_count: 1,
-    current_projected_count: 0,
-    rollout_event_count: 2,
+    total_count: 2,
+    current_projected_count: 1,
+    rollout_event_count: 3,
     item_limit: 240,
     items: [
+      {
+        schema_version: "todo_index_item_v0",
+        goal_id: "loopx-meta",
+        index: 1,
+        done: false,
+        text: "todo update recorded for todo_dashboard_search_meta_backlog",
+        title: "todo update recorded for todo_dashboard_search_meta_backlog",
+        todo_id: "todo_dashboard_search_meta_backlog",
+        role: "agent",
+        status: "open",
+        source: "rollout_event_log",
+        event_count: 1,
+        event_kinds: ["todo_update"],
+        latest_event_kind: "todo_update",
+        latest_event_at: "2026-06-22T12:29:47Z",
+        latest_event_status: "open",
+        agent_id: "codex-side-bypass",
+      },
       {
         schema_version: "todo_index_item_v0",
         goal_id: "loopx-meta",
@@ -474,14 +505,6 @@ function loadPlaywright() {
   }
 
   throw new Error("Playwright package not found; install playwright or set LOOPX_PLAYWRIGHT_PACKAGE");
-}
-
-async function launchBrowser(chromium) {
-  try {
-    return await chromium.launch({ channel: "chrome", headless: true });
-  } catch {
-    return chromium.launch({ headless: true });
-  }
 }
 
 async function waitForDashboard(url) {
@@ -571,6 +594,22 @@ async function assertNoHorizontalOverflow(page, label) {
   }
 }
 
+async function assertNoPanelContentOverflow(page, label) {
+  const offenders = await page.evaluate(() => Array.from(document.querySelectorAll([
+    '[data-testid="agent-management-row"]',
+    '[data-testid="usage-goal-table"]',
+    '[data-testid="event-ledger-goal-table"]',
+    '[data-testid="decision-freshness-table"]',
+  ].join(","))).filter((element) => element.scrollWidth > element.clientWidth + 2).map((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    testid: element.getAttribute("data-testid"),
+  })));
+  if (offenders.length) {
+    throw new Error(`${label} panel content overflow: ${JSON.stringify(offenders)}`);
+  }
+}
+
 async function assertDecisionFrameVisible(page, label) {
   const decisionFrame = page.locator('[data-testid^="share-decision-frame-"]').first();
   await decisionFrame.scrollIntoViewIfNeeded();
@@ -636,16 +675,16 @@ async function main() {
     const body = await page.locator("body").innerText();
     const required = [
       "把多项目 Agent 工作变成可管理的 Todo、证据和配额",
-      "0617 User Gate",
+      "0617 用户确认",
       "请确认 owner 选项 A/B 的取舍",
-      "Creator Operator",
+      "创作者运营",
       "热点",
       "合成案例",
-      "Peer Agent 自迭代",
-      "需要 Codex recovery",
+      "平级 Agent 自迭代",
+      "需要 Codex 恢复",
       "排序器 / 跨域证据",
       "具体 blocker",
-      "LoopX Meta",
+      "LoopX 自举",
       "配额守卫",
       "状态写回",
       "第一屏决策帧",
@@ -655,13 +694,13 @@ async function main() {
       "首个用户 Todo",
       "最高优 Agent Todo",
       "fixture stop condition",
-      "Top-4 Todo",
+      "前 4 个 Todo",
       "可自动推进候选",
       "待用户",
       "待 Agent",
       "已完成",
       "依赖阻塞",
-      "决策需 rebase",
+      "决策需重新确认",
       "审批或转交前先重读",
       "这不是仓库回滚",
       "推进与 owner 决策独立的 safe side path",
@@ -705,14 +744,28 @@ async function main() {
 
     await page.goto(`${baseUrl}/?view=ops&goalId=loopx-meta&statusUrl=/${fixtureName}`, { waitUntil: "networkidle" });
     await page.waitForSelector('[data-testid="operator-mental-model-panel"]', { timeout: 10_000 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await assertNoHorizontalOverflow(page, "ops 1440x900");
+    await assertNoPanelContentOverflow(page, "ops 1440x900");
+    await page.screenshot({
+      path: resolve(visualOutputDir, "ops-1440x900.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await assertNoHorizontalOverflow(page, "ops 1920x1080");
+    await assertNoPanelContentOverflow(page, "ops 1920x1080");
+    await page.screenshot({
+      path: resolve(visualOutputDir, "ops-1920x1080.png"),
+      fullPage: true,
+    });
     const operatorModelText = await page.locator('[data-testid="operator-mental-model-panel"]').innerText();
     const requiredOperatorModelText = [
-      "Operator Model",
-      "Goal",
-      "Next step",
-      "Needs your judgment",
-      "Evidence",
-      "Can continue",
+      "操作者概览",
+      "目标",
+      "下一步",
+      "需要你判断",
+      "证据",
+      "是否可继续",
     ];
     const missingOperatorModelText = requiredOperatorModelText.filter((text) => !operatorModelText.includes(text));
     if (missingOperatorModelText.length) {
@@ -722,8 +775,8 @@ async function main() {
     const todoExplorer = page.locator('[data-testid="project-todo-explorer"]');
     const initialTodoExplorerText = await todoExplorer.innerText();
     const requiredTodoExplorerText = [
-      "Project Todo Explorer",
-      "All projects",
+      "项目 Todo 浏览器",
+      "全部项目",
       "todo_dashboard_search_meta_backlog",
       "dashboard_todo_search_fixture",
       "claimed_by=codex-side-bypass",
@@ -733,6 +786,10 @@ async function main() {
       throw new Error(`Missing project todo explorer text: ${missingTodoExplorerText.join(", ")}`);
     }
     await page.locator('[data-testid="project-todo-search-input"]').fill("todo_dashboard_search_meta_backlog");
+    const deduplicatedTodoCount = await page.locator('[data-testid="project-todo-result"]').count();
+    if (deduplicatedTodoCount !== 1) {
+      throw new Error(`Project todo explorer rendered ${deduplicatedTodoCount} copies of one stable todo id.`);
+    }
     const filteredTodoExplorerText = await todoExplorer.innerText();
     if (!filteredTodoExplorerText.includes("1/")) {
       throw new Error(`Project todo explorer did not narrow search results: ${filteredTodoExplorerText}`);
@@ -740,12 +797,15 @@ async function main() {
     if (!filteredTodoExplorerText.includes("增加自动 backlog 候选面")) {
       throw new Error("Project todo explorer search lost the matching todo body.");
     }
-    await page.getByLabel("Todo project").selectOption("showcase-creator-operator");
+    if (filteredTodoExplorerText.includes("todo update recorded for todo_dashboard_search_meta_backlog")) {
+      throw new Error("Project todo explorer preferred a historical event over the current todo projection.");
+    }
+    await page.getByLabel("Todo 所属项目").selectOption("showcase-creator-operator");
     const projectFilteredTodoExplorerText = await todoExplorer.innerText();
-    if (!projectFilteredTodoExplorerText.includes("No projected todo matches todo_dashboard_search_meta_backlog")) {
+    if (!projectFilteredTodoExplorerText.includes("没有 Todo 匹配“todo_dashboard_search_meta_backlog”")) {
       throw new Error("Project todo explorer did not apply the selected project filter.");
     }
-    await page.getByLabel("Todo project").selectOption("all");
+    await page.getByLabel("Todo 所属项目").selectOption("all");
     await page.locator('[data-testid="project-todo-search-input"]').fill("todo_f2760d7e328f");
     const historicalTodoExplorerText = await todoExplorer.innerText();
     const requiredHistoricalTodoText = [
@@ -761,16 +821,16 @@ async function main() {
     await page.waitForSelector('[data-testid="control-plane-settings-panel"]', { timeout: 10_000 });
     const settingsText = await page.locator('[data-testid="control-plane-settings-panel"]').innerText();
     const requiredSettings = [
-      "Control Plane Settings",
-      "Quota 1",
-      "self_repair on",
-      "health=on",
-      "waiting_projection=on",
-      "Heartbeat install",
-      "observed",
-      "multi_subagent",
-      "max_children=2",
-      "domains=docs,validation",
+      "控制面设置",
+      "配额 1",
+      "自动修复已开启",
+      "健康问题修复=开启",
+      "等待状态修复=开启",
+      "心跳安装",
+      "已观测到",
+      "多 Agent",
+      "最多子 Agent=2",
+      "允许的领域=docs,validation",
     ];
     const missingSettings = requiredSettings.filter((text) => !settingsText.includes(text));
     if (missingSettings.length) {
@@ -778,7 +838,7 @@ async function main() {
     }
     await page.locator('[data-testid="control-plane-quota-compute"]').fill("1.5");
     const updatedSettingsText = await page.locator('[data-testid="control-plane-settings-panel"]').innerText();
-    if (!updatedSettingsText.includes("dirty")) {
+    if (!updatedSettingsText.includes("有未保存修改")) {
       throw new Error("Control-plane settings draft did not enter dirty state after editing quota.");
     }
     const settingsCommand = await page.locator('[data-testid="control-plane-settings-command-preview"]').innerText();
@@ -803,17 +863,124 @@ async function main() {
       throw new Error("Control-plane command preview must stay dry-run by default.");
     }
 
+    await page.goto(`${baseUrl}/?view=ops&goalId=showcase-side-agent-self-iteration&statusUrl=/${fixtureName}`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-testid="operator-mental-model-panel"]', { timeout: 10_000 });
+    const recoveryBody = await page.locator('[data-testid="selected-goal-detail"]').innerText();
+    const requiredRecoveryText = [
+      "执行恢复证据任务",
+      "恢复任务路径",
+      "限定恢复",
+      "恢复任务边界",
+      "检查最近证据",
+      "结果恢复",
+      "run_outcome_floor_recovery",
+      "排序器 / 跨域证据",
+    ];
+    const missingRecoveryText = requiredRecoveryText.filter((text) => !recoveryBody.includes(text));
+    if (missingRecoveryText.length) {
+      throw new Error(`Missing outcome-floor recovery text: ${missingRecoveryText.join(", ")}`);
+    }
+    const forbiddenRecoveryText = [
+      "执行已批准的 Agent 命令",
+      "已批准 Agent 命令",
+      "run_approved_agent_command",
+      "continue_from_refreshed_state",
+      "continue_codex_action",
+    ];
+    const leakedRecoveryText = forbiddenRecoveryText.filter((text) => recoveryBody.includes(text));
+    if (leakedRecoveryText.length) {
+      const leakContext = leakedRecoveryText.map((text) => {
+        const index = recoveryBody.indexOf(text);
+        return recoveryBody.slice(Math.max(0, index - 220), index + text.length + 320);
+      }).join("\n---\n");
+      throw new Error(`Outcome-floor recovery leaked into ordinary delivery: ${leakedRecoveryText.join(", ")}\n${leakContext}`);
+    }
+
+    const missingStatusRoutes = [
+      `?statusUrl=/status.missing.browser-smoke.json`,
+      `?view=ops&statusUrl=/status.missing.browser-smoke.json`,
+    ];
+    for (const route of missingStatusRoutes) {
+      await page.goto(`${baseUrl}/${route}`, { waitUntil: "networkidle" });
+      const initialStatusState = page.locator('[data-testid="initial-status-state"]');
+      await initialStatusState.waitFor({ state: "visible", timeout: 10_000 });
+      const initialStatusText = await initialStatusState.innerText();
+      const missingInitialStatusText = ["无法加载实时状态", "重试", "使用示例"]
+        .filter((text) => !initialStatusText.includes(text));
+      if (missingInitialStatusText.length) {
+        throw new Error(`Missing explicit initial status error state for ${route}: ${initialStatusText}`);
+      }
+      const syntheticDashboardCount = await page
+        .locator('[data-testid="operator-mental-model-panel"], [data-testid="share-overview"]')
+        .count();
+      if (syntheticDashboardCount !== 0) {
+        throw new Error(`Requested live status fell back to synthetic content for ${route}.`);
+      }
+      if (!route.includes("view=ops")) {
+        await initialStatusState.getByRole("button", { name: "使用示例" }).click();
+        const shareOverview = page.locator('[data-testid="share-overview"]');
+        await shareOverview.waitFor({ state: "visible", timeout: 10_000 });
+        await page.waitForTimeout(300);
+        const sourceLabel = await page.locator('[data-testid="share-source-label"]').innerText();
+        if (sourceLabel !== "内置示例") {
+          throw new Error(`Explicit example selection did not remain stable: ${sourceLabel}`);
+        }
+        if (new URL(page.url()).searchParams.get("statusUrl")) {
+          throw new Error("Explicit example selection did not clear the requested status URL.");
+        }
+        await page.goBack({ waitUntil: "networkidle" });
+        const restoredStatusState = page.locator('[data-testid="initial-status-state"]');
+        await restoredStatusState.waitFor({ state: "visible", timeout: 10_000 });
+        await restoredStatusState.getByText("无法加载实时状态", { exact: true }).waitFor({
+          state: "visible",
+          timeout: 10_000,
+        });
+      }
+    }
+
+    await page.goto(`${baseUrl}/?view=ops`, { waitUntil: "networkidle" });
+    await page.locator('[data-testid="operator-mental-model-panel"]').waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await page.getByLabel("状态地址").fill("/status.missing.browser-smoke.json");
+    await page.getByRole("button", { name: "加载地址" }).click();
+    const requestedStatusState = page.locator('[data-testid="initial-status-state"]');
+    await requestedStatusState.waitFor({ state: "visible", timeout: 10_000 });
+    await requestedStatusState.getByText("无法加载实时状态", { exact: true }).waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    const syntheticOperatorCount = await page
+      .locator('[data-testid="operator-mental-model-panel"], [data-testid="share-overview"]')
+      .count();
+    if (syntheticOperatorCount !== 0) {
+      throw new Error("In-page live status failure left synthetic dashboard content visible.");
+    }
+    await Promise.all([
+      page.waitForResponse((response) => (
+        new URL(response.url()).pathname.endsWith("/status.missing.browser-smoke.json")
+      )),
+      requestedStatusState.getByRole("button", { name: "重试" }).click(),
+    ]);
+    await requestedStatusState.getByText("无法加载实时状态", { exact: true }).waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await requestedStatusState.getByRole("button", { name: "使用示例" }).click();
+    await page.locator('[data-testid="operator-mental-model-panel"]').waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await page.getByText("内置示例", { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+
     if (pageErrors.length) {
       throw new Error(`Dashboard page errors: ${pageErrors.join(" | ")}`);
     }
 
     console.log("dashboard-home-browser-smoke ok");
   } finally {
-    if (browser) {
-      await browser.close();
-    }
-    server.kill("SIGTERM");
-    await rm(fixturePath, { force: true });
+    await cleanupBrowserSmoke({ browser, fixturePaths: [fixturePath], server });
   }
 }
 

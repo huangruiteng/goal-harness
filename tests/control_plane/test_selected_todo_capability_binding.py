@@ -25,6 +25,21 @@ def test_selected_todo_preserves_capability_binding_ref() -> None:
     )
 
 
+def test_selected_todo_preserves_task_domain() -> None:
+    selected = selected_todo_projection(
+        agent_lane_next_action={
+            "source": "agent_lane_next_action",
+            "todo_id": "todo_domain001",
+            "task_domain": "validation",
+            "text": "Validate the adaptive orchestration contract.",
+        },
+        work_lane_contract=None,
+    )
+
+    assert selected is not None
+    assert selected["task_domain"] == "validation"
+
+
 def test_selected_todo_preserves_current_continuation_hint() -> None:
     selected = selected_todo_projection(
         agent_lane_next_action={

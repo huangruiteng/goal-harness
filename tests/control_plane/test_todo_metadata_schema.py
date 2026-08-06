@@ -6,6 +6,9 @@ from loopx.control_plane.todos.contract import (
     format_todo_metadata_line,
     parse_todo_metadata_line,
 )
+from loopx.control_plane.todos.active_state_todo_parser import (
+    parse_active_state_todos,
+)
 
 
 def test_todo_metadata_round_trip_preserves_canonical_values() -> None:
@@ -14,6 +17,7 @@ def test_todo_metadata_round_trip_preserves_canonical_values() -> None:
         status="open",
         task_class="advancement_task",
         action_kind="run_eval",
+        task_domain="validation",
         capability_binding_ref="issue-fix:feasibility-a1b2c3d4",
         task_repository="git:github.com/owner/repo",
         continuation_policy="same_agent_non_delivery",
@@ -64,6 +68,7 @@ def test_todo_metadata_round_trip_preserves_canonical_values() -> None:
         "status": "open",
         "task_class": "advancement_task",
         "action_kind": "run_eval",
+        "task_domain": "validation",
         "capability_binding_ref": "issue-fix:feasibility-a1b2c3d4",
         "task_repository": "git:github.com/owner/repo",
         "continuation_policy": "same_agent_non_delivery",
@@ -194,3 +199,61 @@ def test_todo_metadata_formatter_enforces_cross_field_constraints() -> None:
             claimed_by="codex-quality",
             excluded_agents=["codex-quality"],
         )
+
+
+def test_multi_subagent_todo_parser_projects_untruncated_admission_authority() -> None:
+    lines = ["## Agent Todo", ""]
+    for index in range(1, 19):
+        todo_id = "todo_blocked_child" if index == 18 else f"todo_agent_{index}"
+        lines.extend(
+            [
+                f"- [ ] [P0] Inspect agent fixture {index}.",
+                (
+                    f"  <!-- loopx:todo todo_id={todo_id} status=open "
+                    "task_class=advancement_task action_kind=inspect "
+                    "task_domain=code -->"
+                ),
+            ]
+        )
+    lines.extend(["", "## User Todo", ""])
+    for index in range(1, 19):
+        task_class = "user_gate" if index == 18 else "user_action"
+        metadata = f"todo_id=todo_user_{index} status=open task_class={task_class}"
+        if index == 18:
+            metadata += " unblocks_todo_id=todo_blocked_child"
+        lines.extend(
+            [
+                f"- [ ] [P1] Review user fixture {index}.",
+                f"  <!-- loopx:todo {metadata} -->",
+            ]
+        )
+    state_text = "\n".join(lines) + "\n"
+
+    regular = parse_active_state_todos(state_text)
+    adaptive = parse_active_state_todos(
+        state_text,
+        goal={
+            "spawn_policy": {
+                "mode": "multi_subagent",
+                "allowed": True,
+                "max_children": 2,
+            }
+        },
+    )
+
+    assert "task_orchestration_authority" not in regular["agent_todos"]
+    assert len(adaptive["agent_todos"]["items"]) == 12
+    assert len(adaptive["user_todos"]["items"]) == 12
+    agent_authority = adaptive["agent_todos"]["task_orchestration_authority"]
+    user_authority = adaptive["user_todos"]["task_orchestration_authority"]
+    assert len(agent_authority["candidate_items"]) == 18
+    assert agent_authority["candidate_items"][-1]["todo_id"] == "todo_blocked_child"
+    assert user_authority["user_blocker_items"] == [
+        {
+            "todo_id": "todo_user_18",
+            "status": "open",
+            "done": False,
+            "task_class": "user_gate",
+            "unblocks_todo_id": "todo_blocked_child",
+        }
+    ]

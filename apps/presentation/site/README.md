@@ -1,7 +1,8 @@
 # LoopX Public Website
 
-This directory owns the static, public-safe homepage published at the root of
-the LoopX GitHub Pages site. The dashboard exporter copies the compiled React
+This directory owns the static, public-safe
+[LoopX homepage](https://huangruiteng.github.io/loopx/) published at the root
+of the GitHub Pages site. The dashboard exporter copies the compiled React
 application to `/frontstage/`, then writes this homepage to the Pages root.
 
 `__LOOPX_BASE__` is replaced by the exporter so links and assets work both at

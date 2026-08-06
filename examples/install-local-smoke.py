@@ -225,6 +225,7 @@ def main() -> int:
             in install.stdout
         ), install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-doc-registry'}" in install.stdout, install.stdout
+        assert f"- skill: {codex_home / 'skills' / 'loopx-pr-program'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-self-repair'}" in install.stdout, install.stdout
@@ -325,6 +326,7 @@ def main() -> int:
         assert set(skill_readback["materialized_skill_ids"]) == {
             "loopx",
             "loopx-doc-registry",
+            "loopx-pr-program",
             "loopx-pr-review",
             "loopx-project",
             "loopx-self-repair",
@@ -380,6 +382,19 @@ def main() -> int:
         ):
             assert phrase in pr_review_text, phrase
         assert "Do not use this skill to approve" not in pr_review_text, pr_review_text
+        pr_program_skill = codex_home / "skills" / "loopx-pr-program" / "SKILL.md"
+        pr_program_text = " ".join(pr_program_skill.read_text(encoding="utf-8").split())
+        for phrase in (
+            "one `continuous_monitor` todo",
+            "result_completeness.complete=true",
+            "diff_snapshot.py",
+            "Product requirements set priority",
+            "Quiet monitor polls",
+        ):
+            assert phrase in pr_program_text, phrase
+        assert (
+            pr_program_skill.parent / "scripts" / "diff_snapshot.py"
+        ).is_file()
         pr_review_metadata = pr_review_skill.parent / "agents" / "openai.yaml"
         pr_review_metadata_text = pr_review_metadata.read_text(encoding="utf-8")
         assert (
@@ -472,6 +487,7 @@ def main() -> int:
         ).is_file()
         for implicit_skill_name in (
             "loopx-project",
+            "loopx-pr-program",
             "loopx-pr-review",
             "loopx-doc-registry",
             "loopx-self-repair",
@@ -544,6 +560,8 @@ def main() -> int:
         assert doctor_payload["globally_visible_project_skills"] == [], doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["exists"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["required_phrases"] is True, doctor_payload
+        assert doctor_payload["skills"]["loopx-pr-program"]["exists"] is True, doctor_payload
+        assert doctor_payload["skills"]["loopx-pr-program"]["required_phrases"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-pr-review"]["exists"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-pr-review"]["required_phrases"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-doc-registry"]["exists"] is True, doctor_payload
@@ -594,7 +612,7 @@ def main() -> int:
         assert "installed_skill_delivery_hints: `True`" in doctor_markdown, doctor_markdown
         assert (
             "installed_required_skills: "
-            "`loopx-doc-registry,loopx-pr-review,loopx-project,loopx-self-repair`"
+            "`loopx-doc-registry,loopx-pr-program,loopx-pr-review,loopx-project,loopx-self-repair`"
             in doctor_markdown
         ), doctor_markdown
         assert "loopx_canary_realpath:" in doctor_markdown, doctor_markdown
@@ -636,6 +654,7 @@ def main() -> int:
             repo_root=REPO_ROOT,
             skills={
                 "loopx-project": {"exists": True, "required_phrases": True},
+                "loopx-pr-program": {"exists": True, "required_phrases": True},
                 "loopx-pr-review": {"exists": True, "required_phrases": True},
                 "loopx-doc-registry": {"exists": True, "required_phrases": True},
                 "loopx-self-repair": {"exists": True, "required_phrases": True},
@@ -653,6 +672,7 @@ def main() -> int:
             repo_root=REPO_ROOT,
             skills={
                 "loopx-project": {"exists": True, "required_phrases": True},
+                "loopx-pr-program": {"exists": True, "required_phrases": True},
                 "loopx-pr-review": {"exists": True, "required_phrases": True},
                 "loopx-doc-registry": {"exists": True, "required_phrases": True},
                 "loopx-self-repair": {"exists": True, "required_phrases": True},
@@ -668,6 +688,7 @@ def main() -> int:
             repo_root=REPO_ROOT,
             skills={
                 "loopx-project": {"exists": True, "required_phrases": True},
+                "loopx-pr-program": {"exists": True, "required_phrases": True},
                 "loopx-pr-review": {"exists": True, "required_phrases": True},
                 "loopx-doc-registry": {"exists": True, "required_phrases": True},
                 "loopx-self-repair": {"exists": True, "required_phrases": True},

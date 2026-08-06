@@ -1,0 +1,188 @@
+{
+  "schema_version": "finance_beta_attribution_input_v1",
+  "attribution_id": "illustrative-layered-beta",
+  "attribution_model_id": "frozen-public-observation-model-v1",
+  "component_order_frozen": true,
+  "unit": "return_fraction",
+  "total_move": -0.1,
+  "components": [
+    {
+      "component_id": "market",
+      "observation_state": "observed",
+      "contribution": -0.04,
+      "evidence_refs": [
+        "broad-market-return"
+      ],
+      "reason": "Frozen broad-market contribution."
+    },
+    {
+      "component_id": "rate",
+      "observation_state": "observed",
+      "contribution": -0.01,
+      "evidence_refs": [
+        "rate-factor-return"
+      ],
+      "reason": "Frozen rate-factor contribution."
+    },
+    {
+      "component_id": "sector",
+      "observation_state": "observed",
+      "contribution": -0.03,
+      "evidence_refs": [
+        "sector-return"
+      ],
+      "reason": "Frozen sector contribution."
+    },
+    {
+      "component_id": "narrow_peer",
+      "observation_state": "observed",
+      "contribution": -0.01,
+      "evidence_refs": [
+        "peer-panel-return"
+      ],
+      "reason": "Frozen narrow-peer contribution."
+    },
+    {
+      "component_id": "cycle",
+      "observation_state": "observed",
+      "contribution": -0.015,
+      "evidence_refs": [
+        "cycle-observation"
+      ],
+      "reason": "Frozen cycle contribution."
+    },
+    {
+      "component_id": "event",
+      "observation_state": "observed",
+      "contribution": -0.005,
+      "evidence_refs": [
+        "event-observation"
+      ],
+      "reason": "Frozen event contribution."
+    }
+  ],
+  "case_reference": {
+    "case_id": "illustrative-debeta-case",
+    "subject_ref": "illustrative-us-cross-section",
+    "observation_window": {
+      "start": "2026-07-23",
+      "end": "2026-07-27"
+    }
+  },
+  "gate_evaluation_input": {
+    "schema_version": "finance_case_gate_input_v1",
+    "case_id": "illustrative-debeta-case",
+    "subject_ref": "illustrative-us-cross-section",
+    "contract": {
+      "schema_version": "finance_case_contract_v1",
+      "contract_id": "us-debeta-public-research-v1",
+      "method_revision": "candidate-v1",
+      "point_in_time": "2026-07-23",
+      "universe_id": "illustrative-us-cross-section",
+      "universe_frozen": true,
+      "identities_frozen": true,
+      "thresholds_frozen": true,
+      "outcome_blind": true,
+      "public_evidence_only": true,
+      "gates": [
+        {
+          "gate_id": "universe",
+          "value_type": "boolean",
+          "operator": "eq",
+          "reference_value": true
+        },
+        {
+          "gate_id": "point_in_time",
+          "value_type": "boolean",
+          "operator": "eq",
+          "reference_value": true
+        },
+        {
+          "gate_id": "evidence_quality",
+          "value_type": "number",
+          "operator": "gte",
+          "reference_value": 2
+        },
+        {
+          "gate_id": "de_beta_residual",
+          "value_type": "number",
+          "operator": "gte",
+          "reference_value": 0
+        },
+        {
+          "gate_id": "valuation",
+          "value_type": "boolean",
+          "operator": "eq",
+          "reference_value": true
+        },
+        {
+          "gate_id": "terminal_risk",
+          "value_type": "boolean",
+          "operator": "eq",
+          "reference_value": true
+        }
+      ],
+      "investment_advice_allowed": false,
+      "trading_allowed": false,
+      "automatic_promotion_allowed": false,
+      "evaluation_as_of": "2026-07-27"
+    },
+    "observations": [
+      {
+        "gate_id": "universe",
+        "observation_state": "observed",
+        "value": true,
+        "evidence_refs": [
+          "universe-snapshot"
+        ],
+        "reason": "Universe and identities were frozen before candidate scoring."
+      },
+      {
+        "gate_id": "point_in_time",
+        "observation_state": "observed",
+        "value": true,
+        "evidence_refs": [
+          "cutoff-ledger"
+        ],
+        "reason": "All observations are at or before the declared cutoff."
+      },
+      {
+        "gate_id": "evidence_quality",
+        "observation_state": "observed",
+        "value": 2,
+        "evidence_refs": [
+          "filing-primary",
+          "market-independent"
+        ],
+        "reason": "Primary evidence and an independent market source agree."
+      },
+      {
+        "gate_id": "de_beta_residual",
+        "observation_state": "observed",
+        "value": 0.01,
+        "evidence_refs": [
+          "peer-control-panel"
+        ],
+        "reason": "The residual is candidate-specific under frozen peer controls."
+      },
+      {
+        "gate_id": "valuation",
+        "observation_state": "observed",
+        "value": true,
+        "evidence_refs": [
+          "diluted-valuation-bridge"
+        ],
+        "reason": "Fully diluted valuation is reproducible from frozen inputs."
+      },
+      {
+        "gate_id": "terminal_risk",
+        "observation_state": "observed",
+        "value": true,
+        "evidence_refs": [
+          "terminal-risk-bridge"
+        ],
+        "reason": "The terminal-loss path is bounded by frozen evidence."
+      }
+    ]
+  }
+}

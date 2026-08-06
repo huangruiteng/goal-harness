@@ -16,6 +16,7 @@ TODO_METADATA_TOKEN_PATTERN = re.compile(
     r"(?<!\S)(?P<key>[a-z_][a-z0-9_]*)=(?P<value>[^\s<>]+)"
 )
 TODO_ACTION_KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+TODO_TASK_DOMAIN_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 TODO_ID_PATTERN = re.compile(r"^todo_[a-z0-9_-]{3,64}$")
 TODO_AGENT_CLAIM_PATTERN = re.compile(r"^[a-z][a-z0-9_.:@-]{0,79}$")
 TODO_CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
@@ -236,6 +237,15 @@ def normalize_todo_action_kind(value: Any) -> str | None:
     if not candidate:
         return None
     if TODO_ACTION_KIND_PATTERN.match(candidate):
+        return candidate
+    return None
+
+
+def normalize_todo_task_domain(value: Any) -> str | None:
+    candidate = str(value or "").strip().lower()
+    if not candidate:
+        return None
+    if TODO_TASK_DOMAIN_PATTERN.fullmatch(candidate):
         return candidate
     return None
 
@@ -874,6 +884,14 @@ _TODO_METADATA_FIELD_SCHEMA = (
         ),
     ),
     _TodoMetadataField(
+        "task_domain",
+        normalize_todo_task_domain,
+        invalid_message=(
+            "todo task_domain must be a public-safe token: lowercase letters, "
+            "digits, '_', '-' or '.'"
+        ),
+    ),
+    _TodoMetadataField(
         "capability_binding_ref",
         normalize_todo_capability_binding_ref,
         invalid_message=(
@@ -1155,6 +1173,7 @@ def format_todo_metadata_line(
     status: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
+    task_domain: str | None = None,
     capability_binding_ref: str | None = None,
     task_repository: str | None = None,
     continuation_policy: str | None = None,
@@ -1206,6 +1225,8 @@ def todo_block_metadata(block: dict[str, Any]) -> dict[str, Any]:
         normalized: Any
         if key == "required_write_scopes":
             normalized = normalize_required_write_scopes(value)
+        elif key == "task_domain":
+            normalized = normalize_todo_task_domain(value)
         elif key == "task_repository":
             normalized = normalize_todo_task_repository(value)
         elif key == "required_capabilities":
@@ -1253,6 +1274,10 @@ def metadata_line_for_todo_block(
                 metadata[key] = normalized
             else:
                 metadata.pop(key, None)
+        elif key == "task_domain":
+            metadata[key] = _TODO_METADATA_FIELD_BY_TOKEN[
+                key
+            ].normalize_for_write(value)
         elif key == "task_repository":
             normalized = normalize_todo_task_repository(value)
             if normalized:

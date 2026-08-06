@@ -27,6 +27,12 @@ production actions.
 
 ## When To Parallelize
 
+The default policy is adaptive orchestration, not a user-selected
+`single-agent` or `multi-agent` mode. LoopX projects ready work and hard
+boundaries; the task coordinator decides whether parallel execution shortens
+the critical path, which todos to delegate, and which qualified host context to
+use.
+
 Parallelize when it reduces uncertainty or latency:
 
 - map disjoint code, docs, test, or runtime surfaces;
@@ -37,6 +43,35 @@ Parallelize when it reduces uncertainty or latency:
 Keep tightly coupled decisions in one peer lane. Do not launch workers merely
 to make the activity graph look busy, and never let worker count override
 quota, user gates, write scope, or repository policy.
+
+### Adaptive Admission
+
+`task_orchestration_contract_v2` admits ephemeral child work only when the
+current runtime explicitly reports `subagent_spawn` through observed
+capabilities and at least two coordinator-owned or unclaimed ready advancement
+todos remain. A host name or scheduler runtime profile is metadata and never
+supplies `subagent_spawn` or `subagent_resume`. Each candidate is checked
+against:
+
+- `task_domain` and the goal's `allowed_domains`;
+- todo status, `resume_ready`, and open user dependencies;
+- `required_capabilities` and observed host capabilities;
+- canonical `task_repository` identity when declared (otherwise the goal
+  repository remains authoritative); and
+- goal-authorized, mutually non-overlapping `required_write_scopes`.
+
+Rejected candidates remain visible in `blocked_lanes` with typed reason codes.
+Ready lanes beyond `max_children` remain visible as `capacity_deferred`.
+To stay inside the TurnEnvelope budget, the signed contract carries one shared
+`child_brief_defaults` block plus a bounded per-lane delta. The typed host
+request combines them into a complete `subagent_control_plane_handoff_v0`
+brief. The coordinator may still keep the work serial; admission is permission
+and capacity, not a command to spawn.
+
+Without `subagent_spawn`, LoopX preserves the existing
+`task_orchestration_contract_v1` registered-peer activation path. This keeps
+long-lived peer identity, leases, worktrees, and multi-round collaboration
+explicit instead of turning them into the default child-worker mechanism.
 
 ## Fresh, Fork, Or Resume
 
@@ -93,8 +128,19 @@ validation: cite files and residual risk; do not edit
 continuation_policy: independent_handoff
 ```
 
-The host may still expose a `subagent_context_hint` with `fresh`, `resume`,
-`fork`, or `do_not_spawn`. It is advisory and cannot widen authority.
+After explicit capability admission, the signed Turn host request uses
+legitimate host metadata only to map supported native context operations. The
+host name does not admit child work. The task coordinator chooses from that
+catalog:
+
+- Codex exposes `fresh` and `resume`;
+- Claude Code exposes `fresh` through its native Task surface;
+- generic adapters expose no child capability unless the adapter declares one.
+
+`fork` stays out of the public execution catalog until a real host adapter
+proves versioned execution state, copy-on-write workspace isolation, capacity
+reservation, branch lease, held-result settlement, cancellation, and recovery.
+Context choice is advisory execution strategy and cannot widen LoopX authority.
 
 ## Claims, Leases, And Worktrees
 
@@ -128,11 +174,12 @@ loopx configure-goal \
   --execute
 ```
 
-`multi_subagent` is the compatibility name for host child-worker capacity. It
-does not select an agent hierarchy. `quota should-run` hashes the current open
-participant lanes, selects one task-scoped coordinator, and projects a
-`task_orchestration_contract_v1`. Dormant registered agents and closed,
-blocked, or deferred todos are not coordinator candidates.
+`multi_subagent` remains the compatibility name for host child-worker capacity
+and permission policy. It does not ask the user to select a run mode or agent
+hierarchy. With host child capability, `quota should-run` projects adaptive
+`task_orchestration_contract_v2`; without it, the registered-peer compatibility
+path remains `task_orchestration_contract_v1`. Dormant registered agents and
+closed, blocked, or deferred todos are not coordinator candidates.
 
 Use `--multi-subagent-feature off` to disable worker spawning. The low-level
 `--orchestration-mode` and `--spawn-allowed` flags remain available for host

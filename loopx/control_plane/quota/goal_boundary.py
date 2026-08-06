@@ -12,6 +12,7 @@ from ...boundary_authority import checkpointed_boundary_authority_summary
 from ...execution_profile import execution_profile_outcome_floor
 from ...explore_graph import compact_explore_graph_policy
 from ...orchestration import compact_orchestration_policy
+from ...repository_identity import resolve_project_identity
 from ..todos.contract import (
     normalize_required_capabilities,
     normalize_required_write_scopes,
@@ -342,7 +343,19 @@ def goal_boundary(
         )
     spawn_policy = goal.get("spawn_policy") if isinstance(goal.get("spawn_policy"), dict) else None
     if spawn_policy is not None:
-        boundary["orchestration"] = compact_orchestration_policy(spawn_policy)
+        orchestration = compact_orchestration_policy(spawn_policy)
+        boundary["orchestration"] = orchestration
+        project = str(goal.get("repo") or "").strip()
+        if orchestration.get("spawn_allowed") is True and project:
+            try:
+                repository_identity = resolve_project_identity(
+                    project,
+                    loopx_project_id=str(goal.get("id") or "").strip() or None,
+                )
+            except ValueError:
+                repository_identity = None
+            if repository_identity and repository_identity.startswith("git:"):
+                boundary["task_repository"] = repository_identity
     project_asset_source = item if item is not None else goal
     for policy_source in (goal, project_asset_source):
         if not isinstance(policy_source, dict):

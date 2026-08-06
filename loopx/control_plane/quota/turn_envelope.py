@@ -660,6 +660,9 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
             scheduler=scheduler,
         ),
     }
+    task_orchestration = payload.get("task_orchestration_contract")
+    if isinstance(task_orchestration, Mapping):
+        projection["task_orchestration_contract"] = dict(task_orchestration)
     response_plan = _response_plan(interaction)
     if response_plan is not None:
         projection["response_plan"] = response_plan
@@ -681,6 +684,7 @@ def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict
         "writeback",
         "scheduler",
         "contract_capsule",
+        "task_orchestration_contract",
     )
     response_plan = envelope.get("response_plan")
     coverage = (

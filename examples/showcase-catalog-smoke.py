@@ -238,8 +238,7 @@ def main() -> int:
     for phrase in (
         "Loop engineering for long-running AI agents and peer agent teams.",
         "A lightweight state kernel and agent-agnostic local control plane for",
-        "https://huangruiteng.github.io/loopx/frontstage/",
-        "docs/outreach/frontstage-demo-script.md",
+        "https://huangruiteng.github.io/loopx/",
         "## Advanced Paths",
         "docs/assets/long-running-loop-openviking-trajectory.png",
         "docs/assets/long-running-loop-ml-experiment-trajectory.png",
@@ -251,6 +250,13 @@ def main() -> int:
         "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html",
     ):
         assert phrase in repo_readme, phrase
+    hosted_frontstage = "https://huangruiteng.github.io/loopx/frontstage/"
+    assert hosted_frontstage not in repo_readme, (
+        "README must promote the public homepage instead of hosted frontstage"
+    )
+    assert hosted_frontstage not in showcase_index, (
+        "showcase index must not promote hosted frontstage"
+    )
 
     print("showcase-catalog-smoke ok")
     return 0

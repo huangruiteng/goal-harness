@@ -14,6 +14,7 @@ from ..control_plane.turn_driver import (
     load_loopx_turn_plan_from_journal,
     run_codex_cli_host,
     run_loopx_turn_once,
+    selected_turn_todo,
 )
 from ..control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_turn,
@@ -423,8 +424,7 @@ def handle_turn_command(
             else:
                 task_validator = None
             envelope = payload.get("turn_envelope") if isinstance(payload.get("turn_envelope"), dict) else {}
-            action = envelope.get("action") if isinstance(envelope.get("action"), dict) else {}
-            selected_todo = action.get("selected_todo") if isinstance(action.get("selected_todo"), dict) else {}
+            selected_todo = selected_turn_todo(envelope)
             writeback_contract = (
                 envelope.get("writeback")
                 if isinstance(envelope.get("writeback"), dict)
