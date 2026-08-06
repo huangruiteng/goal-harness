@@ -49,6 +49,13 @@ REQUIRED_INSTALLED_SKILL_PHRASES = {
         "A plain PR comment is not an adequate substitute for `REQUEST_CHANGES`",
         "route approval, merge, self-merge, and admin-bypass actions to",
     ),
+    "loopx-pr-program": (
+        "one `continuous_monitor` todo",
+        "result_completeness.complete=true",
+        "diff_snapshot.py",
+        "Product requirements set priority",
+        "Quiet monitor polls",
+    ),
     "loopx-doc-registry": (
         "Use even when the user does not mention LoopX or doc registry",
         "use `.loopx/registry.json` as the project-local doc registry",
