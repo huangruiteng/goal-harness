@@ -1,351 +1,484 @@
-# RFC: 多端共享 Goal 的在线权威与可插拔状态 Provider (v0)
+# RFC：共享 Goal 的在线权威与可插拔协调 Provider（v0）
 
-- 状态: Draft，征求意见
-- 提案方: NoKV Lab，与 LoopX maintainer 协作起草
-- 日期: 2026-08-05
-- 适用范围: LoopX 控制面。填补
+- 状态：Draft，正在接受 maintainer review
+- 提案方：NoKV Lab
+- 日期：2026-08-05；修订于 2026-08-06
+- 范围：LoopX 共享 Goal 协调的独立部署合同，用来补充
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
-  预留的 "separate deployment contract" 空位
-- 证据基线: 本提案的全部性能数字与行为断言来自真实环境实测
-  （见附录 A 与[配套证据文档](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md)），
-  不是设计期估算
+- 源码基线：LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
+- Provider API 基线：NoKV `90883d13539e31185f0d78131989fb51912dbd7e`；
+  只用于静态映射 Python `publish_bytes` generation-CAS API，当前 candidate 尚未在
+  真实 NoKV stack 上运行
+- 语言说明：[英文版](./shared-goal-authority-state-provider-v0.md)与本中文版互为
+  语义镜像；两者不一致属于缺陷
 
 ---
 
-## 0. TL;DR
+## 0. 一个用来帮助大家理解的例子
 
-LoopX 引入 NoKV 的原因是这个需求：让分布在多台机器上的 agent 围绕
-同一个 goal 协作，不再依赖人转发指令，从而消除交接中的等待，最大化
-AI workforce 的效能（详见例 1）。
+例 1：模拟一次真实的机器 -> 人 -> 机器 handoff，为什么浪费时间
 
-LoopX作者这个设计最精妙的地方在于：把机器抽象成了部门，为了提效，部门之间要做自动化，用pipeline串联在一起，各部门之间只需要考虑交接内容，以及是否交接成功，NoKV在云上维护各种状态，类似一个中央文档，方便各部门（机器）随时调取且保证了正确性。
+比如，我在开发机上的 agent 做完了一个 Rust PR，笔记本上的 agent 负责 review。
+整个交接过程按时间顺序是这样的：
 
-为满足这个需求，本 RFC 定义三样东西：
+- **T0**：开发机 agent 完成修改并创建 PR；
+- **T1**：代码通过固定的 head SHA 交付。这一步由 Git 完成，所以代码传递本身
+  不是问题；
+- **T2**：我手工把 PR、源任务和 review 要求发给笔记本上的 agent，告诉它有新活；
+- **T3**：笔记本 agent 接单，但如果响应刚好丢失，我只能从它后来的行为反推它
+  是否真的认领成功。
 
-1. **一个在线权威（authority）**：维护状态真相的云端存储，所有协调状态以它为准；
-2. **一套受控命令**：跨端写入的唯一入口，把并发冲突显式暴露出来，而不是悄悄用后来的write覆盖先前的write；
-3. **一个可插拔的状态 Provider**：权威身后的存储层。本地文件先行，NoKV 作为首个数据库后端以 shadow（伴生）身份进入：每笔账都跟着记一份，但不影响主路径。NoKV 在这里扮演云端文件系统的角色。
+真正浪费时间的是 T2 和 T3：机器已经把工作做完了，下一台机器却还在等人转发；
+即使已经接单，也没有一张可以在崩溃后重新取回的凭证。Harness 再快、模型推理再
+快，也补不回人离开电脑以后这段空等。
 
-## 1. 一个用来帮助大家理解的例子
+完整需求显然同时包含“怎么通知下一台机器”和“怎么确认它真的接住了”。但第一版
+RFC 不应该一口吞掉消息、调度、配额、run history 和所有 LoopX 文件。本版先把最
+硬的一段做对：笔记本认领 review todo 时，只有一个端能成功，并且成功后拿到一张
+可重放的原始回执。通知和唤醒仍由
+[`Agent IM、LoopX 与 OpenViking 协作 v0`](./agent-im-openviking-collaboration-v0.md)
+里的 delivery plane 负责。
 
-例 1：关于模拟一次真实场景中的 机器 -> 人 -> 机器 的handoff，为什么浪费时间
+## 1. 这份 RFC 最后选择了什么
 
-比如，我在开发机上的 agent 做完了两个 PR，笔记本上
-的 agent 负责 review。整个交接过程按时间顺序是这样的：
+把 authority 想象成唯一的记账员。各端不直接改账，只提交“我要认领这项工作”的
+申请。记账员检查版本、身份、依赖和 gate；通过就把认领、lease 和回执一起记下，
+不通过就明确告诉申请人原因。
 
-- **T0**（01:01 pm）：我的开发机 agent 完成工作，两个 PR 创建成功。
-- **T1**：（01:01 pm）代码通过 PR 的固定 head SHA 交付。这一步由 Git 完成, 所以代码的传递并不是问题。
-- **T2**（01:28 pm）：我手工把两个 PR 的链接、源任务 ID 和"解释原因并review"的要求，发给笔记本上的 review 任务。
-- **T3**：没有结构化回执。我只能从 reviewer 后来的行为（读了 PR、
-  提了 blocker、推了修正提交）反推它已经接单。
+这次只给记账员一本很小的账，而不是把 LoopX 的所有文件都搬进远端：
 
-⚠️ T0 到 T2 之间相隔了 27 分钟。这 27 分钟里agents是没在干活的，都在等我（还有你！）。工作能在 01:28 继续，唯一的原因是我恰好在laptop面前，看到 PR 建好了，然后手动打字转发。
+1. 一个显式启用共享模式的 Goal，只有一份 **canonical coordination aggregate**；
+2. 每条成功 operation 的状态变化和原始 receipt 必须在**同一次 CAS**里落账；
+3. authority 负责判断，provider 只负责把确定性字节可靠保存下来；
+4. run history、status、quota、scheduler、host session 和 evidence body 继续由各自的
+   owner 管理，不塞进这本协调账。
 
-**对于harness和模型本身，效率再高和推理再快也没法抵消睡一觉带来的AI能效损耗**。goal 越长、交接越多，这种等待占总时长的比例就越大，这是AI workforce 效能的第一杀手。
+NoKV 是记账员身后的可选 provider。Agent 不直接连接 NoKV，NoKV 也不会因此变成
+LoopX 的控制面权威。
 
-所以现在的loopX缺了什么？Git 和 PR msg是不携带组件/server之间的协调信息的，比如为什么需要 review（目标来源）、谁来做（执行者）、按哪个版本做、做到什么程度算完（验收条件）、谁认领了（记录）、接没接住（回执）、没人接怎么办（超时重派）。目前都没有，Git也做不到。
+第一个能跑的例子只有 `claim_work`：对一个已经存在且可执行的 todo，同时写入 soft
+claim、lease/fence 和 receipt。它先回答两件最容易出事故的事——多人同时抢单时谁
+赢，以及响应丢失后怎样找回原回执——而不把完整 lease lifecycle 说成已经交付。
 
-这个RFC 收敛的就是 T2 和 T3这两个阶段：agent 完成的瞬间自动产生后继任务，合适的端自动发现并认领，认领成功产生可验证的回执。人就只用一直保持决策者的状态，不用在两个端agent上来回传递信息。（你肯定有同感）
+举一个最关键的失败序列：operation A 成功拿到 lease `L1`、epoch `7`，但响应丢了；
+随后 operation B 又把账本推进了一页。A 重启后再次提交同一申请，必须逐字段取回
+自己当时的原始 receipt。只告诉 A “这笔账以前记过”以及 B 的当前版本不够，因为
+没有 `L1`、epoch `7` 和 expiry，A 仍然无法证明自己获准执行过这项工作。
 
 ## 2. 要做的，以及不要做的
 
-**要做的**
+**这版要做的**
 
-1. 多端共享同一个 goal 的协调状态：todo、认领、租约、回执、配额。
-2. 所有跨端写入走受控命令：并发冲突显式暴露，崩溃后重试不产生
-   重复效果。
-3. 存储后端可插拔：先用本地文件，再平滑引入 NoKV 等数据库后端，
-   后端更换不改变任何上层语义。
+- 为一个共享 Goal 提供在线、provider-neutral 的 coordination authority；
+- 让并发 claim 只接受一个 owner；
+- 把每个 operation identity 绑定到一份 normalized request digest，换一套语义复用
+  同一个 id 时明确拒绝；
+- 即使后续 operation 已推进账本，也能找回原始 receipt；
+- 保持 LoopX 默认本地模式不变；
+- 把现有每一类持久状态该怎么接入说清楚。
 
-**明确不需要做的**（keep the scope narrow and fit）
+**这版明确不做的**
 
-- 不做多租户公网服务：P0（第一阶段交付，下同）只服务同一用户的可信设备。
-- 不做离线多写者合并：离线端不能产生受控写。
-- 不共享 raw evidence、凭据、绝对路径、对话记录。
-- 不引入事件总线或消息队列：P0 只有一个用户、个位数设备，一个权威加各端定时拉取就覆盖了全部场景，多一套中间件只多一个故障点。
-- Provider 不参与调度决策：它是存储，不是记账的人。
+- 不给所有 LoopX 状态造一个通用分布式文件系统或数据库；
+- 不做离线多写者 merge，也不允许离线创建受控写；
+- 不把 message delivery、wake-up、presence 或 Agent IM 协议混进存储合同；
+- 不定义多租户公网部署、认证协议、HA 或 provider failover；
+- 不把 quota、scheduler、run history、raw evidence、host session 或 extension ledger
+  搬进 coordination head；
+- 不自动 promotion 当前 event projection 或任一 provider；
+- 不允许 Agent 或 extension 绕过 authority 直连存储。
 
-## 3. 设计草案
+## 3. LoopX 现在有哪些账，各自怎么接入
 
-![Shared-goal authority topology](../../assets/shared-goal-authority-topology-v0.svg)
+Owner 提出的关键问题是：LoopX 现有状态分散在不同文件里，不能看到一个持久化
+文件就把它塞进同一个 head。比如两台机器各自记录的本地路径都是真的；status 是
+算出来的；quota accounting 又是一笔笔追加的账。它们不是同一种写模型。
 
-例2：**authority 是唯一的记账员**。各端（开发机，laptop，手机等等）是不直接记账的，只提交"记账申请"（受控命令）。记账员逐笔审核：账本版本对不对、这个人有没有资格、这笔账是不是已经记过。审核通过就落账并开回执，不通过就明确拒绝并告知原因。
+所以下表先把这些账摊开：今天谁在写、怎么写，以及进入共享模式后应该归到哪里。
+它按逻辑状态和字段组组织，而不按固定文件数组织；一个物理文件可以混合多个
+owner，新 host 或 extension 也可以新增本地 artifact，而无需修改本 RFC。
 
-记录放在哪个存储里（文件、NoKV、其他db），申请人（各个端）不需要知道，也察觉不到。
+下表采用这些接入类别：
 
-四个决定，每条回答一个"为什么"：
+- **shared canonical**：只有显式启用 shared mode 后才是权威；
+- **derived**：从所命名的 source 重算；永不接受 lifecycle 写入；
+- **synchronized ledger**：依据稳定 identity 和自身 append 合同复制或求并集，
+  不进入 coordination head；
+- **host-local**：只对一个 host、runtime 或 checkout 有效；
+- **independent ledger**：保留其 capability 或 accounting owner；
+- **excluded body**：跨边界时只允许 redacted digest 或 pointer。
 
-1. **为什么是一份 shared goal，而不是各端各写一份再合并？**
-   因为合并两份分叉的协调状态要同时处理认领冲突、完成状态回退、时钟偏差三类难题，任何一类做错都会丢工作或者双做工作。单一权威把这些问题在源头消掉，代价只是"改账必须在线"（离线时怎么办，见第8节）。
+| 逻辑状态 / 当前 surface | 当前 owner 与写模型 | v0 接入策略 |
+| --- | --- | --- |
+| `ACTIVE_GOAL_STATE.md` 中的 todo lifecycle、soft claim、dependency 与 gate 字段 | Markdown active state 仍是当前真相源。Todo 命令在本地文件锁下整文替换；仅当 event log 已存在时才使用 state-event projection。 | 启用 shared mode 后，只有校验 P0 命令所需的 normalized fields 成为 **shared canonical**。默认模式下 Markdown 继续 canonical；shared mode 下，它对已迁移字段变为本地 projection。私有 prose 排除。 |
+| `goals/<goal>/task-leases/` 下的可选 hard task lease | 每个 todo 的 JSON 在 goal-local lock 下替换或删除。Lease 是否有效还读取 todo status、soft claim、exclusion 和 registered agents。 | 把 claim、lease 与 fence 折入同一个 shared aggregate 和 authority revision。Shared mode 下不保留独立可写 lease file。 |
+| 已应用 operation receipt | LoopX 已有 scoped receipt 先例，包括 Turn journal 与 heartbeat receipt，但没有耐久的 shared-goal operation-to-receipt index。 | 新增可重放 receipt index 作为 **shared canonical**；它与 state transition 在同一次 CAS 中提交。 |
+| Project registry 的逻辑 identity、agent profile、grant 与 policy | Project registry 是本地配置，以 JSON replacement 写入。这些字段与 route、私有 reference 混在一起。 | Authority 消费显式版本化的紧凑 authorization projection 或 digest。整个 registry 不进入 coordination head，registry mutation 也不是 P0 命令。 |
+| Project/global registry route：`source_registry`、repo checkout、state file、runtime root | Global registry 是同步得到的 host-local route projection，并记录本地绝对路径。 | **Host-local**。需要时共享稳定 Goal/repository identity，绝不共享 route path。 |
+| `events.jsonl` 中的候选 state event | 当前 migration bridge 仍以 Markdown 为权威。Event append 使用本地锁；多 event append 不是 transaction。 | 只作 read-only shadow/canary input。本 RFC 不 promotion 它，也不用它证明 atomic completion。 |
+| Run JSON/Markdown 与 raw evidence body | Run writer 预留本地 artifact name，再写入详细 record。内容和 path 可能是私有的。 | **Excluded body** 或外部 artifact-store object。只有在后续命令需要时，aggregate 才可携带 opaque pointer、digest、privacy class 与精确 code revision。 |
+| `runs/index.jsonl` run history | 混合 append index，引用 run artifact，可能包含绝对路径；也携带包括 quota accounting row 在内的多种分类。 | 未来的 **synchronized ledger** 需要稳定 identity、deduplication 与 redaction。它不进入 coordination head。 |
+| `rollout-event-log.jsonl` | 混合的 public-safe diagnostic stream。核心 CLI rollout append 刻意 best-effort，发生在主命令之后；普通 todo event 不按受控 operation identity 建键。 | **Derived** observability projection。Rollout append 失败不能使 coordination commit 失效，也不能证明 commit。 |
+| Status 与 attention，包括 `status-projection-cache/*.json` | Status 从 registry、active state、run history、lease 等输入派生。可选 cache 是可替换的 host-local snapshot，其 key 包含本地 route input。 | **Derived**；cache 仍是 **host-local**，可随时丢弃。 |
+| Quota policy | 本地 policy 配置在 registry 字段中。 | Head 之外的 configuration input。Receipt 可以引用本次采用的 policy revision，但 coordination provider 不拥有 policy。 |
+| Quota accounting（`quota_slot_spent` / `quota_slot_voided`） | 详细 JSON/Markdown 加 `runs/index.jsonl` row 形成 append-style accounting history。当前 row 没有 shared operation identity 或跨 artifact transaction。 | **Independent ledger**。分布式实现需要 idempotent debit/void identity 与独立 retention contract。 |
+| Quota enforcement 与 `should-run` decision | 从 policy、todo/status projection、run history、scheduler context 和 actor scope 计算。Heartbeat receipt 是特殊 rollout 用法。 | **Derived decision**。若未来全局 budget 要 gate claim，应签发独立 reservation/grant receipt；head 可引用它，但不能吸收 quota ledger。 |
+| Scheduler state、liveness、host backoff 与 RRULE observation | Per-goal、per-agent、per-surface JSON 反映拥有该 scheduler 的 host。 | **Host-local**。不能把两个都有效的 host observation 当作冲突并用一个 global value 覆盖。 |
+| Turn journal、`turn-sessions/` 与 Pi `.loopx/pi/` binding | Runtime recovery 与 session binding 为一个 host/session 写入，可能包含本地 path 或 task body。 | **Host-local**。Turn journal 是 receipt 设计先例，不是 shared coordination state。 |
+| Supervisor、domain-state 与 extension runtime file | 每个 capability 定义自己的 schema、privacy、append/upsert rule 与 effect receipt。 | 依 capability contract 保持为 **independent ledger** 或 **host-local**。不得通用导入 head。 |
 
-2. **为什么是 pull 认领工作？** authority 只发布 "可执行的工作"（已通过 gate 放行、依赖、能力匹配三重检查），各端 daemon 带着身份来原子化的认领，只有一个能成功。这样 authority 不需要维护每台机器的空闲状态画像，端的加入退出也不需要注册流程。中心指派留到中期，且只能以受限方式做（详见 第11节）。
+上述分类的源码锚点包括
+[`architecture.md`](../../architecture.md)、
+[`event-store-migration-bridge-v0`](../../reference/protocols/event-store-migration-bridge-v0.md)、
+[`task_lease.py`](../../../loopx/control_plane/work_items/task_lease.py)、
+[`cli_rollout.py`](../../../loopx/cli_rollout.py)、
+[`status_projection_cache.py`](../../../loopx/control_plane/runtime/status_projection_cache.py)、
+[`slot_accounting.py`](../../../loopx/control_plane/quota/slot_accounting.py)、
+[`global_registry.py`](../../../loopx/global_registry.py)，以及这些 host state：
+[`scheduler/state.py`](../../../loopx/control_plane/scheduler/state.py)、
+[`turn_driver/codex_cli.py`](../../../loopx/control_plane/turn_driver/codex_cli.py) 和
+[`pi-goal-loop-runtime.mjs`](../../../loopx/pi_goal_mode/pi-goal-loop-runtime.mjs)。
 
-3. **为什么写入要带版本号？** 每个受控命令都携带申请人看到的账本
-   版本（`expected_revision`），版本过期就拒绝。这就是乐观并发控制，举个例子来讲就是："这是我基于上一页做的决定；如果账本已经翻页，请拒绝此条命令（命令自身来判断），我重新看最新页再决定。"这一条是"并发冲突显式暴露"的落点：两端同时抢一个任务，输的一方拿到明确的"版本过期"，而不是被悄悄覆盖。
+## 4. 这本协调账里到底放什么
 
-4. **为什么 NoKV 先当 shadow？** 新后端先跟单、后掌舵。每笔账在
-   主账本（本地文件）落定时同步登记一份影子账目，定期对账；影子账连续零误差并通过故障注入验收后，才讨论晋升（详见 第6节）。协调状态是不能出错的账目，所以这个顺序让引入新后端对主路径的风险为零。
+一个 provider key 保存一个 Goal 的 v0 aggregate。以下形状仅作说明：
 
-## 3.1 关于版本号设计（乐观锁）的原因
-传统做法是悲观锁：改之前先上锁，别人排队等。问题是持锁者死机了锁谁来还？而且大部分时间根本没人跟你抢，锁的成本白付。
+```json
+{
+  "schema_version": "loopx_coordination_head_v0",
+  "goal_id": "shared-rust-review",
+  "authority_revision": 43,
+  "coordination": {
+    "todos": {
+      "todo_review": {
+        "todo_revision": 9,
+        "status": "claimed",
+        "claimed_by": "laptop-reviewer",
+        "eligibility": {
+          "authorization_projection_revision": 3,
+          "authorization_projection_digest": "sha256:...",
+          "allowed_agent_ids": ["laptop-reviewer"],
+          "dependencies_satisfied": true,
+          "dependency_revision": 12,
+          "gates_open": true,
+          "gate_revision": 5
+        },
+        "repository": "git:example/repo",
+        "code_revision": "0123456789abcdef",
+        "last_lease_epoch": 7
+      }
+    },
+    "leases": {
+      "todo_review": {
+        "lease_id": "lease_...",
+        "owner": "laptop-reviewer",
+        "lease_epoch": 7,
+        "expires_at": "2026-08-06T03:30:00Z",
+        "write_scopes": ["src/review/**"]
+      }
+    }
+  },
+  "receipt_index": {
+    "op_claim_review_01": {
+      "request_digest": "sha256:...",
+      "original_receipt": {
+        "schema_version": "loopx_authority_receipt_v0",
+        "operation_id": "op_claim_review_01",
+        "request_digest": "sha256:...",
+        "command": "claim_work",
+        "actor": {"agent_id": "laptop-reviewer", "device_id": "laptop"},
+        "todo_id": "todo_review",
+        "accepted_authority_revision": 43,
+        "accepted_todo_revision": 9,
+        "applied_at": "2026-08-06T03:20:00Z",
+        "lease_id": "lease_...",
+        "lease_epoch": 7,
+        "expires_at": "2026-08-06T03:30:00Z"
+      }
+    }
+  },
+  "receipt_retention": {"mode": "retain_all_v0"}
+}
+```
 
-乐观并发反过来赌：冲突是少数情况。平时大家自由读、自由提交，零锁成本；真撞上了，才用版本比较把输家挡下来。赌对了（绝大多数时候）就是零开销，赌错了代价也只是"重读一次再决策"。
+该 schema 不包含 raw todo body、transcript、credential、绝对路径或 raw evidence。
+它只包含裁决这一命令切片与恢复其凭证所需的事实。
 
-厉害之处在于工程性价比：整套机制只需要一个整数和一次比较。不需要锁、不需要队列、不需要各端时钟对齐，就把分布式协调里最难的"谁先谁后"问题解决了。而且它对 agent 场景格外贴合：agent 的工作方式本来就是"读状态 → 决策 → 行动"的循环，expected_revision 本质上是给决策盖了个"我当时看到的世界"的时间戳，让记账员能判定这个决策在落账瞬间是否仍然成立。
+原始 receipt 证明某 operation 在某个 authority revision 被接受；它不证明对应
+lease 当前仍有效。因此 replay response 返回逐字段等价的 `original_receipt`，同时
+另行命名当前 observation，例如 `observed_authority_revision` 和
+`authorization_status=active|expired|superseded`。
 
-## 3.2 例 3：A 撑不住了，任务怎么换手
+## 5. 受控命令怎样落账，崩溃后怎样找回回执
 
-比如你有 3 台机器 A、B、C 都部署了 LoopX。A 上的 agent 正干着一个任务，但 A 资源不足（磁盘告急/算力被占死），没法自己接着干。此时发生的事情是：
-
-1. A 不直接把任务"塞给"B 或 C。A 向 authority 提交一条受控命令：交出租约、把任务退回可认领池，命令里带上 A 看到的账本版本 v999。
-2. authority 审核通过，落账：账本翻到 v1000，任务重新出现在"可执行的工作"列表里。这笔账同时登记进 NoKV 影子账。
-3. B、C 的 daemon 在各自心跳里拉到"有任务可认领"，同时提交 claim_work，都带 expected_revision=1000。没有锁，谁也不用等谁。
-4. authority 逐笔处理：先到的 B 成功，账本翻到 v1001，B 拿到回执（applied + 新租约 lease_id/epoch）；后到的 C 拿到显式 conflict（当前已是 v1001）。C 重新 load，看到任务已归 B，转身去干别的。A 的旧租约已交出，就算它缓过来也写不回这个任务（epoch 已换代）。
-5. NoKV 影子账跟着记下每一笔，对账循环随后校验主账与影子账逐笔一致。
-
-NoKV在后续如果晋升成为primary（权威真相）之后这个流程一个字都不用改，唯一变化是第 4 步的版本比较从文件账本移进 NoKV 的 generation CAS（服务端串行提交内裁决）。
-
-## 4. 端到端的写入采取封装了的命令: `loopx_command_v0`
-
-所有跨端写入使用统一封装。以例 1 中"认领 review 任务"为例：
+Request envelope 使用 `operation_id`，以免与现有 CLI 中 `command_id` 的用法冲突：
 
 ```json
 {
   "schema_version": "loopx_command_v0",
-  "command_id": "cmd_claim_review_704_705",
-  "idempotency_key": "goal:review-704-705:laptop:v1",
-  "actor": {"agent_id": "laptop-review", "device_id": "laptop"},
-  "goal_id": "ark-agent-loop-shared",
-  "expected_revision": 1842,
+  "operation_id": "op_claim_review_01",
+  "actor": {"agent_id": "laptop-reviewer", "device_id": "laptop"},
+  "goal_id": "shared-rust-review",
+  "expected_authority_revision": 42,
   "command": {
     "type": "claim_work",
-    "todo_id": "todo_review_704_705",
-    "expected_todo_revision": 7,
+    "todo_id": "todo_review",
+    "expected_todo_revision": 8,
     "lease_ttl_seconds": 600
   }
 }
 ```
 
-逐字段的解释：
+Authority 规范化完整的语义 request 并计算 `request_digest`。Digest 覆盖 actor、
+Goal、expected revision、command type、target 与 command parameter；不覆盖 transport
+retry metadata。
 
-- `command_id`：这一次请求的唯一身份。崩溃后带同一个 id 重试，
-  authority 保证不会记两笔账。
-- `idempotency_key`：业务层去重键，跨请求表达"这件事只做一次"。
-- `expected_revision`：申请人看到的 goal 账本版本（见 第 3 条）。
-- `expected_todo_revision`：目标 todo 自己的版本，防止认领一个内容
-  已经变化了的任务。
-- `lease_ttl_seconds`：租约时长。为什么需要租约：认领者可能中途
-  死机，租约到期不续，工作自动回到可认领状态，从而不会永远卡在
-  一个死掉的端手里。
+对每个 request，authority 执行以下顺序：
 
-**回执是唯一的成功凭证。** 成功响应必须包含 `result=applied`、新的
-`authority_revision`、`lease_id / epoch / expires_at`。其中 epoch 是
-租约的代际编号：同一份工作每换一次持有者，代际加一，旧持有者拿着
-旧代际号来提交会被识别并拒绝。例 1 里缺失的 T3 ACK，在本设计中就是这份回执。
+1. load aggregate 与 provider generation；
+2. 在执行当前状态校验之前查找 `operation_id`；
+3. id 已存在且 digest 相同：返回 `already_applied` 与已存原始 receipt，不写入；
+4. id 已存在但 digest 不同：返回 typed `operation_identity_mismatch`，不写入；
+5. 校验 actor scope、authority revision、todo revision、eligibility、claim state 与
+   lease rule；
+6. 在 authority 中计算 next coordination state 与 original receipt；
+7. 把 transition 和 receipt-index entry 一起放进一个确定性 envelope，并提交一次
+   provider CAS；
+8. provider 返回 conflict 或 ambiguous 后，reload，并在分类结果前重新查 receipt。
 
-回执共有五种状态：
+API result class 如下：
 
-| result | 含义 | 申请人的正确反应 |
-|---|---|---|
-| `applied` | 落账成功 | 开始工作，按节奏续租 |
-| `already_applied` | 这笔账之前已经记过了（幂等replay） | 视同成功，取回原回执 |
-| `conflict` | 版本过期或已被别人认领 | 重新 load，基于新版本决策 |
-| `rejected` | 权限、gate 或校验不通过 | 不要重试，人工介入 |
-| `failed` | 基础设施暂时故障 | 有界退避重试 |
+| Result | 含义 |
+| --- | --- |
+| `applied` | State 与原始 receipt 一起提交。 |
+| `already_applied` | 相同 operation 与 digest 早已提交；返回已保存的原始 receipt。 |
+| `conflict` | 此 operation 不存在 receipt，且 expected authority state 已 stale 或有竞争。 |
+| `rejected` | Identity、eligibility、gate 或命令校验失败，未改变状态。 |
+| `failed` | 无法证明存在 accepted result；仅可依据有界基础设施策略重试。 |
 
-首个命令集（绑定到 LoopX 既有原语，详见 第十一节）：
+`conflict`、`rejected` 和 `failed` 都不是成功凭证，不得得到伪造的 applied receipt。
 
-- `claim_work`：原子认领 + 获取租约。
-- `complete_todo_with_successor`：原子完成当前 todo 并创建后继 todo
-  （例如"实现完成"的同一瞬间产生"待 review"，并绑定精确 head SHA）。
-  这正是消除 T2 的机制：后继任务在完成时刻即存在，无需人转发。
-- `assign_work`（中期）：受限代理指派，见 第11节。
+### 5.1 第一个命令：`claim_work`
 
-## 5. 状态 Provider 的契约，保证了可插拔
+- `claim_work`：在一个 transition 中校验已有 runnable todo、设置 claimant、创建
+  lease、铸造下一个 lease epoch，并保存原始 receipt。它的必填字段是 `todo_id`、
+  `expected_todo_revision` 与 `lease_ttl_seconds`。
 
-Provider 是 authority 身后的存储层，所以契约刻意做到最小：
+Accepted claim 同时推进 `authority_revision` 与目标 `todo_revision`。它只能操作由
+显式 bootstrap/migration 安装的 todo，绝不把未知 todo 作为副作用创建。
+Deterministic reference 的 eligibility input 是紧凑元组 `allowed_agent_ids`、
+`dependencies_satisfied` 与 `gates_open`，并绑定到所命名的 authorization、
+dependency、gate revision 与 digest。
 
+未知 command type fail closed。`renew_lease`、`release_lease`、过期 lease reclaim、
+stale-fence writeback 校验、`complete_todo_with_successor`、transfer 或 delegated
+assignment、任意 todo/gate mutation、quota reservation 与 external effect，都需要
+后续 runtime 合同与 qualification。Production shared mode 前必须完成 renew/release/
+reclaim 与 stale-fence 校验；此处省略是 scope control，不代表 claim-only runtime 已
+完整。只有 source completion、successor creation/assignment、evidence pointer 与
+receipt 能 atomic commit 时，completion 加 successor creation 才可进入后续切片。
+
+## 6. 谁做判断，谁负责保存
+
+### 6.1 Authority 是记账员
+
+LoopX authority 负责：
+
+- request normalization 与 digest；
+- actor、todo、dependency、gate 与 authorization 校验；
+- `authority_revision` 与 todo revision transition；
+- 铸造 time、lease id、lease epoch 与 expiry；
+- receipt 内容与 replay classification；
+- privacy filtering 与 command-specific invariant。
+
+### 6.2 Provider 只负责把账存稳
+
+Provider contract 刻意不含语义：
+
+```text
+load()
+  -> (aggregate | none, provider_generation)
+
+compare_and_put(
+  expected_provider_generation,
+  aggregate
+)
+  -> applied(new_provider_generation)
+   | conflict(current_provider_generation)
+   | ambiguous
+   | failed
 ```
-load() -> (envelope_bytes, revision)
-compare_and_put(expected_revision, command_id, envelope_bytes)
-    -> applied(new_revision) | conflict(current_revision) | already_applied
-```
 
-为什么只有两个动作：动作越少，后端越容易换，所以才能满足"可插拔"。
-本地文件、NoKV、其他数据库都能在一两百行内实现这个契约，而
-authority 的全部并发语义只建立在这两个动作的四条性质上（这个很关键）：
+Provider 必须对完整 aggregate 做确定性序列化，并提供 atomic conditional
+replacement、durable success、same-key
+read-after-write reconciliation，并在无法证明写入是否提交时返回 typed ambiguous。
+它不得解析 LoopX command、铸造 clock/lease、裁决 eligibility 或合成 authority
+receipt。领域 `operation_id` 与 request-digest replay 合同只存在于 authority 及其
+原子保存的 receipt index 中，不是 provider API 参数。Provider 可以生成私有的
+publication-attempt identifier，但该 identifier 不具有 LoopX authority 语义。
 
-1. **CAS 原子**（Compare-And-Set，先比较后写入）：版本比较与写入是
-   一个不可分割的动作，由存储层的单写者串行化保证。
-2. **恰一次**：多个并发请求携带同一个 `expected_revision`，最多一个
-   成功，其余得到显式 conflict，并附上当前版本供重试。
-3. **幂等重试**：同一 `command_id` 重放，返回原结果，不产生第二次
-   效果。
-4. **回执即耐久**：返回 applied 之后，即使进程立刻被 kill -9，
-   这笔账也必须还在。
+调用这些方法之前，provider instance 或 handle 已绑定一个 `goal_id` 与 provider
+key；动词中省略 `goal_id` 并不表示该 key 是 global。
 
-**NoKV provider 的映射**（已实测，见附录 A）。NoKV 在这里扮演云端
-文件系统的角色：goal 账本的影子副本是一个文件（head 文档），每个
-文件自带服务端维护的版本号（generation）。`revision` 直接映射
-generation（服务端在串行提交内校验并加一）；一个 goal 的全部命令走
-同一个 head 文档路径，落在 NoKV 的同一个写入分区（root/shard）上，
-任一时刻只有一个写入者按顺序逐笔处理，天然满足单写者串行化。
+在这个二动词合同下，receipt index 不能作为单独 document 发布。先发布 receipt
+可能为从未发生的 transition 记录成功；先发布 state 则可能在 crash 后丢失唯一
+凭证。将来若要拆分，必须有 provider-neutral 的 multi-record transaction 或
+commit-marker protocol，并通过新的合同 review。
 
-四条适配器纪律写进契约。缺任何一条，typed conflict 语义就会失真或产生双写；附录 A 的"零异常"正是带齐这四条的实现跑出来的：
+### 6.3 三个版本号不是一回事
 
-1. **head 文档永不删除**：删除重建会使版本回退到 1，等于账本页码
-   回拨。
-2. **信封内容必须字节确定**（不含生成时的墙钟字段）：幂等重放靠
-   逐字节校验来识别"这是同一笔账"。
-3. **操作 id 由 `command_id` 按固定规则换算**（同一命令永远算出
-   同一个 id）：崩溃后重放时，服务端一眼认出"这笔记过了"，直接返回
-   原结果。若某个 id 被一次失败的尝试占用，按固定规则轮换到下一个，
-   但首个规则值必须保留给崩溃重放识别。
-4. **冲突要分类，不能一概重试**：存储层报"同一操作 id 携带了不同
-   内容"时，这本身就是原命令已落账的证明，必须转成 already_applied
-   取回原结果，绝不能换个新 id 重发（那会双写）；瞬态争用类错误做
-   有界重试；重试耗尽且账本版本没有前进时，报 failed（基础设施
-   故障）而不是 conflict。
+| 版本域 | Owner | 含义 | Consumer |
+| --- | --- | --- | --- |
+| `provider_generation` | Provider | 条件替换已存字节的 opaque token | 仅 authority/provider seam |
+| `authority_revision` | LoopX authority | 接受一条 command 后的 per-goal 逻辑 coordination revision | Client 与命令校验 |
+| `lease_epoch` | LoopX authority | Ownership 的 per-todo fencing generation；新 lease generation 时推进，普通 renewal 不推进 | Executor 与获准 writeback |
 
-## 6. 双写与对账的时候shadow层先放行
+Backend 常会对每条 accepted command 推进一次 generation，但数值相等永远不是合同。
+Migration、repair 或 provider metadata 可以改变 provider generation，而不授予新的
+LoopX authority revision。
 
-P0 阶段 file provider 是 primary，NoKV 是 shadow：
+对 NoKV 而言，它的 document generation 只实现 `provider_generation`。LoopX
+authority 继续负责另外两个版本域与 document 内的 receipt。
 
-1. **登记**：每个受控命令在主提交落定时，同步把同一信封登记为
-   影子写。登记走本地 outbox（先写进本地暂存队列，网络恢复后自动
-   补投，投递成功才清除），所以短暂的 shadow 不可用只产生积压，
-   不阻塞主路径。
-2. **对账**：以 canonical projection（主账本导出的规范视图）为基准，
-   周期比对主账与影子账，任何 mismatch 都记录并报警。
-3. **晋升审查**：连续零 mismatch + 真实 handoff 走通 + 故障注入
-   （进程 kill、磁盘满、网络抖动）通过后，才讨论 NoKV 参与更多
-   职责。晋升是显式决定，不是自动发生。
+## 7. 回执先全部保留，压缩以后再谈
 
-为什么这样排：**协调状态是不能错的账。** 让新后端先以"只跟单、
-不掌舵"的身份积累证据，代价只是每命令一次shadow write（实测中位数 86ms，
-见附录 A），但能换来主路径零风险。
+v0 使用 `retain_all_v0`：任何已提交 receipt-index entry 都不得 GC、过期或从
+snapshot 中省略。这是 correctness-first 的证明边界，不是 production-scale retention
+承诺。
 
-## 7. P0 部署形态
+若 receipt-index entry 已存在，但其原始 receipt 缺失或无效，authority 将其视为
+provider-protocol violation 并 fail closed。它不能 fallback 到 provider publication
+history，也不得从当前 head 重建 receipt。
 
-- **拓扑**：LoopX authority（与接入 relay 合并。relay 就是各端连
-  上来的那道门，合并后二者是同一个进程）部署在一台公网云服务器
-  （ECS）上；laptop / devbox / 私有云沙箱全部**主动向外连接**
-  authority（TLS + device token，或 mTLS 双向证书认证）。终端不开
-  任何入站端口，从而不需要公网 IP、内网穿透或防火墙配置。
-- **租户**：单一可信用户。不做多租户、K8s、HA、独立消息总线。
-- **NoKV 栈**：与 authority 同机，只绑 127.0.0.1。对外的传输安全
-  完全由 authority 承担，存储层不暴露在网络上。
-- **凭据**：私有 Git 凭据留在各执行端本地的 secret store，永不进入
-  authority。
+有界 retention window、receipt segmentation 或 external receipt ledger 都需要后续
+RFC：它必须保持 atomic proof，并定义窗口之外的行为。在此之前，compaction 可以
+重写字节，但必须携带完整 receipt index。
 
-## 8. 可用性预算与降级规则
+## 8. 默认本地模式不变，共享模式必须显式迁移
 
-服务等级预算（P0 验收用；P95 ≤ 10 秒的意思是 95% 的情况不慢于
-10 秒）：
+### 默认本地模式
 
-| 项目 | 预算 |
-|---|---|
-| daemon 心跳 | 15 秒一跳；45 秒未见标记 suspect（疑似离线）；90 秒判定 offline |
-| 在线 wake（新工作产生到目标端发现它的延迟） | P95 ≤ 10 秒，硬上限 30 秒 |
-| 只读投影 | P95 ≤ 5 秒；超过 30 秒必须显式标注 stale |
-| 租约 | 默认 TTL 10 分钟，每 60 秒续租 |
+- 现有 project registry、Markdown active state、run history、可选 task lease、
+  status、quota 与 host behavior 保持不变。
+- 安装 provider 不会启用 shared authority。
+- 当前 event-store bridge 仍报告 Markdown 为真相源，不允许自动 promotion。
 
-降级规则一句话：**离线可以继续干活，不能改账。**
+### Shared-authority mode
 
-- authority 不可达时，已认领工作的本地编辑、编译、测试照常进行，
-  结果可写入本地 outbox。
-- 但不能：新认领、续租、完成、转派、修改 gate/quota，或发布任何
-  外部副作用。
-- 重连后提交 `lease_id + epoch + 基线 revision + 产物 digest`
-  （digest 是内容摘要：一段能唯一指认这份产物的指纹）。租约仍有效
-  则允许完成；已过期或已被重新分配，结果降级为 stale candidate：系统保留这份结果供人审阅，但不自动写进账本，因为它
-  基于的是已经失效的授权。
+Shared mode 是按 Goal 显式选择。经 review 的实现必须：
 
-这条规则是整个设计里最重要的取舍：放弃"离线也能认领"的便利，
-换来"任何时刻不可能有两端同时拥有同一份工作"的确定性。
+1. 钉住 source registry、active state 与 privacy boundary；
+2. 迁移期间停止或 fence 本地 writer；
+3. 只把 scope 内的 coordination field 规范化为初始 aggregate；
+4. 校验 todo/claim/lease/gate parity 与空 receipt index；
+5. 记录 shared-mode declaration 及 authority endpoint/provider binding；
+6. 让所有 P0 写都经过在线 authority；
+7. 对已迁移字段，仅把 Markdown、local lease view、rollout row 与 status 渲染为
+   projection。
 
-## 9. 隐私
+Bootstrap 是受 fence 保护、发生在受控 shared write 之前的行政迁移，不是 P0 agent
+command：它可以用选定的现有 todo 和空 receipt index 创建初始 aggregate。它的
+source digest 与 mode declaration 必须耐久保存，让 restart 能区分 bootstrap 与尚未
+初始化的 provider。
 
-**跨端共享的**（全部是紧凑的协调事实）：goal / todo / agent /
-device 标识，版本号，任务类别，依赖与 gate，认领与租约，repo 与
-精确 revision 指针，命令与幂等回执，配额与调度状态，存活信号，
-以及带 digest 和隐私分级的 **evidence 指针**。
+第一次 shared write 之前，迁移可以回滚到未改动的本地 source。发生第一次 shared
+write 后，禁止自动 fallback 到本地 writer，否则会产生两个 authority。恢复必须
+修复 authority，或执行另行 review 的 fenced export 与 mode transition。
 
-**永不共享的**：raw evidence 正文、凭据、本地绝对路径、对话与运行
-记录（transcript）。需要引用证据时共享指针与摘要，正文留在产生它
-的机器上。
+Provider shadowing 与 read-only canary 可以采集 evidence，但两者都不改变真相源。
+Promotion 必须显式发生，并遵循现有 fail-closed migration discipline。
 
-## 10. 验收
+## 9. 断网时怎么办，哪些数据不能出机器
 
-P0 验收清单（全部可机器判定）：
+Shared-mode authority 不可用时：
 
-1. 例 1 的真实场景端到端走通，全程零人工转发。
-2. 两端并发认领同一 todo，恰一个 `applied`，另一个显式 `conflict`。
-3. 任一环节 crash 后携原 `command_id` 重试，账本无重复效果。
-4. authority 停机时，各端降级行为符合 第八节里提的内容；恢复后无脏写。
-5. 全部回执与投影通过隐私边界扫描（第九节里的"永不共享"零泄漏）。
-6. shadow 对账连续运行，mismatch 为零（NoKV 晋升门的前置证据）。
+- cached projection 只有标记 stale 后才可读取；
+- 不接受新的受控写入；
+- 已授权的本地计算只能在现有 lease 与 effect boundary 内继续；
+- 不自动 fallback 到本地文件写入。
 
-## 11. schedule
+本 RFC 不规定 wake latency 或 heartbeat topology。Delivery 可以在 Agent IM RFC 下用
+pull、push 或 IM daemon，但消息已送达永远不能证明 coordination command 已提交。
 
-**P0（本 RFC 范围）**
+Shared aggregate 与 receipt 可以包含紧凑的 public-safe 或显式 scoped private
+metadata：stable id、无 credential 的 repository identity、精确 code revision、digest、
+gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque pointer。不得
+包含 credential、raw evidence、raw todo prose、transcript、raw log 或本地绝对路径。
 
-LoopX 侧（多为新建，括号内是可绑定的既有原语）：
+## 10. 第一阶段怎么验收
 
-- `loopx_command_v0` 信封与五态回执（语义沿用既有受控命令 RFC）
-- `claim_work`（绑定 todo 认领 + `task_lease_v0` 租约：其幂等
-  acquire 与版本 CAS 可直接复用；需补 lease_id / epoch 的铸造规则，
-  TTL 参数化到 10 分钟档）
-- `complete_todo_with_successor`（绑定既有的单锁原子
-  complete + successor 原语，外加版本检查与回执）
-- provider seam（`load` / `compare_and_put`）与 file provider
-- shadow 登记与对账循环
-- device 身份与 outbound 传输（device token / mTLS）
-- per-goal `authority_revision` 计数器（新建；注意与现有
-  `command_id`、租约 `version` 字段的命名区分）
+全部检查均可由机器验证：
 
-NoKV 侧：
+1. 两个 actor 从同一 authority revision claim 同一 todo，恰好一个得到 `applied`；
+   loser 得到 `conflict`，且没有 lease；
+2. 以相同 operation id 与 digest 立即 replay，返回原始 receipt 且不改变状态；
+3. 历史 A/B/A replay 从耐久 provider state 重建 authority/provider 后仍成立，并在
+   B 推进 head 后逐字段返回 A 的原始 receipt；
+4. 相同 operation id 搭配不同 normalized digest 时被拒绝，state 与 receipt index
+   均不改变；
+5. Provider CAS 周围的 fault injection 永远不能暴露无 receipt 的 state 或无 state
+   的 receipt；
+6. ambiguous provider response 通过 reload receipt index reconcile；receipt 缺失时
+   绝不转成成功；
+7. 对未知 todo、stale revision、不符合 eligibility、dependency blocked 或 gate
+   blocked 的 claim，拒绝且不创建 state 或 receipt；
+8. 保留的 receipt 经 reload fixture 后仍存在，不发生 receipt GC；
+9. 测试分别处理 provider generation、authority revision 与 lease epoch；
+10. privacy scan 不得发现 credential、raw body、transcript 或绝对路径；
+11. 默认本地模式的行为不变，shared mode 永不 fallback 到未 fenced 的本地 writer。
 
-- shadow provider 实现（参考实现约 200 行，已随本 RFC 附带）
-- SDK 类型化冲突异常（携带当前版本，替代字符串解析）
-- 已知瞬态问题修复（发布终结路径的重试；读路径在文档被并发替换
-  瞬间的自动重试）
+配套 provider probe 是候选实现的 evidence，不构成弱化上述 normative check 的许可。
+性能测量与具体部署 topology 被刻意设为 non-normative。
 
-**中期（非 P0 承诺）**
+## 11. 分阶段交付
 
-- `assign_work` 代理指派，五个前置条件缺一不可：目标端最近在线且
-  能力匹配；目标端明确允许被代理指派；协调者持有 goal 级、动作级
-  的授权；指派带短 TTL 与 ACK 期限；超时未确认自动撤销并重新发布。
-- NoKV 晋升评估：前提是 第6章里提到的晋升门全部通过，以及 NoKV 侧服务恢复
-  能力（进程崩溃后的 successor 接管）落地。
+### P0：合同与 deterministic proof
 
-## 12. 问题（欢迎社区里的朋友们给出意见）
+- 本 ownership matrix 与显式 shared-mode boundary；
+- 确定性的 `loopx_command_v0` normalization 与 request digest；
+- 显式 bootstrapped todo 上的 `claim_work` authority transition；
+- 单 head、state-plus-receipt CAS；
+- 同一 seam 后的 deterministic 与 NoKV provider candidate；
+- 在所声明证据边界内的 A/B/A、identity mismatch、crash window、eligibility、
+  privacy 与 no-GC 检查。
 
-1. 如果nokv live的时候出问题了，端到端交接失败，回退策略和可以接受的情况边界是？
-2. `authority_revision` 的锚定：per-goal 独立计数（本提案倾向），还是全局计数？对账基准选哪个 canonical projection？
-3. 租约 `epoch` 的铸造与递增规则（租约记录重建时如何防回退）。
-4. wake 的传输细节：authority 经各端长连接推送，还是各端按心跳节奏
-   拉取？（预算允许两者，实现复杂度不同。）
-5. 回执的保留窗口：`already_applied` 重放在多久之后仍可取回原回执？
-6. 命名：`command_id` 与现有 CLI 分类字段同名，是否改名以避免混淆？
+### 后续 runtime qualification 与需 review 的切片
+
+- Lease renewal、显式 release、过期 lease reclaim 与 stale-fence writeback rejection；
+  production shared mode 前必须完成这些能力；
+- atomic `complete_todo_with_successor` 与 accepted evidence pointer；
+- transfer 与受限 delegated assignment；
+- 经 Agent IM 的 delivery/wake integration；
+- 独立 run-history synchronization 与 artifact storage；
+- distributed quota reservation/accounting；
+- provider promotion、authentication、service recovery、HA 与 multi-tenancy；
+- `retain_all_v0` 之后的 receipt retention 或 segmentation。
+
+## 12. 还需要 Owner 决定什么
+
+1. 下一个 runtime slice 是否先闭合 renew/release/reclaim 与 stale fencing，还是与
+   atomic complete-with-successor 一起 qualification？
+2. 哪些紧凑的 project-registry authorization field 构成 versioned authority input，
+   谁可以发布新的 authorization projection？
+3. 第一次 shared-mode write 后，reviewed rollback/export procedure 是什么？
+4. 哪个 provider 与 deployment 为第一次 bounded shared-mode canary 提供资格？
+   Provider 选择不改变 authority contract。
+5. Production 使用前，什么 retention 与 capacity policy 可以替代或落实
+   `retain_all_v0`，且不丢失历史凭证？
 
 ---
 
-## 附录 A：实测证据（NoKV shadow provider）
+## 附录 A：这版证据能证明什么
 
-以下数字来自真实栈端到端实测（etcd + S3 兼容存储 + nokv serve +
-Python SDK，零源码改动），完整探针与参考实现见
-[`examples/nokv-shadow-provider/`](../../../examples/nokv-shadow-provider/)，
-实测细节见[配套证据文档](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md)：
-
-| 探针 | 结果 |
-|---|---|
-| 并发认领（8 端同版本 × 20 轮） | 恰一个 applied：20/20，零异常 |
-| 幂等重放（同 command_id） | 返回原结果，账本零变化，lease_id 稳定 |
-| kill -9 耐久 | 数据完好：WAL（写前日志，先落盘再回执）同步写入，元数据目录完整；因下述服务恢复限制，未能重启回读做端到端复验 |
-| 多 goal 同 root | 各 goal 版本独立演进，互不干扰 |
-| 延迟 | 条件写中位数（p50）86ms / p95 114ms；读中位数 25ms / p95 32ms |
-
-对照 第8节 预算：存储层延迟占用预算不足 3%。已知瞬态问题一处（发布终结路径约 2% 概率、秒级自愈的卡顿，修复已列入 NoKV 工作项）。
-
-NoKV 进程崩溃后的服务恢复目前 fail-closed（意思就是宁可拒绝重启接管，也不在未经验证的状态上继续服务），因此它只能以 shadow 身份进入 P0；晋升前该能力必须落地并通过故障注入验收。
+Reference provider 与 probe 位于
+[`examples/nokv-shadow-provider/`](../../../examples/nokv-shadow-provider/)，并有
+[配套证据文档](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md)。本 PR 的
+deterministic candidate 只证明 claim/receipt core：state 与 receipt 的 same-CAS、
+并发 claim、A/B/A 原始 receipt 重放、request-digest mismatch、crash boundary 恢复，
+以及版本域相互独立的示例。它不实现或认证 lease renewal/release/reclaim、
+stale-fence writeback、production authorization-projection publisher、保留 receipt
+的 compaction、默认模式 parity、shared-mode migration 或真实 NoKV restart/recovery。
+因此，
+`python3 examples/nokv-shadow-provider/probes.py contract` 通过并不表示上面的完整 P0
+验收门通过。历史 latency 或 fault 结果只具有参考意义，不构成 durability、recovery、
+HA 或 production qualification 声明。

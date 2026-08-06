@@ -1,68 +1,124 @@
-# NoKV shadow-provider reference implementation
+# NoKV canonical-coordination provider reference
 
-Reference implementation of the LoopX storage-provider contract proposed in
-[RFC: shared-goal authority and pluggable state provider v0](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md):
+This directory contains the small, reviewable NoKV reference for
+[RFC: shared-goal authority and pluggable state provider v0](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0.md).
+It is a contract example, not a shipped LoopX runtime integration or a
+production deployment claim.
 
+## Scope
+
+The claim-only proof stores one per-goal **canonical coordination aggregate**.
+The aggregate contains only the normalized facts needed to validate an
+explicitly bootstrapped `claim_work`, the current authority revision,
+claim/lease/fence state, and a replayable receipt index. It does not implement
+the complete production lease lifecycle or migrate the current LoopX runtime.
+
+The following remain outside this head:
+
+- run artifacts and run-history ledgers;
+- status and attention projections or caches;
+- quota policy, accounting, and enforcement ledgers;
+- host-local routes, scheduler state, locks, and runtime bindings;
+- raw evidence, transcripts, credentials, and local absolute paths; and
+- Agent IM delivery, wake-up, presence, and offline queues.
+
+Those surfaces have separate ownership and synchronization strategies in the
+RFC persistence matrix. A provider does not acquire authority over them merely
+because they may be visible from a shared goal.
+
+## Atomic aggregate and receipt replay
+
+The current coordination state and the receipt mapping for a newly accepted
+operation are published in the **same head CAS**. The reference does not use a
+last-envelope shortcut or a separate `pending -> head -> finalize` receipt
+protocol.
+
+This matters for a historical retry:
+
+1. operation A commits and returns receipt A;
+2. operation B advances the goal head;
+3. the caller retries A after losing its first response; and
+4. the provider returns the original receipt A, field for field, without
+   applying A again or moving the current head.
+
+Each receipt-index entry binds the stable operation identity to a digest of the
+immutable request. Reusing an operation identity with different immutable
+inputs fails closed; it is never classified as an idempotent replay.
+
+The provider contract remains storage-only:
+
+```text
+load() -> (aggregate | none, provider_generation)
+compare_and_put(expected_provider_generation, aggregate)
+    -> applied(provider_generation)
+     | conflict(current_provider_generation)
+     | ambiguous
+     | failed
 ```
-load() -> (envelope_bytes, revision)
-compare_and_put(expected_revision, command_id, envelope_bytes)
-    -> applied(new_revision) | conflict(current_revision) | already_applied
-```
 
-`revision` maps to NoKV's per-path `generation` on a single per-goal head
-document. One goal is pinned to one root/shard, so every command for a goal
-is serialized by a single writer. The adapter encodes the four contract
-disciplines from RFC §5: never delete the head document, byte-deterministic
-envelopes, deterministic operation-id derivation from `command_id`, and
-conflict classification (already-applied proof / bounded contention retry /
-unavailable vs. conflict).
+`provider_generation` is the opaque storage CAS token. It is distinct from the
+aggregate's `authority_revision` and from each todo's lease epoch; none of these
+three version domains is derived from another.
+
+The storage provider deterministically serializes and stores the opaque
+aggregate and returns CAS outcomes.
+`CoordinationAuthority` remains responsible for request validation, authority
+revision, claim/lease transitions, request-digest binding, and the original
+domain receipt. The provider must not inspect an operation receipt or invent
+lease, gate, quota, or scheduling decisions.
 
 ## Files
 
-- `provider.py` (~200 lines): the adapter. `NoKVShadowProvider.load()` and
-  `.compare_and_put()` plus a `sample_envelope()` helper producing the
-  `loopx_command_v0` claim_work envelope from the RFC.
-- `probes.py`: the acceptance probes (P1-P6) whose measured results are
-  reported in the
-  [e2e evidence document](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0-evidence.zh-CN.md).
+- `provider.py`: `NoKVCoordinationProvider`, which maps an opaque per-goal
+  aggregate to NoKV path generation CAS, plus `CoordinationAuthority`, which
+  constructs the aggregate and its receipt index.
+- `probes.py`: deterministic contract regressions. Only the checks in the
+  [evidence note](../../docs/architecture/rfcs/shared-goal-authority-state-provider-v0-evidence.zh-CN.md)
+  are merge evidence for the revised receipt contract.
 
-## Requirements
+## Validation boundary
 
-- A running NoKV stack: `etcd`, an S3-compatible object store, and one
-  `nokv serve` shard owner (all can bind 127.0.0.1 on a single machine).
-- The NoKV Python SDK built from the NoKV repository
-  (`pip install <nokv-repo>/crates/nokv-python`, maturin backend).
+A static compatibility audit is pinned to NoKV
+[`90883d13539e31185f0d78131989fb51912dbd7e`](https://github.com/NoKV-Lab/NoKV/commit/90883d13539e31185f0d78131989fb51912dbd7e).
+At that baseline, the Python `publish_bytes` surface accepts
+`expected_generation` for create-only or replacement CAS and exposes optional
+publication `operation_id` and `artifact_revision_id` inputs. This establishes
+that the provider mapping has a source-level API seam; it does not prove its
+live behavior. The NoKV Python SDK and required services were not available in
+the validation environment, so this candidate has no live NoKV execution
+result.
 
-## Quickstart
+Run the merge-relevant deterministic regression from the repository root with:
 
 ```bash
-# 1) etcd (single node, local)
-etcd --listen-client-urls http://127.0.0.1:2379 \
-     --advertise-client-urls http://127.0.0.1:2379
-
-# 2) any S3-compatible store on 127.0.0.1:9000, then create the bucket
-aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://nokv-loopx-e2e
-
-# 3) provision + serve (all ids are 32-char lowercase hex)
-nokv --root-id <ROOT_ID> --etcd-endpoint http://127.0.0.1:2379 \
-     --etcd-key-prefix /nokv/loopx provision <LOGICAL_SHARD_ID>
-nokv --root-id <ROOT_ID> --etcd-endpoint http://127.0.0.1:2379 \
-     --etcd-key-prefix /nokv/loopx \
-     --object-bucket nokv-loopx-e2e --object-endpoint http://127.0.0.1:9000 \
-     --object-access-key-id <KEY> --object-secret-access-key <SECRET> \
-     --bind 127.0.0.1:7801 --advertise-endpoint 127.0.0.1:7801 \
-     --node-id n1 --metadata-create <METADATA_DIR> serve
-
-# 4) probes
-export NOKV_ROOT_ID=<ROOT_ID> NOKV_ETCD_PREFIX=/nokv/loopx \
-       NOKV_S3_KEY=<KEY> NOKV_S3_SECRET=<SECRET>
-python probes.py setup
-python probes.py p1   # single claim -> applied + receipt
-python probes.py p2   # 8-way concurrent claim x 20 rounds -> exactly one applied
-python probes.py p3b  # crash-retry with same command_id -> already_applied
-python probes.py p5   # 100 cycles -> latency distribution
-python probes.py p6   # two goals in one root -> independent revisions
+python3 examples/nokv-shadow-provider/probes.py contract
 ```
 
-Probes emit JSON lines to stdout as raw evidence. Measured results, the full
-environment recipe, and the known caveats are in the evidence document above.
+It must prove all of the following:
+
+- only an explicitly bootstrapped, runnable todo can be claimed;
+- A applies, B advances the head, and a reconstructed authority replays A;
+- replay returns A's original authority receipt field for field;
+- replay leaves the current revision and aggregate unchanged;
+- the same operation identity with a different semantic request is rejected;
+- transport-only retry metadata does not change operation identity;
+- competing claims have one winner;
+- pre/post-CAS faults and an ambiguous result recover only from the durable
+  receipt index.
+
+The six current result tags are
+`contract.bootstrap_and_preconditions`,
+`contract.a_success_b_advance_replay_a`, `contract.operation_identity`,
+`contract.competing_claims`, `contract.crash_windows_and_ambiguity`, and
+`contract.version_domains_and_retain_all`.
+
+The probe has no live-stack mode in this candidate. A future live exercise
+would require etcd, an S3-compatible object store, `nokv serve`, and the NoKV
+Python SDK, plus separately reviewed restart and recovery assertions. An
+earlier run against the superseded last-envelope adapter is not evidence that
+the revised receipt contract passes. Do not reuse its latency, restart, or
+promotion conclusions for this implementation.
+
+The reference does not establish lease renewal/release, multi-host wake
+delivery, automatic provider promotion, HA/failover, receipt compaction or GC,
+production performance, or a full LoopX state migration.

@@ -1,537 +1,542 @@
-# RFC: Shared-Goal Online Authority and Pluggable State Provider (v0)
+# RFC: Shared-Goal Online Authority and Pluggable Coordination Provider (v0)
 
-- Status: Draft, request for comments
-- Proposed by: NoKV Lab, drafted in collaboration with the LoopX maintainer
-- Date: 2026-08-05
-- Scope: the LoopX control plane. Fills the "separate deployment contract"
-  slot reserved by
+- Status: Draft, under maintainer review
+- Proposed by: NoKV Lab
+- Date: 2026-08-05; revised 2026-08-06
+- Scope: a separate deployment contract for LoopX shared-goal coordination,
+  complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
-- Evidence baseline: every performance number and behavioral claim in this
-  proposal comes from real-environment measurement (see Appendix A and the
-  [companion evidence document](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md)),
-  not design-time estimation
-- Language note: the [Chinese version](./shared-goal-authority-state-provider-v0.zh-CN.md)
-  is the authoritative text; this is a faithful translation
+- Source baseline: LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
+- Provider API baseline: NoKV `90883d13539e31185f0d78131989fb51912dbd7e`,
+  used only to map the Python `publish_bytes` generation-CAS API statically;
+  the current candidate has not been run against a live NoKV stack
+- Language note: the
+  [Chinese version](./shared-goal-authority-state-provider-v0.zh-CN.md) and this
+  English version are semantic mirrors. A difference between them is a defect.
 
 ---
 
-## 0. TL;DR
+## 0. An Example to Help Everyone Understand
 
-The reason LoopX brings in NoKV is this need: let agents spread across
-multiple machines collaborate around one shared goal, without depending on
-a human to relay instructions, thereby eliminating the waiting inside every
-handoff and maximizing the throughput of an AI workforce (see Example 1).
+Example 1: a walkthrough of a real machine -> human -> machine handoff, and why
+it wastes time
 
-The most elegant part of the LoopX author's design: machines are abstracted
-into departments. To raise efficiency, the departments are automated and
-chained into a pipeline, and each department only needs to care about two
-things: what is being handed over, and whether the handover succeeded. NoKV
-maintains all the state in the cloud, like a central document that every
-department (machine) can consult at any time, with correctness guaranteed.
+Suppose my agent on the devbox finishes a Rust PR, and the agent on my laptop is
+responsible for review. The handoff looks like this:
 
-To satisfy this need, this RFC defines three things:
+- **T0**: the devbox agent finishes the change and opens the PR;
+- **T1**: the code is delivered at a pinned head SHA. Git already handles this,
+  so moving the code is not the problem;
+- **T2**: I manually send the PR, source task, and review instructions to the
+  laptop agent so that it knows there is work to do;
+- **T3**: the laptop agent takes the work, but if its response is lost, I can
+  only infer later from its behavior whether the claim actually succeeded.
 
-1. **One online authority**: cloud-side storage that maintains the truth of
-   state; all coordination state defers to it;
-2. **One set of controlled commands**: the single entry point for all
-   cross-device writes, surfacing concurrency conflicts explicitly instead of
-   silently letting a later write clobber an earlier one;
-3. **One pluggable state provider**: the storage layer behind the authority.
-   Local files go first; NoKV enters as the first database backend in a
-   shadow (companion) role: every entry gets a second copy written alongside,
-   without ever touching the main path. NoKV plays the role of a cloud
-   filesystem here.
+T2 and T3 are where the time disappears. One machine has already finished, but
+the next machine is still waiting for a person to relay the work. Even after it
+takes the job, there is no proof that can be recovered after a crash. A faster
+harness or model cannot make up for the hours when the human is away.
 
-## 1. An example to help everyone understand
+The full need clearly includes both "tell the next machine" and "prove that it
+really took the work." The first RFC should not swallow messaging, scheduling,
+quota, run history, and every LoopX file at once. This version starts with the
+hardest small piece: when the laptop claims the review todo, only one endpoint
+may win, and that winner must be able to replay its original receipt. Delivery
+and wake-up remain with the
+[`Agent IM, LoopX, And OpenViking Collaboration v0`](./agent-im-openviking-collaboration-v0.md)
+delivery plane.
 
-Example 1: a walkthrough of a real machine -> human -> machine handoff,
-and why it wastes time
+## 1. What This RFC Chooses
 
-For instance: my agent on the devbox finished two PRs, and the agent on my
-laptop is responsible for review. The handoff, in chronological order:
+Think of the authority as the only bookkeeper. Endpoints never edit the ledger
+directly; they submit a request saying, "I want to claim this work." The
+bookkeeper checks the version, identity, dependencies, and gates. If the request
+passes, the claim, lease, and receipt are written together. If it fails, the
+requester gets an explicit reason.
 
-- **T0** (01:01 pm): my devbox agent finishes its work; two PRs are created.
-- **T1** (01:01 pm): the code is delivered through the PRs' pinned head SHAs.
-  Git does this step, so delivering the code itself was never the problem.
-- **T2** (01:28 pm): I manually send the two PR links, the source task ID,
-  and the instruction "explain the reasoning and review" to the review task
-  on my laptop.
-- **T3**: no structured acknowledgment. I can only infer that the reviewer
-  took the job from its later behavior (it read the PRs, raised a blocker,
-  pushed a fix commit).
+This time the bookkeeper gets one small ledger. We are not moving every LoopX
+file into a remote store:
 
-⚠️ Between T0 and T2 sit 27 minutes. For those 27 minutes the agents were
-not working; they were all waiting for me (and you!). The only reason work
-resumed at 01:28 is that I happened to be in front of the laptop, saw the
-PRs were up, and typed out the forwarding message by hand.
+1. one goal that explicitly opts into shared mode has one **canonical
+   coordination aggregate**;
+2. each successful operation's state transition and original receipt land in
+   the **same compare-and-set (CAS)**;
+3. the authority makes decisions, while a provider only stores deterministic
+   bytes reliably;
+4. run history, status, quota, scheduler state, host sessions, and evidence
+   bodies stay with their existing owners instead of entering this ledger.
 
-**No matter how efficient the harness is or how fast the model reasons, it
-cannot offset the AI-throughput loss of a night's sleep.** The longer the
-goal and the more handoffs it has, the larger the share of total time this
-waiting eats. It is the number-one killer of AI workforce throughput.
+NoKV is an optional provider behind the bookkeeper. Agents do not connect to
+NoKV directly, and NoKV does not become the LoopX control-plane authority.
 
-So what is today's LoopX missing? Git and PR messages carry no coordination
-information between components/servers: why the review is needed (goal
-lineage), who should do it (the executor), against which version, what
-counts as done (acceptance criteria), who claimed it (the record), whether
-it was picked up (the receipt), and what happens if nobody picks it up
-(timeout and re-dispatch). None of that exists today, and Git cannot
-provide it.
+The first runnable example has only one command, `claim_work`. For an existing
+eligible todo, it records the soft claim, lease/fence, and receipt together. It
+answers the two questions most likely to cause an incident—who wins when two
+endpoints claim at once, and how a lost response recovers its original
+receipt—without pretending that the complete lease lifecycle already ships.
 
-What this RFC converges on is exactly T2 and T3: the moment an agent
-finishes, the successor task is created automatically; the right endpoint
-discovers and claims it automatically; a successful claim produces a
-verifiable receipt. The human stays purely in the decision-maker role,
-never ferrying information between two endpoint agents. (You know the
-feeling.)
+Here is the failure sequence that matters most. Operation A succeeds with lease
+`L1`, epoch `7`, but its response is lost. Operation B then advances the ledger.
+When A restarts and retries the same request, it must recover its original
+receipt field for field. "This was already applied" plus B's current revision
+is not enough: without `L1`, epoch `7`, and its expiry, A still cannot prove
+that it was authorized to do the work.
 
-## 2. What we will do, and what we will not
+## 2. What We Will Do, and What We Will Not
 
-**What we will do**
+**What this version will do**
 
-1. Share one goal's coordination state across endpoints: todos, claims,
-   leases, receipts, quota.
-2. Route every cross-device write through controlled commands: concurrency
-   conflicts are surfaced explicitly, and a crash-retry never produces a
-   duplicate effect.
-3. Make the storage backend pluggable: local files first, then database
-   backends such as NoKV slide in, with zero change to any upper-layer
-   semantics.
+- give one shared goal an online, provider-neutral coordination authority;
+- make concurrent claims resolve to one accepted owner;
+- bind each operation identity to one normalized request digest and reject the
+  same id when it is reused with different semantics;
+- recover the original receipt after later operations advance the ledger;
+- keep LoopX's default local mode unchanged;
+- say how every existing durable state category joins—or stays outside—this
+  boundary.
 
-**What we explicitly will not do** (keep the scope narrow and fit)
+**What this version explicitly will not do**
 
-- No multi-tenant public service: P0 (the first delivery phase, hereafter)
-  serves only one user's trusted devices.
-- No offline multi-writer merging: an offline endpoint cannot produce
-  controlled writes.
-- No sharing of raw evidence, credentials, absolute paths, or transcripts.
-- No event bus or message queue: P0 has one user and a handful of devices;
-  one authority plus periodic pulls from each endpoint covers every
-  scenario, and one more middleware is just one more failure point.
-- The provider takes no part in scheduling decisions: it is the storage,
-  not the bookkeeper.
+- build a generic distributed filesystem or database for all LoopX state;
+- support offline multi-writer merge or offline controlled writes;
+- mix message delivery, wake-up, presence, or an Agent IM protocol into the
+  storage contract;
+- define multi-tenant public deployment, authentication, HA, or provider
+  failover;
+- move quota, scheduler state, run history, raw evidence, host sessions, or
+  extension-owned ledgers into the coordination head;
+- automatically promote the current event projection or any provider;
+- let an agent or extension bypass the authority and connect to storage.
 
-## 3. Design draft
+## 3. What LoopX Stores Today, and How Each Part Connects
 
-![Shared-goal authority topology](../../assets/shared-goal-authority-topology-v0.svg)
+The owner's key question was that LoopX state already lives across several
+files, and not every durable file belongs in one head. Two machines can both
+have a correct local route; status is computed; quota accounting is an
+append-style ledger. These are different write models.
 
-Example 2: **the authority is the only bookkeeper.** The endpoints (devbox,
-laptop, phone, and so on) never write the ledger directly; they only submit
-"bookkeeping requests" (controlled commands). The bookkeeper audits each
-one: is the ledger version right, is this actor qualified, has this entry
-been recorded before. If the audit passes, the entry lands and a receipt is
-issued; if not, the request is rejected explicitly with the reason.
+The table below therefore lays the ledgers out first: who writes each one
+today, how it is written, and where it belongs after shared mode exists. It is
+organized by logical state and field group rather than a fixed file count. One
+physical file may mix several owners, and a new host or extension may add local
+artifacts without changing this RFC.
 
-Where the records live (files, NoKV, some other db) is something the
-requesters (the endpoints) neither need to know nor can perceive.
+Integration classes used below:
 
-Four decisions, each answering one "why":
+- **shared canonical**: authoritative only after explicit shared-mode opt-in;
+- **derived**: recompute from its named source; never accept lifecycle writes;
+- **synchronized ledger**: replicate or union by stable identity under its own
+  append contract, not through the coordination head;
+- **host-local**: valid only for one host, runtime, or checkout;
+- **independent ledger**: retains its capability or accounting owner;
+- **excluded body**: only a redacted digest or pointer may cross the boundary.
 
-1. **Why one shared goal, instead of each endpoint writing its own copy and
-   merging later?** Because merging two diverged copies of coordination
-   state means solving three hard problems at once: claim conflicts,
-   completion-state rollback, and clock skew. Getting any one of them wrong
-   loses work or does work twice. A single authority removes these problems
-   at the source, and the only price is "writes must be online" (for what
-   happens offline, see Section 8).
+| Logical state / current surface | Current owner and write model | v0 integration strategy |
+| --- | --- | --- |
+| Todo lifecycle, soft claim, dependency, and gate fields in `ACTIVE_GOAL_STATE.md` | Markdown active state remains the current source of truth. Todo commands use a local file lock and whole-document replacement. A state-event projection is used only when an event log already exists. | Only the normalized fields required to validate the P0 commands become **shared canonical** after opt-in. Markdown remains canonical in default mode and becomes a local projection for migrated fields in shared mode. Private prose stays excluded. |
+| Optional hard task leases under `goals/<goal>/task-leases/` | Per-todo JSON is replaced or removed under a goal-local lock. Lease effectiveness also reads todo status, soft claim, exclusions, and registered agents. | Fold claim, lease, and fence into the same shared aggregate and authority revision. Do not keep an independently writable lease file in shared mode. |
+| Applied-operation receipts | LoopX has scoped receipt precedents, including Turn journals and heartbeat receipts, but no durable shared-goal operation-to-receipt index. | Add the replayable receipt index as **shared canonical**, committed in the same CAS as the state transition. |
+| Project-registry logical identity, agent profiles, grants, and policy | Project registry is local configuration written as a JSON replacement. These fields are mixed with routes and private references. | The authority consumes an explicitly versioned compact authorization projection or digest. The whole registry is not stored in the coordination head, and registry mutation is not a P0 command. |
+| Project/global registry routes: `source_registry`, repo checkout, state file, runtime root | The global registry is a synchronized host-local route projection and records absolute local paths. | **Host-local**. Share stable goal/repository identity where needed, never route paths. |
+| Candidate state events in `events.jsonl` | The current migration bridge keeps Markdown authoritative. Event append uses local locking; multi-event append is not a transaction. | Read-only shadow/canary input. This RFC does not promote it or use it to prove atomic completion. |
+| Run JSON/Markdown and raw evidence bodies | Run writers reserve local artifact names and then write detailed records. Content and paths may be private. | **Excluded body** or external artifact-store object. The aggregate may carry only an opaque pointer, digest, privacy class, and exact code revision when a later command requires them. |
+| `runs/index.jsonl` run history | A mixed append index references run artifacts and may contain absolute paths. It also carries several classifications, including quota accounting rows. | A future **synchronized ledger** needs stable identities, deduplication, and redaction. It is not part of the coordination head. |
+| `rollout-event-log.jsonl` | A mixed public-safe diagnostic stream. Core CLI rollout append is intentionally best-effort and happens after the primary command; ordinary todo events are not keyed by the controlled operation identity. | **Derived** observability projection. A failed rollout append cannot invalidate or prove a coordination commit. |
+| Status and attention, including `status-projection-cache/*.json` | Status is derived from registry, active state, run history, leases, and other inputs. Its optional cache is a replaceable host-local snapshot whose key includes local route inputs. | **Derived**; cache remains **host-local** and may be discarded. |
+| Quota policy | Local policy is configured in registry fields. | Configuration input outside the head. A receipt may reference the policy revision used, but the coordination provider does not own policy. |
+| Quota accounting (`quota_slot_spent` / `quota_slot_voided`) | Detailed JSON/Markdown plus `runs/index.jsonl` rows form an append-style accounting history. Current rows have no shared operation identity or cross-artifact transaction. | **Independent ledger**. A distributed implementation needs idempotent debit/void identities and its own retention contract. |
+| Quota enforcement and `should-run` decisions | Computed from policy, todo/status projections, run history, scheduler context, and actor scope. A heartbeat receipt is a specialized rollout use. | **Derived decision**. If a future global budget gates claims, it should issue a separate reservation/grant receipt; the head may reference that receipt but must not absorb the quota ledger. |
+| Scheduler state, liveness, host backoff, and RRULE observations | Per-goal, per-agent, per-surface JSON reflects the host that owns the scheduler. | **Host-local**. Never resolve two valid host observations by overwriting one global value. |
+| Turn journals, `turn-sessions/`, and Pi `.loopx/pi/` bindings | Runtime recovery and session bindings are written for one host/session and may contain local paths or task bodies. | **Host-local**. Turn journals are a receipt-design precedent, not shared coordination state. |
+| Supervisor, domain-state, and extension runtime files | Each capability defines its own schema, privacy, append/upsert rules, and effect receipts. | **Independent ledger** or **host-local**, according to that capability contract. No generic import into the head. |
 
-2. **Why pull-based claiming?** The authority only publishes "runnable
-   work" (already past three checks: gate clearance, dependencies,
-   capability match). Endpoint daemons come with their identity and claim
-   atomically; only one can win. This way the authority never has to
-   maintain an idleness profile of every machine, and endpoints can join or
-   leave without a registration ceremony. Central assignment is deferred to
-   the mid-term, and only in a restricted form (see Section 11).
+Source anchors for the classifications include
+[`architecture.md`](../../architecture.md),
+[`event-store-migration-bridge-v0`](../../reference/protocols/event-store-migration-bridge-v0.md),
+[`task_lease.py`](../../../loopx/control_plane/work_items/task_lease.py),
+[`cli_rollout.py`](../../../loopx/cli_rollout.py),
+[`status_projection_cache.py`](../../../loopx/control_plane/runtime/status_projection_cache.py),
+[`slot_accounting.py`](../../../loopx/control_plane/quota/slot_accounting.py),
+[`global_registry.py`](../../../loopx/global_registry.py), and the host state in
+[`scheduler/state.py`](../../../loopx/control_plane/scheduler/state.py),
+[`turn_driver/codex_cli.py`](../../../loopx/control_plane/turn_driver/codex_cli.py),
+and [`pi-goal-loop-runtime.mjs`](../../../loopx/pi_goal_mode/pi-goal-loop-runtime.mjs).
 
-3. **Why must writes carry a version number?** Every controlled command
-   carries the ledger version its requester saw (`expected_revision`); a
-   stale version is rejected. This is optimistic concurrency control. As an
-   example: "this decision of mine is based on the previous page; if the
-   ledger has already turned the page, reject this command (the command
-   itself is the judge), and I will look at the newest page and decide
-   again." This is where "conflicts surfaced explicitly" lands: when two
-   endpoints race for one task, the loser gets an unambiguous
-   "version stale" instead of being silently overwritten.
+## 4. What Goes Into This Coordination Ledger
 
-4. **Why does NoKV start as a shadow?** A new backend follows the books
-   before it keeps the books. Every entry is registered as a shadow copy at
-   the moment the primary ledger (local files) commits, with periodic
-   reconciliation; only after the shadow shows sustained zero-mismatch and
-   passes fault-injection acceptance do we discuss promotion (see
-   Section 6). Coordination state is a ledger that must not be wrong, so
-   this ordering makes introducing a new backend zero-risk to the main path.
+One provider key stores one goal's v0 aggregate. The illustrative shape is:
 
-## 3.1 Why version numbers (the optimistic-locking rationale)
+```json
+{
+  "schema_version": "loopx_coordination_head_v0",
+  "goal_id": "shared-rust-review",
+  "authority_revision": 43,
+  "coordination": {
+    "todos": {
+      "todo_review": {
+        "todo_revision": 9,
+        "status": "claimed",
+        "claimed_by": "laptop-reviewer",
+        "eligibility": {
+          "authorization_projection_revision": 3,
+          "authorization_projection_digest": "sha256:...",
+          "allowed_agent_ids": ["laptop-reviewer"],
+          "dependencies_satisfied": true,
+          "dependency_revision": 12,
+          "gates_open": true,
+          "gate_revision": 5
+        },
+        "repository": "git:example/repo",
+        "code_revision": "0123456789abcdef",
+        "last_lease_epoch": 7
+      }
+    },
+    "leases": {
+      "todo_review": {
+        "lease_id": "lease_...",
+        "owner": "laptop-reviewer",
+        "lease_epoch": 7,
+        "expires_at": "2026-08-06T03:30:00Z",
+        "write_scopes": ["src/review/**"]
+      }
+    }
+  },
+  "receipt_index": {
+    "op_claim_review_01": {
+      "request_digest": "sha256:...",
+      "original_receipt": {
+        "schema_version": "loopx_authority_receipt_v0",
+        "operation_id": "op_claim_review_01",
+        "request_digest": "sha256:...",
+        "command": "claim_work",
+        "actor": {"agent_id": "laptop-reviewer", "device_id": "laptop"},
+        "todo_id": "todo_review",
+        "accepted_authority_revision": 43,
+        "accepted_todo_revision": 9,
+        "applied_at": "2026-08-06T03:20:00Z",
+        "lease_id": "lease_...",
+        "lease_epoch": 7,
+        "expires_at": "2026-08-06T03:30:00Z"
+      }
+    }
+  },
+  "receipt_retention": {"mode": "retain_all_v0"}
+}
+```
 
-The traditional approach is pessimistic locking: take a lock before
-changing anything, and everyone else queues. Problem: if the lock holder
-dies, who returns the lock? And most of the time nobody is competing with
-you anyway, so the cost of locking is paid for nothing.
+The schema contains no raw todo body, transcript, credential, absolute path,
+or raw evidence. It contains only the facts needed to adjudicate the command
+slice and recover its proof.
 
-Optimistic concurrency bets the other way: conflicts are the minority.
-Everyone reads and submits freely at zero locking cost; only when a
-collision actually happens does the version comparison stop the loser. Win
-the bet (the vast majority of the time) and the overhead is zero; lose it
-and the price is merely "re-read once and decide again."
+The original receipt proves that an operation was accepted at one authority
+revision. It does not prove that its lease remains current. A replay response
+therefore returns the field-for-field equivalent `original_receipt` plus
+separately named current observations such as `observed_authority_revision` and
+`authorization_status=active|expired|superseded`.
 
-The brilliance is the engineering economics: the whole mechanism needs one
-integer and one comparison. No locks, no queues, no clock synchronization
-across endpoints, and yet it solves the hardest problem in distributed
-coordination: who came first. It also fits the agent scenario unusually
-well: an agent's working loop is already "read state → decide → act", and
-`expected_revision` is essentially a timestamp stamped onto the decision,
-recording "the world as I saw it", so the bookkeeper can judge whether that
-decision still holds at the instant it lands in the ledger.
+## 5. How a Command Lands and How a Lost Receipt Comes Back
 
-## 3.2 Example 3: A cannot carry on, and the task changes hands
-
-Say you have three machines A, B, and C, all running LoopX. The agent on A
-is in the middle of a task, but A is running out of resources (disk nearly
-full / compute starved) and cannot continue on its own. Here is what
-happens:
-
-1. A does not "shove" the task at B or C. A submits one controlled command
-   to the authority: surrender the lease and return the task to the
-   claimable pool, carrying the ledger version A saw, v999.
-2. The authority audits and lands the entry: the ledger turns to v1000, and
-   the task reappears in the "runnable work" list. The same entry is
-   simultaneously registered into the NoKV shadow ledger.
-3. B's and C's daemons pick up "work available to claim" on their own
-   heartbeats and submit claim_work at the same time, both carrying
-   expected_revision=1000. No locks; nobody waits for anybody.
-4. The authority processes entries one by one: B, arriving first, succeeds;
-   the ledger turns to v1001 and B receives the receipt (applied + a new
-   lease with lease_id/epoch). C, arriving later, gets an explicit conflict
-   (the current version is already v1001). C re-loads, sees the task now
-   belongs to B, and turns to other work. A's old lease has already been
-   surrendered, so even if A comes back to life it can no longer write into
-   this task (the epoch has moved to a new generation).
-5. The NoKV shadow ledger records every one of these entries, and the
-   reconciliation loop later verifies the primary and shadow books entry by
-   entry.
-
-If NoKV is later promoted to primary (the authoritative truth), not one
-word of this flow changes; the only difference is that the version
-comparison in step 4 moves from the file ledger into NoKV's generation CAS
-(adjudicated inside the server's serialized commit).
-
-## 4. Every cross-device write takes one wrapped command: `loopx_command_v0`
-
-All cross-device writes use one uniform envelope. Take "claim the review
-task" from Example 1:
+The request envelope uses `operation_id` to avoid collision with existing CLI
+uses of `command_id`:
 
 ```json
 {
   "schema_version": "loopx_command_v0",
-  "command_id": "cmd_claim_review_704_705",
-  "idempotency_key": "goal:review-704-705:laptop:v1",
-  "actor": {"agent_id": "laptop-review", "device_id": "laptop"},
-  "goal_id": "ark-agent-loop-shared",
-  "expected_revision": 1842,
+  "operation_id": "op_claim_review_01",
+  "actor": {"agent_id": "laptop-reviewer", "device_id": "laptop"},
+  "goal_id": "shared-rust-review",
+  "expected_authority_revision": 42,
   "command": {
     "type": "claim_work",
-    "todo_id": "todo_review_704_705",
-    "expected_todo_revision": 7,
+    "todo_id": "todo_review",
+    "expected_todo_revision": 8,
     "lease_ttl_seconds": 600
   }
 }
 ```
 
-Field by field:
+The authority normalizes the complete semantic request and computes
+`request_digest`. Actor, goal, expected revisions, command type, target, and
+command parameters are covered. Transport retry metadata is not.
 
-- `command_id`: the unique identity of this one request. Retry after a
-  crash with the same id, and the authority guarantees the entry is not
-  recorded twice.
-- `idempotency_key`: the business-level dedup key, expressing "this thing
-  happens once" across requests.
-- `expected_revision`: the goal-ledger version the requester saw (see
-  Section 3, decision 3).
-- `expected_todo_revision`: the target todo's own version, preventing you
-  from claiming a task whose content has already changed.
-- `lease_ttl_seconds`: the lease duration. Why leases exist: the claimant
-  may die mid-way; when the lease expires without renewal, the work
-  automatically returns to the claimable pool instead of being stuck
-  forever with a dead endpoint.
+For every request, the authority performs this sequence:
 
-**The receipt is the only proof of success.** A successful response must
-contain `result=applied`, the new `authority_revision`, and
-`lease_id / epoch / expires_at`. Here epoch is the lease's generation
-number: every time the work changes holder, the generation increments, and
-a former holder submitting with an old generation is recognized and
-rejected. The T3 ACK that was missing in Example 1 is, in this design,
-exactly this receipt.
+1. load the aggregate and provider generation;
+2. look up `operation_id` before applying current-state validation;
+3. if the id exists with the same digest, return `already_applied` and the
+   stored original receipt without writing;
+4. if the id exists with a different digest, return typed
+   `operation_identity_mismatch` and do not write;
+5. validate actor scope, authority revision, todo revision, eligibility,
+   claim state, and lease rules;
+6. compute the next coordination state and original receipt in the authority;
+7. add both the transition and receipt-index entry to one deterministic
+   envelope and submit one provider CAS;
+8. after a conflict or ambiguous provider response, reload and repeat the
+   receipt lookup before classifying the result.
 
-The receipt has five states:
+The API result classes are:
 
-| result | Meaning | The requester's correct reaction |
-|---|---|---|
-| `applied` | Entry landed | Start working; renew the lease on cadence |
-| `already_applied` | This entry was already recorded (idempotent replay) | Treat as success; retrieve the original receipt |
-| `conflict` | Version stale, or already claimed by someone else | Re-`load`, decide against the new version |
-| `rejected` | Permission, gate, or validation failure | Do not retry; human intervention |
-| `failed` | Transient infrastructure fault | Bounded backoff and retry |
+| Result | Meaning |
+| --- | --- |
+| `applied` | State and original receipt committed together. |
+| `already_applied` | The same operation and digest committed earlier; the stored original receipt is returned. |
+| `conflict` | No receipt exists for this operation and the expected authority state is stale or contested. |
+| `rejected` | Identity, eligibility, gate, or command validation failed without a state change. |
+| `failed` | No accepted result can be proved. Retry only under bounded infrastructure policy. |
 
-The first command set (bound to existing LoopX primitives, see Section 11):
+`conflict`, `rejected`, and `failed` are not success proofs and do not receive
+fabricated applied receipts.
 
-- `claim_work`: atomic claim + lease acquisition.
-- `complete_todo_with_successor`: atomically complete the current todo and
-  create the successor todo (for example, the same instant "implementation
-  done" lands, "awaiting review" comes into existence, bound to the exact
-  head SHA). This is precisely the mechanism that eliminates T2: the
-  successor task exists at the moment of completion, no human relay needed.
-- `assign_work` (mid-term): restricted delegated assignment, see Section 11.
+### 5.1 The first command: `claim_work`
 
-## 5. The state-provider contract that makes "pluggable" real
+- `claim_work`: in one transition, verify an existing runnable todo, set its
+  claimant, create a lease, mint the next lease epoch, and store the original
+  receipt. Its required fields are `todo_id`, `expected_todo_revision`, and
+  `lease_ttl_seconds`.
 
-The provider is the storage layer behind the authority, so the contract is
-deliberately minimal:
+An accepted claim advances both `authority_revision` and the target
+`todo_revision`. It operates only on a todo installed by explicit
+bootstrap/migration and never creates an unknown todo as a side effect. The
+deterministic reference eligibility input is the compact tuple
+`allowed_agent_ids`, `dependencies_satisfied`, and `gates_open`, bound to the
+named authorization, dependency, and gate revisions and digest.
 
+Unknown command types fail closed. `renew_lease`, `release_lease`, expired-lease
+reclaim, stale-fence writeback validation, `complete_todo_with_successor`,
+transfer or delegated assignment, arbitrary todo/gate mutation, quota
+reservation, and external effects require later runtime contracts and
+qualification. Renew/release/reclaim and stale-fence validation are required
+before production shared-mode operation; their omission here is scope control,
+not a claim that a claim-only runtime is complete. Completion plus successor
+creation may join a later slice only when source completion, successor
+creation/assignment, evidence pointer, and receipt commit atomically.
+
+## 6. Who Decides and Who Stores
+
+### 6.1 The authority is the bookkeeper
+
+The LoopX authority owns:
+
+- request normalization and digesting;
+- actor, todo, dependency, gate, and authorization validation;
+- `authority_revision` and todo revision transitions;
+- time, lease id, lease epoch, and expiry minting;
+- receipt contents and replay classification;
+- privacy filtering and command-specific invariants.
+
+### 6.2 The provider keeps the ledger durable
+
+The provider contract is intentionally semantic-free:
+
+```text
+load()
+  -> (aggregate | none, provider_generation)
+
+compare_and_put(
+  expected_provider_generation,
+  aggregate
+)
+  -> applied(new_provider_generation)
+   | conflict(current_provider_generation)
+   | ambiguous
+   | failed
 ```
-load() -> (envelope_bytes, revision)
-compare_and_put(expected_revision, command_id, envelope_bytes)
-    -> applied(new_revision) | conflict(current_revision) | already_applied
-```
 
-Why only two verbs: the fewer the verbs, the easier the backend swap, and
-only then is "pluggable" true. Local files, NoKV, or any other database can
-implement this contract in one or two hundred lines, while the authority's
-entire concurrency semantics rest on just four properties of these two
-verbs (this part is key):
+The provider must serialize the complete aggregate deterministically and
+provide atomic conditional replacement, durable success,
+same-key read-after-write reconciliation, and a typed ambiguous result when it
+cannot prove whether a write committed. It must not parse LoopX commands, mint
+clocks or leases, decide eligibility, or synthesize authority receipts. The
+domain `operation_id` and request-digest replay contract exist only in the
+authority and its atomically stored receipt index; they are not provider API
+arguments. A provider may generate a private publication-attempt identifier,
+but that identifier has no LoopX authority meaning.
 
-1. **CAS atomicity** (Compare-And-Set: compare first, then write): the
-   version comparison and the write are one indivisible action, guaranteed
-   by the storage layer's single-writer serialization.
-2. **Exactly one**: among concurrent requests carrying the same
-   `expected_revision`, at most one succeeds; the rest get an explicit
-   conflict carrying the current version for retry.
-3. **Idempotent retry**: replaying the same `command_id` returns the
-   original result and produces no second effect.
-4. **Receipt means durable**: once applied is returned, the entry must
-   survive even if the process is kill -9'ed the next instant.
+A provider instance or handle is bound to one `goal_id` and provider key before
+these methods are called; omitting `goal_id` from the verbs does not make the
+key global.
 
-**The NoKV provider mapping** (measured; see Appendix A). NoKV plays the
-role of a cloud filesystem here: the shadow copy of a goal's ledger is one
-file (the head document), and every file carries a server-maintained
-version number (generation). `revision` maps directly onto generation
-(validated and incremented inside the server's serialized commit); all of a
-goal's commands go through the same head-document path, landing on the same
-NoKV write partition (root/shard), where a single writer processes entries
-one by one at any moment, which naturally satisfies single-writer
-serialization.
+The receipt index cannot be a separately published document under this
+two-verb contract. Publishing receipt first can record success for a transition
+that never happened; publishing state first can lose the only proof after a
+crash. Splitting it later requires a provider-neutral multi-record transaction
+or commit-marker protocol and a new reviewed contract.
 
-Four adapter disciplines are written into the contract. Missing any one of
-them, the typed-conflict semantics distort or double-writes appear; the
-"zero anomalies" in Appendix A is exactly what an implementation carrying
-all four produced:
+### 6.3 The three version numbers are not the same thing
 
-1. **Never delete the head document**: delete-and-recreate resets the
-   version to 1, which is winding the ledger's page number backwards.
-2. **The envelope must be byte-deterministic** (no wall-clock fields minted
-   at generation time): idempotent replay identifies "this is the same
-   entry" by byte-for-byte comparison.
-3. **The operation id is derived from `command_id` by a fixed rule** (the
-   same command always yields the same id): on a crash-retry the server
-   recognizes at a glance that "this entry is already recorded" and returns
-   the original result. If an id gets burned by a failed attempt, rotate to
-   the next by a fixed rule, but the first rule-derived value must stay
-   reserved for crash-replay recognition.
-4. **Conflicts must be classified, never blanket-retried**: when the
-   storage layer reports "the same operation id was reused with different
-   contents", that error is itself proof the original command already
-   landed; it must be converted to already_applied and the original result
-   retrieved, and you must never resend under a new id (that double-writes).
-   Transient contention errors get bounded retries; when retries are
-   exhausted and the ledger version has not advanced, report `failed`
-   (infrastructure fault), not `conflict`.
+| Domain | Owner | Meaning | Consumer |
+| --- | --- | --- | --- |
+| `provider_generation` | Provider | Opaque token for conditional replacement of stored bytes | Authority/provider seam only |
+| `authority_revision` | LoopX authority | Per-goal logical coordination revision after an accepted command | Clients and command validation |
+| `lease_epoch` | LoopX authority | Per-todo fencing generation for ownership; advances on a new lease generation, not ordinary renewal | Executors and accepted writeback |
 
-## 6. Dual-write and reconciliation: the shadow lane is waved through
+A backend may often advance its generation once per accepted command, but
+numerical equality is never a contract. Migration, repair, or provider metadata
+may change provider generation without granting a new LoopX authority revision.
 
-In P0 the file provider is primary and NoKV is the shadow:
+For NoKV, its document generation implements `provider_generation` only. The
+LoopX authority remains responsible for the other two domains and for the
+receipt stored inside the document.
 
-1. **Registration**: at the moment the primary commit lands, the same
-   envelope is registered as a shadow write. Registration goes through a
-   local outbox (written to a local staging queue first, auto-redelivered
-   when the network recovers, cleared only after delivery succeeds), so a
-   brief shadow outage only builds backlog and never blocks the main path.
-2. **Reconciliation**: against the canonical projection (the normative view
-   derived from the primary ledger), periodically compare the primary and
-   shadow books; every mismatch is recorded and alarmed.
-3. **Promotion review**: only after sustained zero-mismatch, plus a real
-   handoff completed end to end, plus fault injection passed (process kill,
-   disk full, network jitter) do we discuss NoKV taking on more duties.
-   Promotion is an explicit decision, never automatic.
+## 7. Keep Every Receipt First; Compact Later
 
-Why this ordering: **coordination state is a ledger that must not be
-wrong.** Let the new backend accumulate evidence in a "follow the books,
-never keep the books" role; the cost is one shadow write per command
-(measured median 86ms, see Appendix A), and what it buys is zero risk to
-the main path.
+v0 uses `retain_all_v0`: no committed receipt-index entry may be garbage
+collected, expired, or omitted from a snapshot. This is intentionally a
+correctness-first proof boundary, not a production-scale retention claim.
 
-## 7. P0 deployment shape
+If a receipt-index entry is present but its original receipt is missing or
+invalid, the authority fails closed as a provider-protocol violation. It has no
+fallback to provider publication history and must not reconstruct a receipt
+from the current head.
 
-- **Topology**: the LoopX authority (merged with the access relay; the
-  relay is simply the door the endpoints connect to, and merged they are
-  one process) is deployed on one public-cloud server (ECS); laptop /
-  devbox / private cloud sandbox all **connect outbound** to the authority
-  (TLS + device token, or mTLS mutual-certificate authentication).
-  Endpoints open no inbound ports, so no public IPs, no NAT traversal, no
-  firewall configuration.
-- **Tenancy**: a single trusted user. No multi-tenancy, no K8s, no HA, no
-  standalone message bus.
-- **The NoKV stack**: co-located with the authority, bound to 127.0.0.1
-  only. Transport security toward the outside is carried entirely by the
-  authority; the storage layer is never exposed on the network.
-- **Credentials**: private Git credentials stay in each endpoint's local
-  secret store and never enter the authority.
+A bounded retention window, receipt segmentation, or external receipt ledger
+requires a later RFC that preserves atomic proof and defines behavior outside
+the window. Until then, compaction may rewrite bytes but must carry the complete
+receipt index forward.
 
-## 8. Availability budget and degradation rules
+## 8. Local Mode Stays the Default; Shared Mode Is an Explicit Migration
 
-Service-level budget (used for P0 acceptance; "P95 ≤ 10 s" means 95% of
-cases are no slower than 10 seconds):
+### Default local mode
 
-| Item | Budget |
-|---|---|
-| daemon heartbeat | one beat / 15 s; unseen for 45 s marks suspect; 90 s judges offline |
-| online wake (delay from new work appearing to the target endpoint discovering it) | P95 ≤ 10 s, hard cap 30 s |
-| read-only projection | P95 ≤ 5 s; beyond 30 s must be explicitly labeled stale |
-| lease | default TTL 10 minutes, renewed every 60 s |
+- Existing project registry, Markdown active state, run history, optional task
+  leases, status, quota, and host behavior remain unchanged.
+- Installing a provider does not enable shared authority.
+- The current event-store bridge still reports Markdown as source of truth and
+  does not allow automatic promotion.
 
-The degradation rule in one sentence: **offline you may keep working, but
-you may not touch the books.**
+### Shared-authority mode
 
-- When the authority is unreachable, local editing, compiling, and testing
-  of already-claimed work continue as normal, and results may be written to
-  the local outbox.
-- But not allowed: new claims, lease renewal, completion, reassignment,
-  gate/quota changes, or publishing any external side effect.
-- On reconnection, submit `lease_id + epoch + base revision + artifact
-  digest` (a digest is a content fingerprint: a short string that uniquely
-  identifies this artifact). If the lease is still valid, completion is
-  allowed; if it has expired or been reassigned, the result is downgraded
-  to a stale candidate: the system keeps it for human review but never
-  writes it into the ledger automatically, because it was produced under an
-  authorization that no longer holds.
+Shared mode is an explicit per-goal choice. A reviewed implementation must:
 
-This rule is the most important trade-off in the whole design: give up the
-convenience of "claiming while offline", and gain the certainty that "at no
-moment can two endpoints own the same piece of work."
+1. pin the source registry, active state, and privacy boundary;
+2. stop or fence local writers during migration;
+3. normalize only the scoped coordination fields into an initial aggregate;
+4. validate todo/claim/lease/gate parity and an empty receipt index;
+5. record the shared-mode declaration and authority endpoint/provider binding;
+6. route every P0 write through the online authority;
+7. render Markdown, local lease views, rollout rows, and status only as
+   projections for the migrated fields.
 
-## 9. Privacy
+Bootstrap is a fenced administrative migration before controlled shared writes,
+not a P0 agent command: it may create the initial aggregate with the selected
+existing todos and an empty receipt index. Its source digest and mode
+declaration must be durable so a restart can distinguish bootstrap from an
+uninitialized provider.
 
-**Shared across endpoints** (all of it compact coordination facts):
-goal / todo / agent / device identifiers, version numbers, task class,
-dependencies and gates, claims and leases, repo plus exact revision
-pointers, commands and idempotency receipts, quota and scheduler state,
-liveness signals, and **evidence pointers** carrying a digest and a privacy
-class.
+Before the first shared write, migration may roll back to the untouched local
+source. After a shared write, automatic fallback to local writers is forbidden:
+it would create two authorities. Recovery must restore the authority or perform
+a separately reviewed, fenced export and mode transition.
 
-**Never shared**: raw evidence bodies, credentials, local absolute paths,
-conversations and run records (transcripts). When evidence must be
-referenced, share the pointer and the summary; the body stays on the
-machine that produced it.
+Provider shadowing and read-only canaries may collect evidence, but neither
+changes the source of truth. Promotion is explicit and must follow the existing
+fail-closed migration discipline.
 
-## 10. Acceptance
+## 9. What Happens Offline and What Must Stay Local
 
-The P0 acceptance list (every item machine-checkable):
+When a shared-mode authority is unavailable:
 
-1. The real scenario of Example 1 runs end to end with zero human
-   forwarding.
-2. Two endpoints claim the same todo concurrently: exactly one `applied`,
-   the other an explicit `conflict`.
-3. After a crash at any step, retrying with the original `command_id`
-   leaves no duplicate effect in the ledger.
-4. While the authority is down, each endpoint degrades exactly as Section 8
-   describes; after recovery, no dirty writes.
-5. Every receipt and projection passes the privacy-boundary scan (zero
-   leakage of Section 9's "never shared" items).
-6. Shadow reconciliation runs continuously with zero mismatch (the
-   prerequisite evidence for NoKV's promotion gate).
+- cached projections may be read only when marked stale;
+- no new controlled write is accepted;
+- already authorized local computation may continue only under the existing
+  lease and effect boundaries;
+- there is no automatic local-file write fallback.
 
-## 11. Schedule
+This RFC sets no wake latency or heartbeat topology. Delivery may use pull,
+push, or an IM daemon under the Agent IM RFC, but a delivered message is never
+proof that a coordination command committed.
 
-**P0 (the scope of this RFC)**
+The shared aggregate and receipts may contain compact public-safe or explicitly
+scoped private metadata: stable ids, credential-free repository identity,
+exact code revision, digests, gate/dependency refs, claim and lease fields, and
+privacy-classified opaque pointers. They must not contain credentials, raw
+evidence, raw todo prose, transcripts, raw logs, or local absolute paths.
 
-LoopX side (mostly new; parentheses name the existing primitives to bind):
+## 10. How We Accept the First Stage
 
-- the `loopx_command_v0` envelope and five-state receipts (semantics follow
-  the existing controlled-command RFC)
-- `claim_work` (bind todo claiming + the `task_lease_v0` lease: its
-  idempotent acquire and version CAS are directly reusable; add the minting
-  rules for lease_id / epoch, and parameterize TTL down to the 10-minute
-  tier)
-- `complete_todo_with_successor` (bind the existing single-lock atomic
-  complete + successor primitive, adding the version check and the receipt)
-- the provider seam (`load` / `compare_and_put`) and the file provider
-- shadow registration and the reconciliation loop
-- device identity and outbound transport (device token / mTLS)
-- the per-goal `authority_revision` counter (new; mind the naming clash
-  with the existing `command_id` and the lease's `version` field)
+All checks are machine-verifiable:
 
-NoKV side:
+1. two actors claiming the same todo from one authority revision yield exactly
+   one `applied`; the loser receives `conflict` and no lease;
+2. immediate replay with the same operation id and digest returns the original
+   receipt without changing state;
+3. historical A/B/A replay survives authority/provider reconstruction from
+   durable provider state and returns A's original receipt field for field
+   after B advances the head;
+4. the same operation id with a different normalized digest is rejected and
+   changes neither state nor receipt index;
+5. fault injection around the provider CAS never exposes state without its
+   receipt or a receipt without its state;
+6. ambiguous provider responses reconcile by reloading the receipt index;
+   absence is never converted into success;
+7. claim rejects an unknown, stale-revision, ineligible, dependency-blocked,
+   or gate-blocked todo without creating state or a receipt;
+8. retained receipts survive reload fixtures with no receipt GC;
+9. provider generation, authority revision, and lease epoch are tested as
+   distinct domains;
+10. privacy scans find no credential, raw body, transcript, or absolute path;
+11. default local mode remains behaviorally unchanged, and shared mode never
+    falls back to an unfenced local writer.
 
-- the shadow-provider implementation (reference implementation, ~200 lines,
-  attached to this RFC)
-- typed conflict exceptions in the SDK (carrying the current version,
-  replacing string parsing)
-- fixes for the known transients (retry on the publish-finalization path;
-  auto-retry on the read path at the instant a document is concurrently
-  replaced)
+The companion provider probes are evidence for a candidate implementation, not
+permission to weaken these normative checks. Performance measurements and a
+particular deployment topology are deliberately non-normative.
 
-**Mid-term (not a P0 commitment)**
+## 11. Staged Delivery
 
-- `assign_work` delegated assignment, with five preconditions of which none
-  may be missing: the target endpoint is recently online and
-  capability-matched; the target explicitly allows delegated assignment;
-  the coordinator holds a goal-scoped, action-scoped grant; the assignment
-  carries a short TTL and an ACK deadline; on missed ACK it is
-  automatically revoked and republished.
-- NoKV promotion review: prerequisites are the full promotion gate of
-  Section 6, plus NoKV-side service recovery (successor takeover after a
-  process crash) landing.
+### P0: contract and deterministic proof
 
-## 12. Open questions (community input welcome)
+- this ownership matrix and explicit shared-mode boundary;
+- deterministic `loopx_command_v0` normalization and request digest;
+- the `claim_work` authority transition over explicitly bootstrapped todos;
+- one-head state-plus-receipt CAS;
+- deterministic and NoKV provider candidates behind the same seam;
+- A/B/A, identity-mismatch, crash-window, eligibility, privacy, and no-GC
+  checks within the stated evidence boundary.
 
-1. If NoKV misbehaves while live and an end-to-end handoff fails, what is
-   the fallback strategy, and where is the boundary of acceptable
-   situations?
-2. Anchoring of `authority_revision`: per-goal independent counters (this
-   proposal's preference), or a global counter? Which canonical projection
-   is the reconciliation baseline?
-3. Minting and increment rules for the lease `epoch` (how to prevent
-   rollback when a lease record is recreated).
-4. Wake transport details: does the authority push over each endpoint's
-   long-lived connection, or do endpoints pull on their heartbeat cadence?
-   (The budget allows both; implementation complexity differs.)
-5. Receipt retention window: for how long after the fact can an
-   `already_applied` replay still retrieve the original receipt?
-6. Naming: `command_id` collides with an existing CLI classification field;
-   rename to avoid confusion?
+### Later runtime qualification and reviewed slices
+
+- lease renewal, explicit release, expired-lease reclaim, and stale-fence
+  writeback rejection, all required before production shared mode;
+- atomic `complete_todo_with_successor` and accepted evidence pointers;
+- transfer and restricted delegated assignment;
+- delivery/wake integration through Agent IM;
+- independent run-history synchronization and artifact storage;
+- distributed quota reservation/accounting;
+- provider promotion, authentication, service recovery, HA, and multi-tenancy;
+- receipt retention or segmentation beyond `retain_all_v0`.
+
+## 12. What the Owner Still Needs to Decide
+
+1. Should the next runtime slice first close renew/release/reclaim and stale
+   fencing, or qualify that lifecycle together with atomic
+   complete-with-successor?
+2. Which compact project-registry authorization fields form the versioned
+   authority input, and who may publish a new authorization projection?
+3. What is the reviewed rollback/export procedure after the first shared-mode
+   write?
+4. Which provider and deployment qualify for the first bounded shared-mode
+   canary? Provider selection does not change the authority contract.
+5. Before production use, what retention and capacity policy replaces or
+   operationalizes `retain_all_v0` without losing historical proof?
 
 ---
 
-## Appendix A: measured evidence (NoKV shadow provider)
+## Appendix A: What This Evidence Proves
 
-The numbers below come from an end-to-end run on a real stack (etcd +
-S3-compatible store + nokv serve + Python SDK, zero source changes). The
-full probes and the reference implementation live in
-[`examples/nokv-shadow-provider/`](../../../examples/nokv-shadow-provider/);
-measurement details are in the
-[companion evidence document](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md):
-
-| Probe | Result |
-|---|---|
-| Concurrent claim (8 endpoints, same version × 20 rounds) | Exactly one applied: 20/20, zero anomalies |
-| Idempotent replay (same command_id) | Original result returned, ledger unchanged, lease_id stable |
-| kill -9 durability | Data intact: WAL (write-ahead log: land on disk first, then receipt) written synchronously, metadata directory complete; end-to-end re-verification by restart was not possible due to the service-recovery limit below |
-| Multiple goals in one root | Each goal's version evolves independently, no interference |
-| Latency | Conditional write median (p50) 86ms / p95 114ms; read median 25ms / p95 32ms |
-
-Against the Section 8 budget: the storage layer consumes under 3% of it.
-One known transient (a roughly 2%-probability, seconds-to-self-heal stall
-on the publish-finalization path; the fix is on NoKV's work list).
-
-NoKV's service recovery after a process crash is currently fail-closed
-(meaning: it would rather refuse to restart and take over than keep serving
-on unverified state), which is why it enters P0 only in the shadow role;
-before promotion this capability must land and pass fault-injection
-acceptance.
+The reference provider and probes live in
+[`examples/nokv-shadow-provider/`](../../../examples/nokv-shadow-provider/),
+with a companion
+[`evidence document`](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md).
+The deterministic candidate in this PR proves only the claim/receipt core:
+same-CAS state plus receipt, competing claims, A/B/A original-receipt replay,
+request-digest mismatch, crash-boundary recovery, and distinct version-domain
+examples. It does not implement or qualify lease renewal/release/reclaim,
+stale-fence writeback, a production authorization-projection publisher,
+receipt-preserving compaction, default-mode parity, shared-mode migration, or
+live NoKV restart/recovery. Passing
+`python3 examples/nokv-shadow-provider/probes.py contract` is therefore not a
+claim that the complete P0 acceptance gate above passes. Historical latency or
+fault results are informative only; they are not a durability, recovery, HA,
+or production qualification claim.
