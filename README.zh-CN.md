@@ -408,23 +408,14 @@ LoopX 还在早期，最需要真实长程 agent 项目里的反馈：控制面�
 - 可复现 bug、安装问题、功能建议：请提
   [GitHub Issue](https://github.com/huangruiteng/loopx/issues)。
 - 文档修正、showcase 补充、小型 public-safe 示例：欢迎开 PR。
-- 中文用户与贡献者可以加入飞书开发群；加入微信群请添加微信 `huangrt00`，
-  好友申请备注 `LoopX`。
+- 参与社区讨论：可在下方直接加入飞书群，或通过微信申请入群。
 
 <p align="center">
-  <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX 开发群二维码" width="320"></a><br>
-  <strong>飞书开发群</strong>
+  <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX 飞书开发群二维码" width="280"></a>
+  <a href="docs/assets/loopx-wechat-contact.png"><img src="docs/assets/loopx-wechat-contact.png" alt="LoopX 微信联系人二维码" width="220"></a>
 </p>
-
 <p align="center">
-  <a href="docs/assets/loopx-wechat-contact.png"><img src="docs/assets/loopx-wechat-contact.png" alt="LoopX 微信联系人二维码" width="280"></a><br>
-  <strong>微信：<code>huangrt00</code></strong><br>
-  添加好友，备注 LoopX 后邀请入群
-</p>
-
-<p align="center">
-  <img src="docs/assets/loopx-logo.png" alt="LoopX 标志" width="96"><br>
-  LoopX 项目标志
+  <sub><strong>飞书：</strong>扫码直接加入<br><strong>微信：<code>huangrt00</code></strong> · 好友申请备注 LoopX</sub>
 </p>
 
 ## 贡献

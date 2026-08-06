@@ -452,24 +452,14 @@ gates or handoffs disappeared from view.
 - Use [GitHub Issues](https://github.com/huangruiteng/loopx/issues) for
   reproducible bugs, install problems, and feature requests.
 - Open PRs for docs fixes, showcase writeups, and small public-safe examples.
-- Chinese-speaking users and contributors can join the Lark developer group.
-  To join the WeChat group, add `huangrt00` and include `LoopX` in the friend
-  request.
+- Join community discussion through Lark or WeChat below.
 
 <p align="center">
-  <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX Lark developer group QR code" width="320"></a><br>
-  <strong>Lark developer group</strong>
+  <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX Lark developer group QR code" width="280"></a>
+  <a href="docs/assets/loopx-wechat-contact.png"><img src="docs/assets/loopx-wechat-contact.png" alt="LoopX WeChat contact QR code" width="220"></a>
 </p>
-
 <p align="center">
-  <a href="docs/assets/loopx-wechat-contact.png"><img src="docs/assets/loopx-wechat-contact.png" alt="LoopX WeChat contact QR code" width="280"></a><br>
-  <strong>WeChat: <code>huangrt00</code></strong><br>
-  Mention LoopX for a group invitation
-</p>
-
-<p align="center">
-  <img src="docs/assets/loopx-logo.png" alt="LoopX logo" width="96"><br>
-  LoopX project mark
+  <sub><strong>Lark:</strong> scan to join directly<br><strong>WeChat: <code>huangrt00</code></strong> · mention LoopX in the friend request</sub>
 </p>
 
 ## Contributing
