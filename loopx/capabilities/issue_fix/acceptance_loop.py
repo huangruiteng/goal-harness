@@ -184,12 +184,12 @@ def _base_snapshot(workspace: Path, base_branch: str) -> dict[str, Any]:
     else:
         base_is_ancestor = _run_git_capture(
             workspace,
-            ["merge-base", "--is-ancestor", base_branch, tracking_ref],
+            ["merge-base", "--is-ancestor", base_revision, tracking_revision],
             expected_exit_codes=(0, 1),
         ).returncode == 0
         tracking_is_ancestor = _run_git_capture(
             workspace,
-            ["merge-base", "--is-ancestor", tracking_ref, base_branch],
+            ["merge-base", "--is-ancestor", tracking_revision, base_revision],
             expected_exit_codes=(0, 1),
         ).returncode == 0
         if base_is_ancestor:
@@ -683,9 +683,8 @@ def build_issue_fix_caller_repo_branch_packet(
         dirty_before = bool(_git_status_lines(workspace))
         branch_exists = _git_branch_exists(workspace, branch)
         base_exists = _git_branch_exists(workspace, base)
-        if not base_exists:
-            raise RuntimeError("base_branch does not exist in the approved local repo")
-        base_snapshot = _base_snapshot(workspace, base)
+        if base_exists:
+            base_snapshot = _base_snapshot(workspace, base)
         if current_branch == branch:
             branch_action = "claimed_current"
         else:
@@ -700,19 +699,26 @@ def build_issue_fix_caller_repo_branch_packet(
                 _require_passed(step)
                 branch_action = "claimed_existing"
             else:
+                if not base_exists:
+                    raise RuntimeError("base_branch does not exist in the approved local repo")
                 if base_snapshot["relation"] not in {"current", "no_tracking_ref"}:
                     raise RuntimeError(
                         "refusing to create an issue branch because base_branch does "
                         "not match its local tracking ref; refresh or reconcile the "
                         "approved base, then rerun"
                     )
-                if current_branch != base:
-                    step = _run_git_step(workspace, ["checkout", base], "git checkout approved base branch")
-                    git_steps.append(step)
-                    _require_passed(step)
-                step = _run_git_step(workspace, ["checkout", "-b", branch], "git create approved issue branch")
+                base_revision = str(base_snapshot["base_revision"])
+                step = _run_git_step(
+                    workspace,
+                    ["checkout", "-b", branch, base_revision],
+                    "git create approved issue branch from base snapshot",
+                )
                 git_steps.append(step)
                 _require_passed(step)
+                if _git_ref_oid(workspace, branch) != base_revision:
+                    raise RuntimeError(
+                        "created issue branch does not match the approved base snapshot"
+                    )
                 branch_action = "created"
         if not validation_command:
             raise ValueError("validation_command is required when --execute is used")

@@ -96,6 +96,17 @@ def _run_git(workspace: Path, args: list[str]) -> None:
     )
 
 
+def _git_output(workspace: Path, args: list[str]) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=workspace,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    ).stdout.strip()
+
+
 def _write_fixture_repo(workspace: Path, *, fixed: bool = False) -> None:
     operator = "+" if fixed else "-"
     (workspace / "calculator.py").write_text(
@@ -317,6 +328,59 @@ def main() -> int:
         )
         assert branch_probe.returncode == 1
         _assert_no_local_paths(stale_payload)
+
+    with tempfile.TemporaryDirectory(prefix="loopx-pinned-base-smoke-") as tmp:
+        fixture_root = Path(tmp)
+        remote_path = fixture_root / "remote.git"
+        repo_path = fixture_root / "repo"
+        remote_path.mkdir()
+        repo_path.mkdir()
+        _run_git(remote_path, ["init", "--bare"])
+        _init_fixture_git_repo(repo_path)
+        _run_git(repo_path, ["remote", "add", "origin", str(remote_path)])
+        _run_git(repo_path, ["push", "--set-upstream", "origin", "main"])
+        approved_revision = _git_output(repo_path, ["rev-parse", "main"])
+        _run_git(repo_path, ["checkout", "-b", "moving-base"])
+        (repo_path / "later-base.txt").write_text("later\n", encoding="utf-8")
+        _run_git(repo_path, ["add", "later-base.txt"])
+        _run_git(repo_path, ["commit", "-m", "Prepare a later base revision"])
+        later_revision = _git_output(repo_path, ["rev-parse", "HEAD"])
+        _run_git(repo_path, ["checkout", "-b", "caller-start", "main"])
+        hook = repo_path / ".git" / "hooks" / "post-checkout"
+        hook.write_text(
+            "#!/bin/sh\n"
+            f"git update-ref refs/heads/main {later_revision}\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+
+        pinned_payload = _run_caller_repo_json_command(
+            repo_path,
+            issue_branch="codex/issue-123-pinned-base",
+        )
+        pinned_branch = pinned_payload["caller_repo_branch"]
+        assert pinned_branch["base_snapshot"]["base_revision"] == approved_revision
+        assert _git_output(repo_path, ["rev-parse", "HEAD"]) == approved_revision
+        assert _git_output(repo_path, ["rev-parse", "main"]) == later_revision
+        _assert_no_local_paths(pinned_payload)
+
+    with tempfile.TemporaryDirectory(prefix="loopx-existing-branch-smoke-") as tmp:
+        repo_path = Path(tmp)
+        _init_fixture_git_repo(repo_path)
+        issue_branch = "codex/issue-123-existing-without-base"
+        _run_git(repo_path, ["checkout", "-b", issue_branch])
+        _run_git(repo_path, ["branch", "-D", "main"])
+
+        existing_payload = _run_caller_repo_json_command(
+            repo_path,
+            issue_branch=issue_branch,
+        )
+        existing_branch = existing_payload["caller_repo_branch"]
+        assert existing_branch["branch_action"] == "claimed_current"
+        assert existing_branch["base_snapshot"]["relation"] == "not_inspected"
+        assert existing_branch["base_snapshot"]["base_revision"] is None
+        assert existing_branch["validation"]["executed"] is True
+        _assert_no_local_paths(existing_payload)
 
     markdown = subprocess.run(
         [
