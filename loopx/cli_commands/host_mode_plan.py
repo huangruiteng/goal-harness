@@ -59,12 +59,12 @@ def register_host_mode_plan_command(
     parser.add_argument("--agent-id", help="Registered agent id to scope Turn and quota preview commands.")
     parser.add_argument(
         "--host-identity",
-        choices=[*SUPPORTED_TURN_HOST_IDENTITIES, "opencode"],
+        choices=[*SUPPORTED_TURN_HOST_IDENTITIES, "opencode", "pi"],
         help=(
             "Explicit visible host identity. Required to keep visible_tui mapped to the "
             "actual host instead of assuming Codex CLI. One of: "
-            + ", ".join([*SUPPORTED_TURN_HOST_IDENTITIES, "opencode"])
-            + " (`opencode` maps to the generic-cli Turn host with the opencode_goal_loop connector)."
+            + ", ".join([*SUPPORTED_TURN_HOST_IDENTITIES, "opencode", "pi"])
+            + " (`opencode` maps to the generic-cli Turn host with the opencode_goal_loop connector; `pi` maps to the generic-cli Turn host with the pi_goal_loop connector)."
         ),
     )
     parser.add_argument(

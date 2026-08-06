@@ -50,10 +50,11 @@ def register_slash_commands_command(
     parser.add_argument(
         "--surface",
         action="append",
-        choices=["all", "codex", "codex-cli", "codex-app", "codex-app-ssh", "codex-ide-plugin", "codex-ide", "claude-code", "opencode"],
+        choices=["all", "codex", "codex-cli", "codex-app", "codex-app-ssh", "codex-ide-plugin", "codex-ide", "claude-code", "opencode", "pi"],
         help=(
             "Host surface to install. Repeatable. Defaults to static command facades "
-            "for Codex, Claude Code, and OpenCode."
+            "for Codex, Claude Code, and OpenCode. `pi` installs the self-contained "
+            "Pi goal extension into the project's .pi/extensions/."
         ),
     )
     parser.add_argument(
@@ -75,6 +76,11 @@ def register_slash_commands_command(
     parser.add_argument(
         "--opencode-home",
         help="OpenCode config directory. Defaults to OPENCODE_CONFIG_DIR or ~/.config/opencode.",
+    )
+    parser.add_argument(
+        "--pi-project",
+        default=".",
+        help="Project directory for the Pi goal extension install. Defaults to the current directory.",
     )
     parser.add_argument(
         "--dry-run",
@@ -102,6 +108,7 @@ def handle_slash_commands_command(
             codex_home=args.codex_home,
             claude_home=args.claude_home,
             opencode_home=args.opencode_home,
+            pi_project=args.pi_project,
         )
         print_payload(payload, output_format(args), render_slash_command_install_markdown)
         return 0 if payload.get("ok") is True else 1

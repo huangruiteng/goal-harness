@@ -33,7 +33,7 @@ REQUIRED_HOST_SKILL_IDS = ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS
 CHANGE_QUALITY_SKILL_ID = "loopx-change-quality"
 
 
-def _surface_install_command(agent_type: str, cli_bin: str) -> str | None:
+def _surface_install_command(agent_type: str, cli_bin: str, project: str) -> str | None:
     if agent_type in {"codex-app", "codex-app-ssh", "codex-ide-plugin", "codex-cli"}:
         return f"{shell_arg(cli_bin)} slash-commands --install --surface codex"
     if agent_type == "claude-code":
@@ -42,6 +42,14 @@ def _surface_install_command(agent_type: str, cli_bin: str) -> str | None:
         return (
             f"{shell_arg(cli_bin)} slash-commands --install --surface opencode "
             "--with-goal-bridge"
+        )
+    if agent_type == "pi":
+        # The slash-commands installer resolves the Pi extension target through
+        # --pi-project; pass the resolved project so the command stays correct
+        # when agent-onboard runs from any cwd.
+        return (
+            f"{shell_arg(cli_bin)} slash-commands --install --surface pi "
+            f"--pi-project {shell_arg(project)}"
         )
     return None
 
@@ -58,6 +66,8 @@ def _project_skill_surface(agent_type: str) -> str | None:
         return "claude-code"
     if agent_type == "opencode":
         return "opencode"
+    if agent_type == "pi":
+        return "pi"
     return None
 
 
@@ -241,6 +251,7 @@ def _bootstrap_pack_command(
         "claude-code": "claude-code",
         "opencode": "opencode",
         "traex-cli": "traex-cli",
+        "pi": "pi",
         "ark-managed-agent": "ark-managed-agent",
         "manual": "shell",
         "other-agent": "other-agent",
@@ -279,6 +290,8 @@ def _start_instruction(agent_type: str) -> str:
         return "Run `/loopx <task>`; after todo writeback, call `loopx_goal_activate` with the generated heartbeat task body."
     if agent_type == "traex-cli":
         return "Use `$loopx <task>` or select the LoopX skill from `/skills`; after todos are written, set `/goal <task_body>` in the visible TraeX TUI (enable `[features] goals = true` first if goal mode is off)."
+    if agent_type == "pi":
+        return "Run `/loopx <task>`; after todo writeback, call `loopx_goal_activate` with the generated heartbeat task body."
     if agent_type == "ark-managed-agent":
         return (
             "Use `$loopx <task>` as the ordinary task entry; after its todo "
@@ -347,7 +360,7 @@ def build_agent_onboarding_packet(
     normalized_available_capabilities = list(
         host_loop_activation.get("available_capabilities") or []
     )
-    install_command = _surface_install_command(canonical_agent_type, cli_bin)
+    install_command = _surface_install_command(canonical_agent_type, cli_bin, resolved_project)
     bootstrap_pack_command = _bootstrap_pack_command(
         project=resolved_project,
         goal_id=resolved_goal_id,

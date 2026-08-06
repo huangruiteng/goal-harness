@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from .opencode_goal_mode import plugin_source, runtime_source
+from .pi_goal_mode import extension_source as pi_extension_source
+from .pi_goal_mode import runtime_source as pi_runtime_source
 from .slash_commands import build_slash_command_catalog
 
 SCHEMA_VERSION = "loopx_slash_command_install_v0"
@@ -115,14 +117,14 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "argument_hint": "[--capability-route issue-fix] [task text]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, `opencode` for OpenCode, `traex-cli` for the TraeX terminal TUI, or `ark-managed-agent` for Ark Managed Agent.",
+                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, `opencode` for OpenCode, `traex-cli` for the TraeX terminal TUI, `pi` for Pi, or `ark-managed-agent` for Ark Managed Agent.",
                 f"If arguments are present, parse only an optional leading `--capability-route issue-fix` as an explicit product-route switch, remove that prefix from the task text, and pass it to `{cli_bin} start-goal --guided --project . --goal-text \"<remaining exact arguments>\" --host-surface <exact-current-host>`. Without that switch, preserve all arguments as task text and do not add a capability route. Never infer a route from issue/PR wording or URLs. If the host is unclear, omit the host flag once and follow the returned host-surface selection gate.",
                 f"Treat the returned `ordered_steps` as a required transaction. On first connection, run its bootstrap command, resolve the fresh-agent identity gate before planning, then plan and execute at least one business `{cli_bin} todo add` derived from `$ARGUMENTS` before substantive task work. Encode priority in the todo text such as `[P0]`; `{cli_bin} todo add` has no `--priority` flag. Do not continue until LoopX status shows that business Agent Todo.",
                 "If `selected_capability_route` is present, run its entry and admission commands before substantive implementation. Keep capability facts in capability-owned state; generic Todos remain scheduling records.",
                 f"Before dependent work, persist material scope, acceptance, or non-goal changes in current Todo evidence and the next executable Todo; then run `{cli_bin} refresh-state` and verify quota readback. Chat/model summaries are not durable state.",
                 f"If that packet exposes a goal-selection gate, rerun one exact choice before any mutation. For an argument-bearing task with no active agent interaction contract, treat this invocation as a new agent connection by default: choose a new public-safe agent id and preview `{cli_bin} register-agent --goal-id <selected-goal-id> --agent-id <new-agent-id> --require-new`. Treat preview as advisory; apply with `--execute` and continue only when that result reports `ok=true`, `changed=true`, `written=true`, successful global sync, and verified registration readback. Then rerun start-goal with explicit `--goal-id` and `--agent-id` before todo writeback. Only reuse an existing registered identity when the user explicitly asks to take over that exact agent's work; never infer takeover from a single registered agent or registry order.",
                 f"If arguments are empty and the host task already identifies an active LoopX goal, run its exact CLI `interaction_contract` or quota command first; do not call `start-goal` or bootstrap another goal. Only when no active goal contract is present, inspect `{cli_bin} bootstrap-command-pack --project .`, `{cli_bin} status`, and `{cli_bin} slash-commands` before changing files.",
-                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli`, `claude-code`, `opencode`, `traex-cli`, or `ark-managed-agent`, never ambiguous `codex`.",
+                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli`, `claude-code`, `opencode`, `traex-cli`, `pi`, or `ark-managed-agent`, never ambiguous `codex`.",
                 f"Do not configure optional features during first-run. Only when the task needs bounded child agents or Explore, inspect `{cli_bin} configure-goal --goal-id <resolved-goal-id>` and its `configuration_catalog`; preview before explicit apply and never auto-enable a feature merely because it exists.",
                 "When project work is started, plan ordered P0/P1/P2 todos, write them through LoopX todo state, refresh state, activate the host loop if missing/stale, run quota, and complete one bounded delivery segment through validation plus LoopX writeback or an exact blocker; do not return merely after setup, planning, or claim.",
                 "Host loop activation means Codex App heartbeat automation; Codex App over SSH, the Codex IDE plugin, or CLI visible `/goal <task_body>`; Claude Code native `/loop`; OpenCode `loopx_goal_activate`; TraeX visible `/goal <task_body>`; Ark Managed Agent one-shot Goal submission; or a custom host-loop gate from `loopx agent-onboard`.",
@@ -513,6 +515,14 @@ def _normalize_surfaces(surfaces: list[str] | None) -> list[str]:
     return normalized
 
 
+def _pi_extension_path(project_root: Path) -> Path:
+    return project_root / ".pi" / "extensions" / "loopx-goal.ts"
+
+
+def _pi_runtime_path(project_root: Path) -> Path:
+    return project_root / ".pi" / "extensions" / "pi-goal-loop-runtime.mjs"
+
+
 def install_slash_commands(
     *,
     execute: bool,
@@ -524,12 +534,14 @@ def install_slash_commands(
     codex_home: str | None = None,
     claude_home: str | None = None,
     opencode_home: str | None = None,
+    pi_project: str | None = None,
 ) -> dict[str, Any]:
     specs = _command_prompt_specs(cli_bin=cli_bin, include_legacy_aliases=include_legacy_aliases)
     effective_surfaces = _normalize_surfaces(surfaces)
     codex_root = _codex_home(codex_home)
     claude_root = _claude_home(claude_home)
     opencode_root = _opencode_home(opencode_home)
+    pi_project_root = Path(pi_project or ".").expanduser().resolve()
     installed: list[dict[str, Any]] = []
 
     if with_goal_bridge and "opencode" not in effective_surfaces:
@@ -905,6 +917,76 @@ def install_slash_commands(
                     }
                 )
 
+    if "pi" in effective_surfaces:
+        extension_path = _pi_extension_path(pi_project_root)
+        runtime_path = _pi_runtime_path(pi_project_root)
+        extension_content = pi_extension_source()
+        runtime_content = pi_runtime_source()
+        if uninstall:
+            for mechanism, path in (
+                ("pi_goal_extension", extension_path),
+                ("pi_goal_extension_runtime", runtime_path),
+            ):
+                installed.append(
+                    {
+                        "surface": "pi",
+                        "host_surfaces": ["pi"],
+                        "mechanism": mechanism,
+                        "command": "/loopx",
+                        "path": str(path),
+                        "status": _retire_status(path, execute=execute),
+                        "invoke_as": ["/loopx", "loopx_goal_activate"],
+                    }
+                )
+        else:
+            # The adapter and its loop runtime are one atomic delivery unit:
+            # preflight both targets and fail closed with zero writes when any
+            # target is a user-owned file, so a newly created managed adapter
+            # can never import an unmanaged runtime that may lack the exports
+            # it needs.
+            user_owned_pi_paths = [
+                str(path)
+                for path, content in (
+                    (extension_path, extension_content),
+                    (runtime_path, runtime_content),
+                )
+                if _target_status(path, content, execute=False) == "skipped_user_file"
+            ]
+            if user_owned_pi_paths:
+                installed.append(
+                    {
+                        "surface": "pi",
+                        "host_surfaces": ["pi"],
+                        "mechanism": "pi_goal_extension",
+                        "command": "/loopx",
+                        "path": str(extension_path),
+                        "status": "blocked_user_owned_pi_file",
+                        "invoke_as": ["/loopx", "loopx_goal_activate"],
+                        "reason": (
+                            "Move or rename the listed user-owned Pi files before "
+                            "installing LoopX so the adapter and its loop runtime "
+                            "are installed as one atomic unit; no Pi file was written."
+                        ),
+                        "conflicts": user_owned_pi_paths,
+                    }
+                )
+            else:
+                for mechanism, path, content in (
+                    ("pi_goal_extension", extension_path, extension_content),
+                    ("pi_goal_extension_runtime", runtime_path, runtime_content),
+                ):
+                    installed.append(
+                        {
+                            "surface": "pi",
+                            "host_surfaces": ["pi"],
+                            "mechanism": mechanism,
+                            "command": "/loopx",
+                            "path": str(path),
+                            "status": _target_status(path, content, execute=execute),
+                            "invoke_as": ["/loopx", "loopx_goal_activate"],
+                        }
+                    )
+
     status_counts: dict[str, int] = {}
     for item in installed:
         status = str(item["status"])
@@ -929,6 +1011,8 @@ def install_slash_commands(
             "opencode_command_dir": str(opencode_root / "commands") if "opencode" in effective_surfaces else None,
             "opencode_plugin_path": str(opencode_root / "plugins" / "loopx-goal.js") if "opencode" in effective_surfaces and with_goal_bridge else None,
             "opencode_package_path": str(opencode_root / "package.json") if "opencode" in effective_surfaces and with_goal_bridge else None,
+            "pi_extension_path": str(_pi_extension_path(pi_project_root)) if "pi" in effective_surfaces else None,
+            "pi_runtime_path": str(_pi_runtime_path(pi_project_root)) if "pi" in effective_surfaces else None,
             "status_counts": status_counts,
             "skip_policy": (
                 "Uninstall removes only LoopX-managed files; user files without a LoopX managed marker are preserved"
@@ -942,6 +1026,7 @@ def install_slash_commands(
             "Explicit LoopX command-facade skills use agents/openai.yaml policy allow_implicit_invocation=false and remain distinct from richer workflow skills such as loopx-project.",
             "Claude Code discovers user skills from CLAUDE_HOME/skills and exposes each skill name as a slash command.",
             "The default all surface installs only OpenCode's static command facade; the executable goal bridge requires --with-goal-bridge.",
+            "The Pi surface is opt-in and installs the self-contained goal extension and its loop runtime into the project's .pi/extensions/; it is not part of the default all surface.",
             "The OpenCode goal bridge uses Bun-managed config-directory dependencies and must replace any direct goal-plugin registration.",
             "OpenCode bridge uninstall preserves package.json dependencies because they may be shared by user-owned local plugins.",
             "Uninstall is fail-closed: it retires only files carrying the LoopX managed marker and leaves user-owned files in place.",
@@ -974,6 +1059,12 @@ def render_slash_command_install_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- opencode commands: `{opencode_command_dir}`")
     if opencode_plugin_path:
         lines.append(f"- opencode bridge: `{opencode_plugin_path}`")
+    pi_extension_path = payload.get("summary", {}).get("pi_extension_path")
+    if pi_extension_path:
+        lines.append(f"- pi extension: `{pi_extension_path}`")
+    pi_runtime_path = payload.get("summary", {}).get("pi_runtime_path")
+    if pi_runtime_path:
+        lines.append(f"- pi loop runtime: `{pi_runtime_path}`")
     counts = payload.get("summary", {}).get("status_counts") or {}
     if isinstance(counts, dict) and counts:
         count_text = ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))

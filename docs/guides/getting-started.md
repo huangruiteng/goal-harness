@@ -85,6 +85,13 @@ can discover user-installed skills:
   `--with-goal-bridge` install. The wrapped goal runtime keeps private restart
   state under each project's `.opencode/goals/`; add that directory to project
   ignore rules before using the persistent bridge.
+- Pi: the self-contained goal extension under `.pi/extensions/loopx-goal.ts`
+  (with its loop core in `.pi/extensions/pi-goal-loop-runtime.mjs`) exposes
+  `/loopx` after restart and runs the quota-gated goal loop through
+  `loopx_goal_activate`. It is installed explicitly with
+  `loopx slash-commands --install --surface pi` (pass `--pi-project <path>`
+  to target another project from a different directory); private binding state
+  stays under each project's `.loopx/pi/` (already gitignored via `.loopx/`).
 
 The command family is the same across surfaces, even when the host-specific
 entry point is different:

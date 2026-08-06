@@ -176,6 +176,7 @@ def test_codex_ide_plugin_is_an_exact_host_type_with_visible_goal_activation() -
         ("claude-code", "claude_code"),
         ("opencode", "generic_cli"),
         ("traex-cli", "generic_cli"),
+        ("pi", "generic_cli"),
     ),
 )
 def test_first_class_hosts_bind_one_runtime_profile(
@@ -205,6 +206,55 @@ def test_native_goal_host_family_is_profile_driven(
         runtime_profile=runtime_profile,
         scheduler_execution_context=None,
     ) is expected
+
+
+def test_pi_is_an_exact_host_type_with_visible_goal_extension_activation() -> None:
+    assert normalize_agent_type("pi") == "pi"
+    assert normalize_agent_type("Pi") == "pi"
+    assert normalize_agent_type("pi-agent") == "pi"
+    assert normalize_agent_type("pi_agent") == "pi"
+    assert normalize_agent_type("earendil-pi") == "pi"
+    assert agent_type_for_host_surface("pi") == "pi"
+    assert agent_type_for_host_surface("pi-tui") == "pi"
+    assert scheduler_command_binding_for_agent_type("pi") == {
+        "runtime_profile": "generic_cli"
+    }
+
+    packet = build_host_loop_activation_packet(
+        agent_type="pi",
+        goal_id="fixture-goal",
+        agent_id="pi-fixture",
+        registered_agents=["pi-fixture"],
+    )
+
+    assert packet["host_surface"] == "pi_visible_goal_mode"
+    assert packet["activation_method"] == "activate_loopx_pi_goal_extension"
+    assert packet["setup_command"] == "loopx slash-commands --install --surface pi"
+    assert packet["host_mutation"]["owner"] == "Pi LoopX goal extension"
+    assert packet["host_mutation"]["host_tool"] == "loopx_goal_activate"
+    assert packet["host_mutation"]["tool_argument_mapping"]["goalId"] == (
+        "heartbeat_prompt.goal_id"
+    )
+    assert packet["host_mutation"]["tool_argument_mapping"]["objective"] == (
+        "heartbeat_prompt.task_body"
+    )
+    assert "automation_update" not in str(packet)
+    assert (
+        "--runtime-profile generic_cli"
+        in packet["commands"]["heartbeat_prompt"]
+    )
+    assert (
+        packet["success_criteria"][0]
+        == "The visible Pi session has a LoopX-backed goal bound through loopx_goal_activate."
+    )
+
+
+def test_pi_is_not_a_native_goal_host() -> None:
+    # Pi's visible loop is extension-driven and gated by LoopX quota, so it is
+    # not part of the native goal host family (like opencode, unlike codex-cli).
+    assert scheduler_command_binding_for_agent_type("pi") == {
+        "runtime_profile": "generic_cli"
+    }
 
 
 @pytest.mark.parametrize(

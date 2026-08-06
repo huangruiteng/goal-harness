@@ -19,6 +19,7 @@ PROJECT_SKILL_SURFACE_ROOTS = {
     "codex": Path(".agents") / "skills",
     "claude-code": Path(".claude") / "skills",
     "opencode": Path(".opencode") / "skills",
+    "pi": Path(".pi") / "skills",
 }
 PROJECT_SKILL_SURFACES = tuple(PROJECT_SKILL_SURFACE_ROOTS)
 SKILL_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")

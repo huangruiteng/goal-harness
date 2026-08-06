@@ -47,6 +47,9 @@ When the user provides text after `/loopx`, the host should:
      unless a verified LoopX adapter is installed. LoopX ships no Codex App
      automation and no slash-command installer for TraeX; it loads skills
      from `~/.trae/skills`.
+   - `pi`: call `loopx_goal_activate` from the installed LoopX Pi extension;
+     the extension gates settled continuations and timer wakes through
+     `quota should-run` and stops only on validated terminal no-follow-up.
    - `manual` / `other-agent`: wire the external loop driver described by
      `loopx agent-onboard`.
 7. If the host cannot mutate that surface, report the exact pasteable gate

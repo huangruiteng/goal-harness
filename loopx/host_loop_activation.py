@@ -39,6 +39,7 @@ def scheduler_command_binding_for_agent_type(
         "claude-code": SchedulerRuntimeProfile.CLAUDE_CODE_VISIBLE,
         "opencode": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
         "traex-cli": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
+        "pi": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
     }.get(canonical)
     if runtime_profile is not None:
         return {"runtime_profile": runtime_profile.value}
@@ -58,6 +59,7 @@ SUPPORTED_AGENT_TYPES = [
     "claude-code",
     "opencode",
     "traex-cli",
+    "pi",
     "manual",
     "other-agent",
 ]
@@ -156,6 +158,19 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
             "trae cli",
         ],
     },
+    "pi": {
+        "display_name": "Pi",
+        "host_loop": "visible Pi goal extension gated by LoopX",
+        "entry": "/loopx <task> with the LoopX Pi extension installed",
+        "accepted_inputs": [
+            "pi",
+            "pi-agent",
+            "pi_agent",
+            "pi agent",
+            "earendil-pi",
+            "earendil pi",
+        ],
+    },
     "manual": {
         "display_name": "Manual shell / external scheduler",
         "host_loop": "external scheduler or manual quota/status loop",
@@ -222,6 +237,8 @@ HOST_SURFACE_TO_AGENT_TYPE = {
     "traex-cli": "traex-cli",
     "traex-cli-tui": "traex-cli",
     "traex": "traex-cli",
+    "pi": "pi",
+    "pi-tui": "pi",
     "shell": "manual",
     "http": "other-agent",
     "worker-bridge": "other-agent",
@@ -348,6 +365,7 @@ def _heartbeat_commands(
         "claude-code": "Claude Code native /loop gated by LoopX",
         "opencode": "OpenCode visible goal loop gated by LoopX",
         "traex-cli": "TraeX CLI /goal visible TUI loop gated by LoopX",
+        "pi": "Pi visible goal loop gated by LoopX",
         "manual": "External scheduler or manual shell LoopX poll",
         "other-agent": "Custom agent host loop gated by LoopX",
     }
@@ -629,6 +647,43 @@ def _claude_code_activation(commands: dict[str, str], cli_bin: str) -> dict[str,
     }
 
 
+def _pi_activation(commands: dict[str, str], cli_bin: str) -> dict[str, Any]:
+    return {
+        "host_surface": "pi_visible_goal_mode",
+        "entry_command_hint": "/loopx <task>",
+        "activation_method": "activate_loopx_pi_goal_extension",
+        "activation_input_command": commands["heartbeat_prompt_json"],
+        "setup_command": f"{cli_bin} slash-commands --install --surface pi",
+        "host_mutation": {
+            "owner": "Pi LoopX goal extension",
+            "host_tool": "loopx_goal_activate",
+            "tool_argument_mapping": {
+                "goalId": "heartbeat_prompt.goal_id",
+                "objective": "heartbeat_prompt.task_body",
+                "agentId": "heartbeat_prompt.agent_id when present",
+                "registryPath": "explicit registry path when present",
+                "availableCapabilities": "declared host capabilities when present",
+            },
+            "cli_can_mutate_directly": False,
+            "missing_host_tool_gate": (
+                "The LoopX Pi extension or loopx_goal_activate tool is unavailable; "
+                "install the Pi surface and restart Pi before claiming autonomous "
+                "heartbeat support."
+            ),
+        },
+        "activation_steps": [
+            "Install or refresh the LoopX Pi surface when needed.",
+            "Run the heartbeat-prompt JSON command after project state and todos are written.",
+            "Call loopx_goal_activate with goalId from goal_id, objective from task_body, and optional agentId, registryPath, or availableCapabilities when those values are present.",
+            "Let the extension gate every settled continuation and timer wake through LoopX quota should-run.",
+        ],
+        "success_criteria": [
+            "The visible Pi session has a LoopX-backed goal bound through loopx_goal_activate.",
+            "Quiet waits make no model call, active work auto-continues, and validated terminal no-follow-up stops the goal.",
+        ],
+    }
+
+
 def _opencode_activation(commands: dict[str, str], cli_bin: str) -> dict[str, Any]:
     return {
         "host_surface": "opencode_visible_goal_mode",
@@ -777,6 +832,8 @@ def build_host_loop_activation_packet(
         surface = _opencode_activation(commands, cli_bin)
     elif canonical == "traex-cli":
         surface = _traex_activation(commands)
+    elif canonical == "pi":
+        surface = _pi_activation(commands, cli_bin)
     else:
         surface = _manual_activation(commands)
         if canonical == "other-agent":
