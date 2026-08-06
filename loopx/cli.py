@@ -68,6 +68,7 @@ from .cli_commands import (
     handle_evidence_log_command,
     handle_extension_command,
     handle_explore_command,
+    handle_gates_all_command,
     handle_history_command,
     handle_lark_inbox_command,
     handle_lark_kanban_command,
@@ -102,6 +103,7 @@ from .cli_commands import (
     register_evidence_log_command,
     register_extension_commands,
     register_explore_commands,
+    register_gates_all_command,
     register_history_command,
     register_lark_inbox_commands,
     build_lark_issue_fix_reviewer_provider_hooks,
@@ -271,6 +273,7 @@ def build_parser() -> LoopXArgumentParser:
 
     register_status_commands(sub, add_subcommand_format)
     register_summary_all_command(sub, add_subcommand_format)
+    register_gates_all_command(sub, add_subcommand_format)
     register_pr_review_command(sub, add_subcommand_format)
     register_slash_commands_command(sub, add_subcommand_format)
     register_dreaming_commands(sub, add_subcommand_format)
@@ -684,6 +687,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if summary_all_result is not None:
         return summary_all_result
+
+    gates_all_result = handle_gates_all_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if gates_all_result is not None:
+        return gates_all_result
 
     pr_review_result = handle_pr_review_command(
         args,
