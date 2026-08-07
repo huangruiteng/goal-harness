@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import html as html_module
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,9 @@ PRIVATE_MARKERS = tuple(
     )
 )
 PRIMARY_SHOWCASE_IDS = [
+    "2026-07-cpp-accuracy-long-run",
+    "2026-07-four-day-unattended-agent",
+    "2026-07-public-engine-refactor",
     "2026-06-27-overnight-pr-batch",
     "2026-06-24-pr-issue-auto-fix",
     "2026-06-23-agent-to-agent-pr-comments",
@@ -54,6 +58,7 @@ def main() -> int:
         )
         assert str(output) in result.stdout, result.stdout
         html = output.read_text(encoding="utf-8")
+        unescaped_html = html_module.unescape(html)
 
     for marker in PRIVATE_MARKERS:
         assert marker not in html, marker
@@ -99,8 +104,8 @@ def main() -> int:
         assert f'data-status="{case["status"]}"' in html, case_id
         assert f'data-domain="{case["domain"]}"' in html, case_id
         for field in ("title", "headline", "user_value", "evidence_boundary"):
-            assert str(case[field]) in html, (case_id, field)
-            assert str(case[field]).lower() in html.lower(), (case_id, field, "search")
+            assert str(case[field]) in unescaped_html, (case_id, field)
+            assert str(case[field]).lower() in unescaped_html.lower(), (case_id, field, "search")
         assert str(case["case_page"]).replace("docs/showcases/", "") in html or str(case["case_page"]) in html
         storyboard_path = case.get("storyboard_path")
         if isinstance(storyboard_path, str) and storyboard_path:

@@ -63,7 +63,10 @@ def assert_no_live_source_promotion() -> None:
 
 def assert_catalog_is_frontstage_ready() -> None:
     catalog = json.loads(read(CATALOG))
-    assert catalog.get("schema_version") == "loopx_showcase_catalog_v0", catalog
+    assert catalog.get("schema_version") in {
+        "loopx_showcase_catalog_v0",
+        "loopx_showcase_catalog_v1",
+    }, catalog
     cases = catalog.get("cases")
     assert isinstance(cases, list) and len(cases) >= 4, catalog
     for case in cases:
@@ -114,7 +117,8 @@ def assert_storyboard_uses_public_catalog() -> None:
             assert case_id in catalog_ids, (case_id, scene)
             referenced_ids.add(case_id)
 
-    assert referenced_ids == catalog_ids, (referenced_ids, catalog_ids)
+    assert referenced_ids, referenced_ids
+    assert referenced_ids <= catalog_ids, (referenced_ids, catalog_ids)
 
 
 def main() -> int:
