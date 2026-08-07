@@ -143,14 +143,30 @@ This redacted screenshot demonstrates the control-plane shape of one owner-run
 workflow. It does not establish a production research result, company or
 employer endorsement, or an independently reproducible evaluation.
 
+### Used In Real Projects
+
+- **Independent user · `>13h` C++ accuracy run.** The user reported that a
+  multi-stage task stayed aligned, triggered public research, adopted a
+  [public code-memory tool](https://github.com/DeusData/codebase-memory-mcp),
+  and improved final precision. [Read the evidence boundary](docs/showcases/cases/independent-cpp-accuracy-long-run.md).
+- **Independent user · `4d` unattended run.** The user reported four days
+  without human intervention, useful ongoing work, and a periodic report
+  surface. [Read the redacted case](docs/showcases/cases/independent-four-day-unattended-agent.md).
+- **Independent user · `7` merged PRs.** A LoopX-attributed Engine refactor is
+  visible in a [public issue](https://github.com/zilliztech/mfs/issues/166) and
+  seven merged PRs; attribution and the reported `1B+` token scale remain user
+  reports. [Inspect the case](docs/showcases/cases/independent-public-engine-refactor.md).
+
+These are the three strongest current cases, not the full inventory. Browse the
+[complete Showcase catalog](docs/showcases/README.md) for contributor cases,
+creator dogfooding, reproducible demos, and explicit evidence-strength labels.
+
 More inspectable surfaces:
 
 - the [public homepage](https://huangruiteng.github.io/loopx/) for the product
   narrative, quick start, and long-running evidence;
-- the [showcase catalog](docs/showcases/README.md), including
-  [blocked-P0 safe rotation](docs/showcases/cases/0617-blocked-p0-safe-rotation.md),
-  [LoopX self-iteration](docs/showcases/cases/0619-loopx-self-iteration.md), and
-  [dynamic workflow orchestration](docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html);
+- the [complete Showcase catalog](docs/showcases/README.md) and its
+  [bilingual hosted index](docs/showcases/index.html);
 - the [cross-runtime implementation review demo](docs/product/use-cases/cross-runtime/cross-runtime-impl-review-demo.md);
 - the public [user manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg).
 

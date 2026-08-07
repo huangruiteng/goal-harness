@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>Overnight PR batch with reviewable control</h1>
     <div class="accent">An overnight LoopX run can produce many PR-sized slices while keeping review, validation, and public evidence boundaries visible.</div>
     <p>The operator can wake up to a compact batch of merged public slices, see what changed, and still trust that gates, validation, and evidence boundaries were not bypassed.</p>
-    <div class="chips"><span>PR batch</span><span>review packet</span><span>public boundary</span></div>
+    <div class="chips"><span>Creator dogfooding</span><span>Public Git evidence</span><span>PR batch</span><span>review packet</span><span>public boundary</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>22</strong><span>reviewable merged commits</span></div><div class="metric"><strong>10</strong><span>PR-numbered commits</span></div><div class="metric"><strong>10h</strong><span>public evidence window</span></div><div class="metric"><strong>0</strong><span>raw-agent-log dependency</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">Public window</div><p>2026-06-27 01:29 to 11:29 +08:00, a 10-hour Git evidence window.</p></div><div class="evidence-card"><div class="evidence-label">Change shape</div><p>22 merged commits across docs, runtime, status/quota, benchmark contracts, smokes, and release/runtime guardrails.</p></div><div class="evidence-card"><div class="evidence-label">Review boundary</div><p>Work landed as PR-sized slices instead of one broad diff that maintainers would have to trust blindly.</p></div><div class="evidence-card"><div class="evidence-label">Reproduction</div><p>The case document gives `git log --since ... --until ...` and `git log --numstat` commands.</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX behavior</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">LoopX ties each lane to todo ownership, validation, review policy, and public evidence.</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">Runtime, docs, and focused smokes move together when a control-plane contract changes.</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">Self-merge remains limited to narrow validated changes; larger or unclear work preserves review gates.</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">Public-boundary scans keep internal screenshots, local state, raw logs, and private planning out of the showcase.</div></div></li></ul>

@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>一晚 30 个高价值 PR</h1>
     <div class="accent">高吞吐、多车道推进仍保持 PR 级可 review、可合并。</div>
     <p>The operator can wake up to a compact batch of merged public slices, see what changed, and still trust that gates, validation, and evidence boundaries were not bypassed.</p>
-    <div class="chips"><span>PR batch</span><span>review packet</span><span>public boundary</span></div>
+    <div class="chips"><span>Creator dogfooding</span><span>公开 Git 证据</span><span>PR batch</span><span>review packet</span><span>public boundary</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>22</strong><span>可审阅 merged commits</span></div><div class="metric"><strong>10</strong><span>带 PR 编号的 commits</span></div><div class="metric"><strong>10h</strong><span>公开证据窗口</span></div><div class="metric"><strong>0</strong><span>raw agent logs 依赖</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">公开窗口</div><p>2026-06-27 01:29 到 11:29 +08:00，10 小时 Git 证据窗口。</p></div><div class="evidence-card"><div class="evidence-label">变更粒度</div><p>22 个 merged commits 覆盖 docs、runtime、status/quota、benchmark contracts、smokes 和 release/runtime guardrails。</p></div><div class="evidence-card"><div class="evidence-label">审阅边界</div><p>工作以 PR-sized slices 落地，而不是一个需要 maintainer 盲信的巨大 diff。</p></div><div class="evidence-card"><div class="evidence-label">复现方式</div><p>case 文档给出 `git log --since ... --until ...` 和 `git log --numstat` 命令。</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX 行为</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">LoopX 把每条 lane 绑定到 todo ownership、validation、review policy 和 public evidence。</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">当 control-plane contract 改变时，runtime、docs 和 focused smoke 一起移动。</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">self-merge 只用于窄而验证过的变更；更大或不清楚的工作仍保留 review gate。</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">公开边界扫描把内部截图、本地状态、原始日志和私有计划排除在 showcase 之外。</div></div></li></ul>

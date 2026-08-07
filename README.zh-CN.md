@@ -126,13 +126,28 @@ owner-run showcase，不代表连续算力执行、独立复现、生产结果�
 这张脱敏截图只用于说明一次 owner-run 工作流的控制面形态，不构成生产研究结果、
 公司或雇主背书，也不是可供第三方独立复现的评测证据。
 
+### 真实项目中的使用
+
+- **外部独立用户 · `>13h` C++ 精度修复。** 用户报告多阶段任务持续对齐目标，
+  触发 public research 后采用[公开代码记忆工具](https://github.com/DeusData/codebase-memory-mcp)，
+  最终精度明显提升。[查看证据边界](docs/showcases/cases/independent-cpp-accuracy-long-run.md)。
+- **外部独立用户 · `4d` 无人干预运行。** 用户报告 Agent 连续四天无需人工
+  干预，持续处理有价值的工作，并提供周期报告入口。
+  [查看脱敏案例](docs/showcases/cases/independent-four-day-unattended-agent.md)。
+- **外部独立用户 · `7` 个合并 PR。** 一次归因于 LoopX 的 Engine 重构可由
+  [公开 Issue](https://github.com/zilliztech/mfs/issues/166)和七个合并 PR 检查；
+  LoopX 归因与用户报告的 `10 亿+` token 规模仍按用户自述标记。
+  [检查完整案例](docs/showcases/cases/independent-public-engine-refactor.md)。
+
+这里长期只维护当前最强的三个案例，不复制全量清单。完整的 contributor case、
+creator dogfooding、reproducible demo 和证据强度标签见
+[Showcase 全量目录](docs/showcases/README.md)。
+
 更多可检查入口：
 
 - [产品首页](https://huangruiteng.github.io/loopx/)：查看产品叙事、快速开始和长程证据；
-- [Showcase 目录](docs/showcases/README.md)，包括
-  [Blocked P0 安全侧路](docs/showcases/cases/0617-blocked-p0-safe-rotation.md)、
-  [LoopX 自迭代](docs/showcases/cases/0619-loopx-self-iteration.md)和
-  [动态工作流编排](docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html)；
+- [Showcase 全量目录](docs/showcases/README.md)和
+  [中英双语托管索引](docs/showcases/index.html)；
 - [跨 runtime 实现审阅演示](docs/product/use-cases/cross-runtime/cross-runtime-impl-review-demo.md)；
 - 公开[用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg)。
 

@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>PR Issue 自动 Fix</h1>
     <div class="accent">Issue / Review comment 可以进入可执行修复闭环。</div>
     <p>The operator can turn a PR issue into a controlled fix loop without manually rewriting the review comment as an agent plan.</p>
-    <div class="chips"><span>issue fix</span><span>repro smoke</span><span>PR review</span></div>
+    <div class="chips"><span>可复现 Demo</span><span>Public-safe pattern</span><span>issue fix</span><span>repro smoke</span><span>PR review</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>5</strong><span>修复闭环阶段</span></div><div class="metric"><strong>1</strong><span>branch-ready 修复包</span></div><div class="metric"><strong>1</strong><span>review handoff 保留</span></div><div class="metric"><strong>0</strong><span>公开 artifact 中 raw issue body</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">产品入口</div><p>`docs/capabilities/issue-fix/README.md` 声明 `loopx issue-fix ...`、content-ops bridge、protocol docs 和 smoke；入口面向维护者的真实动作是把反馈转成可执行修复包。</p></div><div class="evidence-card"><div class="evidence-label">工作流协议</div><p>`issue_fix_workflow_contract_v0` 明确 metadata preview、intake classification、workflow plan、todo writeback、caller repo branch、validation、PR review packet 和 gate handling。</p></div><div class="evidence-card"><div class="evidence-label">可执行闭环</div><p>`issue_fix_acceptance_loop_v0` 包含 acceptance fixture、repo-branch fixture 和 caller-approved repo branch mode。</p></div><div class="evidence-card"><div class="evidence-label">验证面</div><p>focused smokes 保护 metadata preview、content-ops intake、workflow plan、workflow contract、acceptance loop 和端到端 workflow 的关键边界。</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX 行为</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">public metadata 可以进入 packet；raw issue body、comment body、timeline、provider payload 都是 gated source。</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">accepted candidates 写成有序 LoopX todos：repro smoke、code-context route、branch-local patch、validation、review-packet readiness。</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">caller-approved repo 模式只在 `--execute` 时检查本地 repo，并且输出 repo-relative changed files、validation pass/fail 和 PR-readiness。</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">外部 comment、PR creation、merge、publish、destructive git 和 production action 都保留为显式 gate。</div></div></li></ul>

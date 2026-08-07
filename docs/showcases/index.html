@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -121,73 +126,103 @@
     <div class="section-head"><span>01</span><h2>顶部 Showcase 案例</h2></div>
     <input class="search" id="case-search" type="search" placeholder="搜索 showcase 案例" aria-label="搜索 showcase 案例">
     <div class="cards" data-cards>
-      <a class="card" href="cases/0627-overnight-pr-batch.html" data-search="一晚 30 个高价值 pr 高吞吐、多车道推进仍保持 pr 级可 review、可合并。 高吞吐多 lane 工作也可以保持 pr 粒度、可审阅、可合并。 todo claim、review packet、自合并边界、focused smoke、public-boundary scan high_throughput_reviewable_work pr_sized_slices self_merge_policy validation_writeback 22 可审阅 merged commits 10 带 pr 编号的 commits 10h 公开证据窗口 0 raw agent logs 依赖">
+      <a class="card" href="cases/independent-cpp-accuracy-long-run.html" data-search="13+ 小时 c++ 算法精度修复 外部用户报告：超过 13 小时的多阶段任务保持目标一致，并通过公开研究找到新工具、提升最终精度。 长程工程任务可以在更换方法时不丢失目标，并保留可解释的证据链。 vision 对齐、replan、public research、证据保留 外部独立用户 用户报告 + 公开方法 13h plus run vision replan &gt;13h 用户报告运行时长 1 公开工具引用 0 参数微操报告">
+        <div class="meta">2026-07 · owner_approved_user_evidence_case</div>
+        <h3>13+ 小时 C++ 算法精度修复</h3>
+        <p>外部用户报告：超过 13 小时的多阶段任务保持目标一致，并通过公开研究找到新工具、提升最终精度。</p>
+        <p><strong>证明点:</strong> 长程工程任务可以在更换方法时不丢失目标，并保留可解释的证据链。</p>
+        <div class="mini-metrics"><span>&gt;13h · 用户报告运行时长</span><span>1 · 公开工具引用</span><span>0 · 参数微操报告</span></div>
+        <div class="chips"><span>外部独立用户</span><span>用户报告 + 公开方法</span><span>13h plus run</span><span>vision replan</span></div>
+      </a>
+
+
+      <a class="card" href="cases/independent-four-day-unattended-agent.html" data-search="4 天无人干预运行 外部用户报告：agent 在没有人工干预的情况下连续运行 4 天，并持续处理有价值的工作。 长程 agent 不只是保持存活，还需要让用户看见它是否在做有价值的工作。 持久任务状态、无人值守续跑、周期报告 外部独立用户 用户报告 four day run unattended execution 4d 用户报告运行时长 0 报告的人工干预 1 周期报告能力">
+        <div class="meta">2026-07 · owner_approved_user_evidence_case</div>
+        <h3>4 天无人干预运行</h3>
+        <p>外部用户报告：Agent 在没有人工干预的情况下连续运行 4 天，并持续处理有价值的工作。</p>
+        <p><strong>证明点:</strong> 长程 Agent 不只是保持存活，还需要让用户看见它是否在做有价值的工作。</p>
+        <div class="mini-metrics"><span>4d · 用户报告运行时长</span><span>0 · 报告的人工干预</span><span>1 · 周期报告能力</span></div>
+        <div class="chips"><span>外部独立用户</span><span>用户报告</span><span>four day run</span><span>unattended execution</span></div>
+      </a>
+
+
+      <a class="card" href="cases/independent-public-engine-refactor.html" data-search="公开 engine 重构：7 个合并 pr 外部用户将一次公开 engine 拆分归因于 loopx；仓库证据显示相关工作通过 7 个 pr 渐进合并。 一个公开重构目标可以拆成 7 个可独立 review、可合并的 pr。 持久目标、分阶段 todo、pr-sized delivery、证据续跑 外部独立用户 公开仓库 + 用户报告 public repository seven prs 7 公开合并 pr 1 公开架构目标 1b+ 用户报告 token 规模">
+        <div class="meta">2026-07 · public_repository_plus_user_report_case</div>
+        <h3>公开 Engine 重构：7 个合并 PR</h3>
+        <p>外部用户将一次公开 Engine 拆分归因于 LoopX；仓库证据显示相关工作通过 7 个 PR 渐进合并。</p>
+        <p><strong>证明点:</strong> 一个公开重构目标可以拆成 7 个可独立 review、可合并的 PR。</p>
+        <div class="mini-metrics"><span>7 · 公开合并 PR</span><span>1 · 公开架构目标</span><span>1B+ · 用户报告 token 规模</span></div>
+        <div class="chips"><span>外部独立用户</span><span>公开仓库 + 用户报告</span><span>public repository</span><span>seven prs</span></div>
+      </a>
+
+
+      <a class="card" href="cases/0627-overnight-pr-batch.html" data-search="一晚 30 个高价值 pr 高吞吐、多车道推进仍保持 pr 级可 review、可合并。 高吞吐多 lane 工作也可以保持 pr 粒度、可审阅、可合并。 todo claim、review packet、自合并边界、focused smoke、public-boundary scan creator dogfooding 公开 git 证据 high throughput reviewable work pr sized slices 22 可审阅 merged commits 10 带 pr 编号的 commits 10h 公开证据窗口 0 raw agent logs 依赖">
         <div class="meta">2026-06-27 · public_evidence_case</div>
         <h3>一晚 30 个高价值 PR</h3>
         <p>高吞吐、多车道推进仍保持 PR 级可 review、可合并。</p>
         <p><strong>证明点:</strong> 高吞吐多 lane 工作也可以保持 PR 粒度、可审阅、可合并。</p>
         <div class="mini-metrics"><span>22 · 可审阅 merged commits</span><span>10 · 带 PR 编号的 commits</span><span>10h · 公开证据窗口</span></div>
-        <div class="chips"><span>high_throughput_reviewable_work</span><span>pr_sized_slices</span><span>self_merge_policy</span><span>validation_writeback</span></div>
+        <div class="chips"><span>Creator dogfooding</span><span>公开 Git 证据</span><span>high throughput reviewable work</span><span>pr sized slices</span></div>
       </a>
 
 
-      <a class="card" href="cases/0624-pr-issue-auto-fix.html" data-search="pr issue 自动 fix issue / review comment 可以进入可执行修复闭环。 issue 和 review 反馈可以变成受控、可执行的修复循环。 issue-fix workflow、command pack、repro smoke、pr review feedback issue_fix_workflow review_feedback repro_smoke command_pack 5 修复闭环阶段 1 branch-ready 修复包 1 review handoff 保留 0 公开 artifact 中 raw issue body">
+      <a class="card" href="cases/0624-pr-issue-auto-fix.html" data-search="pr issue 自动 fix issue / review comment 可以进入可执行修复闭环。 issue 和 review 反馈可以变成受控、可执行的修复循环。 issue-fix workflow、command pack、repro smoke、pr review feedback 可复现 demo public-safe pattern issue fix workflow review feedback 5 修复闭环阶段 1 branch-ready 修复包 1 review handoff 保留 0 公开 artifact 中 raw issue body">
         <div class="meta">2026-06-24 · public_safe_pattern_case</div>
         <h3>PR Issue 自动 Fix</h3>
         <p>Issue / Review comment 可以进入可执行修复闭环。</p>
         <p><strong>证明点:</strong> Issue 和 review 反馈可以变成受控、可执行的修复循环。</p>
         <div class="mini-metrics"><span>5 · 修复闭环阶段</span><span>1 · branch-ready 修复包</span><span>1 · review handoff 保留</span></div>
-        <div class="chips"><span>issue_fix_workflow</span><span>review_feedback</span><span>repro_smoke</span><span>command_pack</span></div>
+        <div class="chips"><span>可复现 Demo</span><span>Public-safe pattern</span><span>issue fix workflow</span><span>review feedback</span></div>
       </a>
 
 
-      <a class="card" href="cases/0623-agent-to-agent-pr-comments.html" data-search="agent to agent 回复 pr comment 和 pr fix 多 agent 可围绕 pr review 协同发现、评论、修复。 多 agent lane 可以围绕 pr comment 协作，同时保留 owner review。 claimed_by、handoff gate、review packet、comment/fix loop agent_to_agent_handoff pr_comment_loop review_packet claimed_todo 1 每条反馈一个 owner 3 owner/fix/review 可回答问题 1 review packet handoff 0 无主 pr comment reminder">
+      <a class="card" href="cases/0623-agent-to-agent-pr-comments.html" data-search="agent to agent 回复 pr comment 和 pr fix 多 agent 可围绕 pr review 协同发现、评论、修复。 多 agent lane 可以围绕 pr comment 协作，同时保留 owner review。 claimed_by、handoff gate、review packet、comment/fix loop 可复现 demo public-safe pattern agent to agent handoff pr comment loop 1 每条反馈一个 owner 3 owner/fix/review 可回答问题 1 review packet handoff 0 无主 pr comment reminder">
         <div class="meta">2026-06-23 · public_safe_pattern_case</div>
         <h3>Agent to agent 回复 PR comment 和 PR Fix</h3>
         <p>多 agent 可围绕 PR review 协同发现、评论、修复。</p>
         <p><strong>证明点:</strong> 多 agent lane 可以围绕 PR comment 协作，同时保留 owner review。</p>
         <div class="mini-metrics"><span>1 · 每条反馈一个 owner</span><span>3 · owner/fix/review 可回答问题</span><span>1 · review packet handoff</span></div>
-        <div class="chips"><span>agent_to_agent_handoff</span><span>pr_comment_loop</span><span>review_packet</span><span>claimed_todo</span></div>
+        <div class="chips"><span>可复现 Demo</span><span>Public-safe pattern</span><span>agent to agent handoff</span><span>pr comment loop</span></div>
       </a>
 
 
-      <a class="card" href="cases/0623-overnight-project-refactor.html" data-search="一晚上自主重构项目 长时间无值守重构能拆成适中 pr，而不是一个不可 review 大改。 无人值守 refactor 可以拆成 pr-sized slice。 loop、todo follow-up、supersede、pr-sized slices long_unattended_goal pr_sized_slices todo_follow_up supersede 1 一次一个 pr-sized slice 3 successor/supersede/handoff 路线 1 宽风险 review gate 0 巨型 diff 目标">
+      <a class="card" href="cases/0623-overnight-project-refactor.html" data-search="一晚上自主重构项目 长时间无值守重构能拆成适中 pr，而不是一个不可 review 大改。 无人值守 refactor 可以拆成 pr-sized slice。 loop、todo follow-up、supersede、pr-sized slices creator dogfooding public-safe pattern long unattended goal pr sized slices 1 一次一个 pr-sized slice 3 successor/supersede/handoff 路线 1 宽风险 review gate 0 巨型 diff 目标">
         <div class="meta">2026-06-23 · public_safe_pattern_case</div>
         <h3>一晚上自主重构项目</h3>
         <p>长时间无值守重构能拆成适中 PR，而不是一个不可 review 大改。</p>
         <p><strong>证明点:</strong> 无人值守 refactor 可以拆成 PR-sized slice。</p>
         <div class="mini-metrics"><span>1 · 一次一个 PR-sized slice</span><span>3 · successor/supersede/handoff 路线</span><span>1 · 宽风险 review gate</span></div>
-        <div class="chips"><span>long_unattended_goal</span><span>pr_sized_slices</span><span>todo_follow_up</span><span>supersede</span></div>
+        <div class="chips"><span>Creator dogfooding</span><span>Public-safe pattern</span><span>long unattended goal</span><span>pr sized slices</span></div>
       </a>
 
 
-      <a class="card" href="cases/0619-dynamic-workflow-hardware-agent.html" data-search="外部芯片 agent workflow 模糊目标、多 worker、长时间无值守下仍可收敛。 模糊目标、多 worker、长时间无值守下仍可收敛。 goal state、worker handoff、dynamic workflow dynamic_workflow multi_agent_coordination shared_control_plane long_unattended_goal 5 公开安全硬件 workflow 3 loopx/编排/worker 角色分离 1 canonical artifact 保留 0 专有设计细节暴露">
+      <a class="card" href="cases/0619-dynamic-workflow-hardware-agent.html" data-search="外部芯片 agent workflow 模糊目标、多 worker、长时间无值守下仍可收敛。 模糊目标、多 worker、长时间无值守下仍可收敛。 goal state、worker handoff、dynamic workflow contributor case 公开交互案例 dynamic workflow multi agent coordination 5 公开安全硬件 workflow 3 loopx/编排/worker 角色分离 1 canonical artifact 保留 0 专有设计细节暴露">
         <div class="meta">2026-06-19 · public_safe_interactive_case</div>
         <h3>外部芯片 agent workflow</h3>
         <p>模糊目标、多 worker、长时间无值守下仍可收敛。</p>
         <p><strong>证明点:</strong> 模糊目标、多 worker、长时间无值守下仍可收敛。</p>
         <div class="mini-metrics"><span>5 · 公开安全硬件 workflow</span><span>3 · LoopX/编排/worker 角色分离</span><span>1 · canonical artifact 保留</span></div>
-        <div class="chips"><span>dynamic_workflow</span><span>multi_agent_coordination</span><span>shared_control_plane</span><span>long_unattended_goal</span><span>Canonical 原页面</span></div>
+        <div class="chips"><span>Contributor case</span><span>公开交互案例</span><span>dynamic workflow</span><span>multi agent coordination</span><span>Canonical 原页面</span></div>
       </a>
 
 
-      <a class="card" href="cases/0619-loopx-self-iteration.html" data-search="loopx meta agent 自迭代 高变更、多车道项目可保持状态、边界和证据。 高 churn 多 lane agent repo 可以保持状态、证据和边界一致。 todo、quota、gate、evidence、review packet、frontstage self_iteration peer_claim_scope todo_claim_ownership identity_aware_prompt 801 public commits 244 06-18 后 commits 59-92d ai-assisted baseline 3.0-4.7x calendar compression">
+      <a class="card" href="cases/0619-loopx-self-iteration.html" data-search="loopx meta agent 自迭代 高变更、多车道项目可保持状态、边界和证据。 高 churn 多 lane agent repo 可以保持状态、证据和边界一致。 todo、quota、gate、evidence、review packet、frontstage creator dogfooding 公开 git 证据 self iteration peer claim scope 801 public commits 244 06-18 后 commits 59-92d ai-assisted baseline 3.0-4.7x calendar compression">
         <div class="meta">2026-06-19 · public_evidence_case</div>
         <h3>LoopX Meta Agent 自迭代</h3>
         <p>高变更、多车道项目可保持状态、边界和证据。</p>
         <p><strong>证明点:</strong> 高 churn 多 lane agent repo 可以保持状态、证据和边界一致。</p>
         <div class="mini-metrics"><span>801 · public commits</span><span>244 · 06-18 后 commits</span><span>59-92d · AI-assisted baseline</span></div>
-        <div class="chips"><span>self_iteration</span><span>peer_claim_scope</span><span>todo_claim_ownership</span><span>identity_aware_prompt</span></div>
+        <div class="chips"><span>Creator dogfooding</span><span>公开 Git 证据</span><span>self iteration</span><span>peer claim scope</span></div>
       </a>
 
 
-      <a class="card" href="cases/0617-blocked-p0-safe-rotation.html" data-search="p0 block 后推进 p1/p2 用户决策不应阻塞全部安全工作。 被阻塞的 p0 决策不应该阻止安全的 p1/p2 工作继续。 concrete user todo、safe fallback、quota control blocked_priority_fallback concrete_user_gate safe_fallback_work quota_discipline 1 具体 p0 用户决策 1 safe fallback lane 0 gated lane 自动推进 0 private upload 依赖">
+      <a class="card" href="cases/0617-blocked-p0-safe-rotation.html" data-search="p0 block 后推进 p1/p2 用户决策不应阻塞全部安全工作。 被阻塞的 p0 决策不应该阻止安全的 p1/p2 工作继续。 concrete user todo、safe fallback、quota control 可复现 demo 可复现合成证据 blocked priority fallback concrete user gate 1 具体 p0 用户决策 1 safe fallback lane 0 gated lane 自动推进 0 private upload 依赖">
         <div class="meta">2026-06-17 · reproducible_synthetic_demo</div>
         <h3>P0 block 后推进 P1/P2</h3>
         <p>用户决策不应阻塞全部安全工作。</p>
         <p><strong>证明点:</strong> 被阻塞的 P0 决策不应该阻止安全的 P1/P2 工作继续。</p>
         <div class="mini-metrics"><span>1 · 具体 P0 用户决策</span><span>1 · safe fallback lane</span><span>0 · gated lane 自动推进</span></div>
-        <div class="chips"><span>blocked_priority_fallback</span><span>concrete_user_gate</span><span>safe_fallback_work</span><span>quota_discipline</span></div>
+        <div class="chips"><span>可复现 Demo</span><span>可复现合成证据</span><span>blocked priority fallback</span><span>concrete user gate</span></div>
       </a>
 </div>
 
@@ -217,13 +252,13 @@
 
     <div class="section-head"><span>02</span><h2>附录案例</h2></div>
     <div class="cards">
-      <a class="card" href="cases/0620-creator-operator-case-spec.html" data-search="创作者-运营者长跑 agent 案例 研究可以继续，发布决策仍然 gated。 创作与运营工作可以共享一个 gate-aware 的长期 agent loop。 creator-operator workflow、user gate、feedback capture、material library creator_operator_workflow gate_aware_continuation feedback_capture safe_side_path 1 publish hard gate 1 safe research side path 0 autopublish 动作 0 真实运营数据暴露">
+      <a class="card" href="cases/0620-creator-operator-case-spec.html" data-search="创作者-运营者长跑 agent 案例 研究可以继续，发布决策仍然 gated。 创作与运营工作可以共享一个 gate-aware 的长期 agent loop。 creator-operator workflow、user gate、feedback capture、material library 可复现 demo public-safe case spec creator operator workflow gate aware continuation 1 publish hard gate 1 safe research side path 0 autopublish 动作 0 真实运营数据暴露">
         <div class="meta">2026-06-20 · public_safe_case_spec</div>
         <h3>创作者-运营者长跑 Agent 案例</h3>
         <p>研究可以继续，发布决策仍然 gated。</p>
         <p><strong>证明点:</strong> 创作与运营工作可以共享一个 gate-aware 的长期 agent loop。</p>
         <div class="mini-metrics"><span>1 · publish hard gate</span><span>1 · safe research side path</span><span>0 · autopublish 动作</span></div>
-        <div class="chips"><span>creator_operator_workflow</span><span>gate_aware_continuation</span><span>feedback_capture</span><span>safe_side_path</span></div>
+        <div class="chips"><span>可复现 Demo</span><span>Public-safe case spec</span><span>creator operator workflow</span><span>gate aware continuation</span></div>
       </a>
 </div>
     <footer>由 docs/showcases/showcase-catalog.json 生成。不包含私有链接、原始聊天、本地状态或内部媒体。</footer>

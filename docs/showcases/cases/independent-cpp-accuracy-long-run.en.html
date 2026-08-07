@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LoopX Showcase: Blocked P0 with safe P1/P2 rotation</title>
+  <title>LoopX Showcase: 13+ hour C++ algorithm accuracy run</title>
   <link rel="icon" href="data:,">
   <style>
   *{box-sizing:border-box;margin:0;padding:0}
@@ -90,14 +90,14 @@
     <nav class="nav" aria-label="Showcase navigation">
       <a href="../index.en.html">Showcases</a>
       <a href="../showcase-catalog.json">Catalog</a>
-      <a href="0617-blocked-p0-safe-rotation.html">中文</a>
+      <a href="independent-cpp-accuracy-long-run.html">中文</a>
     </nav>
 
-    <div class="mlab">2026-06-17 · benchmark-rotation</div>
-    <h1>Blocked P0 with safe P1/P2 rotation</h1>
-    <div class="accent">A gated P0 lane should not stall a whole long-running goal when safe fallback work exists.</div>
-    <p>The operator sees exactly what decision is needed while the agent can keep making bounded progress elsewhere.</p>
-    <div class="chips"><span>Reproducible demo</span><span>Reproducible synthetic evidence</span><span>reproducible</span><span>user-gate</span><span>fallback</span></div>
+    <div class="mlab">2026-07 · complex-cpp-algorithm</div>
+    <h1>13+ hour C++ algorithm accuracy run</h1>
+    <div class="accent">An independent user reported a &gt;13h multi-stage C++ accuracy task that stayed on goal, found a public code-memory tool, and improved the final precision.</div>
+    <p>The user reported a clear precision improvement, less context compression, and an explanation that made the result and experiment path understandable after the run.</p>
+    <div class="chips"><span>Independent user</span><span>User report + public method</span><span>&gt;13h</span><span>C++ accuracy</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -108,9 +108,9 @@
         <rect x="52" y="132" width="180" height="78" rx="8" fill="none" stroke="#6a6e76" stroke-width="2"></rect>
         <rect x="290" y="124" width="180" height="94" rx="8" fill="#6e79d6" fill-opacity=".16" stroke="#6e79d6" stroke-width="2"></rect>
         <rect x="528" y="132" width="180" height="78" rx="8" fill="none" stroke="#6a6e76" stroke-width="2"></rect>
-        <text x="142" y="166" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">Blocked P0 with safe P</text>
-        <text x="380" y="163" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">concrete user todo</text>
-        <text x="618" y="166" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">reproducible synthetic d</text>
+        <text x="142" y="166" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">13+ hour C++ algorithm</text>
+        <text x="380" y="163" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">vision alignment</text>
+        <text x="618" y="166" text-anchor="middle" fill="#f1f2f3" font-size="13" font-weight="600">owner approved user evid</text>
         <text x="142" y="188" text-anchor="middle" fill="#62666d" font-size="11">goal / trigger</text>
         <text x="380" y="185" text-anchor="middle" fill="#62666d" font-size="11">todo / gate / evidence</text>
         <text x="618" y="188" text-anchor="middle" fill="#62666d" font-size="11">public outcome</text>
@@ -125,28 +125,28 @@
 
 
     <div class="section-head"><span>01</span><h2>Case context</h2></div>
-    <div class="text-stack"><p>This case shows what should happen when a P0 route is blocked by a user decision: the system should neither keep forcing that lane nor stop the whole goal. The original shape was a benchmark rotation where one lane needed a large local image while other no-upload benchmark work remained safe.</p><p>The public repository does not expose raw benchmark tasks or local image names. It reproduces the control-plane behavior with a synthetic smoke. The user-facing value is seeing one concrete P0 decision while safe fallback work can continue and the gated lane does not burn automated progress budget.</p></div>
+    <div class="text-stack"><p>A complex C++ algorithm had a precision problem, while direct long-running agent attempts risked parameter thrashing, local-detail drift, and repeated context compression.</p></div>
 
     <div class="section-head"><span>02</span><h2>Repository evidence</h2></div>
     <div class="panel">
-      <div class="panel-row"><div class="panel-key">Proof</div><div class="panel-val"><p>A user decision should not block all safe work.</p></div></div>
-      <div class="panel-row"><div class="panel-key">LoopX intervention</div><div class="panel-val"><p>concrete user todo, safe fallback, quota control</p></div></div>
+      <div class="panel-row"><div class="panel-key">Proof</div><div class="panel-val"><p>A &gt;13h engineering run can remain aligned, change method through public research, and retain an understandable evidence trail.</p></div></div>
+      <div class="panel-row"><div class="panel-key">LoopX intervention</div><div class="panel-val"><p>vision alignment, replan, public research, evidence retention</p></div></div>
     </div>
-    <div class="metric-grid"><div class="metric"><strong>1</strong><span>concrete P0 user decision</span></div><div class="metric"><strong>1</strong><span>safe fallback lane</span></div><div class="metric"><strong>0</strong><span>gated-lane auto-progress</span></div><div class="metric"><strong>0</strong><span>private upload dependency</span></div></div>
-    <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">Synthetic fixture</div><p>`examples/showcase-0617-blocked-p0-safe-rotation-smoke.py` reproduces a P0 user gate, a P0 agent lane blocked by that gate, and a P1 no-upload fallback.</p></div><div class="evidence-card"><div class="evidence-label">Quota contract</div><p>The smoke pins `should_run=True`, `requires_user_action=True`, `safe_bypass_allowed=True`, `safe_bypass_kind=scoped_user_gate_fallback`, and related fallback evidence.</p></div><div class="evidence-card"><div class="evidence-label">Selected fallback</div><p>The fixture selects `terminal_bench_no_upload` while preserving the `ale_image` gate as the user-visible blocker.</p></div><div class="evidence-card"><div class="evidence-label">Rendered evidence</div><p>The smoke checks markdown for `scoped_user_gate_fallback` and safe no-upload Terminal-Bench rotation.</p></div></div>
-
+    <div class="metric-grid"><div class="metric"><strong>&gt;13h</strong><span>user-reported runtime</span></div><div class="metric"><strong>1</strong><span>public tool reference</span></div><div class="metric"><strong>0</strong><span>parameter-micromanagement reports</span></div></div>
+    <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">Proof</div><p>A &gt;13h engineering run can remain aligned, change method through public research, and retain an understandable evidence trail.</p></div></div>
+    <div class="evidence-assets"><figure class="evidence-asset"><a href="../../assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg"><img src="../../assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg" alt="Authorized user feedback reporting a LoopX C++ algorithm run lasting more than 13 hours with improved precision and retained evidence" loading="lazy"></a><figcaption>Owner-approved user excerpt. Runtime and outcome are user-reported; the public MCP reference is independently inspectable.</figcaption></figure><figure class="evidence-asset"><a href="../../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg"><img src="../../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg" alt="Authorized follow-up explaining that LoopX replan triggered public research and found a code-memory MCP" loading="lazy"></a><figcaption>Follow-up excerpt describing the public-research transition.</figcaption></figure></div>
 
     <div class="section-head"><span>03</span><h2>LoopX behavior</h2></div>
-    <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">The user todo names the concrete P0 decision instead of saying only owner gate.</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">The agent does not spend compute on the gated lane; it selects fallback work that does not depend on the decision.</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">State records both the blocker and the fallback reason so P0 can resume later.</div></div></li></ul>
+    <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">kept the multi-stage work aligned to the declared vision for more than 13 hours</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">triggered public research when the current route no longer appeared able to satisfy the vision</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">selected a public codebase-memory MCP for C++ call-graph and coupling analysis</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">retained experiment evidence and an explanation of the final approach</div></div></li></ul>
 
     <div class="section-head"><span>04</span><h2>What the user sees</h2></div>
-    <div class="text-stack"><p>The user sees the exact decision they need to make while the project continues safely elsewhere.</p><p>Attention load drops: the user does not need to watch repeated idle polls and does not miss the real decision.</p></div>
+    <div class="text-stack"><p>The user reported a clear precision improvement, less context compression, and an explanation that made the result and experiment path understandable after the run.</p></div>
 
     <div class="section-head"><span>05</span><h2>Repository sources</h2></div>
-    <div class="source-list"><a class="source-ref" href="0617-blocked-p0-safe-rotation.md"><span>case narrative</span><code>docs/showcases/cases/0617-blocked-p0-safe-rotation.md</code></a><a class="source-ref" href="../../../examples/showcase-0617-blocked-p0-safe-rotation-smoke.py"><span>synthetic smoke</span><code>examples/showcase-0617-blocked-p0-safe-rotation-smoke.py</code></a></div>
-    <div class="boundary-box"><p><strong>Evidence boundary.</strong> Synthetic public fixture only; no private screenshots, raw tasks, internal links, local image names, or raw run logs.</p></div>
-    <div class="chips"><a class="case-link" href="0617-blocked-p0-safe-rotation.md">Case note</a></div>
-    <div class="metric"><strong>Demo</strong><span><code>python3 examples/showcase-0617-blocked-p0-safe-rotation-smoke.py</code></span></div>
+    <div class="source-list"><a class="source-ref" href="independent-cpp-accuracy-long-run.md"><span>Case note</span><code>docs/showcases/cases/independent-cpp-accuracy-long-run.md</code></a><a class="source-ref" href="https://github.com/DeusData/codebase-memory-mcp"><span>codebase-memory-mcp</span><code>https://github.com/DeusData/codebase-memory-mcp</code></a></div>
+    <div class="boundary-box"><p><strong>Evidence boundary.</strong> Owner-approved user excerpts and a public tool reference; the project repository, raw run state, prompts, experiment data, and performance measurements remain private.</p></div>
+    <div class="chips"><a class="case-link" href="independent-cpp-accuracy-long-run.md">Case note</a></div>
+
     <footer>Generated from docs/showcases/showcase-catalog.json. Private links, raw chats, local state, and internal media are excluded.</footer>
   </article>
 </div>
