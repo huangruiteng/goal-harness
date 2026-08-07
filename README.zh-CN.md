@@ -78,10 +78,12 @@ LoopX 不是生产自动化控制器。危险权限、生产写入、公开发�
 
 ## 证据
 
-这些不是单轮 demo。OpenViking Issue-Fix 与 Auto ML 两条真实轨迹各自跨越
-**200+ 小时自然时长**，持续保留多轮 todo、决策和证据更新。这里的自然时长是
-项目从启动到最新证据的 wall-clock 时间，不等于 200 小时连续模型执行，也不代表
-无人值守的生产自治。点击原图可以检查 public-safe graph、证据分支和跨轮决策。
+这些不是单轮 demo。OpenViking 的公开贡献序列与经过脱敏的 owner-run Auto ML
+showcase 各自跨越 **200+ 小时自然时长**，持续保留多轮 todo、决策和证据更新。
+这里的自然时长是项目从启动到最新证据的 wall-clock 时间。
+不等于 200 小时连续模型执行，也不代表无人值守的生产自治。点击原图可以检查
+public-safe graph、
+证据分支和跨轮决策。
 
 ### 开源 Issue Fix
 
@@ -101,24 +103,28 @@ repository context、带 revision 的修复知识和 reviewer-facing preference
 
 ### Auto ML Experiment
 
-**超过 200 小时的 owner-run 实验轨迹：假设、matched evidence、无效谱系、
-运行中复现和 promote / stop gate 留在同一张图中。**
+**经过脱敏的 owner-run showcase：超过 200 小时的实验轨迹把假设、matched
+evidence、无效谱系、运行中复现和 promote / stop gate 留在同一张图中。**
 
 <a href="docs/assets/long-running-loop-ml-experiment-trajectory.png">
   <img src="docs/assets/long-running-loop-ml-experiment-trajectory.png" alt="Auto ML Experiment 轨迹：实验谱系、证据门和晋级决策" width="760">
 </a>
 
-这张经过脱敏的 public-safe graph 保留了该 200+ 小时自然时间窗口中的决策谱系；
-它是轨迹证据，不代表连续算力执行、独立复现或生产结果。
+这张 public-safe graph 保留了该 200+ 小时自然时间窗口中的决策谱系。它是
+owner-run showcase，不代表连续算力执行、独立复现、生产结果，也不代表公司或
+雇主背书；脱敏后的图片本身不足以让第三方独立复现实验。
 
 ### Auto Research
 
-**Proposer、executor、evaluator/promoter 并行迭代，todo、quota、证据与
-targeted wake 同屏可见。**
+**经过脱敏的 owner-run showcase：Proposer、executor、evaluator/promoter
+并行迭代，todo、quota、证据与 targeted wake 同屏可见。**
 
 <a href="docs/assets/auto-research-multi-agent-showcase.png">
   <img src="docs/assets/auto-research-multi-agent-showcase.png" alt="Auto Research 多 Agent 工作区：proposer、executor、evaluator/promoter、todo、quota、证据与 targeted wake 同屏推进">
 </a>
+
+这张脱敏截图只用于说明一次 owner-run 工作流的控制面形态，不构成生产研究结果、
+公司或雇主背书，也不是可供第三方独立复现的评测证据。
 
 更多可检查入口：
 

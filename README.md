@@ -86,12 +86,14 @@ publishing, production writes, and final ownership stay with the human.
 
 ## Evidence
 
-These are not one-turn demos. The OpenViking Issue-Fix and Auto ML trajectories
-each span **200+ hours of elapsed loop lifetime** across many bounded turns,
-decisions, and evidence updates. Elapsed lifetime is wall-clock project time,
+These are not one-turn demos. The public OpenViking contribution sequence and
+the redacted, owner-run Auto ML showcase each span
+**200+ hours of elapsed loop lifetime** across many bounded turns, decisions,
+and evidence updates. Elapsed lifetime is wall-clock project time. It is
 not 200 hours of continuous model execution or a claim of unattended
-production autonomy. Open each visual to inspect the public-safe graph,
-evidence branches, and decisions preserved across turns.
+production autonomy. Open each visual to
+inspect the public-safe graph, evidence branches, and decisions preserved
+across turns.
 
 ### Open-Source Issue Fix
 
@@ -113,26 +115,33 @@ authoritative.
 
 ### Auto ML Experiment
 
-**200+ hour owner-run experiment arc: hypotheses, matched evidence, invalid
-lineages, running replicates, and promote/stop gates remain visible in one
-graph.**
+**Redacted owner-run showcase: a 200+ hour experiment arc keeps hypotheses,
+matched evidence, invalid lineages, running replicates, and promote/stop gates
+visible in one graph.**
 
 <a href="docs/assets/long-running-loop-ml-experiment-trajectory.png">
   <img src="docs/assets/long-running-loop-ml-experiment-trajectory.png" alt="Auto ML Experiment trajectory with experiment lineages, evidence gates, and promotion decisions" width="760">
 </a>
 
 The redacted public-safe graph preserves decision lineage across that 200+ hour
-elapsed window. It is trajectory evidence, not a claim of continuous compute,
-independent reproduction, or a production result.
+elapsed window. It is an owner-run showcase, not a claim of continuous compute,
+independent reproduction, a production result, or company or employer
+endorsement. The redacted image is not sufficient to reproduce the underlying
+experiment independently.
 
 ### Auto Research
 
-**Proposer, executor, and evaluator/promoter agents iterate in parallel while
-todo, quota, evidence, and targeted wake remain visible.**
+**Redacted owner-run showcase: proposer, executor, and evaluator/promoter agents
+iterate in parallel while todo, quota, evidence, and targeted wake remain
+visible.**
 
 <a href="docs/assets/auto-research-multi-agent-showcase.png">
   <img src="docs/assets/auto-research-multi-agent-showcase.png" alt="Auto Research multi-agent workspace with proposer, executor, evaluator/promoter, todo, quota, evidence, and targeted wake activity">
 </a>
+
+This redacted screenshot demonstrates the control-plane shape of one owner-run
+workflow. It does not establish a production research result, company or
+employer endorsement, or an independently reproducible evaluation.
 
 More inspectable surfaces:
 

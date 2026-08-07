@@ -2914,9 +2914,9 @@ const showcaseGraphStories = [
     imageAlt: "Open-source issue-fix Explore graph linking focused PR delivery with reusable LoopX capabilities",
   },
   {
-    eyebrow: "Auto ML Experiment",
+    eyebrow: "Redacted owner-run showcase · Auto ML",
     title: "Evidence branches stay visible until promote or stop",
-    body: "Matched baselines, invalid lineages, negative results, running replicates, capacity slots, and decision gates remain traceable in one Explore topology.",
+    body: "Matched baselines, invalid lineages, negative results, running replicates, capacity slots, and decision gates remain traceable. This redacted view is not a production result, endorsement, or independently reproducible evaluation.",
     image: showcaseAssetPath("auto-ml-experiment-explore.jpg"),
     imageAlt: "Auto ML Experiment Explore graph with experiment lineages, evidence gates, and promotion decisions",
   },
@@ -2928,13 +2928,13 @@ function ShowcaseGraphStories() {
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-3">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">
-            Real Explore topology
+            Public-safe Explore topology
           </div>
           <h2 className="mt-1 text-base font-semibold leading-7 text-slate-950 sm:text-lg">
             Two long-running loops, without flattening the evidence graph.
           </h2>
         </div>
-        <Badge variant="info">original projections</Badge>
+        <Badge variant="info">source-labeled projections</Badge>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
         {showcaseGraphStories.map((story) => (

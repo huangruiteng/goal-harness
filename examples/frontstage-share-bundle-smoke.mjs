@@ -136,6 +136,8 @@ for (const terminalContract of [
   "data-terminal-control",
   "data-terminal-last",
   "Curated replay from public evidence",
+  "Redacted owner-run showcase",
+  "not a production result, company or employer endorsement, or independently reproducible evidence",
 ]) {
   if (!homepageHtml.includes(terminalContract)) {
     throw new Error(`homepage evidence terminal is missing contract: ${terminalContract}`);

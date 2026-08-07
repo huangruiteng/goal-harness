@@ -48,7 +48,7 @@ def main() -> int:
         "## Advanced Paths",
         "200+ hours of elapsed loop lifetime",
         "200+ hour public contribution arc",
-        "200+ hour owner-run experiment arc",
+        "Redacted owner-run showcase",
         "not 200 hours of continuous model execution",
         "docs/assets/long-running-loop-openviking-trajectory.png",
         "docs/assets/long-running-loop-ml-experiment-trajectory.png",
@@ -74,8 +74,7 @@ def main() -> int:
         '<a id="看几个例子"></a>',
         "200+ 小时自然时长",
         "超过 200 小时的公开贡献轨迹",
-        "超过 200 小时的 owner-run 实验轨迹",
-        "不等于 200 小时连续模型执行",
+        "经过脱敏的 owner-run showcase",
         "`0.4.x` 已经是一套可用、但仍处于早期的长程 Agent 本地控制面",
         "docs/assets/loopx-lark-developer-group.png",
         "docs/assets/loopx-wechat-contact.png",
@@ -87,6 +86,18 @@ def main() -> int:
 
     first_screen = readme.split("## Why LoopX", 1)[0]
     assert "docs/assets/loopx-logo.png" not in first_screen
+
+    for required in [
+        "company or employer endorsement",
+        "independently reproducible evaluation",
+    ]:
+        assert required in compact_readme, required
+    for required in [
+        "不等于 200 小时连续模型执行",
+        "公司或雇主背书",
+        "第三方独立复现",
+    ]:
+        assert required in compact(readme_zh), required
 
     for required in [
         "`$loopx <complex task>`",
