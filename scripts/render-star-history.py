@@ -39,17 +39,36 @@ def _load_stargazers(path: Path) -> list[date]:
     return dates
 
 
-def _nice_ceiling(value: int) -> int:
+def _nice_scale(value: int, *, target_intervals: int = 7) -> tuple[int, int]:
     if value <= 1:
-        return 1
-    rough_step = value / 4
+        return 1, 1
+    rough_step = value / target_intervals
     magnitude = 10 ** math.floor(math.log10(rough_step))
     scaled_step = rough_step / magnitude
     factor = next(
         candidate for candidate in (1, 2, 2.5, 5, 10) if scaled_step <= candidate
     )
-    step = factor * magnitude
-    return int(math.ceil(value / step) * step)
+    step = max(1, int(factor * magnitude))
+    return int(math.ceil(value / step) * step), step
+
+
+def _format_count(value: int) -> str:
+    if value < 1_000:
+        return str(value)
+    scaled = value / 1_000
+    return f"{scaled:.0f}k" if scaled.is_integer() else f"{scaled:.1f}k"
+
+
+def _format_tick_date(day: date, *, span_days: int) -> str:
+    if span_days >= 730:
+        return str(day.year)
+    if span_days >= 120:
+        return f"{day:%b} {day.year}"
+    return f"{day:%b} {day.day}"
+
+
+def _format_display_date(day: date) -> str:
+    return f"{day:%b} {day.day}, {day.year}"
 
 
 def _timeline(stars: list[date], *, as_of: date) -> list[tuple[date, int]]:
@@ -71,11 +90,11 @@ def render_svg(repo: str, stars: list[date], *, as_of: date) -> str:
     total = points[-1][1]
     start = points[0][0]
     span_days = max((as_of - start).days, 1)
-    width, height = 960, 420
-    left, right, top, bottom = 78, 28, 72, 62
+    width, height = 800, 500
+    left, right, top, bottom = 76, 30, 108, 72
     plot_width = width - left - right
     plot_height = height - top - bottom
-    y_max = _nice_ceiling(total)
+    y_max, y_step = _nice_scale(total)
 
     def x_for(day: date) -> float:
         return left + ((day - start).days / span_days) * plot_width
@@ -85,63 +104,69 @@ def render_svg(repo: str, stars: list[date], *, as_of: date) -> str:
 
     chart_points = [(x_for(day), y_for(value)) for day, value in points]
     line = " ".join(f"{x:.1f},{y:.1f}" for x, y in chart_points)
-    area = (
-        f"{left},{top + plot_height} "
-        + line
-        + f" {left + plot_width},{top + plot_height}"
-    )
-
     y_grid: list[str] = []
-    for index in range(5):
-        value = round(y_max * index / 4)
+    value = 0
+    while value <= y_max:
         y = y_for(value)
         y_grid.append(
             f'<line x1="{left}" y1="{y:.1f}" x2="{left + plot_width}" y2="{y:.1f}" class="grid"/>'
-            f'<text x="{left - 14}" y="{y + 4:.1f}" class="axis" text-anchor="end">{value}</text>'
+            f'<text x="{left - 12}" y="{y + 4:.1f}" class="axis" text-anchor="end">{_format_count(value)}</text>'
         )
+        value += y_step
 
     x_labels: list[str] = []
-    for index in range(5):
-        day = start + timedelta(days=round(span_days * index / 4))
+    for index in range(6):
+        day = start + timedelta(days=round(span_days * index / 5))
         x = x_for(day)
-        anchor = "start" if index == 0 else "end" if index == 4 else "middle"
+        anchor = "start" if index == 0 else "end" if index == 5 else "middle"
         x_labels.append(
-            f'<text x="{x:.1f}" y="{top + plot_height + 34}" class="axis" text-anchor="{anchor}">{day:%Y-%m-%d}</text>'
+            f'<text x="{x:.1f}" y="{top + plot_height + 28}" class="axis" text-anchor="{anchor}">{_format_tick_date(day, span_days=span_days)}</text>'
         )
 
     safe_repo = escape(repo)
+    legend_width = min(260, max(154, 34 + len(repo) * 7))
+    display_date = _format_display_date(as_of)
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
   <title id="title">{safe_repo} GitHub star history</title>
   <desc id="desc">Cumulative public GitHub stars through {as_of.isoformat()}: {total}.</desc>
   <style>
     .background {{ fill: #ffffff; }}
-    .grid {{ stroke: #dbe5f3; stroke-width: 1; }}
-    .axis {{ fill: #65748a; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
-    .title {{ fill: #0d1b2f; font: 600 22px ui-sans-serif, system-ui, sans-serif; }}
-    .meta {{ fill: #65748a; font: 13px ui-sans-serif, system-ui, sans-serif; }}
-    .area {{ fill: url(#area-gradient); }}
-    .line {{ fill: none; stroke: #2f80ed; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }}
-    .point {{ fill: #ffffff; stroke: #2f80ed; stroke-width: 3; }}
+    .grid {{ stroke: #e5e7eb; stroke-width: 1; stroke-dasharray: 3 5; }}
+    .axis-line {{ stroke: #9ca3af; stroke-width: 1.5; }}
+    .axis {{ fill: #667085; font: 12px ui-sans-serif, system-ui, sans-serif; }}
+    .axis-title {{ fill: #667085; font: 12px ui-sans-serif, system-ui, sans-serif; }}
+    .title {{ fill: #101828; font: 600 22px ui-sans-serif, system-ui, sans-serif; }}
+    .meta {{ fill: #667085; font: 13px ui-sans-serif, system-ui, sans-serif; }}
+    .legend-box {{ fill: #ffffff; stroke: #d0d5dd; stroke-width: 1; }}
+    .legend {{ fill: #344054; font: 12px ui-sans-serif, system-ui, sans-serif; }}
+    .legend-dot {{ fill: #f05235; }}
+    .line {{ fill: none; stroke: #f05235; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }}
+    .point {{ fill: #ffffff; stroke: #f05235; stroke-width: 3; }}
     @media (prefers-color-scheme: dark) {{
-      .background {{ fill: #07101f; }}
-      .grid {{ stroke: #21324a; }}
-      .axis, .meta {{ fill: #91a2b9; }}
-      .title {{ fill: #e8eef7; }}
-      .point {{ fill: #07101f; }}
+      .background {{ fill: #0d1117; }}
+      .grid {{ stroke: #30363d; }}
+      .axis-line {{ stroke: #6e7681; }}
+      .axis, .axis-title, .meta {{ fill: #8b949e; }}
+      .title {{ fill: #f0f6fc; }}
+      .legend-box {{ fill: #161b22; stroke: #30363d; }}
+      .legend {{ fill: #c9d1d9; }}
+      .point {{ fill: #0d1117; }}
     }}
   </style>
-  <defs>
-    <linearGradient id="area-gradient" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#2f80ed" stop-opacity="0.32"/>
-      <stop offset="100%" stop-color="#2f80ed" stop-opacity="0.03"/>
-    </linearGradient>
-  </defs>
-  <rect width="{width}" height="{height}" rx="12" class="background"/>
-  <text x="{left}" y="36" class="title">GitHub Star History</text>
-  <text x="{left}" y="57" class="meta">{safe_repo} · {total} stars · updated {as_of.isoformat()}</text>
+  <rect width="{width}" height="{height}" class="background"/>
+  <text x="{width / 2:.0f}" y="34" class="title" text-anchor="middle">Star History</text>
+  <text x="{width / 2:.0f}" y="56" class="meta" text-anchor="middle">{total:,} stars · updated {display_date}</text>
+  <g transform="translate({left},72)">
+    <rect width="{legend_width}" height="28" rx="6" class="legend-box"/>
+    <circle cx="13" cy="14" r="4" class="legend-dot"/>
+    <text x="25" y="18" class="legend">{safe_repo}</text>
+  </g>
   {''.join(y_grid)}
   {''.join(x_labels)}
-  <polygon points="{area}" class="area"/>
+  <line x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}" class="axis-line"/>
+  <line x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}" class="axis-line"/>
+  <text x="20" y="{top + plot_height / 2:.1f}" class="axis-title" text-anchor="middle" transform="rotate(-90 20 {top + plot_height / 2:.1f})">GitHub stars</text>
+  <text x="{left + plot_width / 2:.1f}" y="{height - 16}" class="axis-title" text-anchor="middle">Date</text>
   <polyline points="{line}" class="line"/>
   <circle cx="{chart_points[-1][0]:.1f}" cy="{chart_points[-1][1]:.1f}" r="5" class="point"/>
 </svg>

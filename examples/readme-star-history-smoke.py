@@ -73,9 +73,13 @@ def main() -> int:
         svg = output.read_text(encoding="utf-8")
         root = ET.fromstring(svg)
         assert root.tag.endswith("svg")
+        assert root.attrib["viewBox"] == "0 0 800 500"
         assert 'role="img" aria-labelledby="title desc"' in svg
         assert "@media (prefers-color-scheme: dark)" in svg
-        assert "huangruiteng/loopx · 4 stars · updated 2026-08-06" in svg
+        assert "4 stars · updated Aug 6, 2026" in svg
+        assert '<text x="25" y="18" class="legend">huangruiteng/loopx</text>' in svg
+        assert "GitHub stars" in svg
+        assert "<polygon" not in svg
         assert "<script" not in svg.lower()
         assert "http://" not in svg.replace("http://www.w3.org/2000/svg", "")
         assert "https://" not in svg
@@ -83,7 +87,7 @@ def main() -> int:
         empty_output = temp / "empty.svg"
         _render([], empty_output)
         empty_svg = empty_output.read_text(encoding="utf-8")
-        assert "huangruiteng/loopx · 0 stars · updated 2026-08-06" in empty_svg
+        assert "0 stars · updated Aug 6, 2026" in empty_svg
 
         mismatch = _render(
             [{"starred_at": "2026-08-01T09:45:00Z"}],
@@ -100,10 +104,11 @@ def main() -> int:
     }
     for readme, sections in readme_sections.items():
         text = readme.read_text(encoding="utf-8")
+        positions = [text.index(section) for section in sections]
         assert text.count(IMAGE_URL) == 1, readme
         assert "https://github.com/huangruiteng/loopx/stargazers" in text, readme
+        assert 'width="800"' in text[positions[1] : positions[2]], readme
         assert "star-history.dera.page" not in text, readme
-        positions = [text.index(section) for section in sections]
         assert positions == sorted(positions), (readme, sections)
         assert "\n## " not in text[positions[-1] + len(sections[-1]) :], readme
 
