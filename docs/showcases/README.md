@@ -5,6 +5,62 @@ independent user evidence, then use the case type and evidence label to separate
 real-world adoption from contributor cases, creator dogfooding, and reproducible
 demos.
 
+## Start With Real Use
+
+### 13+ hour C++ algorithm accuracy run
+
+**Independent user** · `>13h` reported · no parameter micromanagement reported
+
+LoopX kept a complex accuracy task aligned to its declared vision, then used
+replan to trigger public research instead of continuing local parameter
+thrashing. The user reported improved precision and retained experiment
+evidence.
+
+<p align="center">
+  <a href="../assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg"><img src="../assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg" alt="Authorized user feedback reporting a LoopX C++ algorithm run lasting more than 13 hours with improved precision and retained evidence" width="48%"></a>
+  <a href="../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg"><img src="../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg" alt="Authorized follow-up explaining that LoopX replan triggered public research and found a code-memory MCP" width="48%"></a>
+</p>
+
+*Owner-approved excerpts. Runtime and outcome are user-reported; the referenced
+[code-memory MCP](https://github.com/DeusData/codebase-memory-mcp) is public, but
+the private project and its measurements are not independently reproducible.
+[Read the case](cases/independent-cpp-accuracy-long-run.md).*
+
+### Four-day unattended agent run
+
+**Independent user** · `4d` reported · no intervention reported during the run
+
+LoopX kept one agent doing useful work across a four-day window and preserved a
+periodic report surface for later inspection.
+
+<p align="center">
+  <a href="../assets/showcases/user-feedback/four-day-unattended-user-report.jpg"><img src="../assets/showcases/user-feedback/four-day-unattended-user-report.jpg" alt="Minimally redacted authorized chat excerpt reporting a four-day LoopX agent run without human intervention" width="72%"></a>
+</p>
+
+*Owner-approved, minimally redacted excerpt. The workload, run history, and
+quality assessment remain private and user-reported.
+[Read the case](cases/independent-four-day-unattended-agent.md).*
+
+### Public Engine refactor across seven merged PRs
+
+**Independent user** · seven merged PRs · maintainer review and merge remained
+present
+
+One durable refactor goal became staged component extractions across the public
+[`zilliztech/mfs` Engine issue](https://github.com/zilliztech/mfs/issues/166)
+and seven merged PRs. The repository independently verifies the issue and PR
+sequence; LoopX attribution, perceived quality, and the reported `1B+` token
+scale remain user-reported.
+
+[Read the case and inspect all seven PRs](cases/independent-public-engine-refactor.md).
+
+Open the [hosted Showcase index](https://huangruiteng.github.io/loopx/docs/showcases/index.html)
+for the bilingual visual case surface. The
+[feedback coverage map](user-feedback-coverage.md) records every input cluster,
+including useful signals that were deliberately not promoted to success cases.
+
+## What A Case Includes
+
 Showcases are not raw run logs. Each case should reduce a real collaboration
 into a reusable control-plane pattern:
 
@@ -14,24 +70,6 @@ into a reusable control-plane pattern:
 - the evidence boundary, including what must stay private;
 - a reproducible demo or the reason a demo is still pending;
 - optional data that a future website can render as a public evidence sequence.
-
-## Start With Real Use
-
-| Case | Type | Runtime / scale | Human intervention | Evidence |
-| --- | --- | --- | --- | --- |
-| [13+ hour C++ algorithm accuracy run](cases/independent-cpp-accuracy-long-run.md) | Independent user | `>13h`, one long-running agent reported | No parameter micromanagement reported | Authorized excerpts + [public MCP reference](https://github.com/DeusData/codebase-memory-mcp) |
-| [Four-day unattended agent run](cases/independent-four-day-unattended-agent.md) | Independent user | `4d`, one long-running agent reported | None reported during the run | Authorized, minimally redacted excerpt |
-| [Public Engine refactor](cases/independent-public-engine-refactor.md) | Independent user | Seven merged PRs; `1B+` tokens user-reported | Maintainer review and merge remained present | [Public issue](https://github.com/zilliztech/mfs/issues/166) + seven merged PRs + user report |
-
-The first two outcomes remain user reports because their project repositories
-and raw runs are private. The Engine refactor has stronger independent evidence:
-the public repository verifies the goal and merged PR sequence, while LoopX
-attribution, perceived quality, and token scale remain user-reported.
-
-Open the [hosted Showcase index](https://huangruiteng.github.io/loopx/docs/showcases/index.html)
-for the bilingual visual case surface. The
-[feedback coverage map](user-feedback-coverage.md) records every input cluster,
-including useful signals that were deliberately not promoted to success cases.
 
 ## Catalog Contract
 
