@@ -204,7 +204,6 @@ def render_scene_keyframes(scenes: list[dict[str, Any]], duration: int) -> str:
     for scene in scenes:
         scene_class = slug(scene["id"])
         start, end = scene["time_seconds"]
-        start_pct = pct(start, duration)
         fade_pct = pct(min(start + 0.7, end), duration)
         hold_pct = pct(max(end - 0.7, start + 0.7), duration)
         end_pct = pct(end, duration)
