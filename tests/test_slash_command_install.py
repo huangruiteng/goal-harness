@@ -600,3 +600,41 @@ def test_pi_install_retires_managed_extension_on_uninstall(tmp_path: Path) -> No
     assert not runtime.exists()
     assert _row(payload, "pi_goal_extension")["status"] == "retired_managed_file"
     assert _row(payload, "pi_goal_extension_runtime")["status"] == "retired_managed_file"
+
+
+def test_multisurface_dry_run_preserves_row_order_and_has_no_side_effects(
+    tmp_path: Path,
+) -> None:
+    payload = install_slash_commands(
+        execute=False,
+        with_goal_bridge=True,
+        surfaces=["codex", "claude-code", "opencode", "pi"],
+        codex_home=str(tmp_path / "codex"),
+        claude_home=str(tmp_path / "claude"),
+        opencode_home=str(tmp_path / "opencode"),
+        pi_project=str(tmp_path / "project"),
+    )
+
+    rows = payload["installed"]
+    assert isinstance(rows, list)
+    assert [row["surface"] for row in rows] == (
+        ["codex"] * 30
+        + ["claude-code"] * 10
+        + ["opencode"] * 13
+        + ["pi"] * 2
+    )
+    assert payload["summary"]["status_counts"] == {
+        "would_create": 45,
+        "unsupported_host_surface": 10,
+    }
+    assert [
+        (row["mechanism"], row["command"])
+        for row in rows[-5:]
+    ] == [
+        ("opencode_commands", "/loop-global-gates"),
+        ("opencode_commands", "/loop-global-todos"),
+        ("opencode_commands", "/loop-global-risks"),
+        ("pi_goal_extension", "/loopx"),
+        ("pi_goal_extension_runtime", "/loopx"),
+    ]
+    assert list(tmp_path.iterdir()) == []
