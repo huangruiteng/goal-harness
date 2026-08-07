@@ -1016,8 +1016,6 @@ Start here:
 - [Long-task cadence hint](../operations/long-task-cadence-policy.md)
 - [Public/private boundary](../public-private-boundary.md)
 - [Benchmark developer workflow](../development/benchmark-developer-workflow.md)
-- [Public launch narrative draft](../outreach/public-launch-narrative-draft.md)
-- [Xiaohongshu launch draft](../outreach/xiaohongshu-launch-draft.md)
 - [Dashboard status contract](../status-data-contract.md)
 - [Codex peer task orchestration](../integrations/codex-subagent-orchestration.md)
 - [Benchmark long-run design](../research/long-horizon-agent-benchmarks/codex-cli-long-run-benchmark-design.md)

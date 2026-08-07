@@ -50,9 +50,7 @@ dashboard route remains an exporter compatibility surface, not a promoted
 public entry. New users should start from the homepage; public cases,
 efficiency evidence, and the public boundary come from this directory, while
 live local `statusUrl` feeds belong only to explicit ops-mode inspection.
-For animated outreach assets, start from the
-[showcase animation skill spike](../outreach/showcase-animation-skill-spike.md)
-and the
+For animated showcase assets, start from the
 [public storyboard artifact](showcase-animation-storyboard.json). Keep
 `showcase-catalog.json` as the only case data source.
 Generate the first catalog-backed animation prototype with

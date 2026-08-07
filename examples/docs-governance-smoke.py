@@ -50,12 +50,6 @@ MOVED_PATHS = {
     "docs/outcome-floor-safe-bypass-incident-20260606.md": (
         "docs/archive/incidents/outcome-floor-safe-bypass-incident-20260606.md"
     ),
-    "docs/public-launch-narrative-draft.md": (
-        "docs/outreach/public-launch-narrative-draft.md"
-    ),
-    "docs/xiaohongshu-launch-draft.md": (
-        "docs/outreach/xiaohongshu-launch-draft.md"
-    ),
     "docs/protocol-action-packet-codex-cli-wrapper-v0.md": (
         "docs/reference/protocols/protocol-action-packet-codex-cli-wrapper-v0.md"
     ),
@@ -155,7 +149,6 @@ def main() -> int:
         "docs/architecture/rfcs/README.md",
         "docs/architecture/rfcs/agent-im-openviking-collaboration-v0.md",
         "docs/concepts/README.md",
-        "docs/outreach/README.md",
         "docs/operations/README.md",
         "docs/product/README.md",
         "docs/product/release-note-template.md",
@@ -209,6 +202,10 @@ def main() -> int:
     }
     assert product_root_markdown == PRODUCT_ROOT_DOCS, sorted(product_root_markdown)
 
+    assert not (DOCS / "outreach").exists(), (
+        "retired marketing and launch drafts must stay out of the active docs tree"
+    )
+
     assert_local_doc_links_resolve()
 
     collaboration_rfc = read(
@@ -240,7 +237,6 @@ def main() -> int:
             read("CONTRIBUTOR_TASKS.md"),
             read("docs/README.md"),
             read("docs/archive/README.md"),
-            read("docs/outreach/README.md"),
             read("docs/product/README.md"),
             read("docs/product/runtimes/codex-cli/README.md"),
             read("docs/reference/README.md"),
