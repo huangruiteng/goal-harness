@@ -45,6 +45,9 @@ def main() -> int:
         "examples/readme-star-history-smoke.py",
         "python3 examples/readme-star-history-smoke.py",
         "scripts/render-star-history.py",
+        "secrets.STAR_HISTORY_READ_TOKEN",
+        "Missing star-history credential",
+        "fine-grained PAT limited to this repository with Metadata: read",
         "application/vnd.github.star+json",
         "X-GitHub-Api-Version: 2026-03-10",
         'jq \'[.[][]] | length\'',
@@ -70,6 +73,7 @@ def main() -> int:
         "enable-reward-write-api",
         "npm run dev",
         "npm run preview",
+        "GH_TOKEN: ${{ github.token }}",
     ]:
         assert_absent(text, forbidden)
 
