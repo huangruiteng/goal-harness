@@ -81,6 +81,42 @@ def test_todo_handler_expands_shared_paths_and_keeps_suggest_project_only(
     assert "state_file" not in captured_suggest
 
 
+def test_todo_requires_explicit_command_without_mutating_state(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail_if_add_is_called(**_kwargs: object) -> dict[str, object]:
+        pytest.fail("omitting the todo command must not fall back to todo add")
+
+    monkeypatch.setattr(todo_command, "add_goal_todo", fail_if_add_is_called)
+
+    exit_code = main(
+        [
+            "--format",
+            "json",
+            "todo",
+            "--goal-id",
+            "example-goal",
+            "--todo-id",
+            "todo_example",
+            "--role",
+            "agent",
+            "--text",
+            "Accidental replacement todo.",
+        ]
+    )
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["added"] is False
+    assert payload["error"] == (
+        "`loopx todo` requires an explicit command; use `loopx todo add`, "
+        "`loopx todo claim`, `loopx todo update`, or another command shown "
+        "by `loopx todo --help`"
+    )
+
+
 @pytest.mark.parametrize(
     "argv",
     [
