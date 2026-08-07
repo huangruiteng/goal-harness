@@ -28,10 +28,10 @@ and raw runs are private. The Engine refactor has stronger independent evidence:
 the public repository verifies the goal and merged PR sequence, while LoopX
 attribution, perceived quality, and token scale remain user-reported.
 
-Open the [hosted Showcase index](index.html) for the bilingual visual case
-surface. The [feedback coverage map](user-feedback-coverage.md) records every
-input cluster, including useful signals that were deliberately not promoted to
-success cases.
+Open the [hosted Showcase index](https://huangruiteng.github.io/loopx/docs/showcases/index.html)
+for the bilingual visual case surface. The
+[feedback coverage map](user-feedback-coverage.md) records every input cluster,
+including useful signals that were deliberately not promoted to success cases.
 
 ## Catalog Contract
 
