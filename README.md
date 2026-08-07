@@ -4,7 +4,7 @@
 
 <img src="docs/assets/loopx-social-preview.png" alt="LoopX loop engineering social preview banner" width="560">
 
-**The local control plane for long-running AI agent work.**
+**The open, provider-neutral, stateful control plane for long-running agents.**
 
 <sub>Keep objectives, gates, todos, evidence, quota, and handoffs stable while Codex, Claude Code, Cursor, or your own runtime executes bounded turns.</sub>
 
@@ -20,10 +20,10 @@
 
 ---
 
-A lightweight state kernel and agent-agnostic local control plane for loop
-engineering, LoopX keeps long-running work reviewable, restartable, and easier
-to hand off across turns, tools, and agents. It does not replace your agent
-runtime.
+Open and provider-neutral, LoopX is a lightweight state kernel and local-first
+control plane for loop engineering. It keeps long-running work reviewable,
+restartable, and easier to hand off across turns, tools, and agents without
+replacing the runtime that performs the work.
 
 **Loop engineering for long-running AI agents and peer agent teams.**
 
@@ -56,6 +56,10 @@ Codex / Claude Code / Cursor / shell agent executes one turn
    ▼
 write evidence + handoff + next todo ─▶ quota decides the next tick
 ```
+
+Agent runtimes execute the work. LoopX governs the state that lets engineering,
+research, discovery, and operations loops continue across runs. It is not
+another agent framework or a provider-specific orchestration runtime.
 
 ![LoopX control-plane board](docs/assets/control-plane-board.svg)
 

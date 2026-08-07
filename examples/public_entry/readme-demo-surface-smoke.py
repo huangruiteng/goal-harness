@@ -39,7 +39,7 @@ def main() -> int:
         "docs/assets/loopx-social-preview.png",
         "LoopX loop engineering social preview banner",
         "Loop engineering for long-running AI agents and peer agent teams.",
-        "A lightweight state kernel and agent-agnostic local control plane for",
+        "The open, provider-neutral, stateful control plane for long-running agents.",
         "Keep objectives, gates, todos, evidence, quota, and handoffs stable",
         "## Why LoopX",
         "objective / issue / project",

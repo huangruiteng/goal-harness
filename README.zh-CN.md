@@ -4,7 +4,7 @@
 
 <img src="docs/assets/loopx-social-preview.png" alt="LoopX Loop Engineering 展示图" width="560">
 
-**面向长程 AI Agent 工作的本地控制面。**
+**面向长程 Agent 的开放、有状态、Provider-neutral 控制面。**
 
 <sub>Codex、Claude Code、Cursor 或自有 runtime 负责一次次有界执行；LoopX 让目标、gate、todo、证据、quota 和交接跨轮次保持稳定。</sub>
 
@@ -20,9 +20,9 @@
 
 ---
 
-LoopX 是一个轻量 state kernel，也是 agent-agnostic 的本地 Loop Engineering
-控制面。它不替代 agent runtime，而是让跨轮次、跨工具、跨 agent 的工作可审阅、
-可恢复、可接力。
+LoopX 是开放且 Provider-neutral 的轻量 state kernel，也是 local-first
+的 Loop Engineering 控制面。它不替代真正执行任务的 agent runtime，而是让
+跨轮次、跨工具、跨 agent 的工作可审阅、可恢复、可接力。
 
 > 让 Loop 持续向前，让关键判断留在人手里。
 
@@ -50,6 +50,10 @@ Codex / Claude Code / Cursor / shell agent 执行一轮
    ▼
 写回证据 + handoff + next todo ─▶ quota 决定下一次 tick
 ```
+
+Agent runtime 负责执行，LoopX 负责治理跨运行延续的控制状态，让工程、
+研究、discovery 和运营 Loop 能持续推进。它不是又一个 agent framework，也不是
+绑定某一 Provider 的编排 runtime。
 
 ![LoopX control-plane board](docs/assets/control-plane-board.svg)
 
