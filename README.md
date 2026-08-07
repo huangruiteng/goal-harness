@@ -395,10 +395,11 @@ loopx check \
 
 ## Advanced Documentation
 
-Start with the path that matches your role. Use the hosted
+Start with the path that matches your current task. Use the hosted
 [documentation portal](https://huangruiteng.github.io/loopx/docs/) for the
 published docs site; the [documentation index](docs/README.md) remains the
-complete source map.
+complete source map. This list stays selective; each category index owns its
+deeper documents and versioned protocols.
 
 ### Use and Operate
 
@@ -406,46 +407,62 @@ complete source map.
   diagnose, daily workflow, heartbeats, dashboard, development, and commands.
 - [User Manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg):
   public onboarding, concepts, FAQ, and selected cases.
-- [Showcase Catalog](docs/showcases/README.md): public-safe cases and evidence
-  labels.
-- [Update Notes](docs/update-notes/README.md): public-safe progress notes.
+- [Operations](docs/operations/README.md): goal continuation, todo, cadence,
+  attention, and authority workflows.
+- [Quota Allocation](docs/quota-allocation.md) and
+  [Heartbeat Automation Prompt](docs/heartbeat-automation-prompt.md): scheduler
+  eligibility, spend, and scheduled continuation.
+- [Dashboard](apps/presentation/dashboard/README.md) and
+  [Status Data Contract](docs/status-data-contract.md): operator-facing state
+  and projection contracts.
 - [Release Readiness](docs/product/release-readiness.md): install/update paths,
   compatibility gates, release notes, and safe-to-depend-on surfaces.
-- [Dashboard](apps/presentation/dashboard/README.md) and
-  [Status Data Contract](docs/status-data-contract.md).
 
 ### Understand the Control Plane
 
 - [Architecture](docs/architecture.md): lifetime-goal invariant and kernel.
 - [State Interaction Model](docs/state-interaction-model.md): actors, stores,
   interaction contract, and writeback.
-- [Interaction Pattern Catalog](docs/concepts/interaction-pattern-catalog.md):
-  reusable routing, gate, evidence, projection, and planning patterns.
-- [Loop Engineering Principles and Pitfalls](docs/product/foundations/loop-engineering-principles-and-pitfalls.md)
-  and the
-  [Chinese version](docs/product/foundations/loop-engineering-principles-and-pitfalls.zh.md).
-- [Control-Plane Developer Course](docs/development/control-plane-course/README.md):
-  nine Chinese, code-led lectures.
+- [Concepts](docs/concepts/README.md): reusable routing, gate, evidence,
+  projection, and planning patterns.
+- [Product Foundations](docs/product/foundations/README.md): Loop Engineering
+  principles, project-level reward, and reward-style replanning.
 - [Product Vision](docs/product/vision.md): the broader Loop Agent direction.
 
 ### Integrate and Extend
 
 - [Integration Guide](docs/integration.md)
 - [Custom Agent Runner Integration](docs/guides/custom-agent-runner-integration.md)
-- [Worker Bridge Install Contract](docs/integrations/worker-bridge-install-contract.md)
+- [Integrations](docs/integrations/README.md): runtime, host, collaboration, and
+  external-system adapters, including worker bridge and Lark.
 - [Extensions and Capabilities](docs/reference/extensions.md)
-- [Codex App Host Command Registry](docs/reference/protocols/codex-app-host-command-registry-v0.md)
-- [Heartbeat Automation Prompt](docs/heartbeat-automation-prompt.md)
-- [Lark Kanban Adapter](docs/integrations/lark-kanban-control-plane-adapter.md)
-- [Reward Memory Architecture](docs/reference/protocols/reward-memory-architecture-v0.md)
 
-### Validate and Govern
+### Build and Review LoopX
 
-- [Quota Allocation](docs/quota-allocation.md)
-- [Public/Private Boundary](docs/public-private-boundary.md)
-- [Benchmark Developer Workflow](docs/development/benchmark-developer-workflow.md)
-- [Project-Level Reward Model](docs/product/foundations/project-level-reward-model.md)
+- [Developer Guide](docs/development/README.md): contributor workflows,
+  benchmark development, documentation layout, and quality gates.
+- [Reference and Protocols](docs/reference/README.md): stable contracts and
+  versioned implementation protocols, including host command and reward memory
+  architecture.
+- [Control-Plane Developer Course](docs/development/control-plane-course/README.md):
+  nine Chinese, code-led lectures.
+- [Testing and Quality](docs/development/testing-and-quality.md): validation
+  layers and risk-based checks.
+- [Public/Private Boundary](docs/public-private-boundary.md): safe fixtures,
+  examples, evidence, and publication.
+
+### Inspect Outcomes
+
+- [Showcase Catalog](docs/showcases/README.md): public-safe cases and evidence
+  labels.
+- [Research and Evidence](docs/research/README.md): benchmark investigations
+  and source-backed findings.
+- [Update Notes](docs/update-notes/README.md): public-safe progress notes.
+
+### Project and Community
+
 - [Project Governance](GOVERNANCE.md)
+- [Contributing](CONTRIBUTING.md) and [Contributor Tasks](CONTRIBUTOR_TASKS.md)
 - [Authors and Contributors](AUTHORS.md)
 - [Project History](docs/project/history.md)
 - [Name and Marks](TRADEMARKS.md)

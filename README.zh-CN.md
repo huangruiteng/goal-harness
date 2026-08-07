@@ -356,8 +356,9 @@ loopx check \
 
 ## 进阶文档
 
-按你的角色选择入口；[线上文档](https://huangruiteng.github.io/loopx/docs/)
-提供发布后的浏览入口，[完整文档索引](docs/README.md)仍是权威地图。
+按当前任务选择入口；[线上文档](https://huangruiteng.github.io/loopx/docs/)
+提供发布后的浏览入口，[完整文档索引](docs/README.md)仍是权威地图。这里仅保留
+精选入口；每个分类索引负责承接更深层的文档和版本化协议。
 
 ### 使用与运维
 
@@ -365,43 +366,56 @@ loopx check \
   dashboard、开发和命令参考。
 - [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg)：
   公开 onboarding、概念、FAQ 和案例。
-- [Showcase Catalog](docs/showcases/README.md)：public-safe 案例和 evidence label。
-- [Update Notes](docs/update-notes/README.md)：公开安全的进展记录。
+- [Operations](docs/operations/README.md)：goal continuation、todo、cadence、
+  attention 和 authority 工作流。
+- [Quota Allocation](docs/quota-allocation.md)与
+  [Heartbeat Automation Prompt](docs/heartbeat-automation-prompt.md)：scheduler
+  eligibility、spend 和定时续跑。
+- [Dashboard](apps/presentation/dashboard/README.md)与
+  [Status Data Contract](docs/status-data-contract.md)：面向操作者的状态与投影契约。
 - [Release Readiness](docs/product/release-readiness.md)：安装升级、兼容性 gate、
   release note 和稳定表面。
-- [Dashboard](apps/presentation/dashboard/README.md)与
-  [Status Data Contract](docs/status-data-contract.md)。
 
 ### 理解控制面
 
 - [Architecture](docs/architecture.md)：lifetime-goal invariant 与 kernel。
 - [State Interaction Model](docs/state-interaction-model.md)：actor、store、
   interaction contract 与 writeback。
-- [Interaction Pattern Catalog](docs/concepts/interaction-pattern-catalog.md)：可复用
-  routing、gate、evidence、projection 与 planning pattern。
-- [Loop Engineering 原则与陷阱（中文）](docs/product/foundations/loop-engineering-principles-and-pitfalls.zh.md)
-  及[英文版](docs/product/foundations/loop-engineering-principles-and-pitfalls.md)。
-- [控制面开发者 9 讲](docs/development/control-plane-course/README.md)。
+- [Concepts](docs/concepts/README.md)：可复用的 routing、gate、evidence、
+  projection 与 planning pattern。
+- [Product Foundations](docs/product/foundations/README.md)：Loop Engineering
+  原则、project-level reward 和 reward-style replanning。
 - [Product Vision](docs/product/vision.md)：更广义的 Loop Agent 产品方向。
 
 ### 集成与扩展
 
 - [Integration Guide](docs/integration.md)
 - [Custom Agent Runner 中文指南](docs/guides/custom-agent-runner-integration.zh-CN.md)
-- [Worker Bridge Install Contract](docs/integrations/worker-bridge-install-contract.md)
+- [Integrations](docs/integrations/README.md)：runtime、host、协作和外部系统 adapter，
+  包括 worker bridge 与 Lark。
 - [Extensions and Capabilities](docs/reference/extensions.md)
-- [Codex App Host Command Registry](docs/reference/protocols/codex-app-host-command-registry-v0.md)
-- [Heartbeat Automation Prompt](docs/heartbeat-automation-prompt.md)
-- [Lark Kanban Adapter](docs/integrations/lark-kanban-control-plane-adapter.md)
-- [Reward Memory 中文架构](docs/reference/protocols/reward-memory-architecture-v0.zh-CN.md)
 
-### 验证与治理
+### 构建与评审 LoopX
 
-- [Quota Allocation](docs/quota-allocation.md)
-- [Public/Private Boundary](docs/public-private-boundary.md)
-- [Benchmark Developer Workflow](docs/development/benchmark-developer-workflow.md)
-- [Project-Level Reward Model](docs/product/foundations/project-level-reward-model.md)
+- [Developer Guide](docs/development/README.md)：贡献者工作流、benchmark 开发、
+  文档布局和质量 gate。
+- [Reference and Protocols](docs/reference/README.md)：稳定契约和版本化实现协议，
+  包括 host command 与 reward memory architecture。
+- [控制面开发者 9 讲](docs/development/control-plane-course/README.md)。
+- [Testing and Quality](docs/development/testing-and-quality.md)：分层验证与风险检查。
+- [Public/Private Boundary](docs/public-private-boundary.md)：安全的 fixture、示例、
+  evidence 与发布边界。
+
+### 查看结果与证据
+
+- [Showcase Catalog](docs/showcases/README.md)：public-safe 案例和 evidence label。
+- [Research and Evidence](docs/research/README.md)：benchmark 调查和有来源的结论。
+- [Update Notes](docs/update-notes/README.md)：公开安全的进展记录。
+
+### 项目与社区
+
 - [Project Governance](GOVERNANCE.md)
+- [Contributing](CONTRIBUTING.md)与[Contributor Tasks](CONTRIBUTOR_TASKS.md)
 - [Authors and Contributors](AUTHORS.md)
 - [Project History](docs/project/history.md)
 - [Name and Marks](TRADEMARKS.md)
