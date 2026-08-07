@@ -605,6 +605,76 @@ def assert_bare_successor_claim_does_not_clear_replan() -> None:
         ), guard
 
 
+def assert_no_followup_replan_ack_is_todo_local() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
+        registry_path, runtime = write_fixture(
+            Path(tmp),
+            include_replan_signals=False,
+            periodic_run_count=20,
+        )
+        state_path = (
+            registry_path.parent.parent
+            / ".codex"
+            / "goals"
+            / GOAL_ID
+            / "ACTIVE_GOAL_STATE.md"
+        )
+        state_text = state_path.read_text(encoding="utf-8")
+        old_agent_todos = (
+            "## Agent Todo\n\n"
+            "- [x] [P1] Completed autonomous planning-trigger work with a replan obligation.\n"
+            "- [ ] [P1] Advance the next bounded project hardening slice.\n"
+        )
+        local_closure_with_monitor = (
+            "## Agent Todo\n\n"
+            "- [x] [P1] Deduplicate an already handled exact-head review.\n"
+            "  <!-- loopx:todo todo_id=todo_dedup123456 status=done "
+            "task_class=advancement_task claimed_by=quality-agent "
+            "no_followup=true evidence=verified -->\n"
+            "- [ ] [P1] Continue the long-running review queue monitor.\n"
+            "  <!-- loopx:todo todo_id=todo_monitor1234 status=open "
+            "task_class=continuous_monitor claimed_by=quality-agent "
+            "target_key=review-queue cadence=30m "
+            "next_due_at=2026-08-01T13:00:00Z "
+            "expires_at=2099-08-02T13:00:00Z -->\n"
+        )
+        assert old_agent_todos in state_text, state_text
+        state_path.write_text(
+            state_text.replace(old_agent_todos, local_closure_with_monitor),
+            encoding="utf-8",
+        )
+
+        refresh = run_cli(
+            "refresh-state",
+            "--goal-id",
+            GOAL_ID,
+            "--classification",
+            "exact_head_review_deduplicated",
+            "--agent-id",
+            "quality-agent",
+            "--autonomous-replan-recorded",
+            "--repair-delta-kind",
+            "no_followup",
+            "--recommended-action",
+            "Wait for a material review-queue transition before creating another review todo.",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+
+        assert refresh["classification"] == "exact_head_review_deduplicated", refresh
+        assert refresh["autonomous_replan_recorded"] is True, refresh
+        delta = refresh["repair_delta_contract"]
+        assert delta["delta_present"] is True, delta
+        assert delta["delta_kinds"] == ["no_followup"], delta
+        assert delta["auto_evidence"] == [
+            {
+                "kind": "no_followup",
+                "source": "active_state_agent_todos",
+                "todo_ids": ["todo_dedup123456"],
+            }
+        ], delta
+
+
 def assert_watch_replan_ack_requires_bounded_state_evidence() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
         registry_path, runtime = write_fixture(
@@ -701,6 +771,7 @@ def main() -> int:
     assert_refresh_state_structured_ack_clears_replan()
     assert_replan_ack_without_delta_is_noop()
     assert_bare_successor_claim_does_not_clear_replan()
+    assert_no_followup_replan_ack_is_todo_local()
     assert_watch_replan_ack_requires_bounded_state_evidence()
     assert_no_replan_obligation_without_signal()
     print("autonomous-replan-obligation-smoke ok")

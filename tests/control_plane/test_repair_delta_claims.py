@@ -259,7 +259,7 @@ def test_successor_claim_requires_real_scoped_transition() -> None:
     assert rejected == []
 
 
-def test_no_followup_claim_requires_validated_terminal_closure() -> None:
+def test_no_followup_claim_requires_complete_source_and_local_closure() -> None:
     item = {
         "todo_id": "todo_source123456",
         "status": "done",
@@ -273,53 +273,170 @@ def test_no_followup_claim_requires_validated_terminal_closure() -> None:
     assert accepted == []
     assert evidence == []
     assert rejected[0]["reason"] == (
-        "no validated terminal todo no-follow-up closure exists"
+        "no scoped completed todo has a validated local no-follow-up closure"
     )
 
+    monitor = {
+        "todo_id": "todo_monitor123456",
+        "status": "open",
+        "done": False,
+        "task_class": "continuous_monitor",
+        "claimed_by": "quality-agent",
+    }
     summary = {
         "schema_version": "todo_summary_v0",
         "source_section": "Agent Todo",
-        "total_count": 1,
-        "open_count": 0,
+        "total_count": 2,
+        "open_count": 1,
         "done_count": 1,
         "deferred_count": 0,
-        "items": [item],
-        "monitor_open_items": [],
+        "items": [item, monitor],
+        "monitor_open_items": [monitor],
         "deferred_items": [],
         "deferred_resume_candidates": [],
-        "monitor_due_count": 0,
+        "monitor_due_count": 1,
         "monitor_schedule_gap_count": 0,
         "source_proof": {
             "schema_version": "todo_source_proof_v0",
             "role": "agent",
-            "item_count": 1,
+            "item_count": 2,
             "derived": True,
-        },
-        "terminal_closure_proof": {
-            "schema_version": "todo_terminal_closure_proof_v0",
-            "role": "agent",
-            "source_section": "Agent Todo",
-            "item_count": 1,
-            "all_todos_done": True,
-            "monitor_open_count": 0,
-            "successor_gap_count": 0,
-            "route_replan_count": 0,
-            "no_followup_count": 1,
-            "derived": True,
-        },
-        "closure_intent": {
-            "schema_version": "todo_closure_intent_v0",
-            "kind": "no_followup",
-            "derived": True,
-            "count": 1,
         },
     }
     accepted, evidence, rejected = _validate(
         "no_followup",
-        items=(item,),
+        items=(item, monitor),
         summary=summary,
     )
 
     assert accepted == ["no_followup"]
     assert evidence[0]["todo_ids"] == [item["todo_id"]]
     assert rejected == []
+
+
+def test_no_followup_claim_rejects_other_agent_or_replan_required_todo() -> None:
+    items = (
+        {
+            "todo_id": "todo_otheragent12",
+            "status": "done",
+            "done": True,
+            "task_class": "advancement_task",
+            "claimed_by": "other-agent",
+            "no_followup": True,
+        },
+        {
+            "todo_id": "todo_replan123456",
+            "status": "done",
+            "done": True,
+            "task_class": "advancement_task",
+            "claimed_by": "quality-agent",
+            "no_followup": True,
+            "route_continuation_replan_required": True,
+        },
+    )
+    summary = {
+        "schema_version": "todo_summary_v0",
+        "source_section": "Agent Todo",
+        "total_count": 2,
+        "open_count": 0,
+        "done_count": 2,
+        "deferred_count": 0,
+        "items": list(items),
+        "source_proof": {
+            "schema_version": "todo_source_proof_v0",
+            "role": "agent",
+            "item_count": 2,
+            "derived": True,
+        },
+    }
+
+    accepted, evidence, rejected = _validate(
+        "no_followup",
+        items=items,
+        summary=summary,
+    )
+
+    assert accepted == []
+    assert evidence == []
+    assert rejected[0]["reason"] == (
+        "no scoped completed todo has a validated local no-follow-up closure"
+    )
+
+
+def test_no_followup_claim_uses_latest_scoped_local_closure() -> None:
+    older = {
+        "todo_id": "todo_older1234567",
+        "status": "done",
+        "done": True,
+        "task_class": "advancement_task",
+        "claimed_by": "quality-agent",
+        "no_followup": True,
+        "completed_at": "2026-07-01T00:00:00Z",
+    }
+    latest = {
+        "todo_id": "todo_latest123456",
+        "status": "done",
+        "done": True,
+        "task_class": "advancement_task",
+        "claimed_by": "quality-agent",
+        "no_followup": True,
+        "completed_at": "2026-08-01T00:00:00Z",
+    }
+    summary = {
+        "schema_version": "todo_summary_v0",
+        "source_section": "Agent Todo",
+        "total_count": 2,
+        "open_count": 0,
+        "done_count": 2,
+        "deferred_count": 0,
+        "items": [older, latest],
+    }
+
+    accepted, evidence, rejected = _validate(
+        "no_followup",
+        items=(older, latest),
+        summary=summary,
+    )
+
+    assert accepted == ["no_followup"]
+    assert evidence[0]["todo_ids"] == [latest["todo_id"]]
+    assert rejected == []
+
+
+def test_no_followup_claim_rejects_stale_older_local_closure() -> None:
+    older_no_followup = {
+        "todo_id": "todo_older1234567",
+        "status": "done",
+        "done": True,
+        "task_class": "advancement_task",
+        "claimed_by": "quality-agent",
+        "no_followup": True,
+        "completed_at": "2026-07-01T00:00:00Z",
+    }
+    latest_without_closure = {
+        "todo_id": "todo_latest123456",
+        "status": "done",
+        "done": True,
+        "task_class": "advancement_task",
+        "claimed_by": "quality-agent",
+        "completed_at": "2026-08-01T00:00:00Z",
+    }
+    summary = {
+        "schema_version": "todo_summary_v0",
+        "source_section": "Agent Todo",
+        "total_count": 2,
+        "open_count": 0,
+        "done_count": 2,
+        "deferred_count": 0,
+        "items": [older_no_followup, latest_without_closure],
+    }
+
+    accepted, evidence, rejected = _validate(
+        "no_followup",
+        items=(older_no_followup, latest_without_closure),
+        summary=summary,
+    )
+
+    assert accepted == []
+    assert evidence == []
+    assert rejected[0]["kind"] == "no_followup"

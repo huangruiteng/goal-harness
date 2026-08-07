@@ -4,7 +4,7 @@
 
 <img src="docs/assets/loopx-social-preview.png" alt="LoopX loop engineering social preview banner" width="560">
 
-**The local control plane for long-running AI agent work.**
+**The open, provider-neutral, stateful control plane for long-running agents.**
 
 <sub>Keep objectives, gates, todos, evidence, quota, and handoffs stable while Codex, Claude Code, Cursor, or your own runtime executes bounded turns.</sub>
 
@@ -20,10 +20,10 @@
 
 ---
 
-A lightweight state kernel and agent-agnostic local control plane for loop
-engineering, LoopX keeps long-running work reviewable, restartable, and easier
-to hand off across turns, tools, and agents. It does not replace your agent
-runtime.
+Open and provider-neutral, LoopX is a lightweight state kernel and local-first
+control plane for loop engineering. It keeps long-running work reviewable,
+restartable, and easier to hand off across turns, tools, and agents without
+replacing the runtime that performs the work.
 
 **Loop engineering for long-running AI agents and peer agent teams.**
 
@@ -56,6 +56,10 @@ Codex / Claude Code / Cursor / shell agent executes one turn
    ▼
 write evidence + handoff + next todo ─▶ quota decides the next tick
 ```
+
+Agent runtimes execute the work. LoopX governs the state that lets engineering,
+research, discovery, and operations loops continue across runs. It is not
+another agent framework or a provider-specific orchestration runtime.
 
 ![LoopX control-plane board](docs/assets/control-plane-board.svg)
 
@@ -131,7 +135,7 @@ experiment independently.
 
 ### Auto Research
 
-**Redacted owner-run showcase: proposer, executor, and evaluator/promoter agents
+**Reproducible public KNN demo: proposer, executor, and evaluator/promoter agents
 iterate in parallel while todo, quota, evidence, and targeted wake remain
 visible.**
 
@@ -139,9 +143,12 @@ visible.**
   <img src="docs/assets/auto-research-multi-agent-showcase.png" alt="Auto Research multi-agent workspace with proposer, executor, evaluator/promoter, todo, quota, evidence, and targeted wake activity">
 </a>
 
-This redacted screenshot demonstrates the control-plane shape of one owner-run
-workflow. It does not establish a production research result, company or
-employer endorsement, or an independently reproducible evaluation.
+This screenshot comes from LoopX's built-in exact-KNN demo. The public task,
+editable and protected files, deterministic CPU evaluator, and dev/held-out
+commands all live in this repository. Follow the
+[showcase walkthrough](docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md)
+or the [command path](docs/guides/auto-research-command-path.md) to reproduce the
+workflow; it is a demo result, not a production research claim.
 
 ### Used In Real Projects
 

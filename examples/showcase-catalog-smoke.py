@@ -266,7 +266,7 @@ def main() -> int:
         assert phrase in feedback_loop, phrase
     for phrase in (
         "Loop engineering for long-running AI agents and peer agent teams.",
-        "A lightweight state kernel and agent-agnostic local control plane for",
+        "The open, provider-neutral, stateful control plane for long-running agents.",
         "https://huangruiteng.github.io/loopx/",
         "## Advanced Paths",
         "docs/assets/long-running-loop-openviking-trajectory.png",

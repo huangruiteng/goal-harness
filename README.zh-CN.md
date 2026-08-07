@@ -4,7 +4,7 @@
 
 <img src="docs/assets/loopx-social-preview.png" alt="LoopX Loop Engineering 展示图" width="560">
 
-**面向长程 AI Agent 工作的本地控制面。**
+**面向长程 Agent 的开放、有状态、Provider-neutral 控制面。**
 
 <sub>Codex、Claude Code、Cursor 或自有 runtime 负责一次次有界执行；LoopX 让目标、gate、todo、证据、quota 和交接跨轮次保持稳定。</sub>
 
@@ -20,9 +20,9 @@
 
 ---
 
-LoopX 是一个轻量 state kernel，也是 agent-agnostic 的本地 Loop Engineering
-控制面。它不替代 agent runtime，而是让跨轮次、跨工具、跨 agent 的工作可审阅、
-可恢复、可接力。
+LoopX 是开放且 Provider-neutral 的轻量 state kernel，也是 local-first
+的 Loop Engineering 控制面。它不替代真正执行任务的 agent runtime，而是让
+跨轮次、跨工具、跨 agent 的工作可审阅、可恢复、可接力。
 
 > 让 Loop 持续向前，让关键判断留在人手里。
 
@@ -50,6 +50,10 @@ Codex / Claude Code / Cursor / shell agent 执行一轮
    ▼
 写回证据 + handoff + next todo ─▶ quota 决定下一次 tick
 ```
+
+Agent runtime 负责执行，LoopX 负责治理跨运行延续的控制状态，让工程、
+研究、discovery 和运营 Loop 能持续推进。它不是又一个 agent framework，也不是
+绑定某一 Provider 的编排 runtime。
 
 ![LoopX control-plane board](docs/assets/control-plane-board.svg)
 
@@ -116,15 +120,18 @@ owner-run showcase，不代表连续算力执行、独立复现、生产结果�
 
 ### Auto Research
 
-**经过脱敏的 owner-run showcase：Proposer、executor、evaluator/promoter
-并行迭代，todo、quota、证据与 targeted wake 同屏可见。**
+**可复现的公开 KNN demo：Proposer、executor、evaluator/promoter 并行迭代，
+todo、quota、证据与 targeted wake 同屏可见。**
 
 <a href="docs/assets/auto-research-multi-agent-showcase.png">
   <img src="docs/assets/auto-research-multi-agent-showcase.png" alt="Auto Research 多 Agent 工作区：proposer、executor、evaluator/promoter、todo、quota、证据与 targeted wake 同屏推进">
 </a>
 
-这张脱敏截图只用于说明一次 owner-run 工作流的控制面形态，不构成生产研究结果、
-公司或雇主背书，也不是可供第三方独立复现的评测证据。
+这张截图来自 LoopX 内置的 exact-KNN demo。公开 task、可编辑与受保护文件、
+deterministic CPU evaluator、dev / held-out 命令均在仓库内。可按
+[showcase walkthrough](docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md)
+或 [command path](docs/guides/auto-research-command-path.md)复现工作流；它是 demo
+结果，不是生产研究结论。
 
 ### 真实项目中的使用
 

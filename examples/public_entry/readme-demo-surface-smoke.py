@@ -25,14 +25,21 @@ def main() -> int:
     cross_runtime_index = read("docs/product/use-cases/cross-runtime/README.md")
     getting_started = read("docs/guides/getting-started.md")
     compact_readme = compact(readme)
+    compact_readme_zh = "".join(readme_zh.split())
     compact_demo = compact(demo)
+    auto_research = readme.split("### Auto Research", 1)[1].split(
+        "### Used In Real Projects", 1
+    )[0]
+    auto_research_zh = readme_zh.split("### Auto Research", 1)[1].split(
+        "### 真实项目中的使用", 1
+    )[0]
 
     for required in [
         '<div align="center">',
         "docs/assets/loopx-social-preview.png",
         "LoopX loop engineering social preview banner",
         "Loop engineering for long-running AI agents and peer agent teams.",
-        "A lightweight state kernel and agent-agnostic local control plane for",
+        "The open, provider-neutral, stateful control plane for long-running agents.",
         "Keep objectives, gates, todos, evidence, quota, and handoffs stable",
         "## Why LoopX",
         "objective / issue / project",
@@ -89,7 +96,7 @@ def main() -> int:
 
     for required in [
         "company or employer endorsement",
-        "independently reproducible evaluation",
+        "independent reproduction",
     ]:
         assert required in compact_readme, required
     for required in [
@@ -97,7 +104,23 @@ def main() -> int:
         "公司或雇主背书",
         "第三方独立复现",
     ]:
-        assert required in compact(readme_zh), required
+        assert required.replace(" ", "") in compact_readme_zh, required
+
+    for required in [
+        "Reproducible public KNN demo",
+        "deterministic CPU evaluator",
+        "docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md",
+    ]:
+        assert required in auto_research, required
+    assert "redacted" not in auto_research.lower()
+
+    for required in [
+        "可复现的公开 KNN demo",
+        "deterministic CPU evaluator",
+        "docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md",
+    ]:
+        assert required in auto_research_zh, required
+    assert "脱敏" not in auto_research_zh
 
     for required in [
         "`$loopx <complex task>`",
