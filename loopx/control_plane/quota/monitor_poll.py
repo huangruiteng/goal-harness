@@ -24,6 +24,7 @@ from ..scheduler.monitor_poll_policy import (
 )
 from ..scheduler.monitor_todo import monitor_todo_is_due
 from ..scheduler.monitor_poll_writeback import (
+    require_monitor_successor_route,
     resolve_monitor_todo_item,
     write_monitor_poll_todo_state,
 )
@@ -296,6 +297,25 @@ def _load_monitor_poll_artifact(index_record: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _monitor_successor_receipts(
+    todo_writeback: Any,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if not isinstance(todo_writeback, dict):
+        return [], []
+    raw_receipts = todo_writeback.get("successor_receipts")
+    receipts = (
+        [dict(receipt) for receipt in raw_receipts if isinstance(receipt, dict)]
+        if isinstance(raw_receipts, list)
+        else []
+    )
+    successor_ids = [
+        str(receipt["todo_id"])
+        for receipt in receipts
+        if receipt.get("todo_id")
+    ]
+    return receipts, successor_ids
+
+
 def _allows_registry_due_monitor_poll(
     before: dict[str, Any],
     *,
@@ -418,6 +438,11 @@ def record_quota_monitor_poll_for_decision(
     cadence: str | None = None,
     next_due_at: str | None = None,
     next_agent_todo: str | None = None,
+    next_action_kind: str | None = None,
+    next_task_repository: str | None = None,
+    next_required_capabilities: list[str] | None = None,
+    next_continuation_policy: str | None = None,
+    next_target_key: str | None = None,
     next_user_todo: str | None = None,
     next_user_task_class: str | None = None,
     next_claimed_by: str | None = None,
@@ -456,6 +481,17 @@ def record_quota_monitor_poll_for_decision(
         return failure("`quota monitor-poll --material-change` requires --todo-id or --target-key")
     if (next_agent_todo or next_user_todo) and not material_change:
         return failure("`--next-agent-todo` and `--next-user-todo` require --material-change")
+    try:
+        require_monitor_successor_route(
+            next_agent_todo=next_agent_todo,
+            next_action_kind=next_action_kind,
+            next_task_repository=next_task_repository,
+            next_required_capabilities=next_required_capabilities,
+            next_continuation_policy=next_continuation_policy,
+            next_target_key=next_target_key,
+        )
+    except ValueError as exc:
+        return failure(str(exc))
     try:
         effective_next_user_task_class = resolve_next_user_task_class(
             next_user_todo,
@@ -501,6 +537,9 @@ def record_quota_monitor_poll_for_decision(
                     if isinstance(artifact.get("monitor_event"), dict)
                     else {}
                 )
+                replay_receipts, replay_successor_ids = _monitor_successor_receipts(
+                    monitor_event.get("todo_writeback")
+                )
                 return {
                     "ok": True,
                     "mode": "monitor-poll",
@@ -519,6 +558,8 @@ def record_quota_monitor_poll_for_decision(
                     "turn_instance_id": normalized_turn_instance_id,
                     "monitor_event": monitor_event,
                     "todo_writeback": None,
+                    "successor_todo_ids": replay_successor_ids,
+                    "successor_receipts": replay_receipts,
                     "health_check": existing.get("health_check"),
                     "delivery_outcome": existing.get("delivery_outcome"),
                     "json_path": existing.get("json_path"),
@@ -553,6 +594,11 @@ def record_quota_monitor_poll_for_decision(
                 cadence=cadence,
                 next_due_at=next_due_at,
                 next_agent_todo=next_agent_todo,
+                next_action_kind=next_action_kind,
+                next_task_repository=next_task_repository,
+                next_required_capabilities=next_required_capabilities,
+                next_continuation_policy=next_continuation_policy,
+                next_target_key=next_target_key,
                 next_user_todo=next_user_todo,
                 next_user_task_class=effective_next_user_task_class,
                 next_claimed_by=next_claimed_by,
@@ -588,24 +634,32 @@ def record_quota_monitor_poll_for_decision(
     if normalized_todo_id or safe_target_key:
         if registry_path is None:
             raise ValueError("monitor todo writeback requires registry_path")
-        todo_writeback = write_monitor_poll_todo_state(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            generated_at=generated_at,
-            execute=execute,
-            todo_id=normalized_todo_id,
-            target_key=safe_target_key,
-            result_hash=result_hash,
-            material_change=material_change,
-            cadence=cadence,
-            next_due_at=next_due_at,
-            reason_summary=reason_summary,
-            next_agent_todo=next_agent_todo,
-            next_user_todo=next_user_todo,
-            next_user_task_class=effective_next_user_task_class,
-            next_claimed_by=next_claimed_by,
-            agent_id=agent_id,
-        )
+        try:
+            todo_writeback = write_monitor_poll_todo_state(
+                registry_path=registry_path,
+                goal_id=goal_id,
+                generated_at=generated_at,
+                execute=execute,
+                todo_id=normalized_todo_id,
+                target_key=safe_target_key,
+                result_hash=result_hash,
+                material_change=material_change,
+                cadence=cadence,
+                next_due_at=next_due_at,
+                reason_summary=reason_summary,
+                next_agent_todo=next_agent_todo,
+                next_action_kind=next_action_kind,
+                next_task_repository=next_task_repository,
+                next_required_capabilities=next_required_capabilities,
+                next_continuation_policy=next_continuation_policy,
+                next_target_key=next_target_key,
+                next_user_todo=next_user_todo,
+                next_user_task_class=effective_next_user_task_class,
+                next_claimed_by=next_claimed_by,
+                agent_id=agent_id,
+            )
+        except ValueError as exc:
+            return failure(str(exc))
     record = build_quota_monitor_poll_event(
         before,
         source=source,
@@ -635,6 +689,7 @@ def record_quota_monitor_poll_for_decision(
                 "last_checked_at",
                 "next_due_at",
                 "cadence",
+                "successor_receipts",
             }
         }
     stem = run_file_stem(generated_at)
@@ -661,6 +716,9 @@ def record_quota_monitor_poll_for_decision(
         index_record["target_key"] = record["monitor_event"]["target_key"]
     if record["monitor_event"].get("material_change"):
         index_record["material_change"] = record["monitor_event"]["material_change"]
+    successor_receipts, successor_todo_ids = _monitor_successor_receipts(todo_writeback)
+    if successor_todo_ids:
+        index_record["successor_todo_ids"] = successor_todo_ids
 
     after_status = deepcopy(status_payload)
     status_reload_warning = None
@@ -703,6 +761,8 @@ def record_quota_monitor_poll_for_decision(
         "material_change": record["monitor_event"].get("material_change"),
         "monitor_event": record["monitor_event"],
         "todo_writeback": todo_writeback,
+        "successor_todo_ids": successor_todo_ids,
+        "successor_receipts": successor_receipts,
         "health_check": record["health_check"],
         "delivery_outcome": record["delivery_outcome"],
         "json_path": str(json_path),
