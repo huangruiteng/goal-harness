@@ -108,6 +108,7 @@ def test_blocked_visible_todo_is_not_counted_as_runnable(monkeypatch, tmp_path) 
 
 def test_global_gates_uses_formal_exact_todo_link(monkeypatch, tmp_path) -> None:
     status_payload = {
+        "ok": True,
         "attention_queue": {"items": [{"goal_id": "linked-goal", "waiting_on": "user"}]}
     }
     quota_payload = {
@@ -162,6 +163,7 @@ def test_global_gates_uses_formal_exact_todo_link(monkeypatch, tmp_path) -> None
 
 def test_global_gates_action_required_owns_shared_route(monkeypatch, tmp_path) -> None:
     status_payload = {
+        "ok": True,
         "attention_queue": {
             "items": [
                 {
@@ -203,6 +205,7 @@ def test_global_gates_action_required_owns_shared_route(monkeypatch, tmp_path) -
 
 def test_global_gates_does_not_treat_plain_user_todo_as_gate(monkeypatch, tmp_path) -> None:
     status_payload = {
+        "ok": True,
         "attention_queue": {"items": [{"goal_id": "plain-user-todo", "waiting_on": "agent"}]}
     }
     quota_payload = {
@@ -236,6 +239,7 @@ def test_global_gates_does_not_treat_plain_user_todo_as_gate(monkeypatch, tmp_pa
 def test_global_gates_uses_decision_scope_then_goal_fallback(monkeypatch, tmp_path) -> None:
     scope = {"kind": "production", "granularity": "project", "scope_key": "deploy"}
     status_payload = {
+        "ok": True,
         "attention_queue": {
             "items": [
                 {"goal_id": "scoped-goal", "waiting_on": "user"},
@@ -301,6 +305,7 @@ def test_global_gates_uses_decision_scope_then_goal_fallback(monkeypatch, tmp_pa
 
 def test_global_gates_preserves_shared_route_with_supported_owner(monkeypatch, tmp_path) -> None:
     status_payload = {
+        "ok": True,
         "attention_queue": {
             "items": [
                 {
@@ -327,6 +332,7 @@ def test_global_gates_preserves_shared_route_with_supported_owner(monkeypatch, t
 
 def test_global_gates_filters_every_group_to_requested_agent(monkeypatch, tmp_path) -> None:
     status_payload = {
+        "ok": True,
         "attention_queue": {
             "items": [
                 {
@@ -369,6 +375,7 @@ def test_global_gates_scans_until_gate_limit_after_normalization(monkeypatch, tm
         {"goal_id": f"ordinary-{index}", "waiting_on": "agent"} for index in range(40)
     ]
     status_payload = {
+        "ok": True,
         "attention_queue": {
             "items": [
                 *non_gate_items,
@@ -402,7 +409,7 @@ def test_global_gates_empty_payload_has_focused_public_contract(monkeypatch, tmp
 
     def collect_status(**_kwargs):
         calls["status"] += 1
-        return {"attention_queue": {"items": []}}
+        return {"ok": True, "attention_queue": {"items": []}}
 
     monkeypatch.setattr(summary_all, "collect_status", collect_status)
 
@@ -424,9 +431,27 @@ def test_global_gates_empty_payload_has_focused_public_contract(monkeypatch, tmp
     assert payload["boundary"] == summary_all.BOUNDARY
 
 
+def test_global_gates_fails_closed_when_status_source_is_unhealthy(
+    monkeypatch, tmp_path
+) -> None:
+    status_payload = {"ok": False, "attention_queue": {"items": []}}
+    monkeypatch.setattr(summary_all, "collect_status", lambda **_: status_payload)
+
+    payload = build_global_gates(tmp_path)
+
+    assert payload["ok"] is False
+    assert payload["error"] == "Global status source unavailable."
+    assert payload["request"]["command"] == "/loopx-global-gates"
+    assert "summary" not in payload
+    assert "gates" not in payload
+    assert "lanes" not in payload
+    assert payload["boundary"] == summary_all.BOUNDARY
+
+
 def test_global_gates_applies_limit_in_queue_order(monkeypatch, tmp_path) -> None:
     goal_ids = ["first-gate", "second-gate", "third-gate"]
     status_payload = {
+        "ok": True,
         "attention_queue": {
             "items": [
                 {"goal_id": goal_id, "waiting_on": "controller"} for goal_id in goal_ids

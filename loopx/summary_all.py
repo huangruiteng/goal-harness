@@ -379,6 +379,8 @@ def build_global_gates(
         scan_roots=scan_roots,
         limit=normalized_limit,
     )
+    if status_payload.get("ok") is not True:
+        return build_global_gates_error("Global status source unavailable.")
     state = _collect_global_gate_state(
         status_payload,
         agent_id=agent_id,

@@ -197,6 +197,47 @@ def assert_error_envelope(root: Path, *, runtime: Path) -> None:
     assert_public_safe(payload)
 
 
+def assert_unhealthy_status_envelope(
+    root: Path, *, registry: Path, runtime: Path
+) -> None:
+    unhealthy_registry = root / "unhealthy-registry.json"
+    unhealthy_payload = json.loads(registry.read_text(encoding="utf-8"))
+    del unhealthy_payload["goals"][0]["domain"]
+    unhealthy_registry.write_text(
+        json.dumps(unhealthy_payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    status_proc = run_cli(
+        registry=unhealthy_registry,
+        runtime=runtime,
+        command="status",
+        output_format="json",
+        check=False,
+    )
+    status_payload = json.loads(status_proc.stdout)
+    assert status_payload["ok"] is False, status_proc
+    assert "attention_queue" in status_payload, status_payload
+    assert "error" not in status_payload, status_payload
+
+    gates_proc = run_cli(
+        registry=unhealthy_registry,
+        runtime=runtime,
+        command="global-gates",
+        output_format="json",
+        check=False,
+    )
+    assert gates_proc.returncode != 0, gates_proc
+    payload = json.loads(gates_proc.stdout)
+    assert payload["ok"] is False, payload
+    assert payload["error"] == "Global status source unavailable.", payload
+    assert "summary" not in payload, payload
+    assert "gates" not in payload, payload
+    assert "lanes" not in payload, payload
+    assert str(root) not in gates_proc.stdout, gates_proc.stdout
+    assert_public_safe(payload)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-global-manager-smoke-") as tmp:
         root = Path(tmp)
@@ -231,6 +272,11 @@ def main() -> int:
         assert_gates_markdown(markdown_proc.stdout, private_root=root)
         assert snapshot_files(files) == before
         assert_error_envelope(root, runtime=runtime)
+        assert_unhealthy_status_envelope(
+            root,
+            registry=registry,
+            runtime=runtime,
+        )
 
     print("global-manager-command-cli-smoke ok")
     return 0
