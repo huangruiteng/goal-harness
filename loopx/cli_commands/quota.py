@@ -34,7 +34,6 @@ from ..control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
 )
-from ..control_plane.todos.contract import TODO_CONTINUATION_POLICY_VALUES
 from ..file_lock import lock_timeout_error_fields
 from ..presentation.renderers.quota_event_markdown import (
     render_quota_monitor_poll_markdown,
@@ -66,6 +65,7 @@ from .quota_request import (
     QUOTA_MONITOR_POLL_DETAIL_SECTIONS,
     QUOTA_SHOULD_RUN_DETAIL_SECTIONS,
     quota_detail_sections_from_args,
+    register_quota_monitor_poll_request_arguments,
     validate_quota_command_request,
 )
 
@@ -292,59 +292,7 @@ def register_quota_command(subparsers: argparse._SubParsersAction) -> None:
     )
     quota_parser.add_argument("--void-generated-at", help="generated_at timestamp of the quota_slot_spent run to void.")
     quota_parser.add_argument("--reason-summary", help="Public-safe reason for `quota void-slot`.")
-    quota_parser.add_argument("--todo-id", help="Monitor todo id for `quota monitor-poll` metadata writeback.")
-    quota_parser.add_argument("--target-key", help="Stable monitor target key for `quota monitor-poll` metadata writeback.")
-    quota_parser.add_argument("--result-hash", help="Public-safe result hash observed by `quota monitor-poll`.")
-    quota_parser.add_argument("--material-change", action="store_true", help="Mark a monitor poll as a material transition instead of unchanged evidence.")
-    quota_parser.add_argument("--cadence", help="Monitor cadence used to compute the next due timestamp, e.g. 30m, 2h, or 1d.")
-    quota_parser.add_argument("--next-due-at", help="Explicit ISO timestamp for the next monitor poll.")
-    quota_parser.add_argument("--next-agent-todo", help="Agent follow-up todo to add when `--material-change` is set.")
-    quota_parser.add_argument(
-        "--next-action-kind",
-        help="Explicit action kind for a material monitor's --next-agent-todo successor.",
-    )
-    quota_parser.add_argument(
-        "--next-task-repository",
-        help=(
-            "Credential-free Git repository identity for a material monitor's "
-            "--next-agent-todo successor."
-        ),
-    )
-    quota_parser.add_argument(
-        "--next-required-capability",
-        dest="next_required_capabilities",
-        action="append",
-        help=(
-            "Execution capability required by a material monitor's --next-agent-todo "
-            "successor. Repeat for multiple capabilities."
-        ),
-    )
-    quota_parser.add_argument(
-        "--next-continuation-policy",
-        choices=sorted(TODO_CONTINUATION_POLICY_VALUES),
-        help=(
-            "Continuation policy for a material monitor's --next-agent-todo successor. "
-            "Defaults to independent_handoff."
-        ),
-    )
-    quota_parser.add_argument(
-        "--next-target-key",
-        help=(
-            "Stable public-safe target key for a material monitor's --next-agent-todo "
-            "successor. Defaults to a deterministic monitor-transition key."
-        ),
-    )
-    quota_parser.add_argument("--next-user-todo", help="User follow-up todo to add when `--material-change` is set.")
-    quota_parser.add_argument(
-        "--next-user-task-class",
-        choices=["user_gate", "user_action"],
-        help=(
-            "Required with monitor-poll `--next-user-todo`: user_gate for a "
-            "blocking owner decision or user_action for a visible reminder "
-            "that must not block the bound agent lane."
-        ),
-    )
-    quota_parser.add_argument("--next-claimed-by", help="Registered agent id to claim the `--next-agent-todo` follow-up.")
+    register_quota_monitor_poll_request_arguments(quota_parser)
     quota_parser.add_argument("--surface", default="codex_app", help="Scheduler surface for scheduler ACK/failure commands; defaults to codex_app.")
     quota_parser.add_argument("--state-key", default="scheduler_hint.codex_app.stateful_backoff", help="Scheduler state key for scheduler ACK/failure commands.")
     quota_parser.add_argument("--applied-rrule", help="RRULE successfully applied by the host before `quota scheduler-ack --execute`.")
