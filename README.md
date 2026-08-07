@@ -131,7 +131,7 @@ experiment independently.
 
 ### Auto Research
 
-**Redacted owner-run showcase: proposer, executor, and evaluator/promoter agents
+**Reproducible public KNN demo: proposer, executor, and evaluator/promoter agents
 iterate in parallel while todo, quota, evidence, and targeted wake remain
 visible.**
 
@@ -139,9 +139,12 @@ visible.**
   <img src="docs/assets/auto-research-multi-agent-showcase.png" alt="Auto Research multi-agent workspace with proposer, executor, evaluator/promoter, todo, quota, evidence, and targeted wake activity">
 </a>
 
-This redacted screenshot demonstrates the control-plane shape of one owner-run
-workflow. It does not establish a production research result, company or
-employer endorsement, or an independently reproducible evaluation.
+This screenshot comes from LoopX's built-in exact-KNN demo. The public task,
+editable and protected files, deterministic CPU evaluator, and dev/held-out
+commands all live in this repository. Follow the
+[showcase walkthrough](docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md)
+or the [command path](docs/guides/auto-research-command-path.md) to reproduce the
+workflow; it is a demo result, not a production research claim.
 
 ### Used In Real Projects
 

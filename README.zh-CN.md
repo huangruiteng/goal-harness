@@ -116,15 +116,18 @@ owner-run showcase，不代表连续算力执行、独立复现、生产结果�
 
 ### Auto Research
 
-**经过脱敏的 owner-run showcase：Proposer、executor、evaluator/promoter
-并行迭代，todo、quota、证据与 targeted wake 同屏可见。**
+**可复现的公开 KNN demo：Proposer、executor、evaluator/promoter 并行迭代，
+todo、quota、证据与 targeted wake 同屏可见。**
 
 <a href="docs/assets/auto-research-multi-agent-showcase.png">
   <img src="docs/assets/auto-research-multi-agent-showcase.png" alt="Auto Research 多 Agent 工作区：proposer、executor、evaluator/promoter、todo、quota、证据与 targeted wake 同屏推进">
 </a>
 
-这张脱敏截图只用于说明一次 owner-run 工作流的控制面形态，不构成生产研究结果、
-公司或雇主背书，也不是可供第三方独立复现的评测证据。
+这张截图来自 LoopX 内置的 exact-KNN demo。公开 task、可编辑与受保护文件、
+deterministic CPU evaluator、dev / held-out 命令均在仓库内。可按
+[showcase walkthrough](docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md)
+或 [command path](docs/guides/auto-research-command-path.md)复现工作流；它是 demo
+结果，不是生产研究结论。
 
 ### 真实项目中的使用
 
