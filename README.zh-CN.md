@@ -463,7 +463,10 @@ Loop 的 terminal acceptance、补足独立采用与 outcome evidence，并打�
 
 ## Star 趋势
 
-[![LoopX Star 趋势](https://star-history.dera.page/svg?repos=huangruiteng/loopx&type=date&legend=top-left)](https://star-history.dera.page/#huangruiteng/loopx&type=date&legend=top-left)
+<p align="center">
+  <a href="https://github.com/huangruiteng/loopx/stargazers"><img src="https://huangruiteng.github.io/loopx/site-assets/star-history.svg" alt="LoopX GitHub Star 历史趋势，来自已校验快照" width="900"></a><br>
+  <sub>由仓库授权的 workflow 每 6 小时基于 GitHub 官方 stargazer 时间戳生成；仅当拉取条数与 GitHub 当前 Star 总数一致时发布。GitHub 图片缓存可能延迟刷新。</sub>
+</p>
 
 ## License
 
