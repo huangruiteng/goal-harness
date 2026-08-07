@@ -19,7 +19,28 @@ CATALOG = SHOWCASE_DIR / "showcase-catalog.json"
 HARDWARE_CASE_ID = "2026-06-19-dynamic-workflow-hardware-agent"
 HARDWARE_CANONICAL_PAGE = CASES_DIR / "0619-dynamic-workflow-hardware-agent.html"
 
+CASE_TYPE_LABELS = {
+    "independent_user": {"zh": "外部独立用户", "en": "Independent user"},
+    "contributor_case": {"zh": "Contributor case", "en": "Contributor case"},
+    "creator_dogfooding": {"zh": "Creator dogfooding", "en": "Creator dogfooding"},
+    "reproducible_demo": {"zh": "可复现 Demo", "en": "Reproducible demo"},
+}
+
+EVIDENCE_STRENGTH_LABELS = {
+    "user_report_with_public_method_reference": {"zh": "用户报告 + 公开方法", "en": "User report + public method"},
+    "user_report_only": {"zh": "用户报告", "en": "User report"},
+    "public_repository_plus_user_report": {"zh": "公开仓库 + 用户报告", "en": "Public repo + user report"},
+    "public_git_evidence": {"zh": "公开 Git 证据", "en": "Public Git evidence"},
+    "public_safe_pattern": {"zh": "Public-safe pattern", "en": "Public-safe pattern"},
+    "public_interactive_case": {"zh": "公开交互案例", "en": "Public interactive case"},
+    "reproducible_synthetic_demo": {"zh": "可复现合成证据", "en": "Reproducible synthetic evidence"},
+    "public_safe_case_spec": {"zh": "Public-safe case spec", "en": "Public-safe case spec"},
+}
+
 PRIMARY_CASE_ORDER = [
+    "2026-07-cpp-accuracy-long-run",
+    "2026-07-four-day-unattended-agent",
+    "2026-07-public-engine-refactor",
     "2026-06-27-overnight-pr-batch",
     "2026-06-24-pr-issue-auto-fix",
     "2026-06-23-agent-to-agent-pr-comments",
@@ -30,6 +51,18 @@ PRIMARY_CASE_ORDER = [
 ]
 
 SHOWCASE_TABLE = {
+    "2026-07-cpp-accuracy-long-run": {
+        "proof_point": "A >13h engineering run can remain aligned, change method through public research, and retain an understandable evidence trail.",
+        "loopx_intervention": "vision alignment, replan, public research, evidence retention",
+    },
+    "2026-07-four-day-unattended-agent": {
+        "proof_point": "A user observed four days of unattended work and judged the work useful, with a later reporting surface available for inspection.",
+        "loopx_intervention": "durable task state, unattended continuation, periodic reporting",
+    },
+    "2026-07-public-engine-refactor": {
+        "proof_point": "One public refactor goal landed as seven merged PRs instead of a monolithic change.",
+        "loopx_intervention": "durable goal, staged todo sequence, PR-sized delivery, evidence-backed continuation",
+    },
     "2026-06-27-overnight-pr-batch": {
         "proof_point": "High-throughput multi-lane work can remain PR-sized, reviewable, and merge-safe.",
         "loopx_intervention": "todo claim, review packet, self-merge boundary, focused smoke, public-boundary scan",
@@ -653,6 +686,11 @@ def ui(lang: str, key: str) -> str:
 
 
 def copy_for(case: dict[str, Any], lang: str) -> dict[str, Any]:
+    localizations = case.get("localizations")
+    if isinstance(localizations, dict):
+        localized_copy = localizations.get(lang)
+        if isinstance(localized_copy, dict):
+            return localized_copy
     if lang == "zh":
         return ZH_COPY.get(str(case.get("id")), {})
     return {}
@@ -689,12 +727,23 @@ def details_for(case: dict[str, Any], lang: str) -> dict[str, Any]:
     details = CASE_DETAILS.get(str(case.get("id")), {}).get(lang)
     if isinstance(details, dict):
         return details
+    copy = copy_for(case, lang)
+    source_refs = [(ui(lang, "narrative"), str(case.get("case_page") or ""))]
+    evidence_links = case.get("evidence_links")
+    if isinstance(evidence_links, list):
+        for item in evidence_links:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or ui(lang, "sources"))
+            url = str(item.get("url") or "")
+            if url:
+                source_refs.append((label, url))
     return {
-        "context": [str(case.get("problem") or case.get("headline") or "")],
+        "context": [str(copy.get("problem") or case.get("problem") or localized(case, lang, "headline"))],
         "evidence": [(ui(lang, "proof"), table_for(case, lang)["proof_point"])],
-        "mechanism": first_items(case.get("loopx_behavior"), 6),
-        "user_outcome": [str(case.get("user_value") or "")],
-        "source_refs": [(ui(lang, "narrative"), str(case.get("case_page") or ""))],
+        "mechanism": first_items(copy.get("loopx_behavior") or case.get("loopx_behavior"), 6),
+        "user_outcome": [str(copy.get("user_value") or case.get("user_value") or "")],
+        "source_refs": source_refs,
     }
 
 
@@ -716,12 +765,34 @@ def render_source_refs(items: list[tuple[str, str]], current: Path) -> str:
     for label, path in items:
         if not path:
             continue
-        target = repo_path(path)
+        href = path if path.startswith(("https://", "http://")) else rel_href(current, repo_path(path))
         links.append(
-            f'<a class="source-ref" href="{esc(rel_href(current, target))}">'
+            f'<a class="source-ref" href="{esc(href)}">'
             f'<span>{esc(label)}</span><code>{esc(path)}</code></a>'
         )
     return '<div class="source-list">' + "".join(links) + "</div>"
+
+
+def render_evidence_assets(case: dict[str, Any], current: Path) -> str:
+    assets = case.get("evidence_assets")
+    if not isinstance(assets, list):
+        return ""
+    figures: list[str] = []
+    for item in assets:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        alt = str(item.get("alt") or "")
+        caption = str(item.get("caption") or "")
+        if not path or not alt:
+            continue
+        href = rel_href(current, repo_path(path))
+        figures.append(
+            f'<figure class="evidence-asset"><a href="{esc(href)}">'
+            f'<img src="{esc(href)}" alt="{esc(alt)}" loading="lazy"></a>'
+            f'<figcaption>{esc(caption)}</figcaption></figure>'
+        )
+    return '<div class="evidence-assets">' + "".join(figures) + "</div>" if figures else ""
 
 
 def case_html_path(case: dict[str, Any], lang: str) -> Path:
@@ -778,6 +849,35 @@ def badges(items: list[str]) -> str:
     return "".join(f"<span>{esc(item)}</span>" for item in items)
 
 
+def classification_badges(case: dict[str, Any], lang: str) -> list[str]:
+    case_type = str(case.get("case_type") or "unclassified")
+    strength = str(case.get("evidence_strength") or "unclassified")
+    return [
+        CASE_TYPE_LABELS.get(case_type, {}).get(lang, case_type),
+        EVIDENCE_STRENGTH_LABELS.get(strength, {}).get(lang, strength),
+    ]
+
+
+def display_badges(case: dict[str, Any], lang: str, raw_tags: list[str], limit: int) -> list[str]:
+    labels = classification_badges(case, lang)
+    excluded = {
+        str(case.get("case_type") or ""),
+        str(case.get("evidence_strength") or ""),
+    }
+    seen = {label.casefold() for label in labels}
+    for raw_tag in raw_tags:
+        if raw_tag in excluded:
+            continue
+        label = raw_tag.replace("_", " ").strip()
+        if not label or label.casefold() in seen:
+            continue
+        labels.append(label)
+        seen.add(label.casefold())
+        if len(labels) >= limit + 2:
+            break
+    return labels
+
+
 def css() -> str:
     return """
   *{box-sizing:border-box;margin:0;padding:0}
@@ -815,6 +915,11 @@ def css() -> str:
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -848,7 +953,7 @@ def css() -> str:
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 """
 
 
@@ -967,7 +1072,8 @@ def render_case_page(case: dict[str, Any], lang: str, primary: bool) -> str:
     table = table_for(case, lang)
     details = details_for(case, lang)
     frontend = case.get("frontend_card") if isinstance(case.get("frontend_card"), dict) else {}
-    tags = first_items(frontend.get("badges"), 5) or first_items(case.get("pattern_tags"), 5)
+    raw_tags = first_items(frontend.get("badges"), 5) or first_items(case.get("pattern_tags"), 5)
+    tags = display_badges(case, lang, raw_tags, 5)
     behavior = [str(item) for item in details.get("mechanism", [])][:8] or first_items(case.get("loopx_behavior"), 6)
     narrative = repo_path(str(case.get("case_page") or ""))
     demo = case.get("demo_command")
@@ -986,6 +1092,7 @@ def render_case_page(case: dict[str, Any], lang: str, primary: bool) -> str:
     )
     context_block = render_text_stack([str(item) for item in details.get("context", [])])
     evidence_block = render_evidence_items([(str(label), str(text)) for label, text in details.get("evidence", [])])
+    evidence_assets = render_evidence_assets(case, output)
     outcome_block = render_text_stack([str(item) for item in details.get("user_outcome", [])])
     sources_block = render_source_refs([(str(label), str(path)) for label, path in details.get("source_refs", [])], output)
     return f"""<!doctype html>
@@ -999,7 +1106,7 @@ def render_case_page(case: dict[str, Any], lang: str, primary: bool) -> str:
     <div class="mlab">{esc(case.get("date") or "")} · {esc(case.get("domain") or "")}</div>
     <h1>{esc(title)}</h1>
     <div class="accent">{esc(headline)}</div>
-    <p>{esc(case.get("user_value") or "")}</p>
+    <p>{esc(localized(case, lang, "user_value"))}</p>
     <div class="chips">{badges(tags)}{appendix}</div>
     {control_diagram(case, lang)}
 
@@ -1013,6 +1120,7 @@ def render_case_page(case: dict[str, Any], lang: str, primary: bool) -> str:
     </div>
     {metrics(case, lang)}
     {evidence_block}
+    {evidence_assets}
 
     <div class="section-head"><span>03</span><h2>{esc(ui(lang, "behavior"))}</h2></div>
     <ul class="flow">{behavior_list}</ul>
@@ -1022,7 +1130,7 @@ def render_case_page(case: dict[str, Any], lang: str, primary: bool) -> str:
 
     <div class="section-head"><span>05</span><h2>{esc(ui(lang, "sources"))}</h2></div>
     {sources_block}
-    <div class="boundary-box"><p><strong>{esc(ui(lang, "boundary"))}.</strong> {esc(case.get("evidence_boundary") or "")}</p></div>
+    <div class="boundary-box"><p><strong>{esc(ui(lang, "boundary"))}.</strong> {esc(localized(case, lang, "evidence_boundary"))}</p></div>
     <div class="chips">{''.join(links)}</div>
     {demo_block}
     <footer>{esc(ui(lang, "footer"))}</footer>
@@ -1038,7 +1146,7 @@ def index_card(case: dict[str, Any], current: Path, lang: str) -> str:
     title = localized(case, lang, "title")
     headline = localized(case, lang, "headline")
     table = table_for(case, lang)
-    tags = first_items(case.get("pattern_tags"), 4)
+    tags = display_badges(case, lang, first_items(case.get("pattern_tags"), 4), 2)
     metric_cards = evidence_metric_cards(case, lang)
     metric_terms = [f"{value} {label}" for value, label in metric_cards]
     search = " ".join([title, headline, table["proof_point"], table["loopx_intervention"], *tags, *metric_terms]).lower()

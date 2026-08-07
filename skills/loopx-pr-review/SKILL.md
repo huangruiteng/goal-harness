@@ -1,6 +1,6 @@
 ---
 name: loopx-pr-review
-description: Use when the visible request starts with `/loopx-pr-review` or asks LoopX to review a repository PR queue by time window, open/unmerged status, merged/closed status, or current-day PR activity. Run `loopx pr-review` first, preserve the full packet contract, then read PR evidence and produce per-PR reviews with the five required blocks, including code-volume necessity and concrete simplification analysis. For an open PR, publish validated actionable findings by default and submit REQUEST_CHANGES when blockers are found; keep review local only when the user explicitly asks for local-only or dry-run output. Use `loopx-pr-merge` for approval, merge, self-merge, or admin-bypass actions.
+description: Use when the visible request starts with `/loopx-pr-review` or asks LoopX to review a repository PR queue by time window, open/unmerged status, merged/closed status, or current-day PR activity. Run `loopx pr-review` first, preserve the full packet contract, then read PR evidence and produce detailed per-PR reviews with the five required blocks, exact-head key-code explanations, code-volume necessity, and concrete simplification analysis. For an open PR, publish validated actionable findings by default and submit REQUEST_CHANGES when blockers are found; keep review local only when the user explicitly asks for local-only or dry-run output. Use `loopx-pr-merge` for approval, merge, self-merge, or admin-bypass actions.
 ---
 
 # LoopX PR Review
@@ -147,6 +147,8 @@ packet's `evidence_commands`; equivalent targeted `gh pr view`, `gh pr diff
 --name-only`, and `gh pr diff --patch` commands are acceptable when needed.
 Each PR must receive its own evidence pass and standalone review card. Do not
 reuse one PR's architecture, validation, or risk statements as queue-wide prose.
+For code-changing PRs, also read the definitions and surrounding active call
+sites of the behavior-bearing symbols; the changed hunk alone is insufficient.
 
 Treat `agent_response_contract.explanation_depth_contract` and each
 `review_template.sections[].agent_instruction` as the canonical detail policy.
@@ -185,6 +187,9 @@ At minimum, record:
 - the old behavior and affected caller, plus the intended observable result;
 - the entry point, important symbols, active call site, state or data flow, and
   ownership or authority boundary;
+- a 2-5 symbol key-code map with exact-head lines, inputs/pre-state, critical
+  branches or invariants, calls/side effects, outputs/consumers, and failure
+  ownership;
 - the changed-line breakdown by production, tests/fixtures, docs, generated
   files, and mechanical moves;
 - focused validation tied to the changed invariant, including failures, skipped
@@ -214,6 +219,36 @@ The two chains below are the minimum interpretation of the packet's canonical
 depth contract. They do not add output headings or compete with packet-specific
 instructions; use the same evidence to satisfy both when they overlap.
 
+### Key Code Explanation Gate
+
+For every code-changing PR, put a `### 关键代码讲解` subsection inside
+`具体改动`; this is a subsection, not a sixth top-level review block. Select
+2-5 behavior-bearing symbols in proportion to the PR. Prefer the entry point,
+decision helper, state transition or provider call, receipt/projection builder,
+and failure or rollback owner. Do not choose symbols merely because their files
+have the most changed lines.
+
+For each selected symbol, explain all applicable items:
+
+- exact-head `file:line` and symbol name;
+- responsibility and before/after behavior;
+- input or authoritative pre-state;
+- critical condition, branch, transition, or invariant;
+- important callee, side effect, or persisted write;
+- return value, receipt, projection, or downstream consumer;
+- rejection, fallback, retry, rollback, or error owner.
+
+Include 1-3 short excerpts from the exact reviewed head, or equivalent
+pseudocode when quoting would obscure the mechanism. Follow every excerpt with
+an explanation of why the branch exists and how callers observe it. Do not paste
+large diff regions, restate code token by token, list filenames without control
+flow, or name symbols without explaining execution semantics. Read enough
+unchanged surrounding code to identify the real caller and owner boundary.
+
+For a docs-only PR, use `### 关键内容讲解` instead and explain the policy or
+content anchors, their intended reader/tool consumer, and any precedence or
+compatibility effect. Do not invent code symbols for a documentation-only diff.
+
 ### Motivation Causal Chain
 
 Under `动机`, connect the feature objective to the real workflow:
@@ -239,6 +274,9 @@ observable receipt or projection, and the component that owns failure,
 fallback, or retry.
 
 Trace at least one concrete input through those symbols to the final output.
+Use the key-code subsection to show the critical condition or transition with a
+short exact-head excerpt or equivalent pseudocode, then connect it to the
+surrounding caller and downstream consumer.
 Map important changed files to their role in that chain and distinguish
 production behavior from adapters, compatibility plumbing, fixtures, and
 validation. For a related multi-PR set, add a compact relationship map after
@@ -300,6 +338,9 @@ PR body, files, checks, and diff. Follow the packet's per-section ranges and
 instructions as the normal per-PR depth target rather than optional aggregate
 guidance. Going shorter is acceptable only when the PR genuinely has less
 applicable surface, and the card must still satisfy the per-PR evidence gate.
+For code-changing PRs, `具体改动` is incomplete without `### 关键代码讲解` and
+the required symbol-level execution semantics. A final chat summary may be
+short only after the detailed public review has been published and linked.
 Avoid title-only summaries such as "improves docs" or "low risk", and
 distinguish intended behavior from what the implementation and validation
 actually prove.

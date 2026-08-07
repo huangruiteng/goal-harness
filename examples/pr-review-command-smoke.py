@@ -71,6 +71,14 @@ def main() -> int:
         "who pays the cost",
         "Implementation Execution Chain",
         "authoritative input or state",
+        "Key Code Explanation Gate",
+        "`### 关键代码讲解` subsection inside `具体改动`",
+        "2-5 behavior-bearing symbols",
+        "exact-head `file:line` and symbol name",
+        "critical condition, branch, transition, or invariant",
+        "return value, receipt, projection, or downstream consumer",
+        "Include 1-3 short excerpts from the exact reviewed head",
+        "For a docs-only PR, use `### 关键内容讲解`",
         "relationship map",
         "state the minimum repair plus regression test",
         "Code Volume And Simplification Review",
@@ -203,11 +211,16 @@ def main() -> int:
         assert "quota.py" not in section["agent_instruction"], section
     assert [section["word_hint"] for section in template["sections"]] == [
         "200-350字",
-        "250-450字",
-        "300-600字",
+        "300-500字",
+        "450-800字",
         "250-500字",
         "150-300字",
     ], template
+    concrete_change = next(
+        section for section in template["sections"] if section["label"] == "具体改动"
+    )
+    assert "### 关键代码讲解" in concrete_change["agent_instruction"], concrete_change
+    assert "2-5 个行为关键符号" in concrete_change["agent_instruction"], concrete_change
     assert "headRefOid" in first["evidence_commands"][0], first["evidence_commands"]
     assert "headRefOid" in first["evidence_commands"][-1], first["evidence_commands"]
     assert template["review_order"][0] == "docs/guides/newcomer-command-path.md", template
@@ -411,6 +424,13 @@ def main() -> int:
     assert len(depth["evidence_layers"]) == 4, depth
     assert len(depth["necessity_questions"]) == 3, depth
     assert depth["runtime_walkthroughs"]["positive"], depth
+    key_code = depth["key_code_explanation"]
+    assert key_code["schema_version"] == "pr_review_key_code_explanation_v0", key_code
+    assert key_code["required_for_code_changes"] is True, key_code
+    assert key_code["subsection"] == "关键代码讲解", key_code
+    assert len(key_code["per_symbol_fields"]) == 7, key_code
+    assert "short exact-head excerpts" in key_code["source_form"], key_code
+    assert key_code["docs_only_alternative"], key_code
     assert "authority, permission, or scope bypass" in depth["risk_scan"], depth
     assert "head SHA" in depth["freshness"], depth
     assert any("Do not stop at the queue/table summary" in item for item in response_contract["instructions"])
@@ -491,6 +511,7 @@ def main() -> int:
     assert "explanation_depth_contract" in markdown, markdown
     assert "remote head SHA" in markdown, markdown
     assert "Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`" in markdown, markdown
+    assert "`关键代码讲解`" in markdown, markdown
     assert "## Unmerged PRs" in markdown, markdown
     assert "## Merged PRs" in markdown, markdown
     assert "#770" in markdown, markdown
@@ -501,8 +522,8 @@ def main() -> int:
     assert "- 推荐阅读顺序:" in markdown, markdown
     assert "- 五块模板（留空给 agentloop 填写）:" in markdown, markdown
     assert "动机（200-350字）" in markdown, markdown
-    assert "改动思路（250-450字）" in markdown, markdown
-    assert "具体改动（300-600字）" in markdown, markdown
+    assert "改动思路（300-500字）" in markdown, markdown
+    assert "具体改动（450-800字）" in markdown, markdown
     assert "对主干的风险（250-500字）" in markdown, markdown
     assert "我的整体评价（150-300字）" in markdown, markdown
     assert "main regression risk:" not in markdown, markdown

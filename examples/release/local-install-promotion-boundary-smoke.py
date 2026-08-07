@@ -82,6 +82,7 @@ def assert_untrusted_checkout_is_canary_only() -> None:
         expected_skill_ids = {
             "loopx",
             "loopx-doc-registry",
+            "loopx-pr-program",
             "loopx-pr-review",
             "loopx-project",
             "loopx-self-repair",

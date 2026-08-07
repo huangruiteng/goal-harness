@@ -17,12 +17,14 @@ not need these documents to start LoopX.
 3. Read [Testing and quality](testing-and-quality.md) before changing agent-facing
    output, scheduler decisions, todo/gate semantics, onboarding, or release
    promotion.
-4. Use [Architecture](../architecture.md) and the
+4. Use [What counts as a good smoke](good-smokes.md) before adding, retaining,
+   or consolidating a public smoke.
+5. Use [Architecture](../architecture.md) and the
    [core control-plane graphs](../product/core-control-plane/README.md) to find
    the bounded context that owns the behavior.
-5. Check [Public/private boundaries](../public-private-boundary.md) before adding
+6. Check [Public/private boundaries](../public-private-boundary.md) before adding
    fixtures, examples, evidence, or provider-backed evaluation.
-6. Follow the [documentation layout policy](documentation-layout.md) before
+7. Follow the [documentation layout policy](documentation-layout.md) before
    adding or moving public documentation.
 
 1. 先阅读[贡献指南](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTING.md)，了解仓库边界和 PR 检查项。
@@ -30,12 +32,14 @@ not need these documents to start LoopX.
    状态机、核心函数和分层质量门禁建立代码心智模型。
 3. 修改 agent-facing 输出、调度决策、todo/gate 语义、新用户接入或发布流程前，
    阅读[测试与质量体系](testing-and-quality.md)。
-4. 通过[架构文档](../architecture.md)和
+4. 新增、保留或合并公开 smoke 前，阅读
+   [什么是好的 Smoke](good-smokes.md)。
+5. 通过[架构文档](../architecture.md)和
    [控制面核心图](../product/core-control-plane/README.md)定位真正拥有该行为的
    bounded context。
-5. 添加 fixture、示例、证据或模型测试前，检查
+6. 添加 fixture、示例、证据或模型测试前，检查
    [公开/私有边界](../public-private-boundary.md)。
-6. 新增或移动公开文档前，遵循
+7. 新增或移动公开文档前，遵循
    [文档布局规则](documentation-layout.md)。
 
 ## Core References / 核心参考
@@ -44,6 +48,7 @@ not need these documents to start LoopX.
 | --- | --- |
 | Control-plane code reading / 控制面代码领读 | [Nine-lecture developer course](control-plane-course/README.md) |
 | Quality layers and commands / 质量分层与命令 | [Testing and quality](testing-and-quality.md) |
+| Durable smoke design and cleanup / 稳定 Smoke 的设计与清理 | [What counts as a good smoke](good-smokes.md) |
 | Agent-facing size budgets / Agent 输出体积预算 | [Interface budget contract](../reference/contracts/interface-budget-contract.md) |
 | Status and decision payloads / 状态与决策载荷 | [Status data contract](../status-data-contract.md) |
 | Quota and spend semantics / Quota 与 spend 语义 | [Quota allocation](../quota-allocation.md) |

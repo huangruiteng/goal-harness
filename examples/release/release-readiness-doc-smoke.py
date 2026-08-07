@@ -11,6 +11,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 DOC = ROOT / "docs" / "product" / "release-readiness.md"
+TEMPLATE = ROOT / "docs" / "product" / "release-note-template.md"
 README = ROOT / "README.md"
 DOCS_INDEX = ROOT / "docs" / "README.md"
 PRODUCT_INDEX = ROOT / "docs" / "product" / "README.md"
@@ -28,6 +29,22 @@ FORBIDDEN_PUBLIC_STRINGS = [
 
 ENGLISH_USAGE_HEADING = "## Optional Capability Activation & Use"
 CHINESE_USAGE_HEADING = "### 可选能力启用与使用"
+ENGLISH_DECISION_HEADING = "## Release Decision"
+CHINESE_DECISION_HEADING = "### 升级决策"
+ENGLISH_DECISION_FIELDS = (
+    "**Who should upgrade:**",
+    "**What this release solves:**",
+    "**Breaking changes:**",
+    "**How to verify:**",
+    "**Contributors:**",
+)
+CHINESE_DECISION_FIELDS = (
+    "**谁需要升级：**",
+    "**解决了什么：**",
+    "**是否有破坏性变更：**",
+    "**如何验证：**",
+    "**贡献者：**",
+)
 ENGLISH_NO_CHANGES = "No new optional capability activation is introduced in this release."
 CHINESE_NO_CHANGES = "本版本未新增可选能力启用入口。"
 ENGLISH_USAGE_FIELDS = (
@@ -114,6 +131,55 @@ def validate_surface_entry(
         )
 
 
+def decision_field_value(decision: str, field: str, language: str) -> str:
+    match = re.search(rf"^{re.escape(field)}\s*(.+)$", decision, re.MULTILINE)
+    if not match:
+        raise AssertionError(f"{language} release decision missing a value for {field!r}")
+    value = match.group(1).strip()
+    if len(value) < 8 or "<" in value or ">" in value:
+        raise AssertionError(
+            f"{language} release decision has an empty or placeholder value for {field!r}"
+        )
+    return value
+
+
+def validate_release_decision(body: str) -> None:
+    english = section(body, ENGLISH_DECISION_HEADING)
+    english_values = {
+        field: decision_field_value(english, field, "English")
+        for field in ENGLISH_DECISION_FIELDS
+    }
+    breaking = english_values["**Breaking changes:**"].casefold()
+    if not re.match(r"^(no|yes)\b", breaking):
+        raise AssertionError("English breaking decision must start with 'No.' or 'Yes.'")
+    contributors = english_values["**Contributors:**"].casefold()
+    if "@" not in contributors and "no community contribution" not in contributors:
+        raise AssertionError(
+            "English contributors decision must name a handle or explicitly state "
+            "that there was no community contribution"
+        )
+    if "```bash" not in english:
+        raise AssertionError("English release decision has no runnable verification block")
+
+    chinese_summary = section(body, "## 中文摘要")
+    chinese = section(chinese_summary, CHINESE_DECISION_HEADING)
+    chinese_values = {
+        field: decision_field_value(chinese, field, "Chinese")
+        for field in CHINESE_DECISION_FIELDS
+    }
+    breaking_zh = chinese_values["**是否有破坏性变更：**"]
+    if not breaking_zh.startswith(("无", "有", "否", "是")):
+        raise AssertionError("Chinese breaking decision must start with 无/有/否/是")
+    contributors_zh = chinese_values["**贡献者：**"]
+    if "@" not in contributors_zh and not any(
+        phrase in contributors_zh for phrase in ("无社区贡献", "没有社区贡献")
+    ):
+        raise AssertionError(
+            "Chinese contributors decision must name a handle or explicitly state "
+            "that there was no community contribution"
+        )
+
+
 def validate_release_notes(
     path: Path,
     *,
@@ -125,6 +191,7 @@ def validate_release_notes(
     if body.count("```") % 2:
         raise AssertionError("release notes contain an unbalanced fenced code block")
 
+    validate_release_decision(body)
     english = section(body, ENGLISH_USAGE_HEADING)
     chinese_summary = section(body, "## 中文摘要")
     chinese = section(chinese_summary, CHINESE_USAGE_HEADING)
@@ -163,71 +230,80 @@ def validate_release_notes(
 
 
 def validate_release_notes_gate_self_test() -> None:
-    valid = f"""# Example
+    def fixture(english_usage: str, chinese_usage: str) -> str:
+        return f"""# Example
+
+{ENGLISH_DECISION_HEADING}
+**Who should upgrade:** Operators affected by the scheduler fix should upgrade now.
+**What this release solves:** It prevents a due monitor from missing its next wake.
+**Breaking changes:** No. Existing persisted state remains compatible.
+**How to verify:** Run the following identity and behavior checks after updating.
+**Contributors:** Maintainer @example prepared this release; no community contribution was included.
+```bash
+loopx --version
+loopx doctor
+```
 
 {ENGLISH_USAGE_HEADING}
 
-### Example Surface
-
-**Activation:** Enable the example.
-
-**Validation:** Read it back.
-
-**Disable / rollback:** Disable the example.
-
-**Authority boundary:** No authority is granted.
-
-**Docs:** https://example.com/docs.
-
-```bash
-loopx example --check
-```
+{english_usage}
 
 ## Validation
 
 ## 中文摘要
 
+{CHINESE_DECISION_HEADING}
+**谁需要升级：**受 scheduler 修复影响的 operator 应立即升级。
+**解决了什么：**本版本避免到期 monitor 错过下一次唤醒。
+**是否有破坏性变更：**无。已有持久状态保持兼容。
+**如何验证：**升级后运行上方 identity 与 behavior 检查。
+**贡献者：**由 maintainer @example 准备，本版本无社区贡献。
+
 {CHINESE_USAGE_HEADING}
 
-#### Example Surface
+{chinese_usage}
 
-**启用：**启用示例。
-
-**验证：**读回示例。
-
-**停用 / 回退：**停用示例。
-
-**权限边界：**不授予额外权限。
-
-**文档：**https://example.com/docs。
-
+### 验证
+"""
+    valid = fixture(
+        """### Example Surface
+**Activation:** Enable the example.
+**Validation:** Read it back.
+**Disable / rollback:** Disable the example.
+**Authority boundary:** No authority is granted.
+**Docs:** https://example.com/docs.
 ```bash
 loopx example --check
-```
+```""",
+        """#### Example Surface
+**启用：**启用示例。
+**验证：**读回示例。
+**停用 / 回退：**停用示例。
+**权限边界：**不授予额外权限。
+**文档：**https://example.com/docs。
+```bash
+loopx example --check
+```""",
+    )
+    no_changes = fixture(ENGLISH_NO_CHANGES, CHINESE_NO_CHANGES)
 
-### 验证
-"""
-    invalid = valid.replace("**Disable / rollback:**", "", 1)
-    no_changes = f"""# Example
+    def assert_rejected(path: Path, body: str, message: str) -> None:
+        path.write_text(body, encoding="utf-8")
+        try:
+            validate_release_notes(
+                path,
+                surfaces=["Example Surface"],
+                expect_no_optional_capability_changes=False,
+            )
+        except AssertionError:
+            return
+        raise AssertionError(message)
 
-{ENGLISH_USAGE_HEADING}
-
-{ENGLISH_NO_CHANGES}
-
-## 中文摘要
-
-{CHINESE_USAGE_HEADING}
-
-{CHINESE_NO_CHANGES}
-
-### 验证
-"""
     with tempfile.TemporaryDirectory() as tmp:
-        valid_path = Path(tmp) / "valid.md"
-        invalid_path = Path(tmp) / "invalid.md"
-        no_changes_path = Path(tmp) / "no-changes.md"
+        tmp_path = Path(tmp)
+        valid_path = tmp_path / "valid.md"
+        no_changes_path = tmp_path / "no-changes.md"
         valid_path.write_text(valid, encoding="utf-8")
-        invalid_path.write_text(invalid, encoding="utf-8")
         no_changes_path.write_text(no_changes, encoding="utf-8")
         validate_release_notes(
             valid_path,
@@ -239,16 +315,30 @@ loopx example --check
             surfaces=[],
             expect_no_optional_capability_changes=True,
         )
-        try:
-            validate_release_notes(
-                invalid_path,
-                surfaces=["Example Surface"],
-                expect_no_optional_capability_changes=False,
-            )
-        except AssertionError:
-            pass
-        else:
-            raise AssertionError("release-note gate accepted a missing rollback field")
+        assert_rejected(
+            tmp_path / "missing-rollback.md",
+            valid.replace("**Disable / rollback:**", "", 1),
+            "release-note gate accepted a missing rollback field",
+        )
+        assert_rejected(
+            tmp_path / "ambiguous-breaking.md",
+            valid.replace(
+                "**Breaking changes:** No.",
+                "**Breaking changes:** Review compatibility notes.",
+                1,
+            ),
+            "release-note gate accepted an ambiguous breaking decision",
+        )
+        assert_rejected(
+            tmp_path / "missing-contributors.md",
+            valid.replace(
+                "**Contributors:** Maintainer @example prepared this release; "
+                "no community contribution was included.",
+                "**Contributors:** See the commit history.",
+                1,
+            ),
+            "release-note gate accepted an unspecified contributor decision",
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -274,7 +364,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    for path in [DOC, README, DOCS_INDEX, PRODUCT_INDEX]:
+    for path in [DOC, TEMPLATE, README, DOCS_INDEX, PRODUCT_INDEX]:
         validate_boundary(path)
 
     doc = compact(read(DOC))
@@ -306,6 +396,19 @@ def main() -> None:
         "/loopx-global-summary",
         "benchmark runner behavior, scoring, upload",
         "## Release Note Checklist",
+        "[release note template](release-note-template.md)",
+        "`## Release Decision`",
+        "`**Who should upgrade:**`",
+        "`**What this release solves:**`",
+        "`**Breaking changes:**`",
+        "`**How to verify:**`",
+        "`**Contributors:**`",
+        "`### 升级决策`",
+        "`**谁需要升级：**`",
+        "`**解决了什么：**`",
+        "`**是否有破坏性变更：**`",
+        "`**如何验证：**`",
+        "`**贡献者：**`",
         "prominent `## Community Contributors` section",
         "after the English product groups",
         "tag-to-tag Git range and merged pull-request metadata",
@@ -350,6 +453,31 @@ def main() -> None:
     assert_contains(root_readme, "docs/product/release-readiness.md", "root README")
     assert_contains(docs_index, "product/release-readiness.md", "docs index")
     assert_contains(product_index, "release-readiness.md", "product index")
+    assert_contains(product_index, "release-note-template.md", "product index")
+
+    template = read(TEMPLATE)
+    for required in [
+        ENGLISH_DECISION_HEADING,
+        *ENGLISH_DECISION_FIELDS,
+        "## State Kernel & Control Plane",
+        "## Capabilities & Workflows",
+        "## Quality & Testing",
+        "## Benchmarks & Integrations",
+        "## Documentation & Compatibility",
+        "## Community Contributors",
+        ENGLISH_USAGE_HEADING,
+        *ENGLISH_USAGE_FIELDS,
+        ENGLISH_NO_CHANGES,
+        "## Install / Update",
+        "## 中文摘要",
+        CHINESE_DECISION_HEADING,
+        *CHINESE_DECISION_FIELDS,
+        CHINESE_USAGE_HEADING,
+        *CHINESE_USAGE_FIELDS,
+        CHINESE_NO_CHANGES,
+        "### 发布验证",
+    ]:
+        assert_contains(template, required, "release-note template")
 
     validate_release_notes_gate_self_test()
     if args.release_notes is not None:

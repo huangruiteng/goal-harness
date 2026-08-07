@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import html
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -418,7 +417,7 @@ def main() -> int:
     args = parser.parse_args()
 
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
-    if catalog.get("schema_version") != "loopx_showcase_catalog_v0":
+    if catalog.get("schema_version") not in {"loopx_showcase_catalog_v0", "loopx_showcase_catalog_v1"}:
         raise ValueError("unsupported showcase catalog schema_version")
     html_text = render(catalog, output=args.output)
     if args.output:

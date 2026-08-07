@@ -153,6 +153,8 @@ def test_material_poll_reloads_status_and_projects_declared_successor(
         AGENT_ID,
         "--runtime-profile",
         "generic_cli",
+        "--available-capability",
+        "network",
         "--todo-id",
         monitor["todo_id"],
         "--target-key",
@@ -162,6 +164,16 @@ def test_material_poll_reloads_status_and_projects_declared_successor(
         "--material-change",
         "--next-agent-todo",
         "Validate the exact merged release head.",
+        "--next-action-kind",
+        "validate_release_head",
+        "--next-task-repository",
+        "git:github.com/huangruiteng/loopx",
+        "--next-required-capability",
+        "network",
+        "--next-continuation-policy",
+        "same_agent_non_delivery",
+        "--next-target-key",
+        "release-head:huangruiteng/loopx#42@merged-42",
         "--next-claimed-by",
         AGENT_ID,
         "--execute",
@@ -171,6 +183,12 @@ def test_material_poll_reloads_status_and_projects_declared_successor(
 
     successor = result["todo_writeback"]["next_todos"][0]
     assert successor["status"] == "open"
+    assert successor["action_kind"] == "validate_release_head"
+    assert successor["task_repository"] == "git:github.com/huangruiteng/loopx"
+    assert successor["continuation_policy"] == "same_agent_non_delivery"
+    assert successor["required_capabilities"] == ["network"]
+    assert successor["target_key"] == "release-head:huangruiteng/loopx#42@merged-42"
+    assert result["successor_todo_ids"] == [successor["todo_id"]]
     assert result["after"]["selected_todo"]["todo_id"] == successor["todo_id"]
     assert result["after"]["effective_action"] == "normal_run"
     assert "Validate the exact merged release head." in state.read_text(encoding="utf-8")
@@ -469,6 +487,7 @@ def test_material_poll_reload_failure_reports_persisted_writeback(
         result_hash="merged-42",
         material_change=True,
         next_agent_todo="Validate the persisted material transition successor.",
+        next_action_kind="validate_material_transition",
         status_reloader=fail_status_reload,
     )
 
@@ -480,7 +499,11 @@ def test_material_poll_reload_failure_reports_persisted_writeback(
     assert warning["after_projection_fresh"] is False
     assert "rerun quota should-run" in warning["recommended_action"]
     assert result["monitor_event"]["status_reload_warning"] == warning
-    assert result["todo_writeback"]["next_todos"]
+    successor = result["todo_writeback"]["next_todos"][0]
+    assert successor["continuation_policy"] == "independent_handoff"
+    assert successor["target_key"].startswith(
+        f"monitor-successor:{monitor['todo_id']}:"
+    )
     assert "Validate the persisted material transition successor." in state.read_text(
         encoding="utf-8"
     )

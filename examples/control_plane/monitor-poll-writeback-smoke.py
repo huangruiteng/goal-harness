@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -103,6 +104,7 @@ def write_fixture(
     primary_no_change_count: int = 1,
     other_no_change_count: int = 1,
     monitor_required_capabilities: tuple[str, ...] = (),
+    monitor_task_repository: str | None = None,
 ) -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
@@ -118,6 +120,11 @@ def write_fixture(
     monitor_capability_metadata = (
         f"required_capabilities={','.join(monitor_required_capabilities)} "
         if monitor_required_capabilities
+        else ""
+    )
+    monitor_repository_metadata = (
+        f"task_repository={monitor_task_repository} "
+        if monitor_task_repository
         else ""
     )
     other_monitor = (
@@ -204,6 +211,7 @@ def write_fixture(
         "task_class=continuous_monitor "
         "action_kind=poll "
         f"{monitor_capability_metadata}"
+        f"{monitor_repository_metadata}"
         f"claimed_by={AGENT_ID} "
         f"{monitor_metadata}"
         "cadence=15m "
@@ -375,6 +383,10 @@ def assert_unchanged_writeback() -> None:
             GOAL_ID,
             "--agent-id",
             AGENT_ID,
+            "--available-capability",
+            "network",
+            "--available-capability",
+            "external_evidence_poll",
             "--codex-app",
         )
         assert followup["decision"] == "autonomous_replan_required", followup
@@ -452,8 +464,68 @@ def assert_stalled_monitor_does_not_preempt_runnable_advancement() -> None:
 
 def assert_material_transition_followup() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-monitor-poll-material-") as tmp:
-        registry_path, state_file = write_fixture(Path(tmp))
+        registry_path, state_file = write_fixture(
+            Path(tmp),
+            monitor_task_repository="git:github.com/huangruiteng/loopx",
+        )
         assert_due_monitor_selected(registry_path)
+
+        missing_route = run_cli_expect_error(
+            registry_path,
+            "quota",
+            "monitor-poll",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            "--available-capability",
+            "network",
+            "--available-capability",
+            "external_evidence_poll",
+            "--target-key",
+            TARGET_KEY,
+            "--result-hash",
+            "new",
+            "--material-change",
+            "--next-agent-todo",
+            "Review the material monitor transition and prepare a public-safe packet.",
+        )
+        assert "requires explicit successor action semantics" in missing_route[
+            "reason"
+        ], missing_route
+        assert "--next-action-kind" in missing_route["reason"], missing_route
+
+        missing_repository = run_cli_expect_error(
+            registry_path,
+            "quota",
+            "monitor-poll",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            "--available-capability",
+            "network",
+            "--available-capability",
+            "external_evidence_poll",
+            "--target-key",
+            TARGET_KEY,
+            "--result-hash",
+            "new",
+            "--material-change",
+            "--next-agent-todo",
+            "Review the material monitor transition and prepare a public-safe packet.",
+            "--next-action-kind",
+            "review_material_transition",
+        )
+        assert "repository-bound monitor successors" in missing_repository[
+            "reason"
+        ], missing_repository
+        assert "--next-task-repository" in missing_repository[
+            "reason"
+        ], missing_repository
+        unchanged_monitor = find_todo(state_file, TODO_ID)
+        assert unchanged_monitor["result_hash"] == "old", unchanged_monitor
+        assert unchanged_monitor["material_change"] == "false", unchanged_monitor
 
         payload = run_cli(
             registry_path,
@@ -463,6 +535,10 @@ def assert_material_transition_followup() -> None:
             GOAL_ID,
             "--agent-id",
             AGENT_ID,
+            "--available-capability",
+            "network",
+            "--available-capability",
+            "external_evidence_poll",
             "--target-key",
             TARGET_KEY,
             "--result-hash",
@@ -470,6 +546,14 @@ def assert_material_transition_followup() -> None:
             "--material-change",
             "--next-agent-todo",
             "Review the material monitor transition and prepare a public-safe packet.",
+            "--next-action-kind",
+            "review_material_transition",
+            "--next-task-repository",
+            "git:github.com/huangruiteng/loopx",
+            "--next-required-capability",
+            "network",
+            "--next-required-capability",
+            "external_evidence_poll",
             "--execute",
         )
         assert payload["ok"] is True, payload
@@ -488,11 +572,33 @@ def assert_material_transition_followup() -> None:
         ]
         assert successors, agent_todos(state_file)
         assert successors[0]["task_class"] == "advancement_task", successors[0]
+        assert successors[0]["action_kind"] == "review_material_transition", successors[0]
+        assert successors[0]["task_repository"] == "git:github.com/huangruiteng/loopx", successors[0]
+        assert successors[0]["continuation_policy"] == "independent_handoff", successors[0]
+        assert successors[0]["required_capabilities"] == [
+            "network",
+            "external_evidence_poll",
+        ], successors[0]
+        expected_target_key = (
+            f"monitor-successor:{TODO_ID}:"
+            f"{hashlib.sha256(b'new').hexdigest()[:16]}"
+        )
+        assert successors[0]["target_key"] == expected_target_key, successors[0]
         successor_id = successors[0]["todo_id"]
+        assert payload["successor_todo_ids"] == [successor_id], payload
+        receipt = payload["successor_receipts"][0]
+        assert receipt["todo_id"] == successor_id, receipt
+        assert receipt["task_repository"] == "git:github.com/huangruiteng/loopx", receipt
+        assert receipt["target_key"] == expected_target_key, receipt
+        assert writeback["successor_receipts"] == payload["successor_receipts"], writeback
         records = monitor_poll_records(registry_path)
         assert [record["classification"] for record in records] == ["quota_monitor_poll"], records
         assert records[0]["delivery_outcome"] == "outcome_progress", records[0]
+        assert records[0]["successor_todo_ids"] == [successor_id], records[0]
         event = payload["monitor_event"]
+        assert event["todo_writeback"]["successor_receipts"] == payload[
+            "successor_receipts"
+        ], event
         assert event["monitor_mode"] == "due_monitor_material_transition", event
         assert event["reason_summary"] == "due monitor observation produced a material transition", event
         assert "due monitor material transition observed" in payload["health_check"], payload
@@ -504,6 +610,12 @@ def assert_material_transition_followup() -> None:
         assert compact_contract["agent_channel"]["must_attempt"] is True, compact_contract
         assert compact_contract["agent_channel"]["primary_action"], compact_contract
         assert compact_contract["cli_channel"]["spend_after_validation"] is True, compact_contract
+        runtime_root = runtime_root_from_registry(registry_path)
+        rollout_events = load_rollout_events(rollout_event_log_path(runtime_root, GOAL_ID))
+        monitor_events = [
+            item for item in rollout_events if item.get("event_kind") == "quota_monitor_poll"
+        ]
+        assert monitor_events[-1]["details"]["successor_todo_ids"] == successor_id, monitor_events[-1]
 
         handoff = run_cli(
             registry_path,
@@ -513,6 +625,10 @@ def assert_material_transition_followup() -> None:
             GOAL_ID,
             "--agent-id",
             AGENT_ID,
+            "--available-capability",
+            "network",
+            "--available-capability",
+            "external_evidence_poll",
             "--codex-app",
         )
         assert handoff["ok"] is True, handoff
@@ -1083,6 +1199,11 @@ def assert_cli_monitor_poll_uses_should_run_lookback() -> None:
         cadence=None,
         next_due_at=None,
         next_agent_todo=None,
+        next_action_kind=None,
+        next_task_repository=None,
+        next_required_capabilities=None,
+        next_continuation_policy=None,
+        next_target_key=None,
         next_user_todo=None,
         next_user_task_class=None,
         next_claimed_by=None,

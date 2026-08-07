@@ -1,17 +1,18 @@
 {
-  "schema_version": "loopx_showcase_catalog_v0",
-  "updated_at": "2026-06-27",
+  "schema_version": "loopx_showcase_catalog_v1",
+  "updated_at": "2026-08-07",
   "redaction_policy": {
     "public_repo_may_include": [
       "sanitized domain labels",
       "reusable control-plane patterns",
       "synthetic demos",
-      "explicit evidence boundaries"
+      "explicit evidence boundaries",
+      "owner-approved user feedback excerpts with hard-sensitive details removed"
     ],
     "public_repo_must_not_include": [
       "private document links",
-      "internal screenshots",
-      "raw chats",
+      "unapproved internal screenshots",
+      "unredacted raw chats",
       "raw benchmark task text",
       "private repositories",
       "local filesystem paths",
@@ -19,12 +20,435 @@
       "unpublished domain artifacts"
     ]
   },
+  "source_coverage": [
+    {
+      "source_key": "cpp-algorithm-accuracy",
+      "disposition": "promoted_case",
+      "case_id": "2026-07-cpp-accuracy-long-run",
+      "reason": "The report includes a concrete >13h runtime, stated intervention level, outcome, and mechanism evidence."
+    },
+    {
+      "source_key": "four-day-unattended-agent",
+      "disposition": "promoted_case",
+      "case_id": "2026-07-four-day-unattended-agent",
+      "reason": "The report states four days without human intervention and identifies useful work plus a reporting capability."
+    },
+    {
+      "source_key": "public-engine-refactor",
+      "disposition": "promoted_case",
+      "case_id": "2026-07-public-engine-refactor",
+      "reason": "The user report is backed by a public issue and seven merged pull requests."
+    },
+    {
+      "source_key": "small-request-relief",
+      "disposition": "feedback_signal_only",
+      "case_id": null,
+      "reason": "Useful satisfaction signal, but it has no duration, intervention, or independently inspectable outcome."
+    },
+    {
+      "source_key": "ecommerce-24x7-interest",
+      "disposition": "not_promoted",
+      "case_id": null,
+      "reason": "This is prospective demand for seller analytics and competitor monitoring, not a realized LoopX outcome."
+    },
+    {
+      "source_key": "peer-harness-assessment",
+      "disposition": "not_promoted",
+      "case_id": null,
+      "reason": "The material is a positive assessment and a comparable harness report, not evidence that the referenced workloads used LoopX."
+    }
+  ],
   "cases": [
+    {
+      "id": "2026-07-cpp-accuracy-long-run",
+      "date": "2026-07",
+      "title": "13+ hour C++ algorithm accuracy run",
+      "status": "owner_approved_user_evidence_case",
+      "case_type": "independent_user",
+      "evidence_strength": "user_report_with_public_method_reference",
+      "case_page": "docs/showcases/cases/independent-cpp-accuracy-long-run.md",
+      "demo_command": null,
+      "domain": "complex-cpp-algorithm",
+      "audience": [
+        "engineering-lead",
+        "long-running-agent-operator",
+        "C++ developer"
+      ],
+      "pattern_tags": [
+        "independent_user",
+        "13h_plus_run",
+        "vision_replan",
+        "public_research",
+        "evidence_retention"
+      ],
+      "headline": "An independent user reported a >13h multi-stage C++ accuracy task that stayed on goal, found a public code-memory tool, and improved the final precision.",
+      "problem": "A complex C++ algorithm had a precision problem, while direct long-running agent attempts risked parameter thrashing, local-detail drift, and repeated context compression.",
+      "loopx_behavior": [
+        "kept the multi-stage work aligned to the declared vision for more than 13 hours",
+        "triggered public research when the current route no longer appeared able to satisfy the vision",
+        "selected a public codebase-memory MCP for C++ call-graph and coupling analysis",
+        "retained experiment evidence and an explanation of the final approach"
+      ],
+      "runtime_signal": {
+        "duration": ">13h",
+        "agent_scale": "one long-running agent reported",
+        "human_intervention": "no parameter micromanagement or repeated local redirection reported during the multi-stage run"
+      },
+      "user_value": "The user reported a clear precision improvement, less context compression, and an explanation that made the result and experiment path understandable after the run.",
+      "evidence_links": [
+        {
+          "label": "codebase-memory-mcp",
+          "url": "https://github.com/DeusData/codebase-memory-mcp",
+          "kind": "public_method_reference"
+        }
+      ],
+      "evidence_assets": [
+        {
+          "path": "docs/assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg",
+          "alt": "Authorized user feedback reporting a LoopX C++ algorithm run lasting more than 13 hours with improved precision and retained evidence",
+          "caption": "Source: an owner-approved message excerpt from the LoopX public Lark developer group. Runtime and outcome are user-reported; the public MCP reference is independently inspectable."
+        },
+        {
+          "path": "docs/assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg",
+          "alt": "Authorized follow-up explaining that LoopX replan triggered public research and found a code-memory MCP",
+          "caption": "Source: an owner-approved follow-up message excerpt from the same LoopX public Lark developer group, describing the public-research transition."
+        }
+      ],
+      "evidence_boundary": "Owner-approved message excerpts from the LoopX public Lark developer group and a public tool reference; the project repository, raw run state, prompts, experiment data, and performance measurements remain private.",
+      "showcase_table": {
+        "proof_point": "A >13h engineering run can remain aligned, change method through public research, and retain an understandable evidence trail.",
+        "loopx_intervention": "vision alignment, replan, public research, evidence retention"
+      },
+      "frontend_card": {
+        "visual_metaphor": "a long C++ investigation changes tools without losing its target",
+        "primary_metric_hint": ">13h user-reported run with improved final precision",
+        "badges": [
+          "Independent user",
+          ">13h",
+          "C++ accuracy"
+        ],
+        "story_beats": [
+          "a complex algorithm accuracy problem resisted the initial route",
+          "LoopX preserved the vision while replanning",
+          "public research found a code-memory tool",
+          "the user reported improved precision and retained evidence"
+        ]
+      },
+      "evidence_metrics": [
+        {
+          "value": ">13h",
+          "labels": {
+            "zh": "用户报告运行时长",
+            "en": "user-reported runtime"
+          }
+        },
+        {
+          "value": "1",
+          "labels": {
+            "zh": "公开工具引用",
+            "en": "public tool reference"
+          }
+        },
+        {
+          "value": "0",
+          "labels": {
+            "zh": "参数微操报告",
+            "en": "parameter-micromanagement reports"
+          }
+        }
+      ],
+      "localizations": {
+        "zh": {
+          "title": "13+ 小时 C++ 算法精度修复",
+          "headline": "外部用户报告：超过 13 小时的多阶段任务保持目标一致，并通过公开研究找到新工具、提升最终精度。",
+          "problem": "一个复杂 C++ 算法存在精度问题；直接长程执行容易出现参数反复调整、局部细节漂移和上下文反复压缩。",
+          "proof_point": "长程工程任务可以在更换方法时不丢失目标，并保留可解释的证据链。",
+          "loopx_intervention": "vision 对齐、replan、public research、证据保留",
+          "loopx_behavior": [
+            "超过 13 小时的多阶段工作持续对齐已声明的 vision",
+            "当前路径无法继续满足 vision 时触发 public research",
+            "选择公开 codebase-memory MCP 分析 C++ 调用关系和耦合",
+            "保留实验证据与最终方案解释"
+          ],
+          "user_value": "用户报告最终精度明显提升、上下文压缩减少，并能在运行结束后理解过程与方案选择。",
+          "evidence_boundary": "来自 LoopX 公开飞书开发群、经 owner 授权的消息摘录与公开工具引用；项目仓库、原始运行状态、prompt、实验数据和性能测量仍保持私有。"
+        }
+      },
+      "interactive_page": "docs/showcases/cases/independent-cpp-accuracy-long-run.html",
+      "interactive_page_zh": "docs/showcases/cases/independent-cpp-accuracy-long-run.html",
+      "interactive_page_en": "docs/showcases/cases/independent-cpp-accuracy-long-run.en.html",
+      "localized_pages": {
+        "zh": "docs/showcases/cases/independent-cpp-accuracy-long-run.html",
+        "en": "docs/showcases/cases/independent-cpp-accuracy-long-run.en.html"
+      },
+      "showcase_rank": 1
+    },
+    {
+      "id": "2026-07-four-day-unattended-agent",
+      "date": "2026-07",
+      "title": "Four-day unattended agent run",
+      "status": "owner_approved_user_evidence_case",
+      "case_type": "independent_user",
+      "evidence_strength": "user_report_only",
+      "case_page": "docs/showcases/cases/independent-four-day-unattended-agent.md",
+      "demo_command": null,
+      "domain": "long-running-agent-operations",
+      "audience": [
+        "operator",
+        "agent-platform-developer",
+        "engineering-lead"
+      ],
+      "pattern_tags": [
+        "independent_user",
+        "four_day_run",
+        "unattended_execution",
+        "weekly_reporting"
+      ],
+      "headline": "An independent user reported that an agent ran for four days without human intervention, continued useful work, and exposed a weekly-report capability.",
+      "problem": "Long-running agents often need repeated prompting, and operators cannot easily tell whether unattended work is still useful.",
+      "loopx_behavior": [
+        "kept the task active across a four-day window",
+        "allowed the agent to continue without reported human intervention",
+        "made the accumulated work discussable through a periodic report surface"
+      ],
+      "runtime_signal": {
+        "duration": "4d",
+        "agent_scale": "one long-running agent reported",
+        "human_intervention": "none reported during the four-day run"
+      },
+      "user_value": "The user described the agent as doing valuable work rather than merely staying alive, while a weekly report gave the operator a way to inspect progress later.",
+      "evidence_links": [],
+      "evidence_assets": [
+        {
+          "path": "docs/assets/showcases/user-feedback/four-day-unattended-user-report.jpg",
+          "alt": "Redacted authorized chat excerpt reporting a four-day LoopX agent run without human intervention",
+          "caption": "Source: an owner-approved message excerpt from the LoopX public Lark developer group, cropped to remove chat identity and unrelated reporting context. All claims remain user-reported."
+        }
+      ],
+      "evidence_boundary": "Owner-approved message excerpt from the LoopX public Lark developer group only; the workload, repository, run history, report contents, and unselected chat context remain private.",
+      "showcase_table": {
+        "proof_point": "A user observed four days of unattended work and judged the work useful, with a later reporting surface available for inspection.",
+        "loopx_intervention": "durable task state, unattended continuation, periodic reporting"
+      },
+      "frontend_card": {
+        "visual_metaphor": "an unattended work loop advances across four days and returns a report",
+        "primary_metric_hint": "4d without reported human intervention",
+        "badges": [
+          "Independent user",
+          "4 days",
+          "Unattended"
+        ],
+        "story_beats": [
+          "the operator left the task running",
+          "the agent continued for four days",
+          "the user judged the work valuable",
+          "a weekly report offered a later inspection point"
+        ]
+      },
+      "evidence_metrics": [
+        {
+          "value": "4d",
+          "labels": {
+            "zh": "用户报告运行时长",
+            "en": "user-reported runtime"
+          }
+        },
+        {
+          "value": "0",
+          "labels": {
+            "zh": "报告的人工干预",
+            "en": "reported human interventions"
+          }
+        },
+        {
+          "value": "1",
+          "labels": {
+            "zh": "周期报告能力",
+            "en": "periodic report surface"
+          }
+        }
+      ],
+      "localizations": {
+        "zh": {
+          "title": "4 天无人干预运行",
+          "headline": "外部用户报告：Agent 在没有人工干预的情况下连续运行 4 天，并持续处理有价值的工作。",
+          "problem": "长程 Agent 往往需要反复催促，operator 也难以判断无人值守期间是否仍在做有价值的工作。",
+          "proof_point": "长程 Agent 不只是保持存活，还需要让用户看见它是否在做有价值的工作。",
+          "loopx_intervention": "持久任务状态、无人值守续跑、周期报告",
+          "loopx_behavior": [
+            "任务在 4 天窗口内持续保持 active",
+            "Agent 在用户报告的零人工干预下继续推进",
+            "通过周期报告为后续检查提供入口"
+          ],
+          "user_value": "用户认为 Agent 在持续做有价值的工作，而周期报告让 operator 可以稍后检查进度。",
+          "evidence_boundary": "仅包含来自 LoopX 公开飞书开发群、经 owner 授权并脱敏的消息摘录；工作负载、仓库、运行历史、报告内容和未选取的聊天上下文仍保持私有。"
+        }
+      },
+      "interactive_page": "docs/showcases/cases/independent-four-day-unattended-agent.html",
+      "interactive_page_zh": "docs/showcases/cases/independent-four-day-unattended-agent.html",
+      "interactive_page_en": "docs/showcases/cases/independent-four-day-unattended-agent.en.html",
+      "localized_pages": {
+        "zh": "docs/showcases/cases/independent-four-day-unattended-agent.html",
+        "en": "docs/showcases/cases/independent-four-day-unattended-agent.en.html"
+      },
+      "showcase_rank": 2
+    },
+    {
+      "id": "2026-07-public-engine-refactor",
+      "date": "2026-07",
+      "title": "Public engine refactor across seven merged PRs",
+      "status": "public_repository_plus_user_report_case",
+      "case_type": "independent_user",
+      "evidence_strength": "public_repository_plus_user_report",
+      "case_page": "docs/showcases/cases/independent-public-engine-refactor.md",
+      "demo_command": null,
+      "domain": "repository-refactor",
+      "audience": [
+        "maintainer",
+        "engineering-lead",
+        "long-running-agent-operator"
+      ],
+      "pattern_tags": [
+        "independent_user",
+        "public_repository",
+        "seven_prs",
+        "incremental_refactor",
+        "user_reported_scale"
+      ],
+      "headline": "A user attributed a public Engine decomposition to LoopX; the repository shows the work landing incrementally through seven merged PRs.",
+      "problem": "A monolithic Engine mixed roughly nine responsibility areas and about sixty methods, making behavioral refactoring difficult to review and test.",
+      "loopx_behavior": [
+        "kept the decomposition anchored to one explicit public refactor goal",
+        "split the work across independently reviewable component extractions",
+        "allowed later stages to reuse the public issue as a durable coordination point",
+        "preserved incremental mergeability instead of producing one giant refactor diff"
+      ],
+      "runtime_signal": {
+        "duration": "multi-week public PR sequence",
+        "agent_scale": "not reported",
+        "human_intervention": "maintainer review and merge remained present; the user did not claim a fully unattended run",
+        "token_scale": "1B+ tokens, user-reported and not independently verified"
+      },
+      "user_value": "The public repository shows seven related PRs merged into a staged facade-and-components refactor; the user described the LoopX-driven sequence as successful and high quality.",
+      "evidence_links": [
+        {
+          "label": "Refactor issue #166",
+          "url": "https://github.com/zilliztech/mfs/issues/166",
+          "kind": "public_goal_and_design"
+        },
+        {
+          "label": "PR #131",
+          "url": "https://github.com/zilliztech/mfs/pull/131",
+          "kind": "merged_pull_request"
+        },
+        {
+          "label": "PR #137",
+          "url": "https://github.com/zilliztech/mfs/pull/137",
+          "kind": "merged_pull_request"
+        },
+        {
+          "label": "PR #160",
+          "url": "https://github.com/zilliztech/mfs/pull/160",
+          "kind": "merged_pull_request"
+        },
+        {
+          "label": "PR #164",
+          "url": "https://github.com/zilliztech/mfs/pull/164",
+          "kind": "merged_pull_request"
+        },
+        {
+          "label": "PR #171",
+          "url": "https://github.com/zilliztech/mfs/pull/171",
+          "kind": "merged_pull_request"
+        },
+        {
+          "label": "PR #175",
+          "url": "https://github.com/zilliztech/mfs/pull/175",
+          "kind": "merged_pull_request"
+        },
+        {
+          "label": "PR #176",
+          "url": "https://github.com/zilliztech/mfs/pull/176",
+          "kind": "merged_pull_request"
+        }
+      ],
+      "evidence_assets": [],
+      "evidence_boundary": "The issue and seven merged PRs are public repository evidence. LoopX attribution, perceived quality, and the 1B+ token scale are owner-approved user reports rather than independently verified repository facts.",
+      "showcase_table": {
+        "proof_point": "One public refactor goal landed as seven merged PRs instead of a monolithic change.",
+        "loopx_intervention": "durable goal, staged todo sequence, PR-sized delivery, evidence-backed continuation"
+      },
+      "frontend_card": {
+        "visual_metaphor": "one monolithic engine separates into reviewable components across seven merge points",
+        "primary_metric_hint": "7 merged PRs in a public repository",
+        "badges": [
+          "Independent user",
+          "7 merged PRs",
+          "Public repo"
+        ],
+        "story_beats": [
+          "a public issue defined the target architecture",
+          "component extractions landed incrementally",
+          "seven related PRs merged",
+          "user-reported scale is kept separate from public repository facts"
+        ]
+      },
+      "evidence_metrics": [
+        {
+          "value": "7",
+          "labels": {
+            "zh": "公开合并 PR",
+            "en": "public merged PRs"
+          }
+        },
+        {
+          "value": "1",
+          "labels": {
+            "zh": "公开架构目标",
+            "en": "public architecture goal"
+          }
+        },
+        {
+          "value": "1B+",
+          "labels": {
+            "zh": "用户报告 token 规模",
+            "en": "user-reported token scale"
+          }
+        }
+      ],
+      "localizations": {
+        "zh": {
+          "title": "公开 Engine 重构：7 个合并 PR",
+          "headline": "外部用户将一次公开 Engine 拆分归因于 LoopX；仓库证据显示相关工作通过 7 个 PR 渐进合并。",
+          "problem": "一个 Engine 混合约 9 类职责和约 60 个方法，行为保持型重构难以测试、审阅和一次性合并。",
+          "proof_point": "一个公开重构目标可以拆成 7 个可独立 review、可合并的 PR。",
+          "loopx_intervention": "持久目标、分阶段 todo、PR-sized delivery、证据续跑",
+          "loopx_behavior": [
+            "用一个公开 issue 固定目标架构",
+            "把组件抽取拆成可独立 review 的阶段",
+            "后续阶段继续复用公开 issue 作为协调点",
+            "通过 PR-sized delivery 避免单个巨型重构 diff"
+          ],
+          "user_value": "公开仓库显示 7 个相关 PR 已合并；用户将这组渐进式重构归因于 LoopX，并评价成功率和质量较好。",
+          "evidence_boundary": "Issue 和 7 个合并 PR 属于公开仓库证据；LoopX 归因、主观质量和 10 亿+ token 规模来自经 owner 授权的用户报告，并非独立验证事实。"
+        }
+      },
+      "interactive_page": "docs/showcases/cases/independent-public-engine-refactor.html",
+      "interactive_page_zh": "docs/showcases/cases/independent-public-engine-refactor.html",
+      "interactive_page_en": "docs/showcases/cases/independent-public-engine-refactor.en.html",
+      "localized_pages": {
+        "zh": "docs/showcases/cases/independent-public-engine-refactor.html",
+        "en": "docs/showcases/cases/independent-public-engine-refactor.en.html"
+      },
+      "showcase_rank": 3
+    },
     {
       "id": "2026-06-27-overnight-pr-batch",
       "date": "2026-06-27",
       "title": "Overnight PR batch with reviewable control",
       "status": "public_evidence_case",
+      "case_type": "creator_dogfooding",
+      "evidence_strength": "public_git_evidence",
       "case_page": "docs/showcases/cases/0627-overnight-pr-batch.md",
       "demo_command": null,
       "domain": "agent-platform-self-improvement",
@@ -74,7 +498,7 @@
         "zh": "docs/showcases/cases/0627-overnight-pr-batch.html",
         "en": "docs/showcases/cases/0627-overnight-pr-batch.en.html"
       },
-      "showcase_rank": 1,
+      "showcase_rank": 4,
       "showcase_table": {
         "proof_point": "High-throughput multi-lane work can remain PR-sized, reviewable, and merge-safe.",
         "loopx_intervention": "todo claim, review packet, self-merge boundary, focused smoke, public-boundary scan"
@@ -130,6 +554,8 @@
       "date": "2026-06-24",
       "title": "PR issue automatic fix loop",
       "status": "public_safe_pattern_case",
+      "case_type": "reproducible_demo",
+      "evidence_strength": "public_safe_pattern",
       "case_page": "docs/showcases/cases/0624-pr-issue-auto-fix.md",
       "demo_command": null,
       "domain": "issue-fix-workflow",
@@ -162,7 +588,7 @@
         "zh": "docs/showcases/cases/0624-pr-issue-auto-fix.html",
         "en": "docs/showcases/cases/0624-pr-issue-auto-fix.en.html"
       },
-      "showcase_rank": 2,
+      "showcase_rank": 5,
       "showcase_table": {
         "proof_point": "Issue and review feedback can enter an executable repair loop.",
         "loopx_intervention": "issue-fix workflow, command pack, repro smoke, PR review feedback"
@@ -218,6 +644,8 @@
       "date": "2026-06-23",
       "title": "Agent-to-agent PR comment and fix loop",
       "status": "public_safe_pattern_case",
+      "case_type": "reproducible_demo",
+      "evidence_strength": "public_safe_pattern",
       "case_page": "docs/showcases/cases/0623-agent-to-agent-pr-comments.md",
       "demo_command": null,
       "domain": "pull-request-review",
@@ -250,7 +678,7 @@
         "zh": "docs/showcases/cases/0623-agent-to-agent-pr-comments.html",
         "en": "docs/showcases/cases/0623-agent-to-agent-pr-comments.en.html"
       },
-      "showcase_rank": 3,
+      "showcase_rank": 6,
       "showcase_table": {
         "proof_point": "Multiple agents can coordinate around PR review comments without losing owner review.",
         "loopx_intervention": "claimed_by, handoff gate, review packet, comment/fix loop"
@@ -306,6 +734,8 @@
       "date": "2026-06-23",
       "title": "Overnight project refactor as PR-sized slices",
       "status": "public_safe_pattern_case",
+      "case_type": "creator_dogfooding",
+      "evidence_strength": "public_safe_pattern",
       "case_page": "docs/showcases/cases/0623-overnight-project-refactor.md",
       "demo_command": null,
       "domain": "repository-refactor",
@@ -338,7 +768,7 @@
         "zh": "docs/showcases/cases/0623-overnight-project-refactor.html",
         "en": "docs/showcases/cases/0623-overnight-project-refactor.en.html"
       },
-      "showcase_rank": 4,
+      "showcase_rank": 7,
       "showcase_table": {
         "proof_point": "Long unattended refactors can split into moderate PR slices instead of one unreviewable diff.",
         "loopx_intervention": "loop, todo follow-up, supersede, PR-sized slices"
@@ -394,6 +824,8 @@
       "date": "2026-06-19",
       "title": "Dynamic workflow for hardware-agent development",
       "status": "public_safe_interactive_case",
+      "case_type": "contributor_case",
+      "evidence_strength": "public_interactive_case",
       "case_page": "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.md",
       "interactive_page": "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html",
       "demo_command": null,
@@ -441,7 +873,7 @@
         "zh": "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html",
         "en": "docs/showcases/cases/0619-dynamic-workflow-hardware-agent.en.html"
       },
-      "showcase_rank": 5,
+      "showcase_rank": 8,
       "showcase_table": {
         "proof_point": "Fuzzy goals, multiple workers, and long unattended runs can still converge.",
         "loopx_intervention": "goal state, worker handoff, dynamic workflow"
@@ -482,6 +914,8 @@
       "date": "2026-06-19",
       "title": "LoopX self-iteration loop",
       "status": "public_evidence_case",
+      "case_type": "creator_dogfooding",
+      "evidence_strength": "public_git_evidence",
       "case_page": "docs/showcases/cases/0619-loopx-self-iteration.md",
       "demo_command": null,
       "domain": "agent-platform-self-improvement",
@@ -598,7 +1032,7 @@
         "zh": "docs/showcases/cases/0619-loopx-self-iteration.html",
         "en": "docs/showcases/cases/0619-loopx-self-iteration.en.html"
       },
-      "showcase_rank": 6,
+      "showcase_rank": 9,
       "showcase_table": {
         "proof_point": "A high-churn multi-lane project can keep state, boundaries, and evidence coherent.",
         "loopx_intervention": "todo, quota, gate, evidence, review packet, frontstage"
@@ -639,6 +1073,8 @@
       "date": "2026-06-17",
       "title": "Blocked P0 with safe P1/P2 rotation",
       "status": "reproducible_synthetic_demo",
+      "case_type": "reproducible_demo",
+      "evidence_strength": "reproducible_synthetic_demo",
       "case_page": "docs/showcases/cases/0617-blocked-p0-safe-rotation.md",
       "demo_command": "python3 examples/showcase-0617-blocked-p0-safe-rotation-smoke.py",
       "domain": "benchmark-rotation",
@@ -686,7 +1122,7 @@
         "zh": "docs/showcases/cases/0617-blocked-p0-safe-rotation.html",
         "en": "docs/showcases/cases/0617-blocked-p0-safe-rotation.en.html"
       },
-      "showcase_rank": 7,
+      "showcase_rank": 10,
       "showcase_table": {
         "proof_point": "A user decision should not block all safe work.",
         "loopx_intervention": "concrete user todo, safe fallback, quota control"
@@ -727,6 +1163,8 @@
       "date": "2026-06-20",
       "title": "Creator-operator long-running agent case",
       "status": "public_safe_case_spec",
+      "case_type": "reproducible_demo",
+      "evidence_strength": "public_safe_case_spec",
       "case_page": "docs/showcases/cases/0620-creator-operator-case-spec.md",
       "demo_command": null,
       "storyboard_path": "docs/showcases/creator-ops-fake-data-storyboard.md",

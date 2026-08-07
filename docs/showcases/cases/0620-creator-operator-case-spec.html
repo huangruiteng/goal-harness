@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>创作者-运营者长跑 Agent 案例</h1>
     <div class="accent">研究可以继续，发布决策仍然 gated。</div>
     <p>A non-technical operator can see what changed, what is blocked, what can safely continue, and how feedback changes the plan without reading prompts, logs, or raw traces.</p>
-    <div class="chips"><span>creator_operator_workflow</span><span>gate_aware_continuation</span><span>feedback_capture</span><span>safe_side_path</span><span>material_library</span><span>附录案例</span></div>
+    <div class="chips"><span>可复现 Demo</span><span>Public-safe case spec</span><span>creator operator workflow</span><span>gate aware continuation</span><span>feedback capture</span><span>safe side path</span><span>material library</span><span>附录案例</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>1</strong><span>publish hard gate</span></div><div class="metric"><strong>1</strong><span>safe research side path</span></div><div class="metric"><strong>0</strong><span>autopublish 动作</span></div><div class="metric"><strong>0</strong><span>真实运营数据暴露</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">storyboard</div><p>`creator-ops-fake-data-storyboard.md` 给出完整 fake fixture，不需要 live platform access，适合公开展示用户旅程而不泄漏真实运营数据。</p></div><div class="evidence-card"><div class="evidence-label">feedback contract</div><p>`creator-ops-feedback-boundary-contract.md` 把 gate decision、preference hint、todo update、boundary correction、reward signal 和 product improvement note 分开，避免把偏好误当发布授权。</p></div><div class="evidence-card"><div class="evidence-label">source status</div><p>contract 要求 topic、insight、draft、material item 都携带 source status；public repo 默认 `synthetic_demo`，不伪装成真实增长证据。</p></div><div class="evidence-card"><div class="evidence-label">no autopublish</div><p>publishing 是 hard user gate；safe side work 可以继续，但不能把偏好或 reward 当成发布授权。</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX 行为</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">creative objective 是 durable goal state，不是聊天窗口里的隐形任务。</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">publish/no-publish 是 user gate；research、整理和 source-status 改进可以作为 safe side path。</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">反馈被写成 preference hint、gate decision、todo update 或 boundary correction。</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">下一次 agent run 前，用户能看到 blocked route、safe side path 和 validation expectation。</div></div></li></ul>

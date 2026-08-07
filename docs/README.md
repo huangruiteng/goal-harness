@@ -57,7 +57,6 @@ a longer onboarding path.
 - [Showcases](showcases/README.md): public-safe cases and reproducible demos.
 - [Research](research/README.md): public evidence and benchmark investigations.
 - [Update notes](update-notes/README.md): current public progress notes.
-- [Outreach drafts](outreach/README.md): non-canonical launch and narrative work.
 - [Archive](archive/README.md): superseded and dated records.
 
 ## Project And Community

@@ -1,7 +1,71 @@
 # LoopX Showcases
 
-This directory collects public-safe examples that explain where LoopX
-helps and how the behavior can be reproduced or visualized.
+This directory is the complete public-safe case inventory for LoopX. Start with
+independent user evidence, then use the case type and evidence label to separate
+real-world adoption from contributor cases, creator dogfooding, and reproducible
+demos.
+
+## Start With Real Use
+
+**Source note:** The chat screenshots in the first two cases are owner-approved
+message excerpts from the LoopX public Lark developer group. They remain
+user-reported evidence, not independently reproduced proof.
+
+### 13+ hour C++ algorithm accuracy run
+
+**Independent user** · `>13h` reported · no parameter micromanagement reported
+
+LoopX kept a complex accuracy task aligned to its declared vision, then used
+replan to trigger public research instead of continuing local parameter
+thrashing. The user reported improved precision and retained experiment
+evidence.
+
+<p align="center">
+  <a href="../assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg"><img src="../assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg" alt="Authorized user feedback reporting a LoopX C++ algorithm run lasting more than 13 hours with improved precision and retained evidence" width="48%"></a>
+  <a href="../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg"><img src="../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg" alt="Authorized follow-up explaining that LoopX replan triggered public research and found a code-memory MCP" width="48%"></a>
+</p>
+
+*Source: owner-approved message excerpts from the LoopX public Lark developer
+group. Runtime and outcome are user-reported; the referenced [code-memory
+MCP](https://github.com/DeusData/codebase-memory-mcp) is public, but the private
+project and its measurements are not independently reproducible.
+[Read the case](cases/independent-cpp-accuracy-long-run.md).*
+
+### Four-day unattended agent run
+
+**Independent user** · `4d` reported · no intervention reported during the run
+
+LoopX kept one agent doing useful work across a four-day window and preserved a
+periodic report surface for later inspection.
+
+<p align="center">
+  <a href="../assets/showcases/user-feedback/four-day-unattended-user-report.jpg"><img src="../assets/showcases/user-feedback/four-day-unattended-user-report.jpg" alt="Minimally redacted authorized chat excerpt reporting a four-day LoopX agent run without human intervention" width="72%"></a>
+</p>
+
+*Source: an owner-approved, minimally redacted message excerpt from the LoopX
+public Lark developer group. The workload, run history, and quality assessment
+remain private and user-reported.
+[Read the case](cases/independent-four-day-unattended-agent.md).*
+
+### Public Engine refactor across seven merged PRs
+
+**Independent user** · seven merged PRs · maintainer review and merge remained
+present
+
+One durable refactor goal became staged component extractions across the public
+[`zilliztech/mfs` Engine issue](https://github.com/zilliztech/mfs/issues/166)
+and seven merged PRs. The repository independently verifies the issue and PR
+sequence; LoopX attribution, perceived quality, and the reported `1B+` token
+scale remain user-reported.
+
+[Read the case and inspect all seven PRs](cases/independent-public-engine-refactor.md).
+
+Open the [hosted Showcase index](https://huangruiteng.github.io/loopx/docs/showcases/index.html)
+for the bilingual visual case surface. The
+[feedback coverage map](user-feedback-coverage.md) records every input cluster,
+including useful signals that were deliberately not promoted to success cases.
+
+## What A Case Includes
 
 Showcases are not raw run logs. Each case should reduce a real collaboration
 into a reusable control-plane pattern:
@@ -12,6 +76,8 @@ into a reusable control-plane pattern:
 - the evidence boundary, including what must stay private;
 - a reproducible demo or the reason a demo is still pending;
 - optional data that a future website can render as a public evidence sequence.
+
+## Catalog Contract
 
 The machine-readable catalog lives in
 [showcase-catalog.json](showcase-catalog.json). Public docs and future frontend
@@ -50,9 +116,7 @@ dashboard route remains an exporter compatibility surface, not a promoted
 public entry. New users should start from the homepage; public cases,
 efficiency evidence, and the public boundary come from this directory, while
 live local `statusUrl` feeds belong only to explicit ops-mode inspection.
-For animated outreach assets, start from the
-[showcase animation skill spike](../outreach/showcase-animation-skill-spike.md)
-and the
+For animated showcase assets, start from the
 [public storyboard artifact](showcase-animation-storyboard.json). Keep
 `showcase-catalog.json` as the only case data source.
 Generate the first catalog-backed animation prototype with
@@ -111,32 +175,29 @@ cd apps/presentation/dashboard && npm run dev
 CLI state remains the source of truth, browser writes require explicit local
 opt-in, and review signals stay separate from execution permission.
 
-## Canonical PoC Cards
+## Independent User Cases
 
-| Case | Pattern | Status | Public Surface |
+| Case | Problem | LoopX behavior | Outcome boundary |
 | --- | --- | --- | --- |
-| [0617 blocked P0 with safe P1/P2 rotation](cases/0617-blocked-p0-safe-rotation.md) | Blocked priority fallback, concrete user gate, quota discipline | Reproducible synthetic demo | `python3 examples/showcase-0617-blocked-p0-safe-rotation-smoke.py` |
-| [0619 LoopX self-iteration loop](cases/0619-loopx-self-iteration.md) | Self-iteration, peer claims, evidence writeback | Public Git evidence case | Commit-backed narrative and workload signal |
-| [0619 dynamic workflow for hardware-agent development](cases/0619-dynamic-workflow-hardware-agent.html) | Dynamic workflow, multi-agent convergence, shared control plane | Public-safe interactive case | Five hardware-agent cases plus companion notes |
+| [13+ hour C++ algorithm accuracy run](cases/independent-cpp-accuracy-long-run.md) | Complex accuracy work risked local thrashing and context loss | Vision-aligned replan triggered public research and a new code-memory method | Improved precision is user-reported; public tool is inspectable |
+| [Four-day unattended agent run](cases/independent-four-day-unattended-agent.md) | Operator needed useful work without repeated prompting | Durable continuation plus a periodic report surface | Four days and usefulness are user-reported |
+| [Public Engine refactor](cases/independent-public-engine-refactor.md) | Monolithic Engine mixed nine responsibility areas | One durable goal became staged, PR-sized component extractions | Seven PRs are public; attribution and token scale are user-reported |
 
-The catalog order above is the canonical frontstage order for the PoC. It keeps
-the public homepage focused on one reproducible control-plane proof, one
-commit-backed self-iteration case, and one contributor-approved interactive
-workflow case that shows how LoopX coordinates generated scripts and worker
-agents under a shared control plane.
+The catalog and hosted index keep these external cases first. README files keep
+only the strongest three and link back here; the full inventory stays in this
+directory.
 
-## Additional Public Evidence Cases
+## Contributor, Creator, And Demo Cases
 
-| Case | Pattern | Status | Public Surface |
+| Case | Type | Pattern | Evidence |
 | --- | --- | --- | --- |
-| [0623 agent-to-agent PR comment and fix loop](cases/0623-agent-to-agent-pr-comments.md) | Agent handoff, PR comment loop, review packet | Public-safe pattern case | Redacted lifecycle narrative |
-| [0623 overnight project refactor](cases/0623-overnight-project-refactor.md) | PR-sized slices, todo follow-up, supersede | Public-safe pattern case | Redacted lifecycle narrative |
-| [0624 PR issue automatic fix loop](cases/0624-pr-issue-auto-fix.md) | Issue-fix workflow, repro smoke, reviewer handoff | Public-safe pattern case | Redacted workflow narrative |
-| [0627 overnight PR batch with reviewable control](cases/0627-overnight-pr-batch.md) | PR-sized slices, validation writeback, public-boundary discipline | Public Git evidence case | 22 merged commits over a 10-hour public Git window |
-
-Additional evidence cases stay in the catalog as appendix surfaces, but they
-are not part of the first three canonical PoC cards until they gain a
-reproducible demo or a deeper public evidence packet.
+| [External hardware-agent workflow](cases/0619-dynamic-workflow-hardware-agent.html) | Contributor case | Dynamic workflow, multi-agent convergence | Contributor-approved interactive case |
+| [LoopX self-iteration](cases/0619-loopx-self-iteration.md) | Creator dogfooding | Self-iteration, peer claims, evidence writeback | Public Git evidence |
+| [Overnight PR batch](cases/0627-overnight-pr-batch.md) | Creator dogfooding | PR-sized slices, validation writeback | 22 merged commits over a 10-hour public Git window |
+| [Overnight project refactor](cases/0623-overnight-project-refactor.md) | Creator dogfooding | PR-sized slices, todo follow-up, supersede | Public-safe lifecycle narrative |
+| [Blocked P0 safe rotation](cases/0617-blocked-p0-safe-rotation.md) | Reproducible demo | Concrete user gate, safe P1/P2 fallback | Focused synthetic smoke |
+| [PR issue automatic fix](cases/0624-pr-issue-auto-fix.md) | Reproducible demo | Issue-fix workflow, repro, reviewer handoff | Public-safe pattern case |
+| [Agent-to-agent PR comment loop](cases/0623-agent-to-agent-pr-comments.md) | Reproducible demo | Claimed handoff, comment, fix, review packet | Public-safe pattern case |
 
 ## Appendix Cases
 

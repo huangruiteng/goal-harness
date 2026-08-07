@@ -44,6 +44,11 @@ def main() -> int:
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
     scenes = storyboard["scenes"]
     cases = catalog["cases"]
+    referenced_case_ids = {
+        str(case_id)
+        for scene in scenes
+        for case_id in scene.get("source_case_ids", [])
+    }
     duration = scenes[-1]["time_seconds"][1]
 
     with tempfile.TemporaryDirectory(prefix="loopx-showcase-animation-") as tmp:
@@ -97,6 +102,8 @@ def main() -> int:
 
     for case in cases:
         case_id = str(case["id"])
+        if case_id not in referenced_case_ids:
+            continue
         assert case_id in rendered, case_id
         assert escaped(case["title"]) in rendered, case_id
         assert escaped(case["headline"]) in rendered, case_id

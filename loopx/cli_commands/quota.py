@@ -34,6 +34,7 @@ from ..control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
 )
+from ..control_plane.todos.contract import TODO_CONTINUATION_POLICY_VALUES
 from ..file_lock import lock_timeout_error_fields
 from ..presentation.renderers.quota_event_markdown import (
     render_quota_monitor_poll_markdown,
@@ -298,6 +299,41 @@ def register_quota_command(subparsers: argparse._SubParsersAction) -> None:
     quota_parser.add_argument("--cadence", help="Monitor cadence used to compute the next due timestamp, e.g. 30m, 2h, or 1d.")
     quota_parser.add_argument("--next-due-at", help="Explicit ISO timestamp for the next monitor poll.")
     quota_parser.add_argument("--next-agent-todo", help="Agent follow-up todo to add when `--material-change` is set.")
+    quota_parser.add_argument(
+        "--next-action-kind",
+        help="Explicit action kind for a material monitor's --next-agent-todo successor.",
+    )
+    quota_parser.add_argument(
+        "--next-task-repository",
+        help=(
+            "Credential-free Git repository identity for a material monitor's "
+            "--next-agent-todo successor."
+        ),
+    )
+    quota_parser.add_argument(
+        "--next-required-capability",
+        dest="next_required_capabilities",
+        action="append",
+        help=(
+            "Execution capability required by a material monitor's --next-agent-todo "
+            "successor. Repeat for multiple capabilities."
+        ),
+    )
+    quota_parser.add_argument(
+        "--next-continuation-policy",
+        choices=sorted(TODO_CONTINUATION_POLICY_VALUES),
+        help=(
+            "Continuation policy for a material monitor's --next-agent-todo successor. "
+            "Defaults to independent_handoff."
+        ),
+    )
+    quota_parser.add_argument(
+        "--next-target-key",
+        help=(
+            "Stable public-safe target key for a material monitor's --next-agent-todo "
+            "successor. Defaults to a deterministic monitor-transition key."
+        ),
+    )
     quota_parser.add_argument("--next-user-todo", help="User follow-up todo to add when `--material-change` is set.")
     quota_parser.add_argument(
         "--next-user-task-class",
@@ -736,6 +772,11 @@ def handle_quota_command(
                 cadence=args.cadence,
                 next_due_at=args.next_due_at,
                 next_agent_todo=args.next_agent_todo,
+                next_action_kind=args.next_action_kind,
+                next_task_repository=args.next_task_repository,
+                next_required_capabilities=args.next_required_capabilities,
+                next_continuation_policy=args.next_continuation_policy,
+                next_target_key=args.next_target_key,
                 next_user_todo=args.next_user_todo,
                 next_user_task_class=args.next_user_task_class,
                 next_claimed_by=args.next_claimed_by,
@@ -846,6 +887,15 @@ def handle_quota_command(
             "source": payload.get("source") or "",
             "todo_id": payload.get("todo_id") or "",
             "target_key": payload.get("target_key") or "",
+            "successor_todo_ids": ",".join(
+                str(todo_id)
+                for todo_id in (
+                    payload.get("successor_todo_ids")
+                    if isinstance(payload.get("successor_todo_ids"), list)
+                    else []
+                )
+                if str(todo_id).strip()
+            ),
             "applied_rrule": payload.get("applied_rrule") or "",
         }
         if heartbeat_turn_id and args.quota_command == "should-run":

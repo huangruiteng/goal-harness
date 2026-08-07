@@ -1,0 +1,96 @@
+name: Feature Request
+description: Propose a concrete LoopX product or documentation improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem and smallest useful outcome before prescribing a large implementation. Keep examples public-safe and free of credentials, private state, and internal material.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues, discussions, and contributor tasks for this request.
+          required: true
+        - label: This request and its attachments contain no credentials or private/internal material.
+          required: true
+
+  - type: dropdown
+    id: request-origin
+    attributes:
+      label: Request origin
+      description: What evidence motivates this request?
+      options:
+        - Observed need in a real workflow
+        - Feedback from an assisted pilot or user
+        - Inferred by an AI agent and not yet observed
+        - Design or maintenance improvement
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or unmet outcome
+      description: What is difficult today, for whom, and what is the failure cost?
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Show the workflow in which this capability would be used.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-outcome
+    attributes:
+      label: Proposed outcome
+      description: Describe the observable behavior you want, without requiring one implementation.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product area
+      options:
+        - Goal, todo, and gate lifecycle
+        - Quota, scheduler, and heartbeat
+        - Issue-fix or another domain capability
+        - Host and runtime integration
+        - Dashboard and operator surfaces
+        - Extensions and external integrations
+        - Documentation and onboarding
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What existing command, extension, workflow, or smaller change did you consider?
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I may be able to help design, implement, document, or validate this request.

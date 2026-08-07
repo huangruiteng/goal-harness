@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>P0 block 后推进 P1/P2</h1>
     <div class="accent">用户决策不应阻塞全部安全工作。</div>
     <p>The operator sees exactly what decision is needed while the agent can keep making bounded progress elsewhere.</p>
-    <div class="chips"><span>reproducible</span><span>user-gate</span><span>fallback</span></div>
+    <div class="chips"><span>可复现 Demo</span><span>可复现合成证据</span><span>reproducible</span><span>user-gate</span><span>fallback</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>1</strong><span>具体 P0 用户决策</span></div><div class="metric"><strong>1</strong><span>safe fallback lane</span></div><div class="metric"><strong>0</strong><span>gated lane 自动推进</span></div><div class="metric"><strong>0</strong><span>private upload 依赖</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">synthetic fixture</div><p>`examples/showcase-0617-blocked-p0-safe-rotation-smoke.py` 复现 P0 user gate、被 gate 阻塞的 P0 agent lane 和 P1 no-upload fallback。</p></div><div class="evidence-card"><div class="evidence-label">quota contract</div><p>smoke 固定 `should_run=True`、`requires_user_action=True`、`safe_bypass_allowed=True`、`safe_bypass_kind=scoped_user_gate_fallback` 等关键 contract。</p></div><div class="evidence-card"><div class="evidence-label">selected fallback</div><p>fixture 选择 `terminal_bench_no_upload`，同时保留 `ale_image` gate 的 user-visible blocker。</p></div><div class="evidence-card"><div class="evidence-label">rendered evidence</div><p>smoke 检查 markdown 中包含 `scoped_user_gate_fallback` 和 safe no-upload Terminal-Bench rotation。</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX 行为</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">用户 todo 具体命名 P0 决策，不用“owner gate”这种空话。</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">agent 不在 gated lane 上花 compute；只选择不依赖该决策的 fallback。</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">状态同时记录 blocker 和 fallback reason，方便之后恢复 P0。</div></div></li></ul>

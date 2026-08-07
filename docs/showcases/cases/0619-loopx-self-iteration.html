@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>LoopX Meta Agent 自迭代</h1>
     <div class="accent">高变更、多车道项目可保持状态、边界和证据。</div>
     <p>The operator can let a fast-moving multi-lane agent project continue across benchmark, product, docs, and peer work while keeping ownership, gates, validation, follow-up, and conservative efficiency evidence visible in one shared control plane.</p>
-    <div class="chips"><span>self-iteration</span><span>commit-backed</span><span>peer-agent</span><span>efficiency-model</span></div>
+    <div class="chips"><span>Creator dogfooding</span><span>公开 Git 证据</span><span>self-iteration</span><span>commit-backed</span><span>peer-agent</span><span>efficiency-model</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>801</strong><span>public commits</span></div><div class="metric"><strong>244</strong><span>06-18 后 commits</span></div><div class="metric"><strong>59-92d</strong><span>AI-assisted baseline</span></div><div class="metric"><strong>3.0-4.7x</strong><span>calendar compression</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">全仓库证据</div><p>截至 anchor commit：801 个 public commits、570 个 touched files、265703 行新增、49895 行删除。</p></div><div class="evidence-card"><div class="evidence-label">近期窗口</div><p>2026-06-18 起有 244 个 public commits、216 个 touched files、52898 行新增、20935 行删除。</p></div><div class="evidence-card"><div class="evidence-label">0619 当日</div><p>2026-06-19 有 74 个 public commits、118 个 touched files、16087 行新增、1082 行删除。</p></div><div class="evidence-card"><div class="evidence-label">效率模型</div><p>把公开仓库能力拆成 9 个 requirement clusters，保守估计 59-92 个 AI-coding-assisted developer-days，对 19.6 天 public window 得出方向性 compression。</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX 行为</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">registry、prompt contracts 和 registered agents 命名 primary/side identities，不靠聊天记忆。</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">benchmark、productization、documentation、planning 和 peer lanes 被拆成 reviewable obligations。</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">quota/status projection 区分 executable work、monitor work、user gates 和 blockers。</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">advisory peer scope 留在 profile/prompt，todo metadata 保留 `claimed_by` 和 typed continuation。</div></div></li><li><span class="flow-num">5</span><div class="flow-body"><div class="flow-title">public docs 和 smokes 把可复用经验沉淀为仓库 artifact。</div></div></li></ul>

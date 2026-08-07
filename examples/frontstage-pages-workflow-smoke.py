@@ -25,6 +25,8 @@ def main() -> int:
 
     for needle in [
         "workflow_dispatch:",
+        "schedule:",
+        'cron: "37 */6 * * *"',
         "pull_request:",
         "branches:",
         "actions: read",
@@ -40,6 +42,14 @@ def main() -> int:
         "apps/presentation/site/**",
         "examples/showcase-catalog-smoke.py",
         "python3 examples/showcase-catalog-smoke.py",
+        "examples/readme-star-history-smoke.py",
+        "python3 examples/readme-star-history-smoke.py",
+        "scripts/render-star-history.py",
+        "application/vnd.github.star+json",
+        "X-GitHub-Api-Version: 2026-03-10",
+        'jq \'[.[][]] | length\'',
+        "--expected-count",
+        "output/frontstage-pages/site/site-assets/star-history.svg",
         "npm run smoke:frontstage-share-bundle",
         "npm run export:frontstage-share -- --base /loopx/ --out-dir ../../../output/frontstage-pages",
         "actions/configure-pages@v6",

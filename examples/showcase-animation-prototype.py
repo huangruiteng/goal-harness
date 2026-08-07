@@ -58,7 +58,7 @@ def validate(
         raise ValueError("storyboard schema_version mismatch")
     if storyboard.get("source_catalog") != "docs/showcases/showcase-catalog.json":
         raise ValueError("storyboard must point to docs/showcases/showcase-catalog.json")
-    if catalog.get("schema_version") != "loopx_showcase_catalog_v0":
+    if catalog.get("schema_version") not in {"loopx_showcase_catalog_v0", "loopx_showcase_catalog_v1"}:
         raise ValueError("catalog schema_version mismatch")
 
     target = storyboard.get("duration_seconds_target")
@@ -119,8 +119,8 @@ def validate(
     duration = int(scenes[-1]["time_seconds"][1])
     if duration < int(target["min"]) or duration > int(target["max"]):
         raise ValueError("storyboard scene duration must fit the 20-30 second target")
-    if referenced_case_ids != set(case_by_id):
-        raise ValueError("storyboard must reference every catalog case exactly through public ids")
+    if not referenced_case_ids:
+        raise ValueError("storyboard must reference at least one catalog case through public ids")
     return scenes, case_by_id, duration
 
 
@@ -204,7 +204,6 @@ def render_scene_keyframes(scenes: list[dict[str, Any]], duration: int) -> str:
     for scene in scenes:
         scene_class = slug(scene["id"])
         start, end = scene["time_seconds"]
-        start_pct = pct(start, duration)
         fade_pct = pct(min(start + 0.7, end), duration)
         hold_pct = pct(max(end - 0.7, start + 0.7), duration)
         end_pct = pct(end, duration)

@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>一晚上自主重构项目</h1>
     <div class="accent">长时间无值守重构能拆成适中 PR，而不是一个不可 review 大改。</div>
     <p>The operator can wake up to reviewable PR-sized refactor slices instead of a single giant autonomous diff.</p>
-    <div class="chips"><span>refactor</span><span>PR slices</span><span>todo evidence</span></div>
+    <div class="chips"><span>Creator dogfooding</span><span>Public-safe pattern</span><span>refactor</span><span>PR slices</span><span>todo evidence</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>1</strong><span>一次一个 PR-sized slice</span></div><div class="metric"><strong>3</strong><span>successor/supersede/handoff 路线</span></div><div class="metric"><strong>1</strong><span>宽风险 review gate</span></div><div class="metric"><strong>0</strong><span>巨型 diff 目标</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">successor path</div><p>`docs/integrations/lark-kanban-control-plane-adapter.md` 明确 real successor 使用 `todo complete --next-*`，replacement 或 narrower split 使用 `todo supersede --next-agent-todo`。</p></div><div class="evidence-card"><div class="evidence-label">peer completion</div><p>`docs/heartbeat-automation-prompt.md` 要求非平凡完成创建 typed successor todo 或写 no-follow-up rationale。</p></div><div class="evidence-card"><div class="evidence-label">CLI validation</div><p>`examples/control_plane/todo-lifecycle-cli-smoke.py` 覆盖 `--next-agent-todo` successor、`todo supersede`、claim 继承、typed continuation、same-agent review rejection 和 peer self-merge evidence。</p></div><div class="evidence-card"><div class="evidence-label">review shape</div><p>`loopx review-packet` 把当前 open todo、claimed_by 和 handoff 状态打包成 reviewer 可读的 packet。</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX 行为</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">当前 refactor slice 必须是可 review 的单位，不把整夜发现都塞进一个 PR。</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">发现的新工作写成 follow-up todo；路线变了就 supersede 旧 todo。</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">每个 slice 用 focused validation 或文档/contract smoke 证明，而不是依赖原始 agent trace。</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">大范围或风险不清楚的 slice 不自合并，进入 review handoff。</div></div></li></ul>
