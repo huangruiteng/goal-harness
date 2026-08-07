@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
-from ..runtime.time import now_utc
+from ..runtime.time import now_utc, parse_timestamp
 from ..scheduler.monitor_todo import monitor_cadence_delta
 from ..todos.contract import (
     TODO_STATUS_DONE,
@@ -25,7 +25,6 @@ from ..todos.projection import (
     todo_item_next_due_at,
     todo_item_task_class,
 )
-from ..todos.quota_summary import validate_todo_source_contract
 from ..todos.todo_summary import todo_successor_todo_ids
 
 REPAIR_DELTA_KIND_CHOICES = (
@@ -160,30 +159,75 @@ def _bounded_watch_todo_ids(
     return todo_ids
 
 
-def _terminal_no_followup_todo_ids(
+def _todo_source_projection_is_complete(summary: dict[str, Any] | None) -> bool:
+    if not isinstance(summary, dict):
+        return False
+    items = summary.get("items")
+    proof = summary.get("source_proof")
+    counts = [
+        summary.get(key)
+        for key in ("total_count", "open_count", "done_count", "deferred_count")
+    ]
+    if not all(type(count) is int and count >= 0 for count in counts):
+        return False
+    total_count, open_count, done_count, deferred_count = cast(
+        tuple[int, int, int, int],
+        tuple(counts),
+    )
+    # Open lanes omit source_proof by design, so exact item/count parity is the
+    # completeness guard for the unbounded parser used by refresh-state.
+    return bool(
+        summary.get("schema_version") == "todo_summary_v0"
+        and isinstance(items, list)
+        and total_count == open_count + done_count
+        and deferred_count <= open_count
+        and len(items) == total_count
+        and (
+            proof is None
+            or (
+                isinstance(proof, dict)
+                and proof.get("schema_version") == "todo_source_proof_v0"
+                and proof.get("role") == "agent"
+                and proof.get("item_count") == total_count
+                and proof.get("derived") is True
+            )
+        )
+        and summary.get("source_section") == "Agent Todo"
+    )
+
+
+def _scoped_no_followup_todo_ids(
     summary: dict[str, Any] | None,
     *,
     items: list[dict[str, Any]],
 ) -> list[str]:
-    if not isinstance(summary, dict):
+    if not _todo_source_projection_is_complete(summary):
         return []
-    completeness, intent = validate_todo_source_contract(summary)
-    if not (
-        completeness.get("status") == "valid"
-        and completeness.get("role") == "agent"
-        and completeness.get("terminal_closure") == "valid"
-        and isinstance(intent, dict)
-        and intent.get("kind") == "no_followup"
-        and intent.get("source") == "todo_no_followup"
-    ):
-        return []
-    return [
-        todo_id
+    completed = [
+        (item, todo_id)
         for item in items
         if _todo_is_done(item)
-        and normalize_todo_no_followup(item.get("no_followup")) is True
         and (todo_id := normalize_todo_id(item.get("todo_id")))
     ]
+    if not completed:
+        return []
+
+    def recency(candidate: tuple[dict[str, Any], str]) -> tuple[float, int]:
+        item, _ = candidate
+        completed_at = parse_timestamp(item.get("completed_at") or item.get("updated_at"))
+        index = item.get("index")
+        return (
+            completed_at.timestamp() if completed_at is not None else float("-inf"),
+            index if type(index) is int else -1,
+        )
+
+    latest_item, latest_id = max(completed, key=recency)
+    if not (
+        normalize_todo_no_followup(latest_item.get("no_followup")) is True
+        and latest_item.get("route_continuation_replan_required") is not True
+    ):
+        return []
+    return [latest_id]
 
 
 def _successor_transition_todo_ids(
@@ -228,35 +272,38 @@ def validate_repair_delta_claims(
     vision_patch_written: bool,
     observed_at: datetime | None = None,
 ) -> tuple[list[str], list[dict[str, Any]], list[dict[str, str]]]:
-    items = (
+    projected_items: Any = (
         agent_todo_summary.get("items")
         if isinstance(agent_todo_summary, dict)
-        and isinstance(agent_todo_summary.get("items"), list)
-        else []
+        else None
     )
+    items: list[dict[str, Any]] = [
+        item
+        for item in (projected_items if isinstance(projected_items, list) else [])
+        if isinstance(item, dict)
+    ]
     normalized_agent_id = normalize_todo_claimed_by(agent_id)
     scoped = [
         item
         for item in items
-        if isinstance(item, dict)
-        and todo_item_claimed_by_agent_or_unclaimed(
+        if todo_item_claimed_by_agent_or_unclaimed(
             item,
             agent_id=normalized_agent_id,
         )
     ]
     runnable_ids = [
-        item.get("todo_id")
+        todo_id
         for item in scoped
         if todo_item_is_actionable_open(item)
         and todo_item_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
-        and item.get("todo_id")
+        and (todo_id := normalize_todo_id(item.get("todo_id")))
     ]
     blocker_ids = [
-        item.get("todo_id")
+        todo_id
         for item in scoped
         if todo_item_is_actionable_open(item)
         and todo_item_task_class(item) == TODO_TASK_CLASS_BLOCKER
-        and item.get("todo_id")
+        and (todo_id := normalize_todo_id(item.get("todo_id")))
     ]
     bounded_watch_ids = _bounded_watch_todo_ids(
         scoped,
@@ -266,9 +313,9 @@ def validate_repair_delta_claims(
         items,
         agent_id=normalized_agent_id,
     )
-    no_followup_ids = _terminal_no_followup_todo_ids(
+    no_followup_ids = _scoped_no_followup_todo_ids(
         agent_todo_summary,
-        items=items,
+        items=scoped,
     )
 
     accepted: list[str] = []
@@ -303,7 +350,9 @@ def validate_repair_delta_claims(
             reason = "no completed todo links a scoped open advancement successor"
         elif kind == "no_followup":
             todo_ids = no_followup_ids
-            reason = "no validated terminal todo no-follow-up closure exists"
+            reason = (
+                "no scoped completed todo has a validated local no-follow-up closure"
+            )
         elif kind == "active_state_next_action" and not next_action_changed:
             reason = "active-state Next Action did not change"
         elif kind == "goal_vision_patch" and not vision_patch_written:
