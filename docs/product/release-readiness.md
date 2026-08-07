@@ -527,6 +527,25 @@ Treat these as experimental until their contract docs say otherwise:
 
 ## Release Note Checklist
 
+Start the final GitHub release body from the canonical
+[release note template](release-note-template.md). Its first substantive
+section is a compact `## Release Decision` block that answers the five
+questions a reader needs before inspecting the detailed changelog:
+
+| Field | Required decision |
+| --- | --- |
+| `**Who should upgrade:**` | Name the affected users or operators, the reason to upgrade now, and who can remain on the current version. |
+| `**What this release solves:**` | State the concrete failure, missing workflow, or reliability gap in user-outcome language. |
+| `**Breaking changes:**` | Start with `No.` or `Yes.`; when yes, give the migration path, and when no, still disclose changed defaults, deprecations, or experimental boundaries. |
+| `**How to verify:**` | State the expected post-upgrade result and include a minimal runnable `bash` block that proves package identity and the affected behavior. |
+| `**Contributors:**` | Name the release maintainer and community contributors from the tag range, or explicitly say that the release has no community contribution. |
+
+Mirror the same decisions under `### 升级决策` in the Chinese summary with
+`**谁需要升级：**`, `**解决了什么：**`, `**是否有破坏性变更：**`,
+`**如何验证：**`, and `**贡献者：**`. The summary is a decision aid, not a
+replacement for the detailed product groups, per-claim PR evidence, optional
+capability lifecycle, or exact-commit validation evidence below it.
+
 Keep user-visible product changes first. When merged pull requests between the
 previous and current tags include community contributors other than project
 founder `@huangruiteng`, add a prominent `## Community Contributors` section
@@ -577,13 +596,11 @@ still useful at the end, but it does not replace per-claim PR attribution.
 Avoid bare PR ranges as the only evidence because ranges can hide omitted or
 unrelated changes.
 
-Every public release note or update note should also answer:
+After the decision summary and product groups, every public release note should
+also record:
 
-- What user-visible capability became more dependable?
 - What package version and public tag name this stable release uses?
 - Which install/update path should a new user follow?
-- Which commands, docs, or smokes prove the claim?
-- Are there compatibility or migration notes for existing local state?
 - Which surfaces are still experimental or intentionally excluded?
 - For every new or materially changed experimental, default-off, or opt-in
   capability, include an **Optional capability activation** entry in both
