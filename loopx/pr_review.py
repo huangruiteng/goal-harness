@@ -607,13 +607,13 @@ def _review_template(item: dict[str, Any]) -> dict[str, Any]:
         ),
         _section(
             "改动思路",
-            "250-450字",
-            "解释所选架构、改动前后的控制流或数据流、所有权边界、关键不变量和替代方案取舍；为不熟悉子系统的读者给出一条正向运行链路。",
+            "300-500字",
+            "解释所选架构、改动前后的控制流或数据流、所有权边界、关键不变量和替代方案取舍；为不熟悉子系统的读者给出一条正向运行链路，并点明承载关键决策的符号。",
         ),
         _section(
             "具体改动",
-            "300-600字",
-            "把关键文件和符号映射到行为，覆盖接口、配置或状态、兼容路径、测试与文档；说明各部分如何协作，并给出一个具体输入到输出的例子。",
+            "450-800字",
+            "把关键文件和符号映射到行为，覆盖接口、配置或状态、兼容路径、测试与文档；代码型 PR 必须包含 `### 关键代码讲解`，选 2-5 个行为关键符号，结合精确 head 的短代码片段或等价伪代码，逐个解释输入/前置状态、关键分支或不变量、调用/副作用、输出消费者与失败路径；说明各部分如何协作，并给出一个具体输入到输出的例子。纯文档 PR 改为讲解关键政策或内容锚点。",
         ),
         _section(
             "对主干的风险",
@@ -631,7 +631,7 @@ def _review_template(item: dict[str, Any]) -> dict[str, Any]:
         "purpose": "Empty scaffold only; agentloop fills it after reading PR body and diff.",
         "sections": sections,
         "review_order": _review_order(key_files),
-        "output_hint": "Write for a reader unfamiliar with the PR: explain context, architecture, implementation, validation, necessity, and risk with concrete evidence. Follow each section's range as a depth signal, not filler.",
+        "output_hint": "Write for a reader unfamiliar with the PR: explain context, architecture, implementation, validation, necessity, and risk with concrete evidence. For code changes, include a detailed key-code subsection grounded in exact-head symbols and short excerpts or equivalent pseudocode. Follow each section's range as a depth signal, not filler.",
     }
 
 
@@ -684,6 +684,23 @@ def _agent_response_contract() -> dict[str, Any]:
                 "positive": "Trace one user or host action through calls/state to the observable result.",
                 "negative_when": "For selectors, policy, authority, lifecycle, or bridge changes, trace one rejection or failure case.",
             },
+            "key_code_explanation": {
+                "schema_version": "pr_review_key_code_explanation_v0",
+                "required_for_code_changes": True,
+                "subsection": "关键代码讲解",
+                "symbol_count": "Select 2-5 behavior-bearing symbols, proportional to the PR; do not choose by diff size alone.",
+                "per_symbol_fields": [
+                    "exact-head file and line plus symbol name",
+                    "responsibility and before/after behavior",
+                    "inputs or authoritative pre-state",
+                    "critical branch, transition, or invariant",
+                    "callee, side effect, or persisted write",
+                    "return value, receipt, or downstream consumer",
+                    "failure, fallback, rejection, or retry ownership",
+                ],
+                "source_form": "Use 1-3 short exact-head excerpts or equivalent pseudocode blocks, each followed by mechanism-rich explanation; do not paste large diff regions.",
+                "docs_only_alternative": "For a docs-only PR, explain the key policy or content anchors and how readers or tooling consume them.",
+            },
             "risk_scan": [
                 "false-ready or false-success state",
                 "authority, permission, or scope bypass",
@@ -703,6 +720,7 @@ def _agent_response_contract() -> dict[str, Any]:
             "Do not stop at the queue/table summary when the user invokes /loopx-pr-review.",
             "Do not pipe the JSON packet through jq or another projection that drops agent_response_contract, result_completeness, review_groups, pull_requests[].review_template, or pull_requests[].evidence_commands before planning the final answer.",
             "For each selected PR, run the evidence_commands or equivalent PR body/diff reads before filling the five sections.",
+            "For every code-changing PR, put a detailed `关键代码讲解` subsection under `具体改动`; explain 2-5 exact-head symbols with short excerpts or equivalent pseudocode, surrounding callers, state transitions, consumers, and failure ownership.",
             "Follow explanation_depth_contract and the per-section instructions; the packet, rather than host-specific skill prose, is the canonical explanation-depth contract.",
             "Lead with actionable findings, explain repository-specific terms on first use, and distinguish intended behavior from implementation and validation evidence.",
             "Do not fill the five sections from metadata_risk_hint alone; metadata_risk_hint is only queue-ordering context.",
@@ -1161,6 +1179,7 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
         "- Do not collapse this packet to `.summary` and `.review_sequence` only; preserve `agent_response_contract`, `review_groups`, `pull_requests[].review_template`, and `pull_requests[].evidence_commands`.",
         "- For each selected PR, read PR body/files/diff/checks first, then return one review card.",
         "- Follow `agent_response_contract.explanation_depth_contract`; explain the PR for a technically curious reader who may not know the subsystem.",
+        "- Code-changing PRs must include a `关键代码讲解` subsection under `具体改动`, grounded in exact-head symbols and short excerpts or equivalent pseudocode.",
         "- Bind the verdict to the remote head SHA and recheck it before answering.",
         "- Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`.",
         "- `metadata_risk_hint` is only queue-ordering metadata; do not copy it as the final risk judgment.",
