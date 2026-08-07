@@ -1,0 +1,186 @@
+name: Release Artifacts
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-artifacts.yml"
+      - "examples/release-artifacts-smoke.py"
+      - "loopx/**"
+      - "pyproject.toml"
+      - "README.md"
+      - "scripts/release_artifacts.py"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing GitHub Release tag containing this release tooling"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'huangruiteng/loopx'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      release-tag: ${{ steps.identity.outputs.release-tag }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Resolve and validate release identity
+        id: identity
+        env:
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          release_tag="${EVENT_RELEASE_TAG:-${INPUT_RELEASE_TAG:-}}"
+          if [[ -z "${release_tag}" ]]; then
+            release_tag="$(python scripts/release_artifacts.py expected-tag)"
+          fi
+          python scripts/release_artifacts.py validate-tag "${release_tag}"
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          echo "release-tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "RELEASE_TAG=${release_tag}" >> "${GITHUB_ENV}"
+          echo "SOURCE_DATE_EPOCH=${source_date_epoch}" >> "${GITHUB_ENV}"
+          echo "PYTHONHASHSEED=0" >> "${GITHUB_ENV}"
+
+      - name: Install release build tools
+        run: python -m pip install --disable-pip-version-check build==1.4.4 twine==6.2.0
+
+      - name: Build wheel and source distribution
+        run: python -m build --sdist --wheel --outdir dist/packages
+
+      - name: Normalize source distribution metadata
+        run: >-
+          python scripts/release_artifacts.py normalize-sdist
+          --dist-dir dist/packages
+          --source-date-epoch "${SOURCE_DATE_EPOCH}"
+
+      - name: Validate package metadata
+        run: python -m twine check dist/packages/*
+
+      - name: Generate and verify checksums
+        run: |
+          set -euo pipefail
+          python scripts/release_artifacts.py write-checksums \
+            --dist-dir dist/packages \
+            --output dist/SHA256SUMS
+          python scripts/release_artifacts.py verify-checksums \
+            --dist-dir dist/packages \
+            --checksum-file dist/SHA256SUMS
+
+      - name: Verify wheel in a clean environment
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/loopx-wheel"
+          "${RUNNER_TEMP}/loopx-wheel/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            dist/packages/*.whl
+          test "$("${RUNNER_TEMP}/loopx-wheel/bin/loopx" --version)" = \
+            "loopx ${RELEASE_TAG#v}"
+
+      - name: Exercise release contract smoke
+        run: python examples/release-artifacts-smoke.py
+
+      - name: Attest release packages and checksum manifest
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/packages/*
+            dist/SHA256SUMS
+
+      - name: Upload validated release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: loopx-${{ steps.identity.outputs.release-tag }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 30
+
+  upload-release:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.release-tag }}
+
+      - name: Download validated release bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: loopx-${{ needs.build.outputs.release-tag }}
+          path: dist
+
+      - name: Verify checksums before upload
+        run: >-
+          python scripts/release_artifacts.py verify-checksums
+          --dist-dir dist/packages
+          --checksum-file dist/SHA256SUMS
+
+      - name: Upload immutable GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
+        run: |
+          set -euo pipefail
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          gh release upload "${RELEASE_TAG}" \
+            dist/packages/* \
+            dist/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}"
+
+  publish-pypi:
+    if: >-
+      github.event_name != 'pull_request' &&
+      vars.PYPI_PUBLISH_ENABLED == 'true'
+    needs:
+      - build
+      - upload-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/project/loopx/
+    steps:
+      - name: Download validated release bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: loopx-${{ needs.build.outputs.release-tag }}
+          path: dist
+
+      - name: Publish distributions with PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: dist/packages

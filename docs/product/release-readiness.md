@@ -95,9 +95,34 @@ Before moving `stable`, maintainers should:
   `loopx update --execute` when the check recommends or when they want to
   refresh to the named stable release.
 
-This is a lightweight GitHub release contract, not a PyPI publishing
-requirement. A future package registry can reuse the same version/tag contract
-instead of inventing a second release identity.
+The release workflow builds a wheel and source distribution from the tagged
+commit. Its release assets include a canonical `SHA256SUMS` file, and GitHub
+records build-provenance attestations for both packages and the checksum
+manifest. Verify a downloaded bundle before installation:
+
+```bash
+sha256sum --check SHA256SUMS
+gh attestation verify loopx-X.Y.Z-py3-none-any.whl --repo huangruiteng/loopx
+gh attestation verify loopx-X.Y.Z.tar.gz --repo huangruiteng/loopx
+```
+
+The checksum proves that the downloaded bytes match the release manifest. The
+attestation separately binds those bytes to the repository, workflow, commit,
+and build event; neither mechanism claims that the package is vulnerability
+free.
+
+PyPI publication is an explicit, fail-closed extension of the same build. The
+release workflow publishes only when maintainers have configured all of these:
+
+- a PyPI project named `loopx` with a Trusted Publisher for
+  `huangruiteng/loopx` and `.github/workflows/release-artifacts.yml`;
+- a protected GitHub environment named `pypi` that matches the Trusted
+  Publisher configuration;
+- the repository variable `PYPI_PUBLISH_ENABLED=true`.
+
+Do not add a long-lived PyPI token. Without every condition above, GitHub
+Release packages and their verification material are still produced, while
+the PyPI job remains skipped.
 
 ## Public Release Timeline
 
