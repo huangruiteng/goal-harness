@@ -398,7 +398,7 @@ def main() -> int:
         pr_review_metadata = pr_review_skill.parent / "agents" / "openai.yaml"
         pr_review_metadata_text = pr_review_metadata.read_text(encoding="utf-8")
         assert (
-            'short_description: "Guide AgentLoop through LoopX PR review queues"'
+            'short_description: "Review LoopX PRs with deep key-code explanations"'
             in pr_review_metadata_text
         ), pr_review_metadata_text
         assert "Guide agentloop" not in pr_review_metadata_text, pr_review_metadata_text
