@@ -160,13 +160,13 @@ def test_global_gates_uses_formal_exact_todo_link(monkeypatch, tmp_path) -> None
     ]
 
 
-def test_global_gates_prefers_explicit_action_required_metadata(monkeypatch, tmp_path) -> None:
+def test_global_gates_action_required_owns_shared_route(monkeypatch, tmp_path) -> None:
     status_payload = {
         "attention_queue": {
             "items": [
                 {
                     "goal_id": "action-required-goal",
-                    "waiting_on": "user",
+                    "waiting_on": "user_or_controller",
                     "operator_question": "Lower-precedence operator question?",
                 }
             ]
@@ -196,6 +196,7 @@ def test_global_gates_prefers_explicit_action_required_metadata(monkeypatch, tmp
     gate = payload["gates"][0]
     assert gate["gate_id"] == "explicit-quota-gate"
     assert gate["owner"] == "user"
+    assert gate["waiting_on"] == "user_or_controller"
     assert gate["question"] == "Scoped user question?"
     assert gate["blocks"] == ["action-required-goal"]
 
@@ -289,11 +290,13 @@ def test_global_gates_uses_decision_scope_then_goal_fallback(monkeypatch, tmp_pa
     payload = build_global_gates(tmp_path)
 
     assert payload["gates"][0]["blocks"] == ["deploy-todo"]
+    assert payload["groups"]["blocked_work"][0]["top_todo_id"] == "deploy-todo"
     controller_gate = payload["gates"][1]
     assert controller_gate["owner"] == "controller"
     assert controller_gate["waiting_on"] == "controller"
     assert controller_gate["question"] == "Should the controller attach this adapter?"
     assert controller_gate["blocks"] == ["controller-goal"]
+    assert "top_todo_id" not in payload["groups"]["blocked_work"][1]
 
 
 def test_global_gates_preserves_shared_route_with_supported_owner(monkeypatch, tmp_path) -> None:

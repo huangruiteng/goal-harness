@@ -276,10 +276,7 @@ def _global_gate_from_item(
     if not action_required and not formal_gate and not controller_routed:
         return None
 
-    if formal_gate or (action_required and waiting_on != "user_or_controller"):
-        owner = "user"
-    else:
-        owner = "controller"
+    owner = "user" if formal_gate or action_required else "controller"
     goal_id = str(item.get("goal_id") or quota_payload.get("goal_id") or "").strip()
     question = (
         user_channel.get("question")
@@ -341,7 +338,15 @@ def _collect_global_gate_state(
         if not gate:
             continue
         gates.append(gate)
-        lanes.append(_lane_from_item(item, quota_payload=quota_payload))
+        lane = _lane_from_item(item, quota_payload=quota_payload)
+        verified_todo_ids = {
+            str(blocked_ref)
+            for blocked_ref in _as_list(gate.get("blocks"))
+            if str(blocked_ref) != goal_id
+        }
+        if str(lane.get("top_todo_id") or "") not in verified_todo_ids:
+            lane.pop("top_todo_id", None)
+        lanes.append(lane)
         if len(gates) >= limit:
             break
     return {"gates": gates, "lanes": lanes}
