@@ -404,9 +404,9 @@ loopx check \
 
 LoopX 欢迎与其他开源项目协作，共建长程 Agent 生态。已确认的合作伙伴包括：
 
-- [NoKV](https://github.com/NoKV-Lab/NoKV) - AI 原生分布式文件系统
 - [OpenViking](https://github.com/volcengine/OpenViking) - 面向 AI Agent 的自进化
   上下文数据库
+- [NoKV](https://github.com/NoKV-Lab/NoKV) - AI 原生分布式文件系统
 
 ## 用户群与反馈
 

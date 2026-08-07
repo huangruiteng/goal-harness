@@ -446,9 +446,9 @@ complete source map.
 LoopX welcomes collaboration with other open-source projects to build the
 long-running agent ecosystem. Our confirmed partners include:
 
-- [NoKV](https://github.com/NoKV-Lab/NoKV) - AI native distributed file system
 - [OpenViking](https://github.com/volcengine/OpenViking) - Self-evolving
   context database for AI agents
+- [NoKV](https://github.com/NoKV-Lab/NoKV) - AI native distributed file system
 
 <a id="community--feedback"></a>
 
