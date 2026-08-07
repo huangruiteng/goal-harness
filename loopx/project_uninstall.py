@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .control_plane.runtime.time import now_local_iso, utc_timestamp
+from .global_registry import GlobalRegistryReduction, mutate_global_registry
 from .history import load_registry
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from .registry import registry_goals
@@ -24,7 +25,9 @@ def _timestamp() -> str:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     temp_path.replace(path)
 
 
@@ -64,7 +67,11 @@ def _resolve_state_file(goal: dict[str, Any], *, registry_path: Path) -> Path | 
     path = Path(str(state_file)).expanduser()
     if path.is_absolute():
         return path
-    repo = Path(str(goal.get("repo"))).expanduser() if goal.get("repo") else _project_root_from_registry(registry_path)
+    repo = (
+        Path(str(goal.get("repo"))).expanduser()
+        if goal.get("repo")
+        else _project_root_from_registry(registry_path)
+    )
     return repo / path
 
 
@@ -136,7 +143,9 @@ def _selected_goals(
     goals = registry_goals(registry)
     if not requested_goal_ids:
         return goals
-    requested = {validate_goal_id_path_segment(goal_id) for goal_id in requested_goal_ids}
+    requested = {
+        validate_goal_id_path_segment(goal_id) for goal_id in requested_goal_ids
+    }
     found = {str(goal.get("id")) for goal in goals if str(goal.get("id")) in requested}
     missing = sorted(requested - found)
     if missing:
@@ -205,6 +214,31 @@ def _remove_global_goals(
     return payload, removed, skipped_route_mismatch, before, after
 
 
+def _uninstall_global_registry_reduction(
+    current: dict[str, Any],
+    *,
+    source_registry: Path,
+    target_goal_ids: set[str],
+) -> GlobalRegistryReduction:
+    payload, removed, skipped, before, after = _remove_global_goals(
+        current,
+        source_registry=source_registry,
+        target_goal_ids=target_goal_ids,
+    )
+    if not removed:
+        payload = current
+    return GlobalRegistryReduction(
+        payload=payload,
+        receipt={
+            "removed": removed,
+            "skipped_route_mismatch": skipped,
+            "goal_count_before": before,
+            "goal_count_after": after,
+        },
+        backup_label="project-uninstall-backup" if removed else None,
+    )
+
+
 def uninstall_project(
     *,
     registry_path: Path,
@@ -239,12 +273,16 @@ def uninstall_project(
         target_goal_ids=target_goal_ids,
     )
 
-    global_registry = load_registry(global_path) if global_path.exists() else {}
-    new_global_registry, global_removed, skipped_route_mismatch, global_before, global_after = _remove_global_goals(
-        global_registry,
+    global_preview = _uninstall_global_registry_reduction(
+        load_registry(global_path),
         source_registry=registry_path,
         target_goal_ids=target_goal_ids,
     )
+    global_receipt = global_preview.receipt
+    global_removed = global_receipt["removed"]
+    skipped_route_mismatch = global_receipt["skipped_route_mismatch"]
+    global_before = global_receipt["goal_count_before"]
+    global_after = global_receipt["goal_count_after"]
 
     archive_root = registry_path.parent / "archived-project-state"
     state_actions = (
@@ -269,10 +307,12 @@ def uninstall_project(
         ]
     )
 
-    local_backup_path = _copy_backup(registry_path, label="project-uninstall-backup", dry_run=dry_run)
+    local_backup_path = _copy_backup(
+        registry_path, label="project-uninstall-backup", dry_run=dry_run
+    )
     global_backup_path = (
         _copy_backup(global_path, label="project-uninstall-backup", dry_run=dry_run)
-        if global_removed
+        if dry_run and global_removed
         else None
     )
 
@@ -286,9 +326,22 @@ def uninstall_project(
         else:
             _write_json(registry_path, new_project_registry)
             wrote_local_registry = True
-        if global_removed:
-            _write_json(global_path, new_global_registry)
-            wrote_global_registry = True
+        global_mutation = mutate_global_registry(
+            global_path,
+            "project_uninstall_global_registry",
+            lambda current: _uninstall_global_registry_reduction(
+                current,
+                source_registry=registry_path,
+                target_goal_ids=target_goal_ids,
+            ),
+        )
+        global_receipt = global_mutation["receipt"]
+        global_removed = global_receipt["removed"]
+        skipped_route_mismatch = global_receipt["skipped_route_mismatch"]
+        global_before = global_receipt["goal_count_before"]
+        global_after = global_receipt["goal_count_after"]
+        global_backup_path = global_mutation["backup_path"]
+        wrote_global_registry = bool(global_mutation["wrote"])
 
     return {
         "ok": True,
@@ -307,7 +360,9 @@ def uninstall_project(
         "global_registry_goal_count_before": global_before,
         "global_registry_goal_count_after": global_after,
         "global_registry_removed_goal_ids": sorted(set(global_removed)),
-        "global_registry_skipped_route_mismatch_goal_ids": sorted(set(skipped_route_mismatch)),
+        "global_registry_skipped_route_mismatch_goal_ids": sorted(
+            set(skipped_route_mismatch)
+        ),
         "global_registry_backup_path": global_backup_path,
         "wrote_global_registry": wrote_global_registry,
         "archive_state": archive_state,
@@ -325,7 +380,9 @@ def uninstall_project(
             },
             {
                 "path": str(global_path),
-                "action": "would-write" if dry_run and global_removed else ("wrote" if wrote_global_registry else "kept"),
+                "action": "would-write"
+                if dry_run and global_removed
+                else ("wrote" if wrote_global_registry else "kept"),
             },
         ],
         "warnings": (
@@ -364,25 +421,39 @@ def render_project_uninstall_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- error: {payload.get('error')}")
         return "\n".join(lines)
     if payload.get("local_registry_backup_path"):
-        lines.append(f"- local_registry_backup_path: `{payload.get('local_registry_backup_path')}`")
+        lines.append(
+            f"- local_registry_backup_path: `{payload.get('local_registry_backup_path')}`"
+        )
     if payload.get("global_registry_backup_path"):
-        lines.append(f"- global_registry_backup_path: `{payload.get('global_registry_backup_path')}`")
+        lines.append(
+            f"- global_registry_backup_path: `{payload.get('global_registry_backup_path')}`"
+        )
 
     removed = payload.get("global_registry_removed_goal_ids") or []
     if removed:
         lines.extend(["", "## Removed Global Routes"])
         lines.extend(f"- {goal_id}" for goal_id in removed)
-    state_actions = payload.get("state_actions") if isinstance(payload.get("state_actions"), list) else []
+    state_actions = (
+        payload.get("state_actions")
+        if isinstance(payload.get("state_actions"), list)
+        else []
+    )
     if state_actions:
         lines.extend(["", "## Local State"])
         for action in state_actions:
             if not isinstance(action, dict):
                 continue
-            suffix = f" -> `{action.get('archive_path')}`" if action.get("archive_path") else ""
+            suffix = (
+                f" -> `{action.get('archive_path')}`"
+                if action.get("archive_path")
+                else ""
+            )
             lines.append(f"- {action.get('goal_id')}: `{action.get('action')}`{suffix}")
             if action.get("warning"):
                 lines.append(f"  - warning: {action.get('warning')}")
-    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    warnings = (
+        payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    )
     if warnings:
         lines.extend(["", "## Warnings"])
         lines.extend(f"- {warning}" for warning in warnings)
