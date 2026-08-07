@@ -35,11 +35,13 @@ quality or task completion.
 
 ![Redacted authorized chat excerpt reporting a four-day LoopX agent run without human intervention](../../assets/showcases/user-feedback/four-day-unattended-user-report.jpg)
 
-*Owner-approved excerpt, cropped to remove chat identity and internal reporting
-context. All runtime and outcome claims remain user-reported.*
+*Source: an owner-approved message excerpt from the LoopX public Lark developer
+group, cropped to remove chat identity and unrelated reporting context. All
+runtime and outcome claims remain user-reported.*
 
 ## Evidence Boundary
 
-The workload, repository, run history, report contents, and raw chat remain
-private. This page preserves only the approved, minimally redacted excerpt and
-does not infer facts beyond its text.
+The published image is an approved excerpt from the LoopX public Lark developer
+group. The workload, repository, run history, report contents, and unselected
+chat context remain private. This page preserves only the minimally redacted
+excerpt and does not infer facts beyond its text.

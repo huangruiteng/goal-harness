@@ -106,15 +106,15 @@
         {
           "path": "docs/assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg",
           "alt": "Authorized user feedback reporting a LoopX C++ algorithm run lasting more than 13 hours with improved precision and retained evidence",
-          "caption": "Owner-approved user excerpt. Runtime and outcome are user-reported; the public MCP reference is independently inspectable."
+          "caption": "Source: an owner-approved message excerpt from the LoopX public Lark developer group. Runtime and outcome are user-reported; the public MCP reference is independently inspectable."
         },
         {
           "path": "docs/assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg",
           "alt": "Authorized follow-up explaining that LoopX replan triggered public research and found a code-memory MCP",
-          "caption": "Follow-up excerpt describing the public-research transition."
+          "caption": "Source: an owner-approved follow-up message excerpt from the same LoopX public Lark developer group, describing the public-research transition."
         }
       ],
-      "evidence_boundary": "Owner-approved user excerpts and a public tool reference; the project repository, raw run state, prompts, experiment data, and performance measurements remain private.",
+      "evidence_boundary": "Owner-approved message excerpts from the LoopX public Lark developer group and a public tool reference; the project repository, raw run state, prompts, experiment data, and performance measurements remain private.",
       "showcase_table": {
         "proof_point": "A >13h engineering run can remain aligned, change method through public research, and retain an understandable evidence trail.",
         "loopx_intervention": "vision alignment, replan, public research, evidence retention"
@@ -171,7 +171,7 @@
             "保留实验证据与最终方案解释"
           ],
           "user_value": "用户报告最终精度明显提升、上下文压缩减少，并能在运行结束后理解过程与方案选择。",
-          "evidence_boundary": "经 owner 授权的用户摘录与公开工具引用；项目仓库、原始运行状态、prompt、实验数据和性能测量仍保持私有。"
+          "evidence_boundary": "来自 LoopX 公开飞书开发群、经 owner 授权的消息摘录与公开工具引用；项目仓库、原始运行状态、prompt、实验数据和性能测量仍保持私有。"
         }
       },
       "interactive_page": "docs/showcases/cases/independent-cpp-accuracy-long-run.html",
@@ -222,10 +222,10 @@
         {
           "path": "docs/assets/showcases/user-feedback/four-day-unattended-user-report.jpg",
           "alt": "Redacted authorized chat excerpt reporting a four-day LoopX agent run without human intervention",
-          "caption": "Owner-approved excerpt, cropped to remove chat identity and internal reporting context. All claims remain user-reported."
+          "caption": "Source: an owner-approved message excerpt from the LoopX public Lark developer group, cropped to remove chat identity and unrelated reporting context. All claims remain user-reported."
         }
       ],
-      "evidence_boundary": "Owner-approved redacted user excerpt only; the workload, repository, run history, report contents, and raw chat remain private.",
+      "evidence_boundary": "Owner-approved message excerpt from the LoopX public Lark developer group only; the workload, repository, run history, report contents, and unselected chat context remain private.",
       "showcase_table": {
         "proof_point": "A user observed four days of unattended work and judged the work useful, with a later reporting surface available for inspection.",
         "loopx_intervention": "durable task state, unattended continuation, periodic reporting"
@@ -281,7 +281,7 @@
             "通过周期报告为后续检查提供入口"
           ],
           "user_value": "用户认为 Agent 在持续做有价值的工作，而周期报告让 operator 可以稍后检查进度。",
-          "evidence_boundary": "仅包含经 owner 授权并脱敏的用户摘录；工作负载、仓库、运行历史、报告内容和原始聊天仍保持私有。"
+          "evidence_boundary": "仅包含来自 LoopX 公开飞书开发群、经 owner 授权并脱敏的消息摘录；工作负载、仓库、运行历史、报告内容和未选取的聊天上下文仍保持私有。"
         }
       },
       "interactive_page": "docs/showcases/cases/independent-four-day-unattended-agent.html",

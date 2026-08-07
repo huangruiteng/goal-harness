@@ -7,6 +7,10 @@ demos.
 
 ## Start With Real Use
 
+**Source note:** The chat screenshots in the first two cases are owner-approved
+message excerpts from the LoopX public Lark developer group. They remain
+user-reported evidence, not independently reproduced proof.
+
 ### 13+ hour C++ algorithm accuracy run
 
 **Independent user** · `>13h` reported · no parameter micromanagement reported
@@ -21,9 +25,10 @@ evidence.
   <a href="../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg"><img src="../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg" alt="Authorized follow-up explaining that LoopX replan triggered public research and found a code-memory MCP" width="48%"></a>
 </p>
 
-*Owner-approved excerpts. Runtime and outcome are user-reported; the referenced
-[code-memory MCP](https://github.com/DeusData/codebase-memory-mcp) is public, but
-the private project and its measurements are not independently reproducible.
+*Source: owner-approved message excerpts from the LoopX public Lark developer
+group. Runtime and outcome are user-reported; the referenced [code-memory
+MCP](https://github.com/DeusData/codebase-memory-mcp) is public, but the private
+project and its measurements are not independently reproducible.
 [Read the case](cases/independent-cpp-accuracy-long-run.md).*
 
 ### Four-day unattended agent run
@@ -37,8 +42,9 @@ periodic report surface for later inspection.
   <a href="../assets/showcases/user-feedback/four-day-unattended-user-report.jpg"><img src="../assets/showcases/user-feedback/four-day-unattended-user-report.jpg" alt="Minimally redacted authorized chat excerpt reporting a four-day LoopX agent run without human intervention" width="72%"></a>
 </p>
 
-*Owner-approved, minimally redacted excerpt. The workload, run history, and
-quality assessment remain private and user-reported.
+*Source: an owner-approved, minimally redacted message excerpt from the LoopX
+public Lark developer group. The workload, run history, and quality assessment
+remain private and user-reported.
 [Read the case](cases/independent-four-day-unattended-agent.md).*
 
 ### Public Engine refactor across seven merged PRs

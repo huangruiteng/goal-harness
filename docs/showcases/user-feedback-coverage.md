@@ -17,6 +17,9 @@ private source URL or raw internal discussion.
 ## Import Boundary
 
 - Source revision: owner-approved manual revision `813`.
+- Published chat screenshots are owner-approved message excerpts from the
+  LoopX public Lark developer group; that source attribution does not make the
+  underlying projects, run state, or unselected chat context public.
 - Public assets are local, compressed, and contain no authenticated image URLs.
 - The four-day excerpt was cropped to remove chat identity and internal
   reporting context.

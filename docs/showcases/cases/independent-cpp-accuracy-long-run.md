@@ -40,15 +40,18 @@ user-reported outcome.
 
 ![Authorized user feedback reporting a LoopX C++ algorithm run lasting more than 13 hours with improved precision and retained evidence](../../assets/showcases/user-feedback/cpp-accuracy-13h-user-report.jpg)
 
-*Owner-approved user excerpt. Runtime and outcome are user-reported.*
+*Source: an owner-approved message excerpt from the LoopX public Lark developer
+group. Runtime and outcome are user-reported.*
 
 ![Authorized follow-up explaining that LoopX replan triggered public research and found a code-memory MCP](../../assets/showcases/user-feedback/cpp-accuracy-public-research-user-report.jpg)
 
-*Follow-up excerpt describing the public-research transition.*
+*Source: an owner-approved follow-up message excerpt from the same LoopX public
+Lark developer group, describing the public-research transition.*
 
 ## Evidence Boundary
 
-The screenshots are owner-approved excerpts stored as local repository assets.
-The project repository, raw run state, prompts, experiment data, and performance
+The screenshots are owner-approved message excerpts from the LoopX public Lark
+developer group and are stored as local repository assets. The project
+repository, raw run state, prompts, experiment data, and performance
 measurements remain private. The MCP repository is public and independently
 inspectable; it does not independently prove the reported precision gain.
