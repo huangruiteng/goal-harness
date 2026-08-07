@@ -1,0 +1,67 @@
+name: Show and Tell / Adoption
+description: Share a public-safe LoopX workflow, result, integration, or adoption story.
+title: "[Showcase]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share what really ran, what LoopX changed, and what remains limited. This is not an endorsement channel. Remove private data, credentials, raw agent sessions, internal links, and sensitive logs.
+
+  - type: dropdown
+    id: adoption-stage
+    attributes:
+      label: Adoption stage
+      options:
+        - Experiment or demo
+        - Maintainer dogfood
+        - Assisted pilot
+        - Independent adoption
+        - Realized value in a continuing workflow
+    validations:
+      required: true
+
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Project or workflow
+      description: Describe the public-safe task, runtime, and operating context.
+    validations:
+      required: true
+
+  - type: textarea
+    id: intervention
+    attributes:
+      label: How LoopX was used
+      description: Which lifecycle, control-plane, capability, or integration behavior mattered?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome and evidence
+      description: State the observed result and link inspectable artifacts, commands, or public evidence when available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: limitations
+    attributes:
+      label: Limitations and remaining gaps
+      description: What was assisted, not independently reproduced, experimental, or still unresolved?
+    validations:
+      required: true
+
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Reproduction or artifacts
+      description: Add public repositories, docs, screenshots, or minimal steps that others can inspect or try.
+
+  - type: checkboxes
+    id: permission
+    attributes:
+      label: Permission and privacy
+      options:
+        - label: I have permission to share this material publicly and removed credentials, private data, internal links, and raw agent/runtime state.
+          required: true

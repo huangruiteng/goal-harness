@@ -464,6 +464,9 @@ gates or handoffs disappeared from view.
 - Join the [Discord community](https://discord.gg/XmGgQyCFZd), or use Lark or
   WeChat below.
 
+See [Support](SUPPORT.md) for channel routing and service boundaries, and
+[Communications](COMMUNICATIONS.md) for official publication sources.
+
 <p align="center">
   <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX Lark developer group QR code" width="280"></a>
   <a href="docs/assets/loopx-wechat-contact.png"><img src="docs/assets/loopx-wechat-contact.png" alt="LoopX WeChat contact QR code" width="220"></a>

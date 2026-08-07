@@ -419,6 +419,9 @@ LoopX 还在早期，最需要真实长程 agent 项目里的反馈：控制面�
 - 参与社区讨论：可加入 [Discord 社区](https://discord.gg/XmGgQyCFZd)，也可在
   下方直接加入飞书群或通过微信申请入群。
 
+渠道分工与支持边界见 [Support](SUPPORT.md)，官方发布源见
+[Communications](COMMUNICATIONS.md)。
+
 <p align="center">
   <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX 飞书开发群二维码" width="280"></a>
   <a href="docs/assets/loopx-wechat-contact.png"><img src="docs/assets/loopx-wechat-contact.png" alt="LoopX 微信联系人二维码" width="220"></a>
