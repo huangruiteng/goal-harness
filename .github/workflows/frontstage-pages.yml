@@ -111,15 +111,31 @@ jobs:
             echo "::error title=Missing star-history credential::Set STAR_HISTORY_READ_TOKEN to a fine-grained PAT limited to this repository with Metadata: read." >&2
             exit 1
           fi
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          count_query='query($owner: String!, $repo: String!) {
+            repository(owner: $owner, name: $repo) { stargazerCount }
+          }'
+          history_query='query($owner: String!, $repo: String!, $endCursor: String) {
+            repository(owner: $owner, name: $repo) {
+              stargazers(first: 100, after: $endCursor, orderBy: {field: STARRED_AT, direction: ASC}) {
+                edges { starredAt }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }'
           for attempt in 1 2 3; do
-            count_before="$(gh api "/repos/$GITHUB_REPOSITORY" --jq .stargazers_count)"
-            gh api --paginate --slurp \
-              --header "Accept: application/vnd.github.star+json" \
-              --header "X-GitHub-Api-Version: 2026-03-10" \
-              "/repos/$GITHUB_REPOSITORY/stargazers?per_page=100" \
+            count_before="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazerCount)"
+            gh api graphql --paginate --slurp \
+              -f query="$history_query" \
+              -F owner="$owner" \
+              -F repo="$repo" \
+              > "$RUNNER_TEMP/loopx-stargazer-pages.json"
+            jq '[.[].data.repository.stargazers.edges[] | {starred_at: .starredAt}]' \
+              "$RUNNER_TEMP/loopx-stargazer-pages.json" \
               > "$RUNNER_TEMP/loopx-stargazers.json"
-            count_after="$(gh api "/repos/$GITHUB_REPOSITORY" --jq .stargazers_count)"
-            fetched_count="$(jq '[.[][]] | length' "$RUNNER_TEMP/loopx-stargazers.json")"
+            count_after="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazerCount)"
+            fetched_count="$(jq 'length' "$RUNNER_TEMP/loopx-stargazers.json")"
             if [[ "$count_before" == "$count_after" && "$fetched_count" == "$count_after" ]]; then
               printf '%s\n' "$count_after" > "$RUNNER_TEMP/loopx-stargazers-count"
               break
