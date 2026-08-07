@@ -43,6 +43,7 @@ from ...control_plane.agents.multi_agent.visible_launch_policy import (
     resolve_codex_trust_workspace,
     resolve_visible_launch_policy,
 )
+from ...control_plane.runtime.public_safety import public_safe_compact_text
 from ...history import load_registry
 from ...paths import resolve_runtime_root
 from ...quota import build_quota_should_run
@@ -62,6 +63,9 @@ AddFormat = Callable[[argparse.ArgumentParser], None]
 
 AUTO_RESEARCH_DEMO_GOAL_PREFIX = "loopx-auto-research-demo"
 AUTO_RESEARCH_START_AGENT_ID = "auto-research-operator"
+AUTO_RESEARCH_COMMAND_FAILED_ERROR_CODE = "auto_research_command_failed"
+AUTO_RESEARCH_INVALID_INPUT_ERROR_CODE = "auto_research_invalid_input"
+AUTO_RESEARCH_IO_FAILED_ERROR_CODE = "auto_research_io_failed"
 AUTO_RESEARCH_SUBCOMMANDS = frozenset(
     {
         "append-evidence",
@@ -76,6 +80,31 @@ AUTO_RESEARCH_SUBCOMMANDS = frozenset(
         "worker-turn",
     }
 )
+
+
+def _public_auto_research_error(exc: Exception) -> tuple[str, str]:
+    """Project an internal exception into a stable, public-safe CLI error."""
+
+    if isinstance(exc, json.JSONDecodeError):
+        return (
+            AUTO_RESEARCH_INVALID_INPUT_ERROR_CODE,
+            "Auto Research input must be valid JSON.",
+        )
+    if isinstance(exc, OSError):
+        return (
+            AUTO_RESEARCH_IO_FAILED_ERROR_CODE,
+            "Auto Research could not access a required resource.",
+        )
+    if isinstance(exc, ValueError):
+        public_message = public_safe_compact_text(str(exc), limit=220)
+        return (
+            AUTO_RESEARCH_INVALID_INPUT_ERROR_CODE,
+            public_message or "Auto Research input is invalid.",
+        )
+    return (
+        AUTO_RESEARCH_COMMAND_FAILED_ERROR_CODE,
+        "Auto Research command failed unexpectedly.",
+    )
 
 
 def rewrite_auto_research_question_argv(argv: list[str]) -> list[str]:
@@ -1303,11 +1332,13 @@ def handle_auto_research_command(
                 "`worker-turn`, `worker-loop`, `demo-supervisor`, `demo-e2e`, "
                 "or `start` subcommand"
             )
-    except Exception:
+    except Exception as exc:
+        error_code, public_error = _public_auto_research_error(exc)
         payload = {
             "ok": False,
             "mode": "auto-research",
-            "error_code": "AUTO_RESEARCH_COMMAND_FAILED",
+            "error_code": error_code,
+            "error": public_error,
         }
     print_payload(payload, output_format(args, "auto_research_format"), render_auto_research_markdown)
     return 0 if payload.get("ok") else 1

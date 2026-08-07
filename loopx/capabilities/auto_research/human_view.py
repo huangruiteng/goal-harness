@@ -15,6 +15,15 @@ from .user_contract import AUTO_RESEARCH_USER_CONTRACT_SCHEMA_VERSION
 AUTO_RESEARCH_DEMO_E2E_SCHEMA_VERSION = "auto_research_demo_e2e_result_v0"
 
 
+def _render_failure(payload: dict[str, object]) -> str:
+    lines = ["# LoopX Auto Research", "", "- ok: `False`"]
+    if payload.get("error_code"):
+        lines.append(f"- error_code: `{payload.get('error_code')}`")
+    if payload.get("error"):
+        lines.append(f"- error: `{payload.get('error')}`")
+    return "\n".join(lines) + "\n"
+
+
 def _join_or_none(values: object) -> str:
     if isinstance(values, list) and values:
         return ", ".join(str(item) for item in values)
@@ -302,7 +311,7 @@ def _render_user_contract(payload: dict[str, object]) -> str:
 
 def render_auto_research_projection_markdown(payload: dict[str, object]) -> str:
     if not payload.get("ok"):
-        return f"# LoopX Auto Research\n\n- ok: `False`\n- error: `{payload.get('error')}`\n"
+        return _render_failure(payload)
     if "frontier" not in payload or "evidence_graph" not in payload:
         return _render_generic(payload)
     frontier = _dict_value(payload, "frontier")
@@ -666,7 +675,7 @@ def _render_generic(payload: dict[str, object]) -> str:
 
 def render_auto_research_markdown(payload: dict[str, object]) -> str:
     if not payload.get("ok"):
-        return f"# LoopX Auto Research\n\n- ok: `False`\n- error: `{payload.get('error')}`\n"
+        return _render_failure(payload)
     schema = payload.get("schema_version")
     if schema == "auto_research_worker_turn_v0":
         return _render_worker_turn(payload)
