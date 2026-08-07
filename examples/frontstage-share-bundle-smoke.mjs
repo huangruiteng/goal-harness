@@ -123,8 +123,8 @@ if (!homepageHtml.includes('data-copy-key="agentSetup"') || !homepageHtml.includ
 if (!homepageHtml.includes("scripts/install-from-github.sh | bash") || !homepageHtml.includes("loopx connect") || !homepageHtml.includes("Inspect installer")) {
   throw new Error("homepage must retain the official manual setup fallback");
 }
-if (!homepageHtml.includes("Goal-level control plane") || !homepageHtml.includes("data-language-toggle")) {
-  throw new Error("homepage must publish the official goal-level positioning and language switch");
+if (!homepageHtml.includes("provider-neutral") || !homepageHtml.includes("stateful control plane") || !homepageHtml.includes("data-language-toggle")) {
+  throw new Error("homepage must publish the official provider-neutral stateful positioning and language switch");
 }
 if (!homepageHtml.includes("Evidence from real loops") || !homepageHtml.includes("data-evidence-dialog")) {
   throw new Error("homepage must publish the curated evidence terminal and full-screen evidence viewer");
@@ -152,7 +152,7 @@ for (const assetName of [
   }
 }
 const homepageScript = await readFile(resolve(siteDir, "site-assets/home.js"), "utf8");
-if (!homepageScript.includes('"hero.eyebrow": "长程目标控制面"') || !homepageScript.includes('requestedLanguage === "zh" ? "zh" : "en"')) {
+if (!homepageScript.includes('"hero.eyebrow": "开放 · 有状态 · Provider-neutral"') || !homepageScript.includes('requestedLanguage === "zh" ? "zh" : "en"')) {
   throw new Error("homepage language switch must include the public-safe Chinese locale and default to English");
 }
 for (const promptContract of [
