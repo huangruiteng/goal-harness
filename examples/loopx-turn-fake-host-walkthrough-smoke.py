@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.control_plane.turn_driver import (  # noqa: E402
-    LOOPX_TURN_RESULT_SCHEMA_VERSION,
+    build_loopx_turn_command_validator,
     build_loopx_turn_plan,
     load_loopx_turn_plan_from_journal,
     run_loopx_turn_once,
@@ -65,14 +65,39 @@ def _plan(*, action_hash: str) -> dict[str, Any]:
     )
 
 
-def _result(plan: dict[str, Any]) -> dict[str, Any]:
-    transaction = plan["transaction"]
-    assert isinstance(transaction, dict)
-    return {
-        "schema_version": LOOPX_TURN_RESULT_SCHEMA_VERSION,
-        "turn_key": transaction["turn_key"],
+def _host_argv(effect_path: Path, count_path: Path) -> list[str]:
+    script = """
+import json
+import pathlib
+import sys
+
+request = json.load(sys.stdin)
+contract = request["result_contract"]
+assert contract["schema_version"] == "loopx_turn_result_v0"
+assert contract["completed_phases"] == ["host_execute", "typed_result"]
+effect_path = pathlib.Path(sys.argv[1])
+effect_path.parent.mkdir(parents=True, exist_ok=True)
+effect_path.write_text(
+    json.dumps(
+        {
+            "task": "synthetic_public_fixture",
+            "turn_key": request["turn_key"],
+            "result_schema_version": contract["schema_version"],
+        }
+    ),
+    encoding="utf-8",
+)
+count_path = pathlib.Path(sys.argv[2])
+count_path.write_text(
+    str(int(count_path.read_text()) + 1 if count_path.exists() else 1),
+    encoding="utf-8",
+)
+json.dump(
+    {
+        "schema_version": contract["schema_version"],
+        "turn_key": request["turn_key"],
         "result_kind": "validated_progress",
-        "completed_phases": ["host_execute", "typed_result"],
+        "completed_phases": contract["completed_phases"],
         "classification": "fake_host_fixture_progress",
         "recommended_action": "Validate the synthetic fixture.",
         "next_action": "Stop after the independently validated fixture.",
@@ -80,15 +105,33 @@ def _result(plan: dict[str, Any]) -> dict[str, Any]:
         "delivery_outcome": "outcome_progress",
         "vision_unchanged_reason": "The public fixture objective is unchanged.",
         "summary": "The generic fake host advanced one fixture.",
-    }
+    },
+    sys.stdout,
+)
+"""
+    program = effect_path.parent.parent / "synthetic-generic-host.py"
+    program.write_text(script, encoding="utf-8")
+    return [sys.executable, str(program), str(effect_path), str(count_path)]
 
 
-def _validator(_plan: dict[str, Any], _result: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "status": "passed",
-        "validator_kind": "synthetic_independent_callback",
-        "summary": "Independent fixture postcondition passed.",
-    }
+def _validator_argv(effect_path: Path) -> list[str]:
+    script = """
+import json
+import pathlib
+import sys
+
+result = json.load(sys.stdin)
+effect = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+valid = (
+    effect.get("task") == "synthetic_public_fixture"
+    and effect.get("turn_key") == result.get("turn_key")
+    and effect.get("result_schema_version") == result.get("schema_version")
+)
+raise SystemExit(0 if valid else 9)
+"""
+    program = effect_path.parent.parent / "synthetic-task-validator.py"
+    program.write_text(script, encoding="utf-8")
+    return [sys.executable, str(program), str(effect_path)]
 
 
 def _callbacks(calls: dict[str, int], phases: list[str]):
@@ -116,50 +159,38 @@ def _callbacks(calls: dict[str, int], phases: list[str]):
 
 def _common(
     *,
-    plan: dict[str, Any],
     root: Path,
     calls: dict[str, int],
     phases: list[str],
-) -> dict[str, Any]:
-    def host(request: dict[str, Any]) -> dict[str, Any]:
-        assert set(request) == {
-            "schema_version",
-            "turn_key",
-            "route",
-            "session",
-            "turn_envelope",
-            "result_contract",
-        }
-        assert request["schema_version"] == "loopx_turn_host_request_v0"
-        assert request["session"] == {
-            "schema_version": "loopx_turn_session_binding_v0",
-            "action": "start_new",
-        }
-        assert "session_handle" not in request
-        calls["host"] += 1
-        phases.append("host")
-        return _result(plan)
-
+) -> tuple[dict[str, Any], Path, Path]:
+    project = root / "project"
+    project.mkdir(parents=True)
+    effect_path = project / "synthetic-task.json"
+    count_path = root / "host-count"
     writeback, spend, scheduler = _callbacks(calls, phases)
     return {
-        "host_runner": host,
-        "project": root / "project",
+        "host_argv": _host_argv(effect_path, count_path),
+        "project": project,
         "runtime_root": root / "runtime",
         "goal_id": "fake-host-walkthrough",
         "timeout_seconds": 5,
         "execute": True,
-        "task_validator": _validator,
+        "task_validator": build_loopx_turn_command_validator(
+            _validator_argv(effect_path),
+            project=project,
+            timeout_seconds=5,
+        ),
         "writeback": writeback,
         "spend": spend,
         "scheduler": scheduler,
-    }
+    }, effect_path, count_path
 
 
 def _commit_replay_and_boundary(root: Path) -> dict[str, Any]:
     plan = _plan(action_hash="sha256:fake-host-commit")
-    calls = {"host": 0, "writeback": 0, "spend": 0, "scheduler": 0}
+    calls = {"writeback": 0, "spend": 0, "scheduler": 0}
     phases: list[str] = []
-    kwargs = _common(plan=plan, root=root, calls=calls, phases=phases)
+    kwargs, effect_path, count_path = _common(root=root, calls=calls, phases=phases)
 
     preview = run_loopx_turn_once(plan, **{**kwargs, "execute": False})
     committed = run_loopx_turn_once(plan, **kwargs)
@@ -177,14 +208,21 @@ def _commit_replay_and_boundary(root: Path) -> dict[str, Any]:
     }
     assert replay["replayed"] is True
     assert not any(replay["effects"].values())
-    assert calls == {"host": 1, "writeback": 1, "spend": 1, "scheduler": 1}
-    assert phases == ["host", "writeback", "spend", "scheduler"]
+    assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
+    assert phases == ["writeback", "spend", "scheduler"]
+    assert count_path.read_text(encoding="utf-8") == "1"
+    assert json.loads(effect_path.read_text(encoding="utf-8"))["task"] == (
+        "synthetic_public_fixture"
+    )
 
     journal = next(
         (root / "runtime" / "goals" / "fake-host-walkthrough" / "turns").glob("*.json")
     )
     journal_payload = json.loads(journal.read_text(encoding="utf-8"))
-    assert journal_payload["host"] == {"executable": "built-in", "kind": "generic-cli"}
+    assert journal_payload["host"] == {
+        "executable": Path(sys.executable).name,
+        "argv_count": 4,
+    }
     assert set(journal_payload["host_result"]) == {
         "classification",
         "completed_phases",
@@ -202,20 +240,21 @@ def _commit_replay_and_boundary(root: Path) -> dict[str, Any]:
     assert str(root) not in json.dumps(journal_payload, sort_keys=True)
 
     return {
-        "compact_request_preserved": True,
+        "generic_host_process_boundary_proven": True,
+        "independent_task_effect_validated": True,
         "preview_has_no_effects": True,
         "committed_once": True,
         "replay_has_no_effects": True,
-        "ordered_effects": phases[1:],
+        "ordered_effects": phases,
         "public_boundary_preserved": True,
     }
 
 
 def _recover_after_writeback(root: Path) -> dict[str, Any]:
     plan = _plan(action_hash="sha256:fake-host-recovery")
-    calls = {"host": 0, "writeback": 0, "spend": 0, "scheduler": 0}
+    calls = {"writeback": 0, "spend": 0, "scheduler": 0}
     phases: list[str] = []
-    kwargs = _common(plan=plan, root=root, calls=calls, phases=phases)
+    kwargs, effect_path, count_path = _common(root=root, calls=calls, phases=phases)
     healthy_spend = kwargs["spend"]
 
     def interrupted_spend() -> dict[str, Any]:
@@ -243,12 +282,17 @@ def _recover_after_writeback(root: Path) -> dict[str, Any]:
     )
 
     assert recovered["status"] == "committed"
-    assert calls == {"host": 1, "writeback": 1, "spend": 2, "scheduler": 1}
-    assert phases == ["host", "writeback", "spend-interrupted", "spend", "scheduler"]
+    assert calls == {"writeback": 1, "spend": 2, "scheduler": 1}
+    assert phases == ["writeback", "spend-interrupted", "spend", "scheduler"]
+    assert count_path.read_text(encoding="utf-8") == "1"
+    assert json.loads(effect_path.read_text(encoding="utf-8"))["task"] == (
+        "synthetic_public_fixture"
+    )
     return {
         "resumed_after_writeback": True,
         "host_not_repeated": True,
         "writeback_not_repeated": True,
+        "task_effect_not_repeated": True,
         "remaining_effects": ["spend", "scheduler"],
     }
 
