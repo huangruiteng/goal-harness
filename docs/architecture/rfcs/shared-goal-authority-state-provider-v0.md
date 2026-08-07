@@ -165,14 +165,14 @@ Integration classes used below:
 Source anchors for the classifications include
 [`architecture.md`](../../architecture.md),
 [`event-store-migration-bridge-v0`](../../reference/protocols/event-store-migration-bridge-v0.md),
-[`task_lease.py`](../../../loopx/control_plane/work_items/task_lease.py),
-[`cli_rollout.py`](../../../loopx/cli_rollout.py),
-[`status_projection_cache.py`](../../../loopx/control_plane/runtime/status_projection_cache.py),
-[`slot_accounting.py`](../../../loopx/control_plane/quota/slot_accounting.py),
-[`global_registry.py`](../../../loopx/global_registry.py), and the host state in
-[`scheduler/state.py`](../../../loopx/control_plane/scheduler/state.py),
-[`turn_driver/codex_cli.py`](../../../loopx/control_plane/turn_driver/codex_cli.py),
-and [`pi-goal-loop-runtime.mjs`](../../../loopx/pi_goal_mode/pi-goal-loop-runtime.mjs).
+`loopx/control_plane/work_items/task_lease.py`,
+`loopx/cli_rollout.py`,
+`loopx/control_plane/runtime/status_projection_cache.py`,
+`loopx/control_plane/quota/slot_accounting.py`,
+`loopx/global_registry.py`, and the host state in
+`loopx/control_plane/scheduler/state.py`,
+`loopx/control_plane/turn_driver/codex_cli.py`,
+and `loopx/pi_goal_mode/pi-goal-loop-runtime.mjs`.
 
 ## 4. What Goes Into This Coordination Ledger
 
@@ -618,7 +618,7 @@ evidence; those ledgers retain the owners defined in Section 3.
 ## Appendix A: What This Evidence Proves
 
 The reference provider and probes live in
-[`examples/nokv-shadow-provider/`](../../../examples/nokv-shadow-provider/),
+`examples/nokv-shadow-provider/`,
 with a companion
 [`evidence document`](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md).
 The deterministic candidate in this PR proves only the claim/receipt core:

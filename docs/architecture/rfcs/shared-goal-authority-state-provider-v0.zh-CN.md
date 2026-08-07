@@ -139,14 +139,14 @@ owner，新 host 或 extension 也可以新增本地 artifact，而无需修改�
 上述分类的源码锚点包括
 [`architecture.md`](../../architecture.md)、
 [`event-store-migration-bridge-v0`](../../reference/protocols/event-store-migration-bridge-v0.md)、
-[`task_lease.py`](../../../loopx/control_plane/work_items/task_lease.py)、
-[`cli_rollout.py`](../../../loopx/cli_rollout.py)、
-[`status_projection_cache.py`](../../../loopx/control_plane/runtime/status_projection_cache.py)、
-[`slot_accounting.py`](../../../loopx/control_plane/quota/slot_accounting.py)、
-[`global_registry.py`](../../../loopx/global_registry.py)，以及这些 host state：
-[`scheduler/state.py`](../../../loopx/control_plane/scheduler/state.py)、
-[`turn_driver/codex_cli.py`](../../../loopx/control_plane/turn_driver/codex_cli.py) 和
-[`pi-goal-loop-runtime.mjs`](../../../loopx/pi_goal_mode/pi-goal-loop-runtime.mjs)。
+`loopx/control_plane/work_items/task_lease.py`、
+`loopx/cli_rollout.py`、
+`loopx/control_plane/runtime/status_projection_cache.py`、
+`loopx/control_plane/quota/slot_accounting.py`、
+`loopx/global_registry.py`，以及这些 host state：
+`loopx/control_plane/scheduler/state.py`、
+`loopx/control_plane/turn_driver/codex_cli.py` 和
+`loopx/pi_goal_mode/pi-goal-loop-runtime.mjs`。
 
 ## 4. 这本协调账里到底放什么
 
@@ -542,7 +542,7 @@ history、quota、scheduler 或 evidence 的通用存储抽象，这些账继续
 ## 附录 A：这版证据能证明什么
 
 Reference provider 与 probe 位于
-[`examples/nokv-shadow-provider/`](../../../examples/nokv-shadow-provider/)，并有
+`examples/nokv-shadow-provider/`，并有
 [配套证据文档](./shared-goal-authority-state-provider-v0-evidence.zh-CN.md)。本 PR 的
 deterministic candidate 只证明 claim/receipt core：state 与 receipt 的 same-CAS、
 并发 claim、A/B/A 原始 receipt 重放、request-digest mismatch、crash boundary 恢复，
