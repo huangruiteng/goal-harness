@@ -400,6 +400,14 @@ loopx check \
 - [Project History](docs/project/history.md)
 - [Name and Marks](TRADEMARKS.md)
 
+## 合作伙伴项目
+
+LoopX 欢迎与其他开源项目协作，共建长程 Agent 生态。已确认的合作伙伴包括：
+
+- [NoKV](https://github.com/NoKV-Lab/NoKV) - AI 原生分布式文件系统
+- [OpenViking](https://github.com/volcengine/OpenViking) - 面向 AI Agent 的自进化
+  上下文数据库
+
 ## 用户群与反馈
 
 LoopX 还在早期，最需要真实长程 agent 项目里的反馈：控制面帮到了哪里、哪里太重，

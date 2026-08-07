@@ -441,6 +441,15 @@ complete source map.
 - [Project History](docs/project/history.md)
 - [Name and Marks](TRADEMARKS.md)
 
+## Partner Projects
+
+LoopX welcomes collaboration with other open-source projects to build the
+long-running agent ecosystem. Our confirmed partners include:
+
+- [NoKV](https://github.com/NoKV-Lab/NoKV) - AI native distributed file system
+- [OpenViking](https://github.com/volcengine/OpenViking) - Self-evolving
+  context database for AI agents
+
 <a id="community--feedback"></a>
 
 ## Community and Feedback
