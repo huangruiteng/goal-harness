@@ -1307,7 +1307,7 @@ def handle_auto_research_command(
         payload = {
             "ok": False,
             "mode": "auto-research",
-            "error": str(exc),
+            "error_code": "AUTO_RESEARCH_COMMAND_FAILED",
         }
     print_payload(payload, output_format(args, "auto_research_format"), render_auto_research_markdown)
     return 0 if payload.get("ok") else 1
