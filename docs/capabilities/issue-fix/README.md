@@ -816,14 +816,18 @@ On a host with the LoopX slash entry, start the long-running goal directly:
 ```
 
 For a manually integrated host, inspect the command pack and then start the
-same exact goal text through the guided CLI transaction:
+same exact conversational arguments through the guided CLI transaction:
 
 ```bash
 loopx bootstrap-command-pack --project .
 loopx start-goal --guided --project . \
-  --capability-route issue-fix \
-  --goal-text "Fix https://github.com/owner/repo/issues/123"
+  --slash-command-arguments="--capability-route issue-fix Fix https://github.com/owner/repo/issues/123"
 ```
+
+Typed callers that already own separate fields may instead pass
+`--capability-route issue-fix` with `--goal-text`. Generated conversational
+entries use the single raw-argument form so route parsing stays in the CLI
+rather than in model instructions.
 
 The explicit route switch does not bypass issue selection, authority, or
 validation. Without it, goal text never activates issue-fix. With it, the

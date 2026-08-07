@@ -45,7 +45,9 @@ def test_host_materialization_installs_generated_loopx_entry_skill(
     assert 'name: "loopx"' in skill_text
     assert "`ark-managed-agent` for Ark Managed Agent" in skill_text
     assert "Ark Managed Agent one-shot Goal submission" in skill_text
-    assert "optional leading `--capability-route issue-fix`" in skill_text
+    assert "--slash-command-arguments" in skill_text
+    assert "The CLI, not the model, owns parsing" in skill_text
+    assert "Never split and recompose the switch" in skill_text
     assert "Never infer a route from issue/PR wording or URLs" in skill_text
     assert "run its exact CLI `interaction_contract` or quota command first" in skill_text
     assert "do not call `start-goal` or bootstrap another goal" in skill_text
@@ -76,6 +78,8 @@ def test_host_materialization_can_bind_exact_managed_agent_surface(
     assert "exact current host `ark-managed-agent`" in skill_text
     assert "--host-surface ark-managed-agent" in skill_text
     assert "--host-surface <exact-current-host>" not in skill_text
+    assert "--slash-command-arguments" in skill_text
+    assert "The CLI, not the model, owns parsing" in skill_text
     assert "before substantive task work" in skill_text
     assert "has no `--priority` flag" in skill_text
     assert "Before dependent work, persist material scope" in skill_text
@@ -85,7 +89,7 @@ def test_host_materialization_can_bind_exact_managed_agent_surface(
     assert "capability show <capability-id> --format json" in skill_text
     assert "instead of substituting provider CLIs" in skill_text
     assert "generic Todos remain scheduling records" in skill_text
-    assert "do not add a capability route" in skill_text
+    assert "Never infer a route" in skill_text
     assert "run its exact CLI `interaction_contract` or quota command first" in skill_text
     assert "Only when no active goal contract is present" in skill_text
 

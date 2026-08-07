@@ -167,6 +167,15 @@ caller must explicitly pass `--capability-route issue-fix` to `start-goal` (or
 use the equivalent explicit host switch). Issue/PR wording, a public URL, or the
 literal string `issue-fix` remain objective text only and grant no route.
 
+Conversational hosts must not ask the model to split that switch from the goal
+text and then rebuild separate CLI arguments. Their generated `/loopx` entry
+passes the complete visible argument string once through
+`start-goal --slash-command-arguments`; the CLI consumes only a leading typed
+route switch and treats the remainder as goal text. Direct integrations may
+continue to use structured `--capability-route` plus `--goal-text`. These two
+input forms are mutually exclusive, and malformed or unsupported leading route
+switches fail closed before the guided transaction is built.
+
 `start-goal` projects that explicit switch as a typed
 `selected_capability_route`.
 This is a bootstrap-only selection, not later-turn authority. The guided

@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from loopx.bootstrap_command_pack import (
     GUIDED_COMMAND_PACK_PROJECTION_SCHEMA_VERSION,
     build_loopx_bootstrap_command_pack,
@@ -111,6 +113,34 @@ def _invoke_detail_command(command: str) -> dict[str, Any]:
     payload = json.loads(output.getvalue())
     assert isinstance(payload, dict)
     return payload
+
+
+def _invoke_ark_start_goal_cli(
+    project: Path,
+    *goal_input_args: str,
+) -> tuple[int, dict[str, Any]]:
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--goal-id",
+                GOAL_ID,
+                "--agent-id",
+                AGENT_ID,
+                "--host-surface",
+                "ark-managed-agent",
+                *goal_input_args,
+            ]
+        )
+    payload = json.loads(output.getvalue())
+    assert isinstance(payload, dict)
+    return exit_code, payload
 
 
 def test_default_projection_preserves_host_actions_and_json_anchors(
@@ -1082,6 +1112,89 @@ def test_cli_without_host_returns_read_only_host_selection_gate(
     ide = next(choice for choice in choices if choice["host_surface"] == "codex-ide-plugin")
     assert "--host-surface codex-ide-plugin" in ide["rerun_command"]
     assert "--capability-route issue-fix" in ide["rerun_command"]
+
+
+@pytest.mark.parametrize(
+    "raw_arguments",
+    [
+        "--capability-route issue-fix Fix the selected public issue.",
+        "--capability-route=issue-fix Fix the selected public issue.",
+    ],
+)
+def test_cli_parses_typed_route_from_complete_slash_arguments(
+    tmp_path: Path,
+    raw_arguments: str,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    exit_code, payload = _invoke_ark_start_goal_cli(
+        project,
+        f"--slash-command-arguments={raw_arguments}",
+    )
+
+    assert exit_code == 0
+    assert payload["goal_text"] == "Fix the selected public issue."
+    selected_route = payload["guided_transaction"]["selected_capability_route"]
+    assert selected_route["capability_id"] == "issue-fix"
+    assert selected_route["selection_source"] == "explicit_capability_route"
+    canonical_command = payload["command_pack"]["canonical_cli_command"]
+    assert "--capability-route issue-fix" in canonical_command
+    assert "--goal-text 'Fix the selected public issue.'" in canonical_command
+
+
+def test_cli_preserves_unrouted_complete_slash_arguments_as_goal_text(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    exit_code, payload = _invoke_ark_start_goal_cli(
+        project,
+        "--slash-command-arguments",
+        "Investigate issue-fix wording without selecting a route.",
+    )
+
+    assert exit_code == 0
+    assert payload["goal_text"] == (
+        "Investigate issue-fix wording without selecting a route."
+    )
+    assert "selected_capability_route" not in payload["guided_transaction"]
+
+
+@pytest.mark.parametrize(
+    ("raw_arguments", "extra_args", "expected_error"),
+    [
+        (
+            "Fix the selected public issue.",
+            ["--capability-route", "issue-fix"],
+            "cannot be combined with --capability-route",
+        ),
+        (
+            "--capability-route unknown Fix the selected public issue.",
+            [],
+            "unsupported --capability-route; expected one of: issue-fix",
+        ),
+        (
+            "--capability-route issue-fix",
+            [],
+            "must contain goal text after --capability-route",
+        ),
+    ],
+)
+def test_cli_rejects_ambiguous_or_unsupported_slash_route_input(
+    tmp_path: Path,
+    raw_arguments: str,
+    extra_args: list[str],
+    expected_error: str,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    exit_code, payload = _invoke_ark_start_goal_cli(
+        project,
+        "--slash-command-arguments",
+        raw_arguments,
+        *extra_args,
+    )
+
+    assert exit_code == 2
+    assert payload["ok"] is False
+    assert expected_error in payload["error"]
 
 
 def test_ark_managed_agent_plans_todos_before_one_shot_goal_activation(

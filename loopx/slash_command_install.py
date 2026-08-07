@@ -108,6 +108,30 @@ def _opencode_command_body(spec: dict[str, Any]) -> str:
     ) + "\n"
 
 
+def _loopx_start_goal_arguments_instruction(
+    *,
+    cli_bin: str,
+    host_surface: str | None,
+) -> str:
+    selected_host = host_surface or "<exact-current-host>"
+    instruction = (
+        "If arguments are present, pass the complete visible command arguments "
+        "unchanged as one value to "
+        f'`{cli_bin} start-goal --guided --project . --slash-command-arguments='
+        f'"<complete visible $ARGUMENTS>" --host-surface {selected_host}`. '
+        "The CLI, not the model, owns parsing the optional leading typed "
+        "`--capability-route issue-fix` switch and preserving the remaining goal "
+        "text. Never split and recompose the switch. Never infer a route from "
+        "issue/PR wording or URLs."
+    )
+    if host_surface is None:
+        instruction += (
+            " If the host is unclear, omit the host flag once and follow the "
+            "returned host-surface selection gate."
+        )
+    return instruction
+
+
 def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = [
         {
@@ -118,7 +142,10 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
                 "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, `opencode` for OpenCode, `traex-cli` for the TraeX terminal TUI, `pi` for Pi, or `ark-managed-agent` for Ark Managed Agent.",
-                f"If arguments are present, parse only an optional leading `--capability-route issue-fix` as an explicit product-route switch, remove that prefix from the task text, and pass it to `{cli_bin} start-goal --guided --project . --goal-text \"<remaining exact arguments>\" --host-surface <exact-current-host>`. Without that switch, preserve all arguments as task text and do not add a capability route. Never infer a route from issue/PR wording or URLs. If the host is unclear, omit the host flag once and follow the returned host-surface selection gate.",
+                _loopx_start_goal_arguments_instruction(
+                    cli_bin=cli_bin,
+                    host_surface=None,
+                ),
                 f"Treat the returned `ordered_steps` as a required transaction. On first connection, run its bootstrap command and resolve the returned agent-identity gate before planning; a stable unbound host thread is a new session and defaults to fresh registration. Then plan and execute at least one business `{cli_bin} todo add` derived from `$ARGUMENTS` before substantive task work. Encode priority in the todo text such as `[P0]`; `{cli_bin} todo add` has no `--priority` flag. Do not continue until LoopX status shows that business Agent Todo.",
                 f"If `selected_capability_route` is present, run its entry and admission commands before substantive implementation, and treat `{cli_bin} capability show <capability-id> --format json` as the authoritative later-transition command surface. Use capability-owned commands for listed external transitions instead of substituting provider CLIs. Keep capability facts in capability-owned state; generic Todos remain scheduling records.",
                 f"Before dependent work, persist material scope, acceptance, or non-goal changes in current Todo evidence and the next executable Todo; then run `{cli_bin} refresh-state` and verify quota readback. Chat/model summaries are not durable state.",
@@ -245,14 +272,9 @@ def materialize_loopx_entry_skill(
             "This entry skill is installed for the exact current host "
             f"`{host_surface}`; do not infer or substitute another host surface."
         )
-        instructions[2] = (
-            f"If arguments are present, parse only an optional leading "
-            "`--capability-route issue-fix` as an explicit product-route switch, "
-            "remove that prefix from the task text, and pass it to "
-            f'`{cli_bin} start-goal --guided --project . --goal-text "<remaining exact arguments>" '
-            f"--host-surface {host_surface}`. Without that switch, preserve all "
-            "arguments as task text and do not add a capability route. Never infer "
-            "a route from issue/PR wording or URLs."
+        instructions[2] = _loopx_start_goal_arguments_instruction(
+            cli_bin=cli_bin,
+            host_surface=host_surface,
         )
         spec = {**spec, "instructions": instructions}
     skill_path = skills_dir / "loopx" / "SKILL.md"
