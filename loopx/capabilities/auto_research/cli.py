@@ -1303,7 +1303,7 @@ def handle_auto_research_command(
                 "`worker-turn`, `worker-loop`, `demo-supervisor`, `demo-e2e`, "
                 "or `start` subcommand"
             )
-    except Exception as exc:
+    except Exception:
         payload = {
             "ok": False,
             "mode": "auto-research",
