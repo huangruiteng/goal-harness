@@ -140,6 +140,11 @@ def main() -> None:
         holdout_payload = run_eval(workspace, "test", holdout)
         assert dev_payload["score"] > dev_payload["baseline_score"], dev_payload
         assert holdout_payload["score"] > holdout_payload["baseline_score"], holdout_payload
+        # Wall-clock speedup is measured but not used as a hard pass/fail
+        # oracle — timing variance across CI hosts makes strict >1.0
+        # assertions non-deterministic.  The evidence normalization pipeline
+        # provides the semantic coverage (improved/contradicted status,
+        # protected-scope checks) independent of timing thresholds.
 
         packet = run_evidence(workspace / "research_contract.public.json", dev, holdout)
         assert packet["ok"] is True, packet
