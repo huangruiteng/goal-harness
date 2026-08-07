@@ -29,6 +29,7 @@ as a maintainer or grant release, security, or governance authority.
 | [`@Hoey041`](https://github.com/Hoey041) | Write | Active |
 | [`@maxliux5`](https://github.com/maxliux5) | Write | Invitation pending |
 | [`@JackyCSer`](https://github.com/JackyCSer) | Write | Invitation pending |
+| [`@steven-kid`](https://github.com/steven-kid) | Write | Invitation pending |
 
 GitHub's repository settings are the operational source of truth for access.
 This public snapshot should be updated through a pull request when a write-role
