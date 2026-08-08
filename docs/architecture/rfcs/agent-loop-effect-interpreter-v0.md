@@ -48,7 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
-| M6 General effect-program abstraction | In progress (#2938, #2939, #2940) |
+| M6 General effect-program abstraction | In progress (#2938, #2939, #2940, #2942, #2943, #2945) |
 
 ## Why This Matters
 
@@ -535,6 +535,9 @@ Large smokes remain only as thin end-to-end checks.
   turn result, status, or monitor poll?
 - At what point should `next_effect` stop being a flat CLI tuple and become an
   ordered effect program with `execution_mode`?
+- Which runtime path should become the first ordered-effect executor: guided
+  bootstrap transaction, turn driver, or Codex CLI scheduler?
+- When should `EffectProgram` become runtime-owned rather than host-driven?
 
 ## Success Metrics
 
