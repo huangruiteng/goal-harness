@@ -1,6 +1,6 @@
 ---
 name: loopx-pr-review
-description: Use for `/loopx-pr-review` or evidence-backed PR queue review. Run `loopx pr-review` first, execute the capability-owned review plan for each selected exact head, then publish bilingual reviews (detailed Chinese plus concise English) that match the verified findings. Use `loopx-pr-merge` for approval or merge actions.
+description: Use for `/loopx-pr-review` or evidence-backed PR queue review. Run `loopx pr-review` first, execute the capability-owned review plan for each selected exact head, then publish full bilingual PR reviews (complete Chinese five-block review plus one concise English verdict) that match the verified findings. Use `loopx-pr-merge` for approval or merge actions.
 ---
 
 # LoopX PR Review
@@ -95,24 +95,25 @@ review back, verify its state and rendered body, and return its URL. Merge
 still routes through `loopx-pr-merge`; an `APPROVE` is not merge authority.
 Do not leave a public blocker only in chat.
 
-## Bilingual Review Format
+## Full PR Review And Bilingual Format
 
-For every selected PR, publish two public artifacts:
+Every review must cover the whole PR, not only the top finding. Read the full
+diff/checks, then explain motivation, architecture, changed files/symbols,
+positive and negative paths, risk across the whole diff, validation, and
+overall judgment. A findings-only or blocker-only body is incomplete.
 
-1. **详细中文评审** - the five-block review as a standalone Chinese
-   review/comment, starting with `### Review: <结论>` or `### 结论：...`,
-   including the exact reviewed head. This is the detail carrier: motivation,
-   approach, concrete changes, main risk, and overall judgment stay in Chinese
-   with repo-relative evidence.
-2. **英文简短结论** - a concise English machine verdict (`APPROVE`,
-   `REQUEST_CHANGES`, or the author-owned `COMMENTED` fallback) stating the
-   exact head, verdict, key finding, and validation.
+Publish two artifacts:
 
-Produce bilingual reviews: one detailed Chinese five-block review plus one
-concise English verdict. This is required even when this skill only produces
-the read-only review and a later `loopx-pr-merge` action publishes the GitHub
-verdict. Do not replace the Chinese detail with an English-only body. Read both
-published artifacts back.
+1. **详细中文评审** - a standalone Chinese full-PR review with the exact head
+   and five sections: `动机`, `改动思路`, `具体改动`, `对主干的风险`,
+   `我的整体评价`. Cover every changed surface and key symbols, not just the
+   main finding.
+2. **英文简短结论** - a concise English verdict (`APPROVE`,
+   `REQUEST_CHANGES`, or the author-owned `COMMENTED` fallback) with exact
+   head, verdict, key finding, and validation.
+
+Do not publish before the Chinese section covers the entire PR. Read both
+artifacts back.
 
 ## Autonomous Queue
 

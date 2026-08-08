@@ -64,10 +64,12 @@ def main() -> int:
         "formal `REQUEST_CHANGES`",
         "Read the published review back",
         "Route approval, merge, self-merge, and admin bypass to `loopx-pr-merge`",
-        "Bilingual Review Format",
+        "Full PR Review And Bilingual Format",
+        "findings-only or blocker-only body is incomplete",
+        "Cover every changed surface and key symbols",
         "详细中文评审",
         "英文简短结论",
-        "one detailed Chinese five-block review plus one concise English verdict",
+        "complete Chinese five-block review plus one concise English verdict",
     ):
         assert phrase in skill_text, phrase
     assert len(skill_source.splitlines()) <= 140, len(skill_source.splitlines())
