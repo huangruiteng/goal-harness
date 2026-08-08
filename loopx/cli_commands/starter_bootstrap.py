@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -9,15 +10,15 @@ from ..agent_onboarding import (
     render_agent_onboarding_markdown,
 )
 from ..bootstrap_command_pack import (
-    build_start_goal_host_surface_selection_packet,
-    build_start_goal_guided_packet,
     build_loopx_bootstrap_command_pack,
-    render_start_goal_guided_markdown,
+    build_start_goal_guided_packet,
+    build_start_goal_host_surface_selection_packet,
     render_loopx_bootstrap_command_pack_markdown,
+    render_start_goal_guided_markdown,
 )
 from ..host_loop_activation import (
-    AgentTypeError,
     SUPPORTED_AGENT_TYPES,
+    AgentTypeError,
     build_agent_type_catalog,
     render_agent_type_catalog_markdown,
 )
@@ -32,11 +33,19 @@ from ..project_prompt import (
     render_new_project_prompt_markdown,
 )
 
-
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
     None,
 ]
+
+
+def _current_host_thread_id(args: argparse.Namespace) -> str | None:
+    explicit = getattr(args, "thread_id", None)
+    if explicit:
+        return str(explicit)
+    if getattr(args, "host_surface", None) == "codex-app":
+        return os.environ.get("CODEX_THREAD_ID") or None
+    return None
 
 
 def handle_new_project_prompt_command(
@@ -100,7 +109,7 @@ def handle_loopx_bootstrap_command_pack_command(
         project=Path(args.project),
         goal_id=args.goal_id,
         agent_id=args.agent_id,
-        thread_id=getattr(args, "thread_id", None),
+        thread_id=_current_host_thread_id(args),
         new_peer=bool(getattr(args, "new_peer", False)),
         cli_bin=args.cli_bin,
         host_surface=args.host_surface,
@@ -133,7 +142,7 @@ def handle_start_goal_command(
             project=Path(args.project),
             goal_id=args.goal_id,
             agent_id=args.agent_id,
-            thread_id=getattr(args, "thread_id", None),
+            thread_id=_current_host_thread_id(args),
             new_peer=bool(getattr(args, "new_peer", False)),
             cli_bin=args.cli_bin,
             goal_text=args.goal_text,
@@ -147,7 +156,7 @@ def handle_start_goal_command(
         project=Path(args.project),
         goal_id=args.goal_id,
         agent_id=args.agent_id,
-        thread_id=getattr(args, "thread_id", None),
+        thread_id=_current_host_thread_id(args),
         new_peer=bool(getattr(args, "new_peer", False)),
         cli_bin=args.cli_bin,
         host_surface=args.host_surface,

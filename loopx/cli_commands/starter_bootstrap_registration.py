@@ -75,7 +75,10 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
     )
     bootstrap_command_pack_parser.add_argument(
         "--thread-id",
-        help="Stable opaque host thread id used to reuse the bound agent lane.",
+        help=(
+            "Stable opaque host thread id used to reuse the bound agent lane. "
+            "Codex App defaults to the ambient CODEX_THREAD_ID when available."
+        ),
     )
     bootstrap_command_pack_parser.add_argument(
         "--new-peer",
@@ -136,7 +139,10 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
     )
     start_goal_parser.add_argument(
         "--thread-id",
-        help="Stable opaque host thread id used to reuse the bound agent lane.",
+        help=(
+            "Stable opaque host thread id used to reuse the bound agent lane. "
+            "Codex App defaults to the ambient CODEX_THREAD_ID when available."
+        ),
     )
     start_goal_parser.add_argument(
         "--new-peer",

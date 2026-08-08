@@ -153,8 +153,10 @@ After parsing, the host hands the agent or CLI a compact packet:
 }
 ```
 
-When a host supplies `thread_id`, the first explicit lane selection should be
-persisted with `loopx bind-agent-thread --execute`. Later `/loopx` calls in the
+Codex App CLI reads `CODEX_THREAD_ID` when `--thread-id` is omitted. When a host
+supplies a thread ID, the first explicit lane selection must be persisted with
+`loopx bind-agent-thread --execute` and its source/global readback must verify
+before Todo writeback. Later `/loopx` calls in the
 same `(host_surface, goal_id, thread_id)` reuse that agent ID and carry it through
 start, heartbeat, quota, refresh-state, and Todo commands. A missing binding must select an existing lane; it must not register a new
 peer unless the user explicitly requests one and passes `--new-peer`. If the

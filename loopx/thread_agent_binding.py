@@ -23,11 +23,11 @@ def normalize_thread_id(value: Any) -> str | None:
     if not token:
         return None
     if len(token) > THREAD_ID_MAX_LENGTH:
-        raise ValueError(
-            f"thread_id must be at most {THREAD_ID_MAX_LENGTH} characters"
-        )
+        raise ValueError(f"thread_id must be at most {THREAD_ID_MAX_LENGTH} characters")
     if any(char.isspace() or ord(char) < 32 for char in token):
-        raise ValueError("thread_id must be a public-safe opaque token without whitespace")
+        raise ValueError(
+            "thread_id must be a public-safe opaque token without whitespace"
+        )
     if any(char in token for char in ("/", "\\", '"', "'")):
         raise ValueError("thread_id must not contain path or quoting characters")
     return token
@@ -119,7 +119,9 @@ def _merge_thread_binding_entries(
         )
     ]
     merged.append(entry)
-    merged.sort(key=lambda item: (item["host_surface"], item["thread_id"], item["agent_id"]))
+    merged.sort(
+        key=lambda item: (item["host_surface"], item["thread_id"], item["agent_id"])
+    )
     return merged
 
 
@@ -143,7 +145,9 @@ def _prepare_binding(
         for item in (registered if isinstance(registered, list) else [])
     }
     if agent_id not in registered_ids:
-        raise ValueError(f"agent_id={agent_id!r} is not registered for goal {goal_id!r}")
+        raise ValueError(
+            f"agent_id={agent_id!r} is not registered for goal {goal_id!r}"
+        )
 
     current = _bindings_for_goal(goal)
     existing = resolve_thread_agent_binding(

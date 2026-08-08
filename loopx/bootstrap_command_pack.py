@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from .agent_registry import registered_agent_ids_for_goal
-from .thread_agent_binding import normalize_thread_id, resolve_thread_agent_binding
 from .bootstrap import default_goal_id
 from .capabilities.issue_fix.candidate_preflight import (
     candidate_preflight_input_contract,
@@ -31,6 +30,7 @@ from .project_prompt import (
 )
 from .registry import registry_goals, resolve_state_file
 from .slash_commands import build_slash_command_catalog
+from .thread_agent_binding import normalize_thread_id, resolve_thread_agent_binding
 
 SCHEMA_VERSION = "loopx_bootstrap_command_pack_v0"
 CANONICAL_SLASH_COMMAND = "/loopx"
@@ -916,6 +916,9 @@ def build_loopx_bootstrap_command_pack(
         thread_binding=thread_binding,
     )
     selected_agent_id = host_loop_activation.get("agent_id")
+    thread_binding_projection = {"status": thread_binding.get("status")}
+    if thread_binding.get("agent_id"):
+        thread_binding_projection["agent_id"] = thread_binding["agent_id"]
     issue_fix_commands = build_issue_fix_goal_command_templates(
         cli_bin=cli_bin,
         goal_id=resolved_goal_id,
@@ -1044,9 +1047,6 @@ def build_loopx_bootstrap_command_pack(
         "goal_id": resolved_goal_id,
         "agent_id": selected_agent_id,
         "requested_agent_id": agent_id,
-        "thread_id": normalized_thread_id,
-        "new_peer": new_peer,
-        "thread_agent_binding": thread_binding,
         "agent_type": agent_type,
         "host_surface": host_surface,
         "project_connection": inspection,
@@ -1080,10 +1080,7 @@ def build_loopx_bootstrap_command_pack(
                 if (
                     normalized_thread_id
                     and selected_agent_id
-                    and (
-                        thread_binding.get("status") != "bound"
-                        or thread_binding.get("agent_id") == selected_agent_id
-                    )
+                    and thread_binding.get("status") == "missing"
                 )
                 else None
             ),
@@ -1133,6 +1130,11 @@ def build_loopx_bootstrap_command_pack(
             "host_loop_activation_allowed": activation_allowed,
         },
     }
+    if normalized_thread_id:
+        payload["thread_id"] = normalized_thread_id
+        payload["thread_agent_binding"] = thread_binding_projection
+    if new_peer:
+        payload["new_peer"] = True
     payload["message"] = render_loopx_bootstrap_command_pack_message(payload)
     payload["packet_summary"] = _build_packet_summary(
         payload,
@@ -1515,6 +1517,27 @@ def build_start_goal_guided_packet(
         if host_surface == "codex-app"
         else []
     )
+    bind_thread_steps = (
+        [
+            {
+                "id": "bind_thread_identity",
+                "kind": "identity_mutation",
+                "command": commands.get("goal_start_bind_thread"),
+                "purpose": "bind thread; verify readback before Todo writeback",
+                "must_stop_on_failure": True,
+                "result_contract": {
+                    "schema_version": "loopx_thread_agent_binding_continuation_v0",
+                    "required_result": {
+                        "ok": True,
+                        "global_sync": {"ok": True},
+                        "registration_readback": {"verified": True},
+                    },
+                },
+            }
+        ]
+        if commands.get("goal_start_bind_thread")
+        else []
+    )
     guided_transaction = {
         "schema_version": GUIDED_START_SCHEMA_VERSION,
         "mode": "dry_run_preview",
@@ -1534,6 +1557,7 @@ def build_start_goal_guided_packet(
                 "command": commands.get("goal_start_connect_if_needed"),
                 "purpose": "create or reuse project-local LoopX state only when no matching goal exists",
             },
+            *bind_thread_steps,
             {
                 "id": "plan_ranked_todos",
                 "kind": "model_checkpoint",
@@ -1612,8 +1636,8 @@ def build_start_goal_guided_packet(
                 ),
                 "choices": identity_selection_gate.get("choices") or [],
                 "purpose": (
-                    "register a fresh agent identity by default; reuse an exact existing "
-                    "identity only after explicit takeover intent, before todo writeback"
+                    "select an existing registered identity for this thread; register a "
+                    "fresh identity only when explicit new-peer intent is present"
                 ),
             },
         )
@@ -1694,9 +1718,6 @@ def build_start_goal_guided_packet(
         "project": command_pack.get("project"),
         "goal_id": command_pack.get("goal_id"),
         "agent_id": command_pack.get("agent_id"),
-        "thread_id": command_pack.get("thread_id"),
-        "new_peer": command_pack.get("new_peer"),
-        "thread_agent_binding": command_pack.get("thread_agent_binding"),
         "host_surface": command_pack.get("host_surface"),
         "goal_text": command_pack.get("goal_text"),
         "project_connection": command_pack.get("project_connection"),
@@ -1713,6 +1734,11 @@ def build_start_goal_guided_packet(
             "force_bootstrap_allowed": False,
         },
     }
+    if command_pack.get("thread_id"):
+        payload["thread_id"] = command_pack["thread_id"]
+        payload["thread_agent_binding"] = command_pack.get("thread_agent_binding")
+    if command_pack.get("new_peer"):
+        payload["new_peer"] = True
     payload["message"] = render_start_goal_guided_markdown(payload)
     payload["packet_summary"] = _build_packet_summary(
         payload,

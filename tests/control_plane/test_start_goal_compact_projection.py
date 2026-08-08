@@ -513,7 +513,10 @@ def test_bootstrap_message_does_not_reintroduce_semantic_route_selection(
     assert marker in routed["message"]
 
 
-def test_explicit_cold_path_restores_the_complete_command_pack(tmp_path: Path) -> None:
+def test_explicit_cold_path_restores_the_complete_command_pack(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
     project = _write_connected_project(tmp_path)
     compact = _build(project, include_detail=False)
     restored = _invoke_detail_command(compact["command_pack"]["detail_command"])
@@ -625,6 +628,10 @@ def test_start_goal_reuses_bound_thread_agent_and_scopes_commands(tmp_path: Path
     commands = payload["command_pack"]["commands"]
     assert f"--agent-id {AGENT_ID}" in commands["goal_start_quota_should_run"]
     assert f"--agent-id {AGENT_ID}" in commands["goal_start_refresh_state"]
+    assert commands["goal_start_bind_thread"] is None
+    assert "bind_thread_identity" not in {
+        step["id"] for step in payload["guided_transaction"]["ordered_steps"]
+    }
     assert f"--agent-id {AGENT_ID}" in payload["guided_transaction"]["ordered_steps"][3]["command_template"]
 
     explicit_override = build_start_goal_guided_packet(
@@ -639,6 +646,114 @@ def test_start_goal_reuses_bound_thread_agent_and_scopes_commands(tmp_path: Path
     )
     assert explicit_override["agent_id"] == "codex-guided-peer"
     assert explicit_override["command_pack"]["commands"]["goal_start_bind_thread"] is None
+
+
+def test_cli_codex_app_reuses_ambient_thread_binding(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = _write_connected_project(tmp_path)
+    registry_path = project / ".loopx" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["coordination"]["thread_agent_bindings"] = [
+        {"thread_id": "thread-ambient", "host_surface": "codex-app", "agent_id": AGENT_ID}
+    ]
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-ambient")
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--goal-id",
+                GOAL_ID,
+                "--host-surface",
+                "codex-app",
+                "--goal-text",
+                GOAL_TEXT,
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(output.getvalue())
+    assert payload["thread_id"] == "thread-ambient"
+    assert payload["agent_id"] == AGENT_ID
+    assert payload["thread_agent_binding"]["status"] == "bound"
+    assert payload["guided_transaction"].get("blocked_by") is None
+
+
+def test_start_goal_binds_selected_lane_before_todo_writeback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = _write_connected_project(tmp_path)
+    source_registry = project / ".loopx" / "registry.json"
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    source_payload = json.loads(source_registry.read_text(encoding="utf-8"))
+    global_payload = {
+        **source_payload,
+        "registry_role": "global-local",
+    }
+    global_payload["goals"][0]["source_registry"] = str(source_registry)
+    (runtime / "registry.global.json").write_text(
+        json.dumps(global_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LOOPX_RUNTIME_ROOT", str(runtime))
+
+    first = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        thread_id="thread-first-selection",
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    ordered_steps = first["guided_transaction"]["ordered_steps"]
+    assert [step["id"] for step in ordered_steps[:4]] == [
+        "inspect_connection",
+        "connect_if_needed",
+        "bind_thread_identity",
+        "plan_ranked_todos",
+    ]
+    bind_step = ordered_steps[2]
+    assert bind_step["must_stop_on_failure"] is True
+    assert bind_step["result_contract"]["required_result"] == {
+        "ok": True,
+        "global_sync": {"ok": True},
+        "registration_readback": {"verified": True},
+    }
+
+    output = io.StringIO()
+    bind_argv = shlex.split(bind_step["command"])
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(["--runtime-root", str(runtime), *bind_argv[1:]])
+    assert exit_code == 0, output.getvalue()
+
+    second = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        thread_id="thread-first-selection",
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text="continue the same task",
+        available_capabilities=["network"],
+    )
+    assert second["agent_id"] == AGENT_ID
+    assert second["thread_agent_binding"]["status"] == "bound"
+    assert second["command_pack"]["commands"]["goal_start_bind_thread"] is None
+    assert "bind_thread_identity" not in {
+        step["id"] for step in second["guided_transaction"]["ordered_steps"]
+    }
 
 
 def test_start_goal_with_unbound_thread_requires_existing_lane_selection(tmp_path: Path) -> None:

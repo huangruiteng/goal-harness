@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def run_json(*args: str, env: dict[str, str] | None = None) -> dict[str, object]:
     process_env = os.environ.copy()
+    process_env.pop("CODEX_THREAD_ID", None)
     if env:
         process_env.update(env)
     result = subprocess.run(

@@ -47,16 +47,26 @@ def test_binding_lookup_is_fail_closed_without_thread_id() -> None:
         "coordination": {
             "registered_agents": ["agent-a", "agent-b"],
             "thread_agent_bindings": [
-                {"thread_id": "thread-a", "host_surface": "codex-app", "agent_id": "agent-a"}
+                {
+                    "thread_id": "thread-a",
+                    "host_surface": "codex-app",
+                    "agent_id": "agent-a",
+                }
             ],
         }
     }
-    assert resolve_thread_agent_binding(
-        goal, host_surface="codex-app", thread_id=None
-    )["status"] == "unavailable"
-    assert resolve_thread_agent_binding(
-        goal, host_surface="codex-app", thread_id="thread-a"
-    )["agent_id"] == "agent-a"
+    assert (
+        resolve_thread_agent_binding(goal, host_surface="codex-app", thread_id=None)[
+            "status"
+        ]
+        == "unavailable"
+    )
+    assert (
+        resolve_thread_agent_binding(
+            goal, host_surface="codex-app", thread_id="thread-a"
+        )["agent_id"]
+        == "agent-a"
+    )
 
 
 def test_binding_is_idempotent_and_conflicts_fail_closed(tmp_path: Path) -> None:

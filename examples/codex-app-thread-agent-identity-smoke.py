@@ -3,12 +3,21 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
+import shlex
+import sys
 import tempfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from loopx.bootstrap_command_pack import build_start_goal_guided_packet
-from loopx.thread_agent_binding import bind_thread_agent_in_registry
+from loopx.cli import main as cli_main
 
 
 def main() -> None:
@@ -41,26 +50,77 @@ def main() -> None:
             + "\n",
             encoding="utf-8",
         )
-        bound = bind_thread_agent_in_registry(
-            registry_path=registry,
-            goal_id="goal",
-            host_surface="codex-app",
-            thread_id="thread-a",
-            agent_id="codex-a",
-            execute=True,
+        runtime = root / "runtime"
+        runtime.mkdir()
+        global_payload = json.loads(registry.read_text(encoding="utf-8"))
+        global_payload["registry_role"] = "global-local"
+        global_payload["goals"][0]["source_registry"] = str(registry)
+        (runtime / "registry.global.json").write_text(
+            json.dumps(global_payload, indent=2) + "\n",
+            encoding="utf-8",
         )
-        assert bound["ok"] and bound["written"], bound
-        reused = build_start_goal_guided_packet(
+
+        first = build_start_goal_guided_packet(
             project=project,
             goal_id="goal",
-            agent_id=None,
+            agent_id="codex-a",
             thread_id="thread-a",
             cli_bin="loopx",
             host_surface="codex-app",
-            goal_text="continue the task",
+            goal_text="select the existing lane",
         )
+        ordered_steps = first["guided_transaction"]["ordered_steps"]
+        assert [step["id"] for step in ordered_steps[:4]] == [
+            "inspect_connection",
+            "connect_if_needed",
+            "bind_thread_identity",
+            "plan_ranked_todos",
+        ], ordered_steps
+        bind_step = ordered_steps[2]
+        assert bind_step["must_stop_on_failure"] is True, bind_step
+
+        bind_output = io.StringIO()
+        bind_argv = shlex.split(bind_step["command"])
+        with contextlib.redirect_stdout(bind_output):
+            bind_exit = cli_main(["--runtime-root", str(runtime), *bind_argv[1:]])
+        assert bind_exit == 0, bind_output.getvalue()
+
+        previous_thread_id = os.environ.get("CODEX_THREAD_ID")
+        os.environ["CODEX_THREAD_ID"] = "thread-a"
+        try:
+            reuse_output = io.StringIO()
+            with contextlib.redirect_stdout(reuse_output):
+                reuse_exit = cli_main(
+                    [
+                        "--runtime-root",
+                        str(runtime),
+                        "--format",
+                        "json",
+                        "start-goal",
+                        "--guided",
+                        "--project",
+                        str(project),
+                        "--goal-id",
+                        "goal",
+                        "--host-surface",
+                        "codex-app",
+                        "--goal-text",
+                        "continue the task",
+                    ]
+                )
+            assert reuse_exit == 0, reuse_output.getvalue()
+            reused = json.loads(reuse_output.getvalue())
+        finally:
+            if previous_thread_id is None:
+                os.environ.pop("CODEX_THREAD_ID", None)
+            else:
+                os.environ["CODEX_THREAD_ID"] = previous_thread_id
+
         assert reused["agent_id"] == "codex-a", reused
         assert reused["thread_agent_binding"]["status"] == "bound", reused
+        assert "bind_thread_identity" not in {
+            step["id"] for step in reused["guided_transaction"]["ordered_steps"]
+        }, reused
         commands = reused["command_pack"]["commands"]
         assert "--agent-id codex-a" in commands["goal_start_quota_should_run"], commands
         assert "--agent-id codex-a" in commands["goal_start_refresh_state"], commands
@@ -78,18 +138,6 @@ def main() -> None:
         assert gate["default_action"] == "select_agent_identity", gate
         assert gate["fresh_agent_registration"] is None, gate
         assert "do not register a new one" in gate["reason"], gate
-
-        explicit_lane = build_start_goal_guided_packet(
-            project=project,
-            goal_id="goal",
-            agent_id="codex-b",
-            thread_id="thread-b",
-            cli_bin="loopx",
-            host_surface="codex-app",
-            goal_text="select the existing lane",
-        )
-        assert explicit_lane["agent_id"] == "codex-b", explicit_lane
-        assert "bind-agent-thread" in explicit_lane["command_pack"]["commands"]["goal_start_bind_thread"]
 
         fresh = build_start_goal_guided_packet(
             project=project,

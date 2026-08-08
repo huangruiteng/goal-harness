@@ -103,8 +103,9 @@ remain user gates. This contract is shared by local visible Goal hosts and Ark
 Managed Agent Goal mode without requiring prompt regeneration.
 
 Agent identity follows the same fail-closed rule. `agent-onboard` keeps its
-fresh-registration path, while Codex App `start-goal --guided` must reuse a
-matching stable opaque `--thread-id` binding when available. A missing thread
+fresh-registration path, while Codex App `start-goal --guided` consumes the
+ambient `CODEX_THREAD_ID` when `--thread-id` is omitted and must reuse a
+matching stable opaque thread binding when available. A missing thread
 id or missing binding must select an existing lane; fresh registration requires
 explicit `--new-peer` intent. Existing identities are takeover choices, never
 an implicit default; selecting one requires explicit user intent for that exact

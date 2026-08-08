@@ -61,8 +61,9 @@ loopx start-goal --guided --project . --goal-text "<GOAL_TEXT>"
 Append `--capability-route issue-fix` only when the caller supplied that exact
 explicit route switch.
 
-Include `--goal-id <STABLE_GOAL_ID>` when known. When the host exposes a stable,
-opaque thread id, pass it as `--thread-id <HOST_THREAD_ID>` on every `/loopx`
+Include `--goal-id <STABLE_GOAL_ID>` when known. Codex App automatically reads
+the stable ambient `CODEX_THREAD_ID`; other hosts that expose a stable opaque
+thread id should pass it as `--thread-id <HOST_THREAD_ID>` on every `/loopx`
 invocation. If that thread is already bound, reuse the returned
 `--agent-id <REGISTERED_AGENT_ID>` on start, heartbeat, quota, refresh-state,
 and Todo commands. Include `--agent-id <REGISTERED_AGENT_ID>` only when the

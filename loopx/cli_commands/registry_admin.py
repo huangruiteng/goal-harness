@@ -21,10 +21,6 @@ from ..history import load_registry
 from ..paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from ..project_uninstall import render_project_uninstall_markdown, uninstall_project
 from ..registry import registry_goals
-from ..thread_agent_binding import (
-    bind_thread_agent_in_registry,
-    resolve_thread_agent_binding,
-)
 from ..registry_writability import probe_registry_write_path
 from ..runtime import archive_runtime_goal, render_archive_runtime_markdown
 from ..state_migration import (
@@ -34,6 +30,10 @@ from ..state_migration import (
     migrate_legacy_state,
     parse_key_value_map,
     render_state_migration_markdown,
+)
+from ..thread_agent_binding import (
+    bind_thread_agent_in_registry,
+    resolve_thread_agent_binding,
 )
 from ..upgrade import build_upgrade_plan
 from .registry_admin_configure import register_configure_goal_command
