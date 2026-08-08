@@ -14,6 +14,10 @@ from loopx.extensions.lark.goal_channel_contracts import (
     write_human_gate_auto_notify_marker,
     write_goal_channel_binding,
 )
+from loopx.extensions.lark.goal_channel_targets import (
+    GOAL_CHANNEL_TARGETS_SCHEMA_VERSION,
+)
+from loopx.extensions.lark.private_json import write_private_json_atomic
 
 
 GOAL_ID = "goal-public-fixture"
@@ -60,6 +64,41 @@ def _binding(registry_path: Path, *, enabled: bool) -> None:
             },
         },
     )
+
+
+def _target_binding(registry_path: Path) -> dict[str, Any]:
+    payload = read_goal_channel_binding(registry_path.parent / "goal-channel.json")
+    binding = payload["bindings"][GOAL_ID]
+    binding["target_ref"] = "shared-lark"
+    binding["channel"] = {}
+    binding["identity"] = {}
+    write_goal_channel_binding(registry_path.parent / "goal-channel.json", payload)
+    target = {
+        "name": "shared-lark",
+        "provider": "lark",
+        "enabled": True,
+        "channel": {
+            "chat_id": "oc_public_fixture",
+            "chat_name": "Shared Goal Channel",
+        },
+        "identity": {
+            "mode": "local_user",
+            "sender_profile": "",
+            "sender_identity": "bot",
+            "bot_app_id": "cli_public_fixture",
+            "bot_display_name": "",
+            "cli_bin": "lark-cli",
+        },
+    }
+    write_private_json_atomic(
+        Path(json.loads(registry_path.read_text())["common_runtime_root"])
+        / "goal-channel-targets.json",
+        {
+            "schema_version": GOAL_CHANNEL_TARGETS_SCHEMA_VERSION,
+            "targets": {"shared-lark": target},
+        },
+    )
+    return target
 
 
 def test_refresh_lifecycle_checks_extension_before_private_opt_in(
@@ -330,3 +369,99 @@ def test_refresh_lifecycle_reads_quota_then_delivers_selected_gate(
         ][GOAL_ID]["automation"]["human_gate_auto_notify_enabled"]
         is True
     )
+
+
+def test_refresh_lifecycle_resolves_shared_provider_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path = _registry(tmp_path)
+    _binding(registry_path, enabled=True)
+    expected_target = _target_binding(registry_path)
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "resolve_extension_activation",
+        lambda *args, **kwargs: {"status": "active"},
+    )
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "collect_status",
+        lambda **kwargs: {"status": "fixture"},
+    )
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "build_quota_should_run",
+        lambda status, **kwargs: {
+            "state": "operator_gate",
+            "notify_user_on_gate": True,
+            "gate_prompt": "Approve the bounded external write.",
+        },
+    )
+
+    def deliver(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "ok": True,
+            "enabled": True,
+            "status": "sent_verified",
+            "delivery_postcondition": {
+                "satisfied": True,
+                "blocks_delivery": False,
+            },
+        }
+
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "auto_notify_lark_goal_channel_gate",
+        deliver,
+    )
+
+    result = goal_channel_lifecycle.sync_human_gate_after_refresh(
+        registry_path=registry_path,
+        runtime_root_override=None,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        external_sink_delivery_authorized=True,
+    )
+
+    assert result["status"] == "sent_verified"
+    assert captured["provider_target"] == expected_target
+    raw_binding = read_goal_channel_binding(
+        registry_path.parent / "goal-channel.json"
+    )["bindings"][GOAL_ID]
+    assert raw_binding["target_ref"] == "shared-lark"
+    assert raw_binding["channel"] == {}
+    assert raw_binding["identity"] == {}
+
+
+def test_refresh_lifecycle_missing_shared_target_blocks_delivery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path = _registry(tmp_path)
+    _binding(registry_path, enabled=True)
+    payload = read_goal_channel_binding(registry_path.parent / "goal-channel.json")
+    payload["bindings"][GOAL_ID]["target_ref"] = "missing-target"
+    write_goal_channel_binding(registry_path.parent / "goal-channel.json", payload)
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "resolve_extension_activation",
+        lambda *args, **kwargs: {"status": "active"},
+    )
+
+    result = goal_channel_lifecycle.sync_human_gate_after_refresh(
+        registry_path=registry_path,
+        runtime_root_override=None,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        external_sink_delivery_authorized=True,
+    )
+
+    assert result["ok"] is False
+    assert result["enabled"] is True
+    assert result["status"] == "provider_target_missing"
+    assert result["delivery_postcondition"] == {
+        "satisfied": False,
+        "blocks_delivery": True,
+    }
