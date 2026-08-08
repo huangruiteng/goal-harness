@@ -13,6 +13,10 @@
 卡片，claim、gate、monitor、writeback 等 Kernel operator 决定卡片能否移动，Capability
 Pack 增加领域泳道。看板只是 projection；canonical state 和 typed transition 才是控制合同。
 
+贯穿全课的另一种判定是 effect interpreter：模型提出 effect request，harness 解释后返回
+observation，再把 next effect 交回 host。每个状态机都是解释器内部的一张 interpretation
+table，而不是独立产品。
+
 ## 课程先建立一个递进
 
 普通 Agent 对话主要依赖当前 transcript。Codex 原生 Goal 再向外走一步：通过持久 goal object
