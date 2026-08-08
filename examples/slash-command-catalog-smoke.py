@@ -50,14 +50,12 @@ def main() -> int:
     assert pr_review["agent_contract"]["slash_prefix_dominates_intent"] is True, pr_review
     assert pr_review["agent_contract"]["stats_only_requires_explicit_opt_out"] is True, pr_review
     assert "agent_response_contract" in pr_review["agent_contract"]["authoritative_fields"], pr_review
-    assert "agent_response_contract.review_execution_contract" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert "agent_response_contract.explanation_depth_contract" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert "review_groups.unmerged" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert "review_groups.merged" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert "agent_response_contract.required_final_sections" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert pr_review["agent_contract"]["required_packet_fields_to_preserve"] == [
         "agent_response_contract",
-        "agent_response_contract.review_execution_contract",
         "result_completeness",
         "review_groups",
         "pull_requests[].review_plan",
@@ -74,7 +72,7 @@ def main() -> int:
         "对主干的风险",
         "我的整体评价",
     ], final_contract
-    assert "per-section ranges" in final_contract["section_length_hint"], final_contract
+    assert "review_template ranges" in final_contract["section_length_hint"], final_contract
     assert "may not know" in final_contract["reader_profile"], final_contract
     assert "remote head" in final_contract["freshness_policy"], final_contract
     assert "do not reconstruct" in pr_review["agent_contract"]["manual_gh_policy"], pr_review
