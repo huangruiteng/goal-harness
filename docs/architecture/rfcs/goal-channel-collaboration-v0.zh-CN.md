@@ -272,6 +272,10 @@ loopx goal-channel configure --goal-id <goal-id> --no-auto-notify-human-gates --
 状态迁移权限。群聊回复可以补充 context，但只有经过 LoopX 校验并记录的 decision
 才能改变 gate 状态。
 
+自动生命周期投递会先解析已启用且 doctor 验证通过的 Lark extension，再读取私有
+binding。唯一的恢复例外是显式本地 disable 命令：即使 extension 或 binding
+不完整，它也可以清除 opt-in；该路径不会进入 provider 代码，也不会执行外部写。
+
 ## 命令契约
 
 每个 effectful command 返回紧凑 packet：

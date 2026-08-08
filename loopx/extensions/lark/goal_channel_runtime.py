@@ -16,6 +16,7 @@ from .goal_channel_contracts import (
     operation_packet,
     parse_time,
     provider_idempotency_key,
+    quota_human_gate_identity,
     quota_selects_human_gate,
     read_goal_channel_binding,
     save_goal_binding,
@@ -75,7 +76,7 @@ def configure_lark_goal_channel_automation(
             blocker="channel_binding_missing",
             public_summary="configure the Goal Channel before enabling automation",
         )
-    if binding.get("enabled") is not True:
+    if human_gate_auto_notify and binding.get("enabled") is not True:
         return operation_packet(
             ok=False,
             goal_id=goal_id,
@@ -520,7 +521,15 @@ def notify_lark_goal_channel_gate(
         quota_packet=quota_packet,
         kanban_url=str(kanban.get("base_url") or ""),
     )
-    key = semantic_key(goal_id, "lark", "notify_gate", question, chat_id)
+    gate_identity = quota_human_gate_identity(quota_packet)
+    key = semantic_key(
+        goal_id,
+        "lark",
+        "notify_gate",
+        gate_identity,
+        question,
+        chat_id,
+    )
     receipts = _mapping(binding.get("receipts"))
     existing_receipt = _mapping(receipts.get(key))
     if existing_receipt:

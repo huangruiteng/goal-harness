@@ -514,6 +514,35 @@ def test_configure_auto_notify_is_preview_first_and_persists_private_opt_in(
     _assert_public_packet(applied)
 
 
+def test_configure_can_disable_auto_notify_for_incomplete_binding(
+    tmp_path: Path,
+) -> None:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    binding_path.parent.mkdir(parents=True)
+    kanban_path = tmp_path / ".loopx" / "lark-kanban.json"
+    _write_binding(binding_path, kanban_path)
+    binding = read_goal_channel_binding(binding_path)
+    goal_binding = binding["bindings"][GOAL_ID]
+    goal_binding["enabled"] = False
+    goal_binding["automation"] = {"human_gate_auto_notify_enabled": True}
+    write_goal_channel_binding(binding_path, binding)
+
+    payload = configure_lark_goal_channel_automation(
+        registry=_registry(tmp_path),
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        human_gate_auto_notify=False,
+        execute=True,
+    )
+
+    assert payload["ok"] is True
+    assert payload["readback_verified"] is True
+    persisted = read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]
+    assert persisted["enabled"] is False
+    assert persisted["automation"]["human_gate_auto_notify_enabled"] is False
+    _assert_public_packet(payload)
+
+
 def test_auto_notify_gate_is_disabled_by_default_and_suppressible(
     tmp_path: Path,
 ) -> None:
@@ -898,6 +927,63 @@ def test_notify_gate_is_idempotent_after_verified_send(tmp_path: Path) -> None:
     assert sum("+messages-send" in args for args in calls) == send_count
     _assert_public_packet(first)
     _assert_public_packet(second)
+
+
+def test_notify_gate_distinguishes_different_gate_ids_with_same_question(
+    tmp_path: Path,
+) -> None:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    binding_path.parent.mkdir(parents=True)
+    kanban_path = tmp_path / ".loopx" / "lark-kanban.json"
+    save_lark_kanban_board_config(
+        kanban_path,
+        base_token="base_public_fixture",
+        table_id="tbl_public_fixture",
+        base_url="https://example.invalid/base/public-fixture",
+    )
+    _write_binding(binding_path, kanban_path)
+    calls: list[list[str]] = []
+    runner = _fake_runner(calls)
+
+    def quota(todo_id: str) -> dict[str, Any]:
+        return {
+            "state": "operator_gate",
+            "notify_user_on_gate": True,
+            "gate_prompt": "Approve the bounded external write.",
+            "user_todo_summary": {
+                "gate_open_items": [
+                    {
+                        "todo_id": todo_id,
+                        "task_class": "user_gate",
+                        "text": "Approve the bounded external write.",
+                    }
+                ]
+            },
+        }
+
+    first = notify_lark_goal_channel_gate(
+        registry=_registry(tmp_path),
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        quota_packet=quota("todo_gate_one"),
+        cooldown_seconds=0,
+        execute=True,
+        runner=runner,
+    )
+    second = notify_lark_goal_channel_gate(
+        registry=_registry(tmp_path),
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        quota_packet=quota("todo_gate_two"),
+        cooldown_seconds=0,
+        execute=True,
+        runner=runner,
+    )
+
+    assert first["status"] == "sent_verified"
+    assert second["status"] == "sent_verified"
+    assert first["idempotency_key"] != second["idempotency_key"]
+    assert sum("+messages-send" in args for args in calls) == 2
 
 
 def test_notify_gate_resends_when_existing_receipt_readback_is_stale(

@@ -60,22 +60,21 @@ def _binding(registry_path: Path, *, enabled: bool) -> None:
     )
 
 
-def test_refresh_lifecycle_does_not_load_extension_without_opt_in(
+def test_refresh_lifecycle_checks_extension_before_private_opt_in(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     registry_path = _registry(tmp_path)
-    called = False
+    calls: list[Path] = []
 
-    def unexpected(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        nonlocal called
-        called = True
-        raise AssertionError("extension activation must remain lazy")
+    def activate(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(Path(kwargs["state_file"]))
+        return {"status": "active"}
 
     monkeypatch.setattr(
         goal_channel_lifecycle,
         "resolve_extension_activation",
-        unexpected,
+        activate,
     )
 
     result = goal_channel_lifecycle.sync_human_gate_after_refresh(
@@ -89,7 +88,7 @@ def test_refresh_lifecycle_does_not_load_extension_without_opt_in(
     assert result["ok"] is True
     assert result["enabled"] is False
     assert result["status"] == "not_configured"
-    assert called is False
+    assert calls == [tmp_path / "runtime" / "extensions" / "state.json"]
 
 
 def test_refresh_lifecycle_shared_registry_without_source_binding_is_safe_noop(
@@ -127,21 +126,24 @@ def test_refresh_lifecycle_shared_registry_without_source_binding_is_safe_noop(
     assert result["status"] == "project_binding_unavailable"
 
 
-def test_refresh_lifecycle_suppression_skips_extension_and_quota(
+def test_refresh_lifecycle_suppression_checks_extension_but_skips_quota(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     registry_path = _registry(tmp_path)
     _binding(registry_path, enabled=True)
 
-    def unexpected(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("suppressed delivery must not load external dependencies")
+    activation_calls = 0
 
-    monkeypatch.setattr(
-        goal_channel_lifecycle,
-        "resolve_extension_activation",
-        unexpected,
-    )
+    def activate(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal activation_calls
+        activation_calls += 1
+        return {"status": "active"}
+
+    def unexpected(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("suppressed delivery must not rebuild quota")
+
+    monkeypatch.setattr(goal_channel_lifecycle, "resolve_extension_activation", activate)
     monkeypatch.setattr(goal_channel_lifecycle, "collect_status", unexpected)
 
     result = goal_channel_lifecycle.sync_human_gate_after_refresh(
@@ -155,9 +157,10 @@ def test_refresh_lifecycle_suppression_skips_extension_and_quota(
     assert result["ok"] is True
     assert result["enabled"] is True
     assert result["status"] == "external_sink_suppressed"
+    assert activation_calls == 1
 
 
-def test_refresh_lifecycle_no_gate_does_not_load_extension(
+def test_refresh_lifecycle_no_gate_checks_extension_without_delivery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -174,13 +177,10 @@ def test_refresh_lifecycle_no_gate_does_not_load_extension(
         lambda status, **kwargs: {"state": "eligible"},
     )
 
-    def unexpected(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("no selected gate must not load the Lark extension")
-
     monkeypatch.setattr(
         goal_channel_lifecycle,
         "resolve_extension_activation",
-        unexpected,
+        lambda *args, **kwargs: {"status": "active"},
     )
 
     result = goal_channel_lifecycle.sync_human_gate_after_refresh(
@@ -195,6 +195,34 @@ def test_refresh_lifecycle_no_gate_does_not_load_extension(
     assert result["enabled"] is True
     assert result["status"] == "not_selected"
     assert "extension_activation" not in result
+
+
+def test_refresh_lifecycle_extension_failure_prevents_private_binding_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path = _registry(tmp_path)
+    binding_path = registry_path.parent / "goal-channel.json"
+    binding_path.write_text("not-json", encoding="utf-8")
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "resolve_extension_activation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("extension unavailable")
+        ),
+    )
+
+    result = goal_channel_lifecycle.sync_human_gate_after_refresh(
+        registry_path=registry_path,
+        runtime_root_override=None,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        external_sink_delivery_authorized=True,
+    )
+
+    assert result["ok"] is True
+    assert result["enabled"] is False
+    assert result["status"] == "extension_unavailable"
 
 
 def test_refresh_lifecycle_reads_quota_then_delivers_selected_gate(

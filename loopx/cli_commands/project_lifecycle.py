@@ -103,6 +103,26 @@ def _lark_explore_graph_syncer(
     return sync
 
 
+def _apply_external_sink_postcondition(
+    payload: dict[str, object],
+    *,
+    sink_result: Mapping[str, object],
+    warning: str,
+    error: str,
+) -> None:
+    postcondition = (
+        sink_result.get("delivery_postcondition")
+        if isinstance(sink_result.get("delivery_postcondition"), Mapping)
+        else {}
+    )
+    if not sink_result.get("enabled") or postcondition.get("satisfied"):
+        return
+    payload.setdefault("warnings", []).append(warning)
+    if postcondition.get("blocks_delivery"):
+        payload["ok"] = False
+        payload["error"] = error
+
+
 def _inline_agent_vision_packet(args: argparse.Namespace) -> dict[str, object] | None:
     patch = {
         field: str(value).strip()
@@ -586,22 +606,18 @@ def handle_project_lifecycle_command(
                 ),
             )
             payload["explore_graph_sync"] = graph_sync
-            graph_postcondition = (
-                graph_sync.get("delivery_postcondition")
-                if isinstance(graph_sync.get("delivery_postcondition"), dict)
-                else {}
-            )
-            if graph_sync.get("enabled") and not graph_postcondition.get("satisfied"):
-                payload.setdefault("warnings", []).append(
+            _apply_external_sink_postcondition(
+                payload,
+                sink_result=graph_sync,
+                warning=(
                     "enabled Explore Graph delivery postcondition is unsatisfied; "
                     "the unchanged sink digest keeps it retryable"
-                )
-                if graph_postcondition.get("blocks_delivery"):
-                    payload["ok"] = False
-                    payload["error"] = (
-                        "enabled Explore Graph sync/readback failed after the material "
-                        "refresh; retry it before delivery"
-                    )
+                ),
+                error=(
+                    "enabled Explore Graph sync/readback failed after the material "
+                    "refresh; retry it before delivery"
+                ),
+            )
             try:
                 gate_sync = sync_human_gate_after_refresh(
                     registry_path=registry_path,
@@ -612,7 +628,7 @@ def handle_project_lifecycle_command(
                         args.suppress_external_sinks
                     ),
                 )
-            except Exception as exc:
+            except Exception:
                 gate_sync = {
                     "schema_version": "loopx_goal_channel_gate_auto_delivery_v0",
                     "ok": False,
@@ -624,25 +640,21 @@ def handle_project_lifecycle_command(
                         "satisfied": False,
                         "blocks_delivery": True,
                     },
-                    "error": str(exc),
+                    "error_code": "goal_channel_gate_sync_failed",
                 }
             payload["goal_channel_gate_sync"] = gate_sync
-            gate_postcondition = (
-                gate_sync.get("delivery_postcondition")
-                if isinstance(gate_sync.get("delivery_postcondition"), dict)
-                else {}
-            )
-            if gate_sync.get("enabled") and not gate_postcondition.get("satisfied"):
-                payload.setdefault("warnings", []).append(
+            _apply_external_sink_postcondition(
+                payload,
+                sink_result=gate_sync,
+                warning=(
                     "enabled Goal Channel human-gate delivery postcondition is "
                     "unsatisfied; the notification remains retryable"
-                )
-                if gate_postcondition.get("blocks_delivery"):
-                    payload["ok"] = False
-                    payload["error"] = (
-                        "enabled Goal Channel human-gate notification/readback failed "
-                        "after the refresh; retry it before delivery"
-                    )
+                ),
+                error=(
+                    "enabled Goal Channel human-gate notification/readback failed "
+                    "after the refresh; retry it before delivery"
+                ),
+            )
         print_payload(payload, fmt, render_state_refresh_markdown)
         return 0 if payload.get("ok") else 1
 

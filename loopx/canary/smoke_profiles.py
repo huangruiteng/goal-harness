@@ -78,6 +78,7 @@ SMOKE_SUITE_PROFILE_MANIFEST: dict[str, dict[str, Any]] = {
             "capability-extension",
             "extension",
             "lark-event",
+            "lark-goal-channel",
             "lark-inbox",
             "openviking-extension",
         ],

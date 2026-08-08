@@ -5,6 +5,42 @@ from typing import Any
 
 CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
     {
+        "id": "lark-goal-channel-human-gate-delivery",
+        "title": "Lark Goal Channel human-gate delivery",
+        "quality_risk": "high",
+        "purpose": (
+            "Qualify opt-in user-gate delivery from canonical active state and "
+            "quota through the verified Lark Goal Channel transport boundary."
+        ),
+        "catalog_families": [
+            "Work Routing",
+            "State And Boundary",
+        ],
+        "trigger_hints": (
+            "lark goal channel",
+            "human gate delivery",
+            "goal-channel",
+            "loopx/cli_commands/project_lifecycle.py",
+            "loopx/extensions/lark/goal_channel_lifecycle.py",
+            "loopx/extensions/lark/goal_channel_runtime.py",
+            "examples/lark-goal-channel-human-gate-delivery-smoke.py",
+            "docs/architecture/rfcs/goal-channel-collaboration-v0.md",
+        ),
+        "checks": [
+            {
+                "command": (
+                    "python3 "
+                    "examples/lark-goal-channel-human-gate-delivery-smoke.py"
+                ),
+                "tier": "default",
+                "reason": (
+                    "guards canonical user-gate selection, stable gate identity, "
+                    "bot send/readback, receipt persistence, and duplicate suppression"
+                ),
+            },
+        ],
+    },
+    {
         "id": "change-quality-exact-receipt",
         "title": "Change-quality exact-scope receipt integrity",
         "quality_risk": "high",

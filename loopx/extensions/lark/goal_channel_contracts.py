@@ -136,6 +136,26 @@ def human_gate_auto_notify_enabled(binding: Mapping[str, Any] | None) -> bool:
     return automation.get(HUMAN_GATE_AUTO_NOTIFY_SETTING) is True
 
 
+def quota_human_gate_identity(quota_packet: Mapping[str, Any]) -> str:
+    summary = quota_packet.get("user_todo_summary")
+    summary = summary if isinstance(summary, Mapping) else {}
+    for key in ("gate_open_items", "first_open_items"):
+        items = summary.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            identity = str(item.get("todo_id") or item.get("gate_id") or "").strip()
+            if identity:
+                return identity
+    return str(
+        quota_packet.get("gate_id")
+        or quota_packet.get("operator_gate_id")
+        or "unidentified_gate"
+    ).strip()
+
+
 def quota_selects_human_gate(quota_packet: Mapping[str, Any]) -> bool:
     return bool(
         quota_packet.get("state") == "operator_gate"

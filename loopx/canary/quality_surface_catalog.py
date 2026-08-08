@@ -365,6 +365,51 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
         },
     },
     {
+        "surface_id": "lark-goal-channel-human-gate-delivery",
+        "title": "Lark Goal Channel human-gate delivery",
+        "risk": "high",
+        "canary_profile_id": "lark-goal-channel-human-gate-delivery",
+        "owner_paths": [
+            "loopx/cli_commands/project_lifecycle.py",
+            "loopx/extensions/lark/goal_channel_lifecycle.py",
+            "loopx/extensions/lark/goal_channel_runtime.py",
+        ],
+        "semantic_oracle": {
+            "source_kind": "specification",
+            "refs": [
+                "docs/architecture/rfcs/goal-channel-collaboration-v0.md"
+            ],
+            "independence_rationale": (
+                "The Goal Channel RFC defines opt-in delivery, canonical quota "
+                "selection, gate identity, suppression, idempotency, readback, "
+                "and public/private boundaries before the lifecycle and transport "
+                "implementations are exercised."
+            ),
+        },
+        "layers": {
+            "unit_contract": _covered(
+                "tests/extensions/test_lark_goal_channel.py",
+                "tests/extensions/test_lark_goal_channel_lifecycle.py",
+                "tests/cli_commands/test_project_lifecycle_goal_channel.py",
+            ),
+            "durable_smoke": _covered(
+                "examples/lark-goal-channel-human-gate-delivery-smoke.py"
+            ),
+            "catalog_canary": _covered(
+                "lark-goal-channel-human-gate-delivery"
+            ),
+            "host_upgrade": _covered("examples/install-local-smoke.py"),
+            "model_behavior": _not_applicable(
+                "Gate selection and provider delivery safety are deterministic "
+                "control-plane and transport contracts."
+            ),
+            "release_gate": _covered(
+                "loopx canary premerge "
+                "--profile lark-goal-channel-human-gate-delivery"
+            ),
+        },
+    },
+    {
         "surface_id": "new-user-onboarding",
         "title": "New-user goal start and host activation",
         "risk": "high",

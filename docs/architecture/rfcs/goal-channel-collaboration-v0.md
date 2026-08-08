@@ -296,6 +296,12 @@ It does not grant repository or LoopX transition authority. Chat replies can
 provide context, but a gate changes only after LoopX validates and records the
 corresponding decision.
 
+Automatic lifecycle delivery resolves the enabled, doctor-verified Lark
+extension before reading the private binding. The explicit local disable
+command is the only recovery exception: it may clear the opt-in while the
+extension or binding is incomplete, and it never enters provider code or
+performs an external write.
+
 ## Command Contract
 
 Each effectful command returns a compact packet:

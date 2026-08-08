@@ -25,6 +25,10 @@ from .goal_channel_targets import (
     goal_channel_target_for_name,
     read_goal_channel_targets,
 )
+from .presentation.kanban import (
+    CommandRunner,
+    default_subprocess_runner,
+)
 
 
 def _inactive_result(status: str) -> dict[str, Any]:
@@ -42,6 +46,13 @@ def _inactive_result(status: str) -> dict[str, Any]:
     }
 
 
+def _extension_unavailable_result() -> dict[str, Any]:
+    return {
+        **_inactive_result("extension_unavailable"),
+        "enabled": False,
+    }
+
+
 def sync_human_gate_after_refresh(
     *,
     registry_path: Path,
@@ -49,6 +60,7 @@ def sync_human_gate_after_refresh(
     goal_id: str,
     agent_id: str | None,
     external_sink_delivery_authorized: bool,
+    runner: CommandRunner = default_subprocess_runner,
 ) -> dict[str, Any]:
     invoked_registry = load_registry(registry_path)
     source_route = resolve_goal_source_runtime_route(
@@ -65,6 +77,19 @@ def sync_human_gate_after_refresh(
     )
     if source_registry_path.parent.name != ".loopx":
         return _inactive_result("project_binding_unavailable")
+    runtime_root = (
+        Path(runtime_root_override).expanduser().resolve()
+        if runtime_root_override
+        else Path(str(source_route["source_runtime_root"]))
+    )
+    try:
+        activation = resolve_extension_activation(
+            LARK_EXTENSION_ID,
+            state_file=default_extension_state_file(runtime_root),
+            required_permissions=(LARK_GOAL_CHANNEL_PERMISSION,),
+        )
+    except (OSError, ValueError):
+        return _extension_unavailable_result()
     binding_path = default_goal_channel_binding_path(source_registry_path)
     binding_payload = read_goal_channel_binding(binding_path)
     raw_binding = binding_for_goal(binding_payload, goal_id)
@@ -117,11 +142,6 @@ def sync_human_gate_after_refresh(
             external_sink_delivery_authorized=False,
         )
 
-    runtime_root = (
-        Path(runtime_root_override).expanduser().resolve()
-        if runtime_root_override
-        else Path(str(source_route["source_runtime_root"]))
-    )
     status = collect_status(
         registry_path=source_registry_path,
         runtime_root_override=str(runtime_root),
@@ -149,11 +169,6 @@ def sync_human_gate_after_refresh(
             external_sink_delivery_authorized=True,
         )
 
-    activation = resolve_extension_activation(
-        LARK_EXTENSION_ID,
-        state_file=default_extension_state_file(runtime_root),
-        required_permissions=(LARK_GOAL_CHANNEL_PERMISSION,),
-    )
     result = auto_notify_lark_goal_channel_gate(
         registry=source_registry,
         goal_id=goal_id,
@@ -161,6 +176,7 @@ def sync_human_gate_after_refresh(
         quota_packet=quota_packet,
         provider_target=provider_target,
         external_sink_delivery_authorized=external_sink_delivery_authorized,
+        runner=runner,
     )
     result["extension_activation"] = activation
     return result

@@ -185,3 +185,59 @@ def test_refresh_state_forwards_external_sink_suppression(
 
     assert result == 0
     assert captured_kwargs["external_sink_delivery_authorized"] is False
+
+
+def test_refresh_state_redacts_goal_channel_exception_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        project_lifecycle,
+        "refresh_state_run",
+        lambda **kwargs: {
+            "ok": True,
+            "appended": True,
+            "dry_run": False,
+            "classification": "validated",
+        },
+    )
+    monkeypatch.setattr(
+        project_lifecycle,
+        "sync_explore_graph_after_material_refresh",
+        lambda **kwargs: {
+            "enabled": False,
+            "delivery_postcondition": {
+                "satisfied": True,
+                "blocks_delivery": False,
+            },
+        },
+    )
+
+    def fail_with_private_details(**kwargs: Any) -> dict[str, Any]:
+        raise ValueError(
+            f"private binding failed at {tmp_path}/.loopx/goal-channel.json "
+            "for oc_private_fixture"
+        )
+
+    monkeypatch.setattr(
+        project_lifecycle,
+        "sync_human_gate_after_refresh",
+        fail_with_private_details,
+    )
+
+    result = project_lifecycle.handle_project_lifecycle_command(
+        _args(),
+        registry_path=tmp_path / ".loopx" / "registry.json",
+        print_payload=lambda payload, fmt, renderer: captured.update(payload),
+        output_format=lambda args: "json",
+        append_cli_rollout_event=lambda *args, **kwargs: {},
+    )
+
+    serialized = str(captured)
+    assert result == 1
+    assert captured["goal_channel_gate_sync"]["error_code"] == (
+        "goal_channel_gate_sync_failed"
+    )
+    assert str(tmp_path) not in serialized
+    assert "oc_private_fixture" not in serialized
