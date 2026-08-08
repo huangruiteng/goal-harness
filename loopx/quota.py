@@ -78,6 +78,7 @@ from .control_plane.quota.monitor_poll import (
 )
 from .control_plane.quota.recent_runs import (
     build_monitor_debt_arbitration as _build_monitor_debt_arbitration,
+    goal_latest_run as _goal_latest_run,
     goal_latest_runs as _goal_latest_runs,
     recent_external_monitor_observation_unchanged as _recent_external_monitor_observation_unchanged,
 )
@@ -507,13 +508,6 @@ def quota_status(
     return payload
 
 
-def _latest_run(goal: dict[str, Any]) -> dict[str, Any]:
-    latest_runs = goal.get("latest_runs") if isinstance(goal.get("latest_runs"), list) else []
-    if latest_runs and isinstance(latest_runs[0], dict):
-        return latest_runs[0]
-    return {}
-
-
 def _quota_sort_key(item: dict[str, Any]) -> tuple[int, float, int, str]:
     quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
     state = str(quota.get("state") or "waiting")
@@ -910,7 +904,7 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
             if isinstance(attention.get("project_asset"), dict)
             else {}
         )
-        latest = _latest_run(goal)
+        latest = _goal_latest_run(goal)
         waiting_on = attention.get("waiting_on") or "none"
         lifecycle_phase = attention.get("lifecycle_phase") or goal.get("lifecycle_phase")
         lifecycle_flags = attention.get("lifecycle_flags") or goal.get("lifecycle_flags")

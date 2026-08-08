@@ -10,6 +10,19 @@ MONITOR_DEBT_UNCHANGED_TURN_THRESHOLD = 2
 NON_WORK_RUN_CLASSIFICATIONS = {"state_refreshed"}
 
 
+def goal_latest_run(goal: dict[str, Any]) -> dict[str, Any]:
+    """Return the latest run object for one goal, or an empty mapping."""
+
+    latest_runs = (
+        goal.get("latest_runs")
+        if isinstance(goal.get("latest_runs"), list)
+        else []
+    )
+    if latest_runs and isinstance(latest_runs[0], dict):
+        return latest_runs[0]
+    return {}
+
+
 def _run_is_unchanged_monitor_observation(run: dict[str, Any]) -> bool:
     if str(run.get("classification") or "") != QUOTA_MONITOR_POLL_CLASSIFICATION:
         return False
