@@ -264,7 +264,7 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
 
     frontier_rule_payload = build_catalog_canary_plan(
         changed_files=[
-            "loopx/control_plane/goals/goal_frontier_replan_rules.py",
+            "loopx/control_plane/goals/goal_frontier/replan_rules.py",
         ],
         surfaces=["ordered goal frontier replan policy"],
         max_checks_per_profile=5,

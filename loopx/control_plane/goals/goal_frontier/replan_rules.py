@@ -1,8 +1,10 @@
+"""Goal-frontier replan rule selection: the decision interpreter for the
+`goal_frontier` bounded context."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-
 
 GOAL_FRONTIER_REPLAN_RULE_DECISION_SCHEMA_VERSION = (
     "goal_frontier_replan_rule_decision_v0"

@@ -768,7 +768,7 @@ receipt = record_supervisor_receipt(
 6. `loopx/control_plane/agents/supervisor_events.py`
 7. `loopx/control_plane/agents/supervisor_inject.py`
 8. `loopx/control_plane/agents/runtime_model.py`
-9. `loopx/control_plane/goals/goal_frontier_replan_rules.py`
+9. `loopx/control_plane/goals/goal_frontier/replan_rules.py`
 10. `tests/control_plane/test_goal_frontier_replan_rules.py`
 11. `examples/control_plane/goal-frontier-replan-rules-smoke.py`
 

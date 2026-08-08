@@ -20,17 +20,17 @@ from ...work_items.autonomous_replan_obligation import (
     build_autonomous_replan_obligation_payload,
 )
 from ...work_items.repair_delta import repair_delta_kinds_have_frontier_delta
-from ..goal_frontier_replan_rules import (
-    GoalFrontierReplanFacts,
-    GoalFrontierReplanRule,
-    select_goal_frontier_replan_rule,
-)
 from ..goal_vision_policy import goal_vision_repeats_advancement_until_closed
 from ..goal_vision_state import (
     goal_vision_state_is_closed,
     goal_vision_state_requires_successor,
 )
 from ..goal_vision_wait import build_goal_vision_wait_state
+from .replan_rules import (
+    GoalFrontierReplanFacts,
+    GoalFrontierReplanRule,
+    select_goal_frontier_replan_rule,
+)
 from .terminal import (
     GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION,  # noqa: F401
     GOAL_TERMINAL_STATE_SCHEMA_VERSION,  # noqa: F401

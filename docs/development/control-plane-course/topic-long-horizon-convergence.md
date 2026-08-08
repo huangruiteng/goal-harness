@@ -1616,7 +1616,7 @@ LoopX 已经提供的通用机制包括：
 | --- | --- | --- |
 | 本轮决策 | `loopx/quota.py::build_quota_should_run` | 多种 source facts 怎样收敛成一个 interaction decision |
 | Agent-facing packet | `loopx/control_plane/work_items/interaction_contract.py::build_interaction_contract` | selected work、gate、replan、terminal 是否完整投影 |
-| Goal frontier replan | `loopx/control_plane/goals/goal_frontier_replan_rules.py::select_goal_frontier_replan_rule` | runnable、gate、succession gap、monitor exhaustion 的优先级 |
+| Goal frontier replan | `loopx/control_plane/goals/goal_frontier/replan_rules.py::select_goal_frontier_replan_rule` | runnable、gate、succession gap、monitor exhaustion 的优先级 |
 | Vision checkpoint | `loopx/state_refresh.py::build_vision_checkpoint` | material closeout 后如何防止局部目标替代长期方向 |
 | Todo succession | `loopx/control_plane/todos/succession_warning.py::build_open_parent_successor_advisory`、`loopx/control_plane/todos/completion_policy.py::resolve_completion_policy` | successor 为什么只记录 lineage，open parent 为什么仍需显式 complete/defer |
 | Turn transaction | `loopx/control_plane/turn_driver/executor.py::run_loopx_turn_once` | phase failure 怎样恢复，何时允许 commit |

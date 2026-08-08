@@ -184,7 +184,7 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
         "owner_paths": [
             "loopx/control_plane/goals/goal_frontier/__init__.py",
             "loopx/control_plane/goals/goal_frontier/terminal.py",
-            "loopx/control_plane/goals/goal_frontier_replan_rules.py",
+            "loopx/control_plane/goals/goal_frontier/replan_rules.py",
             "loopx/control_plane/work_items/autonomous_replan_ack.py",
         ],
         "semantic_oracle": {

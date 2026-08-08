@@ -7,7 +7,7 @@ import pytest
 from loopx.control_plane.goals.goal_frontier import (
     derive_goal_frontier_replan_obligation_from_summaries,
 )
-from loopx.control_plane.goals.goal_frontier_replan_rules import (
+from loopx.control_plane.goals.goal_frontier.replan_rules import (
     GOAL_FRONTIER_REPLAN_RULE_ORDER,
     GoalFrontierReplanFacts,
     GoalFrontierReplanRule,
