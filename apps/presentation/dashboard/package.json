@@ -43,6 +43,6 @@
     "vite": "^8.2.1"
   },
   "overrides": {
-    "postcss": "8.5.18"
+    "postcss": "8.5.26"
   }
 }

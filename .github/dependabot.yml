@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directories:
+      - "/"
+      - "/docs"
+      - "/packages/loopx-finance-value-discovery"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: "/apps/presentation/dashboard"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      dashboard-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
