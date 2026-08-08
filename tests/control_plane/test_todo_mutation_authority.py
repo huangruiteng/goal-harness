@@ -237,6 +237,43 @@ def test_advancement_todo_preserves_public_target_key(tmp_path: Path) -> None:
     assert projected["target_key"] == "issue-fix:owner/repo:issue_42"
 
 
+def test_agent_cannot_claim_overlapping_open_advancement_target(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    first = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Advance the first admitted route.",
+        task_class="advancement_task",
+        claimed_by=AUTHOR_AGENT,
+        monitor_metadata={"target_key": "admission:supply-chain"},
+    )
+    second = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Prepare the adjacent admitted route.",
+        task_class="advancement_task",
+        claimed_by=None,
+        monitor_metadata={"target_key": "admission:supply-chain"},
+    )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="already owns open advancement todo"):
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=second["todo_id"],
+            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
+            claim_only=True,
+        )
+
+    assert state.read_text(encoding="utf-8") == before
+    assert _agent_todo(state, first["todo_id"])["claimed_by"] == AUTHOR_AGENT
+    assert _agent_todo(state, second["todo_id"]).get("claimed_by") is None
+
+
 def test_capability_binding_follows_generated_agent_successor(tmp_path: Path) -> None:
     registry, state = _write_fixture(tmp_path)
     todo = add_goal_todo(

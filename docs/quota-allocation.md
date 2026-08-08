@@ -342,6 +342,13 @@ candidate is missing a capability, the gate returns
 `credentials`/`production_access`, or
 `action=skip` for unsupported capability classes.
 
+Candidate projection always orders explicit todo priority before claim
+ownership. A claim is a responsibility and tie-break signal inside one priority
+bucket; it is not permission for stale claimed work to outrank a newer P0/P1
+todo. LoopX also rejects a claim when the same agent already owns another open
+`advancement_task` with the same non-empty `target_key`. Close, supersede,
+defer, or release the existing claim before opening overlapping work.
+
 Blocked candidates retain typed `resolution_bindings` even when another todo is
 runnable. Each binding names the capability, its resolution owner, and the
 exact `blocked_todo_ids`. The interaction contract turns an owner-held binding

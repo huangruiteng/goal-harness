@@ -245,12 +245,13 @@ def _agent_lane_candidate_sort_key(
     claimed_by = agent_scope_item_claimed_by(raw_item)
     claim_rank = 0 if agent_id and claimed_by == agent_id else 1
     repair_rank = 0 if raw_item.get("capability_repair_mode") is True else 1
-    # Durable Next Action is a steering hint inside the selected peer/profile
-    # priority bucket, not permission to cross an explicit todo priority boundary.
+    # Explicit priority is the product steering boundary. A claim records
+    # execution ownership and only breaks ties inside that boundary; otherwise
+    # an obsolete claimed lane can starve newer P0/P1 work indefinitely.
     return (
+        todo_priority_rank(raw_item),
         claim_rank,
         agent_profile_candidate_rank(raw_item, agent_profile=agent_profile),
-        todo_priority_rank(raw_item),
         active_next_rank,
         repair_rank,
         todo_index_rank(raw_item),
@@ -273,9 +274,9 @@ def _sort_capability_runnable_candidates(
         else None
     )
     policy = (
-        "claim_then_profile_then_priority_then_active_next_then_repair"
+        "priority_then_claim_then_profile_then_active_next_then_repair"
         if agent_profile
-        else "claim_then_priority_then_active_next_then_repair"
+        else "priority_then_claim_then_active_next_then_repair"
     )
     return (
         sorted(

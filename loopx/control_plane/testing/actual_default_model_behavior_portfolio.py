@@ -483,7 +483,7 @@ def build_quota_hot_path_compaction_regression_source() -> dict[str, Any]:
         "missing": [],
         "action": "run",
         "decision_owner": "agent",
-        "candidate_order_policy": "claim_then_profile_then_priority",
+        "candidate_order_policy": "priority_then_claim_then_profile",
         "runnable_count": len(runnable_candidates),
         "runnable_candidates": runnable_candidates,
         "blocked_candidates": blocked_candidates,

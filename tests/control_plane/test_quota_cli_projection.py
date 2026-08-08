@@ -387,7 +387,7 @@ def test_compact_quota_should_run_cli_payload_bounds_repeated_vision_detail() ->
             "missing": [],
             "action": "run",
             "decision_owner": "agent",
-            "candidate_order_policy": "claim_then_profile_then_priority",
+            "candidate_order_policy": "priority_then_claim_then_profile",
             "runnable_count": 12,
             "runnable_candidates": _items(12, prefix="candidate"),
             "blocked_candidates": _items(8, prefix="blocked"),

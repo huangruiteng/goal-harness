@@ -9,6 +9,7 @@ from .active_state_editing import (
     set_todo_text,
     todo_metadata_would_change,
 )
+from .claim_policy import require_unique_open_advancement_target_claim
 from .contract import (
     TODO_MONITOR_METADATA_FIELDS,
     TODO_STATUS_DONE,
@@ -246,6 +247,14 @@ def apply_todo_update_to_lines(
         metadata_line = metadata_line_for_todo_block(block, updates)
     metadata_updated = upsert_todo_metadata(lines, block, metadata_line)
     effective_metadata = parse_todo_metadata_line(metadata_line or "") or {}
+    if claimed_by:
+        require_unique_open_advancement_target_claim(
+            lines,
+            todo_id=normalized_todo_id,
+            claimed_by=claimed_by,
+            task_class=str(effective_metadata.get("task_class") or ""),
+            target_key=str(effective_metadata.get("target_key") or "") or None,
+        )
     return {
         "role": resolved_role,
         "section": section,

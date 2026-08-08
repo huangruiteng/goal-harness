@@ -17,6 +17,8 @@ def _todo(
     required: list[str] | None = None,
     targets: list[str] | None = None,
     task_class: str = "advancement_task",
+    priority: str = "P1",
+    claimed_by: str | None = AGENT_ID,
 ) -> dict[str, Any]:
     item: dict[str, Any] = {
         "todo_id": todo_id,
@@ -24,9 +26,9 @@ def _todo(
         "status": "open",
         "done": False,
         "index": index,
-        "priority": "P1",
+        "priority": priority,
         "task_class": task_class,
-        "claimed_by": AGENT_ID,
+        "claimed_by": claimed_by,
     }
     if required is not None:
         item["required_capabilities"] = required
@@ -183,3 +185,41 @@ def test_target_capability_is_repair_output_instead_of_prerequisite() -> None:
 
 def test_requirement_free_candidate_does_not_invent_capability_gate() -> None:
     assert _gate({"executable_backlog_items": [_todo("todo_plain", index=1)]}) is None
+
+
+def test_priority_preempts_stale_claim_and_claim_breaks_priority_ties() -> None:
+    stale_claim = _todo(
+        "todo_stale_claim",
+        index=1,
+        required=["shell"],
+        priority="P2",
+    )
+    urgent_unclaimed = _todo(
+        "todo_urgent_unclaimed",
+        index=2,
+        required=["shell"],
+        priority="P0",
+        claimed_by=None,
+    )
+    peer_unclaimed = _todo(
+        "todo_peer_unclaimed",
+        index=3,
+        required=["shell"],
+        priority="P2",
+        claimed_by=None,
+    )
+
+    gate = _gate(
+        {"executable_backlog_items": [stale_claim, peer_unclaimed, urgent_unclaimed]},
+        available=["shell"],
+    )
+
+    assert gate is not None
+    assert gate["candidate_order_policy"] == (
+        "priority_then_claim_then_active_next_then_repair"
+    )
+    assert [item["todo_id"] for item in gate["runnable_candidates"]] == [
+        "todo_urgent_unclaimed",
+        "todo_stale_claim",
+        "todo_peer_unclaimed",
+    ]

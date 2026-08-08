@@ -131,13 +131,13 @@ def assert_current_agent_candidate_order_contract() -> None:
             "agent_model": "peer_v1",
         },
     )
-    assert policy == "claim_then_priority_then_active_next_then_repair"
+    assert policy == "priority_then_claim_then_active_next_then_repair"
     assert [item["todo_id"] for item in ordered] == [
+        "todo_unclaimed_p0",
+        "todo_other_p0",
         "todo_current_p2",
         "todo_current_unblock_p2",
         "todo_primary_review",
-        "todo_unclaimed_p0",
-        "todo_other_p0",
     ], ordered
 
 
