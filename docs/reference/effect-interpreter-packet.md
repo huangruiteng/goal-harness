@@ -12,7 +12,8 @@ that already play each role.
 ## Code Lens
 
 `loopx.control_plane.effect_program.interpret_quota_should_run_packet` maps an
-existing `quota should-run` packet onto the canonical slots:
+existing `quota should-run` packet onto the canonical slots, and
+`interpret_turn_result_packet` maps an existing `loopx_turn_result_v0` packet:
 
 - `EffectRequest`
 - `EffectInterpretation`
@@ -20,9 +21,10 @@ existing `quota should-run` packet onto the canonical slots:
 - `EffectNext`
 - `EffectTurn`
 
-The function is intentionally read-only. It does not replace quota decision
-logic or add a second runtime; it gives refactor and test code one stable
-abstraction for reading the effect program shape.
+Both functions are intentionally read-only. They do not replace quota
+decision or turn-settlement logic; they give refactor and test code one
+stable abstraction for reading the effect program shape across packet
+families.
 
 ## Canonical Example
 
