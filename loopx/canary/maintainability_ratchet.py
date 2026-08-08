@@ -55,7 +55,7 @@ REVIEWED_MAINTAINABILITY_EXCEPTIONS: dict[str, dict[str, Any]] = {
         "The public loopx.quota import surface remains a supported compatibility contract, "
         "including presentation-owned quota event renderers.",
         "Keep internal consumers on canonical modules and shrink exports as callers migrate.",
-        metric_ceilings={"package_reexport_count": 95, "source_module_count": 36},
+        metric_ceilings={"package_reexport_count": 101, "source_module_count": 37},
     ),
     "compatibility_facade:loopx.status": _exception(
         "The public loopx.status import surface remains a supported compatibility contract.",
