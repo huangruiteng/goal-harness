@@ -95,6 +95,11 @@ collapsed into a generic exception handler: `owner_missing`,
 `repair_missing`, and `decision_owner` stay visible because `ask_owner` and
 `repair_bridge` lead to different next effects.
 
+A CLI packet is a higher-density effect than a single tool call: one command
+can carry permission, budget, validation, execution, failure semantics, ACK,
+and writeback. Vendor serial or interleaved tool APIs are execution modes
+inside the interpreter, not new state machines.
+
 ## Relationship To State Machines
 
 Each state family is an interpretation table over this lens:

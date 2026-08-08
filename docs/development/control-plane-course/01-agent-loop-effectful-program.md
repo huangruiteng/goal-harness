@@ -129,6 +129,20 @@ around 决策时，问七件事：
 7. host effect 之后，evidence、trace、budget 是否通过 writeback / ACK / spend
    继续成立？
 
+## CLI 是更高密度的 effect
+
+单个 tool call 是 `ToolInput => F[ToolOutput]`。LoopX 的 CLI packet 是一条更高
+密度的 effect：一条命令可以把权限、预算、参数校验、外部执行、失败语义、scheduler
+ACK 和 writeback 都编码进同一个 request。模型仍然只提出 effect request，harness
+负责解释并决定下一步执行什么。
+
+如果未来厂商 API 原生支持 serial tool calls 或 interleaved reasoning，对 LoopX
+来说只是解释器内部的一种 execution mode：
+
+- 串行、并行、交错是 execution strategy，不是新的状态机；
+- `effect_request -> interpretation -> observation -> next_effect` 仍然稳定；
+- `next_effect` 从一条 CLI 命令变成一段有序 effect program。
+
 ## 读代码前先问五个问题
 
 1. 这个 effect request 是谁提出的？

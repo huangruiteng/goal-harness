@@ -220,6 +220,24 @@ middleware stack:
 7. Does evidence, trace, and budget continuity survive the host effect
    through writeback, ACK, and spend?
 
+### CLI Is a Higher-Density Effect
+
+A single tool call is `ToolInput => F[ToolOutput]`. A LoopX CLI packet is a
+higher-density effect: one command can carry permission, budget, parameter
+validation, external execution, failure semantics, scheduler ACK, and
+writeback in the same request. The model still only proposes effect requests;
+the harness interprets them into CLI actions.
+
+If a vendor API later supports serial tool calls or interleaved reasoning,
+that does not change the LoopX shape. It becomes an execution mode inside the
+interpreter:
+
+- serial, parallel, and interleaved are execution strategies, not new state
+  machines;
+- `effect_request -> interpretation -> observation -> next_effect` stays
+  stable;
+- `next_effect` changes from one CLI command to an ordered effect program.
+
 ## State Machine As Interpretation Table
 
 Instead of teaching state machines as a list of enum values, teach each state
