@@ -162,6 +162,22 @@ def test_contracts() -> None:
     assert mismatched["first_blocker"] == "edgebench_submission_rounds_mismatch"
     assert_boundary(mismatched)
 
+    for invalid_pass_rate in (1.5, -0.1):
+        invalid = reduce_edgebench_final_result(
+            task_id="ad_placement_optimization",
+            run_id=f"edgebench-smoke-pass-rate-{invalid_pass_rate}",
+            result={
+                "best_pass_rate": invalid_pass_rate,
+                "total_rounds": 1,
+                "agent_submissions": 1,
+                "auto_submissions": 0,
+                "runtime_seconds": 60.0,
+            },
+        )
+        assert invalid["countable"] is False
+        assert invalid["first_blocker"] == "edgebench_pass_rate_out_of_range"
+        assert_boundary(invalid)
+
 
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(

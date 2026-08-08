@@ -244,6 +244,8 @@ def reduce_edgebench_final_result(
     blockers: list[str] = []
     if best_score is None and best_pass_rate is None:
         blockers.append("edgebench_best_metric_missing")
+    if best_pass_rate is not None and not 0.0 <= best_pass_rate <= 1.0:
+        blockers.append("edgebench_pass_rate_out_of_range")
     if total_rounds is None or total_rounds <= 0:
         blockers.append("edgebench_submission_rounds_missing")
     elif (
