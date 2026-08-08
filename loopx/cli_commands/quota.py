@@ -9,6 +9,7 @@ from ..control_plane.quota.cli_projection import (
     compact_quota_monitor_poll_cli_payload,
     compact_quota_should_run_cli_payload,
 )
+from ..control_plane.quota.error_codes import quota_error_code
 from ..control_plane.quota.heartbeat_receipt import (
     fail_heartbeat_receipt,
     find_heartbeat_receipt,
@@ -493,6 +494,7 @@ def _quota_failure_payload(
             "mode": command,
             "registry": str(registry_path),
             "runtime_root": runtime_root_arg,
+            "error_code": quota_error_code(error),
             "error": str(error),
             "summary": {
                 "registered_goals": 0,
@@ -520,6 +522,7 @@ def _quota_failure_payload(
         "goal_id": args.goal_id,
         "decision": "skip",
         "should_run": False,
+        "error_code": quota_error_code(error),
         "reason": str(error),
         "state": "blocked_health",
         "waiting_on": "codex",
@@ -813,7 +816,7 @@ def handle_quota_command(
             payload = build_quota_plan(status_payload, mode=args.quota_command)
         if cache_metadata:
             payload["status_projection_cache"] = cache_metadata
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI fail-safe boundary; error_code is typed below.
         payload = _quota_failure_payload(
             args,
             registry_path=registry_path,
