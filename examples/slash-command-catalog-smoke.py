@@ -50,13 +50,17 @@ def main() -> int:
     assert pr_review["agent_contract"]["slash_prefix_dominates_intent"] is True, pr_review
     assert pr_review["agent_contract"]["stats_only_requires_explicit_opt_out"] is True, pr_review
     assert "agent_response_contract" in pr_review["agent_contract"]["authoritative_fields"], pr_review
+    assert "agent_response_contract.review_execution_contract" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert "agent_response_contract.explanation_depth_contract" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert "review_groups.unmerged" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert "review_groups.merged" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert "agent_response_contract.required_final_sections" in pr_review["agent_contract"]["authoritative_fields"], pr_review
     assert pr_review["agent_contract"]["required_packet_fields_to_preserve"] == [
         "agent_response_contract",
+        "agent_response_contract.review_execution_contract",
+        "result_completeness",
         "review_groups",
+        "pull_requests[].review_plan",
         "pull_requests[].review_template",
         "pull_requests[].evidence_commands",
     ], pr_review

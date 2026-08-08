@@ -50,48 +50,30 @@ def assert_public_safe(payload: dict[str, object]) -> None:
 
 
 def main() -> int:
-    skill_text = " ".join(PR_REVIEW_SKILL.read_text(encoding="utf-8").split())
+    skill_source = PR_REVIEW_SKILL.read_text(encoding="utf-8")
+    skill_text = " ".join(skill_source.split())
     for phrase in (
-        "Use when the visible request starts with `/loopx-pr-review`",
+        "This skill is a thin host adapter",
         "loopx --format json pr-review --state all",
-        "agent_response_contract",
-        "review_groups",
+        "agent_response_contract.review_execution_contract",
+        "pull_requests[].review_plan",
         "pull_requests[].review_template",
         "pull_requests[].evidence_commands",
-        "Do not pipe the first packet through `jq`",
-        "Do not fill the five-block review from title, labels, changed-file counts, or metadata risk hints alone",
-        "Each PR must receive its own evidence pass and standalone review card",
-        "Do not compress individual cards to cover more of the queue",
-        "Per-PR Evidence And Depth Gate",
-        "build a compact internal evidence record for that PR",
-        "Each card must stand on its own",
-        "one concrete positive walkthrough",
-        "one concrete negative or failure walkthrough",
-        "Motivation Causal Chain",
-        "who pays the cost",
-        "Implementation Execution Chain",
-        "authoritative input or state",
-        "Key Code Explanation Gate",
-        "`### 关键代码讲解` subsection inside `具体改动`",
-        "2-5 behavior-bearing symbols",
-        "exact-head `file:line` and symbol name",
-        "critical condition, branch, transition, or invariant",
-        "return value, receipt, projection, or downstream consumer",
-        "Include 1-3 short excerpts from the exact reviewed head",
-        "For a docs-only PR, use `### 关键内容讲解`",
-        "relationship map",
-        "state the minimum repair plus regression test",
-        "Code Volume And Simplification Review",
-        "Classify the volume as `necessary`, `partly avoidable`, or `not yet proven`",
-        "A code-volume conclusion without diff and call-site evidence is incomplete",
-        "submit a formal `REQUEST_CHANGES` review",
-        "A plain PR comment is not an adequate substitute for `REQUEST_CHANGES`",
-        "keep the workflow read-only only when the user explicitly says `local-only`",
-        "the GitHub review state must match the written verdict",
-        "After publication, include the GitHub review/comment URL",
-        "route approval, merge, self-merge, and admin-bypass actions to `loopx-pr-merge`",
+        "Apply `completion_gate` literally",
+        "Re-read the remote head immediately before verdict and publication",
+        "formal `REQUEST_CHANGES`",
+        "Read the published review back",
+        "Route approval, merge, self-merge, and admin bypass to `loopx-pr-merge`",
     ):
         assert phrase in skill_text, phrase
+    assert len(skill_source.splitlines()) <= 140, len(skill_source.splitlines())
+    for duplicated_contract_heading in (
+        "Per-PR Evidence And Depth Gate",
+        "Motivation Causal Chain",
+        "Implementation Execution Chain",
+        "Code Volume And Simplification Review",
+    ):
+        assert duplicated_contract_heading not in skill_source, duplicated_contract_heading
 
     assert _github_search_date("2026-06-28T00:00:00+08:00") == "2026-06-27"
     assert _github_search_date("2026-06-28T00:00:00Z") == "2026-06-28"
@@ -201,7 +183,7 @@ def main() -> int:
     template = first["review_template"]
     assert template["schema_version"] == "pr_review_five_block_template_v0", template
     assert "Empty scaffold only" in template["purpose"], template
-    assert "reader unfamiliar with the PR" in template["output_hint"], template
+    assert "review_execution_contract" in template["output_hint"], template
     labels = [section["label"] for section in template["sections"]]
     assert labels == ["动机", "改动思路", "具体改动", "对主干的风险", "我的整体评价"], template
     for section in template["sections"]:
@@ -220,7 +202,7 @@ def main() -> int:
         section for section in template["sections"] if section["label"] == "具体改动"
     )
     assert "### 关键代码讲解" in concrete_change["agent_instruction"], concrete_change
-    assert "2-5 个行为关键符号" in concrete_change["agent_instruction"], concrete_change
+    assert "2-5 behavior-bearing exact-head symbols" in concrete_change["agent_instruction"], concrete_change
     assert "headRefOid" in first["evidence_commands"][0], first["evidence_commands"]
     assert "headRefOid" in first["evidence_commands"][-1], first["evidence_commands"]
     assert template["review_order"][0] == "docs/guides/newcomer-command-path.md", template
@@ -406,8 +388,10 @@ def main() -> int:
     assert response_contract["queue_table_role"] == "preface_only", response_contract
     assert response_contract["required_packet_fields_to_preserve"] == [
         "agent_response_contract",
+        "agent_response_contract.review_execution_contract",
         "result_completeness",
         "review_groups",
+        "pull_requests[].review_plan",
         "pull_requests[].review_template",
         "pull_requests[].evidence_commands",
     ], response_contract
@@ -420,24 +404,56 @@ def main() -> int:
     ], response_contract
     depth = response_contract["explanation_depth_contract"]
     assert depth["schema_version"] == "pr_review_explanation_depth_v0", depth
+    assert depth["authority"] == "agent_response_contract.review_execution_contract", depth
     assert "may not know" in depth["reader_profile"], depth
-    assert len(depth["evidence_layers"]) == 4, depth
-    assert len(depth["necessity_questions"]) == 3, depth
-    assert depth["runtime_walkthroughs"]["positive"], depth
-    key_code = depth["key_code_explanation"]
-    assert key_code["schema_version"] == "pr_review_key_code_explanation_v0", key_code
-    assert key_code["required_for_code_changes"] is True, key_code
-    assert key_code["subsection"] == "关键代码讲解", key_code
-    assert len(key_code["per_symbol_fields"]) == 7, key_code
-    assert "short exact-head excerpts" in key_code["source_form"], key_code
-    assert key_code["docs_only_alternative"], key_code
-    assert "authority, permission, or scope bypass" in depth["risk_scan"], depth
-    assert "head SHA" in depth["freshness"], depth
-    assert any("Do not stop at the queue/table summary" in item for item in response_contract["instructions"])
-    assert any("open, closed, merged, today" in item for item in response_contract["instructions"])
-    assert any("drops agent_response_contract" in item or "Do not pipe the JSON packet" in item for item in response_contract["instructions"])
-    assert any("intended checked-out LoopX worktree" in item for item in response_contract["instructions"])
+    execution = response_contract["review_execution_contract"]
+    assert execution["schema_version"] == "pull_request_review_execution_contract_v1", execution
+    requirements = {
+        item["evidence_id"]: item for item in execution["evidence_requirements"]
+    }
+    assert set(requirements) == {
+        "problem_context",
+        "architecture_flow",
+        "changed_line_classification",
+        "symbol_map",
+        "walkthroughs",
+        "validation_matrix",
+        "failure_analysis",
+        "code_volume",
+    }, requirements
+    assert requirements["symbol_map"]["item_count"] == {"minimum": 2, "maximum": 5}
+    assert "caller_evidence" in requirements["symbol_map"]["item_fields"]
+    assert requirements["changed_line_classification"]["categories"] == [
+        "production",
+        "tests_or_fixtures",
+        "docs",
+        "generated",
+        "mechanical_moves",
+    ]
+    assert "negative_fields" in requirements["walkthroughs"]
+    assert "regression_test" in requirements["failure_analysis"]["fields"]
+    assert requirements["code_volume"]["verdict_values"] == [
+        "necessary",
+        "partly_avoidable",
+        "not_yet_proven",
+    ]
+    assert execution["completion_gate"]["metadata_only_verdict_allowed"] is False
+    assert execution["completion_gate"]["stale_head_verdict_allowed"] is False
+    assert execution["finding_contract"]["findings_first"] is True
+    first_plan = first["review_plan"]
+    assert first_plan["schema_version"] == "pull_request_review_plan_v1", first_plan
+    assert first_plan["applicability"]["docs_only"] is True, first_plan
+    assert first_plan["applicability"]["symbol_map_required"] is False, first_plan
+    assert "symbol_map" not in first_plan["required_evidence_ids"], first_plan
+    assert first_plan["result_template"]["target_exact_head"] == (
+        "773@7730000000000000000000000000000000000000"
+    ), first_plan
     merged = next(item for item in payload["pull_requests"] if item["number"] == 770)
+    merged_plan = merged["review_plan"]
+    assert merged_plan["applicability"]["code_change"] is True, merged_plan
+    assert merged_plan["applicability"]["symbol_map_required"] is True, merged_plan
+    assert merged_plan["applicability"]["negative_walkthrough_required"] is True, merged_plan
+    assert "symbol_map" in merged_plan["required_evidence_ids"], merged_plan
     merged_risk_hint = merged["metadata_risk_hint"]
     assert merged_risk_hint["level"] == "medium", merged_risk_hint
     merged_main_risk = merged["main_regression_analysis"]
@@ -508,7 +524,8 @@ def main() -> int:
     assert "final answer contract: queue/table is only a preface" in markdown, markdown
     assert "## Agent Output Contract" in markdown, markdown
     assert "Do not stop at the queue/table summary" in markdown, markdown
-    assert "explanation_depth_contract" in markdown, markdown
+    assert "agent_response_contract.review_execution_contract" in markdown, markdown
+    assert "review plan: exact_head=" in markdown, markdown
     assert "remote head SHA" in markdown, markdown
     assert "Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`" in markdown, markdown
     assert "`关键代码讲解`" in markdown, markdown
