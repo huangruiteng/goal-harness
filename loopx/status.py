@@ -70,8 +70,6 @@ from .control_plane.handoff.project_handoff import (
 )
 from .control_plane.work_items.autonomous_candidates import (
     MAX_AUTONOMOUS_TODO_CANDIDATES as _MAX_AUTONOMOUS_TODO_CANDIDATES,
-    autonomous_backlog_candidates as _autonomous_backlog_candidates_read_model,
-    autonomous_monitor_candidates as _autonomous_monitor_candidates_read_model,
 )
 from .control_plane.agents.agent_lane_recommendation import (
     compact_agent_lane_recommendation as _compact_agent_lane_recommendation_read_model,
@@ -103,7 +101,6 @@ from .control_plane.work_items.attention_item import (
 from .control_plane.work_items.attention_queue import (
     AttentionQueueContext,
     build_attention_queue as _build_attention_queue_read_model,
-    build_attention_queue_projection as _build_attention_queue_projection_read_model,
     merge_global_registry_findings as _merge_global_registry_findings_read_model,
 )
 from .control_plane.work_items.attention_routing import (
@@ -319,8 +316,6 @@ from .state_projection import (
 )
 from .control_plane.todos.contract import (
     TODO_STATUS_OPEN,
-    TODO_TASK_CLASS_ADVANCEMENT,
-    TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_GATE,
     normalize_todo_status,
     normalize_todo_task_class as normalize_todo_task_class,
@@ -2212,14 +2207,11 @@ def autonomous_backlog_candidates(
     *,
     limit: int = MAX_AUTONOMOUS_BACKLOG_CANDIDATES,
 ) -> dict[str, Any] | None:
-    return _autonomous_backlog_candidates_read_model(
-        items,
-        open_todo_items=open_todo_items,
-        todo_item_is_actionable_open=todo_item_is_actionable_open,
-        normalize_todo_text=normalize_todo_text,
-        advancement_task_class=TODO_TASK_CLASS_ADVANCEMENT,
-        limit=limit,
+    from .control_plane.status.attention_projection import (
+        autonomous_backlog_candidates as _autonomous_backlog_candidates,
     )
+
+    return _autonomous_backlog_candidates(items, limit=limit)
 
 
 def autonomous_monitor_candidates(
@@ -2227,15 +2219,11 @@ def autonomous_monitor_candidates(
     *,
     limit: int = MAX_AUTONOMOUS_BACKLOG_CANDIDATES,
 ) -> dict[str, Any] | None:
-    return _autonomous_monitor_candidates_read_model(
-        items,
-        open_todo_items=open_todo_items,
-        todo_item_is_actionable_open=todo_item_is_actionable_open,
-        normalize_todo_text=normalize_todo_text,
-        monitor_task_class=TODO_TASK_CLASS_MONITOR,
-        monitor_signal_waiting_on=MONITOR_SIGNAL_WAITING_ON,
-        limit=limit,
+    from .control_plane.status.attention_projection import (
+        autonomous_monitor_candidates as _autonomous_monitor_candidates,
     )
+
+    return _autonomous_monitor_candidates(items, limit=limit)
 
 
 def build_attention_queue_projection(
@@ -2245,12 +2233,15 @@ def build_attention_queue_projection(
     autonomous_backlog_candidates: dict[str, Any] | None,
     autonomous_monitor_candidates: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    return _build_attention_queue_projection_read_model(
+    from .control_plane.status.attention_projection import (
+        build_attention_queue_projection as _build_attention_queue_projection,
+    )
+
+    return _build_attention_queue_projection(
         items=items,
         goal_id_filter=goal_id_filter,
         autonomous_backlog_candidates=autonomous_backlog_candidates,
         autonomous_monitor_candidates=autonomous_monitor_candidates,
-        monitor_signal_waiting_on=MONITOR_SIGNAL_WAITING_ON,
     )
 
 
