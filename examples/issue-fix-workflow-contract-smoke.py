@@ -90,7 +90,7 @@ def main() -> int:
     assert "loopx bootstrap-command-pack --project ." in readme
     assert "--capability-route issue-fix" in readme
     assert "--slash-command-arguments=" in readme
-    assert "single raw-argument form" in readme
+    assert "CLI owns route parsing" in readme
     assert "loopx issue-fix workflow-plan" in readme
     assert "loopx issue-fix feasibility" in readme
     assert "loopx issue-fix pr-lifecycle" in readme
@@ -106,6 +106,9 @@ def main() -> int:
     assert "Goal text never selects a product capability" in loopx_goal_command
     assert "start-goal --slash-command-arguments" in loopx_goal_command
     assert "switches fail closed before the guided transaction" in loopx_goal_command
+    assert "Only the leading `--capability-route` switch is parsed" in loopx_goal_command
+    assert "is ordinary goal text and is not an" in loopx_goal_command
+    assert "error." in loopx_goal_command
     assert "loopx issue-fix workflow-plan" in loopx_goal_command
     assert "--repository-context-json <compact-context.json>" in loopx_goal_command
     assert "--goal-id <goal-id>" in loopx_goal_command

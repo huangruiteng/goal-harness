@@ -176,6 +176,10 @@ continue to use structured `--capability-route` plus `--goal-text`. These two
 input forms are mutually exclusive, and malformed or unsupported leading route
 switches fail closed before the guided transaction is built.
 
+Only the leading `--capability-route` switch is parsed. A later occurrence of
+the same text in the raw argument string is ordinary goal text and is not an
+error.
+
 `start-goal` projects that explicit switch as a typed
 `selected_capability_route`.
 This is a bootstrap-only selection, not later-turn authority. The guided
