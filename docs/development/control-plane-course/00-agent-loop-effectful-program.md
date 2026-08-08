@@ -10,6 +10,8 @@ interpreter。agent loop 是被解释的循环，harness 才是解释外部 effe
 
 全文参考：
 [Agent Loop Effect Interpreter RFC](../../architecture/rfcs/agent-loop-effect-interpreter-v0.md)。
+公开来源：
+[主线一：Agent Loop 里的小魔法：函数的组合(3)](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=CBDnukhtey6qJ1aXATVJtv4edjVUnZB1_yebMpqJdNLfc=&xsec_source=pc_share)。
 
 ## 一个最朴素的 Agent Loop
 

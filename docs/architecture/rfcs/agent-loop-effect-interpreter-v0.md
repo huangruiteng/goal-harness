@@ -23,6 +23,9 @@ The agent loop is the loop. The harness is the effectful program that
 interprets each effect request and returns an observation to the next model
 step.
 
+The framing builds on the public lecture series by 齐梦星空, especially
+[主线一：Agent Loop 里的小魔法：函数的组合(3)](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=CBDnukhtey6qJ1aXATVJtv4edjVUnZB1_yebMpqJdNLfc=&xsec_source=pc_share).
+
 LoopX's job is the middle two steps: it receives an effect request from an
 agent or host, decides whether and how to interpret it, writes back an
 observation, and returns control to the next loop iteration.
@@ -337,3 +340,9 @@ Large smokes remain only as thin end-to-end checks.
 LoopX harness is not "a set of state machines". It is the effectful program
 and effect interpreter around a long-running agent loop. This RFC makes that
 story explicit and gives the refactor and test work a stable target.
+
+## References
+
+- 齐梦星空, *主线一：Agent Loop 是 effectful program(1)*.
+- 齐梦星空, *主线一：Tool Calling 是 Kleisli arrow(2)*.
+- 齐梦星空, [*主线一：Agent Loop 里的小魔法：函数的组合(3)*](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=CBDnukhtey6qJ1aXATVJtv4edjVUnZB1_yebMpqJdNLfc=&xsec_source=pc_share).
