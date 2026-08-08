@@ -7,6 +7,7 @@ import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import Enum
 from typing import Any
 
 from ..runtime.time import now_utc, utc_isoformat
@@ -52,11 +53,21 @@ CODEX_APP_MAX_INTERVAL_MINUTES = 60
 DEFAULT_ACK_CAPABILITIES = {"shell", "filesystem_read", "filesystem_write"}
 MONITOR_WAIT_HOST_FLOOR_MINUTES = 15
 MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES = 60
+
+
+class MonitorWaitPhase(str, Enum):
+    EXPIRED = "expired"
+    ACTIVE_WINDOW = "active_window"
+    NEAR_WINDOW = "near_window"
+    FAR_WINDOW = "far_window"
+    CADENCE_ONLY = "cadence_only"
+
+
 MONITOR_WAIT_PHASE_RANK = {
-    "active_window": 0,
-    "near_window": 1,
-    "cadence_only": 2,
-    "far_window": 3,
+    MonitorWaitPhase.ACTIVE_WINDOW.value: 0,
+    MonitorWaitPhase.NEAR_WINDOW.value: 1,
+    MonitorWaitPhase.CADENCE_ONLY.value: 2,
+    MonitorWaitPhase.FAR_WINDOW.value: 3,
 }
 SCHEDULER_BASE_IDENTITY_KEYS = (
     "goal_id",
@@ -425,7 +436,7 @@ def _monitor_wait_item_plan(
     expires_at = _parse_monitor_timestamp(item.get("expires_at"))
     if expires_at is not None and expires_at <= current_time:
         return {
-            "phase": "expired",
+            "phase": MonitorWaitPhase.EXPIRED.value,
             "selected_monitor_identity": _monitor_item_identity(item),
         }
 
@@ -433,12 +444,12 @@ def _monitor_wait_item_plan(
     last_checked_at = _parse_monitor_timestamp(item.get("last_checked_at"))
     cadence_minutes = _monitor_cadence_minutes(item.get("cadence"))
     host_floor = MONITOR_WAIT_HOST_FLOOR_MINUTES
-    phase: str | None = None
+    phase: MonitorWaitPhase | None = None
     cap_candidates: list[int] = []
     include_next_due_in_reset = False
 
     if expires_at is not None and last_checked_at is not None and last_checked_at <= current_time:
-        phase = "active_window"
+        phase = MonitorWaitPhase.ACTIVE_WINDOW
         if cadence_minutes is not None:
             cap_candidates.append(cadence_minutes)
         if next_due_at is not None and next_due_at > current_time:
@@ -446,16 +457,16 @@ def _monitor_wait_item_plan(
     elif next_due_at is not None and next_due_at > current_time:
         minutes_until_due = _minutes_until(next_due_at, current_time)
         phase = (
-            "near_window"
+            MonitorWaitPhase.NEAR_WINDOW
             if minutes_until_due <= MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES
-            else "far_window"
+            else MonitorWaitPhase.FAR_WINDOW
         )
         cap_candidates.append(minutes_until_due)
         if cadence_minutes is not None:
             cap_candidates.append(cadence_minutes)
         include_next_due_in_reset = True
     elif cadence_minutes is not None:
-        phase = "cadence_only"
+        phase = MonitorWaitPhase.CADENCE_ONLY
         cap_candidates.append(cadence_minutes)
 
     if phase is None or not cap_candidates:
@@ -469,7 +480,7 @@ def _monitor_wait_item_plan(
         return None
     selected_identity = _monitor_item_identity(item)
     reset_profile = {
-        "monitor_wait_phase": phase,
+        "monitor_wait_phase": phase.value,
         "monitor_wait_host_floor_minutes": host_floor,
         "monitor_wait_selected_identity": selected_identity,
         "monitor_wait_cadence_minutes": cadence_minutes,
@@ -485,7 +496,7 @@ def _monitor_wait_item_plan(
         host_floor_minutes=host_floor,
     )
     return {
-        "phase": phase,
+        "phase": phase.value,
         "selected_monitor_identity": selected_identity,
         "selected_todo_id": item.get("todo_id"),
         "selected_target_key": item.get("target_key"),
@@ -510,7 +521,7 @@ def _monitor_wait_cadence_plan(payload: dict[str, Any]) -> dict[str, Any] | None
         plan = _monitor_wait_item_plan(item, current_time=current_time)
         if not plan:
             continue
-        if plan.get("phase") == "expired":
+        if plan.get("phase") == MonitorWaitPhase.EXPIRED.value:
             expired_count += 1
             continue
         plans.append(plan)
@@ -518,7 +529,7 @@ def _monitor_wait_cadence_plan(payload: dict[str, Any]) -> dict[str, Any] | None
     if not plans:
         if expired_count:
             return {
-                "phase": "expired",
+                "phase": MonitorWaitPhase.EXPIRED.value,
                 "expired_monitor_count": expired_count,
                 "host_floor_minutes": MONITOR_WAIT_HOST_FLOOR_MINUTES,
                 "base_progression_minutes": MONITOR_WAIT_PROGRESSION_MINUTES,
