@@ -45,10 +45,15 @@
       "dict_any_count": 0,
       "lines": 1578
     },
-    "loopx/control_plane/goals/goal_frontier.py": {
-      "any_count": 130,
+    "loopx/control_plane/goals/goal_frontier/__init__.py": {
+      "any_count": 115,
       "dict_any_count": 0,
-      "lines": 2225
+      "lines": 2056
+    },
+    "loopx/control_plane/goals/goal_frontier/terminal.py": {
+      "any_count": 15,
+      "dict_any_count": 0,
+      "lines": 180
     },
     "loopx/extensions/lark/presentation/explore_results.py": {
       "any_count": 58,

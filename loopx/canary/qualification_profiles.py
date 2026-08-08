@@ -183,7 +183,8 @@ CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
         "trigger_hints": (
             "goal frontier replan",
             "goal_frontier_replan_rules",
-            "loopx/control_plane/goals/goal_frontier.py",
+            "loopx/control_plane/goals/goal_frontier/__init__.py",
+            "loopx/control_plane/goals/goal_frontier/terminal.py",
             "loopx/control_plane/goals/goal_frontier_replan_rules.py",
             "goal-frontier-replan-rules-smoke.py",
         ),
