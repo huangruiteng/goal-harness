@@ -79,15 +79,21 @@ user explicitly requested local-only/dry-run output or the finding contains
 private or security-sensitive material.
 
 - Remaining blocking finding: formal `REQUEST_CHANGES`.
-- Non-blocking finding: normal review/comment.
-- No finding: say so; approval still routes through `loopx-pr-merge`.
+- Non-blocking finding with no blockers: formal `APPROVE`, not a bare comment.
+  When the GitHub account is the PR author and GitHub rejects self-approval,
+  record the same approval conclusion as a `COMMENTED` review or PR comment
+  titled `Approval conclusion (author-owned PR; GitHub blocks formal self-approval)`
+  so the verdict remains public and machine-visible.
+- Non-blocking finding with only P2 suggestions: still `APPROVE`; keep the P2
+  items in the review body rather than downgrading the verdict.
 - Merged PR: publish a post-merge audit comment only for a new actionable
   finding; avoid duplicating an equivalent exact-head result.
 
 Build public text from the exact reviewed head. Remove local paths, private
 context, raw logs, credentials, and internal-only links. Read the published
-review back, verify its state and rendered body, and return its URL. Do not
-leave a public blocker only in chat.
+review back, verify its state and rendered body, and return its URL. Merge
+still routes through `loopx-pr-merge`; an `APPROVE` is not merge authority.
+Do not leave a public blocker only in chat.
 
 ## Autonomous Queue
 
