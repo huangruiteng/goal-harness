@@ -43,25 +43,28 @@ course. The Dev Book explains enough mechanism to predict behavior. Follow its c
 the course when you need rule precedence, bounded-context placement, or implementation detail. The deep
 course is currently maintained in Chinese; the English Dev Book keeps the mechanism needed for its main
 paths self-contained.
+Developers ready to enter Kernel implementation can go directly to the
+[independent Control-Plane Course chapter](./12-control-plane-course.md).
 
 - **How do short sessions compose into long-running work?** Read Chapters 1 and 2, then descend into the
-  [concept primer](/loopx/docs/development/control-plane-course/00-concept-primer/) and
-  [Lesson 0](/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/), then walk
-  through a real Loop in [Lesson 1](/loopx/docs/development/control-plane-course/01-first-real-loop/).
+  [concept primer](/loopx/docs/development/control-plane-course/00-concept-primer/),
+  [Lesson 1: Harness is the effectful program](/loopx/docs/development/control-plane-course/01-agent-loop-effectful-program/),
+  and [Lesson 2](/loopx/docs/development/control-plane-course/02-goal-control-plane-architecture/), then walk
+  through a real Loop in [Lesson 3](/loopx/docs/development/control-plane-course/03-first-real-loop/).
 - **Who owns state, the work graph, and authority?** Read Chapters 3 and 4, then descend into
-  [Lesson 2](/loopx/docs/development/control-plane-course/02-state-substrate/) and
-  [Lesson 3](/loopx/docs/development/control-plane-course/03-work-graph-and-peers/).
+  [Lesson 4](/loopx/docs/development/control-plane-course/04-state-substrate/) and
+  [Lesson 5](/loopx/docs/development/control-plane-course/05-work-graph-and-peers/).
 - **Which rule wins when a Gate, Monitor, and Replan coexist?** Read Chapter 5, then descend into
-  [Lesson 4](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/) and
-  [Lesson 5](/loopx/docs/development/control-plane-course/05-host-scheduler-and-heartbeat/).
+  [Lesson 6](/loopx/docs/development/control-plane-course/06-quota-decision-kernel/) and
+  [Lesson 7](/loopx/docs/development/control-plane-course/07-host-scheduler-and-heartbeat/).
 - **How does long-running work avoid drift and local loops?** Read Chapter 6, then descend into
   [long-horizon convergence](/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/)
-  and [Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
+  and [Lesson 8](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/).
 - **How do I change a rule and prove it is deliverable?** Read Chapters 10 through 13, then descend into
-  [Lesson 7](/loopx/docs/development/control-plane-course/07-engineering-a-control-plane-rule/) and
-  [Lesson 8](/loopx/docs/development/control-plane-course/08-autonomous-agent-quality-gates/).
+  [Lesson 9](/loopx/docs/development/control-plane-course/09-engineering-a-control-plane-rule/) and
+  [Lesson 10](/loopx/docs/development/control-plane-course/10-autonomous-agent-quality-gates/).
 - **How do Extensions, domain capabilities, and the Kernel compose?** Read Chapters 14 through 16, then
-  descend into [Lesson 9](/loopx/docs/development/control-plane-course/09-extension-layer/).
+  descend into [Lesson 11](/loopx/docs/development/control-plane-course/11-extension-layer/).
 
 After those chapters:
 

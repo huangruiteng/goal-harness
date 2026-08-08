@@ -161,9 +161,9 @@ frontier delta；最后重算 scheduler identity。不能因为 Monitor 本轮�
 Replan 修订 frontier；只有最终 interaction contract 才定义本轮行为。
 
 需要阅读完整 decision table、九类组合 case、源码 seam 与 smoke 时，进入
-[Control-Plane Course 第 4 讲](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/)；
+[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-quota-decision-kernel/)；
 Host、heartbeat、stateful backoff 和 scheduler receipt 的实现细节见
-[第 5 讲](/loopx/docs/development/control-plane-course/05-host-scheduler-and-heartbeat/)。
+[第 7 讲](/loopx/docs/development/control-plane-course/07-host-scheduler-and-heartbeat/)。
 
 ### Quota 是决策编译器，不是余额检查
 
@@ -192,7 +192,7 @@ Quota 的正确模型是从 source facts 按稳定 precedence 编译成 interact
 跳过 validation。这些都是把局部信号当成全局授权。
 
 完整决策 table、九类组合 case 和规则优先级见
-[Control-Plane Course 第 4 讲](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/)。
+[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-quota-decision-kernel/)。
 
 ## Bounded Delivery 的五段闭环
 
@@ -275,7 +275,7 @@ Validation 缺失最危险，因为它把内部信心当成了外部事实。Wri
 quota 和 monitor 在读取决策前已过时。
 
 这个证据阶梯的完整实验见
-[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)，
+[Control-Plane Course 第 8 讲](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/)，
 其中包含每层的失败回放和修复路径。
 
 ## Evidence、Receipt 与 Observation
@@ -398,7 +398,7 @@ no-change streak，M2 也会打断 M1。最终两个 monitor 的 consecutive_no_
 
 这个 per-lane 设计也适用于多 agent 场景：每个 agent 的 monitor 是独立 lane，共享的是同一个
 frontier 读模型，但 no-change 判断是 per-lane 的。实现细节和交错实验见
-[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
+[Control-Plane Course 第 8 讲](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/)。
 
 ## 一轮何时结束
 

@@ -191,7 +191,7 @@ For the complete paired-Showcase replay, evidence-delta criteria, independent or
 experiments, use
 [Long-horizon convergence](/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/).
 For evidence, refresh, spend, and repair delta source paths, see
-[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
+[Control-Plane Course Lesson 8](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/).
 
 ## Handle a projection gap in order
 
@@ -249,7 +249,7 @@ For subsequent rounds, claiming unchanged requires:
 If the baseline is missing but the agent still claims unchanged, quota will produce a
 `vision_checkpoint_missing` gap. This is not a punishment, but a guard against the agent accumulating
 wrong assumptions on a never-checked state. For the full failure replay, see
-[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
+[Control-Plane Course Lesson 8](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/).
 
 ## Terminal closure
 

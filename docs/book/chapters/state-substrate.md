@@ -186,7 +186,7 @@ command 写入的 transition 才算。
 区分这三者的实践意义：每次写回前，确认要写入的是 goal/event state（transition）而不是 turn
 journal（临时记录）；每次读取 decision 前，确认读的是 goal/event state 而不是 run history 的旧
 投影。完整三类 ledger 的源码路径和实验见
-[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
+[Control-Plane Course 第 8 讲](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/)。
 
 ## Canonical、Workbench、Projection 与外部事实
 
@@ -351,7 +351,7 @@ run_recorded(R1, tests_passed_at=commit-a)
   operator 与 Agent 读取的聚合表面。
 
 如果你准备修改 registry、event、Domain State、replay 或 projection builder，继续阅读
-[Control-Plane Course 第 2 讲](/loopx/docs/development/control-plane-course/02-state-substrate/)。
+[Control-Plane Course 第 4 讲](/loopx/docs/development/control-plane-course/04-state-substrate/)。
 它从 Issue-Fix、Auto ML 与 Auto Research 的事实归属进入源码路径和实验；本章继续作为外部
 开发者的概念入口。
 

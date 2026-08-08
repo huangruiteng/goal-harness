@@ -29,6 +29,13 @@ existing project or contribute to LoopX.
 
     [:octicons-arrow-right-24: Make a contribution](chapters/source-protocol-map.md)
 
+-   :material-school: **Control-Plane Course**
+
+    For developers entering Kernel, CLI, state projection, or scheduler implementation, with Showcases,
+    decision tables, and source walkthroughs.
+
+    [:octicons-arrow-right-24: Enter the developer course](chapters/12-control-plane-course.md)
+
 </div>
 
 ## What this book helps you do
@@ -49,7 +56,7 @@ the Kernel. It gives external developers a stable path for deciding:
 - how to decide whether a capability belongs in core, a Capability, a Provider, a Host, a projection, or an
   independently delivered Extension.
 
-## Two independent practice paths
+## Three parallel learning paths
 
 After the control-plane chapters, choose the path that matches your job:
 
@@ -57,9 +64,12 @@ After the control-plane chapters, choose the path that matches your job:
    [Connect an existing Git project](./chapters/05-connect-existing-project.md).
 2. **Make a developer contribution:** begin with the
    [Developer contribution map](./chapters/source-protocol-map.md).
+3. **Control-Plane Course:** enter Kernel implementation through the
+   [independent course chapter](./chapters/12-control-plane-course.md).
 
 The paths share the same foundations but are independent. Project onboarding does not require a LoopX
-source change. Contributions are not limited to Kernel maintainers: you can work on the Control Plane,
+source change. Contributions are not limited to Kernel maintainers, and the Course takes the Dev Book's
+mechanism model further into implementation, rules, and validation. You can work on the Control Plane,
 Capabilities and Domain State, Providers, Host or Runner integration, projections, documentation and
 fixtures, or Extension and package lifecycle. An Extension is one delivery choice for independently
 versioned or optional functionality, not the default shape of every contribution.

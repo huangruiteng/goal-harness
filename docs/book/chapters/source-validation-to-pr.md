@@ -513,7 +513,7 @@ observed in target environment
 
 需要为不同风险 surface 选择 deterministic test、decision replay、canary、模型行为验证或
 release gate 时，继续阅读
-[Control-Plane Course 第 8 讲](/loopx/docs/development/control-plane-course/08-autonomous-agent-quality-gates/)。
+[Control-Plane Course 第 10 讲](/loopx/docs/development/control-plane-course/10-autonomous-agent-quality-gates/)。
 课程提供组合风险 case；本章保留从本地证据到公开 PR 的交付主线。
 
 至此，你完成了开发者贡献中的一条 Control-Plane 路径：从贡献地图选择 owner，沿协议链定位

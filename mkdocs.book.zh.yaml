@@ -56,6 +56,8 @@ nav:
   - 首页: index.md
   - 开始:
       - 如何使用本书: chapters/00-reading-guide.md
+  - 开发者课程:
+      - Control-Plane Course: chapters/12-control-plane-course.md
   - 第一部分：控制面基础:
       - 1. 从一次会话到长程任务: chapters/01-from-session-to-loop.md
       - 2. 会话、Codex Goal 与 LoopX: chapters/02-session-goal-loopx.md

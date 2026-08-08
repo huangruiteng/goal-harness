@@ -37,25 +37,28 @@ LoopX Kernel 源码，也不需要理解所有 CLI 子命令。
 
 二者共享官方协议与源码事实，但不维护两份完整课程。Dev Book 会把预测行为所需的机制讲完整；
 当你需要判断规则优先级、定位具体 bounded context 或修改实现时，再沿章节末尾的入口进入课程。
+准备深入 Kernel 的开发者也可以直接进入
+[Control-Plane Course 独立章节](./12-control-plane-course.md)。
 
 - **多个短 Session 怎样组成长程任务？** 先读第 1、2 章，再下钻
-  [概念导读](/loopx/docs/development/control-plane-course/00-concept-primer/)与
-  [第 0 讲](/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/)，
-  再用[第 1 讲](/loopx/docs/development/control-plane-course/01-first-real-loop/)走一遍真实 Loop。
+  [概念导读](/loopx/docs/development/control-plane-course/00-concept-primer/)、
+  [第 1 讲：Harness 是 effectful program](/loopx/docs/development/control-plane-course/01-agent-loop-effectful-program/)与
+  [第 2 讲](/loopx/docs/development/control-plane-course/02-goal-control-plane-architecture/)，
+  再用[第 3 讲](/loopx/docs/development/control-plane-course/03-first-real-loop/)走一遍真实 Loop。
 - **状态、工作图与权限分别由谁拥有？** 先读第 3、4 章，再下钻
-  [第 2 讲](/loopx/docs/development/control-plane-course/02-state-substrate/)与
-  [第 3 讲](/loopx/docs/development/control-plane-course/03-work-graph-and-peers/)。
+  [第 4 讲](/loopx/docs/development/control-plane-course/04-state-substrate/)与
+  [第 5 讲](/loopx/docs/development/control-plane-course/05-work-graph-and-peers/)。
 - **Gate、Monitor、Replan 同时出现时哪条规则优先？** 先读第 5 章，再下钻
-  [第 4 讲](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/)与
-  [第 5 讲](/loopx/docs/development/control-plane-course/05-host-scheduler-and-heartbeat/)。
+  [第 6 讲](/loopx/docs/development/control-plane-course/06-quota-decision-kernel/)与
+  [第 7 讲](/loopx/docs/development/control-plane-course/07-host-scheduler-and-heartbeat/)。
 - **长程任务怎样防止目标漂移与局部空转？** 先读第 6 章，再下钻
   [长程收敛专题](/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/)与
-  [第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
+  [第 8 讲](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/)。
 - **怎样修改规则并证明它可交付？** 先读第 10 至 13 章，再下钻
-  [第 7 讲](/loopx/docs/development/control-plane-course/07-engineering-a-control-plane-rule/)与
-  [第 8 讲](/loopx/docs/development/control-plane-course/08-autonomous-agent-quality-gates/)。
+  [第 9 讲](/loopx/docs/development/control-plane-course/09-engineering-a-control-plane-rule/)与
+  [第 10 讲](/loopx/docs/development/control-plane-course/10-autonomous-agent-quality-gates/)。
 - **Extension、领域能力与 Kernel 怎样组合？** 先读第 14 至 16 章，再下钻
-  [第 9 讲](/loopx/docs/development/control-plane-course/09-extension-layer/)。
+  [第 11 讲](/loopx/docs/development/control-plane-course/11-extension-layer/)。
 
 完成基础篇后：
 

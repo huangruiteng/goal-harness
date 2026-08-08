@@ -53,6 +53,8 @@ nav:
   - Home: index.md
   - Start:
       - How to use this book: chapters/00-reading-guide.md
+  - Developer Course:
+      - Control-Plane Course: chapters/12-control-plane-course.md
   - Part I — Control-plane foundations:
       - 1. From one session to long-running work: chapters/01-from-session-to-loop.md
       - 2. Sessions, Codex Goal, and LoopX: chapters/02-session-goal-loopx.md

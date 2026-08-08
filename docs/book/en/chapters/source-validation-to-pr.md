@@ -518,7 +518,7 @@ Before opening the PR, confirm:
 
 When a risk surface requires choosing among deterministic tests, decision replay, canaries, model-behavior
 validation, or release gates, continue to
-[Control-Plane Course Lesson 8](/loopx/docs/development/control-plane-course/08-autonomous-agent-quality-gates/).
+[Control-Plane Course Lesson 10](/loopx/docs/development/control-plane-course/10-autonomous-agent-quality-gates/).
 The course provides combined risk cases; this chapter keeps the delivery path from local evidence to a
 public PR.
 

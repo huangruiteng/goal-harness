@@ -137,7 +137,7 @@ LoopX 的控制合同不绑定某一种业务流程。仓库中的 Control-Plane
 领域层提供可判定事实与 proposal，Provider 执行外部调用，Kernel 拥有跨领域生命周期。
 
 需要从三个 Showcase 进入架构、源码入口和完整 case 时，继续阅读
-[Control-Plane Course 第 0 讲](/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/)；
+[Control-Plane Course 第 2 讲](/loopx/docs/development/control-plane-course/02-goal-control-plane-architecture/)；
 第一次接触术语时可先看[概念导读](/loopx/docs/development/control-plane-course/00-concept-primer/)。
 
 ## 哪些状态必须外置

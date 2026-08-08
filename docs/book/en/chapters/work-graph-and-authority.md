@@ -338,7 +338,7 @@ For work-graph or authority changes, start with:
   for claims, optional leases, capability, and Host boundaries.
 
 For changes involving equal peers, lifecycle authority, handoff, dependencies, or successors, continue to
-[Control-Plane Course Lesson 3](/loopx/docs/development/control-plane-course/03-work-graph-and-peers/).
+[Control-Plane Course Lesson 5](/loopx/docs/development/control-plane-course/05-work-graph-and-peers/).
 The course provides combined cases and source walkthroughs; this chapter preserves the work-graph and
 authority model needed by external contributors.
 

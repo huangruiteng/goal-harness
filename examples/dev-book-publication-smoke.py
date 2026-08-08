@@ -37,21 +37,23 @@ CHAPTERS = (
     "09-extension-scaffold",
     "10-extension-lifecycle",
     "11-engineering-boundaries",
+    "12-control-plane-course",
     "appendix-reference",
 )
 
 COURSE_PAGES = (
     "00-concept-primer",
-    "00-goal-control-plane-architecture",
-    "01-first-real-loop",
-    "02-state-substrate",
-    "03-work-graph-and-peers",
-    "04-quota-decision-kernel",
-    "05-host-scheduler-and-heartbeat",
-    "06-evidence-refresh-and-self-repair",
-    "07-engineering-a-control-plane-rule",
-    "08-autonomous-agent-quality-gates",
-    "09-extension-layer",
+    "01-agent-loop-effectful-program",
+    "02-goal-control-plane-architecture",
+    "03-first-real-loop",
+    "04-state-substrate",
+    "05-work-graph-and-peers",
+    "06-quota-decision-kernel",
+    "07-host-scheduler-and-heartbeat",
+    "08-evidence-refresh-and-self-repair",
+    "09-engineering-a-control-plane-rule",
+    "10-autonomous-agent-quality-gates",
+    "11-extension-layer",
     "topic-long-horizon-convergence",
 )
 
@@ -65,7 +67,7 @@ def validate_rendered_site(site_dir: Path) -> None:
         "index.html": ("LoopX Developer Book", "English edition", "MkDocs Material"),
         "chapters/00-reading-guide/index.html": (
             "Dev Book 与 Control-Plane Course 如何配合",
-            "/loopx/docs/development/control-plane-course/04-quota-decision-kernel/",
+            "/loopx/docs/development/control-plane-course/06-quota-decision-kernel/",
         ),
         "chapters/01-from-session-to-loop/index.html": (
             "从一次会话到长程任务",
@@ -79,7 +81,7 @@ def validate_rendered_site(site_dir: Path) -> None:
         "index.html": ("LoopX Developer Book", "简体中文版", "MkDocs Material"),
         "chapters/00-reading-guide/index.html": (
             "How the Dev Book and Control-Plane Course work together",
-            "/loopx/docs/development/control-plane-course/04-quota-decision-kernel/",
+            "/loopx/docs/development/control-plane-course/06-quota-decision-kernel/",
         ),
         "chapters/01-from-session-to-loop/index.html": (
             "From one session to long-running work",
@@ -230,13 +232,13 @@ def main() -> int:
             "PR Issue Fix",
             "Single-Agent Auto ML",
             "Multi-Agent Auto Research",
-            "/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/",
+            "/loopx/docs/development/control-plane-course/02-goal-control-plane-architecture/",
         ),
         "chapters/03-one-turn.md": (
             "Decision Pipeline",
             "identity",
             "capability and workspace eligibility",
-            "/loopx/docs/development/control-plane-course/04-quota-decision-kernel/",
+            "/loopx/docs/development/control-plane-course/06-quota-decision-kernel/",
         ),
         "chapters/04-runtime-boundaries.md": (
             "Material Evidence Delta",
@@ -248,13 +250,13 @@ def main() -> int:
             "PR Issue Fix",
             "Single-Agent Auto ML",
             "Multi-Agent Auto Research",
-            "/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/",
+            "/loopx/docs/development/control-plane-course/02-goal-control-plane-architecture/",
         ),
         "en/chapters/03-one-turn.md": (
             "Decision pipeline",
             "Identity",
             "capability and workspace eligibility",
-            "/loopx/docs/development/control-plane-course/04-quota-decision-kernel/",
+            "/loopx/docs/development/control-plane-course/06-quota-decision-kernel/",
         ),
         "en/chapters/04-runtime-boundaries.md": (
             "Material evidence delta",

@@ -172,9 +172,9 @@ Monitor says when to observe, and Replan revises the frontier. Only the final in
 defines this turn's behavior.
 
 For the complete decision table, nine combined cases, source seams, and smokes, use
-[Control-Plane Course Lesson 4](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/).
+[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-quota-decision-kernel/).
 Host, heartbeat, stateful backoff, and scheduler receipt implementation details are in
-[Lesson 5](/loopx/docs/development/control-plane-course/05-host-scheduler-and-heartbeat/).
+[Lesson 7](/loopx/docs/development/control-plane-course/07-host-scheduler-and-heartbeat/).
 
 ### Quota is a decision compiler, not a balance check
 
@@ -208,7 +208,7 @@ check because "there was quota before," and skipping validation because "the use
 These all treat a local signal as global authorization.
 
 For the complete decision table, nine combined cases, and rule precedence, see
-[Control-Plane Course Lesson 4](/loopx/docs/development/control-plane-course/04-quota-decision-kernel/).
+[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-quota-decision-kernel/).
 
 ## The five-stage bounded-delivery loop
 
@@ -296,7 +296,7 @@ artifacts or chat records. Missing Refresh is the most subtle: on the surface th
 but quota and monitor are actually reading a decision from before the state was refreshed.
 
 For complete experiments on this evidence ladder, see
-[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/),
+[Control-Plane Course Lesson 8](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/),
 which includes failure replay and repair paths for each layer.
 
 ## Evidence, Receipt, and Observation
@@ -430,7 +430,7 @@ B2...) does not cause mutual zeroing.
 This per-lane design also applies to multi-agent scenarios: each agent's monitor is an independent
 lane; they share the same frontier read model, but no-change judgment is per-lane. Implementation
 details and interleaving experiments are in
-[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
+[Control-Plane Course Lesson 8](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/).
 
 ## How a turn ends
 

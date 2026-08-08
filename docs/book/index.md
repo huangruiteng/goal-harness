@@ -27,6 +27,12 @@
 
     [:octicons-arrow-right-24: 参与开发者贡献](chapters/source-protocol-map.md)
 
+-   :material-school: **Control-Plane Course**
+
+    面向准备进入 Kernel、CLI、状态投影或调度实现的开发者，提供 Showcase、decision table 与源码领读。
+
+    [:octicons-arrow-right-24: 进入开发者课程](chapters/12-control-plane-course.md)
+
 </div>
 
 ## 这本书解决什么问题
@@ -45,15 +51,17 @@
 - 如何判断一项能力应进入 Core、Capability、Provider、Host、Projection，还是作为 Extension
   独立交付。
 
-## 两条并列实践主线
+## 三条并列学习主线
 
 完成第一部分后，可以按需求选择：
 
 1. **接入现有项目：** 从[连接你的 Git 项目](./chapters/05-connect-existing-project.md)开始；
 2. **开发者贡献：** 从[开发者贡献地图与协议入口](./chapters/source-protocol-map.md)开始。
+3. **Control-Plane Course：** 准备深入 Kernel 实现时，从
+   [独立课程章节](./chapters/12-control-plane-course.md)开始。
 
-两条主线共享同一套控制面基础，但互不依赖。项目接入不要求修改 LoopX；开发者贡献也不只属于
-Kernel 核心维护者。你可以沿 Control Plane、Capability、Provider、Host/Runner、
+三条主线共享同一套控制面基础，但互不依赖。项目接入不要求修改 LoopX；开发者贡献也不只属于
+Kernel 核心维护者；课程则把 Dev Book 的机制模型进一步推进到实现、规则与验证。你可以沿 Control Plane、Capability、Provider、Host/Runner、
 Projection/Docs/fixtures 或 Extension/package lifecycle 中的一条边界完成贡献，其中
 Extension 只是可独立版本化和交付的一种路径。
 

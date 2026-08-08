@@ -260,7 +260,7 @@ generic runner 要求 manifest 和 runtime 的权限都为空。发消息、写�
 
 如果你要设计的不只是 standalone package，而是 Explore、Domain State、Capability Pack、
 multi-agent preset、Provider 或 presentation 的组合，继续阅读
-[Control-Plane Course 第 9 讲](/loopx/docs/development/control-plane-course/09-extension-layer/)。
+[Control-Plane Course 第 11 讲](/loopx/docs/development/control-plane-course/11-extension-layer/)。
 它解释这些扩展面怎样复用 Kernel，而不是创建第二套 Goal、Todo、Quota 或 Scheduler。
 
 下一章会从官方 `extension init` 生成这套结构，再只修改 request/response domain contract。

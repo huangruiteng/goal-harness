@@ -326,7 +326,7 @@ claim、workspace guard、Gate 和 writeback 仍逐 Todo 生效。跨设备在�
   claim、optional lease、capability 与 Host 边界。
 
 如果改动涉及 equal peer、lifecycle authority、handoff、dependency 或 successor，继续阅读
-[Control-Plane Course 第 3 讲](/loopx/docs/development/control-plane-course/03-work-graph-and-peers/)。
+[Control-Plane Course 第 5 讲](/loopx/docs/development/control-plane-course/05-work-graph-and-peers/)。
 课程提供组合 case 与源码领读；本章保留外部贡献者需要的工作图和权限模型。
 
 下一章把这些状态与权限编译成一次受治理的 Turn：谁应行动、谁应等待、哪个 channel 应通知，以及

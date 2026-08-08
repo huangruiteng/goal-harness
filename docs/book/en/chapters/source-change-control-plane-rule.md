@@ -426,7 +426,7 @@ Before changing a rule, confirm:
 
 To map this method onto real Kernel bounded contexts, ordered rules, schemas, projections, and smoke
 paths, continue to
-[Control-Plane Course Lesson 7](/loopx/docs/development/control-plane-course/07-engineering-a-control-plane-rule/).
+[Control-Plane Course Lesson 9](/loopx/docs/development/control-plane-course/09-engineering-a-control-plane-rule/).
 This chapter owns the external contribution method; the course owns the deeper implementation derivation
 and review exercises.
 

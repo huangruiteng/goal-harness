@@ -174,7 +174,7 @@ Self-Repair 修补控制面缺口；Terminal audit 防止“Todo 都勾完了”
 更完整的双 Showcase 回放、Evidence Delta 判据、独立 oracle 与收敛实验见
 [长程任务如何收敛](/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/)；
 证据、Refresh、Spend 与 repair delta 的源码路径见
-[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
+[Control-Plane Course 第 8 讲](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/)。
 
 ## Projection Gap 的处理顺序
 
@@ -230,7 +230,7 @@ Goal-level replan 先于 monitor quiet 或 agent-scope wait。否则系统可能
 
 如果 baseline 缺失但 agent 仍声称 unchanged，quota 会产生 `vision_checkpoint_missing` gap。这不是
 为了惩罚，而是为了防止 agent 在 never-checked 状态上积累错误假设。完整失败回放见
-[Control-Plane Course 第 6 讲](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/)。
+[Control-Plane Course 第 8 讲](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/)。
 
 ## Terminal Closure
 

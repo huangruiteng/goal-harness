@@ -199,7 +199,7 @@ The practical significance of distinguishing these three: before every write-bac
 to goal/event state (a transition) and not to the turn journal (temporary records); before every decision
 read, confirm you are reading goal/event state and not an old projection from run history. For complete
 source paths and experiments on the three ledgers, see
-[Control-Plane Course Lesson 6](/loopx/docs/development/control-plane-course/06-evidence-refresh-and-self-repair/).
+[Control-Plane Course Lesson 8](/loopx/docs/development/control-plane-course/08-evidence-refresh-and-self-repair/).
 
 ## Canonical state, workbench, projection, and external fact
 
@@ -371,7 +371,7 @@ This chapter owns the learning sequence, not the complete schemas. For state cha
   for Agent and operator-facing aggregation.
 
 If you plan to change registry, event, Domain State, replay, or projection builders, continue to
-[Control-Plane Course Lesson 2](/loopx/docs/development/control-plane-course/02-state-substrate/). It enters
+[Control-Plane Course Lesson 4](/loopx/docs/development/control-plane-course/04-state-substrate/). It enters
 source paths and experiments through fact ownership in Issue-Fix, Auto ML, and Auto Research. This chapter
 remains the external developer's conceptual entrypoint.
 

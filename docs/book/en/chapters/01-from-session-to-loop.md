@@ -140,7 +140,7 @@ completion state machine. The domain layer supplies decidable facts and proposal
 external calls, and the Kernel owns cross-domain lifecycle.
 
 For the complete Showcase derivation, architecture, and source entrypoints, continue to
-[Control-Plane Course Lesson 0](/loopx/docs/development/control-plane-course/00-goal-control-plane-architecture/).
+[Control-Plane Course Lesson 2](/loopx/docs/development/control-plane-course/02-goal-control-plane-architecture/).
 Use the [concept primer](/loopx/docs/development/control-plane-course/00-concept-primer/) first when the
 vocabulary is new.
 
