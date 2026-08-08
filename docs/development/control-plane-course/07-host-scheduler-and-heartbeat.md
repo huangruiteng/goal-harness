@@ -1,4 +1,4 @@
-# 第 5 讲：Host、Heartbeat 与 Stateful Backoff
+# 第 7 讲：Host、Heartbeat 与 Stateful Backoff
 
 > **本讲结论：** Host 拥有唤醒和外部 effect，LoopX 拥有 cadence proposal 与验证规则；
 > 只有绑定 proposal identity 的 host readback 才能形成 durable scheduler ACK。

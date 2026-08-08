@@ -1,4 +1,4 @@
-# 第 6 讲：证据、Refresh 与 Self-Repair
+# 第 8 讲：证据、Refresh 与 Self-Repair
 
 > **本讲结论：** Artifact 只有经过 validation、writeback、refresh 和一次性 spend，才成为
 > material progress；replan 或 repair 必须留下 bounded state delta，不能只写 ACK。
@@ -130,7 +130,7 @@ commit:<sha>
 smoke:todo-lifecycle-cli
 run:<opaque-run-id>
 event:<event-id>
-doc:docs/development/control-plane-course/01-first-real-loop.md
+doc:docs/development/control-plane-course/03-first-real-loop.md
 ```
 
 ## Bounded Delivery 的证据标准
@@ -364,10 +364,10 @@ checkpoint 证明。
 
 应用记忆后仍需生成 influence/application receipt，并在当前 artifact 上验证技术主张。当前
 todo、gate、fresh observation 和 source-of-truth 始终高于 recalled experience。更完整的
-provider 与 default-off 边界见[第 9 讲的 Reward Memory](09-extension-layer.md#reward-memory)。
+provider 与 default-off 边界见[第 11 讲的 Reward Memory](11-extension-layer.md#reward-memory)。
 
 开发 connector 或 inbox 时，应先把 signal 归一化为 public-safe evidence，再由
-现有 Core State 承接 anchor。第 9 讲的 Lark Event Inbox 展示了这一边界；不要
+现有 Core State 承接 anchor。第 11 讲的 Lark Event Inbox 展示了这一边界；不要
 为每种外部信号新增一个 quota 分支。
 
 ## Replan 与 Dreaming
@@ -463,7 +463,7 @@ Self-repair 不允许：
 
 ## 失败回放：漏写 Vision Checkpoint
 
-用第 1 讲的贯穿实验复现。以下 id 都是占位符：
+用第 3 讲的贯穿实验复现。以下 id 都是占位符：
 
 ```text
 goal_id = <goal-id>
@@ -754,7 +754,7 @@ if normalized_progress_scope == "agent_lane":
 
 ### 4. Projection gap 把 prose 漂移升级成 repair
 
-`loopx/control_plane/quota/projection_repair.py::build_state_projection_gap_repair_hint` 的输入来自第 2 讲的 status projection。当 active prose 看起来可执行、结构化 agent todo 却为零时，它返回 self-repair hint，而不是让 quota 安静等待。
+`loopx/control_plane/quota/projection_repair.py::build_state_projection_gap_repair_hint` 的输入来自第 4 讲的 status projection。当 active prose 看起来可执行、结构化 agent todo 却为零时，它返回 self-repair hint，而不是让 quota 安静等待。
 
 领读时追这条反向路径：
 

@@ -1,4 +1,4 @@
-# 第 2 讲：状态底座与可重放事实
+# 第 4 讲：状态底座与可重放事实
 
 > **本讲结论：** Canonical event/state contract 拥有长期事实；active state、status 和
 > dashboard 是可重建 read model；session context 不能替代 project memory。
@@ -133,7 +133,7 @@ next decision = replay(project memory) + inspect(fresh environment)
 
 Project memory 的充分性标准是：更换 session 后，新的 peer 仍能从 durable state
 重建同一 objective、authority boundary、open frontier、gate、next probe 和 stop
-condition。它不要求逐字复现旧推理。第 3 讲会把这个要求进一步写成 handoff 的
+condition。它不要求逐字复现旧推理。第 5 讲会把这个要求进一步写成 handoff 的
 不动点检查。
 
 可以把这看成长期任务的“最小可恢复状态”，而不是“最大可记忆内容”。外置状态应优先保存：

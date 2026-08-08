@@ -1,4 +1,4 @@
-# 第 0 讲：从三个 Showcase 理解 LoopX 架构
+# 第 2 讲：从三个 Showcase 理解 LoopX 架构
 
 > **本讲结论：** LoopX 让不同领域的长程 Agent 复用同一套外置目标、工作、权限、证据与
 > 恢复内核。Issue-Fix、Single-Agent Auto ML 和 Multi-Agent Auto Research 的业务状态完全
@@ -135,8 +135,8 @@ fact，使下一轮可以重新计算 frontier：
 和下一步恢复路径。长程稳定的目标，是让错误可发现、可归因、可恢复；即使 Agent 犯错，
 已提交事实仍然有效，系统仍能形成下一步 frontier。
 
-这也是后续课程的索引：第 1 讲解释 packet 与一次 Turn，第 3 讲解释 claim、successor 和
-handoff，第 5 讲解释 monitor cadence 与 quiet wake，第 6 讲解释 evidence、reconcile 和
+这也是后续课程的索引：第 3 讲解释 packet 与一次 Turn，第 5 讲解释 claim、successor 和
+handoff，第 7 讲解释 monitor cadence 与 quiet wake，第 8 讲解释 evidence、reconcile 和
 self-repair。这里先记住一个判断标准：**稳定不是不中断，而是每次中断后都能从外置事实恢复。**
 
 ### 一条交付主线，怎样反哺执行系统
@@ -531,7 +531,7 @@ sequenceDiagram
 - spend 晚于验证与写回；
 - scheduler proposal 在 host apply 并形成 ACK 前仍未结算。
 
-第 4 到第 6 讲会分别展开 quota decision、host scheduler 和 evidence/writeback。第 0 讲只需
+第 6 到第 8 讲会分别展开 quota decision、host scheduler 和 evidence/writeback。第 2 讲只需
 确认：这些阶段让长程工作可以被重放、归因和恢复。
 
 ## 多个协作状态机，不是一个巨型枚举
@@ -591,8 +591,8 @@ runtime event、cancel 和 retry。接入 LoopX 时，只需对齐四个面：
 | Auto Research role 怎样声明 | `build_auto_research_preset_summary` | `examples/auto-research-dev-thin-preset-smoke.py` |
 | 每个研究 lane 怎样重新进入 Kernel | `load_auto_research_worker_frontier`、`run_auto_research_worker_turn` | `examples/auto-research-worker-turn-smoke.py` |
 | 研究证据怎样形成决策 | `build_research_decision_candidates`、`build_auto_research_completion_status` | `examples/auto-research-layered-e2e-acceptance-smoke.py` |
-| 通用 Kernel 怎样选择本轮动作 | `build_quota_should_run`、`build_interaction_contract` | 第 4 讲的 quota smokes |
-| 一轮结果怎样写回并恢复 | `run_loopx_turn_once`、`refresh-state` | 第 5、6 讲的 transaction / refresh smokes |
+| 通用 Kernel 怎样选择本轮动作 | `build_quota_should_run`、`build_interaction_contract` | 第 6 讲的 quota smokes |
+| 一轮结果怎样写回并恢复 | `run_loopx_turn_once`、`refresh-state` | 第 7、8 讲的 transaction / refresh smokes |
 
 这条阅读路线同时覆盖 high-level product loop 和 low-level implementation seam。开发者先问
 “这个函数把哪种领域事实翻译成哪种通用 transition”，再看 schema、fingerprint、ordered
@@ -624,14 +624,14 @@ replan 或 self-repair”的整体心智模型，可以先读
 
 | 后续讲次 | Issue-Fix | Single-Agent Auto ML | Auto Research |
 | --- | --- | --- | --- |
-| 第 1 讲 | 从目标到第一个 fix todo | 从候选到一次 bounded experiment Turn | 从 research question 到初始 role todo |
-| 第 2 讲 | feasibility / PR lifecycle 与 Kernel state | task/result ledger、Graph 与外部事实 | evidence event、graph 与 projection |
-| 第 3 讲 | patch successor、monitor、review handoff | launch、monitor、evaluate、replan 工作图 | role claim、lane successor、equal peer |
-| 第 4 讲 | checks pending 为何 quiet | capacity/defer 与 promotion gate | per-agent frontier 与 promotion gate |
-| 第 5 讲 | PR monitor cadence 与外部 readback | training/eval monitor 与分层 backoff | worker loop、no-action 与重新唤醒 |
-| 第 6 讲 | validation、notification receipt、terminal | 模型证据、infra diagnosis、no-promote | dev/holdout evidence、retirement、completion |
-| 第 7、8 讲 | lifecycle rule 与 PR delivery oracle | experiment contract 与 promotion oracle | evidence rule 与独立 oracle |
-| 第 9 讲 | Capability Pack 与 Domain State | ML pack + Explore Graph/Harness | thin preset 与 multi-agent 产品层 |
+| 第 3 讲 | 从目标到第一个 fix todo | 从候选到一次 bounded experiment Turn | 从 research question 到初始 role todo |
+| 第 4 讲 | feasibility / PR lifecycle 与 Kernel state | task/result ledger、Graph 与外部事实 | evidence event、graph 与 projection |
+| 第 5 讲 | patch successor、monitor、review handoff | launch、monitor、evaluate、replan 工作图 | role claim、lane successor、equal peer |
+| 第 6 讲 | checks pending 为何 quiet | capacity/defer 与 promotion gate | per-agent frontier 与 promotion gate |
+| 第 7 讲 | PR monitor cadence 与外部 readback | training/eval monitor 与分层 backoff | worker loop、no-action 与重新唤醒 |
+| 第 8 讲 | validation、notification receipt、terminal | 模型证据、infra diagnosis、no-promote | dev/holdout evidence、retirement、completion |
+| 第 9、10 讲 | lifecycle rule 与 PR delivery oracle | experiment contract 与 promotion oracle | evidence rule 与独立 oracle |
+| 第 11 讲 | Capability Pack 与 Domain State | ML pack + Explore Graph/Harness | thin preset 与 multi-agent 产品层 |
 
 ## 课后检查
 

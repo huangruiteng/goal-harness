@@ -1,4 +1,4 @@
-# 第 8 讲：Agent 自主写代码时的分层质量门禁
+# 第 10 讲：Agent 自主写代码时的分层质量门禁
 
 > **本讲结论：** 先用独立 oracle 定义正确语义，再按风险选择 deterministic test、canary、
 > 模型行为验证与 release gate；当前实现输出不能反过来定义正确答案。
@@ -584,7 +584,7 @@ ready，返回值仍固定 `automatic_release_promotion_allowed=False`，owner d
 在 [PR #2320](https://github.com/huangruiteng/loopx/pull/2320) 中，goal-frontier replan
 从隐式 `if` 链提取成 ordered rules；它没有新增 public payload，
 但它仍是 high-risk change：一次顺序漂移就可能让 agent 在已有工作时错误 replan，或在
-frontier 耗尽时永久等待。第 7 讲解释了实现结构；这里关注门禁怎样证明“移动了政策，但
+frontier 耗尽时永久等待。第 9 讲解释了实现结构；这里关注门禁怎样证明“移动了政策，但
 没有改变政策”。
 
 第一层是完整 decision table。每个 case 不只设置目标条件，还叠加一个更低优先级条件，

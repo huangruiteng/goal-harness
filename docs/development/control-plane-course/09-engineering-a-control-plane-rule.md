@@ -1,4 +1,4 @@
-# 第 7 讲：如何给 Control Plane 增加一条规则
+# 第 9 讲：如何给 Control Plane 增加一条规则
 
 > **本讲结论：** 一条 control-plane 规则必须闭合 source、decision、effect、receipt 与
 > validation；没有真实 call site 和兼容合同的未来能力，应停留在文档或 todo。
@@ -473,7 +473,7 @@ Smoke 应同时证明：
 
 ## 测试策略
 
-本讲只保留规则开发的入口；完整分层、频率、模型行为门和发布门见[第 8 讲](08-autonomous-agent-quality-gates.md)。
+本讲只保留规则开发的入口；完整分层、频率、模型行为门和发布门见[第 10 讲](10-autonomous-agent-quality-gates.md)。
 
 测试先回答“这个状态和规则合理吗”，再验证实现是否符合。共享 quota/status/todo 行为可以先加 parity fixture 描述现状，但 fixture 不是授权书；如果现状与 independently reviewed invariant 冲突，应修规则并增加负向或 mutation coverage，不能刷新 golden 把错误合法化。
 
@@ -501,7 +501,7 @@ Smoke 应同时证明：
 loopx canary premerge --from-git-diff
 ```
 
-一个 hand-picked smoke 不足以覆盖 runtime/quota/scheduler/todo/install/dashboard 边界。是否增加 output budget、actual-default model qualification、full-public 或 outcome baseline，由第 8 讲的风险门禁决定，不能让每个小 patch 都等待最高成本矩阵。
+一个 hand-picked smoke 不足以覆盖 runtime/quota/scheduler/todo/install/dashboard 边界。是否增加 output budget、actual-default model qualification、full-public 或 outcome baseline，由第 10 讲的风险门禁决定，不能让每个小 patch 都等待最高成本矩阵。
 
 ## 练习：设计一个 `pause_branch` Proposal
 
@@ -780,4 +780,4 @@ receipt = record_supervisor_receipt(
 4. Migration reader 为什么应保留，但旧字段不能继续出现在 live config？
 5. 哪类 invariant 值得未来用 Lean/TLA+，哪类只需 focused smoke？
 
-下一讲把这套工程顺序扩成自主交付门禁：什么必须进入 PR 快速门，什么适合 canary、低频模型行为验证或 release gate，以及 agent 何时必须停止自动合并。扩展层顺延到第 9 讲。
+下一讲把这套工程顺序扩成自主交付门禁：什么必须进入 PR 快速门，什么适合 canary、低频模型行为验证或 release gate，以及 agent 何时必须停止自动合并。扩展层顺延到第 11 讲。

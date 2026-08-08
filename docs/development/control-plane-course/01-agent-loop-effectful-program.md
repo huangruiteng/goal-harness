@@ -1,4 +1,4 @@
-# 第 0 讲：Harness 是 effectful program
+# 第 1 讲：Harness 是 effectful program
 
 > 建议时长：30 分钟。先建立心智模型，不进入具体状态枚举。
 

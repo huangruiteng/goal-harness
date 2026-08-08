@@ -1,4 +1,4 @@
-# 第 9 讲：扩展层、Explore 与 Multi-Agent 产品
+# 第 11 讲：扩展层、Explore 与 Multi-Agent 产品
 
 > **本讲结论：** Extension 交付可选 provider、domain facts、capability 或 presentation；
 > 它复用同一份 goal、todo、quota、scheduler、evidence 与 handoff contract，不创建第二个
@@ -29,7 +29,7 @@ Memory 或 Lark Event Inbox。
 
 ## 从 Auto Research 反推 Extension Contract
 
-第 0 讲把 Auto Research 当作产品 Showcase；本讲把它拆成一个可复用 extension：
+第 2 讲把 Auto Research 当作产品 Showcase；本讲把它拆成一个可复用 extension：
 
 | Surface | Auto Research 提供 | 继续由通用层拥有 |
 | --- | --- | --- |
@@ -1006,7 +1006,7 @@ kernel 代码、supervisor 为什么不能借扩展层获得 durable leader auth
 
 ## 课程结束后的能力标准
 
-完成第 0 到第 9 讲后，一个新开发者不需要记住所有 CLI 参数，但应该能够独立完成三件事：
+完成第 1 到第 11 讲后，一个新开发者不需要记住所有 CLI 参数，但应该能够独立完成三件事：
 
 1. 从 `$loopx <task>` 追到 registry、todo、quota、interaction contract、scheduler、refresh 和 spend；
 2. 遇到卡住或矛盾状态时，判断是执行失败、projection gap、host drift 还是缺少用户 authority；

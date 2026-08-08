@@ -118,7 +118,7 @@ to the Kernel lifecycle. Providers supply the external facts behind the lane,
 capabilities validate them and propose typed transitions, and the Kernel owns
 claim, gate, monitor, quota, writeback, recovery, and terminal closure. See the
 [concept primer](development/control-plane-course/00-concept-primer.md) and
-[state substrate lecture](development/control-plane-course/02-state-substrate.md).
+[state substrate lecture](development/control-plane-course/04-state-substrate.md).
 
 ## Current Dependency Budget
 

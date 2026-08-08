@@ -1,4 +1,4 @@
-# 第 4 讲：Quota 决策内核与 Interaction Contract
+# 第 6 讲：Quota 决策内核与 Interaction Contract
 
 > **本讲结论：** `quota should-run` 是只读决策编译器：它把 source facts 编译成 typed
 > interaction contract 与 scheduler hint；host 消费决定，不重新实现决定。

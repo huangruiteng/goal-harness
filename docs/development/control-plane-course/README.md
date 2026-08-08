@@ -5,7 +5,7 @@
 > 编译成一轮可执行的 CLI packet。Issue-Fix、Single-Agent Auto ML、Auto Research 等领域
 > 增加专属判断，但不创建第二套控制面。
 
-这套课程由概念导读、第 0 讲 Harness effectful-program、架构导论和 9 讲专题组成，面向准备修改 LoopX kernel、CLI、
+这套课程由概念导读、第 1 讲 Harness effectful-program、第 2 讲架构导论和第 3 到第 11 讲专题组成，面向准备修改 LoopX kernel、CLI、
 状态投影、调度或扩展能力的开发者。它先从模型上下文为什么不能承担长期状态讲起，再用
 三个端到端 Showcase 推导 ownership，最后沿真实 transition 进入状态机、CLI、核心函数和测试。
 
@@ -124,30 +124,31 @@ receipt、projection、replan 与 self-repair；随后再进入下面的代码�
 | --- | --- | --- |
 | 导读 | [先把 LoopX 放进一张图](00-concept-primer.md) | 有限上下文为何需要外置状态，原生 Goal 与 LoopX 如何递进，核心概念怎样组成一条生命周期？ |
 | 专题 | [长程任务如何收敛：不跑偏、不陷入局部循环](topic-long-horizon-convergence.md) | 如何用方向、权限、证据、Delta、活性与终局不变量，让复杂任务持续接力而不把忙碌误判为进展？ |
-| [第 0 讲](00-agent-loop-effectful-program.md) | Harness 是 effectful program | Harness 为什么是 agent loop 的 effect interpreter，状态机为什么只是 interpretation table？ |
-| [架构导论](00-goal-control-plane-architecture.md) | 从三个 Showcase 理解 LoopX 架构 | Issue-Fix、Single-Agent Auto ML 与 Auto Research 如何按 Agent / Provider / Capability / Kernel 分工并复用同一控制面？ |
-| [第 1 讲](01-first-real-loop.md) | 从 Showcase 到第一次真实 Loop | 用户只说一句目标后，guided start、todo、heartbeat、quota、refresh 和 spend 如何串起来？ |
-| [第 2 讲](02-state-substrate.md) | 状态底座与可重放事实 | registry、event、active state、run history 和 projection 分别拥有什么事实？ |
-| [第 3 讲](03-work-graph-and-peers.md) | Todo 工作图与 Peer 协作 | equal peer 如何 claim、显式委托 lifecycle authority、handoff 材料前沿，而不恢复 primary/side 层级？ |
-| [第 4 讲](04-quota-decision-kernel.md) | Quota 决策内核与 Interaction Contract | `should-run` 如何压成 operator-facing mode，以及它与 `LoopXTurnRoute` / `LoopXTurnResultKind` 的关系？ |
-| [第 5 讲](05-host-scheduler-and-heartbeat.md) | Host、Heartbeat 与 Stateful Backoff | LoopX 决策、heartbeat prompt、execution context、Codex App RRULE 和 ACK 各自负责什么？ |
-| [第 6 讲](06-evidence-refresh-and-self-repair.md) | 证据、Refresh 与 Self-Repair | 什么算 material progress，何时必须 replan，连续无推进如何形成可验证 repair delta？ |
-| [第 7 讲](07-engineering-a-control-plane-rule.md) | 如何给 Control Plane 增加一条规则 | 如何从 invariant、ordered rules、schema、projection 到 smoke 完成一次可审计变更？ |
-| [第 8 讲](08-autonomous-agent-quality-gates.md) | Agent 自主写代码时的分层质量门禁 | 如何按风险选择确定性测试、canary、模型行为验证与 release gate，既保护质量又不阻断普通迭代？ |
-| [第 9 讲](09-extension-layer.md) | 扩展层、Explore 与领域产品 | 默认关闭的 Graph/Harness、Single-Agent Auto ML、Auto Research 和 Supervisor 如何复用 kernel？ |
+| [第 1 讲](01-agent-loop-effectful-program.md) | Harness 是 effectful program | Harness 为什么是 agent loop 的 effect interpreter，状态机为什么只是 interpretation table？ |
+| [第 2 讲](02-goal-control-plane-architecture.md) | 从三个 Showcase 理解 LoopX 架构 | Issue-Fix、Single-Agent Auto ML 与 Auto Research 如何按 Agent / Provider / Capability / Kernel 分工并复用同一控制面？ |
+| [第 3 讲](03-first-real-loop.md) | 从 Showcase 到第一次真实 Loop | 用户只说一句目标后，guided start、todo、heartbeat、quota、refresh 和 spend 如何串起来？ |
+| [第 4 讲](04-state-substrate.md) | 状态底座与可重放事实 | registry、event、active state、run history 和 projection 分别拥有什么事实？ |
+| [第 5 讲](05-work-graph-and-peers.md) | Todo 工作图与 Peer 协作 | equal peer 如何 claim、显式委托 lifecycle authority、handoff 材料前沿，而不恢复 primary/side 层级？ |
+| [第 6 讲](06-quota-decision-kernel.md) | Quota 决策内核与 Interaction Contract | `should-run` 如何压成 operator-facing mode，以及它与 `LoopXTurnRoute` / `LoopXTurnResultKind` 的关系？ |
+| [第 7 讲](07-host-scheduler-and-heartbeat.md) | Host、Heartbeat 与 Stateful Backoff | LoopX 决策、heartbeat prompt、execution context、Codex App RRULE 和 ACK 各自负责什么？ |
+| [第 8 讲](08-evidence-refresh-and-self-repair.md) | 证据、Refresh 与 Self-Repair | 什么算 material progress，何时必须 replan，连续无推进如何形成可验证 repair delta？ |
+| [第 9 讲](09-engineering-a-control-plane-rule.md) | 如何给 Control Plane 增加一条规则 | 如何从 invariant、ordered rules、schema、projection 到 smoke 完成一次可审计变更？ |
+| [第 10 讲](10-autonomous-agent-quality-gates.md) | Agent 自主写代码时的分层质量门禁 | 如何按风险选择确定性测试、canary、模型行为验证与 release gate，既保护质量又不阻断普通迭代？ |
+| [第 11 讲](11-extension-layer.md) | 扩展层、Explore 与领域产品 | 默认关闭的 Graph/Harness、Single-Agent Auto ML、Auto Research 和 Supervisor 如何复用 kernel？ |
 
 ## 建议学习方式
 
 面向潜在合作方、自编排 runner 或远端开发机接入者的一小时分享，建议使用“导读 + 长程收敛
 专题”；专题正文已给出 60 分钟主讲路线，延伸实验和代码领读可以留作课后材料。
 
-准备系统开发 LoopX 的读者先读导读，再读第 0 讲 effectful-program，再读架构导论，最后按
-1 到 9 的顺序进行。架构导论从 Issue-Fix、Single-Agent Auto ML 与 Auto Research 推导共同架构，
-第 1 讲运行端到端路径，第 2 到 6 讲拆开状态、工作图、决策、host 和证据，第 7 讲把这些
-知识收束成工程变更方法，第 8 讲建立自主交付的质量门禁，第 9 讲再系统讨论扩展层。
+准备系统开发 LoopX 的读者先读导读，再读第 1 讲 effectful-program，再读第 2 讲架构导论，最后按
+3 到 11 的顺序进行。第 2 讲架构导论从 Issue-Fix、Single-Agent Auto ML 与 Auto Research
+推导共同架构，第 3 讲运行端到端路径，第 4 到 8 讲拆开状态、工作图、决策、host 和证据，
+第 9 讲把这些知识收束成工程变更方法，第 10 讲建立自主交付的质量门禁，第 11 讲再系统
+讨论扩展层。
 
-只准备开发 Capability Pack 的读者，可以先读 0、2、4、6、9，再按改动涉及的 Kernel
-边界补读 3、5、7、8。准备修改 Kernel 的读者应按完整顺序阅读，因为 quota、scheduler、
+只准备开发 Capability Pack 的读者，可以先读 2、4、6、8、11，再按改动涉及的 Kernel
+边界补读 5、7、9、10。准备修改 Kernel 的读者应按完整顺序阅读，因为 quota、scheduler、
 todo 和 evidence 的局部规则会在同一轮组合生效。
 
 不要从模块文件头一路向下读。每讲的“核心代码领读”会给出函数级入口，先搜索目标函数，再沿 bounded-context helper 向下读。运行实验时使用临时 goal 和测试仓库，不要把课程占位 id 当作真实配置。

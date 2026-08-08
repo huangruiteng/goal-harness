@@ -1,4 +1,4 @@
-# 第 1 讲：从 Showcase 到第一次真实 Loop
+# 第 3 讲：从 Showcase 到第一次真实 Loop
 
 > **本讲结论：** 第一次真实 Loop 不是“heartbeat 调一次模型”，而是外置 source state 被
 > 编译成适合有限上下文的 CLI packet 和 bounded action，执行结果经验证写回，再由
@@ -6,11 +6,11 @@
 
 ## 本讲在课程中的位置
 
-[第 0 讲](00-goal-control-plane-architecture.md)已经从 Issue-Fix、Single-Agent Auto ML
+[第 2 讲](02-goal-control-plane-architecture.md)已经从 Issue-Fix、Single-Agent Auto ML
 与 Auto Research 三条产品闭环推导出 Kernel、Capability Pack、Domain State、host/runtime
 和外部事实源的边界。
 本讲不再展开领域判断，而是沿共同生命周期跑通第一次真实 Loop。
-全课由第 0 讲架构导论和 9 讲专题组成，每讲只增加一个主要抽象：
+全课由第 2 讲架构导论和第 3 到第 11 讲专题组成，每讲只增加一个主要抽象：
 
 | 讲次 | 新增的主要抽象 | 学完后能回答的问题 |
 | --- | --- | --- |
@@ -39,7 +39,7 @@
 
 ## 先把三个 Showcase 压成一轮
 
-第 0 讲看到的是完整产品闭环。本讲只截取其中一轮，观察 LoopX 如何把长期状态变成
+第 2 讲看到的是完整产品闭环。本讲只截取其中一轮，观察 LoopX 如何把长期状态变成
 一次可提交的小变化：
 
 | Showcase 中的一轮 | 本轮输入 | Bounded action | 可接受回执 | 下一轮依据 |
@@ -590,7 +590,7 @@ effective_action = _effective_action(...)
 ### “Supervisor 就是主 agent”
 
 不是。当前 peer 模型没有 primary/side 的运行时层级。可选 supervisor 是 equal peer
-上的观察和 proposal overlay；第 7 讲用它演示规则设计，第 9 讲说明它与其他扩展能力
+上的观察和 proposal overlay；第 9 讲用它演示规则设计，第 11 讲说明它与其他扩展能力
 如何复用同一个 kernel。
 
 ## 本讲源码与 smoke 地图
@@ -646,7 +646,7 @@ state_key   = scheduler_hint.codex_app.stateful_backoff
 RRULE       = FREQ=MINUTELY;INTERVAL=3
 ```
 
-课堂上可以逐条对照自己的状态文件。实验还应故意漏写一次 material refresh 的 vision decision，观察后续 quota 产生 `vision_checkpoint_missing`；第 6 讲会完整复盘这个失败案例。
+课堂上可以逐条对照自己的状态文件。实验还应故意漏写一次 material refresh 的 vision decision，观察后续 quota 产生 `vision_checkpoint_missing`；第 8 讲会完整复盘这个失败案例。
 
 ## 课后检查
 
