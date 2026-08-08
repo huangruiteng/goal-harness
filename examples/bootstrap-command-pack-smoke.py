@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def run_json(*args: str, env: dict[str, str] | None = None) -> dict[str, object]:
     process_env = os.environ.copy()
+    process_env.pop("CODEX_THREAD_ID", None)
     if env:
         process_env.update(env)
     result = subprocess.run(
@@ -699,14 +700,14 @@ def test_skill_slash_fallback_contract() -> None:
     assert "do not route it to `loopx-pr-merge` unless" in normalized
     assert "loopx --format json pr-review --state all" not in skill_text
     assert "loopx --format json pr-review --state all" in pr_review_skill_text
-    assert "full JSON first" in pr_review_normalized
+    assert "Save the full first JSON packet before printing a compact projection" in pr_review_normalized
     assert "agent_response_contract" in pr_review_skill_text
     assert "pull_requests[].review_template" in pr_review_skill_text
     assert "pull_requests[].evidence_commands" in pr_review_skill_text
-    assert "`.summary`, `.review_sequence`, or a table" in pr_review_skill_text
+    assert "Do not pipe the only copy through `jq`" in pr_review_skill_text
     assert "review_groups.unmerged" in pr_review_skill_text
     assert "review_groups.merged" in pr_review_skill_text
-    assert "Do not fill the five-block review from title" in pr_review_normalized
+    assert "The five sections are output structure, while the execution contract is the evidence authority" in pr_review_normalized
 
 
 def main() -> int:

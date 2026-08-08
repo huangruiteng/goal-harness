@@ -80,6 +80,7 @@ def main() -> int:
         assert f"- manpage: {man_root / 'man1' / 'loopx.1.gz'}" in install.stdout, install.stdout
         assert f"- canary executable: {bin_dir / 'loopx-canary'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
+        assert f"- skill: {codex_home / 'skills' / 'loopx-pr-program'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
         assert "promotion-readiness evidence is missing" in install.stderr, install.stderr
         assert "non-blocking" in install.stderr, install.stderr
@@ -99,6 +100,7 @@ def main() -> int:
             encoding="utf-8"
         )
         assert (codex_home / "skills" / "loopx-project" / "SKILL.md").is_file()
+        assert (codex_home / "skills" / "loopx-pr-program" / "SKILL.md").is_file()
         assert (codex_home / "skills" / "loopx-pr-review" / "SKILL.md").is_file()
         assert (codex_home / "skills" / "loopx-self-repair" / "SKILL.md").is_file()
 
@@ -110,8 +112,9 @@ def main() -> int:
         assert doctor["package"]["release_root"] == str(release_root), doctor
         assert doctor["install_freshness"]["schema_version"] == "loopx_install_freshness_v0", doctor
         assert doctor["install_freshness"]["status"] == "unknown", doctor
-        assert "install-from-github.sh" in doctor["install_freshness"]["upgrade_command"], doctor
+        assert "huangruiteng.github.io/loopx/install.sh" in doctor["install_freshness"]["upgrade_command"], doctor
         assert doctor["skills"]["loopx-project"]["exists"] is True, doctor
+        assert doctor["skills"]["loopx-pr-program"]["exists"] is True, doctor
         assert doctor["skills"]["loopx-pr-review"]["exists"] is True, doctor
         assert doctor["skills"]["loopx-self-repair"]["exists"] is True, doctor
 
@@ -141,7 +144,7 @@ def main() -> int:
         )
         assert bootstrap["ok"] is True, bootstrap
         assert bootstrap["goal_id"] == GOAL_ID, bootstrap
-        assert "install-from-github.sh" in bootstrap["install_repair_command"], bootstrap
+        assert "huangruiteng.github.io/loopx/install.sh" in bootstrap["install_repair_command"], bootstrap
         assert "loopx doctor" in bootstrap["install_repair_command"], bootstrap
         assert (project / ".loopx" / "registry.json").is_file(), bootstrap
         assert (project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md").is_file(), bootstrap

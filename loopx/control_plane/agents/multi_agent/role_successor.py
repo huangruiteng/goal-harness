@@ -172,8 +172,15 @@ def apply_role_successor_todos(
     successor_specs: Iterable[object],
     decision_summary: Mapping[str, object],
     execute: bool,
+    text_source_todo_id: str | None = None,
 ) -> dict[str, object]:
-    """Preview or create role-declared successor todos through LoopX state."""
+    """Preview or create role-declared successor todos through LoopX state.
+
+    When text_source_todo_id is provided, it is used for rendering the
+    successor text (so the title is stable across different summary todos
+    that review the same failure lineage).  source_todo_id is still used
+    for the unblocks_todo_id binding.
+    """
 
     specs = [dict(spec) for spec in successor_specs if isinstance(spec, Mapping)]
     if not specs:
@@ -197,7 +204,7 @@ def apply_role_successor_todos(
         )
         action_kind = str(spec.get("action_kind") or "advance_todo")
         task_class = str(spec.get("task_class") or "advancement_task")
-        text = str(spec.get("text") or f"Run {action_kind}.")
+        raw_text = str(spec.get("text") or f"Run {action_kind}.")
         claimed_by = _resolve_successor_target_agent(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -205,9 +212,9 @@ def apply_role_successor_todos(
             spec=spec,
         )
         text = _render_successor_text(
-            text=text,
+            text=raw_text,
             goal_id=goal_id,
-            source_todo_id=source_todo_id,
+            source_todo_id=text_source_todo_id or source_todo_id,
             target_agent_id=claimed_by,
             task_class=task_class,
             action_kind=action_kind,

@@ -38,6 +38,14 @@ EVIDENCE_STATUSES = {
 METRIC_DIRECTIONS = {"maximize", "minimize"}
 NEGATIVE_PRIMARY_METRIC_STATUSES = {"failed", "regressed"}
 RETRY_PRIMARY_METRIC_STATUSES = {"inconclusive"}
+RESEARCH_FAILURE_KINDS = {
+    "data_or_measurement_gap",
+    "guardrail_or_protected_boundary",
+    "mechanism_contradicted",
+    "overfit_or_nonreplication",
+    "retry_exhausted",
+    "unrecoverable_data_gap",
+}
 
 _TOKEN_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,95}$")
 _SHA256_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
@@ -69,7 +77,7 @@ def _compact_public_text(value: Any, *, field: str, max_len: int = 240) -> str:
         raise ValueError(f"{field} must be non-empty")
     if len(text) > max_len:
         raise ValueError(f"{field} is too long for a compact public-safe field")
-    if ".." in text:
+    if ".." in text.replace("...", ""):
         raise ValueError(f"{field} must not contain parent-directory markers")
     if _ABSOLUTE_PATH_RE.search(text) or text.startswith(("/", "~")):
         raise ValueError(f"{field} must use a public alias, not a local/private path")
@@ -91,6 +99,16 @@ def _compact_public_token(value: Any, *, field: str) -> str:
 
 def _compact_public_text_list(values: Iterable[Any] | None, *, field: str) -> list[str]:
     return [_compact_public_text(value, field=f"{field}[]") for value in values or []]
+
+
+def _compact_optional_failure_kind(value: Any, *, field: str) -> str | None:
+    if value is None or str(value).strip() == "":
+        return None
+    kind = _compact_public_token(value, field=field)
+    if kind not in RESEARCH_FAILURE_KINDS:
+        choices = ", ".join(sorted(RESEARCH_FAILURE_KINDS))
+        raise ValueError(f"{field} must be one of {choices}")
+    return kind
 
 
 def _finite_float(value: float | int | str | None, *, field: str) -> float | None:
@@ -300,6 +318,9 @@ def _normalize_benchmark_eval_result(
             baseline=baseline,
             direction=direction,
         ),
+        "failure_kind": result.get("failure_kind"),
+        "measurement_scope": result.get("measurement_scope"),
+        "remediation_attempt": result.get("remediation_attempt"),
         "artifact_refs": result.get("artifact_refs") or [
             f"public_eval:{split}:{result.get('metric_name') or metric['name']}",
             _command_artifact_ref(command, field=f"eval_result.{split}.command"),
@@ -350,6 +371,22 @@ def validate_research_evidence_event(item: dict[str, Any]) -> dict[str, Any]:
     direction = _compact_public_token(metric.get("direction"), field="evidence.metric.direction")
     if direction not in METRIC_DIRECTIONS:
         raise ValueError("evidence.metric.direction must be maximize or minimize")
+    failure_kind = _compact_optional_failure_kind(
+        item.get("failure_kind"),
+        field="failure_kind",
+    )
+    measurement_scope = (
+        _compact_public_text(item.get("measurement_scope"), field="measurement_scope")
+        if item.get("measurement_scope")
+        else None
+    )
+    remediation_attempt = bool(item.get("remediation_attempt"))
+    if failure_kind == "data_or_measurement_gap" and not measurement_scope:
+        raise ValueError("data or measurement gaps require measurement_scope")
+    if remediation_attempt and failure_kind != "data_or_measurement_gap":
+        raise ValueError(
+            "remediation attempts require data_or_measurement_gap failure_kind"
+        )
     return {
         "schema_version": schema,
         "hypothesis_id": _compact_public_token(item.get("hypothesis_id"), field="hypothesis_id"),
@@ -368,6 +405,9 @@ def validate_research_evidence_event(item: dict[str, Any]) -> dict[str, Any]:
             item.get("primary_metric_status"),
             field="primary_metric_status",
         ),
+        "failure_kind": failure_kind,
+        "measurement_scope": measurement_scope,
+        "remediation_attempt": remediation_attempt,
         "artifact_refs": _compact_public_text_list(item.get("artifact_refs"), field="artifact_refs"),
         "protected_scope_clean": bool(item.get("protected_scope_clean")),
         "raw_logs_recorded": False,
@@ -417,6 +457,9 @@ def _eval_result_to_evidence_event(
         "baseline_metric": metric.get("baseline", result.get("baseline_metric")),
         "eval_status": result.get("eval_status"),
         "primary_metric_status": result.get("primary_metric_status"),
+        "failure_kind": result.get("failure_kind"),
+        "measurement_scope": result.get("measurement_scope"),
+        "remediation_attempt": result.get("remediation_attempt"),
         "artifact_refs": artifact_refs,
         "protected_scope_clean": bool(result.get("protected_scope_clean")),
     }
@@ -712,6 +755,9 @@ def build_auto_research_rollout_events(
                     "metric_direction": metric["direction"],
                     "baseline_metric": evidence["baseline_metric"],
                     "primary_metric_status": evidence["primary_metric_status"],
+                    "failure_kind": evidence["failure_kind"] or "",
+                    "measurement_scope": evidence["measurement_scope"] or "",
+                    "remediation_attempt": evidence["remediation_attempt"],
                     "eval_status": evidence["eval_status"],
                     "protected_scope_clean": evidence["protected_scope_clean"],
                 },

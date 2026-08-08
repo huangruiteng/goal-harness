@@ -16,6 +16,7 @@ SKILL_INSTALL_OWNER = "loopx_install_script"
 SKILL_INSTALL_INTEGRATION_MODE = "fixed_install_script"
 PACKAGED_HOST_SKILL_IDS = [
     "loopx-project",
+    "loopx-pr-program",
     "loopx-pr-review",
     "loopx-doc-registry",
     "loopx-self-repair",

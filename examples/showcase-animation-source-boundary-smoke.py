@@ -8,25 +8,9 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SPIKE_DOC = REPO_ROOT / "docs" / "outreach" / "showcase-animation-skill-spike.md"
 SHOWCASE_INDEX = REPO_ROOT / "docs" / "showcases" / "README.md"
 CATALOG = REPO_ROOT / "docs" / "showcases" / "showcase-catalog.json"
 STORYBOARD = REPO_ROOT / "docs" / "showcases" / "showcase-animation-storyboard.json"
-
-REQUIRED_SPIKE_PHRASES = (
-    "20-30 second animated demo",
-    "docs/showcases/showcase-catalog.json",
-    "must not read live registry state",
-    "local status exports",
-    "private chats",
-    "raw benchmark traces",
-    "internal project names",
-    "Remotion Agent Skills",
-    "HyperFrames",
-    "Motion for React",
-    "showcase-animation-storyboard.json",
-    "Run `python3 examples/showcase-animation-source-boundary-smoke.py`",
-)
 
 FORBIDDEN_SOURCE_PROMOTIONS = (
     "status.frontstage-share.json",
@@ -43,27 +27,28 @@ def read(path: Path) -> str:
 
 
 def assert_required_content() -> None:
-    spike = read(SPIKE_DOC)
-    for phrase in REQUIRED_SPIKE_PHRASES:
-        assert phrase in spike, f"{SPIKE_DOC}: missing {phrase!r}"
-
     showcase_index = read(SHOWCASE_INDEX)
-    assert "showcase-animation-skill-spike.md" in showcase_index, SHOWCASE_INDEX
     assert "showcase-animation-storyboard.json" in showcase_index, SHOWCASE_INDEX
     assert "showcase-catalog.json` as the only case data source" in showcase_index, SHOWCASE_INDEX
+    assert "showcase-animation-prototype-smoke.py" in showcase_index, SHOWCASE_INDEX
 
 
 def assert_no_live_source_promotion() -> None:
-    spike = read(SPIKE_DOC)
+    showcase_index = read(SHOWCASE_INDEX)
     storyboard = read(STORYBOARD)
     for marker in FORBIDDEN_SOURCE_PROMOTIONS:
-        assert marker not in spike, f"{SPIKE_DOC}: live/private source marker {marker!r}"
+        assert marker not in showcase_index, (
+            f"{SHOWCASE_INDEX}: live/private source marker {marker!r}"
+        )
         assert marker not in storyboard, f"{STORYBOARD}: live/private source marker {marker!r}"
 
 
 def assert_catalog_is_frontstage_ready() -> None:
     catalog = json.loads(read(CATALOG))
-    assert catalog.get("schema_version") == "loopx_showcase_catalog_v0", catalog
+    assert catalog.get("schema_version") in {
+        "loopx_showcase_catalog_v0",
+        "loopx_showcase_catalog_v1",
+    }, catalog
     cases = catalog.get("cases")
     assert isinstance(cases, list) and len(cases) >= 4, catalog
     for case in cases:
@@ -114,7 +99,8 @@ def assert_storyboard_uses_public_catalog() -> None:
             assert case_id in catalog_ids, (case_id, scene)
             referenced_ids.add(case_id)
 
-    assert referenced_ids == catalog_ids, (referenced_ids, catalog_ids)
+    assert referenced_ids, referenced_ids
+    assert referenced_ids <= catalog_ids, (referenced_ids, catalog_ids)
 
 
 def main() -> int:

@@ -75,7 +75,7 @@ def register_todo_command(
             "suggest",
             "capture-followups",
         ],
-        default="add",
+        default=None,
         help=(
             "Use add to append a checkbox todo, claim to soft-claim by registered "
             "agent id, list to read projected todos, update/complete/supersede to transition by todo_id, or "
@@ -415,6 +415,12 @@ def handle_todo_command(
         else render_todo_markdown
     )
     try:
+        if args.todo_command is None:
+            raise ValueError(
+                "`loopx todo` requires an explicit command; use `loopx todo add`, "
+                "`loopx todo claim`, `loopx todo update`, or another command shown "
+                "by `loopx todo --help`"
+            )
         validate_shared_todo_options(args)
         validate_capability_gap_options(args)
         if args.todo_command == "list":

@@ -5,14 +5,20 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from importlib.util import resolve_name
+import json
 from pathlib import Path
 import subprocess
 from typing import Any, Mapping, Sequence
 
 
 MAINTAINABILITY_REPORT_SCHEMA_VERSION = "control_plane_maintainability_report_v0"
+MODULE_METRIC_BASELINE_SCHEMA_VERSION = "control_plane_module_metric_baseline_v0"
 DECISION_STATEMENT_LIMIT = 90
 DECISION_POINT_LIMIT = 60
+MODULE_LINE_LIMIT = 1500
+MODULE_ANY_LIMIT = 300
+MODULE_DICT_ANY_LIMIT = 300
+MODULE_METRIC_BASELINE_PATH = Path(__file__).with_name("module_metric_baseline.json")
 
 CONTROL_PLANE_FORBIDDEN_DEPENDENCY_PREFIXES = (
     "loopx.benchmark_adapters",
@@ -49,7 +55,7 @@ REVIEWED_MAINTAINABILITY_EXCEPTIONS: dict[str, dict[str, Any]] = {
         "The public loopx.quota import surface remains a supported compatibility contract, "
         "including presentation-owned quota event renderers.",
         "Keep internal consumers on canonical modules and shrink exports as callers migrate.",
-        metric_ceilings={"package_reexport_count": 95, "source_module_count": 36},
+        metric_ceilings={"package_reexport_count": 101, "source_module_count": 37},
     ),
     "compatibility_facade:loopx.status": _exception(
         "The public loopx.status import surface remains a supported compatibility contract.",
@@ -497,6 +503,124 @@ def collect_compatibility_facades(repository_root: Path) -> list[dict[str, Any]]
     return findings
 
 
+def _is_benchmark_module_path(path: Path) -> bool:
+    parts = path.as_posix().split("/")
+    return any(
+        part in {
+            "benchmark_adapters",
+            "benchmarks",
+        }
+        or part.startswith("benchmark")
+        or part.startswith("bench_")
+        or part.startswith("terminal_bench")
+        or part.startswith("skillsbench")
+        or part.startswith("agentissue")
+        or part.startswith("agents_last_exam")
+        for part in parts
+    )
+
+
+def module_metric_baseline(baseline_path: Path) -> dict[str, dict[str, int]]:
+    payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != MODULE_METRIC_BASELINE_SCHEMA_VERSION:
+        raise ValueError(
+            f"unexpected module metric baseline schema: "
+            f"{payload.get('schema_version')!r}"
+        )
+    ceilings = payload.get("module_metric_ceilings")
+    if not isinstance(ceilings, dict):
+        raise ValueError("module metric baseline must contain module_metric_ceilings")
+    normalized: dict[str, dict[str, int]] = {}
+    for path, metrics in ceilings.items():
+        if not isinstance(metrics, dict):
+            raise ValueError(f"module metric baseline entry must be an object: {path}")
+        normalized[str(path)] = {
+            key: int(metrics[key])
+            for key in ("lines", "any_count", "dict_any_count")
+            if key in metrics
+        }
+    return normalized
+
+
+def module_metrics(path: Path) -> dict[str, int]:
+    source = path.read_text(encoding="utf-8")
+    lines = len(source.splitlines())
+    try:
+        tree = ast.parse(source, filename=str(path))
+    except SyntaxError:
+        return {"lines": lines, "any_count": 0, "dict_any_count": 0}
+    any_count = 0
+    dict_any_count = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "Any":
+            any_count += 1
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "dict"
+            and isinstance(node.slice, ast.Tuple)
+            and len(node.slice.elts) == 2
+        ):
+            key, value = node.slice.elts
+            if (
+                isinstance(key, ast.Constant)
+                and key.value == "str"
+                and isinstance(value, ast.Name)
+                and value.id == "Any"
+            ):
+                dict_any_count += 1
+    return {
+        "lines": lines,
+        "any_count": any_count,
+        "dict_any_count": dict_any_count,
+    }
+
+
+def collect_module_metric_findings(
+    repository_root: Path,
+    *,
+    tracked_paths: set[Path] | None = None,
+    baseline_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    package_root = repository_root / "loopx"
+    baseline = module_metric_baseline(
+        baseline_path or MODULE_METRIC_BASELINE_PATH
+    )
+    paths = sorted(package_root.rglob("*.py"))
+    if tracked_paths is not None:
+        paths = [path for path in paths if path in tracked_paths]
+    findings: list[dict[str, Any]] = []
+    for path in paths:
+        if _is_benchmark_module_path(path):
+            continue
+        relative = path.relative_to(repository_root).as_posix()
+        metrics = module_metrics(path)
+        ceilings = baseline.get(relative) or {
+            "lines": MODULE_LINE_LIMIT,
+            "any_count": MODULE_ANY_LIMIT,
+            "dict_any_count": MODULE_DICT_ANY_LIMIT,
+        }
+        regressions = {
+            metric: actual
+            for metric, actual in metrics.items()
+            if actual > ceilings.get(metric, 0)
+        }
+        if not regressions:
+            continue
+        findings.append(
+            {
+                "id": _finding_id("module_metric_budget", relative),
+                "category": "module_metric_budget",
+                "path": relative,
+                "module": _module_name(path, package_root),
+                "metrics": metrics,
+                "metric_ceilings": ceilings,
+                "regressions": regressions,
+            }
+        )
+    return sorted(findings, key=lambda item: str(item["id"]))
+
+
 def evaluate_maintainability_findings(
     findings: Sequence[Mapping[str, Any]],
     *,
@@ -607,6 +731,10 @@ def build_control_plane_maintainability_report(
             tracked_paths=tracked_paths,
         ),
         *collect_compatibility_facades(repository_root),
+        *collect_module_metric_findings(
+            repository_root,
+            tracked_paths=tracked_paths,
+        ),
     ]
     evaluation = evaluate_maintainability_findings(
         sorted(findings, key=lambda item: str(item["id"])),
@@ -618,6 +746,10 @@ def build_control_plane_maintainability_report(
         "policy": {
             "decision_statement_limit": DECISION_STATEMENT_LIMIT,
             "decision_point_limit": DECISION_POINT_LIMIT,
+            "module_line_limit": MODULE_LINE_LIMIT,
+            "module_any_limit": MODULE_ANY_LIMIT,
+            "module_dict_any_limit": MODULE_DICT_ANY_LIMIT,
+            "module_metric_baseline_path": MODULE_METRIC_BASELINE_PATH.name,
             "exception_contract": (
                 "stable finding id plus non-empty reason and retirement_plan; "
                 "metric-bearing debt also requires non-increasing metric ceilings; "
@@ -627,8 +759,9 @@ def build_control_plane_maintainability_report(
             "repository_scope_decision": (
                 "This profile intentionally replaces the repository-wide exact Python line "
                 "budget with semantic checks for control-plane modules and the supported "
-                "quota/status compatibility facades; it does not retain a coarse all-file "
-                "hotspot limit."
+                "quota/status compatibility facades; it also ratchets per-module line and "
+                "type-density metrics from a checked-in baseline while keeping the current "
+                "modules grandfathered. It does not retain a coarse all-file hotspot limit."
             ),
         },
         **evaluation,

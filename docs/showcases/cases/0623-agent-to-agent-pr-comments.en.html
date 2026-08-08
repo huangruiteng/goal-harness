@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>Agent-to-agent PR comment and fix loop</h1>
     <div class="accent">PR review feedback can become an owned agent todo with fix evidence instead of a loose chat reminder.</div>
     <p>The operator can let agents coordinate around PR comments without losing final review visibility or fix evidence.</p>
-    <div class="chips"><span>handoff</span><span>PR comment</span><span>claimed_by</span></div>
+    <div class="chips"><span>Reproducible demo</span><span>Public-safe pattern</span><span>handoff</span><span>PR comment</span><span>claimed by</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>1</strong><span>owner per feedback item</span></div><div class="metric"><strong>3</strong><span>owner/fix/review questions answered</span></div><div class="metric"><strong>1</strong><span>review-packet handoff</span></div><div class="metric"><strong>0</strong><span>unowned PR comment reminders</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">Todo ownership</div><p>`event_sourced_state_contract_v0` defines `todo_claimed` as a canonical event for ownership, lease, or `claimed_by`.</p></div><div class="evidence-card"><div class="evidence-label">Review packet</div><p>`loopx/review_packet.py` preserves `claimed_by` in open-todo rendering and handoff ranking so review packets can show ownership.</p></div><div class="evidence-card"><div class="evidence-label">Peer continuation contract</div><p>`docs/heartbeat-automation-prompt.md` lets peers self-merge only small validated evidence-backed work and otherwise requires typed continuation.</p></div><div class="evidence-card"><div class="evidence-label">CLI smokes</div><p>`examples/control_plane/todo-lifecycle-cli-smoke.py` and `examples/control_plane/todo-cli-smoke.py` cover claims, typed successors, peer self-merge, explicit review handoff, and same-agent review rejection.</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX behavior</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">PR feedback becomes an owned todo rather than a chat reminder.</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">Blocked or cross-lane fixes move through handoff gates and review packets instead of another agent guessing context.</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">The fixing agent leaves diff, validation, and remaining gates; follow-up work becomes a successor todo.</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">Owner review still happens on the PR or review surface; LoopX supplies state, evidence, and handoff.</div></div></li></ul>

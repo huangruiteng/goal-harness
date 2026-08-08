@@ -15,6 +15,7 @@ from typing import Any
 
 from .evidence_packet import (
     METRIC_DIRECTIONS,
+    RESEARCH_FAILURE_KINDS,
     RESEARCH_EVIDENCE_EVENT_SCHEMA_VERSION,
     RESEARCH_HYPOTHESIS_SCHEMA_VERSION,
     _compact_public_text,
@@ -102,9 +103,16 @@ def _compact_optional_text(value: Any, *, field: str, default: str, max_len: int
     if value is None or str(value).strip() == "":
         return default
     text = " ".join(str(value).strip().split())
-    _compact_public_text(text, field=field, max_len=max(len(text), max_len))
     if len(text) > max_len:
-        text = text[: max_len - 1].rstrip() + "."
+        prefix = text[: max_len - 1].rstrip()
+        if prefix.endswith(".") and not prefix.endswith(".."):
+            text = prefix
+        else:
+            text = prefix.rstrip(".") + "."
+    # Strip trailing dot-runs so public text validation does not flag them
+    # as parent-directory markers (text may arrive with "..." from upstream).
+    while text.endswith(".."):
+        text = text[:-1]
     return _compact_public_text(text, field=field, max_len=max_len)
 
 
@@ -219,6 +227,21 @@ def _todo_frontier_item(
             max_len=220,
         ),
     }
+    unblocks_todo_id = _compact_optional_token(
+        item.get("unblocks_todo_id"),
+        field="live.unblocks_todo_id",
+        default="",
+    )
+    if unblocks_todo_id:
+        summary["unblocks_todo_id"] = unblocks_todo_id
+    resume_when = _compact_optional_text(
+        item.get("resume_when"),
+        field="live.resume_when",
+        default="",
+        max_len=160,
+    )
+    if resume_when:
+        summary["resume_when"] = resume_when
     if blocked_by:
         summary["blocked_by"] = _compact_public_text(blocked_by, field="live.blocked_by", max_len=160)
     else:
@@ -321,6 +344,9 @@ def _research_evidence_from_rollout_event(event: dict[str, Any]) -> dict[str, An
             "baseline_metric": details.get("baseline_metric"),
             "eval_status": details.get("eval_status") or event.get("status"),
             "primary_metric_status": details.get("primary_metric_status") or "inconclusive",
+            "failure_kind": details.get("failure_kind") or None,
+            "measurement_scope": details.get("measurement_scope") or None,
+            "remediation_attempt": bool(details.get("remediation_attempt")),
             "artifact_refs": event.get("artifact_refs") or [],
             "protected_scope_clean": bool(details.get("protected_scope_clean")),
         }
@@ -363,6 +389,44 @@ def _best_metric(events: list[dict[str, Any]], *, split: str, direction: str) ->
     return max(values, key=lambda value: _metric_rank_key(value, direction=direction))
 
 
+def _default_failure_kind(
+    *,
+    status: str,
+    events: list[dict[str, Any]],
+) -> str | None:
+    explicit = [event for event in events if event.get("failure_kind")]
+    if explicit:
+        return str(explicit[-1]["failure_kind"])
+    if any(not event["protected_scope_clean"] for event in events):
+        return "guardrail_or_protected_boundary"
+    if status == "needs_retry":
+        return None
+    return "mechanism_contradicted"
+
+
+def _failure_measurement_scope(events: list[dict[str, Any]]) -> str | None:
+    values = [
+        str(event.get("measurement_scope") or "").strip()
+        for event in events
+        if event.get("measurement_scope")
+    ]
+    return values[-1] if values else None
+
+
+def _ancestor_hypothesis_ids(
+    hypothesis_id: str,
+    *,
+    hypotheses: dict[str, dict[str, Any]],
+) -> set[str]:
+    ancestor_ids: set[str] = set()
+    current_id = hypothesis_id
+    while current_id and current_id not in ancestor_ids:
+        ancestor_ids.add(current_id)
+        current = hypotheses.get(current_id) or {}
+        current_id = str(current.get("parent_hypothesis_id") or "").strip()
+    return ancestor_ids
+
+
 def build_research_evidence_graph_from_records(
     *,
     goal_id: str,
@@ -385,6 +449,7 @@ def build_research_evidence_graph_from_records(
     scored_events = [event for event in events if event["eval_status"] == "scored"]
     best_dev = _best_metric(scored_events, split="dev", direction=direction)
     best_holdout = _best_metric(scored_events, split="holdout", direction=direction)
+    hypotheses_by_id = {item["hypothesis_id"]: item for item in hypotheses}
     events_by_hypothesis: dict[str, list[dict[str, Any]]] = {}
     for event in events:
         events_by_hypothesis.setdefault(event["hypothesis_id"], []).append(event)
@@ -405,12 +470,32 @@ def build_research_evidence_graph_from_records(
         item_splits = sorted({event["split"] for event in item_events if event.get("split")})
         item_negative_count = len([event for event in item_events if _is_negative_evidence_event(event)])
         item_retry_count = len([event for event in item_events if _is_retry_evidence_event(event)])
+        item_failure_kind = (
+            _default_failure_kind(status=item["status"], events=item_events)
+            if item["status"] in {"contradicted", "retired", "needs_retry"}
+            or item_negative_count
+            else None
+        )
+        lineage_ids = _ancestor_hypothesis_ids(
+            item["hypothesis_id"],
+            hypotheses=hypotheses_by_id,
+        )
+        remediation_attempt_count = len(
+            [
+                event
+                for event in events
+                if event["hypothesis_id"] in lineage_ids
+                and event.get("remediation_attempt")
+            ]
+        )
         nodes.append(
             {
                 "hypothesis_id": item["hypothesis_id"],
                 "parent_hypothesis_id": item["parent_hypothesis_id"],
                 "todo_id": item["todo_id"],
                 "claimed_by": item["claimed_by"],
+                "mechanism_family": item["mechanism_family"],
+                "hypothesis": item["hypothesis"],
                 "status": item["status"],
                 "grounding_refs": item["grounding_refs"],
                 "novelty_audit_ref": item["novelty_audit_ref"],
@@ -431,6 +516,9 @@ def build_research_evidence_graph_from_records(
                 ),
                 "negative_evidence_count": item_negative_count,
                 "needs_retry_count": item_retry_count,
+                "failure_kind": item_failure_kind,
+                "measurement_scope": _failure_measurement_scope(item_events),
+                "remediation_attempt_count": remediation_attempt_count,
                 "source_kind": source,
             }
         )
@@ -454,6 +542,9 @@ def build_research_evidence_graph_from_records(
         "needs_retry_count": len(
             [event for event in events if _is_retry_evidence_event(event)]
         ) + len([item for item in hypotheses if item["status"] == "needs_retry"]),
+        "remediation_attempt_count": len(
+            [event for event in events if event.get("remediation_attempt")]
+        ),
         "nodes": nodes,
         "source_kind": source,
     }
@@ -546,7 +637,22 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
             baseline=baseline,
             direction=direction,
         )
-        if status in {"contradicted", "retired"} or negative_count > 0:
+        failure_kind = str(raw_node.get("failure_kind") or "")
+        retry_exhausted = status == "needs_retry" and failure_kind == "retry_exhausted"
+        if status in {"contradicted", "retired"} or negative_count > 0 or retry_exhausted:
+            if failure_kind not in RESEARCH_FAILURE_KINDS:
+                failure_kind = (
+                    "guardrail_or_protected_boundary"
+                    if status == "contradicted" and negative_count
+                    else "mechanism_contradicted"
+                )
+            remediation_attempt_count = int(
+                raw_node.get("remediation_attempt_count") or 0
+            )
+            remediation_allowed = (
+                failure_kind == "data_or_measurement_gap"
+                and remediation_attempt_count < 1
+            )
             retirement_candidates.append(
                 {
                     "hypothesis_id": hypothesis_id,
@@ -554,7 +660,23 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
                     "status": status,
                     "negative_evidence_count": negative_count,
                     "evidence_event_count": evidence_count,
-                    "reason": "negative_or_guardrail_evidence" if negative_count else f"status:{status}",
+                    "reason": (
+                        "retry_exhausted"
+                        if retry_exhausted
+                        else "negative_or_guardrail_evidence"
+                        if negative_count
+                        else f"status:{status}"
+                    ),
+                    "failure_kind": failure_kind,
+                    "measurement_scope": raw_node.get("measurement_scope"),
+                    "remediation_attempt_count": remediation_attempt_count,
+                    "remediation_attempt_limit": 1,
+                    "remediation_allowed": remediation_allowed,
+                    "next_outcome": (
+                        "remediate_data_measurement"
+                        if remediation_allowed
+                        else "propose_failure_successor"
+                    ),
                     "source_kind": source_kind,
                 }
             )
@@ -583,6 +705,90 @@ def build_research_decision_candidates(evidence_graph: dict[str, Any]) -> dict[s
         "promotion_candidates": promotion_candidates,
         "retirement_candidates": retirement_candidates,
     }
+
+
+def build_research_failure_continuation_resolution(
+    decision_candidates: dict[str, list[dict[str, Any]]],
+    *,
+    selected_todo_id: str | None = None,
+    selected_lineage_todo_id: str | None = None,
+    allow_unbound_singleton: bool = False,
+    require_selected_failure_match: bool = False,
+) -> dict[str, Any]:
+    candidates = [
+        dict(candidate)
+        for candidate in decision_candidates.get("retirement_candidates") or []
+        if isinstance(candidate, dict)
+    ]
+    lineage_todo_id = str(selected_lineage_todo_id or "").strip()
+    selected_id = str(selected_todo_id or "").strip()
+    selection_bound = bool(lineage_todo_id) if require_selected_failure_match else bool(
+        lineage_todo_id or selected_id
+    )
+    selected_parent_todo_id = (
+        lineage_todo_id
+        if require_selected_failure_match
+        else lineage_todo_id or selected_id
+    )
+    matched = (
+        [
+            candidate
+            for candidate in candidates
+            if str(candidate.get("todo_id") or "").strip() == selected_parent_todo_id
+        ]
+        if selection_bound
+        else []
+    )
+    candidate = (
+        matched[0]
+        if selection_bound and len(matched) == 1
+        else candidates[0]
+        if allow_unbound_singleton and not selection_bound and len(candidates) == 1
+        else None
+    )
+    continuation = (
+        {
+            "hypothesis_id": candidate["hypothesis_id"],
+            "source_todo_id": candidate["todo_id"],
+            "failure_kind": candidate["failure_kind"],
+            "measurement_scope": candidate.get("measurement_scope"),
+            "remediation_attempt_count": candidate["remediation_attempt_count"],
+            "remediation_attempt_limit": candidate["remediation_attempt_limit"],
+            "next_outcome": candidate["next_outcome"],
+            "monitor_allowed": False,
+        }
+        if candidate
+        else None
+    )
+    return {
+        "failure_continuation": continuation,
+        "retirement_candidate_count": len(candidates),
+        "matched_candidate_count": len(matched),
+        "lineage_todo_id": lineage_todo_id or None,
+        "selection_bound": selection_bound,
+        "ambiguous": not selection_bound and len(candidates) > 1,
+        "unresolved": require_selected_failure_match
+        and bool(candidates)
+        and (not lineage_todo_id or len(matched) != 1),
+    }
+
+
+def build_research_failure_continuation(
+    decision_candidates: dict[str, list[dict[str, Any]]],
+    *,
+    selected_todo_id: str | None = None,
+    selected_lineage_todo_id: str | None = None,
+    allow_unbound_singleton: bool = True,
+    require_selected_failure_match: bool = False,
+) -> dict[str, Any] | None:
+    resolution = build_research_failure_continuation_resolution(
+        decision_candidates,
+        selected_todo_id=selected_todo_id,
+        selected_lineage_todo_id=selected_lineage_todo_id,
+        allow_unbound_singleton=allow_unbound_singleton,
+        require_selected_failure_match=require_selected_failure_match,
+    )
+    return resolution["failure_continuation"]
 
 
 def _holdout_metric_sequence_from_graph(evidence_graph: dict[str, Any]) -> list[float]:
@@ -640,6 +846,11 @@ def build_auto_research_completion_status(
     validated_count = len(decisions.get("validated_promotion_candidates") or [])
     promotion_count = len(decisions.get("promotion_candidates") or [])
     retirement_count = len(decisions.get("retirement_candidates") or [])
+    failure_resolution = build_research_failure_continuation_resolution(
+        decisions,
+        allow_unbound_singleton=True,
+    )
+    failure_continuation = failure_resolution["failure_continuation"]
 
     status = "active"
     next_action = "continue_frontier"
@@ -662,10 +873,13 @@ def build_auto_research_completion_status(
         required_actions = ["boundary_scan", "promotion_decision"]
         reason = "validated_promotion_candidate_pending_decision"
     elif retirement_count:
-        status = "retirement_review_required"
-        next_action = "review_retirement_candidate"
-        required_actions = ["retirement_decision"]
-        reason = "retirement_candidate_pending_decision"
+        status = "failure_successor_required"
+        next_action = str(
+            (failure_continuation or {}).get("next_outcome")
+            or "propose_failure_successor"
+        )
+        required_actions = [next_action]
+        reason = "retirement_candidate_requires_successor_or_exhaustion"
 
     return {
         "schema_version": AUTO_RESEARCH_COMPLETION_STATUS_SCHEMA_VERSION,
@@ -681,6 +895,8 @@ def build_auto_research_completion_status(
         "dev_candidate_pending_holdout_count": dev_pending_count,
         "promotion_candidate_count": promotion_count,
         "retirement_candidate_count": retirement_count,
+        "failure_continuation": failure_continuation,
+        "failure_continuation_ambiguous": failure_resolution["ambiguous"],
     }
 
 

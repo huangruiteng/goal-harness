@@ -6,7 +6,7 @@
 > 多轮结果仍属于同一个可恢复、可审计的生命周期。
 
 建议时长：35 分钟。本导读面向第一次接触 LoopX 的读者；读完后再进入
-[第 0 讲](00-goal-control-plane-architecture.md)的架构和代码路径。
+[第 2 讲](02-goal-control-plane-architecture.md)的架构和代码路径。
 
 ## 先接受两个工程预设
 
@@ -483,15 +483,15 @@ LoopX 提供的是让这些能力可以被组合、约束、观察和恢复的�
 
 | 想继续理解的问题 | 对应课程 |
 | --- | --- |
-| Kernel、Capability Pack、Domain State 怎样分层？ | [第 0 讲](00-goal-control-plane-architecture.md) |
-| 一个 goal 第一次怎样真正跑起来？ | [第 1 讲](01-first-real-loop.md) |
-| registry、event、active state、projection 各自拥有什么？ | [第 2 讲](02-state-substrate.md) |
-| todo、claim、lease、gate 和 equal peer 怎样组合？ | [第 3 讲](03-work-graph-and-peers.md) |
-| should-run 怎样压成 interaction contract，以及它与 typed Turn 枚举有何不同？ | [第 4 讲](04-quota-decision-kernel.md)、[architecture Turn vocabulary](../../architecture.md#turn-decision-vocabulary) |
-| scheduler、heartbeat、RRULE 和 ACK 的边界是什么？ | [第 5 讲](05-host-scheduler-and-heartbeat.md) |
-| evidence、replan 和 self-repair 何时触发？ | [第 6 讲](06-evidence-refresh-and-self-repair.md) |
-| 怎样实现和验证一条新的控制面规则？ | [第 7 讲](07-engineering-a-control-plane-rule.md) |
-| 自主 Agent 交付需要哪些分层质量门禁？ | [第 8 讲](08-autonomous-agent-quality-gates.md) |
-| Extension、Explore、Reward Memory 与领域产品怎样复用 Kernel？ | [第 9 讲](09-extension-layer.md) |
+| Kernel、Capability Pack、Domain State 怎样分层？ | [第 2 讲](02-goal-control-plane-architecture.md) |
+| 一个 goal 第一次怎样真正跑起来？ | [第 3 讲](03-first-real-loop.md) |
+| registry、event、active state、projection 各自拥有什么？ | [第 4 讲](04-state-substrate.md) |
+| todo、claim、lease、gate 和 equal peer 怎样组合？ | [第 5 讲](05-work-graph-and-peers.md) |
+| should-run 怎样压成 interaction contract，以及它与 typed Turn 枚举有何不同？ | [第 6 讲](06-quota-decision-kernel.md)、[architecture Turn vocabulary](../../architecture.md#turn-decision-vocabulary) |
+| scheduler、heartbeat、RRULE 和 ACK 的边界是什么？ | [第 7 讲](07-host-scheduler-and-heartbeat.md) |
+| evidence、replan 和 self-repair 何时触发？ | [第 8 讲](08-evidence-refresh-and-self-repair.md) |
+| 怎样实现和验证一条新的控制面规则？ | [第 9 讲](09-engineering-a-control-plane-rule.md) |
+| 自主 Agent 交付需要哪些分层质量门禁？ | [第 10 讲](10-autonomous-agent-quality-gates.md) |
+| Extension、Explore、Reward Memory 与领域产品怎样复用 Kernel？ | [第 11 讲](11-extension-layer.md) |
 
-完成导读后，从[第 0 讲](00-goal-control-plane-architecture.md)开始按真实代码路径学习。
+完成导读后，从[第 2 讲](02-goal-control-plane-architecture.md)开始按真实代码路径学习。

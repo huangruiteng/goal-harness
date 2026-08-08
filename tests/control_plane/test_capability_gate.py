@@ -56,9 +56,10 @@ def _gate(
     ),
     [
         (["shell"], "run", "agent", None),
+        (["project_branch"], "repair_bridge", "agent", "repair_missing"),
         (["network"], "repair_bridge", "agent", "repair_missing"),
         (["credentials"], "ask_owner", "user", "owner_missing"),
-        (["gpu_runner"], "skip", "capability_gate", "unsupported_missing"),
+        (["gpu_runner"], "repair_bridge", "agent", "repair_missing"),
     ],
 )
 def test_missing_capability_decision_table(

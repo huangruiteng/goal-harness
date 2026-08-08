@@ -2,8 +2,43 @@ from __future__ import annotations
 
 from typing import Any
 
-
 CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "lark-goal-channel-human-gate-delivery",
+        "title": "Lark Goal Channel human-gate delivery",
+        "quality_risk": "high",
+        "purpose": (
+            "Qualify opt-in user-gate delivery from canonical active state and "
+            "quota through the verified Lark Goal Channel transport boundary."
+        ),
+        "catalog_families": [
+            "Work Routing",
+            "State And Boundary",
+        ],
+        "trigger_hints": (
+            "lark goal channel",
+            "human gate delivery",
+            "goal-channel",
+            "loopx/cli_commands/project_lifecycle.py",
+            "loopx/extensions/lark/goal_channel_lifecycle.py",
+            "loopx/extensions/lark/goal_channel_runtime.py",
+            "examples/lark-goal-channel-human-gate-delivery-smoke.py",
+            "docs/architecture/rfcs/goal-channel-collaboration-v0.md",
+        ),
+        "checks": [
+            {
+                "command": (
+                    "python3 "
+                    "examples/lark-goal-channel-human-gate-delivery-smoke.py"
+                ),
+                "tier": "default",
+                "reason": (
+                    "guards canonical user-gate selection, stable gate identity, "
+                    "bot send/readback, receipt persistence, and duplicate suppression"
+                ),
+            },
+        ],
+    },
     {
         "id": "change-quality-exact-receipt",
         "title": "Change-quality exact-scope receipt integrity",
@@ -147,7 +182,8 @@ CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
         "trigger_hints": (
             "goal frontier replan",
             "goal_frontier_replan_rules",
-            "loopx/control_plane/goals/goal_frontier.py",
+            "loopx/control_plane/goals/goal_frontier/__init__.py",
+            "loopx/control_plane/goals/goal_frontier/terminal.py",
             "loopx/control_plane/goals/goal_frontier_replan_rules.py",
             "goal-frontier-replan-rules-smoke.py",
         ),
@@ -187,6 +223,7 @@ CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
             "route_binding",
             "loopx/control_plane/scheduler/ack.py",
             "loopx/control_plane/scheduler/scheduler_hint.py",
+            "loopx/control_plane/scheduler/monitor_wait.py",
             "loopx/control_plane/scheduler/state.py",
             "loopx/control_plane/scheduler/state_transition_rules.py",
             "loopx/cli_commands/quota",
@@ -235,6 +272,7 @@ CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
             "loopx/project_prompt.py",
             "loopx/quota.py",
             "loopx/status.py",
+            "loopx/control_plane/effect_program.py",
             "loopx/review_packet.py",
             "loopx/heartbeat_prompt.py",
             "loopx/todos.py",

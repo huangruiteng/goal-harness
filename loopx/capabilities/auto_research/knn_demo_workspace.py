@@ -256,7 +256,7 @@ def _write_if_missing(path: Path, content: str, *, executable: bool = False) -> 
         if executable:
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
         return False
-    path.write_text(content, encoding="utf-8")
+    path.write_text(content, encoding="utf-8", newline="\n")
     if executable:
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return True

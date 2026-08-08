@@ -235,6 +235,21 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         ],
         "implemented_protocols": [
             {
+                "schema_version": "pull_request_review_execution_contract_v1",
+                "module": "loopx.capabilities.pr_review_queue.review_contract",
+                "doc": "docs/reference/protocols/pr-review-command-v0.md",
+            },
+            {
+                "schema_version": "pull_request_review_plan_v1",
+                "module": "loopx.capabilities.pr_review_queue.review_contract",
+                "doc": "docs/reference/protocols/pr-review-command-v0.md",
+            },
+            {
+                "schema_version": "pull_request_review_result_v1",
+                "module": "loopx.capabilities.pr_review_queue.review_contract",
+                "doc": "docs/reference/protocols/pr-review-command-v0.md",
+            },
+            {
                 "schema_version": "pull_request_review_queue_observation_v0",
                 "module": "loopx.capabilities.pr_review_queue.core",
                 "doc": "docs/reference/protocols/pr-review-command-v0.md",
@@ -256,6 +271,7 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         ],
         "docs": ["docs/reference/protocols/pr-review-command-v0.md"],
         "boundaries": [
+            "The shared execution contract owns review depth, evidence completeness, exact-head freshness, symbol-map, walkthrough, validation, failure, and code-volume requirements; host skills only route and publish it.",
             "A queue is observed only when result_completeness.complete=true; partial or failed reads are not_observed and never count as unchanged.",
             "Fingerprints cover exact head, review decision, check state, draft state, and mergeability for every open PR.",
             "One observation emits at most one exact-head advancement Todo preview; unchanged observations emit no duplicate candidate and may advance only from an explicit handled exact-head cursor.",
@@ -1583,6 +1599,26 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "purpose": "Create an isolated goal and launch visible role-scoped workers through the shared multi-agent runtime.",
                 "write_boundary": "local goal, workspace, and visible launcher state; no publication, benchmark submission, or protected external action",
             },
+            {
+                "command": "loopx auto-research decide --goal-id <goal-id> --hypothesis-id <id> --outcome <promoted|retired> --reason <reason> --agent-id <agent-id> --execute",
+                "purpose": "Record one terminal research decision after current evidence satisfies the promotion or retirement contract.",
+                "write_boundary": "one public-safe validation event bound to the current hypothesis evidence revision",
+            },
+            {
+                "command": "loopx auto-research review --goal-id <goal-id> --hypothesis-id <id> --reviewer-agent-id <peer-id> --verdict <verdict> --require-independent --execute",
+                "purpose": "Record a registered-peer review receipt without rewriting the research evidence or terminal decision.",
+                "write_boundary": "one public-safe validation receipt; independent mode rejects producer and decision-agent self-review",
+            },
+            {
+                "command": "loopx auto-research results --goal-id <goal-id> [--hypothesis-id <id>] [--include-history]",
+                "purpose": "Read exact current and historical terminal outcomes, review state, and Explore readback.",
+                "write_boundary": "read-only projection over rollout and Explore result events",
+            },
+            {
+                "command": "loopx auto-research project-results --goal-id <goal-id> --execute",
+                "purpose": "Project current terminal outcomes into deterministic existing Explore node and finding events.",
+                "write_boundary": "goal-scoped Explore result log only; repeated projection is idempotent",
+            },
         ],
         "implemented_protocols": [
             {
@@ -1595,10 +1631,32 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "module": "loopx.capabilities.auto_research.research_state",
                 "doc": "docs/reference/protocols/decentralized-auto-research-state-v0.md",
             },
+            {
+                "schema_version": "auto_research_terminal_decision_v0",
+                "module": "loopx.capabilities.auto_research.terminal_result_contract",
+                "doc": "docs/reference/protocols/decentralized-auto-research-state-v0.md",
+            },
+            {
+                "schema_version": "auto_research_peer_review_v0",
+                "module": "loopx.capabilities.auto_research.terminal_result_contract",
+                "doc": "docs/reference/protocols/auto-research-lane-contract-v1.md",
+            },
+            {
+                "schema_version": "auto_research_terminal_result_query_v0",
+                "module": "loopx.capabilities.auto_research.terminal_result_query",
+                "doc": "docs/reference/protocols/decentralized-auto-research-state-v0.md",
+            },
+            {
+                "schema_version": "auto_research_terminal_result_projection_v0",
+                "module": "loopx.capabilities.auto_research.terminal_results",
+                "doc": "docs/reference/protocols/decentralized-auto-research-state-v0.md",
+            },
         ],
         "smokes": [
             "python3 examples/auto-research-user-contract-entry-smoke.py",
             "python3 examples/auto-research-worker-turn-smoke.py",
+            "python3 examples/auto-research-terminal-results-smoke.py",
+            "python3 examples/auto-research-terminal-results-cli-smoke.py",
         ],
         "docs": [
             "docs/guides/auto-research-command-path.md",
@@ -1607,6 +1665,8 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         "boundaries": [
             "The preset reuses shared control-plane and multi-agent contracts; it is not a second scheduler or runner.",
             "Completion and uplift require role-authored evidence and projected outcomes; the launcher does not manufacture research results.",
+            "Promotion and retirement candidates are not terminal decisions; explicit decisions bind one hypothesis evidence revision.",
+            "Same-agent review remains visible but cannot be labeled independent or upgrade a finding to confirmed or refuted.",
         ],
         "next_real_step": (
             "Use the one-question entrypoint for bounded research and preserve every promoted or rejected outcome in canonical evidence."

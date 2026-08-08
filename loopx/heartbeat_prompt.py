@@ -47,10 +47,20 @@ from .control_plane.work_items.runtime_capability_reentry import (
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
 DEFAULT_PERMISSION_RULE = "Do not ask for permissions when the current Codex session is already trusted."
 USER_TODO_FINAL_MESSAGE_RULE = (
-    "notify=NOTIFY: concrete actions/todos, including non_blocking at false/0; "
-    "never only \"owner gate\"; required missing -> "
-    '"具体 user todo 未投影，需修复 LoopX 状态投影". '
-    "Only notify=DONT_NOTIFY + false/0: quiet."
+    "`interaction_contract.user_channel.notify` controls output: `NOTIFY` -> concrete "
+    "action; otherwise quiet. `should_run`/due monitor and other-agent scoped todos "
+    "are not user prompts. Only inside `NOTIFY`, `action_required` without an action -> "
+    '"具体 user todo 未投影，需修复 LoopX 状态投影"; with `DONT_NOTIFY`, repair '
+    "the projection internally and stay quiet."
+)
+HEARTBEAT_NOTIFICATION_RULE_SHORT = (
+    "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet. "
+    "Due/peer gate != prompt; missing NOTIFY action->"
+    "具体user todo未投影，需修复LoopX状态投影."
+)
+HEARTBEAT_VISION_WRITEBACK_RULE_SHORT = (
+    "writeback: no-change=`surface_only`/no spend; "
+    "unchanged->`--vision-unchanged-reason`; material->actual outcome."
 )
 SCHEDULER_HINT_APPLICATION_RULE = (
     "`scheduler_hint` no-spend. host_action=pause_or_delete_current_heartbeat -> "
@@ -393,7 +403,8 @@ Before delivery, claim an in-scope open todo:
 ```
 
 If a todo is claimed or leased by another peer, choose another in-scope item or
-report no in-scope work. Scope belongs in the heartbeat prompt, not todo metadata.
+record no in-scope work internally. Only `NOTIFY` reports it; `DONT_NOTIFY` stays quiet.
+Scope belongs in the heartbeat prompt, not todo metadata.
 """
 
 
@@ -856,34 +867,27 @@ If that preflight still fails: no work/spend; quiet `DONT_NOTIFY`.
 `lark_event_inbox`: `reply_due`: drain -> effect/reply/readback/ACK.
 
 {USER_TODO_FINAL_MESSAGE_RULE}
+{HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 
 If the result says `should_run=false`:
 
-- If `state=operator_gate`, treat it as a user/controller interaction. Read
-  `gate_prompt`, `operator_question`, `recommended_action`,
-  `next_handoff_condition`, `missing_gates`, `user_todo_summary`, and
-  `agent_todo_summary`. If not surfaced recently, return heartbeat `NOTIFY`
-  with one concise Chinese question listing the gate and expected reply format.
-  If `user_todo_summary.open_count > 0`, list existing open user todos even
-  when nothing new was found; never say "no new user action".
-  Do not execute `agent_command`, adapter work, write-control, production
-  actions, or the gated path while asking.
-- If `notify_user_on_open_todo=true`, existing open `user_todo_summary` is a
-  blocker-push opportunity, not a silent skip. For focus/wait/evidence lanes,
-  a user/owner answer can unlock progress. If the payload explicitly includes
-  `open_todo_notification_policy=repeat_until_resolved`, repeat until resolved,
-  except `user_gate_notification_cooldown.notification_suppressed=true`: keep
-  the gate pending and `DONT_NOTIFY` until its reminder window/change.
-  Else `NOTIFY` in Chinese with up to three
-  `first_open_items`, `open_todo_notify_reason`, and reply format: `done`,
-  `defer/not now`, or evidence link/date/conclusion. No delivery/spend.
+- Only if `user_channel.notify=NOTIFY`, interpret `state=operator_gate` or
+  `notify_user_on_open_todo=true` as a user prompt. Read `gate_prompt`,
+  `operator_question`, `user_todo_summary`, and `open_todo_notify_reason`;
+  ask one concise Chinese action/question with reply format. If
+  `user_todo_summary.open_count > 0`, include up to three `first_open_items`;
+  never say "no new user action". Honor
+  `open_todo_notification_policy=repeat_until_resolved`; when
+  `user_gate_notification_cooldown.notification_suppressed=true`, keep the gate
+  pending and quiet until its reminder window/change. No gated delivery/spend.
+  No delivery/spend on the gated path.
 - If the payload also says `safe_bypass_allowed=true` and the same gate has
   already been surfaced, the gate blocks only the gated delivery path. You may
   do exactly one bounded safe-bypass step from the Priority Stack that does not
   depend on that gate; validate, write back, refresh accountable progress, spend
-  once, and report compactly. If `user_todo_summary.open_count > 0`, include
-  those todos and do not say "no new user action". If none exists, report the
-  gate.
+  once. Only if `user_channel.notify=NOTIFY`: report the result compactly; if
+  `user_todo_summary.open_count > 0`, include those todos; if none exists, report
+  the gate. Under `DONT_NOTIFY`, stay quiet after the safe-bypass work.
 - If `effective_action=monitor_quiet_skip`, receipt/stall is written; quiet
   unless replan. On receipt write failure, retry same id. No edits/spend;
   receipts do not self-stop.
@@ -892,8 +896,10 @@ If the result says `should_run=false`:
   project-approved status/log/metric/marker surfaces named in active state,
   `recommended_action`, or `goal_boundary.next_probe`. Unchanged evidence:
   quiet `DONT_NOTIFY`, no edits, no spend. New eval/fail/complete/blocker/
-  approval/CI/deploy/data evidence: report, write back only allowed canonical
+  approval/CI/deploy/data evidence: write back only allowed canonical
   state/board/ledger, add todos if needed, then spend once after validation.
+  Only if `user_channel.notify=NOTIFY`: report the new evidence. Under
+  `DONT_NOTIFY`, stay quiet.
   Still do not launch/stop/restart/sync/design code or mutate production unless
   `should_run=true` or the user explicitly authorizes it.
 - Otherwise, do not do implementation work, adapter work, file edits, research,
@@ -926,8 +932,8 @@ If the result says `should_run=true`:
    surface propagation, or synthetic-only chains.
    Read `execution_obligation`: `notify` is not an execution gate;
    `must_attempt_work=true` means one bounded segment even with
-   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
-   `notify_user_on_open_todo=true` blocker-push notification. Use
+   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and
+   `user_channel.notify=DONT_NOTIFY`. Use
    `scheduler_hint` for wakeup and unchanged-loop limits. For Codex App:
    `apply_needed=true` -> update `recommended_rrule` once; on success run
    `ack_hint.cli_args`; on failure/timeout do not retry or ack, run
@@ -939,8 +945,8 @@ If the result says `should_run=true`:
    `heartbeat_recommendation`: `recommended_mode=run_first_read_only_map` means
    run its `command` as a real read-only map, then
    validate/save the `read_only_project_map` result, refresh accountable
-   progress, append exactly one heartbeat spend, sync state if needed, and
-   `NOTIFY`. If it says
+   progress, append exactly one heartbeat spend, sync state if needed; notify
+   only under `NOTIFY`. If it says
    `recommended_mode=mapped_noop_if_unchanged` with `stop_if_unchanged=true`,
    and you find no new user instruction, owner evidence, agent todo, stale
    source, or safe handoff, return quiet `DONT_NOTIFY`: do not run, edit, or
@@ -1017,8 +1023,9 @@ If the result says `should_run=true`:
 
    Never emit accountable progress after spend; it creates an unspent record.
 
-10. Return compactly. `NOTIFY` only for an artifact, gate, blocker, or self-stop;
-    otherwise use `DONT_NOTIFY`.
+10. Return compactly under `interaction_contract.user_channel.notify`:
+    `NOTIFY` only for concrete artifact/gate/blocker/self-stop when the
+    authority is `NOTIFY`; otherwise stay quiet `DONT_NOTIFY`.
 
 {material_queue_rule}
 {permission_rule}"""
@@ -1062,9 +1069,8 @@ Guard/retry; `LOOPX_TURN=<current_time_iso>`:
 
 Fail:quiet.
 
-User NOTIFY: Chinese actions incl. non_blocking at false/0; never only "owner
-gate"; required missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
-Only DONT_NOTIFY+false/0: quiet.
+{HEARTBEAT_NOTIFICATION_RULE_SHORT}
+{HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 
 If `should_run=false`: follow user channel. `monitor_quiet_skip`: receipt/stall
 done; quiet unless replan; write failure: retry same id. External/wait monitor:
@@ -1072,25 +1078,23 @@ one read-only poll; new evidence -> writeback/spend. Safe bypass if allowed.
 {SCHEDULER_HINT_THIN_RULE}
 `lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
 
-If `should_run=true`: fetch compact; read needed state priority slice + guard
-payload. Use `status --limit 3`; `review-packet --handoff-only`.
-Blocker-push first; obey
+If `should_run=true`: fetch compact; use `status --limit 3` and
+`review-packet --handoff-only`. Obey
 `execution_obligation`, `effective_action`, `recovery_delivery_allowed`,
 `heartbeat_recommendation`, `safe_bypass_kind=outcome_floor_recovery`,
 `goal_boundary`, `delivery_batch_scale`, `delivery_outcome`, outcome streaks,
 `handoff_delivery_contract`; do 1 bounded segment/batch when
 `execution_obligation.must_attempt_work=true`; if recovery, run
 ranker/cross-domain evidence recovery or blocker writeback;
-validate/writeback/todos; done->successor/rationale.
-Progress (actual values; no upgrade):
+validate/writeback/todos; done->successor/rationale. Progress(actual,no upgrade):
 `{progress_refresh_state_command}`
-Spend once:
+Spend:
 `{quota_spend_command}`
-Optional state-only post-spend:
+Post-spend state:
 `{refresh_state_command}`
 
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs, or
-duplicate accounting. Compact return; `NOTIFY` only for artifact/gate/blocker/self-stop.
+duplicate accounting. Return only under `user_channel.notify=NOTIFY`; else quiet.
 
 {material_queue_rule}
 {permission_rule}"""
@@ -1121,7 +1125,7 @@ def render_compact_heartbeat_task_body(
     )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-This compact LoopX heartbeat body stays generic; local policy:
+This compact LoopX heartbeat body; policy:
 registry/state/adapter/`goal_boundary`.
 Expanded lifecycle contract: `{expanded_prompt_command}`.
 {scope_block}
@@ -1136,27 +1140,28 @@ Preflight/guard; `LOOPX_TURN=<current_time_iso>`; reuse:
 Preflight fail: quiet; no work/spend.
 
 {SCHEDULER_HINT_COMPACT_RULE}
+{HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 
 `lark_event_inbox`: reply_due: drain_command -> effect/reply/readback/ACK.
 
-If `should_run=false`: `monitor_quiet_skip` -> receipt/stall done; quiet unless
-replan; write failure -> retry same id; no edits/spend; receipts do not self-stop.
-`state=operator_gate` / `notify_user_on_open_todo=true` /
-`user_channel.notify=NOTIFY`: blocker-push including
-non_blocking; `open_todo_notification_policy=repeat_until_resolved`: repeat;
-cooldown:quiet;
-never only "owner gate"; no delivery/spend. `safe_bypass_allowed=true`: one
-gate-independent safe-bypass, validate/writeback/spend. External/wait monitor:
-one read-only status/log/metric/marker poll; unchanged quiet, new evidence
-writeback/spend. Otherwise quiet `DONT_NOTIFY`.
+Output policy: authority=`interaction_contract.user_channel.notify`;
+external=`NOTIFY`; quiet=`DONT_NOTIFY`; quiet_missing_action=`internal_repair`.
+
+If `should_run=false`: `monitor_quiet_skip` -> receipt/stall; quiet unless
+replan; failed write -> retry id; no edits/spend; receipts do not self-stop.
+Only under `NOTIFY`, `state=operator_gate`/`notify_user_on_open_todo=true`
+permit concrete blocker-push; else quiet.
+Honor repeat/cooldown. `safe_bypass_allowed=true`: one validated step. Wait
+monitor: one read-only poll; unchanged quiet, new evidence writeback/spend.
 
 If `should_run=true`:
 1. Read active state, Priority Stack, progress/critic, `goal_boundary`,
    `attention_queue.items` / `project_asset`, and guard `user_todo_summary`.
    Legacy/raw fallback is not owner/gate/stop authority. Treat
    `run_history.latest_runs` as drill-down only.
-2. Stop only for this goal's own blocker todo: Chinese `NOTIFY`, no work/spend.
-   Dependency/sibling todos: surface; continue audit.
+2. Goal-owned blocker: stop its path. Under `NOTIFY`, send a concrete Chinese
+   blocker-push; under `DONT_NOTIFY`, repair internally and stay quiet.
+   Dependency/sibling todos: record; continue audit.
 3. If `effective_action=outcome_floor_recovery` or
    `recovery_delivery_allowed=true` or
    `safe_bypass_kind=outcome_floor_recovery`, run only ranker/cross-domain
@@ -1164,11 +1169,11 @@ If `should_run=true`:
    surface/synthetic-only work.
 4. Follow `execution_obligation`: `notify` is not an execution gate.
    `must_attempt_work=true` means one bounded segment even with
-   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and no
-   `notify_user_on_open_todo=true` blocker-push notification.
+   `notify=DONT_NOTIFY`; quiet no-op needs `must_attempt_work=false` and
+   `user_channel.notify=DONT_NOTIFY`.
    Then follow `heartbeat_recommendation`:
-   `run_first_read_only_map` means run exact real-map command, then
-   validate/save/accountable-refresh/spend/`NOTIFY`;
+   `run_first_read_only_map`: exact real-map, validate/save/refresh/spend;
+   notify only under `NOTIFY`;
    `mapped_noop_if_unchanged` plus
    `stop_if_unchanged=true` means quiet no-op if no new instruction/evidence/
    todo/stale source/safe handoff.
@@ -1203,8 +1208,7 @@ If `should_run=true`:
 No spend for quiet skips, preflight failures, blocker-push asks, dry-runs,
 self-cancel turns, or duplicate accounting.
 
-Return compactly. Use heartbeat `NOTIFY` only for committed artifact, user gate,
-real blocker, or self-stop; otherwise use `DONT_NOTIFY`.
+Return only under `user_channel.notify=NOTIFY`; otherwise stay quiet.
 
 {material_queue_rule}
 {permission_rule}"""
@@ -1462,12 +1466,10 @@ def render_thin_heartbeat_task_body(
 Inspect state/status/repo.
 `LOOPX_TURN=<current_time_iso>`; reuse.
 {pr_review_pre_quota_instruction}{quota_guard_instruction}.
-NOTIFY Chinese actions incl. non_blocking false/0; not only "owner gate";
-missing -> "具体 user todo 未投影，需修复 LoopX 状态投影".
-DONT_NOTIFY+false/0 only: quiet.
+{HEARTBEAT_NOTIFICATION_RULE_SHORT}
 {RUNTIME_CAPABILITY_PROJECTION_THIN_RULE}
 {SCHEDULER_HINT_THIN_RULE}
-writeback: actual class/scale/outcome accountable refresh->spend; no upgrade.
+{HEARTBEAT_VISION_WRITEBACK_RULE_SHORT}
 Done->todo/rationale; guard receipt; 2 stalls->replan.
 `lark_event_inbox`: reply_due; drain_command/reply-readback/ACK.
 

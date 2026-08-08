@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import errno
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .authority import compact_authority_registry
 from .control_plane.runtime.time import now_local_iso
+from .file_lock import exclusive_file_lock
 from .history import load_registry
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path, resolve_runtime_root
 from .registry import registry_goals
@@ -30,21 +32,63 @@ def now_local() -> str:
     return now_local_iso()
 
 
-def read_json_if_exists(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    with path.open(encoding="utf-8") as f:
-        payload = json.load(f)
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return payload
-
-
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     temp_path.replace(path)
+
+
+@dataclass(frozen=True, slots=True)
+class GlobalRegistryReduction:
+    payload: dict[str, Any]
+    receipt: dict[str, Any]
+    backup_label: str | None = None
+
+
+def _global_registry_backup_path(global_path: Path, label: str) -> Path:
+    timestamp = now_local().replace(":", "").replace("-", "")
+    return global_path.with_name(f"{global_path.name}.{label}-{timestamp}.bak")
+
+
+def mutate_global_registry(
+    global_path: Path,
+    operation: str,
+    reducer: Callable[[dict[str, Any]], GlobalRegistryReduction],
+) -> dict[str, Any]:
+    """Apply one authoritative global-registry read-modify-write transaction."""
+
+    with exclusive_file_lock(global_path, operation=operation):
+        current = load_registry(global_path)
+        reduction = reducer(copy.deepcopy(current))
+        if not isinstance(reduction, GlobalRegistryReduction):
+            raise TypeError(
+                "global registry reducer must return GlobalRegistryReduction"
+            )
+        if not isinstance(reduction.payload, dict):
+            raise TypeError("global registry reducer payload must be a JSON object")
+
+        wrote = reduction.payload != current
+        backup_path = None
+        if wrote and reduction.backup_label and global_path.exists():
+            backup = _global_registry_backup_path(
+                global_path,
+                reduction.backup_label,
+            )
+            write_json(backup, current)
+            backup_path = str(backup)
+        if wrote:
+            write_json(global_path, reduction.payload)
+
+    return {
+        "before": current,
+        "after": reduction.payload,
+        "receipt": reduction.receipt,
+        "backup_path": backup_path,
+        "wrote": wrote,
+    }
 
 
 def global_write_denied_payload(
@@ -91,7 +135,8 @@ def global_write_denied_payload(
         "global_registry_writability": writability or {},
         "requires_global_registry_repair": True,
         "requires_host_permission": bool(
-            (writability or {}).get("requires_host_permission") or is_write_denied_error(exc)
+            (writability or {}).get("requires_host_permission")
+            or is_write_denied_error(exc)
         ),
         "recommended_action": (
             f"Fix write access for `{global_path}` and rerun `loopx sync-global` "
@@ -102,7 +147,9 @@ def global_write_denied_payload(
     }
 
 
-def sanitize_goal_for_global(goal: dict[str, Any], *, source_registry: Path, synced_at: str) -> dict[str, Any]:
+def sanitize_goal_for_global(
+    goal: dict[str, Any], *, source_registry: Path, synced_at: str
+) -> dict[str, Any]:
     copied = copy.deepcopy(goal)
     authority_sources = copied.pop("authority_sources", [])
     repo = Path(str(copied.get("repo"))).expanduser() if copied.get("repo") else None
@@ -111,7 +158,9 @@ def sanitize_goal_for_global(goal: dict[str, Any], *, source_registry: Path, syn
     copied.pop("authority_registry", None)
     copied["source_registry"] = str(source_registry.expanduser().resolve())
     copied["synced_at"] = synced_at
-    copied["authority_source_count"] = len(authority_sources) if isinstance(authority_sources, list) else 0
+    copied["authority_source_count"] = (
+        len(authority_sources) if isinstance(authority_sources, list) else 0
+    )
     copied["authority_registry"] = authority_registry
     return copied
 
@@ -122,7 +171,10 @@ def same_source_registry(existing: dict[str, Any], incoming: dict[str, Any]) -> 
     if not existing_source or not incoming_source:
         return False
     try:
-        return Path(str(existing_source)).expanduser().resolve() == Path(str(incoming_source)).expanduser().resolve()
+        return (
+            Path(str(existing_source)).expanduser().resolve()
+            == Path(str(incoming_source)).expanduser().resolve()
+        )
     except OSError:
         return str(existing_source) == str(incoming_source)
 
@@ -146,7 +198,9 @@ def route_snapshot(goal: dict[str, Any] | None) -> dict[str, str | None]:
     return {field: _resolved_route_value(goal, field) for field in ROUTE_FIELDS}
 
 
-def route_collision(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any] | None:
+def route_collision(
+    existing: dict[str, Any], incoming: dict[str, Any]
+) -> dict[str, Any] | None:
     existing_route = route_snapshot(existing)
     incoming_route = route_snapshot(incoming)
     changed = [
@@ -176,8 +230,14 @@ def collision_message(collision: dict[str, Any]) -> str:
     )
 
 
-def preserve_attention_override(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
-    merged = {key: value for key, value in incoming.items() if key != "clear_attention_override"}
+def preserve_attention_override(
+    existing: dict[str, Any], incoming: dict[str, Any]
+) -> dict[str, Any]:
+    merged = {
+        key: value
+        for key, value in incoming.items()
+        if key != "clear_attention_override"
+    }
     if incoming.get("clear_attention_override"):
         return merged
     if same_source_registry(existing, incoming):
@@ -190,7 +250,9 @@ def preserve_attention_override(existing: dict[str, Any], incoming: dict[str, An
         merged[field] = existing[field]
         preserved = True
     if preserved and existing.get("attention_override_synced_from"):
-        merged["attention_override_synced_from"] = existing.get("attention_override_synced_from")
+        merged["attention_override_synced_from"] = existing.get(
+            "attention_override_synced_from"
+        )
     return merged
 
 
@@ -237,12 +299,67 @@ def merge_goal_entries(
     return merged, actions, synced_ids, collisions
 
 
-def write_recovery_backup(global_path: Path, payload: dict[str, Any], *, dry_run: bool) -> str | None:
-    timestamp = now_local().replace(":", "").replace("-", "")
-    backup_path = global_path.with_name(f"{global_path.name}.route-collision-backup-{timestamp}.bak")
-    if not dry_run:
-        write_json(backup_path, payload)
-    return str(backup_path)
+def _merge_global_registry_payload(
+    existing: dict[str, Any],
+    incoming: list[dict[str, Any]],
+    *,
+    allow_route_replacement: bool,
+    schema_version_fallback: str,
+    runtime_root: Path,
+    synced_at: str,
+) -> tuple[dict[str, Any], list[Any], list[str], list[str], list[dict[str, Any]]]:
+    """Reduce one global-registry snapshot with sanitized incoming goals."""
+
+    existing_goals = existing.get("goals")
+    if not isinstance(existing_goals, list):
+        existing_goals = []
+    merged_goals, actions, synced_ids, collisions = merge_goal_entries(
+        existing_goals,
+        incoming,
+        allow_route_replacement=allow_route_replacement,
+    )
+    payload = dict(existing)
+    payload["schema_version"] = str(
+        payload.get("schema_version") or schema_version_fallback or "0.1"
+    )
+    payload["updated_at"] = synced_at
+    payload["common_runtime_root"] = str(runtime_root or DEFAULT_RUNTIME_ROOT)
+    payload["registry_role"] = "global-local"
+    payload["goals"] = merged_goals
+    return payload, merged_goals, actions, synced_ids, collisions
+
+
+def _sync_global_registry_reduction(
+    current: dict[str, Any],
+    incoming: list[dict[str, Any]],
+    *,
+    allow_route_replacement: bool,
+    schema_version_fallback: str,
+    runtime_root: Path,
+    synced_at: str,
+) -> GlobalRegistryReduction:
+    payload, merged_goals, actions, synced_ids, collisions = (
+        _merge_global_registry_payload(
+            current,
+            incoming,
+            allow_route_replacement=allow_route_replacement,
+            schema_version_fallback=schema_version_fallback,
+            runtime_root=runtime_root,
+            synced_at=synced_at,
+        )
+    )
+    return GlobalRegistryReduction(
+        payload=payload,
+        receipt={
+            "merged_goals": merged_goals,
+            "actions": actions,
+            "synced_ids": synced_ids,
+            "collisions": collisions,
+        },
+        backup_label=(
+            "route-collision-backup" if collisions and allow_route_replacement else None
+        ),
+    )
 
 
 def _global_goal_path(
@@ -263,41 +380,32 @@ def _global_goal_path(
     return global_path.parent / path
 
 
-def retire_global_registry_goals(
+def _retire_global_registry_reduction(
+    current: dict[str, Any],
     *,
-    runtime_root_override: str | None,
-    goal_ids: list[str],
-    execute: bool,
-) -> dict[str, Any]:
-    requested_ids = list(dict.fromkeys(goal_id.strip() for goal_id in goal_ids if goal_id.strip()))
-    if not requested_ids:
-        raise ValueError("at least one explicit --goal-id is required")
-
-    runtime_root = (
-        Path(runtime_root_override).expanduser()
-        if runtime_root_override
-        else DEFAULT_RUNTIME_ROOT
-    )
-    global_path = global_registry_path(runtime_root)
-    if not global_path.exists():
-        raise FileNotFoundError(f"global registry does not exist: {global_path}")
-
-    existing = load_registry(global_path)
-    existing_goals = existing.get("goals")
-    if not isinstance(existing_goals, list):
-        existing_goals = []
+    requested_ids: list[str],
+    global_path: Path,
+    updated_at: str,
+) -> GlobalRegistryReduction:
+    current_goals = current.get("goals")
+    if not isinstance(current_goals, list):
+        current_goals = []
     matches_by_id: dict[str, list[dict[str, Any]]] = {
         goal_id: [
             goal
-            for goal in existing_goals
+            for goal in current_goals
             if isinstance(goal, dict) and str(goal.get("id") or "") == goal_id
         ]
         for goal_id in requested_ids
     }
     missing_ids = [goal_id for goal_id, matches in matches_by_id.items() if not matches]
-    duplicate_ids = [goal_id for goal_id, matches in matches_by_id.items() if len(matches) > 1]
+    duplicate_ids = [
+        goal_id for goal_id, matches in matches_by_id.items() if len(matches) > 1
+    ]
     if missing_ids:
-        raise ValueError(f"goal_id not found in global registry: {', '.join(missing_ids)}")
+        raise ValueError(
+            f"goal_id not found in global registry: {', '.join(missing_ids)}"
+        )
     if duplicate_ids:
         raise ValueError(
             "global registry contains duplicate goal ids; deduplicate before retirement: "
@@ -308,7 +416,9 @@ def retire_global_registry_goals(
     blocked_ids: list[str] = []
     for goal_id in requested_ids:
         goal = matches_by_id[goal_id][0]
-        source_path = _global_goal_path(goal, "source_registry", global_path=global_path)
+        source_path = _global_goal_path(
+            goal, "source_registry", global_path=global_path
+        )
         state_path = _global_goal_path(goal, "state_file", global_path=global_path)
         source_missing = source_path is None or not source_path.exists()
         state_missing = state_path is None or not state_path.exists()
@@ -332,14 +442,53 @@ def retire_global_registry_goals(
     retired = set(requested_ids)
     retained_goals = [
         goal
-        for goal in existing_goals
+        for goal in current_goals
         if not (isinstance(goal, dict) and str(goal.get("id") or "") in retired)
     ]
-    updated_at = now_local()
-    timestamp = updated_at.replace(":", "").replace("-", "")
-    backup_path = global_path.with_name(
-        f"{global_path.name}.retire-goal-backup-{timestamp}.bak"
+    updated = dict(current)
+    updated["updated_at"] = updated_at
+    updated["goals"] = retained_goals
+    return GlobalRegistryReduction(
+        payload=updated,
+        receipt={
+            "inspections": inspections,
+            "global_goal_count_before": len(current_goals),
+            "global_goal_count_after": len(retained_goals),
+        },
+        backup_label="retire-goal-backup",
     )
+
+
+def retire_global_registry_goals(
+    *,
+    runtime_root_override: str | None,
+    goal_ids: list[str],
+    execute: bool,
+) -> dict[str, Any]:
+    requested_ids = list(
+        dict.fromkeys(goal_id.strip() for goal_id in goal_ids if goal_id.strip())
+    )
+    if not requested_ids:
+        raise ValueError("at least one explicit --goal-id is required")
+
+    runtime_root = (
+        Path(runtime_root_override).expanduser()
+        if runtime_root_override
+        else DEFAULT_RUNTIME_ROOT
+    )
+    global_path = global_registry_path(runtime_root)
+    if not global_path.exists():
+        raise FileNotFoundError(f"global registry does not exist: {global_path}")
+
+    updated_at = now_local()
+    preview = _retire_global_registry_reduction(
+        load_registry(global_path),
+        requested_ids=requested_ids,
+        global_path=global_path,
+        updated_at=updated_at,
+    )
+    receipt = preview.receipt
+    backup_path = str(_global_registry_backup_path(global_path, "retire-goal-backup"))
     writability: dict[str, Any] = {}
     if execute:
         writability = probe_registry_write_path(global_path, create_parent=True)
@@ -353,20 +502,29 @@ def retire_global_registry_goals(
                 "runtime_root": str(runtime_root),
                 "requested_goal_ids": requested_ids,
                 "retired_goal_ids": [],
-                "inspections": inspections,
+                "inspections": receipt["inspections"],
                 "backup_path": None,
                 "backup_written": False,
                 "wrote": False,
                 "global_registry_writability": writability,
-                "error": str(writability.get("error") or "global registry is not writable"),
+                "error": str(
+                    writability.get("error") or "global registry is not writable"
+                ),
                 "recommended_action": writability.get("recommended_action"),
             }
 
-        updated = dict(existing)
-        updated["updated_at"] = updated_at
-        updated["goals"] = retained_goals
-        write_json(backup_path, existing)
-        write_json(global_path, updated)
+        mutation = mutate_global_registry(
+            global_path,
+            "retire_global_registry_goals",
+            lambda current: _retire_global_registry_reduction(
+                current,
+                requested_ids=requested_ids,
+                global_path=global_path,
+                updated_at=updated_at,
+            ),
+        )
+        receipt = mutation["receipt"]
+        backup_path = mutation["backup_path"]
 
     return {
         "ok": True,
@@ -378,11 +536,11 @@ def retire_global_registry_goals(
         "requested_goal_ids": requested_ids,
         "retired_goal_ids": requested_ids if execute else [],
         "planned_retired_goal_ids": requested_ids,
-        "inspections": inspections,
-        "global_goal_count_before": len(existing_goals),
-        "global_goal_count_after": len(retained_goals),
-        "backup_path": str(backup_path),
-        "backup_written": execute,
+        "inspections": receipt["inspections"],
+        "global_goal_count_before": receipt["global_goal_count_before"],
+        "global_goal_count_after": receipt["global_goal_count_after"],
+        "backup_path": backup_path,
+        "backup_written": bool(backup_path) if execute else False,
         "wrote": execute,
         "updated_at": updated_at,
         "global_registry_writability": writability,
@@ -444,33 +602,37 @@ def sync_project_registry_to_global(
 
     synced_at = now_local()
     incoming = [
-        sanitize_goal_for_global(goal, source_registry=registry_path, synced_at=synced_at)
+        sanitize_goal_for_global(
+            goal, source_registry=registry_path, synced_at=synced_at
+        )
         for goal in goals
     ]
-    existing = read_json_if_exists(global_path)
-    existing_goals = existing.get("goals")
-    if not isinstance(existing_goals, list):
-        existing_goals = []
-
-    merged_goals, actions, synced_ids, collisions = merge_goal_entries(
-        existing_goals,
+    merge_kwargs: dict[str, Any] = {
+        "allow_route_replacement": allow_route_replacement,
+        "schema_version_fallback": str(project_registry.get("schema_version") or "0.1"),
+        "runtime_root": runtime_root,
+        "synced_at": synced_at,
+    }
+    preview = _sync_global_registry_reduction(
+        load_registry(global_path),
         incoming,
-        allow_route_replacement=allow_route_replacement,
+        **merge_kwargs,
     )
+    preview_receipt = preview.receipt
+    merged_goals = preview_receipt["merged_goals"]
+    actions = preview_receipt["actions"]
+    synced_ids = preview_receipt["synced_ids"]
+    collisions = preview_receipt["collisions"]
     backup_path = None
-    payload = dict(existing)
-    payload["schema_version"] = str(payload.get("schema_version") or project_registry.get("schema_version") or "0.1")
-    payload["updated_at"] = synced_at
-    payload["common_runtime_root"] = str(runtime_root or DEFAULT_RUNTIME_ROOT)
-    payload["registry_role"] = "global-local"
-    payload["goals"] = merged_goals
 
     writability = None
     if not dry_run:
         writability = probe_registry_write_path(global_path, create_parent=True)
         if not writability.get("ok"):
             exc = PermissionError(
-                writability.get("errno") if isinstance(writability.get("errno"), int) else errno.EPERM,
+                writability.get("errno")
+                if isinstance(writability.get("errno"), int)
+                else errno.EPERM,
                 str(writability.get("error") or "global registry is not writable"),
                 str(global_path),
             )
@@ -492,13 +654,33 @@ def sync_project_registry_to_global(
             )
 
     try:
-        backup_path = (
-            write_recovery_backup(global_path, existing, dry_run=dry_run)
-            if collisions and allow_route_replacement
-            else None
-        )
-        if not dry_run:
-            write_json(global_path, payload)
+        if dry_run:
+            backup_path = (
+                str(
+                    _global_registry_backup_path(
+                        global_path,
+                        "route-collision-backup",
+                    )
+                )
+                if collisions and allow_route_replacement
+                else None
+            )
+        else:
+            mutation = mutate_global_registry(
+                global_path,
+                "sync_global_registry",
+                lambda current: _sync_global_registry_reduction(
+                    current,
+                    incoming,
+                    **merge_kwargs,
+                ),
+            )
+            receipt = mutation["receipt"]
+            merged_goals = receipt["merged_goals"]
+            actions = receipt["actions"]
+            synced_ids = receipt["synced_ids"]
+            collisions = receipt["collisions"]
+            backup_path = mutation["backup_path"]
     except OSError as exc:
         if not is_write_denied_error(exc):
             raise
@@ -557,9 +739,13 @@ def render_global_sync_markdown(payload: dict[str, Any]) -> str:
         if payload.get("write_denied"):
             lines.append(f"- error_kind: `{payload.get('error_kind')}`")
             lines.append(f"- fallback_registry: `{payload.get('fallback_registry')}`")
-            lines.append(f"- project_registry_usable: `{payload.get('project_registry_usable')}`")
+            lines.append(
+                f"- project_registry_usable: `{payload.get('project_registry_usable')}`"
+            )
             if payload.get("recommended_action"):
-                lines.append(f"- recommended_action: {payload.get('recommended_action')}")
+                lines.append(
+                    f"- recommended_action: {payload.get('recommended_action')}"
+                )
         return "\n".join(lines)
     if payload.get("reason"):
         lines.append(f"- reason: {payload.get('reason')}")

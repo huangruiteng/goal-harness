@@ -158,7 +158,7 @@ def test_case_loopx_install_payload_uses_official_product_lifecycle() -> None:
     assert payload["product_path_primary_route"] == "prompt_driven_case_local_loopx_cli"
     command = str(payload["command"])
     assert "/app/.local/bin/loopx" in command
-    assert "install-from-github.sh" in command
+    assert "huangruiteng.github.io/loopx/install.sh" in command
     assert " bootstrap " in command
     assert " configure-goal " in command
     assert " todo add " in command

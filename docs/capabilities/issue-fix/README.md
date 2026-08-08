@@ -815,15 +815,12 @@ On a host with the LoopX slash entry, start the long-running goal directly:
 /loopx --capability-route issue-fix Fix https://github.com/owner/repo/issues/123
 ```
 
-For a manually integrated host, inspect the command pack and then start the
-same exact goal text through the guided CLI transaction:
-
-```bash
-loopx bootstrap-command-pack --project .
-loopx start-goal --guided --project . \
-  --capability-route issue-fix \
-  --goal-text "Fix https://github.com/owner/repo/issues/123"
-```
+For a manually integrated host, run `loopx bootstrap-command-pack --project .`
+and pass the same complete arguments once through
+`loopx start-goal --guided --project . --slash-command-arguments="..."`.
+Typed callers that already own separate fields may instead pass
+`--capability-route issue-fix` with `--goal-text`; the CLI owns route parsing in
+both forms.
 
 The explicit route switch does not bypass issue selection, authority, or
 validation. Without it, goal text never activates issue-fix. With it, the

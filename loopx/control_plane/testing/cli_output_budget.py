@@ -592,6 +592,12 @@ CLI_OUTPUT_COMMAND_CLASSIFICATIONS: tuple[CliOutputCommandClassification, ...] =
         rationale="agent handoff and review packet",
     ),
     CliOutputCommandClassification(
+        command_id="goal-channel",
+        qualification="explicit_cold_path_exception",
+        surface_id=None,
+        rationale="explicit provider setup, sync, doctor, and gate-notification command family",
+    ),
+    CliOutputCommandClassification(
         command_id="evidence-log",
         qualification="qualified_default",
         surface_id="evidence_log_thin",

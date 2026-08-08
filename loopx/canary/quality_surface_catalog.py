@@ -72,7 +72,11 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
                 "examples/change-quality-qualification-smoke.py"
             ),
             "catalog_canary": _covered("change-quality-exact-receipt"),
-            "host_upgrade": _covered("examples/install-local-smoke.py"),
+            "host_upgrade": _not_applicable(
+                "This surface is exercised through the packaged CLI entrypoint in "
+                "its durable smoke; installation continuity is owned by the "
+                "separate install-update quality surface."
+            ),
             "model_behavior": _not_applicable(
                 "This catalogued surface proves deterministic scope and receipt integrity; "
                 "reviewer competence remains a provider responsibility and a receipt is "
@@ -133,6 +137,7 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
         "owner_paths": [
             "loopx/control_plane/quota/live_decision.py",
             "loopx/control_plane/scheduler/ack.py",
+            "loopx/control_plane/scheduler/monitor_wait.py",
             "loopx/control_plane/scheduler/scheduler_hint.py",
             "loopx/control_plane/scheduler/state.py",
             "loopx/control_plane/scheduler/state_transition_rules.py",
@@ -177,7 +182,8 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
         "risk": "high",
         "canary_profile_id": "goal-frontier-replan-rules",
         "owner_paths": [
-            "loopx/control_plane/goals/goal_frontier.py",
+            "loopx/control_plane/goals/goal_frontier/__init__.py",
+            "loopx/control_plane/goals/goal_frontier/terminal.py",
             "loopx/control_plane/goals/goal_frontier_replan_rules.py",
             "loopx/control_plane/work_items/autonomous_replan_ack.py",
         ],
@@ -361,6 +367,51 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
             ),
             "release_gate": _covered(
                 "loopx canary premerge --profile state-write-correctness"
+            ),
+        },
+    },
+    {
+        "surface_id": "lark-goal-channel-human-gate-delivery",
+        "title": "Lark Goal Channel human-gate delivery",
+        "risk": "high",
+        "canary_profile_id": "lark-goal-channel-human-gate-delivery",
+        "owner_paths": [
+            "loopx/cli_commands/project_lifecycle.py",
+            "loopx/extensions/lark/goal_channel_lifecycle.py",
+            "loopx/extensions/lark/goal_channel_runtime.py",
+        ],
+        "semantic_oracle": {
+            "source_kind": "specification",
+            "refs": [
+                "docs/architecture/rfcs/goal-channel-collaboration-v0.md"
+            ],
+            "independence_rationale": (
+                "The Goal Channel RFC defines opt-in delivery, canonical quota "
+                "selection, gate identity, suppression, idempotency, readback, "
+                "and public/private boundaries before the lifecycle and transport "
+                "implementations are exercised."
+            ),
+        },
+        "layers": {
+            "unit_contract": _covered(
+                "tests/extensions/test_lark_goal_channel.py",
+                "tests/extensions/test_lark_goal_channel_lifecycle.py",
+                "tests/cli_commands/test_project_lifecycle_goal_channel.py",
+            ),
+            "durable_smoke": _covered(
+                "examples/lark-goal-channel-human-gate-delivery-smoke.py"
+            ),
+            "catalog_canary": _covered(
+                "lark-goal-channel-human-gate-delivery"
+            ),
+            "host_upgrade": _covered("examples/install-local-smoke.py"),
+            "model_behavior": _not_applicable(
+                "Gate selection and provider delivery safety are deterministic "
+                "control-plane and transport contracts."
+            ),
+            "release_gate": _covered(
+                "loopx canary premerge "
+                "--profile lark-goal-channel-human-gate-delivery"
             ),
         },
     },

@@ -32,6 +32,12 @@ from .worker_runtime import run_auto_research_worker_turn
 from .rollout_append import (
     append_auto_research_rollout_events as _append_auto_research_rollout_events,
 )
+from .terminal_results import (
+    decide_terminal_result,
+    project_terminal_results,
+    query_terminal_results,
+    review_terminal_result,
+)
 from .user_contract import (
     build_auto_research_user_contract,
     infer_auto_research_output_language,
@@ -43,6 +49,7 @@ from ...control_plane.agents.multi_agent.visible_launch_policy import (
     resolve_codex_trust_workspace,
     resolve_visible_launch_policy,
 )
+from ...control_plane.runtime.public_safety import public_safe_compact_text
 from ...history import load_registry
 from ...paths import resolve_runtime_root
 from ...quota import build_quota_should_run
@@ -62,20 +69,52 @@ AddFormat = Callable[[argparse.ArgumentParser], None]
 
 AUTO_RESEARCH_DEMO_GOAL_PREFIX = "loopx-auto-research-demo"
 AUTO_RESEARCH_START_AGENT_ID = "auto-research-operator"
+AUTO_RESEARCH_COMMAND_FAILED_ERROR_CODE = "auto_research_command_failed"
+AUTO_RESEARCH_INVALID_INPUT_ERROR_CODE = "auto_research_invalid_input"
+AUTO_RESEARCH_IO_FAILED_ERROR_CODE = "auto_research_io_failed"
 AUTO_RESEARCH_SUBCOMMANDS = frozenset(
     {
         "append-evidence",
         "capture-live-evidence",
         "contract",
+        "decide",
         "demo-e2e",
         "demo-supervisor",
         "evidence",
         "frontier",
+        "project-results",
+        "results",
+        "review",
         "start",
         "worker-loop",
         "worker-turn",
     }
 )
+
+
+def _public_auto_research_error(exc: Exception) -> tuple[str, str]:
+    """Project an internal exception into a stable, public-safe CLI error."""
+
+    if isinstance(exc, json.JSONDecodeError):
+        return (
+            AUTO_RESEARCH_INVALID_INPUT_ERROR_CODE,
+            "Auto Research input must be valid JSON.",
+        )
+    if isinstance(exc, OSError):
+        return (
+            AUTO_RESEARCH_IO_FAILED_ERROR_CODE,
+            "Auto Research could not access a required resource.",
+        )
+    if isinstance(exc, ValueError):
+        public_message = public_safe_compact_text(str(exc), limit=220)
+        return (
+            AUTO_RESEARCH_INVALID_INPUT_ERROR_CODE,
+            public_message or "Auto Research input is invalid.",
+        )
+    return (
+        AUTO_RESEARCH_COMMAND_FAILED_ERROR_CODE,
+        "Auto Research command failed unexpectedly.",
+    )
 
 
 def rewrite_auto_research_question_argv(argv: list[str]) -> list[str]:
@@ -389,6 +428,80 @@ def register_auto_research_commands(
     append_parser.add_argument(
         "--output",
         help="Write the append result JSON to this path without recording the path in LoopX state.",
+    )
+
+    decide_parser = auto_research_sub.add_parser(
+        "decide",
+        help="Record an evidence-bound terminal decision for one Auto Research hypothesis.",
+    )
+    add_subcommand_format(decide_parser)
+    decide_parser.add_argument("--goal-id", required=True)
+    decide_parser.add_argument("--hypothesis-id", required=True)
+    decide_parser.add_argument("--outcome", choices=["promoted", "retired"], required=True)
+    decide_parser.add_argument(
+        "--reason",
+        choices=[
+            "contradicted",
+            "duplicate",
+            "holdout_validated",
+            "operator_rejected",
+            "retry_exhausted",
+            "superseded",
+        ],
+        required=True,
+    )
+    decide_parser.add_argument("--agent-id", required=True)
+    decide_parser.add_argument("--evidence-ref", action="append", default=[])
+    decide_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Append the terminal decision. Omit to preview the validated decision.",
+    )
+
+    review_parser = auto_research_sub.add_parser(
+        "review",
+        help="Record a review receipt bound to the current terminal decision and evidence graph revision.",
+    )
+    add_subcommand_format(review_parser)
+    review_parser.add_argument("--goal-id", required=True)
+    review_parser.add_argument("--hypothesis-id", required=True)
+    review_parser.add_argument("--reviewer-agent-id", required=True)
+    review_parser.add_argument(
+        "--verdict",
+        choices=["approve", "needs_more_evidence", "reject"],
+        required=True,
+    )
+    review_parser.add_argument("--evidence-ref", action="append", default=[])
+    review_parser.add_argument(
+        "--require-independent",
+        action="store_true",
+        help="Reject a reviewer who produced the hypothesis or terminal decision.",
+    )
+    review_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Append the review receipt. Omit to preview the validated receipt.",
+    )
+
+    results_parser = auto_research_sub.add_parser(
+        "results",
+        help="Query current terminal decisions and review state by exact hypothesis id.",
+    )
+    add_subcommand_format(results_parser)
+    results_parser.add_argument("--goal-id", required=True)
+    results_parser.add_argument("--hypothesis-id")
+    results_parser.add_argument("--include-history", action="store_true")
+
+    project_results_parser = auto_research_sub.add_parser(
+        "project-results",
+        help="Project terminal Auto Research decisions into the existing Explore result log.",
+    )
+    add_subcommand_format(project_results_parser)
+    project_results_parser.add_argument("--goal-id", required=True)
+    project_results_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Append the deterministic Explore events. Omit to preview.",
     )
 
     live_evidence_parser = auto_research_sub.add_parser(
@@ -1093,6 +1206,45 @@ def handle_auto_research_command(
                     json.dumps(payload, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8",
                 )
+        elif args.auto_research_command == "decide":
+            payload = decide_terminal_result(
+                registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
+                goal_id=args.goal_id,
+                hypothesis_id=args.hypothesis_id,
+                outcome=args.outcome,
+                reason=args.reason,
+                decided_by=args.agent_id,
+                evidence_refs=args.evidence_ref,
+                dry_run=not args.execute,
+            )
+        elif args.auto_research_command == "review":
+            payload = review_terminal_result(
+                registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
+                goal_id=args.goal_id,
+                hypothesis_id=args.hypothesis_id,
+                reviewer_agent_id=args.reviewer_agent_id,
+                verdict=args.verdict,
+                evidence_refs=args.evidence_ref,
+                require_independent=args.require_independent,
+                dry_run=not args.execute,
+            )
+        elif args.auto_research_command == "results":
+            payload = query_terminal_results(
+                registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
+                goal_id=args.goal_id,
+                hypothesis_id=args.hypothesis_id,
+                include_history=args.include_history,
+            )
+        elif args.auto_research_command == "project-results":
+            payload = project_terminal_results(
+                registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
+                goal_id=args.goal_id,
+                dry_run=not args.execute,
+            )
         elif args.auto_research_command == "capture-live-evidence":
             payload = capture_live_codex_e2e_evidence(
                 packet_path=args.packet,
@@ -1299,15 +1451,18 @@ def handle_auto_research_command(
         else:
             raise ValueError(
                 "auto-research requires the `contract`, `frontier`, `evidence`, "
-                "`append-evidence`, `capture-live-evidence`, "
+                "`append-evidence`, `decide`, `review`, `results`, "
+                "`project-results`, `capture-live-evidence`, "
                 "`worker-turn`, `worker-loop`, `demo-supervisor`, `demo-e2e`, "
                 "or `start` subcommand"
             )
     except Exception as exc:
+        error_code, public_error = _public_auto_research_error(exc)
         payload = {
             "ok": False,
             "mode": "auto-research",
-            "error": str(exc),
+            "error_code": error_code,
+            "error": public_error,
         }
     print_payload(payload, output_format(args, "auto_research_format"), render_auto_research_markdown)
     return 0 if payload.get("ok") else 1

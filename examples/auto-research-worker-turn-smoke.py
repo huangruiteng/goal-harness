@@ -264,6 +264,52 @@ def append_fixture_evidence(
     assert_public_safe(appended)
 
 
+def append_negative_fixture_evidence(
+    *,
+    registry: Path,
+    runtime_root: Path,
+    temp: Path,
+    hypothesis_id: str,
+    todo_id: str,
+    failure_kind: str | None = None,
+    measurement_scope: str | None = None,
+    remediation_attempt: bool = False,
+    eval_status: str = "scored",
+    primary_metric_status: str = "regressed",
+) -> None:
+    result = eval_result("dev", value=0.75)
+    result["eval_status"] = eval_status
+    result["primary_metric_status"] = primary_metric_status
+    if failure_kind:
+        result["failure_kind"] = failure_kind
+    if measurement_scope:
+        result["measurement_scope"] = measurement_scope
+    if remediation_attempt:
+        result["remediation_attempt"] = True
+    packet = build_auto_research_evidence_packet(
+        contract=research_contract(goal_id=GOAL_ID),
+        eval_results=[result],
+        hypothesis_id=hypothesis_id,
+        todo_id=todo_id,
+        agent_id=EVIDENCE_AGENT_ID,
+        claimed_by=EVIDENCE_AGENT_ID,
+        mechanism_family=MECHANISM_FAMILY,
+        hypothesis=f"{HYPOTHESIS_TEXT} Failure {hypothesis_id}.",
+        grounding_refs=[GROUNDING_REF],
+        branch_ref="codex/auto-research-worker-turn-smoke",
+    )
+    packet_path = temp / f"{hypothesis_id}.public.json"
+    packet_path.write_text(json.dumps(packet, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    appended = append_auto_research_rollout_events(
+        packet_path=str(packet_path),
+        registry_path=registry,
+        runtime_root_arg=str(runtime_root),
+        dry_run=False,
+    )
+    assert appended["appended_count"] == 2, appended
+    assert_public_safe(appended)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)
@@ -328,6 +374,81 @@ def main() -> int:
             complete=False,
         )
         assert_no_action(evaluator_execute, agent_id=EVALUATOR_AGENT_ID)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        supervisor = build_auto_research_demo_supervisor_plan(
+            goal_id=GOAL_ID,
+            agent_specs=LANES,
+            session_name="loopx-auto-research-resume-lineage-smoke",
+            cli_bin="loopx",
+            codex_bin="codex",
+            tmux_bin="tmux",
+            reasoning_effort="high",
+        )
+        visible_control, registry, runtime_root = _seed_visible_demo_control_plane(
+            demo_root=temp,
+            goal_id=GOAL_ID,
+            objective="Verify seeded evaluator summaries retain executor lineage.",
+            supervisor=supervisor,
+        )
+        seeded_todos = visible_control["seeded_todos"]
+        executor_seed = next(item for item in seeded_todos if item["agent_id"] == EXECUTOR_AGENT_ID)
+        evaluator_seed = next(item for item in seeded_todos if item["agent_id"] == EVALUATOR_AGENT_ID)
+        assert evaluator_seed["resume_when"] == f"todo_done:{executor_seed['todo_id']}", visible_control
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=Path(runtime_root),
+            temp=temp,
+            hypothesis_id="hyp_seeded_retry_exhausted",
+            todo_id=executor_seed["todo_id"],
+            failure_kind="retry_exhausted",
+            eval_status="failed_to_run",
+            primary_metric_status="inconclusive",
+        )
+        executor_completion = complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=executor_seed["todo_id"],
+            role="agent",
+            claimed_by=EXECUTOR_AGENT_ID,
+            agent_id=EXECUTOR_AGENT_ID,
+            note="lane-authored exhausted retry evidence was appended",
+            evidence="public-safe evidence packet recorded retry exhaustion",
+            no_followup=True,
+            self_merged=True,
+            dry_run=False,
+        )
+        assert executor_completion["completed"] is True, executor_completion
+        workspace = temp / "visible-workspace"
+        workspace.mkdir()
+
+        seeded_failure_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        assert seeded_failure_turn["selected_todo_id"] == evaluator_seed["todo_id"], seeded_failure_turn
+        assert seeded_failure_turn["selected_action"] == "summarize_evidence", seeded_failure_turn
+        assert (
+            seeded_failure_turn["frontier"]["frontier"]["selected"]["resume_when"]
+            == f"todo_done:{executor_seed['todo_id']}"
+        ), seeded_failure_turn
+        assert (
+            seeded_failure_turn["evaluation_summary"]["failure_continuation"]["source_todo_id"]
+            == executor_seed["todo_id"]
+        ), seeded_failure_turn
+        successors = seeded_failure_turn["successor_todos"]["successors"]
+        assert len(successors) == 1, seeded_failure_turn
+        assert successors[0]["action_kind"] == "propose_failure_successor", seeded_failure_turn
+        assert successors[0]["unblocks_todo_id"] == evaluator_seed["todo_id"], seeded_failure_turn
+        assert seeded_failure_turn["completion"]["successor_todo_ids"] == [
+            successors[0]["todo_id"]
+        ], seeded_failure_turn
+        assert_public_safe(seeded_failure_turn)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)
@@ -500,6 +621,556 @@ def main() -> int:
         runtime_root = temp / "runtime"
         write_summary_state(state_file)
         write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        first_failure_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate the first failed evidence branch.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        second_failure_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate the second failed evidence branch.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        unrelated_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize an independent evidence branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_first_failure",
+            todo_id=first_failure_evidence["todo_id"],
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_second_failure",
+            todo_id=second_failure_evidence["todo_id"],
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        unrelated_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        assert unrelated_turn["evaluation_summary"]["failure_continuation"] is None, unrelated_turn
+        assert unrelated_turn["successor_todos"]["successors"] == [], unrelated_turn
+        assert unrelated_turn["completion"] == {
+            "requested": True,
+            "executed": False,
+            "reason": "failure_successor_lineage_unresolved",
+        }, unrelated_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert f"todo_id={unrelated_summary['todo_id']} status=done" not in state_text, state_text
+        assert "propose_failure_successor" not in state_text, state_text
+        assert_public_safe(unrelated_turn)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        retry_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Retry one pending evidence branch.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        other_failure_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate a separately retired evidence branch.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        missing_match_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize the retry evidence branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=retry_evidence["todo_id"],
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_retry_pending",
+            todo_id=retry_evidence["todo_id"],
+            eval_status="failed_to_run",
+            primary_metric_status="inconclusive",
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_other_retired",
+            todo_id=other_failure_evidence["todo_id"],
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        missing_match_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        assert (
+            missing_match_turn["frontier"]["frontier"]["completion"]["status"]
+            == "failure_successor_required"
+        ), missing_match_turn
+        assert missing_match_turn["evaluation_summary"]["failure_continuation"] is None, (
+            missing_match_turn
+        )
+        assert missing_match_turn["successor_todos"]["successors"] == [], missing_match_turn
+        assert missing_match_turn["completion"] == {
+            "requested": True,
+            "executed": False,
+            "reason": "failure_successor_lineage_unresolved",
+        }, missing_match_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert f"todo_id={missing_match_summary['todo_id']} status=done" not in state_text, state_text
+        assert_public_safe(missing_match_turn)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        self_referential_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize a self-referential retired branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_summary_id_failure",
+            todo_id=self_referential_summary["todo_id"],
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        self_referential_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        assert (
+            self_referential_turn["frontier"]["frontier"]["completion"]["status"]
+            == "failure_successor_required"
+        ), self_referential_turn
+        assert self_referential_turn["evaluation_summary"]["failure_continuation"] is None, (
+            self_referential_turn
+        )
+        assert self_referential_turn["successor_todos"]["successors"] == [], self_referential_turn
+        assert self_referential_turn["completion"] == {
+            "requested": True,
+            "executed": False,
+            "reason": "failure_successor_lineage_unresolved",
+        }, self_referential_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert (
+            f"todo_id={self_referential_summary['todo_id']} status=done" not in state_text
+        ), state_text
+        assert_public_safe(self_referential_turn)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        positive_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate the supported evidence branch.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        unrelated_failure_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate an unrelated failed evidence branch.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        resume_gate = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Complete an independent summary gate.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        positive_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize the supported evidence branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=positive_evidence["todo_id"],
+            resume_when=f"todo_done:{resume_gate['todo_id']}",
+            dry_run=False,
+        )
+        append_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_positive_branch",
+            todo_id=positive_evidence["todo_id"],
+            dev_metric=1.4,
+            holdout_metric=1.5,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_unrelated_failure",
+            todo_id=unrelated_failure_evidence["todo_id"],
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_resume_gate_failure",
+            todo_id=resume_gate["todo_id"],
+        )
+        resume_gate_completion = complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=resume_gate["todo_id"],
+            role="agent",
+            claimed_by=EXECUTOR_AGENT_ID,
+            agent_id=EXECUTOR_AGENT_ID,
+            note="independent gate completed for summary lineage priority coverage",
+            evidence="public-safe gate evidence",
+            no_followup=True,
+            self_merged=True,
+            dry_run=False,
+        )
+        assert resume_gate_completion["completed"] is True, resume_gate_completion
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        positive_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        assert positive_turn["evaluation_summary"]["failure_continuation"] is None, positive_turn
+        assert (
+            positive_turn["frontier"]["frontier"]["completion"]["status"]
+            == "promotion_review_required"
+        ), positive_turn
+        assert (
+            positive_turn["frontier"]["frontier"]["selected"]["unblocks_todo_id"]
+            == positive_evidence["todo_id"]
+        ), positive_turn
+        assert (
+            positive_turn["frontier"]["frontier"]["selected"]["resume_when"]
+            == f"todo_done:{resume_gate['todo_id']}"
+        ), positive_turn
+        successors = positive_turn["successor_todos"]["successors"]
+        assert len(successors) == 1, positive_turn
+        assert successors[0]["claimed_by"] == CURATOR_AGENT_ID, positive_turn
+        assert successors[0]["action_kind"] == "review_research_contract", positive_turn
+        assert positive_turn["completion"]["successor_todo_ids"] == [successors[0]["todo_id"]], positive_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert f"todo_id={positive_summary['todo_id']} status=done" in state_text, state_text
+        assert_public_safe(positive_turn)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        failure_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate retired evidence.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        failure_review = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize retired evidence.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=failure_evidence["todo_id"],
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_failure_successor",
+            todo_id=failure_evidence["todo_id"],
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        failure_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        successors = failure_turn["successor_todos"]["successors"]
+        assert len(successors) == 1, failure_turn
+        assert successors[0]["claimed_by"] == HYPOTHESIS_AGENT_ID, failure_turn
+        assert successors[0]["action_kind"] == "propose_failure_successor", failure_turn
+        assert failure_turn["evaluation_summary"]["failure_continuation"]["monitor_allowed"] is False, failure_turn
+        assert (
+            failure_turn["evaluation_summary"]["failure_continuation"]["source_todo_id"]
+            == failure_evidence["todo_id"]
+        ), failure_turn
+        assert (
+            failure_turn["frontier"]["frontier"]["selected"]["unblocks_todo_id"]
+            == failure_evidence["todo_id"]
+        ), failure_turn
+        assert successors[0]["unblocks_todo_id"] == failure_review["todo_id"], failure_turn
+        assert failure_turn["completion"]["successor_todo_ids"] == [successors[0]["todo_id"]], failure_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert f"todo_id={failure_review['todo_id']} status=done" in state_text, state_text
+        assert "continuous_monitor" not in state_text, state_text
+        assert_public_safe(failure_turn)
+
+        proposer_successors = auto_research_successor_specs_for_action(
+            role_id="hypothesis_proposer",
+            action="propose_failure_successor",
+        )
+        assert proposer_successors == [], proposer_successors
+        classified_failure_successors = auto_research_successor_specs_for_action(
+            role_id="evaluator_promoter",
+            action="classify_evidence",
+        )
+        assert {
+            successor["action_kind"] for successor in classified_failure_successors
+        } == {
+            "remediate_data_measurement",
+            "propose_failure_successor",
+        }, classified_failure_successors
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        data_gap_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate the declared data gap.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        data_gap_review = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize a declared data gap.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=data_gap_evidence["todo_id"],
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_data_gap_successor",
+            todo_id=data_gap_evidence["todo_id"],
+            failure_kind="data_or_measurement_gap",
+            measurement_scope="adjusted_price_field",
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        data_gap_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        successors = data_gap_turn["successor_todos"]["successors"]
+        assert len(successors) == 1, data_gap_turn
+        assert successors[0]["claimed_by"] == EXECUTOR_AGENT_ID, data_gap_turn
+        assert successors[0]["action_kind"] == "remediate_data_measurement", data_gap_turn
+        assert data_gap_turn["evaluation_summary"]["failure_continuation"]["remediation_attempt_limit"] == 1, data_gap_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert f"todo_id={data_gap_review['todo_id']} status=done" in state_text, state_text
+        assert "continuous_monitor" not in state_text, state_text
+        assert_public_safe(data_gap_turn)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        retry_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Retry the exhausted evidence branch.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        retry_review = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Summarize exhausted retry evidence.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=retry_evidence["todo_id"],
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_retry_exhausted",
+            todo_id=retry_evidence["todo_id"],
+            failure_kind="retry_exhausted",
+            eval_status="failed_to_run",
+            primary_metric_status="inconclusive",
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        retry_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        successors = retry_turn["successor_todos"]["successors"]
+        assert len(successors) == 1, retry_turn
+        assert successors[0]["claimed_by"] == HYPOTHESIS_AGENT_ID, retry_turn
+        assert successors[0]["action_kind"] == "propose_failure_successor", retry_turn
+        assert (
+            retry_turn["evaluation_summary"]["failure_continuation"]["failure_kind"]
+            == "retry_exhausted"
+        ), retry_turn
+        assert (
+            retry_turn["evaluation_summary"]["failure_continuation"]["source_todo_id"]
+            == retry_evidence["todo_id"]
+        ), retry_turn
+        assert successors[0]["unblocks_todo_id"] == retry_review["todo_id"], retry_turn
+        assert retry_turn["completion"]["successor_todo_ids"] == [successors[0]["todo_id"]], retry_turn
+        state_text = state_file.read_text(encoding="utf-8")
+        assert f"todo_id={retry_review['todo_id']} status=done" in state_text, state_text
+        assert_public_safe(retry_turn)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
         generic_todo = add_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -582,6 +1253,93 @@ def main() -> int:
         assert frontier_completion["status"] == "target_reached", target_reached
         assert target_reached["frontier"]["frontier"]["selected"] is None, target_reached
         assert_public_safe(target_reached)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        project = temp / "project"
+        project.mkdir()
+        state_file = project / "ACTIVE_GOAL_STATE.md"
+        registry = temp / "registry.json"
+        runtime_root = temp / "runtime"
+        write_summary_state(state_file)
+        write_registry(registry, project=project, state_file=state_file, runtime_root=runtime_root)
+        failure_evidence = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Evaluate a retired evidence branch for lineage dedup.",
+            task_class="advancement_task",
+            action_kind="run_dev_eval",
+            claimed_by=EXECUTOR_AGENT_ID,
+            dry_run=False,
+        )
+        first_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] First summary of the retired evidence branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=failure_evidence["todo_id"],
+            dry_run=False,
+        )
+        second_summary = add_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            role="agent",
+            text="[P0-auto-research-live] Second summary of the same retired evidence branch.",
+            task_class="advancement_task",
+            action_kind="summarize_evidence",
+            claimed_by=EVALUATOR_AGENT_ID,
+            unblocks_todo_id=failure_evidence["todo_id"],
+            dry_run=False,
+        )
+        append_negative_fixture_evidence(
+            registry=registry,
+            runtime_root=runtime_root,
+            temp=temp,
+            hypothesis_id="hyp_lineage_dedup_failure",
+            todo_id=failure_evidence["todo_id"],
+        )
+        workspace = project / "visible-workspace"
+        workspace.mkdir()
+
+        first_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        first_successors = first_turn["successor_todos"]["successors"]
+        assert len(first_successors) == 1, first_turn
+        assert first_successors[0]["action_kind"] == "propose_failure_successor", first_turn
+        assert first_successors[0]["claimed_by"] == HYPOTHESIS_AGENT_ID, first_turn
+        first_successor_text = first_successors[0]["todo_command"]
+        assert ".." not in first_successor_text, f"successor text contains ..: {first_successor_text!r}"
+        assert_public_safe(first_turn)
+
+        second_turn = run_worker_turn(
+            registry=registry,
+            runtime_root=runtime_root,
+            workspace=workspace,
+            agent_id=EVALUATOR_AGENT_ID,
+            execute=True,
+            complete=True,
+        )
+        second_successors = second_turn["successor_todos"]["successors"]
+        assert len(second_successors) == 1, second_turn
+        second_successor = second_successors[0]
+        assert second_successor["already_exists"] is True, (
+            f"second successor should be deduplicated, got: {second_successor}"
+        )
+        assert second_successor["todo_id"] == first_successors[0]["todo_id"], (
+            f"second successor should have the same todo_id, got: {second_successor['todo_id']}"
+        )
+        assert_public_safe(second_turn)
+
     return 0
 
 

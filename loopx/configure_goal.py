@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import json
-import os
 import shlex
 import shutil
-import tempfile
 from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime
@@ -31,7 +29,7 @@ from .orchestration import (
     orchestration_policy_summary,
 )
 from .quota import goal_quota_config
-from .registry import read_json, registry_goals
+from .registry import atomic_write_json, read_json, registry_goals
 from .control_plane.reward_memory import (
     reward_memory_goal_policy,
     reward_memory_goal_policy_summary,
@@ -390,25 +388,6 @@ def _build_supervisor_prompt_setup(
             f"--agent-id {shlex.quote(agent_id)}"
         ),
     }
-
-
-def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=str(path.parent),
-    )
-    temporary_path = Path(temporary)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-    finally:
-        temporary_path.unlink(missing_ok=True)
 
 
 def configure_goal(
@@ -1104,7 +1083,7 @@ def configure_goal(
                 f"{registry_path.name}.before-agent-model-{stamp}.bak"
             )
             shutil.copy2(registry_path, backup_path)
-        _atomic_write_json(registry_path, payload)
+        atomic_write_json(registry_path, payload)
 
     feature_summary = {
         "multi_subagent": _multi_subagent_feature_status(after.get("orchestration") or {}),

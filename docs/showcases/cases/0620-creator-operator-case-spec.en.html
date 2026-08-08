@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>Creator-operator long-running agent case</h1>
     <div class="accent">A creator-operator needs a long-running agent loop that keeps research moving while publishing decisions stay gated.</div>
     <p>A non-technical operator can see what changed, what is blocked, what can safely continue, and how feedback changes the plan without reading prompts, logs, or raw traces.</p>
-    <div class="chips"><span>creator_operator_workflow</span><span>gate_aware_continuation</span><span>feedback_capture</span><span>safe_side_path</span><span>material_library</span><span>Appendix case</span></div>
+    <div class="chips"><span>Reproducible demo</span><span>Public-safe case spec</span><span>creator operator workflow</span><span>gate aware continuation</span><span>feedback capture</span><span>safe side path</span><span>material library</span><span>Appendix case</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>1</strong><span>publish hard gate</span></div><div class="metric"><strong>1</strong><span>safe research side path</span></div><div class="metric"><strong>0</strong><span>autopublish actions</span></div><div class="metric"><strong>0</strong><span>real operations data exposed</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">Storyboard</div><p>`creator-ops-fake-data-storyboard.md` provides a complete fake fixture with no live platform access, suitable for showing the user journey without exposing real operations data.</p></div><div class="evidence-card"><div class="evidence-label">Feedback contract</div><p>`creator-ops-feedback-boundary-contract.md` separates gate decisions, preference hints, todo updates, boundary corrections, reward signals, and product improvement notes so preference is not mistaken for publish approval.</p></div><div class="evidence-card"><div class="evidence-label">Source status</div><p>The contract requires every topic, insight, draft, and material item to carry source status; the public repo defaults to `synthetic_demo` instead of pretending to show real growth evidence.</p></div><div class="evidence-card"><div class="evidence-label">No autopublish</div><p>Publishing is a hard user gate; safe side work may continue, but preference or reward is not publication approval.</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX behavior</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">The creative objective is durable goal state, not a hidden task inside chat.</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">Publish/no-publish is a user gate; research, organization, and source-status work can continue as safe side paths.</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">Feedback becomes a preference hint, gate decision, todo update, or boundary correction.</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">Before the next agent run, the user can see the blocked route, safe side path, and validation expectation.</div></div></li></ul>

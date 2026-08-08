@@ -122,7 +122,7 @@ export LOOPX_RUNTIME_ROOT="$HOME/.codex/loopx"
 Install or repair the CLI when needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 ```

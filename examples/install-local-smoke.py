@@ -225,6 +225,7 @@ def main() -> int:
             in install.stdout
         ), install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-doc-registry'}" in install.stdout, install.stdout
+        assert f"- skill: {codex_home / 'skills' / 'loopx-pr-program'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-pr-review'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-project'}" in install.stdout, install.stdout
         assert f"- skill: {codex_home / 'skills' / 'loopx-self-repair'}" in install.stdout, install.stdout
@@ -325,6 +326,7 @@ def main() -> int:
         assert set(skill_readback["materialized_skill_ids"]) == {
             "loopx",
             "loopx-doc-registry",
+            "loopx-pr-program",
             "loopx-pr-review",
             "loopx-project",
             "loopx-self-repair",
@@ -366,24 +368,38 @@ def main() -> int:
         pr_review_text = " ".join(pr_review_skill.read_text(encoding="utf-8").split())
         for phrase in (
             "loopx --format json pr-review --state all",
-            "agent_response_contract",
+            "thin host adapter",
+            "agent_response_contract.review_execution_contract",
             "review_groups",
+            "pull_requests[].review_plan",
             "pull_requests[].review_template",
             "pull_requests[].evidence_commands",
-            "Do not pipe the first packet through `jq`",
-            "Do not fill the five-block review from title, labels, changed-file counts, or metadata risk hints alone",
-            "submit a formal `REQUEST_CHANGES` review",
-            "A plain PR comment is not an adequate substitute for `REQUEST_CHANGES`",
-            "keep the workflow read-only only when the user explicitly says `local-only`",
-            "the GitHub review state must match the written verdict",
-            "route approval, merge, self-merge, and admin-bypass actions to `loopx-pr-merge`",
+            "Do not pipe the only copy through `jq`",
+            "completion_gate",
+            "never infer `verified` from title",
+            "formal `REQUEST_CHANGES`",
+            "Read the published review back",
+            "Merge still routes through `loopx-pr-merge`",
         ):
             assert phrase in pr_review_text, phrase
         assert "Do not use this skill to approve" not in pr_review_text, pr_review_text
+        pr_program_skill = codex_home / "skills" / "loopx-pr-program" / "SKILL.md"
+        pr_program_text = " ".join(pr_program_skill.read_text(encoding="utf-8").split())
+        for phrase in (
+            "one `continuous_monitor` todo",
+            "result_completeness.complete=true",
+            "diff_snapshot.py",
+            "Product requirements set priority",
+            "Quiet monitor polls",
+        ):
+            assert phrase in pr_program_text, phrase
+        assert (
+            pr_program_skill.parent / "scripts" / "diff_snapshot.py"
+        ).is_file()
         pr_review_metadata = pr_review_skill.parent / "agents" / "openai.yaml"
         pr_review_metadata_text = pr_review_metadata.read_text(encoding="utf-8")
         assert (
-            'short_description: "Guide AgentLoop through LoopX PR review queues"'
+            'short_description: "Review LoopX PRs with deep key-code explanations"'
             in pr_review_metadata_text
         ), pr_review_metadata_text
         assert "Guide agentloop" not in pr_review_metadata_text, pr_review_metadata_text
@@ -472,6 +488,7 @@ def main() -> int:
         ).is_file()
         for implicit_skill_name in (
             "loopx-project",
+            "loopx-pr-program",
             "loopx-pr-review",
             "loopx-doc-registry",
             "loopx-self-repair",
@@ -515,7 +532,7 @@ def main() -> int:
         assert freshness["manifest_source_git_commit_short"] == source_commit[:12], freshness
         assert freshness["manifest_source_revision"] == source_commit, freshness
         assert freshness["manifest_skills_digest"] == release_manifest["skills"]["digest"], freshness
-        assert "install-from-github.sh" in freshness["upgrade_command"], freshness
+        assert "huangruiteng.github.io/loopx/install.sh" in freshness["upgrade_command"], freshness
         assert "loopx doctor" in freshness["upgrade_command"], freshness
         assert doctor_payload["upgrade_hint"] == freshness, doctor_payload
         assert doctor_payload["path"]["loopx"] == str(wrapper), doctor_payload
@@ -544,6 +561,8 @@ def main() -> int:
         assert doctor_payload["globally_visible_project_skills"] == [], doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["exists"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-project"]["required_phrases"] is True, doctor_payload
+        assert doctor_payload["skills"]["loopx-pr-program"]["exists"] is True, doctor_payload
+        assert doctor_payload["skills"]["loopx-pr-program"]["required_phrases"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-pr-review"]["exists"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-pr-review"]["required_phrases"] is True, doctor_payload
         assert doctor_payload["skills"]["loopx-doc-registry"]["exists"] is True, doctor_payload
@@ -594,7 +613,7 @@ def main() -> int:
         assert "installed_skill_delivery_hints: `True`" in doctor_markdown, doctor_markdown
         assert (
             "installed_required_skills: "
-            "`loopx-doc-registry,loopx-pr-review,loopx-project,loopx-self-repair`"
+            "`loopx-doc-registry,loopx-pr-program,loopx-pr-review,loopx-project,loopx-self-repair`"
             in doctor_markdown
         ), doctor_markdown
         assert "loopx_canary_realpath:" in doctor_markdown, doctor_markdown
@@ -612,7 +631,7 @@ def main() -> int:
         assert f"manifest_source_git_commit: `{source_commit[:12]}`" in doctor_markdown, doctor_markdown
         assert "manifest_source: `local_checkout` @ `n/a`" not in doctor_markdown, doctor_markdown
         assert "manifest_skills_digest:" in doctor_markdown, doctor_markdown
-        assert "install-from-github.sh" in doctor_markdown, doctor_markdown
+        assert "huangruiteng.github.io/loopx/install.sh" in doctor_markdown, doctor_markdown
         assert "latest_promotion_readiness: available=`True`" in doctor_markdown, doctor_markdown
         assert "freshness=`fresh`" in doctor_markdown, doctor_markdown
         assert "requires_readiness_run=`False`" in doctor_markdown, doctor_markdown
@@ -636,6 +655,7 @@ def main() -> int:
             repo_root=REPO_ROOT,
             skills={
                 "loopx-project": {"exists": True, "required_phrases": True},
+                "loopx-pr-program": {"exists": True, "required_phrases": True},
                 "loopx-pr-review": {"exists": True, "required_phrases": True},
                 "loopx-doc-registry": {"exists": True, "required_phrases": True},
                 "loopx-self-repair": {"exists": True, "required_phrases": True},
@@ -645,7 +665,7 @@ def main() -> int:
         assert stale_install["status"] == "stale", stale_install
         assert stale_install["requires_upgrade"] is True, stale_install
         assert stale_install["release_age_hours"] == 192.0, stale_install
-        assert "install-from-github.sh" in stale_install["no_clone_upgrade_command"], stale_install
+        assert "huangruiteng.github.io/loopx/install.sh" in stale_install["no_clone_upgrade_command"], stale_install
 
         fresh_install = build_install_freshness(
             command_path=wrapper,
@@ -653,6 +673,7 @@ def main() -> int:
             repo_root=REPO_ROOT,
             skills={
                 "loopx-project": {"exists": True, "required_phrases": True},
+                "loopx-pr-program": {"exists": True, "required_phrases": True},
                 "loopx-pr-review": {"exists": True, "required_phrases": True},
                 "loopx-doc-registry": {"exists": True, "required_phrases": True},
                 "loopx-self-repair": {"exists": True, "required_phrases": True},
@@ -668,6 +689,7 @@ def main() -> int:
             repo_root=REPO_ROOT,
             skills={
                 "loopx-project": {"exists": True, "required_phrases": True},
+                "loopx-pr-program": {"exists": True, "required_phrases": True},
                 "loopx-pr-review": {"exists": True, "required_phrases": True},
                 "loopx-doc-registry": {"exists": True, "required_phrases": True},
                 "loopx-self-repair": {"exists": True, "required_phrases": True},
@@ -749,7 +771,7 @@ def main() -> int:
         )
         assert "`LOOPX_TURN=<current_time_iso>`; reuse." in payload["task_body"], payload
         assert "guard receipt; 2 stalls->replan" in payload["task_body"], payload
-        assert "actual class/scale/outcome accountable refresh->spend" in payload["task_body"], payload
+        assert "no-change=`surface_only`/no spend" in payload["task_body"], payload
         assert payload["cli_bin"] == "loopx", payload
 
         canary_cli = subprocess.run(

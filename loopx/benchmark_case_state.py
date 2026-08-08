@@ -9,6 +9,7 @@ from .control_plane.scheduler.execution_context import (
     render_scheduler_execution_args,
 )
 from .control_plane.todos.contract import build_todo_id
+from .install_contract import NO_CLONE_INSTALL_URL
 
 BENCHMARK_CASE_ACTIVE_STATE_SCHEMA_VERSION = (
     "loopx_benchmark_case_active_state_v1"
@@ -89,10 +90,7 @@ BENCHMARK_CASE_LOOPX_EXECUTION_STYLES = (
     BENCHMARK_CASE_LOOPX_PROMPT_DRIVEN_EXECUTION_STYLE,
     BENCHMARK_CASE_LOOPX_ORCHESTRATED_EXECUTION_STYLE,
 )
-BENCHMARK_CASE_LOOPX_OFFICIAL_INSTALLER_URL = (
-    "https://raw.githubusercontent.com/huangruiteng/loopx/main/"
-    "scripts/install-from-github.sh"
-)
+BENCHMARK_CASE_LOOPX_OFFICIAL_INSTALLER_URL = NO_CLONE_INSTALL_URL
 BENCHMARK_CASE_LOOPX_PRODUCT_PATH_PRIMARY_ROUTE = (
     "prompt_driven_case_local_loopx_cli"
 )

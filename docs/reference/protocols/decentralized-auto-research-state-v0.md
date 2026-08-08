@@ -65,6 +65,8 @@ agent.
 | `todo_item_v0` | `loopx todo` | Formal executable work, user gate, blocker, or monitor. Research work remains todo-backed. |
 | `research_hypothesis_v0` | proposed rollout event and optional domain pack | A hypothesis node linked to a todo, parent hypothesis, agent lane, mechanism family, and current status. |
 | `research_evidence_event_v0` | proposed `loopx_rollout_event_v0` specialization | Append-only evidence for an attempt: score, split, command label, branch, artifact refs, eval status, and boundary facts. |
+| `auto_research_terminal_decision_v0` | `validation` rollout event specialization | Explicit `promoted` or `retired` result bound to one evidence-graph revision; promotion and retirement candidates do not imply this record. |
+| `auto_research_peer_review_v0` | `validation` rollout event specialization | Approve, reject, or needs-more-evidence review receipt bound to one terminal decision and evidence-graph revision. |
 | `dataset_window_contract_v0` | `loopx/ml_experiment.py` | Train/dev/held-out window or split contract, including missing-window policy. |
 | `agent_lane_next_action_v0` | `quota should-run --agent-id ...` | The current agent's selected frontier item; it does not replace the global state graph. |
 | `operator_gate` | `loopx operator-gate`, review packet | Promotion, merge, private-material, or publication decision. |
@@ -168,6 +170,7 @@ carry source refs and remain recomputable from source state.
 | --- | --- |
 | `decentralized_research_frontier_v0` | Per-agent queue of runnable or blocked hypotheses after quota, claim, capability, and boundary checks. |
 | `research_evidence_graph_v0` | Read-only graph joining hypotheses, todos, attempts, branches, metrics, gates, and promotion decisions. |
+| `auto_research_terminal_result_projection_v0` | Deterministic projection of terminal decisions and review state into existing Explore nodes, findings, and lineage edges. |
 
 ### `decentralized_research_frontier_v0`
 
@@ -278,6 +281,14 @@ Already available:
   `research_hypothesis` and `research_evidence` rollout events back into
   `research_evidence_graph_v0` and derives promotion/retirement candidates for
   the live frontier.
+- `loopx auto-research decide` validates a candidate against current evidence,
+  then records an evidence-revision-bound terminal decision.
+- `loopx auto-research review` records a review receipt; with
+  `--require-independent`, the reviewer must be a different registered peer
+  from both producer and decision agent.
+- `loopx auto-research results` returns exact current and historical terminal
+  state by hypothesis id. `project-results` writes deterministic existing
+  Explore node/finding events, and repeated execution is idempotent.
 
 Needed next:
 
@@ -295,6 +306,9 @@ An implementation is acceptable when:
 - `needs_retry` keeps resumable evidence instead of collapsing into `done`;
 - grounded ideation and novelty audit are separated;
 - held-out promotion is explicit;
+- terminal decisions remain separate from promotion and retirement candidates;
+- same-agent review remains visible but cannot confirm or refute a finding;
+- stale evidence revisions and conflicting terminal decisions fail closed;
 - user-facing research summaries derive from compact frontier and evidence
   graph refs, not a bespoke kernel packet;
 - public projections contain no raw logs, private paths, credentials, or raw

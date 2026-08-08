@@ -8,7 +8,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC = REPO_ROOT / "docs" / "development" / "benchmark-developer-workflow.md"
-README = REPO_ROOT / "README.md"
 DOCS_INDEX = REPO_ROOT / "docs" / "README.md"
 DEVELOPMENT_INDEX = REPO_ROOT / "docs" / "development" / "README.md"
 TASKS = REPO_ROOT / "CONTRIBUTOR_TASKS.md"
@@ -143,11 +142,9 @@ def main() -> int:
     leaked = [snippet for snippet in FORBIDDEN_SNIPPETS if snippet in doc]
     assert not leaked, leaked
 
-    readme = README.read_text(encoding="utf-8")
     docs_index = DOCS_INDEX.read_text(encoding="utf-8")
     development_index = DEVELOPMENT_INDEX.read_text(encoding="utf-8")
     tasks = TASKS.read_text(encoding="utf-8")
-    require(readme, ["docs/development/benchmark-developer-workflow.md"], source=README)
     require(docs_index, ["development/README.md"], source=DOCS_INDEX)
     require(
         development_index,

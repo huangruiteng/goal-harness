@@ -12,7 +12,7 @@ which control-plane surfaces are safe to build on.
 For a first-time user, prefer the no-clone archive installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 ```
@@ -95,9 +95,34 @@ Before moving `stable`, maintainers should:
   `loopx update --execute` when the check recommends or when they want to
   refresh to the named stable release.
 
-This is a lightweight GitHub release contract, not a PyPI publishing
-requirement. A future package registry can reuse the same version/tag contract
-instead of inventing a second release identity.
+The release workflow builds a wheel and source distribution from the tagged
+commit. Its release assets include a canonical `SHA256SUMS` file, and GitHub
+records build-provenance attestations for both packages and the checksum
+manifest. Verify a downloaded bundle before installation:
+
+```bash
+sha256sum --check SHA256SUMS
+gh attestation verify loopx-X.Y.Z-py3-none-any.whl --repo huangruiteng/loopx
+gh attestation verify loopx-X.Y.Z.tar.gz --repo huangruiteng/loopx
+```
+
+The checksum proves that the downloaded bytes match the release manifest. The
+attestation separately binds those bytes to the repository, workflow, commit,
+and build event; neither mechanism claims that the package is vulnerability
+free.
+
+PyPI publication is an explicit, fail-closed extension of the same build. The
+release workflow publishes only when maintainers have configured all of these:
+
+- a PyPI project named `loopx` with a Trusted Publisher for
+  `huangruiteng/loopx` and `.github/workflows/release-artifacts.yml`;
+- a protected GitHub environment named `pypi` that matches the Trusted
+  Publisher configuration;
+- the repository variable `PYPI_PUBLISH_ENABLED=true`.
+
+Do not add a long-lived PyPI token. Without every condition above, GitHub
+Release packages and their verification material are still produced, while
+the PyPI job remains skipped.
 
 ## Public Release Timeline
 
@@ -527,6 +552,25 @@ Treat these as experimental until their contract docs say otherwise:
 
 ## Release Note Checklist
 
+Start the final GitHub release body from the canonical
+[release note template](release-note-template.md). Its first substantive
+section is a compact `## Release Decision` block that answers the five
+questions a reader needs before inspecting the detailed changelog:
+
+| Field | Required decision |
+| --- | --- |
+| `**Who should upgrade:**` | Name the affected users or operators, the reason to upgrade now, and who can remain on the current version. |
+| `**What this release solves:**` | State the concrete failure, missing workflow, or reliability gap in user-outcome language. |
+| `**Breaking changes:**` | Start with `No.` or `Yes.`; when yes, give the migration path, and when no, still disclose changed defaults, deprecations, or experimental boundaries. |
+| `**How to verify:**` | State the expected post-upgrade result and include a minimal runnable `bash` block that proves package identity and the affected behavior. |
+| `**Contributors:**` | Name the release maintainer and community contributors from the tag range, or explicitly say that the release has no community contribution. |
+
+Mirror the same decisions under `### 升级决策` in the Chinese summary with
+`**谁需要升级：**`, `**解决了什么：**`, `**是否有破坏性变更：**`,
+`**如何验证：**`, and `**贡献者：**`. The summary is a decision aid, not a
+replacement for the detailed product groups, per-claim PR evidence, optional
+capability lifecycle, or exact-commit validation evidence below it.
+
 Keep user-visible product changes first. When merged pull requests between the
 previous and current tags include community contributors other than project
 founder `@huangruiteng`, add a prominent `## Community Contributors` section
@@ -577,13 +621,11 @@ still useful at the end, but it does not replace per-claim PR attribution.
 Avoid bare PR ranges as the only evidence because ranges can hide omitted or
 unrelated changes.
 
-Every public release note or update note should also answer:
+After the decision summary and product groups, every public release note should
+also record:
 
-- What user-visible capability became more dependable?
 - What package version and public tag name this stable release uses?
 - Which install/update path should a new user follow?
-- Which commands, docs, or smokes prove the claim?
-- Are there compatibility or migration notes for existing local state?
 - Which surfaces are still experimental or intentionally excluded?
 - For every new or materially changed experimental, default-off, or opt-in
   capability, include an **Optional capability activation** entry in both

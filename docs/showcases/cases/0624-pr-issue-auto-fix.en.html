@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>PR issue automatic fix loop</h1>
     <div class="accent">Review feedback should become an ordered repair workflow with repro, fix, validation, and reviewer handoff.</div>
     <p>The operator can turn a PR issue into a controlled fix loop without manually rewriting the review comment as an agent plan.</p>
-    <div class="chips"><span>issue fix</span><span>repro smoke</span><span>PR review</span></div>
+    <div class="chips"><span>Reproducible demo</span><span>Public-safe pattern</span><span>issue fix</span><span>repro smoke</span><span>PR review</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>5</strong><span>repair-loop stages</span></div><div class="metric"><strong>1</strong><span>branch-ready fix packet</span></div><div class="metric"><strong>1</strong><span>review handoff preserved</span></div><div class="metric"><strong>0</strong><span>raw issue bodies in public artifact</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">Product entry</div><p>`docs/capabilities/issue-fix/README.md` names `loopx issue-fix ...`, the content-ops bridge, protocol docs, and smokes; the maintainer-facing action is turning feedback into an executable fix packet.</p></div><div class="evidence-card"><div class="evidence-label">Workflow contract</div><p>`issue_fix_workflow_contract_v0` defines metadata preview, intake classification, workflow plan, todo writeback, caller repo branch, validation, PR review packet, and gate handling.</p></div><div class="evidence-card"><div class="evidence-label">Executable loop</div><p>`issue_fix_acceptance_loop_v0` includes the acceptance fixture, repo-branch fixture, and caller-approved repo branch mode.</p></div><div class="evidence-card"><div class="evidence-label">Validation surface</div><p>Focused smokes protect the key boundaries for metadata preview, content-ops intake, workflow plan, workflow contract, acceptance loop, and end-to-end workflow behavior.</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX behavior</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">Public metadata can enter packets; raw issue bodies, comment bodies, timelines, and provider payloads remain gated sources.</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">Accepted candidates become ordered LoopX todos: repro smoke, code-context route, branch-local patch, validation, and review-packet readiness.</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">Caller-approved repo mode inspects the local repo only under `--execute` and reports repo-relative changed files plus validation pass/fail.</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">External comments, PR creation, merge, publish, destructive git, and production action remain explicit gates.</div></div></li></ul>

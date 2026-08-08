@@ -17,12 +17,18 @@ HOST_30 = "FREQ=MINUTELY;INTERVAL=30"
 HOST_3 = "FREQ=MINUTELY;INTERVAL=3"
 HOST_6 = "FREQ=MINUTELY;INTERVAL=6"
 HOST_10 = "FREQ=MINUTELY;INTERVAL=10"
+HOST_7 = "FREQ=MINUTELY;INTERVAL=7"
 APP_CONTEXT = scheduler_execution_context_for_runtime_profile(
     "codex_app_heartbeat"
 )
 
 
-def _monitor_decision(*, now: datetime, minutes_until_due: int) -> dict:
+def _monitor_decision(
+    *,
+    now: datetime,
+    minutes_until_due: int,
+    cadence: str = "3m",
+) -> dict:
     return {
         "goal_id": GOAL_ID,
         "agent_identity": {"agent_id": AGENT_ID},
@@ -49,7 +55,7 @@ def _monitor_decision(*, now: datetime, minutes_until_due: int) -> dict:
                     "todo_id": "todo_scheduler_convergence",
                     "task_class": "continuous_monitor",
                     "target_key": "scheduler-convergence",
-                    "cadence": "3m",
+                    "cadence": cadence,
                     "next_due_at": (
                         now + timedelta(minutes=minutes_until_due)
                     ).isoformat(),
@@ -121,7 +127,7 @@ def _ack_state(hint: dict, *, applied_rrule: str, generated_at: datetime) -> dic
     return event["scheduler_ack_event"]["scheduler_state"]
 
 
-def test_monitor_ack_settles_before_progression_and_avoids_15_30_15_flip(
+def test_monitor_ack_settles_before_progression_and_avoids_3_6_3_flip(
     monkeypatch,
 ) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -161,11 +167,22 @@ def test_monitor_ack_settles_before_progression_and_avoids_15_30_15_flip(
     assert "recommended_rrule" not in near_due_app
 
 
+def test_monitor_near_due_under_floor_uses_tight_cadence(monkeypatch) -> None:
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    decision = _monitor_decision(now=now, minutes_until_due=7, cadence="30m")
+    first = _hint(monkeypatch, decision, now=now)
+
+    first_app = first["codex_app"]
+    assert first_app["recommended_rrule"] == HOST_7
+    assert first_app["example_progression_minutes"] == [7]
+    assert first["cadence_class"] == "monitor_wait"
+
+
 def test_monitor_progression_advances_after_elapsed_interval_and_then_converges(
     monkeypatch,
 ) -> None:
     now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
-    decision = _monitor_decision(now=now, minutes_until_due=119)
+    decision = _monitor_decision(now=now, minutes_until_due=119, cadence="30m")
     first = _hint(monkeypatch, decision, now=now)
     settled_15 = _ack_state(first, applied_rrule=HOST_15, generated_at=now)
 

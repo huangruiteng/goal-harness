@@ -186,6 +186,7 @@ def main() -> int:
         assert decision["heartbeat_recommendation"]["notify"] == "NOTIFY", decision
         assert decision["interaction_contract"]["mode"] == "user_gate", decision
         assert decision["interaction_contract"]["user_channel"]["action_required"] is True, decision
+        assert decision["interaction_contract"]["user_channel"]["notify"] == "NOTIFY", decision
         assert decision["interaction_contract"]["agent_channel"]["must_attempt"] is False, decision
         assert decision["interaction_contract"]["agent_channel"]["delivery_allowed"] is False, decision
         assert decision["interaction_contract"]["cli_channel"]["spend_policy"] == (
@@ -209,13 +210,13 @@ def main() -> int:
         compact_prompt = " ".join(prompt.split())
         assert "state=operator_gate" not in compact_prompt, prompt
         assert "Normal turns use CLI `interaction_contract`" in compact_prompt, prompt
-        assert "NOTIFY Chinese actions incl. non_blocking false/0" in compact_prompt, prompt
-        assert 'not only "owner gate"' in compact_prompt, prompt
-        assert "具体 user todo 未投影，需修复 LoopX 状态投影" in compact_prompt, prompt
-        assert "DONT_NOTIFY+false/0 only: quiet" in compact_prompt, prompt
+        assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet" in compact_prompt, prompt
+        assert "Due/peer gate != prompt" in compact_prompt, prompt
+        assert "missing NOTIFY action->具体user todo未投影" in compact_prompt, prompt
         assert "`LOOPX_TURN=<current_time_iso>`; reuse." in compact_prompt, prompt
         assert "guard receipt; 2 stalls->replan" in compact_prompt, prompt
-        assert "actual class/scale/outcome accountable refresh->spend" in compact_prompt, prompt
+        assert "no-change=`surface_only`/no spend" in compact_prompt, prompt
+        assert "unchanged->`--vision-unchanged-reason`" in compact_prompt, prompt
 
     print("blocker-push-runtime-smoke ok")
     return 0

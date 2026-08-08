@@ -319,6 +319,7 @@ def complete_event_projected_goal_todo(
     registered_agents: list[str],
     updated_at: str,
     dry_run: bool,
+    completion_turn_key: str | None = None,
 ) -> dict[str, Any]:
     item = dict(context["item"])
     role = str(context["role"])
@@ -400,6 +401,8 @@ def complete_event_projected_goal_todo(
     }
     if evidence:
         completion_payload["evidence"] = evidence
+    if completion_turn_key:
+        completion_payload["completion_turn_key"] = completion_turn_key
     if note:
         completion_payload["note"] = note
     if no_followup:

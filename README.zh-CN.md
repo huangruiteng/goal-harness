@@ -4,11 +4,13 @@
 
 <img src="docs/assets/loopx-social-preview.png" alt="LoopX Loop Engineering 展示图" width="560">
 
-**面向长程 AI Agent 工作的本地控制面。**
+**面向长程 Agent 的开放、有状态、Provider-neutral 控制面。**
 
 <sub>Codex、Claude Code、Cursor 或自有 runtime 负责一次次有界执行；LoopX 让目标、gate、todo、证据、quota 和交接跨轮次保持稳定。</sub>
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
+<a href="https://trendshift.io/repositories/102379?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-102379"><img src="https://trendshift.io/api/badge/repositories/102379" alt="huangruiteng/loopx 在 Trendshift 的趋势排名" width="220" height="48"></a>
+
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
 
 [产品首页](https://huangruiteng.github.io/loopx/) · [文档](https://huangruiteng.github.io/loopx/docs/) · [试用 LoopX](#试用-loopx) · [查看真实 Loop](#证据) · [理解工作原理](#为什么需要-loopx) · [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [English](README.md)
 
@@ -18,9 +20,9 @@
 
 ---
 
-LoopX 是一个轻量 state kernel，也是 agent-agnostic 的本地 Loop Engineering
-控制面。它不替代 agent runtime，而是让跨轮次、跨工具、跨 agent 的工作可审阅、
-可恢复、可接力。
+LoopX 是开放且 Provider-neutral 的轻量 state kernel，也是 local-first
+的 Loop Engineering 控制面。它不替代真正执行任务的 agent runtime，而是让
+跨轮次、跨工具、跨 agent 的工作可审阅、可恢复、可接力。
 
 > 让 Loop 持续向前，让关键判断留在人手里。
 
@@ -49,6 +51,10 @@ Codex / Claude Code / Cursor / shell agent 执行一轮
 写回证据 + handoff + next todo ─▶ quota 决定下一次 tick
 ```
 
+Agent runtime 负责执行，LoopX 负责治理跨运行延续的控制状态，让工程、
+研究、discovery 和运营 Loop 能持续推进。它不是又一个 agent framework，也不是
+绑定某一 Provider 的编排 runtime。
+
 ![LoopX control-plane board](docs/assets/control-plane-board.svg)
 
 一个形象化理解是：LoopX 是
@@ -76,10 +82,12 @@ LoopX 不是生产自动化控制器。危险权限、生产写入、公开发�
 
 ## 证据
 
-这些不是单轮 demo。OpenViking Issue-Fix 与 Auto ML 两条真实轨迹各自跨越
-**200+ 小时自然时长**，持续保留多轮 todo、决策和证据更新。这里的自然时长是
-项目从启动到最新证据的 wall-clock 时间，不等于 200 小时连续模型执行，也不代表
-无人值守的生产自治。点击原图可以检查 public-safe graph、证据分支和跨轮决策。
+这些不是单轮 demo。OpenViking 的公开贡献序列与经过脱敏的 owner-run Auto ML
+showcase 各自跨越 **200+ 小时自然时长**，持续保留多轮 todo、决策和证据更新。
+这里的自然时长是项目从启动到最新证据的 wall-clock 时间。
+不等于 200 小时连续模型执行，也不代表无人值守的生产自治。点击原图可以检查
+public-safe graph、
+证据分支和跨轮决策。
 
 ### 开源 Issue Fix
 
@@ -99,32 +107,54 @@ repository context、带 revision 的修复知识和 reviewer-facing preference
 
 ### Auto ML Experiment
 
-**超过 200 小时的 owner-run 实验轨迹：假设、matched evidence、无效谱系、
-运行中复现和 promote / stop gate 留在同一张图中。**
+**经过脱敏的 owner-run showcase：超过 200 小时的实验轨迹把假设、matched
+evidence、无效谱系、运行中复现和 promote / stop gate 留在同一张图中。**
 
 <a href="docs/assets/long-running-loop-ml-experiment-trajectory.png">
   <img src="docs/assets/long-running-loop-ml-experiment-trajectory.png" alt="Auto ML Experiment 轨迹：实验谱系、证据门和晋级决策" width="760">
 </a>
 
-这张经过脱敏的 public-safe graph 保留了该 200+ 小时自然时间窗口中的决策谱系；
-它是轨迹证据，不代表连续算力执行、独立复现或生产结果。
+这张 public-safe graph 保留了该 200+ 小时自然时间窗口中的决策谱系。它是
+owner-run showcase，不代表连续算力执行、独立复现、生产结果，也不代表公司或
+雇主背书；脱敏后的图片本身不足以让第三方独立复现实验。
 
 ### Auto Research
 
-**Proposer、executor、evaluator/promoter 并行迭代，todo、quota、证据与
-targeted wake 同屏可见。**
+**可复现的公开 KNN demo：Proposer、executor、evaluator/promoter 并行迭代，
+todo、quota、证据与 targeted wake 同屏可见。**
 
 <a href="docs/assets/auto-research-multi-agent-showcase.png">
   <img src="docs/assets/auto-research-multi-agent-showcase.png" alt="Auto Research 多 Agent 工作区：proposer、executor、evaluator/promoter、todo、quota、证据与 targeted wake 同屏推进">
 </a>
 
+这张截图来自 LoopX 内置的 exact-KNN demo。公开 task、可编辑与受保护文件、
+deterministic CPU evaluator、dev / held-out 命令均在仓库内。可按
+[showcase walkthrough](docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md)
+或 [command path](docs/guides/auto-research-command-path.md)复现工作流；它是 demo
+结果，不是生产研究结论。
+
+### 真实项目中的使用
+
+- **外部独立用户 · `>13h` C++ 精度修复。** 用户报告多阶段任务持续对齐目标，
+  触发 public research 后采用[公开代码记忆工具](https://github.com/DeusData/codebase-memory-mcp)，
+  最终精度明显提升。[查看证据边界](docs/showcases/cases/independent-cpp-accuracy-long-run.md)。
+- **外部独立用户 · `4d` 无人干预运行。** 用户报告 Agent 连续四天无需人工
+  干预，持续处理有价值的工作，并提供周期报告入口。
+  [查看脱敏案例](docs/showcases/cases/independent-four-day-unattended-agent.md)。
+- **外部独立用户 · `7` 个合并 PR。** 一次归因于 LoopX 的 Engine 重构可由
+  [公开 Issue](https://github.com/zilliztech/mfs/issues/166)和七个合并 PR 检查；
+  LoopX 归因与用户报告的 `10 亿+` token 规模仍按用户自述标记。
+  [检查完整案例](docs/showcases/cases/independent-public-engine-refactor.md)。
+
+这里长期只维护当前最强的三个案例，不复制全量清单。完整的 contributor case、
+creator dogfooding、reproducible demo 和证据强度标签见
+[Showcase 全量目录](docs/showcases/README.md)。
+
 更多可检查入口：
 
 - [产品首页](https://huangruiteng.github.io/loopx/)：查看产品叙事、快速开始和长程证据；
-- [Showcase 目录](docs/showcases/README.md)，包括
-  [Blocked P0 安全侧路](docs/showcases/cases/0617-blocked-p0-safe-rotation.md)、
-  [LoopX 自迭代](docs/showcases/cases/0619-loopx-self-iteration.md)和
-  [动态工作流编排](docs/showcases/cases/0619-dynamic-workflow-hardware-agent.html)；
+- [Showcase 全量目录](docs/showcases/README.md)和
+  [中英双语托管索引](docs/showcases/index.html)；
 - [跨 runtime 实现审阅演示](docs/product/use-cases/cross-runtime/cross-runtime-impl-review-demo.md)；
 - 公开[用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg)。
 
@@ -138,7 +168,7 @@ Git；Python package 除标准库外没有 runtime 依赖。
 无需 clone，直接安装：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 ```
@@ -348,8 +378,9 @@ loopx check \
 
 ## 进阶文档
 
-按你的角色选择入口；[线上文档](https://huangruiteng.github.io/loopx/docs/)
-提供发布后的浏览入口，[完整文档索引](docs/README.md)仍是权威地图。
+按当前任务选择入口；[线上文档](https://huangruiteng.github.io/loopx/docs/)
+提供发布后的浏览入口，[完整文档索引](docs/README.md)仍是权威地图。这里仅保留
+精选入口；每个分类索引负责承接更深层的文档和版本化协议。
 
 ### 使用与运维
 
@@ -357,46 +388,67 @@ loopx check \
   dashboard、开发和命令参考。
 - [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg)：
   公开 onboarding、概念、FAQ 和案例。
-- [Showcase Catalog](docs/showcases/README.md)：public-safe 案例和 evidence label。
-- [Update Notes](docs/update-notes/README.md)：公开安全的进展记录。
+- [Operations](docs/operations/README.md)：goal continuation、todo、cadence、
+  attention 和 authority 工作流。
+- [Quota Allocation](docs/quota-allocation.md)与
+  [Heartbeat Automation Prompt](docs/heartbeat-automation-prompt.md)：scheduler
+  eligibility、spend 和定时续跑。
+- [Dashboard](apps/presentation/dashboard/README.md)与
+  [Status Data Contract](docs/status-data-contract.md)：面向操作者的状态与投影契约。
 - [Release Readiness](docs/product/release-readiness.md)：安装升级、兼容性 gate、
   release note 和稳定表面。
-- [Dashboard](apps/presentation/dashboard/README.md)与
-  [Status Data Contract](docs/status-data-contract.md)。
 
 ### 理解控制面
 
 - [Architecture](docs/architecture.md)：lifetime-goal invariant 与 kernel。
 - [State Interaction Model](docs/state-interaction-model.md)：actor、store、
   interaction contract 与 writeback。
-- [Interaction Pattern Catalog](docs/concepts/interaction-pattern-catalog.md)：可复用
-  routing、gate、evidence、projection 与 planning pattern。
-- [Loop Engineering 原则与陷阱（中文）](docs/product/foundations/loop-engineering-principles-and-pitfalls.zh.md)
-  及[英文版](docs/product/foundations/loop-engineering-principles-and-pitfalls.md)。
-- [控制面开发者 9 讲](docs/development/control-plane-course/README.md)。
+- [Concepts](docs/concepts/README.md)：可复用的 routing、gate、evidence、
+  projection 与 planning pattern。
+- [Product Foundations](docs/product/foundations/README.md)：Loop Engineering
+  原则、project-level reward 和 reward-style replanning。
 - [Product Vision](docs/product/vision.md)：更广义的 Loop Agent 产品方向。
 
 ### 集成与扩展
 
 - [Integration Guide](docs/integration.md)
 - [Custom Agent Runner 中文指南](docs/guides/custom-agent-runner-integration.zh-CN.md)
-- [Worker Bridge Install Contract](docs/integrations/worker-bridge-install-contract.md)
+- [Integrations](docs/integrations/README.md)：runtime、host、协作和外部系统 adapter，
+  包括 worker bridge 与 Lark。
 - [Extensions and Capabilities](docs/reference/extensions.md)
-- [Codex App Host Command Registry](docs/reference/protocols/codex-app-host-command-registry-v0.md)
-- [Heartbeat Automation Prompt](docs/heartbeat-automation-prompt.md)
-- [Lark Kanban Adapter](docs/integrations/lark-kanban-control-plane-adapter.md)
-- [Reward Memory 中文架构](docs/reference/protocols/reward-memory-architecture-v0.zh-CN.md)
 
-### 验证与治理
+### 构建与评审 LoopX
 
-- [Quota Allocation](docs/quota-allocation.md)
-- [Public/Private Boundary](docs/public-private-boundary.md)
-- [Benchmark Developer Workflow](docs/development/benchmark-developer-workflow.md)
-- [Project-Level Reward Model](docs/product/foundations/project-level-reward-model.md)
+- [Developer Guide](docs/development/README.md)：贡献者工作流、benchmark 开发、
+  文档布局和质量 gate。
+- [Reference and Protocols](docs/reference/README.md)：稳定契约和版本化实现协议，
+  包括 host command 与 reward memory architecture。
+- [控制面开发者 9 讲](docs/development/control-plane-course/README.md)。
+- [Testing and Quality](docs/development/testing-and-quality.md)：分层验证与风险检查。
+- [Public/Private Boundary](docs/public-private-boundary.md)：安全的 fixture、示例、
+  evidence 与发布边界。
+
+### 查看结果与证据
+
+- [Showcase Catalog](docs/showcases/README.md)：public-safe 案例和 evidence label。
+- [Research and Evidence](docs/research/README.md)：benchmark 调查和有来源的结论。
+- [Update Notes](docs/update-notes/README.md)：公开安全的进展记录。
+
+### 项目与社区
+
 - [Project Governance](GOVERNANCE.md)
+- [Contributing](CONTRIBUTING.md)与[Contributor Tasks](CONTRIBUTOR_TASKS.md)
 - [Authors and Contributors](AUTHORS.md)
 - [Project History](docs/project/history.md)
 - [Name and Marks](TRADEMARKS.md)
+
+## 合作伙伴项目
+
+LoopX 欢迎与其他开源项目协作，共建长程 Agent 生态。已确认的合作伙伴包括：
+
+- [OpenViking](https://github.com/volcengine/OpenViking) - 面向 AI Agent 的自进化
+  上下文数据库
+- [NoKV](https://github.com/NoKV-Lab/NoKV) - AI 原生分布式文件系统
 
 ## 用户群与反馈
 
@@ -406,23 +458,18 @@ LoopX 还在早期，最需要真实长程 agent 项目里的反馈：控制面�
 - 可复现 bug、安装问题、功能建议：请提
   [GitHub Issue](https://github.com/huangruiteng/loopx/issues)。
 - 文档修正、showcase 补充、小型 public-safe 示例：欢迎开 PR。
-- 中文用户与贡献者可以加入飞书开发群；加入微信群请添加微信 `huangrt00`，
-  好友申请备注 `LoopX`。
+- 参与社区讨论：可加入 [Discord 社区](https://discord.gg/XmGgQyCFZd)，也可在
+  下方直接加入飞书群或通过微信申请入群。
+
+渠道分工与支持边界见 [Support](SUPPORT.md)，官方发布源见
+[Communications](COMMUNICATIONS.md)。
 
 <p align="center">
-  <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX 开发群二维码" width="320"></a><br>
-  <strong>飞书开发群</strong>
+  <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX 飞书开发群二维码" width="280"></a>
+  <a href="docs/assets/loopx-wechat-contact.png"><img src="docs/assets/loopx-wechat-contact.png" alt="LoopX 微信联系人二维码" width="220"></a>
 </p>
-
 <p align="center">
-  <a href="docs/assets/loopx-wechat-contact.png"><img src="docs/assets/loopx-wechat-contact.png" alt="LoopX 微信联系人二维码" width="280"></a><br>
-  <strong>微信：<code>huangrt00</code></strong><br>
-  添加好友，备注 LoopX 后邀请入群
-</p>
-
-<p align="center">
-  <img src="docs/assets/loopx-logo.png" alt="LoopX 标志" width="96"><br>
-  LoopX 项目标志
+  <sub><strong>飞书：</strong>扫码直接加入<br><strong>微信：<code>huangrt00</code></strong> · 好友申请备注 LoopX</sub>
 </p>
 
 ## 贡献
@@ -458,6 +505,13 @@ integration 和进阶路径仍是 optional、default-off 或 experimental。Loop
 
 下一阶段会继续改善安装与 host packaging、扩展 typed runtime adapter、加强重复公开
 Loop 的 terminal acceptance、补足独立采用与 outcome evidence，并打磨管理面。
+
+## Star 趋势
+
+<p align="center">
+  <a href="https://github.com/huangruiteng/loopx/stargazers"><img src="https://huangruiteng.github.io/loopx/site-assets/star-history.svg" alt="LoopX GitHub Star 历史趋势，来自已校验快照" width="800"></a><br>
+  <sub>由仓库授权的 workflow 每 6 小时基于 GitHub 官方 stargazer 时间戳生成；仅当拉取条数与 GitHub 当前 Star 总数一致时发布。GitHub 图片缓存可能延迟刷新。</sub>
+</p>
 
 ## License
 

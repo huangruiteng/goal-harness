@@ -137,7 +137,7 @@ def main() -> None:
         assert bundle["agent_id"] == AGENT_ID, bundle
         assert "--message-only" in bundle["message_only_command"], bundle
         assert str(fresh_repo) in bundle["message_only_command"], bundle
-        assert "install-from-github.sh" in bundle["install_repair_command"], bundle
+        assert "huangruiteng.github.io/loopx/install.sh" in bundle["install_repair_command"], bundle
         assert "quota should-run" in bundle["quota_guard_command"], bundle
         assert "--agent-id codex-side-bypass" in bundle["quota_guard_command"], bundle
         assert "refresh-state --goal-id public-fresh-codex-cli-goal" in bundle["refresh_command"], bundle
@@ -181,7 +181,7 @@ def main() -> None:
         assert not message_only.startswith("/goal "), message_only
         assert "# Codex CLI LoopX Bootstrap Message" not in message_only, message_only
         assert "Fresh Repo Install Repair" not in message_only, message_only
-        assert "install-from-github.sh" in message_only, message_only
+        assert "huangruiteng.github.io/loopx/install.sh" in message_only, message_only
         assert "/goal <thin task_body>" in message_only, message_only
         assert "quota should-run" in message_only, message_only
         assert "refresh-state --goal-id public-fresh-codex-cli-goal" in message_only, message_only

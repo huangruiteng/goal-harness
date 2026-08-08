@@ -117,7 +117,33 @@ def main() -> None:
     assert blocked.returncode == 1, blocked.stdout
     blocked_payload = json.loads(blocked.stdout)
     assert blocked_payload["ok"] is False, blocked_payload
+    assert blocked_payload["error_code"] == "auto_research_invalid_input", blocked_payload
     assert "public alias" in blocked_payload["error"], blocked_payload
+
+    missing_path = f"{bad_path}.missing"
+    missing_args = [
+        "auto-research",
+        "frontier",
+        "--fixture",
+        missing_path,
+        "--agent-id",
+        "codex-side-bypass",
+    ]
+    missing_json = run_cli(
+        ["--format", "json", *missing_args],
+        check=False,
+    )
+    assert missing_json.returncode == 1, missing_json.stdout
+    missing_payload = json.loads(missing_json.stdout)
+    assert missing_payload["error_code"] == "auto_research_io_failed", missing_payload
+    assert missing_payload["error"] == "Auto Research could not access a required resource.", missing_payload
+    assert missing_path not in missing_json.stdout, missing_json.stdout
+
+    missing_markdown = run_cli(["--format", "markdown", *missing_args], check=False)
+    assert missing_markdown.returncode == 1, missing_markdown.stdout
+    assert "error_code: `auto_research_io_failed`" in missing_markdown.stdout
+    assert "error: `Auto Research could not access a required resource.`" in missing_markdown.stdout
+    assert missing_path not in missing_markdown.stdout, missing_markdown.stdout
 
     docs = (REPO_ROOT / "docs/reference/protocols/decentralized-auto-research-state-v0.md").read_text(
         encoding="utf-8"

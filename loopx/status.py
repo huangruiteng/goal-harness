@@ -164,6 +164,13 @@ from .control_plane.runtime.run_compaction import (
     compact_operator_gate_resume_contract,
     compact_run_base as _compact_run_base_read_model,
 )
+from .control_plane.runtime.status_classifications import (
+    BLOCKING_CLASSIFICATIONS,
+    CODEX_READY_CLASSIFICATIONS,
+    DREAMING_ADVISORY_CLASSIFICATIONS,
+    HANDOFF_READY_CLASSIFICATIONS,
+    USER_OR_CONTROLLER_CLASSIFICATIONS,
+)
 from .benchmarks.read_models.benchmark_projection import (
     benchmark_run_source as _benchmark_run_source_read_model,
     build_benchmark_solution_quality_signals,
@@ -346,43 +353,10 @@ _PUBLIC_COMPAT_REEXPORTS = {
 }
 
 
-CODEX_READY_CLASSIFICATIONS = {
-    "controller_opted_in_waiting_for_run",
-    "design_next_experiment",
-    "inspect_eval_result",
-    "inspect_result",
-    "needs_more_read_only_evidence",
-    "needs_validation",
-    "public_harness_healthy",
-    "read_only_project_map",
-    "run_validation",
-    "state_refreshed",
-    "operator_gate_approved",
-    "monitor_todo_repeat_dedupe_deployed",
-}
 STATUS_NEUTRAL_CLASSIFICATIONS = HISTORY_STATUS_NEUTRAL_CLASSIFICATIONS
 STATE_EVENT_LOG_BASENAME = "events.jsonl"
 STATUS_CONTROL_PLANE_CONTEXT_LIMIT = 20
 AGENT_LANE_PROGRESS_SCOPE = "agent_lane"
-HANDOFF_READY_CLASSIFICATIONS = {
-    "operator_gate_approved",
-    "controller_opted_in_waiting_for_run",
-}
-DREAMING_ADVISORY_CLASSIFICATIONS = {
-    "dreaming_exploration_proposal",
-    "dreaming_memory_consolidation",
-    "dreaming_refactor_warning",
-    "dreaming_archive_suggestion",
-}
-USER_OR_CONTROLLER_CLASSIFICATIONS = {
-    "needs_human_reward",
-    "needs_controller_opt_in",
-    "needs_user_relay",
-    "ready_for_controller_opt_in",
-    "ready_for_user_relay",
-    "operator_gate_deferred",
-    "operator_gate_rejected",
-} | DREAMING_ADVISORY_CLASSIFICATIONS
 REGISTRY_WAITING_ON_OVERRIDES = {
     "user_or_controller",
     "controller",
@@ -402,9 +376,6 @@ MONITOR_DISPLAY_FALLBACK_ACTION = (
     "No immediate agent work; keep the monitor quiet until a material monitor "
     "transition, regression, or concrete blocker appears."
 )
-BLOCKING_CLASSIFICATIONS = {
-    "blocked_by_safety",
-}
 BENCHMARK_RUN_SCHEMA_VERSION = "benchmark_run_v0"
 MAX_BENCHMARK_RUN_TRIALS = 3
 MAX_BENCHMARK_RUN_LIST_ITEMS = 5

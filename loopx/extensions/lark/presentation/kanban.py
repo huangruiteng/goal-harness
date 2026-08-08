@@ -25,6 +25,7 @@ from ....presentation.projection_source_reconcile import (
     plan_projection_source_reconcile,
     validate_projection_source_reconcile_request,
 )
+from ..private_json import write_private_json_atomic
 from . import issue_fix_surface
 from .projection_rows import (
     projection_lifecycle_parts as _projection_lifecycle_parts,
@@ -740,7 +741,7 @@ def write_lark_kanban_local_config(path: Path, payload: dict[str, Any]) -> None:
     to_write.pop("exists", None)
     to_write["schema_version"] = LARK_KANBAN_LOCAL_CONFIG_VERSION
     to_write["updated_at"] = now_lark_datetime()
-    config_path.write_text(json.dumps(to_write, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_private_json_atomic(config_path, to_write)
 
 
 def parse_lark_base_url(base_url: str) -> dict[str, str]:
@@ -2277,6 +2278,8 @@ def sync_loopx_todos_to_lark_kanban(
                 "commands": commands,
                 "config_path": str(config_path) if config_path else None,
                 "schema_check": schema_check,
+                "successful_write_count": 0,
+                "external_write_performed": False,
                 "error": _schema_check_error(schema_check),
             }
     local, record_map, _, _ = _load_lark_todo_record_map(
@@ -2289,6 +2292,7 @@ def sync_loopx_todos_to_lark_kanban(
     )
 
     results: list[dict[str, Any]] = []
+    successful_write_count = 0
     ok = True
     for block in todos:
         todo_id = str(block.get("todo_id") or "").strip()
@@ -2306,6 +2310,11 @@ def sync_loopx_todos_to_lark_kanban(
         )
         commands.append(result)
         record_id = _extract_created_record_id(result.get("json")) or record_map.get(key)
+        write_succeeded = bool(
+            execute and result.get("executed") and result.get("ok")
+        )
+        if write_succeeded:
+            successful_write_count += 1
         if execute and result.get("ok") and record_id:
             record_map[key] = record_id
         results.append(
@@ -2345,6 +2354,11 @@ def sync_loopx_todos_to_lark_kanban(
             )
             if execute and result.get("ok") and record_id:
                 record_map[key] = record_id
+            write_succeeded = bool(
+                execute and result.get("executed") and result.get("ok")
+            )
+            if write_succeeded:
+                successful_write_count += 1
             results.append(
                 {
                     "todo_id": todo_id,
@@ -2357,7 +2371,7 @@ def sync_loopx_todos_to_lark_kanban(
             if execute and not result.get("ok"):
                 break
 
-    if execute and ok:
+    if execute and successful_write_count:
         _persist_lark_todo_record_map(config, config_path=config_path, local=local, record_map=record_map)
 
     return {
@@ -2382,6 +2396,8 @@ def sync_loopx_todos_to_lark_kanban(
         "records": results,
         "commands": commands,
         "config_path": str(config_path) if config_path else None,
+        "successful_write_count": successful_write_count,
+        "external_write_performed": bool(successful_write_count),
     }
 
 

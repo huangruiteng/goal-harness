@@ -1533,6 +1533,7 @@ def complete_goal_todo(
     role: str | None = None,
     decision_outcome: str | None = None,
     evidence: str | None = None,
+    completion_turn_key: str | None = None,
     note: str | None = None,
     no_followup: bool = False,
     successor_todo_ids: list[str] | None = None,
@@ -1630,6 +1631,28 @@ def complete_goal_todo(
             decision_outcome=effective_decision_outcome,
             decision_target=decision_target,
         )
+        existing_completion_turn_key = str(
+            completion_todo.get("completion_turn_key") or ""
+        )
+        if completion_match and str(completion_todo.get("status") or "") == TODO_STATUS_DONE:
+            if completion_turn_key and completion_turn_key == existing_completion_turn_key:
+                return {
+                    "ok": True,
+                    "dry_run": dry_run,
+                    "completed": True,
+                    "idempotent_replay": True,
+                    "changed": False,
+                    "goal_id": goal_id,
+                    "todo_id": todo_id,
+                    "status": TODO_STATUS_DONE,
+                    "mutation_authority": mutation_authority,
+                    "state_file": str(resolved_state_file),
+                    "project": str(resolved_project) if resolved_project else None,
+                }
+            if completion_turn_key:
+                raise ValueError(
+                    "todo is already completed under a different completion_turn_key"
+                )
         normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
         if successor_todo_ids and not normalized_successor_todo_ids:
             raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
@@ -1690,6 +1713,7 @@ def complete_goal_todo(
                     goal_id=goal_id,
                     context=event_context,
                     evidence=evidence,
+                    completion_turn_key=completion_turn_key,
                     note=note,
                     no_followup=no_followup,
                     successor_todo_ids=normalized_successor_todo_ids,
@@ -1721,6 +1745,7 @@ def complete_goal_todo(
             decision_outcome=effective_decision_outcome,
             note=note,
             evidence=evidence,
+            completion_turn_key=completion_turn_key,
             claimed_by=effective_claimed_by,
             clear_claim=clear_claim,
             no_followup=True if no_followup else None,

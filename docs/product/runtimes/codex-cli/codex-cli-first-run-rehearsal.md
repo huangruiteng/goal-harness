@@ -32,7 +32,7 @@ From the user's project repo:
 3. The agent installs or repairs LoopX when needed, using:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+   curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
    export PATH="$HOME/.local/bin:$PATH"
    loopx doctor
    ```

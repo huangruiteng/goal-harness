@@ -3,15 +3,20 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
+from .capabilities.pr_review_queue import (
+    build_agent_response_contract,
+    build_review_plan,
+    build_review_template,
+)
 from .control_plane.runtime.time import now_utc_iso
 from .presentation.markdown import as_dict as _as_dict
 from .presentation.markdown import as_list as _as_list
 from .presentation.public_safety import public_safe_boundary, redact_public_text
-
 
 COMMAND = "/loopx-pr-review"
 SCHEMA_VERSION = "loopx_pr_review_command_response_v0"
@@ -456,10 +461,6 @@ def _int_or_zero(value: object) -> int:
         return 0
 
 
-def _file_churn(item: dict[str, Any]) -> int:
-    return _int_or_zero(item.get("additions")) + _int_or_zero(item.get("deletions"))
-
-
 def _check_brief_phrase(checks: dict[str, Any]) -> str:
     counts = _as_dict(checks.get("counts"))
     if checks.get("failures"):
@@ -471,11 +472,6 @@ def _check_brief_phrase(checks: dict[str, Any]) -> str:
     if int(checks.get("total") or 0) == 0:
         return "无 checks"
     return str(checks.get("summary") or "unknown")
-
-
-def _review_order(files: list[dict[str, Any]], *, limit: int = 5) -> list[str]:
-    ranked = sorted(files, key=_file_churn, reverse=True)
-    return [str(file.get("path") or "") for file in ranked[:limit] if file.get("path")]
 
 
 def _metadata_risk_hint(pr: dict[str, Any], files: list[dict[str, Any]], checks: dict[str, Any]) -> dict[str, Any]:
@@ -585,130 +581,6 @@ def _main_regression_analysis(pr: dict[str, Any], files: list[dict[str, Any]]) -
         "bug_risks": bug_risks[:5],
         "verification_focus": verification_focus[:5],
         "post_merge_review": state == "MERGED" or bool(pr.get("mergedAt") or pr.get("merged_at")),
-    }
-
-
-def _section(label: str, word_hint: str, instruction: str) -> dict[str, str]:
-    return {
-        "label": label,
-        "word_hint": word_hint,
-        "content": "",
-        "agent_instruction": instruction,
-    }
-
-
-def _review_template(item: dict[str, Any]) -> dict[str, Any]:
-    key_files = [file for file in _as_list(item.get("key_files")) if isinstance(file, dict)]
-    sections = [
-        _section(
-            "动机",
-            "200-350字",
-            "解释旧行为、具体痛点、受影响的用户或调用方、目标结果与必要性；说明不合并会继续付出什么代价，以及需求来自活跃调用方还是未来设想。",
-        ),
-        _section(
-            "改动思路",
-            "250-450字",
-            "解释所选架构、改动前后的控制流或数据流、所有权边界、关键不变量和替代方案取舍；为不熟悉子系统的读者给出一条正向运行链路。",
-        ),
-        _section(
-            "具体改动",
-            "300-600字",
-            "把关键文件和符号映射到行为，覆盖接口、配置或状态、兼容路径、测试与文档；说明各部分如何协作，并给出一个具体输入到输出的例子。",
-        ),
-        _section(
-            "对主干的风险",
-            "250-500字",
-            "按严重度列出有文件或符号证据的发现，评估爆炸半径、兼容性、权限、默认副作用、失败与回滚、可观测性和缺失覆盖；策略或生命周期改动必须解释一条负向链路。",
-        ),
-        _section(
-            "我的整体评价",
-            "150-300字",
-            "权衡价值与复杂度，列出实际检查或运行的验证，注明审阅的 head SHA，并给出精确结论；若阻塞，说明最小修复和复审所需证据。",
-        ),
-    ]
-    return {
-        "schema_version": "pr_review_five_block_template_v0",
-        "purpose": "Empty scaffold only; agentloop fills it after reading PR body and diff.",
-        "sections": sections,
-        "review_order": _review_order(key_files),
-        "output_hint": "Write for a reader unfamiliar with the PR: explain context, architecture, implementation, validation, necessity, and risk with concrete evidence. Follow each section's range as a depth signal, not filler.",
-    }
-
-
-def _agent_response_contract() -> dict[str, Any]:
-    return {
-        "schema_version": "pr_review_agent_response_contract_v0",
-        "table_only_response_allowed": False,
-        "slash_prefix_dominates_intent": True,
-        "stats_only_requires_explicit_opt_out": True,
-        "queue_table_role": "preface_only",
-        "default_review_scope": "Review PRs in review_groups.unmerged first, then review_groups.merged, bounded by the requested limit.",
-        "required_packet_fields_to_preserve": [
-            "agent_response_contract",
-            "result_completeness",
-            "review_groups",
-            "pull_requests[].review_template",
-            "pull_requests[].evidence_commands",
-        ],
-        "stats_only_opt_out_examples": [
-            "只统计",
-            "只列出",
-            "stats only",
-            "list only",
-            "不要 review",
-            "不用分析",
-        ],
-        "required_final_sections": [
-            "动机",
-            "改动思路",
-            "具体改动",
-            "对主干的风险",
-            "我的整体评价",
-        ],
-        "explanation_depth_contract": {
-            "schema_version": "pr_review_explanation_depth_v0",
-            "reader_profile": "A technically curious reader who may not know this PR or subsystem.",
-            "verdict_preface": "Lead with one evidence-based merge verdict and the highest-severity reason before the five sections.",
-            "evidence_layers": [
-                "problem: old behavior, concrete pain, affected caller, and before/after scenario",
-                "architecture: entry point, control/data flow, ownership, state, authority, and failure boundary",
-                "implementation: important files and symbols, behavior changes, compatibility plumbing, tests, and docs",
-                "validation: checks and focused reproductions tied to invariants, including untested or environment-blocked cases",
-            ],
-            "necessity_questions": [
-                "What remains broken or expensive without this PR?",
-                "Why is a smaller call-site fix insufficient, or why would it be sufficient?",
-                "Which plausible alternative was rejected and what trade-off was chosen?",
-            ],
-            "runtime_walkthroughs": {
-                "positive": "Trace one user or host action through calls/state to the observable result.",
-                "negative_when": "For selectors, policy, authority, lifecycle, or bridge changes, trace one rejection or failure case.",
-            },
-            "risk_scan": [
-                "false-ready or false-success state",
-                "authority, permission, or scope bypass",
-                "unexpected default-on installation or side effect",
-                "compatibility or persisted-state migration gap",
-                "host-specific assumption presented as host-neutral",
-                "duplicated truth, stale projection, or lifecycle leak",
-                "missing negative test, rollback behavior, or error observability",
-                "scope inflation or speculative abstraction without an active caller",
-            ],
-            "freshness": "Record the remote head SHA before review and query it again before the verdict; restart if it changed.",
-        },
-        "instructions": [
-            "Run loopx pr-review first and use review_groups as the queue.",
-            "Before treating the queue as exhaustive, require result_completeness.complete=true. If it is false and the user asked for all/every PR, rerun with result_completeness.recommended_limit and preserve the new full packet.",
-            "When the visible message starts with /loopx-pr-review, treat words such as open, closed, merged, today, or time windows as filters, not as permission to return stats only.",
-            "Do not stop at the queue/table summary when the user invokes /loopx-pr-review.",
-            "Do not pipe the JSON packet through jq or another projection that drops agent_response_contract, result_completeness, review_groups, pull_requests[].review_template, or pull_requests[].evidence_commands before planning the final answer.",
-            "For each selected PR, run the evidence_commands or equivalent PR body/diff reads before filling the five sections.",
-            "Follow explanation_depth_contract and the per-section instructions; the packet, rather than host-specific skill prose, is the canonical explanation-depth contract.",
-            "Lead with actionable findings, explain repository-specific terms on first use, and distinguish intended behavior from implementation and validation evidence.",
-            "Do not fill the five sections from metadata_risk_hint alone; metadata_risk_hint is only queue-ordering context.",
-            "Use the installed loopx command or the intended checked-out LoopX worktree; if using python -m loopx.cli from a checkout, first confirm that checkout includes this response contract.",
-            "Only treat the request as stats/list-only when the user explicitly opts out of review with wording such as 只统计, 只列出, stats only, list only, 不要 review, or 不用分析; then say that no detailed PR review was performed.",
-        ],
     }
 
 
@@ -897,7 +769,8 @@ def _normalize_pr(pr: dict[str, Any]) -> dict[str, Any]:
         if number
         else [],
     }
-    item["review_template"] = _review_template(item)
+    item["review_plan"] = build_review_plan(item)
+    item["review_template"] = build_review_template(item)
     return item
 
 
@@ -1058,9 +931,10 @@ def build_pr_review_packet(
             },
             "source": source,
             "include": [
-            "pull_request_list",
-            "result_completeness",
-            "review_groups",
+                "pull_request_list",
+                "result_completeness",
+                "review_groups",
+                "review_plan",
                 "review_template",
                 "agent_response_contract",
                 "change_scope",
@@ -1091,7 +965,7 @@ def build_pr_review_packet(
         "review_sequence": review_sequence,
         "review_groups": review_groups,
         "pull_requests": normalized,
-        "agent_response_contract": _agent_response_contract(),
+        "agent_response_contract": build_agent_response_contract(),
         "actions": [
             {
                 "action_id": "act_review_next_pr",
@@ -1158,9 +1032,10 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
         "## Agent Output Contract",
         "",
         "- Do not stop at the queue/table summary.",
-        "- Do not collapse this packet to `.summary` and `.review_sequence` only; preserve `agent_response_contract`, `review_groups`, `pull_requests[].review_template`, and `pull_requests[].evidence_commands`.",
+        "- Do not collapse this packet to `.summary` and `.review_sequence` only; preserve the paths named by `agent_response_contract.required_packet_fields_to_preserve`.",
         "- For each selected PR, read PR body/files/diff/checks first, then return one review card.",
-        "- Follow `agent_response_contract.explanation_depth_contract`; explain the PR for a technically curious reader who may not know the subsystem.",
+        "- Execute each `pull_requests[].review_plan` against `agent_response_contract.review_execution_contract`; that capability-owned contract is the evidence and completeness authority.",
+        "- Code-changing PRs must include a `关键代码讲解` subsection under `具体改动`, grounded in exact-head symbols and short excerpts or equivalent pseudocode.",
         "- Bind the verdict to the remote head SHA and recheck it before answering.",
         "- Required card headings: `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`.",
         "- `metadata_risk_hint` is only queue-ordering metadata; do not copy it as the final risk judgment.",
@@ -1201,6 +1076,7 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
 
     for pr in [item for item in _as_list(payload.get("pull_requests")) if isinstance(item, dict)]:
         template = _as_dict(pr.get("review_template"))
+        review_plan = _as_dict(pr.get("review_plan"))
         lines.extend(
             [
                 "",
@@ -1218,6 +1094,15 @@ def render_pr_review_markdown(payload: dict[str, Any]) -> str:
                 f"- checks: {_as_dict(pr.get('checks')).get('summary')}",
             ]
         )
+        applicability = _as_dict(review_plan.get("applicability"))
+        if review_plan:
+            lines.append(
+                "- review plan: "
+                f"exact_head=`{_as_dict(review_plan.get('target')).get('exact_head_key') or 'unresolved'}`; "
+                f"code_change=`{applicability.get('code_change')}`; "
+                f"symbol_map_required=`{applicability.get('symbol_map_required')}`; "
+                f"negative_walkthrough_required=`{applicability.get('negative_walkthrough_required')}`"
+            )
         risk_hint = _as_dict(pr.get("metadata_risk_hint"))
         if risk_hint:
             lines.append(

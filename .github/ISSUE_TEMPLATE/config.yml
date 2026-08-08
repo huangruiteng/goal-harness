@@ -1,5 +1,14 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
+  - name: Ask a question
+    url: https://github.com/huangruiteng/loopx/discussions/categories/q-a
+    about: Get community help with usage, configuration, or design questions.
+  - name: Discord community
+    url: https://discord.gg/XmGgQyCFZd
+    about: Join informal onboarding, workflow, and show-and-tell conversations.
+  - name: Report a security vulnerability
+    url: https://github.com/huangruiteng/loopx/security/advisories/new
+    about: Privately report suspected unpatched vulnerabilities. Do not open a public issue.
   - name: Contributor task board
     url: https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTOR_TASKS.md
     about: Start here for public, claimable work.

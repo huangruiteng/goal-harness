@@ -48,7 +48,7 @@ MUST_HAVE = (
     "refresh-state",
     "quota spend-slot",
     "Do not spend quota for a setup-only turn",
-    "install-from-github.sh",
+    "huangruiteng.github.io/loopx/install.sh",
 )
 
 
@@ -58,7 +58,7 @@ def assert_message_contract(payload: dict[str, object]) -> None:
     assert payload["invocation_mode"] == "codex_cli_setup_then_goal_mode", payload
     assert payload["goal_id"] == GOAL_ID, payload
     assert payload["agent_id"] == AGENT_ID, payload
-    assert "install-from-github.sh" in str(payload["install_repair_command"]), payload
+    assert "huangruiteng.github.io/loopx/install.sh" in str(payload["install_repair_command"]), payload
     assert payload["existing_goal_probe_command"] == payload["quota_guard_command"], payload
     assert "heartbeat-prompt --thin" in str(payload["heartbeat_prompt_command"]), payload
     assert "heartbeat-prompt --thin" in str(payload["heartbeat_prompt_json_command"]), payload
@@ -218,7 +218,7 @@ def main() -> int:
     assert "Fresh Repo Install Repair" in cli_markdown, cli_markdown
     assert "Post-Bootstrap Thin Loop Prompt" in cli_markdown, cli_markdown
     assert "Transcript-Free Validation Checklist" in cli_markdown, cli_markdown
-    assert "install-from-github.sh" in cli_markdown, cli_markdown
+    assert "huangruiteng.github.io/loopx/install.sh" in cli_markdown, cli_markdown
 
     cli_message_only = run_cli(
         "codex-cli-bootstrap-message",

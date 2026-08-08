@@ -31,6 +31,10 @@ from ..state_migration import (
     parse_key_value_map,
     render_state_migration_markdown,
 )
+from ..thread_agent_binding import (
+    bind_thread_agent_in_registry,
+    resolve_thread_agent_binding,
+)
 from ..upgrade import build_upgrade_plan
 from .registry_admin_configure import register_configure_goal_command
 from .registry_admin_peer import render_register_agent_markdown
@@ -48,6 +52,7 @@ PrintPayload = Callable[
 REGISTRY_ADMIN_COMMANDS = {
     "configure-goal",
     "register-agent",
+    "bind-agent-thread",
     "archive-runtime",
     "retire-global-goal",
     "uninstall-project",
@@ -388,6 +393,16 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
         help="Write the source registry and sync it globally. Without this flag, preview only.",
     )
 
+    bind_thread_parser = subparsers.add_parser(
+        "bind-agent-thread",
+        help="Bind a stable host thread to one already registered LoopX agent.",
+    )
+    bind_thread_parser.add_argument("--goal-id", required=True, help="Goal id already present in the global registry.")
+    bind_thread_parser.add_argument("--thread-id", required=True, help="Stable opaque host thread id.")
+    bind_thread_parser.add_argument("--host-surface", required=True, help="Host surface such as codex-app.")
+    bind_thread_parser.add_argument("--agent-id", required=True, help="Already registered public-safe agent id.")
+    bind_thread_parser.add_argument("--execute", action="store_true", help="Write the binding; otherwise preview only.")
+
     archive_runtime_parser = subparsers.add_parser(
         "archive-runtime",
         help="Move an obsolete runtime goal directory into the archive area. Defaults to dry-run.",
@@ -658,6 +673,94 @@ def handle_registry_admin_command(
                 execute=bool(args.execute),
                 require_new=bool(args.require_new),
             )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "dry_run": not bool(args.execute),
+                "execute": bool(args.execute),
+                "goal_id": args.goal_id,
+                "changed": False,
+                "written": False,
+                "error": str(exc),
+                **lock_timeout_error_fields(exc),
+            }
+        print_payload(payload, args.format, render_register_agent_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "bind-agent-thread":
+        try:
+            global_path = explicit_global_registry(args.runtime_root)
+            global_goal = _registry_goal(global_path, args.goal_id)
+            source_registry = global_goal.get("source_registry")
+            if not source_registry:
+                raise ValueError(f"{args.goal_id}: global registry entry has no source_registry")
+            source_path = Path(str(source_registry)).expanduser()
+            source_path_resolved = source_path.resolve()
+            goal_repo = global_goal.get("repo")
+            if not goal_repo:
+                raise ValueError(f"{args.goal_id}: global registry entry has no repo")
+            repo_path = Path(str(goal_repo)).expanduser().resolve()
+            if source_path_resolved.name != "registry.json" or source_path_resolved.parent.name != ".loopx":
+                raise ValueError("source_registry must point to a project .loopx/registry.json")
+            try:
+                source_path_resolved.relative_to(repo_path)
+            except ValueError as exc:
+                raise ValueError("source_registry is outside the goal repository") from exc
+            source_path = source_path_resolved
+            if args.execute:
+                writability = probe_registry_write_path(global_path, create_parent=True)
+                if not writability.get("ok"):
+                    payload = {
+                        "ok": False,
+                        "dry_run": False,
+                        "execute": True,
+                        "goal_id": args.goal_id,
+                        "changed": False,
+                        "written": False,
+                        "error_kind": "global_registry_write_denied",
+                        "global_registry_writability": writability,
+                        "recommended_action": writability.get("recommended_action"),
+                    }
+                    print_payload(payload, args.format, render_register_agent_markdown)
+                    return 1
+            payload = bind_thread_agent_in_registry(
+                registry_path=source_path,
+                goal_id=args.goal_id,
+                host_surface=args.host_surface,
+                thread_id=args.thread_id,
+                agent_id=args.agent_id,
+                execute=bool(args.execute),
+            )
+            payload["global_registry"] = str(global_path)
+            payload["source_registry"] = str(source_path)
+            if args.execute and payload.get("ok"):
+                payload["global_sync"] = sync_project_registry_to_global(
+                    registry_path=source_path,
+                    runtime_root_override=str(global_path.parent),
+                    goal_id=args.goal_id,
+                    dry_run=False,
+                )
+                source_binding = resolve_thread_agent_binding(
+                    _registry_goal(source_path, args.goal_id),
+                    host_surface=args.host_surface,
+                    thread_id=args.thread_id,
+                )
+                global_binding = resolve_thread_agent_binding(
+                    _registry_goal(global_path, args.goal_id),
+                    host_surface=args.host_surface,
+                    thread_id=args.thread_id,
+                )
+                readback_verified = all(
+                    binding.get("status") == "bound"
+                    and binding.get("agent_id") == args.agent_id
+                    for binding in (source_binding, global_binding)
+                )
+                payload["registration_readback"] = {"verified": readback_verified}
+                payload["ok"] = bool(payload["global_sync"].get("ok")) and readback_verified
+                if not payload["ok"]:
+                    payload["error_kind"] = "thread_agent_binding_readback_failed"
+            else:
+                payload["global_sync"] = {"enabled": bool(args.execute), "wrote": False}
         except Exception as exc:
             payload = {
                 "ok": False,

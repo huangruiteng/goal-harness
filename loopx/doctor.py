@@ -17,6 +17,7 @@ from .control_plane.runtime.promotion_readiness import (
     PROMOTION_READINESS_CLASSIFICATION,
     PROMOTION_READINESS_RUNTIME_INDEX,
 )
+from .install_contract import NO_CLONE_INSTALL_URL
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path
 from .project_skill_delivery import discover_project_scoped_skill_ids
 from .registry_writability import probe_registry_write_path
@@ -33,7 +34,6 @@ PROMOTION_READINESS_CLASSIFICATIONS = {
 }
 PROMOTION_READINESS_FRESHNESS_HOURS = 24
 INSTALL_FRESHNESS_STALE_HOURS = 168
-NO_CLONE_INSTALL_URL = "https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh"
 RELEASE_ID_TIMESTAMP_RE = re.compile(r"^\d{8}T\d{6}Z$")
 REQUIRED_INSTALLED_SKILL_PHRASES = {
     "loopx-project": (
@@ -43,11 +43,18 @@ REQUIRED_INSTALLED_SKILL_PHRASES = {
     ),
     "loopx-pr-review": (
         "loopx --format json pr-review --state all",
-        "agent_response_contract",
-        "Do not pipe the first packet through `jq`",
-        "submit a formal `REQUEST_CHANGES` review",
-        "A plain PR comment is not an adequate substitute for `REQUEST_CHANGES`",
-        "route approval, merge, self-merge, and admin-bypass actions to",
+        "thin host adapter",
+        "agent_response_contract.review_execution_contract",
+        "pull_requests[].review_plan",
+        "completion_gate",
+        "loopx-pr-merge",
+    ),
+    "loopx-pr-program": (
+        "one `continuous_monitor` todo",
+        "result_completeness.complete=true",
+        "diff_snapshot.py",
+        "Product requirements set priority",
+        "Quiet monitor polls",
     ),
     "loopx-doc-registry": (
         "Use even when the user does not mention LoopX or doc registry",

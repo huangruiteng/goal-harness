@@ -25,6 +25,8 @@ def main() -> int:
 
     for needle in [
         "workflow_dispatch:",
+        "schedule:",
+        'cron: "37 */6 * * *"',
         "pull_request:",
         "branches:",
         "actions: read",
@@ -40,6 +42,20 @@ def main() -> int:
         "apps/presentation/site/**",
         "examples/showcase-catalog-smoke.py",
         "python3 examples/showcase-catalog-smoke.py",
+        "examples/readme-star-history-smoke.py",
+        "python3 examples/readme-star-history-smoke.py",
+        "scripts/render-star-history.py",
+        "secrets.STAR_HISTORY_READ_TOKEN",
+        "Missing star-history credential",
+        "fine-grained PAT limited to this repository with Metadata: read",
+        "gh api graphql --paginate --slurp",
+        "stargazerCount",
+        "edges { starredAt }",
+        "pageInfo { hasNextPage endCursor }",
+        "{starred_at: .starredAt}",
+        'jq \'length\'',
+        "--expected-count",
+        "output/frontstage-pages/site/site-assets/star-history.svg",
         "npm run smoke:frontstage-share-bundle",
         "npm run export:frontstage-share -- --base /loopx/ --out-dir ../../../output/frontstage-pages",
         "actions/configure-pages@v6",
@@ -60,6 +76,8 @@ def main() -> int:
         "enable-reward-write-api",
         "npm run dev",
         "npm run preview",
+        "GH_TOKEN: ${{ github.token }}",
+        '"/stargazers?per_page=100"',
     ]:
         assert_absent(text, forbidden)
 

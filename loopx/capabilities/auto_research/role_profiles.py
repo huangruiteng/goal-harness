@@ -13,6 +13,8 @@ AUTO_RESEARCH_REFINED_DEV_SUCCESSOR_TEXT = "[P0-auto-research-live] Run the refi
 AUTO_RESEARCH_CURATOR_REVIEW_SUCCESSOR_TEXT = "[P0-auto-research-live] Re-check the research contract and protected scope after {source_todo_id}, then keep the next collective round honest."
 AUTO_RESEARCH_HYPOTHESIS_FRONTIER_REVIEW_SUCCESSOR_TEXT = "[P0-auto-research-live] Review the current hypothesis frontier after {source_todo_id}, record whether another candidate is needed, and keep the round participation visible."
 AUTO_RESEARCH_PROMOTION_READINESS_REVIEW_SUCCESSOR_TEXT = "[P0-auto-research-live] Review promotion readiness after {source_todo_id}, record the current evidence gap, and wait for the holdout handoff."
+AUTO_RESEARCH_DATA_MEASUREMENT_REMEDIATION_SUCCESSOR_TEXT = "[P0-auto-research-live] Repair the one declared data or measurement gap from {source_todo_id} without changing thresholds, horizons, assets, or acceptance gates; return to evidence evaluation."
+AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_TEXT = "[P0-auto-research-live] From the retired evidence linked to {source_todo_id}, propose one changed-mechanism hypothesis or explicitly exhaust the frontier; do not relax parameters or create a future-data monitor."
 AUTO_RESEARCH_SUCCESSOR_TODO_COMMAND_TEMPLATE = (
     "loopx todo add --goal-id {goal_id_shell} --role agent "
     "--text {text_shell} --task-class {task_class_shell} "
@@ -54,6 +56,22 @@ AUTO_RESEARCH_REFINED_DEV_SUCCESSOR_CONDITION = _all(
     ),
     _condition("decision_summary.dev_candidate_pending_holdout_count", "eq", 0, "dev_candidate_already_pending_holdout"),
 )
+AUTO_RESEARCH_FAILURE_REMEDIATION_SUCCESSOR_CONDITION = _all(
+    _condition(
+        "decision_summary.failure_continuation.next_outcome",
+        "eq",
+        "remediate_data_measurement",
+        "failure_remediation_not_required",
+    ),
+)
+AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_CONDITION = _all(
+    _condition(
+        "decision_summary.failure_continuation.next_outcome",
+        "eq",
+        "propose_failure_successor",
+        "failure_proposer_successor_not_required",
+    ),
+)
 
 AUTO_RESEARCH_CONTINUATION_POLICY = {
     "schema_version": "auto_research_continuation_policy_v0",
@@ -65,7 +83,7 @@ AUTO_RESEARCH_CONTINUATION_POLICY = {
     ),
     "no_followup_rule": (
         "no-follow-up is valid only after the target is reached, a blocker/user gate is "
-        "projected, or evidence-backed retirement closes the frontier"
+        "projected, or a proposer explicitly exhausts an evidence-backed retired frontier"
     ),
 }
 
@@ -123,8 +141,16 @@ AUTO_RESEARCH_ROLE_PROFILE_ALIASES = {
 AUTO_RESEARCH_ROLE_PROFILES: dict[str, dict[str, object]] = {
     "research_curator": {
         "phase": "contract",
-        "allowed_actions": ["write_research_contract", "review_research_contract"],
-        "write_scope": ["research_contract_v0", "todo_item_v0"],
+        "allowed_actions": [
+            "write_research_contract",
+            "review_research_contract",
+            "review_terminal_decision",
+        ],
+        "write_scope": [
+            "research_contract_v0",
+            "auto_research_peer_review_v0",
+            "todo_item_v0",
+        ],
         "handoff": ["Create the first hypothesis-proposer todo."],
         "successor_todos": [
             _successor("review_research_contract", AUTO_RESEARCH_NEXT_HYPOTHESIS_SUCCESSOR_CONDITION, "hypothesis-proposer", "hypothesis_proposer", "propose_hypothesis", AUTO_RESEARCH_REFINED_HYPOTHESIS_SUCCESSOR_TEXT),
@@ -132,7 +158,11 @@ AUTO_RESEARCH_ROLE_PROFILES: dict[str, dict[str, object]] = {
     },
     "hypothesis_proposer": {
         "phase": "hypothesis",
-        "allowed_actions": ["propose_hypothesis", "review_hypothesis_frontier"],
+        "allowed_actions": [
+            "propose_hypothesis",
+            "propose_failure_successor",
+            "review_hypothesis_frontier",
+        ],
         "write_scope": ["research_hypothesis_v0", "todo_item_v0"],
         "handoff": ["Create or unblock a research-executor todo."],
         "successor_todos": [
@@ -142,7 +172,11 @@ AUTO_RESEARCH_ROLE_PROFILES: dict[str, dict[str, object]] = {
     },
     "research_executor": {
         "phase": "evidence",
-        "allowed_actions": ["run_dev_eval", "run_holdout_eval"],
+        "allowed_actions": [
+            "run_dev_eval",
+            "run_holdout_eval",
+            "remediate_data_measurement",
+        ],
         "write_scope": ["auto_research_evidence_packet_v0", "rollout_event_log"],
         "handoff": [
             "Append scored evidence, complete the selected todo, and create the declared successor todo when the role profile says another split is due."
@@ -159,8 +193,13 @@ AUTO_RESEARCH_ROLE_PROFILES: dict[str, dict[str, object]] = {
             "write_evaluation_summary",
             "classify_evidence",
             "review_promotion_readiness",
+            "record_terminal_decision",
         ],
-        "write_scope": ["research_evidence_graph_v0", "todo_item_v0"],
+        "write_scope": [
+            "research_evidence_graph_v0",
+            "auto_research_terminal_decision_v0",
+            "todo_item_v0",
+        ],
         "handoff": ["Add a role-declared successor todo when evidence needs another bounded split."],
         "successor_todos": [
             _successor("summarize_evidence", AUTO_RESEARCH_HOLDOUT_SUCCESSOR_CONDITION, "research-curator", "research_curator", "review_research_contract", AUTO_RESEARCH_CURATOR_REVIEW_SUCCESSOR_TEXT),
@@ -170,6 +209,14 @@ AUTO_RESEARCH_ROLE_PROFILES: dict[str, dict[str, object]] = {
             _successor("review_promotion_readiness", AUTO_RESEARCH_NEXT_HYPOTHESIS_SUCCESSOR_CONDITION, "research-curator", "research_curator", "review_research_contract", AUTO_RESEARCH_CURATOR_REVIEW_SUCCESSOR_TEXT),
             _successor("review_promotion_readiness", AUTO_RESEARCH_HOLDOUT_SUCCESSOR_CONDITION, "research-curator", "research_curator", "review_research_contract", AUTO_RESEARCH_CURATOR_REVIEW_SUCCESSOR_TEXT),
             _successor("review_promotion_readiness", AUTO_RESEARCH_HOLDOUT_SUCCESSOR_CONDITION, "hypothesis-proposer", "hypothesis_proposer", "review_hypothesis_frontier", AUTO_RESEARCH_HYPOTHESIS_FRONTIER_REVIEW_SUCCESSOR_TEXT),
+            _successor("classify_evidence", AUTO_RESEARCH_FAILURE_REMEDIATION_SUCCESSOR_CONDITION, "research-executor", "research_executor", "remediate_data_measurement", AUTO_RESEARCH_DATA_MEASUREMENT_REMEDIATION_SUCCESSOR_TEXT),
+            _successor("summarize_evidence", AUTO_RESEARCH_FAILURE_REMEDIATION_SUCCESSOR_CONDITION, "research-executor", "research_executor", "remediate_data_measurement", AUTO_RESEARCH_DATA_MEASUREMENT_REMEDIATION_SUCCESSOR_TEXT),
+            _successor("write_evaluation_summary", AUTO_RESEARCH_FAILURE_REMEDIATION_SUCCESSOR_CONDITION, "research-executor", "research_executor", "remediate_data_measurement", AUTO_RESEARCH_DATA_MEASUREMENT_REMEDIATION_SUCCESSOR_TEXT),
+            _successor("review_promotion_readiness", AUTO_RESEARCH_FAILURE_REMEDIATION_SUCCESSOR_CONDITION, "research-executor", "research_executor", "remediate_data_measurement", AUTO_RESEARCH_DATA_MEASUREMENT_REMEDIATION_SUCCESSOR_TEXT),
+            _successor("classify_evidence", AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_CONDITION, "hypothesis-proposer", "hypothesis_proposer", "propose_failure_successor", AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_TEXT),
+            _successor("summarize_evidence", AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_CONDITION, "hypothesis-proposer", "hypothesis_proposer", "propose_failure_successor", AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_TEXT),
+            _successor("write_evaluation_summary", AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_CONDITION, "hypothesis-proposer", "hypothesis_proposer", "propose_failure_successor", AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_TEXT),
+            _successor("review_promotion_readiness", AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_CONDITION, "hypothesis-proposer", "hypothesis_proposer", "propose_failure_successor", AUTO_RESEARCH_FAILURE_PROPOSER_SUCCESSOR_TEXT),
         ],
     },
 }
@@ -178,27 +225,35 @@ AUTO_RESEARCH_ACTION_ROLE_IDS = {
     "write_research_contract": "research_curator",
     "review_research_contract": "research_curator",
     "propose_hypothesis": "hypothesis_proposer",
+    "propose_failure_successor": "hypothesis_proposer",
     "review_hypothesis_frontier": "hypothesis_proposer",
     "run_dev_eval": "research_executor",
     "run_holdout_eval": "research_executor",
+    "remediate_data_measurement": "research_executor",
     "write_evidence": "research_executor",
     "classify_evidence": "evaluator_promoter",
     "summarize_evidence": "evaluator_promoter",
     "write_evaluation_summary": "evaluator_promoter",
     "review_promotion_readiness": "evaluator_promoter",
+    "record_terminal_decision": "evaluator_promoter",
+    "review_terminal_decision": "research_curator",
 }
 
 AUTO_RESEARCH_SEED_TITLES = {
     "write_research_contract": "Write the public-safe research contract for the shared demo hypothesis.",
     "propose_hypothesis": "Map the first shared idea into a todo-backed research hypothesis.",
+    "propose_failure_successor": "Propose one changed-mechanism successor from retired evidence or explicitly exhaust the research frontier.",
     "claim_attempt": "Claim one visible attempt boundary for the selected hypothesis.",
     "run_dev_eval": "Run the selected hypothesis on the dev split, write public-safe evidence, append it, and capture live evidence.",
     "run_holdout_eval": "Run held-out validation for the dev-supported hypothesis, append public-safe evidence, and summarize promotion readiness.",
+    "remediate_data_measurement": "Repair one declared data or measurement gap without changing the research mechanism or acceptance gates.",
     "write_evaluation_summary": "Verify the evidence packet and open the next validation or promotion gate.",
     "summarize_evidence": "Summarize dev evidence and hand off holdout validation when the hypothesis is supported.",
     "review_research_contract": "Re-check the research contract and protected scope for the next collective round.",
     "review_hypothesis_frontier": "Review the hypothesis frontier and record whether another bounded candidate is needed.",
     "review_promotion_readiness": "Review promotion readiness and record the current evidence gap.",
+    "record_terminal_decision": "Record one evidence-revision-bound promoted or retired result after the required gate.",
+    "review_terminal_decision": "Independently review one terminal decision without rewriting research evidence.",
 }
 
 KNN_DEMO_VISIBLE_FIRST_STEP_COMMON = (

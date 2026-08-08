@@ -106,8 +106,49 @@ def test_unchanged_observation_emits_no_duplicate_candidate() -> None:
 
     assert repeated["observation_state"] == "observed_unchanged"
     assert repeated["changed_pr_numbers"] == []
-    assert repeated["candidate"] is None
-    assert repeated["pending_candidate_exact_head"] == f"1@{1:040d}"
+    assert repeated["candidate"]["number"] == 2
+    assert repeated["pending_candidate_exact_head"] == f"2@{2:040d}"
+
+
+def test_round_robin_rotates_through_projected_candidates() -> None:
+    first = _observe([_pr(1), _pr(2), _pr(3)])
+    assert first["candidate"]["number"] == 1
+    assert first["projected_candidate_exact_heads"] == [f"1@{1:040d}"]
+
+    second = _observe([_pr(1), _pr(2), _pr(3)], previous=first)
+    assert second["candidate"]["number"] == 2
+    assert second["projected_candidate_exact_heads"] == [
+        f"1@{1:040d}",
+        f"2@{2:040d}",
+    ]
+
+    third = _observe([_pr(1), _pr(2), _pr(3)], previous=second)
+    assert third["candidate"]["number"] == 3
+    assert third["projected_candidate_exact_heads"] == [
+        f"1@{1:040d}",
+        f"2@{2:040d}",
+        f"3@{3:040d}",
+    ]
+
+    exhausted = _observe([_pr(1), _pr(2), _pr(3)], previous=third)
+    assert exhausted["candidate"] is None
+    assert exhausted["pending_candidate_exact_head"] == f"3@{3:040d}"
+    assert exhausted["projected_candidate_count"] == 3
+
+
+def test_round_robin_accepts_handled_rotated_candidate() -> None:
+    first = _observe([_pr(1), _pr(2)])
+    second = _observe([_pr(1), _pr(2)], previous=first)
+
+    assert second["candidate"]["number"] == 2
+    handled_second = _observe(
+        [_pr(1), _pr(2)],
+        previous=second,
+        handled=[f"2@{2:040d}"],
+    )
+    assert handled_second["handled_exact_heads"] == [f"2@{2:040d}"]
+    assert handled_second["candidate"] is None
+    assert handled_second["projected_candidate_exact_heads"] == [f"1@{1:040d}"]
 
 
 def test_handled_exact_head_advances_unchanged_backlog() -> None:
@@ -123,7 +164,8 @@ def test_handled_exact_head_advances_unchanged_backlog() -> None:
 
     still_pending = _observe([_pr(1), _pr(2)], previous=repeated)
     assert still_pending["observation_state"] == "observed_unchanged"
-    assert still_pending["candidate"]["number"] == 2
+    assert still_pending["candidate"] is None
+    assert still_pending["pending_candidate_exact_head"] == f"2@{2:040d}"
 
 
 def test_handled_changed_pr_does_not_strand_unchanged_backlog() -> None:
@@ -242,3 +284,60 @@ def test_approved_transition_routes_to_merge_policy_without_granting_it() -> Non
     assert todo["action_kind"] == "qualify_pull_request_merge_readiness"
     assert "route any merge through repository policy" in todo["text"]
     assert approved["write_authority_granted"] is False
+
+
+def test_review_backlog_keeps_active_cadence_until_all_handled() -> None:
+    first = _observe([_pr(1), _pr(2), _pr(3)])
+
+    assert first["review_backlog"]["actionable_unhandled_count"] == 3
+    assert first["review_backlog"]["recommended_poll_interval_minutes"] == 3
+    assert first["review_backlog"]["recommended_cadence"] == "active_review"
+
+    after_one = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=first,
+        handled=[f"1@{1:040d}"],
+    )
+    assert after_one["candidate"]["number"] == 2
+    assert after_one["review_backlog"]["actionable_unhandled_count"] == 2
+    assert after_one["review_backlog"]["recommended_poll_interval_minutes"] == 3
+
+    after_two = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=after_one,
+        handled=[f"2@{2:040d}"],
+    )
+    assert after_two["candidate"]["number"] == 3
+    assert after_two["review_backlog"]["actionable_unhandled_count"] == 1
+    assert after_two["review_backlog"]["recommended_poll_interval_minutes"] == 3
+
+    after_three = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=after_two,
+        handled=[f"3@{3:040d}"],
+    )
+    assert after_three["candidate"] is None
+    assert after_three["review_backlog"]["actionable_unhandled_count"] == 0
+    assert after_three["review_backlog"]["recommended_poll_interval_minutes"] == 15
+    assert after_three["review_backlog"]["recommended_cadence"] == "quiet_wait"
+
+
+def test_review_backlog_ignores_draft_prs_for_active_cadence() -> None:
+    mixed = _observe([_pr(1, draft=True), _pr(2)])
+
+    assert mixed["review_backlog"]["actionable_unhandled_count"] == 1
+    assert mixed["review_backlog"]["recommended_poll_interval_minutes"] == 3
+
+    only_draft = _observe([_pr(1, draft=True)])
+
+    assert only_draft["review_backlog"]["actionable_unhandled_count"] == 0
+    assert only_draft["review_backlog"]["recommended_poll_interval_minutes"] == 15
+    assert only_draft["review_backlog"]["recommended_cadence"] == "quiet_wait"
+
+
+def test_incomplete_observation_preserves_active_backlog_when_pending() -> None:
+    baseline = _observe([_pr(1), _pr(2)])
+    incomplete = _observe([_pr(1), _pr(2)], complete=False, previous=baseline)
+
+    assert incomplete["review_backlog"]["actionable_unhandled_count"] == 2
+    assert incomplete["review_backlog"]["recommended_poll_interval_minutes"] == 3

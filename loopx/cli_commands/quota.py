@@ -9,6 +9,7 @@ from ..control_plane.quota.cli_projection import (
     compact_quota_monitor_poll_cli_payload,
     compact_quota_should_run_cli_payload,
 )
+from ..control_plane.quota.error_codes import quota_error_code
 from ..control_plane.quota.heartbeat_receipt import (
     fail_heartbeat_receipt,
     find_heartbeat_receipt,
@@ -65,6 +66,7 @@ from .quota_request import (
     QUOTA_MONITOR_POLL_DETAIL_SECTIONS,
     QUOTA_SHOULD_RUN_DETAIL_SECTIONS,
     quota_detail_sections_from_args,
+    register_quota_monitor_poll_request_arguments,
     validate_quota_command_request,
 )
 
@@ -291,24 +293,7 @@ def register_quota_command(subparsers: argparse._SubParsersAction) -> None:
     )
     quota_parser.add_argument("--void-generated-at", help="generated_at timestamp of the quota_slot_spent run to void.")
     quota_parser.add_argument("--reason-summary", help="Public-safe reason for `quota void-slot`.")
-    quota_parser.add_argument("--todo-id", help="Monitor todo id for `quota monitor-poll` metadata writeback.")
-    quota_parser.add_argument("--target-key", help="Stable monitor target key for `quota monitor-poll` metadata writeback.")
-    quota_parser.add_argument("--result-hash", help="Public-safe result hash observed by `quota monitor-poll`.")
-    quota_parser.add_argument("--material-change", action="store_true", help="Mark a monitor poll as a material transition instead of unchanged evidence.")
-    quota_parser.add_argument("--cadence", help="Monitor cadence used to compute the next due timestamp, e.g. 30m, 2h, or 1d.")
-    quota_parser.add_argument("--next-due-at", help="Explicit ISO timestamp for the next monitor poll.")
-    quota_parser.add_argument("--next-agent-todo", help="Agent follow-up todo to add when `--material-change` is set.")
-    quota_parser.add_argument("--next-user-todo", help="User follow-up todo to add when `--material-change` is set.")
-    quota_parser.add_argument(
-        "--next-user-task-class",
-        choices=["user_gate", "user_action"],
-        help=(
-            "Required with monitor-poll `--next-user-todo`: user_gate for a "
-            "blocking owner decision or user_action for a visible reminder "
-            "that must not block the bound agent lane."
-        ),
-    )
-    quota_parser.add_argument("--next-claimed-by", help="Registered agent id to claim the `--next-agent-todo` follow-up.")
+    register_quota_monitor_poll_request_arguments(quota_parser)
     quota_parser.add_argument("--surface", default="codex_app", help="Scheduler surface for scheduler ACK/failure commands; defaults to codex_app.")
     quota_parser.add_argument("--state-key", default="scheduler_hint.codex_app.stateful_backoff", help="Scheduler state key for scheduler ACK/failure commands.")
     quota_parser.add_argument("--applied-rrule", help="RRULE successfully applied by the host before `quota scheduler-ack --execute`.")
@@ -509,6 +494,7 @@ def _quota_failure_payload(
             "mode": command,
             "registry": str(registry_path),
             "runtime_root": runtime_root_arg,
+            "error_code": quota_error_code(error),
             "error": str(error),
             "summary": {
                 "registered_goals": 0,
@@ -536,6 +522,7 @@ def _quota_failure_payload(
         "goal_id": args.goal_id,
         "decision": "skip",
         "should_run": False,
+        "error_code": quota_error_code(error),
         "reason": str(error),
         "state": "blocked_health",
         "waiting_on": "codex",
@@ -736,6 +723,11 @@ def handle_quota_command(
                 cadence=args.cadence,
                 next_due_at=args.next_due_at,
                 next_agent_todo=args.next_agent_todo,
+                next_action_kind=args.next_action_kind,
+                next_task_repository=args.next_task_repository,
+                next_required_capabilities=args.next_required_capabilities,
+                next_continuation_policy=args.next_continuation_policy,
+                next_target_key=args.next_target_key,
                 next_user_todo=args.next_user_todo,
                 next_user_task_class=args.next_user_task_class,
                 next_claimed_by=args.next_claimed_by,
@@ -824,7 +816,7 @@ def handle_quota_command(
             payload = build_quota_plan(status_payload, mode=args.quota_command)
         if cache_metadata:
             payload["status_projection_cache"] = cache_metadata
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI fail-safe boundary; error_code is typed below.
         payload = _quota_failure_payload(
             args,
             registry_path=registry_path,
@@ -846,6 +838,15 @@ def handle_quota_command(
             "source": payload.get("source") or "",
             "todo_id": payload.get("todo_id") or "",
             "target_key": payload.get("target_key") or "",
+            "successor_todo_ids": ",".join(
+                str(todo_id)
+                for todo_id in (
+                    payload.get("successor_todo_ids")
+                    if isinstance(payload.get("successor_todo_ids"), list)
+                    else []
+                )
+                if str(todo_id).strip()
+            ),
             "applied_rrule": payload.get("applied_rrule") or "",
         }
         if heartbeat_turn_id and args.quota_command == "should-run":

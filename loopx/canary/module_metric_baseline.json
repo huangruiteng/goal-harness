@@ -1,0 +1,105 @@
+{
+  "default_limits": {
+    "any_count": 300,
+    "dict_any_count": 300,
+    "lines": 1500
+  },
+  "module_metric_ceilings": {
+    "loopx/bootstrap_command_pack.py": {
+      "any_count": 32,
+      "dict_any_count": 0,
+      "lines": 2234
+    },
+    "loopx/canary/planner.py": {
+      "any_count": 22,
+      "dict_any_count": 0,
+      "lines": 1984
+    },
+    "loopx/capabilities/auto_research/demo_e2e.py": {
+      "any_count": 0,
+      "dict_any_count": 0,
+      "lines": 1735
+    },
+    "loopx/capabilities/catalog.py": {
+      "any_count": 8,
+      "dict_any_count": 0,
+      "lines": 1863
+    },
+    "loopx/capabilities/content_ops/surface.py": {
+      "any_count": 40,
+      "dict_any_count": 0,
+      "lines": 1956
+    },
+    "loopx/capabilities/issue_fix/cli.py": {
+      "any_count": 5,
+      "dict_any_count": 0,
+      "lines": 1822
+    },
+    "loopx/codex_cli_probe.py": {
+      "any_count": 37,
+      "dict_any_count": 0,
+      "lines": 1530
+    },
+    "loopx/control_plane/agents/agent_scope.py": {
+      "any_count": 107,
+      "dict_any_count": 0,
+      "lines": 1578
+    },
+    "loopx/control_plane/goals/goal_frontier/__init__.py": {
+      "any_count": 115,
+      "dict_any_count": 0,
+      "lines": 2056
+    },
+    "loopx/control_plane/goals/goal_frontier/terminal.py": {
+      "any_count": 15,
+      "dict_any_count": 0,
+      "lines": 180
+    },
+    "loopx/extensions/lark/presentation/explore_results.py": {
+      "any_count": 58,
+      "dict_any_count": 0,
+      "lines": 1965
+    },
+    "loopx/extensions/lark/presentation/kanban.py": {
+      "any_count": 95,
+      "dict_any_count": 0,
+      "lines": 2791
+    },
+    "loopx/heartbeat_prompt.py": {
+      "any_count": 17,
+      "dict_any_count": 0,
+      "lines": 1565
+    },
+    "loopx/history.py": {
+      "any_count": 51,
+      "dict_any_count": 0,
+      "lines": 1508
+    },
+    "loopx/presentation/renderers/status_markdown.py": {
+      "any_count": 47,
+      "dict_any_count": 0,
+      "lines": 1570
+    },
+    "loopx/quota.py": {
+      "any_count": 219,
+      "dict_any_count": 0,
+      "lines": 2946
+    },
+    "loopx/status.py": {
+      "any_count": 180,
+      "dict_any_count": 0,
+      "lines": 3076
+    },
+    "loopx/todos.py": {
+      "any_count": 48,
+      "dict_any_count": 0,
+      "lines": 2141
+    },
+    "loopx/worker_bridge.py": {
+      "any_count": 28,
+      "dict_any_count": 0,
+      "lines": 1574
+    }
+  },
+  "schema_version": "control_plane_module_metric_baseline_v0"
+}

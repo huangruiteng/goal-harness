@@ -65,12 +65,15 @@ BEGINNER_PRESETS: tuple[BeginnerPreset, ...] = (
         default_mode="draft_only",
         summary=(
             "Turn recent merged work and LoopX run history into a release-note draft "
-            "with PR links when available."
+            "that answers the upgrade decision and preserves PR-backed product groups."
         ),
         goal_text=(
             "Run Changelog Draft L1 for this repository: summarize recent merged "
             "work and LoopX run history into a human-reviewed release-note draft "
-            "with PR links when available; do not publish."
+            "that states who should upgrade, what the release solves, whether it is "
+            "breaking, how to verify it, and who contributed; preserve PR-backed "
+            "product groups and optional-capability activation/rollback guidance; "
+            "do not publish."
         ),
         capability_path=(
             "history",

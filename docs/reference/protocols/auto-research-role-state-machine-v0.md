@@ -35,7 +35,7 @@ cleanup are transition duties rather than separate permanent workers.
 | Research curator | `research_curator` | Keep the objective, editable scope, protected scope, metric, stop policy, and operator gates explicit. | `research_contract_v0`, protected-boundary notes, owner gate todos, public projection requests. | Pick winners, run experiments, or publish unsupported claims. |
 | Hypothesis proposer | `hypothesis_proposer` | Turn research ideas into todo-backed hypotheses, parent links, mechanism families, and bounded retire/successor decisions. | `research_hypothesis_v0`, successor todos, grounding refs, no-follow-up rationale. | Claim novelty from the same source used to ideate or delete negative evidence. |
 | Research executor | `research_executor` | Execute selected hypotheses in isolated worktrees and preserve dev or held-out attempt evidence. | branch refs, `research_evidence_event_v0`, retry packets. | Edit protected scope, hide failures, or promote results. |
-| Evaluator/promoter | `evaluator_promoter` | Classify evidence as supported, contradicted, retry-needed, promotion-ready, or retirement-ready. | evaluation summary, promotion candidate, retirement candidate, gate todo, projection-ready evidence. | Treat dev-only lift as promoted or override missing held-out evidence. |
+| Evaluator/promoter | `evaluator_promoter` | Classify evidence as supported, contradicted, retry-needed, promotion-ready, or retirement-ready, and record a terminal decision only after the required gate. | evaluation summary, promotion candidate, retirement candidate, `auto_research_terminal_decision_v0`, gate todo, projection-ready evidence. | Treat dev-only lift as promoted, override missing held-out evidence, or self-certify an independent review. |
 
 The role names are product-facing labels. A single Codex session may perform
 multiple roles only when it has the corresponding todo claim, capability, and
@@ -55,7 +55,7 @@ reintroducing a leader or coordinator agent.
 | Future role | Current v0 duty | Split trigger | Still must not |
 | --- | --- | --- | --- |
 | Gate steward | Research curator plus evidence verifier handle `operator_gate` and `promotion_gate` transitions. | Gates become frequent enough that wait reasons, owner questions, and unblock evidence need independent monitoring. | Approve its own gate, bypass owner decisions, or select experiments. |
-| Synthesis narrator | Read-only projection builder creates `research_evidence_graph_v0` from promoted/retired evidence. | Users need a continuously updated report lane that summarizes evidence without slowing runners or verifiers. | Certify scores, hide negative evidence, or mutate source records. |
+| Synthesis narrator | Read-only projection builder converts the evidence graph plus terminal decisions and reviews into queryable Explore results. | Users need a continuously updated report lane that summarizes evidence without slowing runners or verifiers. | Certify scores, hide negative evidence, or mutate source records. |
 | Frontier janitor | Hypothesis mapper and evidence verifier retire duplicates, exhausted retries, and no-follow-up branches. | The frontier grows large enough that stale hypotheses crowd out active research. | Delete evidence, rewrite todo ownership, or prune without a public rationale. |
 
 Promoting any future role requires a smoke update that proves the role is a
@@ -78,8 +78,8 @@ over the full graph.
 | `needs_retry` | Attempt is inconclusive but resumable from a ref or clearly bounded retry. | `frontier_selected`, `retired` |
 | `contradicted` | Evidence shows regression, correctness failure, or guardrail failure. | `retired`, `hypothesis_proposed` |
 | `promotion_gate` | Promotion requires held-out evidence, owner decision, merge gate, or public-boundary review. | `promoted`, `retired`, `operator_gate` |
-| `promoted` | Promotion policy accepted the result into the current best artifact. | `research_evidence_graph_v0` |
-| `retired` | The direction is no longer active; negative evidence remains queryable. | `research_evidence_graph_v0` |
+| `promoted` | Promotion policy accepted the result into the current best artifact. | peer review, Explore result projection |
+| `retired` | The direction is no longer active; negative evidence remains queryable. | peer review, Explore result projection |
 
 ## State Machine
 
@@ -137,9 +137,10 @@ flowchart TD
 | `evaluated -> contradicted` | Evidence verifier | regression, correctness failure, boundary violation, or novelty failure. |
 | `evaluated -> needs_retry` | Evidence verifier | unscored attempt with resumable ref or explicit bounded retry reason. |
 | `evaluated -> promotion_gate` | Evidence verifier | holdout candidate, clean boundary, pending owner/merge/publication decision. |
-| `promotion_gate -> promoted` | Research curator plus evidence verifier | held-out evidence when required, clean boundary, and applicable operator gate accepted. |
-| `supported|contradicted|needs_retry -> retired` | Hypothesis mapper plus evidence verifier | negative evidence, retry exhaustion, duplicate proof, or no-follow-up rationale. |
-| `promoted|retired -> research_evidence_graph_v0` | Read-only projection builder | projection refs only; no direct mutation of source records. |
+| `promotion_gate -> promoted` | Research curator plus evidence verifier | held-out evidence when required, clean boundary, applicable operator gate accepted, and an explicit evidence-revision-bound terminal decision. |
+| `supported|contradicted|needs_retry -> retired` | Hypothesis mapper plus evidence verifier | negative evidence, retry exhaustion, duplicate proof, or no-follow-up rationale plus an explicit retirement reason. |
+| `promoted|retired -> auto_research_peer_review_v0` | A registered peer distinct from producer and decision agent when independence is claimed | exact terminal-decision ref, exact evidence-graph revision, public-safe evidence refs, and approve/reject/needs-more-evidence verdict. |
+| `promoted|retired -> loopx_explore_result_event_v0` | Read-only projection builder | current evidence graph, terminal decision, and review projection refs only; no direct mutation of source records. |
 
 ## No-Leader Invariants
 
@@ -147,6 +148,10 @@ flowchart TD
 - `quota should-run --agent-id ...` selects only the current agent frontier.
 - Every executable hypothesis remains backed by a `todo_id` and `claimed_by`.
 - Promotion is evidence plus gate policy, not a persuasive summary.
+- A promotion or retirement candidate is not a terminal result; the terminal
+  decision is explicit and bound to one evidence-graph revision.
+- Peer review is a receipt over the decision. It cannot rewrite the hypothesis
+  or evidence, and same-agent review is never labeled independent.
 - A single promoted branch does not close a multi-round target by itself; when
   the role profile's continuation target is unmet, the last role in the cycle
   creates or links the next role-declared successor todo.

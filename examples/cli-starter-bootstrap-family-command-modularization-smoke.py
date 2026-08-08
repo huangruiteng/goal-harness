@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STARTER = ROOT / "loopx" / "cli_commands" / "starter.py"
 BOOTSTRAP = ROOT / "loopx" / "cli_commands" / "starter_bootstrap.py"
 BOOTSTRAP_REGISTRATION = ROOT / "loopx" / "cli_commands" / "starter_bootstrap_registration.py"
+START_GOAL = ROOT / "loopx" / "cli_commands" / "start_goal.py"
 INIT = ROOT / "loopx" / "cli_commands" / "__init__.py"
 
 
@@ -49,6 +50,7 @@ def assert_source_shape() -> None:
     starter_source = STARTER.read_text(encoding="utf-8")
     bootstrap_source = BOOTSTRAP.read_text(encoding="utf-8")
     registration_source = BOOTSTRAP_REGISTRATION.read_text(encoding="utf-8")
+    start_goal_source = START_GOAL.read_text(encoding="utf-8")
     init_source = INIT.read_text(encoding="utf-8")
 
     forbidden_starter_markers = [
@@ -88,12 +90,20 @@ def assert_source_shape() -> None:
         "def register_starter_bootstrap_commands(",
         'subparsers.add_parser(\n        "agent-onboard"',
         'subparsers.add_parser(\n        "bootstrap-command-pack"',
-        'subparsers.add_parser(\n        "start-goal"',
         'subparsers.add_parser(\n        "new-project-prompt"',
     ):
         require(
             marker in registration_source,
             f"starter_bootstrap_registration.py missing marker: {marker}",
+        )
+
+    for marker in (
+        "def register_start_goal_command(",
+        'subparsers.add_parser(\n        "start-goal"',
+    ):
+        require(
+            marker in start_goal_source,
+            f"start_goal.py missing marker: {marker}",
         )
 
     for marker in (

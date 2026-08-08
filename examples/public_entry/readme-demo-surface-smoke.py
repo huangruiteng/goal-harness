@@ -25,14 +25,21 @@ def main() -> int:
     cross_runtime_index = read("docs/product/use-cases/cross-runtime/README.md")
     getting_started = read("docs/guides/getting-started.md")
     compact_readme = compact(readme)
+    compact_readme_zh = "".join(readme_zh.split())
     compact_demo = compact(demo)
+    auto_research = readme.split("### Auto Research", 1)[1].split(
+        "### Used In Real Projects", 1
+    )[0]
+    auto_research_zh = readme_zh.split("### Auto Research", 1)[1].split(
+        "### 真实项目中的使用", 1
+    )[0]
 
     for required in [
         '<div align="center">',
         "docs/assets/loopx-social-preview.png",
         "LoopX loop engineering social preview banner",
         "Loop engineering for long-running AI agents and peer agent teams.",
-        "A lightweight state kernel and agent-agnostic local control plane for",
+        "The open, provider-neutral, stateful control plane for long-running agents.",
         "Keep objectives, gates, todos, evidence, quota, and handoffs stable",
         "## Why LoopX",
         "objective / issue / project",
@@ -48,7 +55,7 @@ def main() -> int:
         "## Advanced Paths",
         "200+ hours of elapsed loop lifetime",
         "200+ hour public contribution arc",
-        "200+ hour owner-run experiment arc",
+        "Redacted owner-run showcase",
         "not 200 hours of continuous model execution",
         "docs/assets/long-running-loop-openviking-trajectory.png",
         "docs/assets/long-running-loop-ml-experiment-trajectory.png",
@@ -74,8 +81,7 @@ def main() -> int:
         '<a id="看几个例子"></a>',
         "200+ 小时自然时长",
         "超过 200 小时的公开贡献轨迹",
-        "超过 200 小时的 owner-run 实验轨迹",
-        "不等于 200 小时连续模型执行",
+        "经过脱敏的 owner-run showcase",
         "`0.4.x` 已经是一套可用、但仍处于早期的长程 Agent 本地控制面",
         "docs/assets/loopx-lark-developer-group.png",
         "docs/assets/loopx-wechat-contact.png",
@@ -87,6 +93,34 @@ def main() -> int:
 
     first_screen = readme.split("## Why LoopX", 1)[0]
     assert "docs/assets/loopx-logo.png" not in first_screen
+
+    for required in [
+        "company or employer endorsement",
+        "independent reproduction",
+    ]:
+        assert required in compact_readme, required
+    for required in [
+        "不等于 200 小时连续模型执行",
+        "公司或雇主背书",
+        "第三方独立复现",
+    ]:
+        assert required.replace(" ", "") in compact_readme_zh, required
+
+    for required in [
+        "Reproducible public KNN demo",
+        "deterministic CPU evaluator",
+        "docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md",
+    ]:
+        assert required in auto_research, required
+    assert "redacted" not in auto_research.lower()
+
+    for required in [
+        "可复现的公开 KNN demo",
+        "deterministic CPU evaluator",
+        "docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md",
+    ]:
+        assert required in auto_research_zh, required
+    assert "脱敏" not in auto_research_zh
 
     for required in [
         "`$loopx <complex task>`",

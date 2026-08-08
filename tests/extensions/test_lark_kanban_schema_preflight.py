@@ -10,6 +10,7 @@ from loopx.extensions.lark.presentation.kanban import (
     read_lark_kanban_local_config,
     save_lark_kanban_board_config,
     sync_loopx_projection_to_lark_kanban,
+    sync_loopx_todos_to_lark_kanban,
     write_lark_kanban_local_config,
 )
 
@@ -202,3 +203,156 @@ def test_complete_remote_list_replaces_stale_local_record_id(tmp_path: Path) -> 
         "rec_stale_fixture"
     )
     assert sum("+record-upsert" in args for args in calls) == 1
+
+
+def test_partial_todo_sync_persists_successful_record_for_retry(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    registry_path = project / ".loopx" / "registry.json"
+    state_file = project / "ACTIVE_GOAL_STATE.md"
+    config_path = project / ".loopx" / "lark-kanban.json"
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "common_runtime_root": str(tmp_path / "runtime"),
+                "goals": [
+                    {
+                        "id": "goal_public_fixture",
+                        "repo": str(project),
+                        "state_file": str(state_file),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    state_file.write_text(
+        """# Active Goal State
+
+## User Todo / Owner Review Reading Queue
+
+## Agent Todo
+
+- [ ] [P1] First public todo
+  <!-- loopx:todo todo_id=todo_public_one status=open task_class=advancement_task -->
+- [ ] [P1] Second public todo
+  <!-- loopx:todo todo_id=todo_public_two status=open task_class=advancement_task -->
+""",
+        encoding="utf-8",
+    )
+    config = LarkKanbanConfig(
+        base_token="base_public_fixture",
+        table_id="tbl_public_fixture",
+        cli_bin="lark-cli",
+        identity="user",
+    )
+    save_lark_kanban_board_config(
+        config_path,
+        base_token=config.base_token,
+        table_id=config.table_id,
+        cli_bin=config.cli_bin,
+        identity=config.identity,
+    )
+    calls: list[list[str]] = []
+    upsert_count = 0
+
+    def runner(
+        args: list[str], cwd: Path | None, timeout: float | None
+    ) -> dict[str, object]:
+        nonlocal upsert_count
+        calls.append(args)
+        if "+field-list" in args:
+            return _result(
+                {
+                    "ok": True,
+                    "data": {"fields": lark_kanban_schema_payload()["fields"]},
+                }
+            )
+        if "+record-list" in args:
+            return _result(
+                {
+                    "ok": True,
+                    "data": {
+                        "fields": ["LoopX Goal ID", "LoopX Todo ID"],
+                        "data": [],
+                        "record_id_list": [],
+                        "has_more": True,
+                    },
+                }
+            )
+        if "+record-upsert" in args:
+            upsert_count += 1
+            todo_id = json.loads(args[args.index("--json") + 1])["LoopX Todo ID"]
+            if upsert_count == 1:
+                assert todo_id == "todo_public_one"
+                assert "--record-id" not in args
+                return _result(
+                    {"ok": True, "data": {"record_id": "rec_public_one"}}
+                )
+            if upsert_count == 2:
+                assert todo_id == "todo_public_two"
+                return {
+                    "returncode": 1,
+                    "stdout": json.dumps(
+                        {
+                            "ok": False,
+                            "error": {"message": "fixture second write failed"},
+                        }
+                    ),
+                    "stderr": "",
+                    "timed_out": False,
+                }
+            if upsert_count == 3:
+                assert todo_id == "todo_public_one"
+                assert args[args.index("--record-id") + 1] == "rec_public_one"
+                return _result(
+                    {"ok": True, "data": {"record_id": "rec_public_one"}}
+                )
+            if upsert_count == 4:
+                assert todo_id == "todo_public_two"
+                assert "--record-id" not in args
+                return _result(
+                    {"ok": True, "data": {"record_id": "rec_public_two"}}
+                )
+        raise AssertionError(args)
+
+    first = sync_loopx_todos_to_lark_kanban(
+        config,
+        registry_path=registry_path,
+        goal_id="goal_public_fixture",
+        config_path=config_path,
+        execute=True,
+        runner=runner,
+    )
+
+    assert first["ok"] is False
+    assert first["successful_write_count"] == 1
+    assert first["external_write_performed"] is True
+    persisted_after_failure = read_lark_kanban_local_config(config_path)[
+        "todo_records"
+    ]
+    assert persisted_after_failure[
+        "goal_public_fixture:todo_public_one"
+    ] == "rec_public_one"
+    assert "goal_public_fixture:todo_public_two" not in persisted_after_failure
+
+    second = sync_loopx_todos_to_lark_kanban(
+        config,
+        registry_path=registry_path,
+        goal_id="goal_public_fixture",
+        config_path=config_path,
+        execute=True,
+        runner=runner,
+    )
+
+    assert second["ok"] is True
+    assert second["successful_write_count"] == 2
+    assert second["external_write_performed"] is True
+    persisted_after_retry = read_lark_kanban_local_config(config_path)["todo_records"]
+    assert persisted_after_retry == {
+        "goal_public_fixture:todo_public_one": "rec_public_one",
+        "goal_public_fixture:todo_public_two": "rec_public_two",
+    }

@@ -564,6 +564,7 @@ def main() -> int:
         assert set(delivery["required_skill_ids"]) == {
             "loopx",
             "loopx-project",
+            "loopx-pr-program",
             "loopx-pr-review",
             "loopx-doc-registry",
             "loopx-self-repair",

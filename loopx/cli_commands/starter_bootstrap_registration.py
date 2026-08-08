@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 
 from ..bootstrap_command_pack import (
-    START_GOAL_CAPABILITY_ROUTES,
     START_GOAL_HOST_SURFACES,
 )
 from ..codex_cli_probe import DEFAULT_CODEX_BIN
@@ -11,17 +10,7 @@ from ..project_prompt import (
     DEFAULT_HANDOFF_ADAPTER_KIND,
     DEFAULT_HANDOFF_ADAPTER_STATUS,
 )
-
-
-def _add_capability_route_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--capability-route",
-        choices=START_GOAL_CAPABILITY_ROUTES,
-        help=(
-            "Explicit product capability route for this goal start. Goal text never "
-            "selects a capability route."
-        ),
-    )
+from .start_goal import add_capability_route_argument, register_start_goal_command
 
 
 def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -74,6 +63,18 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
         help="Registered LoopX agent id to include in quota/heartbeat commands.",
     )
     bootstrap_command_pack_parser.add_argument(
+        "--thread-id",
+        help=(
+            "Stable opaque host thread id used to reuse the bound agent lane. "
+            "Codex App defaults to the ambient CODEX_THREAD_ID when available."
+        ),
+    )
+    bootstrap_command_pack_parser.add_argument(
+        "--new-peer",
+        action="store_true",
+        help="Explicitly request a fresh agent identity for this host thread.",
+    )
+    bootstrap_command_pack_parser.add_argument(
         "--cli-bin",
         default="loopx",
         help="LoopX CLI binary name embedded in generated commands.",
@@ -90,7 +91,7 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
         action="append",
         help="Capability available in this host loop. Repeat for multiple capabilities.",
     )
-    _add_capability_route_argument(bootstrap_command_pack_parser)
+    add_capability_route_argument(bootstrap_command_pack_parser)
     bootstrap_command_pack_parser.add_argument(
         "--goal-text",
         help=(
@@ -106,54 +107,7 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
         help="Print only the pasteable /loopx handling message.",
     )
 
-    start_goal_parser = subparsers.add_parser(
-        "start-goal",
-        help="Preview a guided /loopx <goal text> start transaction without mutating state.",
-    )
-    start_goal_parser.add_argument(
-        "--guided",
-        action="store_true",
-        help="Required for now: render the guided dry-run transaction packet.",
-    )
-    start_goal_parser.add_argument("--project", default=".", help="Project directory to inspect.")
-    start_goal_parser.add_argument("--goal-id", help="Goal id. Defaults to <project-name>-goal.")
-    start_goal_parser.add_argument(
-        "--agent-id",
-        help=(
-            "Explicit registered LoopX identity for an ongoing session or exact "
-            "user-requested takeover. When omitted, new onboarding defaults to fresh "
-            "agent registration."
-        ),
-    )
-    start_goal_parser.add_argument(
-        "--cli-bin",
-        default="loopx",
-        help="LoopX CLI binary name embedded in generated commands.",
-    )
-    start_goal_parser.add_argument(
-        "--host-surface",
-        choices=START_GOAL_HOST_SURFACES,
-        help=(
-            "Exact host surface that will own loop activation after todo writeback. "
-            "When omitted, start-goal returns a read-only host selection gate."
-        ),
-    )
-    start_goal_parser.add_argument(
-        "--available-capability",
-        dest="available_capabilities",
-        action="append",
-        help="Capability available in this host loop. Repeat for multiple capabilities.",
-    )
-    _add_capability_route_argument(start_goal_parser)
-    start_goal_parser.add_argument("--goal-text", required=True, help="Exact goal text to plan before todo writeback.")
-    start_goal_parser.add_argument(
-        "--include-command-pack-detail",
-        action="store_true",
-        help=(
-            "Include the complete nested bootstrap command pack. The default guided "
-            "projection keeps the actionable transaction and advertises this cold path."
-        ),
-    )
+    register_start_goal_command(subparsers)
 
     prompt_parser = subparsers.add_parser(
         "new-project-prompt",

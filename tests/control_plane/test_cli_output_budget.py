@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +26,6 @@ from loopx.control_plane.testing.cli_output_budget import (
 from loopx.heartbeat_prompt import build_heartbeat_prompt
 from loopx.help_surface import COMMAND_GROUPS
 from loopx.rollout_event_log import rollout_event_log_path
-
 
 GOAL_ID = "cli-output-budget-goal"
 AGENT_IDS = ("codex-alpha", "codex-beta", "codex-gamma")
@@ -266,8 +266,13 @@ def _write_user_todo_fixture(state_file: Path) -> None:
 
 def _invoke_cli(args: list[str]) -> tuple[int, str]:
     output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        exit_code = cli_main(args)
+    ambient_thread_id = os.environ.pop("CODEX_THREAD_ID", None)
+    try:
+        with contextlib.redirect_stdout(output):
+            exit_code = cli_main(args)
+    finally:
+        if ambient_thread_id is not None:
+            os.environ["CODEX_THREAD_ID"] = ambient_thread_id
     return exit_code, output.getvalue()
 
 

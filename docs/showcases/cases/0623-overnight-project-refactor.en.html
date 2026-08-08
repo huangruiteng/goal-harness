@@ -41,6 +41,11 @@
   .evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0 6px}
   .evidence-card{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;padding:18px 18px 17px;min-height:128px}
   .evidence-label{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  .evidence-assets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+  .evidence-asset{border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#0e0e10;overflow:hidden}
+  .evidence-asset a{display:block;background:#f4f4f2}
+  .evidence-asset img{display:block;width:100%;height:auto;max-height:520px;object-fit:contain}
+  .evidence-asset figcaption{padding:12px 14px;font-size:12px;line-height:1.55;color:#858a92}
   .source-list{display:flex;flex-direction:column;gap:10px;margin-top:20px}
   .source-ref{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center;text-decoration:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:#0e0e10;padding:12px 14px}
   .source-ref:hover{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -74,7 +79,7 @@
   .experiment-card span{display:block;margin-top:9px;font-size:13px;line-height:1.55;color:#9ea3aa}
   .experiment-card em{display:block;margin-top:10px;font-style:normal;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.55;color:var(--accent)}
   footer{margin-top:76px;color:#62666d;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;line-height:1.7}
-  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
+  @media(max-width:720px){article{padding:52px 18px 90px}.panel-row{grid-template-columns:1fr}.panel-key{border-right:0;border-bottom:1px solid rgba(255,255,255,.07)}.metric-grid,.evidence-grid,.evidence-assets,.experiment-grid{grid-template-columns:1fr}.source-ref{grid-template-columns:1fr;gap:6px}}
 </style>
 </head>
 <body>
@@ -92,7 +97,7 @@
     <h1>Overnight project refactor as PR-sized slices</h1>
     <div class="accent">A broad refactor can run overnight while staying split into human-sized review units.</div>
     <p>The operator can wake up to reviewable PR-sized refactor slices instead of a single giant autonomous diff.</p>
-    <div class="chips"><span>refactor</span><span>PR slices</span><span>todo evidence</span></div>
+    <div class="chips"><span>Creator dogfooding</span><span>Public-safe pattern</span><span>refactor</span><span>PR slices</span><span>todo evidence</span></div>
 
     <div class="diagram" aria-label="LoopX control-plane sketch">
       <svg viewBox="0 0 760 320" role="img">
@@ -129,6 +134,7 @@
     </div>
     <div class="metric-grid"><div class="metric"><strong>1</strong><span>PR-sized slice at a time</span></div><div class="metric"><strong>3</strong><span>successor/supersede/handoff routes</span></div><div class="metric"><strong>1</strong><span>review gate for broad risk</span></div><div class="metric"><strong>0</strong><span>giant-diff target</span></div></div>
     <div class="evidence-grid"><div class="evidence-card"><div class="evidence-label">Successor path</div><p>`docs/integrations/lark-kanban-control-plane-adapter.md` says real successors use `todo complete --next-*`, while replacements or narrower splits use `todo supersede --next-agent-todo`.</p></div><div class="evidence-card"><div class="evidence-label">Peer completion</div><p>`docs/heartbeat-automation-prompt.md` requires nontrivial completion to create a typed successor todo or a no-follow-up rationale.</p></div><div class="evidence-card"><div class="evidence-label">CLI validation</div><p>`examples/control_plane/todo-lifecycle-cli-smoke.py` covers `--next-agent-todo` successors, `todo supersede`, claim inheritance, typed continuation, same-agent review rejection, and peer self-merge evidence.</p></div><div class="evidence-card"><div class="evidence-label">Review shape</div><p>`loopx review-packet` packages open todos, claimed_by, and handoff state for reviewer consumption.</p></div></div>
+
 
     <div class="section-head"><span>03</span><h2>LoopX behavior</h2></div>
     <ul class="flow"><li><span class="flow-num">1</span><div class="flow-body"><div class="flow-title">The current refactor slice must stay reviewable; overnight discoveries do not all land in one PR.</div></div></li><li><span class="flow-num">2</span><div class="flow-body"><div class="flow-title">New discoveries become follow-up todos; changed routes supersede stale todos.</div></div></li><li><span class="flow-num">3</span><div class="flow-body"><div class="flow-title">Each slice carries focused validation or doc/contract smoke evidence rather than raw agent traces.</div></div></li><li><span class="flow-num">4</span><div class="flow-body"><div class="flow-title">Broad or unclear-risk slices route to review handoff instead of self-merge.</div></div></li></ul>

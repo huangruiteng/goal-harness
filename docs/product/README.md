@@ -13,6 +13,9 @@ contracts.
   runtime map for state, interactions, and bounded contexts.
 - [Release readiness](release-readiness.md): the currently supported v0.x
   install and compatibility boundary.
+- [Release note template](release-note-template.md): the copy-ready release
+  decision summary, product groups, optional-capability guidance, validation,
+  and bilingual attribution format.
 - [Public adoption loop](public-adoption-loop.md): a public-safe path from
   external attempt to inspectable feedback.
 - [Domain capability packs](domain-capability-packs.md): what belongs in the

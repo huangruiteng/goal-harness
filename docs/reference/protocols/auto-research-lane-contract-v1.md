@@ -25,8 +25,8 @@ research loop while LoopX stays decentralized?
 | Curator | `research_curator` | Defines or refreshes the public-safe research contract, metric, protected scope, and novelty boundary. | `research_contract_v0`, grounding refs. | Select winners, edit protected evaluators, or own executor queues. |
 | Hypothesis proposer | `hypothesis_proposer` | Proposes grounded, todo-backed hypotheses and parent-child refinements. | `research_hypothesis_v0`, agent todos, grounding refs. | Claim novelty from the same material used for ideation. |
 | Executor | `research_executor` | Runs one claimed hypothesis in an isolated worktree and produces split-aware results. | branch refs, eval result projections, `auto_research_evidence_packet_v0`. | Mutate protected scope, promote results, or hide failed attempts. |
-| Evaluator / promoter | `evaluator_promoter` | Converts scored attempts into promotion, retry, or retirement candidates under the contract policy. | `research_evidence_event_v0`, promotion or retirement candidate projections, gate todos. | Treat dev-only lift as promoted evidence or bypass owner gates. |
-| Product narrator | `product_narrator` | Renders the public-safe case story from projections for downstream product surfaces. | `research_evidence_graph_v0`, public docs, screenshots after first-screen review when needed. | Invent metrics, read private source bodies, or mutate source state. |
+| Evaluator / promoter | `evaluator_promoter` | Converts scored attempts into promotion, retry, or retirement candidates, then records an explicit terminal decision when the contract permits it. | `research_evidence_event_v0`, promotion or retirement candidate projections, `auto_research_terminal_decision_v0`, gate todos. | Treat dev-only lift as promoted evidence, bypass owner gates, or label its own review independent. |
+| Product narrator | `product_narrator` | Renders the public-safe case story from terminal decisions and projections for downstream product surfaces. | `research_evidence_graph_v0`, Explore result events, public docs, screenshots after first-screen review when needed. | Invent metrics, certify candidates as terminal, read private source bodies, or mutate research evidence. |
 
 No lane is privileged. A single Codex session may implement more than one role
 when it has the matching todo claim and boundary, but the graph must still show
@@ -99,9 +99,16 @@ there is no separate continuation projector or central research manager.
    agent-scoped quota or an explicitly claimed role-declared successor todo.
 4. An `evaluator_promoter` may promote only when dev evidence, held-out
    evidence, clean boundary, and required gates are present.
-5. A `product_narrator` may publish only from `research_evidence_graph_v0`
-   and related public-safe refs; first-screen public surface changes still obey
-   the first-screen review gate.
+5. A registered peer may claim independent review only when it differs from
+   both the hypothesis producer and terminal-decision agent, binds the exact
+   evidence-graph revision, and records `approve`, `reject`, or
+   `needs_more_evidence`. Review does not mutate research truth.
+6. A `product_narrator` may publish only from `research_evidence_graph_v0`,
+   an explicit terminal decision, and the current review projection;
+   independent approval is required for `confirmed` or `refuted` findings.
+   Without it, the finding remains `tentative`. Related evidence must stay
+   public-safe, and first-screen public surface changes still obey the
+   first-screen review gate.
 
 ## Gates
 
@@ -123,6 +130,11 @@ Promotion and retirement are both useful outcomes:
   guardrail failure, or repeated retry exhaustion;
 - retry candidate: unscored but resumable attempt with a branch/ref and
   `needs_retry` evidence.
+- terminal decision: a separate evidence-revision-bound `promoted` or
+  `retired` record; candidate status alone never creates one;
+- peer review: a separate receipt over the current terminal decision. A
+  same-agent review is visible but cannot produce a confirmed or refuted
+  finding.
 
 The product board should show all three. The user should see which result is
 worth merging, which direction saved future search time by failing clearly, and
@@ -137,6 +149,12 @@ An implementation satisfies this lane contract when:
   quota selection;
 - promotion and retirement candidates are derived from
   `research_evidence_graph_v0`, not fixture-only prose;
+- terminal results can be queried by exact hypothesis id, including history,
+  without loading raw transcripts;
+- stale evidence revisions and conflicting terminal decisions fail closed to a
+  tentative or blocked projection;
+- independent-review claims require a different registered peer and never
+  rewrite scored evidence or terminal decisions;
 - grounded ideation and novelty audit remain separate lanes;
 - no public surface needs a leader or coordinator agent to explain ownership;
 - public docs and projections contain no raw logs, private paths, credentials,

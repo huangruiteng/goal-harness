@@ -58,15 +58,31 @@ def _host_result(plan: dict[str, object], *, kind: str = "validated_progress") -
         "result_kind": kind,
         "completed_phases": ["host_execute", "typed_result"],
     }
-    if kind == "validated_progress":
+    if kind in {"validated_progress", "validated_completion"}:
         result.update(
-            classification="fixture_progress",
-            recommended_action="Continue the public fixture",
-            next_action="Run the next public fixture check",
+            classification=(
+                "fixture_progress"
+                if kind == "validated_progress"
+                else "fixture_completion"
+            ),
+            recommended_action=(
+                "Continue the public fixture."
+                if kind == "validated_progress"
+                else "Refresh the active goal after this Todo completion."
+            ),
+            next_action=(
+                "Run the next public fixture check."
+                if kind == "validated_progress"
+                else "Select the next Todo from a fresh decision."
+            ),
             delivery_batch_scale="implementation",
             delivery_outcome="outcome_progress",
             vision_unchanged_reason="The fixture objective is unchanged after validated progress.",
-            summary="One public fixture advanced.",
+            summary=(
+                "One public fixture advanced."
+                if kind == "validated_progress"
+                else "One public fixture completed."
+            ),
         )
     return result
 
@@ -250,6 +266,195 @@ def test_run_once_commits_once_and_replays_without_duplicate_effects(tmp_path: P
     assert not any(replay["effects"].values())
     assert count_path.read_text(encoding="utf-8") == "1"
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
+
+
+def test_validated_completion_requires_explicit_lifecycle_writeback(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    result_path = tmp_path / "result.json"
+    result_path.write_text(
+        json.dumps(_host_result(plan, kind="validated_completion")),
+        encoding="utf-8",
+    )
+    calls = {"writeback": 0, "completion": 0, "spend": 0, "scheduler": 0}
+
+    def writeback(_result: dict[str, object]) -> dict[str, object]:
+        calls["writeback"] += 1
+        return {"ok": True, "appended": True}
+
+    def spend() -> dict[str, object]:
+        calls["spend"] += 1
+        return {"ok": True, "appended": True}
+
+    def scheduler(_spend: dict[str, object]) -> dict[str, object]:
+        calls["scheduler"] += 1
+        return {"completed": True, "acknowledged": True}
+
+    payload = run_loopx_turn_once(
+        plan,
+        host_argv=_host_argv(result_path, tmp_path / "host-count"),
+        project=tmp_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id="fixture-goal",
+        timeout_seconds=5,
+        execute=True,
+        task_validator=_passing_validator,
+        writeback=writeback,
+        spend=spend,
+        scheduler=scheduler,
+    )
+
+    assert payload["result_kind"] == "validation_failed"
+    assert payload["receipt"]["failed_phase"] == "validation"
+    assert calls == {"writeback": 0, "completion": 0, "spend": 0, "scheduler": 0}
+
+
+def test_validated_completion_commits_once_with_lifecycle_outcome(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    result_path = tmp_path / "result.json"
+    result_path.write_text(
+        json.dumps(_host_result(plan, kind="validated_completion")),
+        encoding="utf-8",
+    )
+    calls = {"writeback": 0, "completion": 0, "spend": 0, "scheduler": 0}
+    writeback, spend, scheduler = _callbacks(calls)
+
+    def completion_writeback(_result: dict[str, object]) -> dict[str, object]:
+        calls["completion"] += 1
+        return {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "active_goal",
+            },
+        }
+
+    kwargs = {
+        "host_argv": _host_argv(result_path, tmp_path / "host-count"),
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "task_validator": _passing_validator,
+        "writeback": writeback,
+        "completion_writeback": completion_writeback,
+        "spend": spend,
+        "scheduler": scheduler,
+    }
+    first = run_loopx_turn_once(plan, **kwargs)
+    replay = run_loopx_turn_once(plan, **kwargs)
+
+    assert first["status"] == "committed"
+    assert first["effects"]["state_written"] is True
+    assert first["effects"]["quota_spent"] is True
+    assert replay["replayed"] is True
+    assert not any(replay["effects"].values())
+    assert calls == {"writeback": 0, "completion": 1, "spend": 1, "scheduler": 1}
+    assert _journal(tmp_path / "runtime")["writeback"]["completion"] == {
+        "todo_id": "todo_fixture0001",
+        "continuation": "active_goal",
+    }
+
+
+def test_invalid_completion_outcome_fails_closed_without_spending(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    calls = {"completion": 0, "spend": 0, "scheduler": 0}
+    writeback, _spend, _scheduler = _callbacks(calls)
+
+    def completion_writeback(_result: dict[str, object]) -> dict[str, object]:
+        calls["completion"] += 1
+        return {
+            "ok": True,
+            "appended": True,
+            "completion": {"todo_id": "todo_other", "continuation": "active_goal"},
+        }
+
+    payload = run_loopx_turn_once(
+        plan,
+        host_runner=lambda _request: _host_result(plan, kind="validated_completion"),
+        project=tmp_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id="fixture-goal",
+        timeout_seconds=5,
+        execute=True,
+        task_validator=_passing_validator,
+        writeback=writeback,
+        completion_writeback=completion_writeback,
+        spend=lambda: calls.__setitem__("spend", calls["spend"] + 1) or {
+            "ok": True,
+            "appended": True,
+        },
+        scheduler=lambda _spend: calls.__setitem__("scheduler", calls["scheduler"] + 1)
+        or {"completed": True, "acknowledged": True},
+    )
+
+    assert payload["receipt"]["result_kind"] == "writeback_failed"
+    assert payload["receipt"]["failed_phase"] == "durable_writeback"
+    assert calls == {"completion": 1, "spend": 0, "scheduler": 0}
+
+
+def test_validated_completion_recovers_after_writeback_without_repeating_completion(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    calls = {"completion": 0, "spend": 0, "scheduler": 0}
+
+    def completion_writeback(_result: dict[str, object]) -> dict[str, object]:
+        calls["completion"] += 1
+        return {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "active_goal",
+            },
+        }
+
+    def interrupted_spend() -> dict[str, object]:
+        calls["spend"] += 1
+        raise SystemExit(8)
+
+    def scheduler(_spend: dict[str, object]) -> dict[str, object]:
+        calls["scheduler"] += 1
+        return {"completed": True, "acknowledged": True}
+
+    def healthy_spend() -> dict[str, object]:
+        calls["spend"] += 1
+        return {"ok": True, "appended": True}
+
+    common = {
+        "host_runner": lambda _request: _host_result(
+            plan,
+            kind="validated_completion",
+        ),
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "task_validator": _passing_validator,
+        "writeback": lambda _result: {"ok": True, "appended": True},
+        "completion_writeback": completion_writeback,
+        "scheduler": scheduler,
+    }
+    with pytest.raises(SystemExit):
+        run_loopx_turn_once(plan, spend=interrupted_spend, **common)
+
+    recovered = run_loopx_turn_once(
+        plan,
+        spend=healthy_spend,
+        **common,
+    )
+
+    assert recovered["status"] == "committed"
+    assert calls == {"completion": 1, "spend": 2, "scheduler": 1}
 
 
 def test_run_once_recovers_after_process_exit_before_writeback(tmp_path: Path) -> None:

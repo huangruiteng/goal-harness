@@ -17,6 +17,13 @@ observation to this same command. It reuses the existing GitHub scan and
 normalized review queue; it does not introduce a second crawler or a new write
 authority.
 
+The capability also owns the review-depth contract. The shared
+`agent_response_contract.review_execution_contract` defines required evidence,
+completion, freshness, finding, and verdict rules. Each PR carries a compact
+`review_plan` that binds those rules to one exact head and marks code-symbol and
+negative-walkthrough applicability. Host skills route and publish this packet;
+they must not maintain a second explanation checklist.
+
 Codex agents should use the dedicated `loopx-pr-review` skill for this slash
 command. Do not route `/loopx-pr-review` through the broader `loopx-project`
 workflow or the merge-focused `loopx-pr-merge` skill.
@@ -71,14 +78,32 @@ loopx --format json pr-review --repo owner/repo --state open \
 persists these public-safe cursors in `handled_exact_heads`. Candidate emission
 alone is not a completion receipt: callers must add the cursor only after
 review-result readback proves that exact head was handled. A newly supplied
-cursor must match the prior packet's candidate; a caller cannot skip an
-unselected PR by naming it handled. A new head is a new candidate even when the
-prior head was handled.
+cursor must match the prior packet's candidate or one of its
+`projected_candidate_exact_heads`; a caller cannot skip an unselected PR by
+naming it handled. A new head is a new candidate even when the prior head was
+handled.
 
 `pending_candidate_exact_head` preserves the last selected but unhandled exact
 head across unchanged and incomplete polls. It is a scheduling cursor only;
 callers still deduplicate Todo creation by exact target key and must not treat
 the cursor as evidence that a review happened.
+
+`projected_candidate_exact_heads` persists every candidate that has been emitted
+but not yet completed. An unchanged poll skips those projected exact heads and
+selects the next unprojected, unhandled PR in the existing review sequence, so
+the monitor keeps rotating through the backlog instead of waiting on one PR.
+When every actionable PR has already been projected, `candidate` is `None` and
+`pending_candidate_exact_head` remains the last pending cursor. A material
+transition on an already projected exact head still re-selects that head.
+
+`review_backlog` gives the monitor a compact workload cadence hint. It counts
+open, non-draft PRs whose exact head is actionable and not yet recorded in
+`handled_exact_heads`, and returns `recommended_poll_interval_minutes`. While at
+least one unhandled PR remains, the recommendation is `3`; once the actionable
+backlog is empty, it drops to `15`. The hint is scheduling evidence only: it
+does not grant Todo, review, comment, or merge authority, and callers still
+advance the queue with an explicit handled cursor after exact-head review
+readback.
 
 `pull_request_review_queue_observation_v0` has exactly three observation
 states:
@@ -86,11 +111,10 @@ states:
 - `not_observed`: the source or packet slice was incomplete. Preserve the
   previous baseline and do not claim the queue is unchanged.
 - `observed_unchanged`: a complete observation has the same queue fingerprint.
-  Do not create a duplicate exact-head Todo. When an explicit handled cursor
-  advances the scheduling state, the packet may select the next unhandled
-  backlog PR while preserving this observation state. An unhandled candidate
-  can remain selected across polls until the caller supplies its completion
-  cursor.
+  Do not create a duplicate exact-head Todo for a projected candidate. The
+  packet selects the next unprojected, unhandled backlog PR so the queue keeps
+  rotating. An unhandled candidate remains in `projected_candidate_exact_heads`
+  until the caller supplies its completion cursor.
 - `material_transition`: a complete observation changed an exact head, review
   decision, check state, draft state, mergeability, or open-queue membership.
 
@@ -98,7 +122,9 @@ The repository-scoped fingerprint contains only compact public PR metadata.
 Persisted `items` carry only PR number and item fingerprint, so the autonomous
 packet does not duplicate the full review queue. The capability selects at
 most one unhandled, non-draft open PR in the existing `pr-review` sequence:
-changed PRs first, then the unchanged backlog after an explicit handled cursor.
+changed PRs first, then an unchanged poll rotates to the next unprojected
+candidate. Projected-but-unhandled candidates are skipped until they are
+handled or their exact head materially changes.
 It emits a
 `pull_request_review_todo_preview_v0` bound to its exact head. The preview may
 route to initial review, re-review after changes, or merge-readiness
@@ -109,8 +135,35 @@ authority; callers must use normal LoopX Todo authority, `loopx-pr-review`, and
 Do not pipe that first packet through `jq` or another projection that only
 keeps `.summary` and `.review_sequence`; that drops
 `agent_response_contract`, `review_groups`, `pull_requests[].review_template`,
-and `pull_requests[].evidence_commands`, which are the fields that make the
-command a guided review instead of a statistics table.
+`pull_requests[].review_plan`, and `pull_requests[].evidence_commands`, which
+are the fields that make the command a guided review instead of a statistics
+table.
+
+## Capability-Owned Review Execution
+
+`pull_request_review_execution_contract_v1` is shared once per packet to avoid
+duplicating a large prompt for every PR in a 100-item queue. It requires these
+typed evidence groups before a verdict:
+
+- problem context and active caller;
+- architecture and ownership flow;
+- exact changed-line classification across production, tests/fixtures, docs,
+  generated output, and mechanical moves;
+- a 2-5 item exact-head symbol map for code-changing PRs, including caller,
+  state, branch, side effect, consumer, and failure ownership;
+- positive and applicable negative execution walkthroughs;
+- validation tied to changed invariants and failure cases;
+- strongest regression path, blast radius, recovery, minimum repair, and
+  regression test;
+- code-volume necessity and the highest-value behavior-preserving
+  simplification.
+
+The per-PR `pull_request_review_plan_v1` records the exact target, applicability,
+required evidence ids, and an initially `unverified`
+`pull_request_review_result_v1` skeleton. Metadata, labels, file counts, risk
+hints, and green CI cannot upgrade evidence to `verified`. A stale-head verdict
+is prohibited. Missing evidence remains `unverified` with a reason instead of
+being replaced by confident prose.
 
 When `--state all` is used, the command must preserve both lifecycle groups.
 The `--limit` value is applied per group so a busy open queue cannot consume the
@@ -308,7 +361,10 @@ absolute paths, private source bodies, or hidden CI artifacts.
     "queue_table_role": "preface_only",
     "required_packet_fields_to_preserve": [
       "agent_response_contract",
+      "agent_response_contract.review_execution_contract",
+      "result_completeness",
       "review_groups",
+      "pull_requests[].review_plan",
       "pull_requests[].review_template",
       "pull_requests[].evidence_commands"
     ],
@@ -343,17 +399,20 @@ The packet should let a reviewer move through PRs in order:
 2. Then use `review_groups.merged` for post-merge audit and follow-up quality.
 3. Use `evidence_commands`, key files, changed-file scale, and checks to open
    the actual PR body and diff.
-4. Read `main_regression_analysis` before filling risk prose. It is the CLI's
+4. Execute the PR's `review_plan` against
+   `agent_response_contract.review_execution_contract`; keep unavailable
+   evidence explicitly unverified.
+5. Read `main_regression_analysis` before filling risk prose. It is the CLI's
    concrete, generated view of potential main regressions, bug risks, and
    focused validation.
-5. Follow `agent_response_contract.explanation_depth_contract`, then let
-   agentloop fill the blank five-block template:
+6. Render the verified structured result through the blank five-block template:
    `动机`, `改动思路`, `具体改动`, `对主干的风险`, `我的整体评价`.
    Use each section's range as a depth signal for a reader unfamiliar with the
    subsystem, not as filler.
-6. Treat `metadata_risk_hint` only as queue-ordering metadata. It must not be
+7. Treat `metadata_risk_hint` only as queue-ordering metadata. It must not be
    copied as the final risk judgement.
-7. Decide `approve`, `request changes`, `defer`, or `merge after checks`.
+8. Recheck the exact head, then decide `approve`, `request changes`, `defer`, or
+   `merge after checks`.
 
 A response that only lists `Open` and `Merged` PRs, scale, and recommended next
 order is incomplete for `/loopx-pr-review`; it should continue into the
@@ -386,6 +445,10 @@ A first implementation is acceptable when:
   `main_regression_analysis`, evidence commands, explicit
   `review_groups.unmerged` / `review_groups.merged`, and a blank five-block
   review template;
+- the shared `pull_request_review_execution_contract_v1` owns typed evidence,
+  completion, freshness, findings-first, and verdict policy, while every PR has
+  a compact exact-head `pull_request_review_plan_v1` with an unverified result
+  skeleton;
 - the packet includes `agent_response_contract.table_only_response_allowed=false`
   and `agent_response_contract.required_packet_fields_to_preserve` so
   slash-command agents know a table-only chat answer is incomplete;

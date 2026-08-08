@@ -20,11 +20,16 @@ from .research_state import (
     build_live_auto_research_projection,
     build_research_decision_candidates,
     build_research_evidence_graph_from_rollout_events,
+    build_research_failure_continuation_resolution,
     normalize_auto_research_action,
 )
 from ...control_plane.agents.multi_agent.role_successor import (
     apply_role_successor_todos,
     first_successor_followup,
+)
+from ...control_plane.todos.contract import (
+    normalize_supported_todo_resume_when,
+    normalize_todo_id,
 )
 from ...history import load_registry
 from ...paths import resolve_runtime_root
@@ -43,11 +48,15 @@ SUPPORTED_WORKER_ACTIONS = {
     "review_hypothesis_frontier",
     "run_dev_eval",
     "run_holdout_eval",
+    "remediate_data_measurement",
+    "propose_failure_successor",
     "write_evidence",
     "classify_evidence",
     "summarize_evidence",
     "write_evaluation_summary",
     "review_promotion_readiness",
+    "record_terminal_decision",
+    "review_terminal_decision",
 }
 AppendEvidence = Callable[[str], dict[str, object]]
 AUTO_RESEARCH_STATE_SUMMARY_MODE = "rollout_evidence_summary"
@@ -55,9 +64,13 @@ AUTO_RESEARCH_MANUAL_RESEARCH_REQUIRED_MODE = "manual_research_required"
 MANUAL_RESEARCH_REQUIRED_ACTIONS = {
     "write_research_contract",
     "propose_hypothesis",
+    "propose_failure_successor",
     "run_dev_eval",
     "run_holdout_eval",
+    "remediate_data_measurement",
     "write_evidence",
+    "record_terminal_decision",
+    "review_terminal_decision",
 }
 SUMMARY_ACTIONS = {
     "classify_evidence",
@@ -156,6 +169,8 @@ def _write_evaluation_summary_artifact(
     output_path: Path,
     goal_id: str,
     todo_id: str,
+    lineage_todo_id: str | None,
+    require_selected_failure_match: bool,
     agent_id: str,
 ) -> dict[str, object]:
     registry = load_registry(registry_path)
@@ -166,6 +181,14 @@ def _write_evaluation_summary_artifact(
         rollout_events=rollout_events,
     )
     decisions = build_research_decision_candidates(graph)
+    failure_resolution = build_research_failure_continuation_resolution(
+        decisions,
+        selected_todo_id=todo_id,
+        selected_lineage_todo_id=lineage_todo_id,
+        require_selected_failure_match=require_selected_failure_match,
+    )
+    failure_continuation = failure_resolution["failure_continuation"]
+    failure_continuation_unresolved = bool(failure_resolution["unresolved"])
     holdout_metrics = _holdout_metric_sequence(rollout_events)
     metric = graph.get("metric") if isinstance(graph.get("metric"), dict) else {}
     baseline = graph.get("baseline_metric")
@@ -197,6 +220,8 @@ def _write_evaluation_summary_artifact(
             "validated_promotion_candidate_count": len(decisions.get("validated_promotion_candidates") or []),
             "promotion_candidate_count": len(decisions.get("promotion_candidates") or []),
             "retirement_candidate_count": len(decisions.get("retirement_candidates") or []),
+            "failure_continuation": failure_continuation,
+            "failure_continuation_unresolved": failure_continuation_unresolved,
             "holdout_metric_sequence": holdout_metrics,
             "holdout_improvement_count": holdout_improvements,
         },
@@ -214,6 +239,83 @@ def _write_evaluation_summary_artifact(
     }
     _write_json(output_path, artifact)
     return artifact
+
+
+def _selected_failure_lineage_todo_id(selected: dict[str, object]) -> str | None:
+    unblocks_todo_id = normalize_todo_id(selected.get("unblocks_todo_id"))
+    if unblocks_todo_id:
+        return unblocks_todo_id
+    resume_when = normalize_supported_todo_resume_when(selected.get("resume_when"))
+    if not resume_when:
+        return None
+    kind, _separator, target = resume_when.partition(":")
+    return normalize_todo_id(target) if kind == "todo_done" else None
+
+
+def _failure_lineage_unresolved_result(
+    *,
+    goal_id: str,
+    agent_id: str,
+    todo_id: str,
+    action: str,
+    artifact: dict[str, object],
+    frontier_packet: dict[str, object],
+    complete_selected_todo: bool,
+) -> dict[str, object]:
+    decision_summary = artifact["decision_summary"]
+    return {
+        "ok": True,
+        "schema_version": AUTO_RESEARCH_WORKER_TURN_SCHEMA_VERSION,
+        "mode": "execute",
+        "goal_id": goal_id,
+        "agent_id": agent_id,
+        "selected_todo_id": todo_id,
+        "selected_action": action,
+        "executed": True,
+        "summary_mode": AUTO_RESEARCH_STATE_SUMMARY_MODE,
+        "artifact": _artifact_summary("evaluation_summary", filename="evaluation-summary.public.json"),
+        "artifact_status": artifact["summary"]["status"],
+        "claim_allowed": artifact["summary"]["claim_allowed"],
+        "promotion_decision_made": artifact["summary"]["promotion_decision_made"],
+        "role_id": auto_research_role_id_for_action(action),
+        "evaluation_summary": {
+            "claim_allowed": artifact["summary"]["claim_allowed"],
+            "best_dev_metric": artifact["evidence_graph_summary"]["best_dev_metric"],
+            "best_holdout_metric": artifact["evidence_graph_summary"]["best_holdout_metric"],
+            "holdout_metric_sequence": artifact["evidence_graph_summary"][
+                "holdout_metric_sequence"
+            ],
+            "holdout_improvement_count": decision_summary["holdout_improvement_count"],
+            "validated_promotion_candidate_count": decision_summary[
+                "validated_promotion_candidate_count"
+            ],
+            "failure_continuation": None,
+        },
+        "successor_todos": {
+            "schema_version": "multi_agent_role_successor_todos_v0",
+            "source": "role_profile_todo_command_template",
+            "needed": False,
+            "executed": False,
+            "role_id": auto_research_role_id_for_action(action),
+            "action": action,
+            "successors": [],
+            "skipped": [],
+            "reason": "failure_successor_lineage_unresolved",
+        },
+        "followup": None,
+        "completion": {
+            "requested": complete_selected_todo,
+            "executed": False,
+            "reason": "failure_successor_lineage_unresolved",
+        },
+        "frontier": frontier_packet,
+        "public_boundary": {
+            "raw_logs_recorded": False,
+            "private_artifacts_recorded": False,
+            "absolute_paths_recorded": False,
+            "credentials_recorded": False,
+        },
+    }
 
 
 def _manual_research_required_result(
@@ -271,6 +373,21 @@ def _maybe_add_role_successor_todos(
     decision_summary: dict[str, object],
     execute: bool,
 ) -> dict[str, object]:
+    successor_specs = auto_research_successor_specs_for_action(
+        role_id=role_id,
+        action=action,
+    )
+    failure_continuation = decision_summary.get("failure_continuation")
+    if isinstance(failure_continuation, dict):
+        next_outcome = str(failure_continuation.get("next_outcome") or "")
+        successor_specs = [
+            spec
+            for spec in successor_specs
+            if spec.get("action_kind") == next_outcome
+        ]
+    text_source_todo_id = None
+    if isinstance(failure_continuation, dict):
+        text_source_todo_id = str(failure_continuation.get("source_todo_id") or "") or None
     return apply_role_successor_todos(
         registry_path=registry_path,
         goal_id=goal_id,
@@ -278,9 +395,10 @@ def _maybe_add_role_successor_todos(
         current_agent_id=agent_id,
         role_id=role_id,
         action=action,
-        successor_specs=auto_research_successor_specs_for_action(role_id=role_id, action=action),
+        successor_specs=successor_specs,
         decision_summary=decision_summary,
         execute=execute,
+        text_source_todo_id=text_source_todo_id,
     )
 
 
@@ -439,6 +557,11 @@ def run_auto_research_worker_turn(
     raw_action = str((selected or {}).get("allowed_action") or "")
     action = normalize_auto_research_action(raw_action)
     todo_id = str((selected or {}).get("todo_id") or "")
+    lineage_todo_id = (
+        _selected_failure_lineage_todo_id(selected)
+        if isinstance(selected, dict)
+        else None
+    )
     if not selected or not todo_id:
         completion = (
             frontier_packet["frontier"].get("completion")
@@ -524,14 +647,35 @@ def run_auto_research_worker_turn(
                 complete_selected_todo=complete_selected_todo,
                 frontier_packet=frontier_packet,
             )
+        frontier_completion = (
+            frontier_packet["frontier"].get("completion")
+            if isinstance(frontier_packet.get("frontier"), dict)
+            else None
+        )
+        require_selected_failure_match = bool(
+            isinstance(frontier_completion, dict)
+            and frontier_completion.get("status") == "failure_successor_required"
+        )
         artifact = _write_evaluation_summary_artifact(
             registry_path=registry_path,
             runtime_root_arg=runtime_root_arg,
             output_path=evaluation_summary_path,
             goal_id=goal_id,
             todo_id=todo_id,
+            lineage_todo_id=lineage_todo_id,
+            require_selected_failure_match=require_selected_failure_match,
             agent_id=agent_id,
         )
+        if artifact["decision_summary"]["failure_continuation_unresolved"]:
+            return _failure_lineage_unresolved_result(
+                goal_id=goal_id,
+                agent_id=agent_id,
+                todo_id=todo_id,
+                action=action,
+                artifact=artifact,
+                frontier_packet=frontier_packet,
+                complete_selected_todo=complete_selected_todo,
+            )
         role_id = auto_research_role_id_for_action(action)
         successor_todos = _maybe_add_role_successor_todos(
             registry_path=registry_path,
@@ -585,6 +729,9 @@ def run_auto_research_worker_turn(
                 ],
                 "validated_promotion_candidate_count": artifact["decision_summary"][
                     "validated_promotion_candidate_count"
+                ],
+                "failure_continuation": artifact["decision_summary"][
+                    "failure_continuation"
                 ],
             },
             "successor_todos": successor_todos,

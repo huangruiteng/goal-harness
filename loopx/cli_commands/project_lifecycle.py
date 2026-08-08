@@ -23,6 +23,10 @@ from ..extensions.runtime import (
     default_extension_state_file,
     resolve_extension_activation,
 )
+from ..extensions.lark.goal_channel_lifecycle import (
+    goal_channel_gate_sync_failure,
+    sync_human_gate_after_refresh,
+)
 from ..history import load_registry
 from ..feedback import LESSON_KINDS, append_human_reward, compact_reward, render_reward_markdown
 from ..operator_gate import (
@@ -98,6 +102,26 @@ def _lark_explore_graph_syncer(
         return result
 
     return sync
+
+
+def _apply_external_sink_postcondition(
+    payload: dict[str, object],
+    *,
+    sink_result: Mapping[str, object],
+    warning: str,
+    error: str,
+) -> None:
+    postcondition = (
+        sink_result.get("delivery_postcondition")
+        if isinstance(sink_result.get("delivery_postcondition"), Mapping)
+        else {}
+    )
+    if not sink_result.get("enabled") or postcondition.get("satisfied"):
+        return
+    payload.setdefault("warnings", []).append(warning)
+    if postcondition.get("blocks_delivery"):
+        payload["ok"] = False
+        payload["error"] = error
 
 
 def _inline_agent_vision_packet(args: argparse.Namespace) -> dict[str, object] | None:
@@ -583,22 +607,46 @@ def handle_project_lifecycle_command(
                 ),
             )
             payload["explore_graph_sync"] = graph_sync
-            graph_postcondition = (
-                graph_sync.get("delivery_postcondition")
-                if isinstance(graph_sync.get("delivery_postcondition"), dict)
-                else {}
-            )
-            if graph_sync.get("enabled") and not graph_postcondition.get("satisfied"):
-                payload.setdefault("warnings", []).append(
+            _apply_external_sink_postcondition(
+                payload,
+                sink_result=graph_sync,
+                warning=(
                     "enabled Explore Graph delivery postcondition is unsatisfied; "
                     "the unchanged sink digest keeps it retryable"
+                ),
+                error=(
+                    "enabled Explore Graph sync/readback failed after the material "
+                    "refresh; retry it before delivery"
+                ),
+            )
+            try:
+                gate_sync = sync_human_gate_after_refresh(
+                    registry_path=registry_path,
+                    runtime_root_override=args.runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    external_sink_delivery_authorized=not bool(
+                        args.suppress_external_sinks
+                    ),
                 )
-                if graph_postcondition.get("blocks_delivery"):
-                    payload["ok"] = False
-                    payload["error"] = (
-                        "enabled Explore Graph sync/readback failed after the material "
-                        "refresh; retry it before delivery"
-                    )
+            except Exception:
+                gate_sync = goal_channel_gate_sync_failure(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                )
+            payload["goal_channel_gate_sync"] = gate_sync
+            _apply_external_sink_postcondition(
+                payload,
+                sink_result=gate_sync,
+                warning=(
+                    "enabled Goal Channel human-gate delivery postcondition is "
+                    "unsatisfied; the notification remains retryable"
+                ),
+                error=(
+                    "enabled Goal Channel human-gate notification/readback failed "
+                    "after the refresh; retry it before delivery"
+                ),
+            )
         print_payload(payload, fmt, render_state_refresh_markdown)
         return 0 if payload.get("ok") else 1
 

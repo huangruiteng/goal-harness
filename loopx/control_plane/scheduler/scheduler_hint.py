@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
-import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -23,6 +21,14 @@ from .execution_context import (
     SchedulerRuntimeProfile,
     apply_scheduler_execution_context,
     resolve_scheduler_execution_context,
+)
+from .monitor_wait import (
+    MONITOR_WAIT_HOST_FLOOR_MINUTES,
+    MONITOR_WAIT_PHASE_RANK,  # noqa: F401  # re-exported for compatibility
+    MONITOR_WAIT_PROGRESSION_MINUTES,
+    MonitorWaitPhase,  # noqa: F401  # re-exported for compatibility
+    _parse_monitor_timestamp,  # noqa: F401  # re-exported for compatibility
+    build_monitor_wait_cadence_plan,
 )
 from .state import (
     CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
@@ -46,18 +52,8 @@ CODEX_APP_STATEFUL_BACKOFF_SCHEMA_VERSION = "codex_app_stateful_backoff_v0"
 CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION = "codex_app_scheduler_ack_hint_v0"
 CODEX_APP_SCHEDULER_FAILURE_HINT_SCHEMA_VERSION = "codex_app_scheduler_failure_hint_v0"
 USER_GATE_NOTIFICATION_COOLDOWN_SCHEMA_VERSION = "user_gate_notification_cooldown_v0"
-MONITOR_CADENCE_PATTERN = re.compile(r"^\s*(\d+)\s*([mhd])\s*$", re.IGNORECASE)
-MONITOR_WAIT_PROGRESSION_MINUTES = [15, 30, 60]
 CODEX_APP_MAX_INTERVAL_MINUTES = 60
 DEFAULT_ACK_CAPABILITIES = {"shell", "filesystem_read", "filesystem_write"}
-MONITOR_WAIT_HOST_FLOOR_MINUTES = 15
-MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES = 60
-MONITOR_WAIT_PHASE_RANK = {
-    "active_window": 0,
-    "near_window": 1,
-    "cadence_only": 2,
-    "far_window": 3,
-}
 SCHEDULER_BASE_IDENTITY_KEYS = (
     "goal_id",
     "agent_identity.agent_id",
@@ -332,188 +328,6 @@ def build_codex_app_scheduler_failure_hint(
     return {
         "schema_version": CODEX_APP_SCHEDULER_FAILURE_HINT_SCHEMA_VERSION,
         "cli_args": cli_args,
-    }
-
-
-def _parse_monitor_timestamp(value: Any) -> datetime | None:
-    return parse_scheduler_timestamp(value)
-
-
-def _monitor_cadence_minutes(value: Any) -> int | None:
-    match = MONITOR_CADENCE_PATTERN.match(str(value or ""))
-    if not match:
-        return None
-    amount = max(1, int(match.group(1)))
-    unit = match.group(2).lower()
-    if unit == "h":
-        return amount * 60
-    if unit == "d":
-        return amount * 24 * 60
-    return amount
-
-
-def _monitor_wait_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    summary = payload.get("agent_todo_summary")
-    if not isinstance(summary, dict):
-        return []
-    items: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for key in ("current_agent_claimed_monitor_items", "monitor_open_items"):
-        values = summary.get(key)
-        if not isinstance(values, list):
-            continue
-        for value in values:
-            if not isinstance(value, dict):
-                continue
-            todo_id = str(value.get("todo_id") or "")
-            if todo_id and todo_id in seen_ids:
-                continue
-            if todo_id:
-                seen_ids.add(todo_id)
-            items.append(value)
-    return items
-
-
-def _monitor_item_identity(item: dict[str, Any]) -> str:
-    for key in ("todo_id", "target_key", "action_kind", "title"):
-        value = str(item.get(key) or "").strip()
-        if value:
-            return value
-    return str(item.get("index") or "monitor")
-
-
-def _minutes_until(value: datetime, current_time: datetime) -> int:
-    return max(1, math.ceil((value - current_time).total_seconds() / 60))
-
-
-def _cap_monitor_progression(*, cap_minutes: int, host_floor_minutes: int) -> list[int]:
-    safe_cap = max(1, int(cap_minutes))
-    safe_floor = max(1, int(host_floor_minutes))
-    # Keep host RRULEs on stable buckets; the exact due horizon still gates routing.
-    progression = [
-        max(safe_floor, interval)
-        for interval in MONITOR_WAIT_PROGRESSION_MINUTES
-        if interval <= safe_cap
-    ]
-    return progression or [safe_floor]
-
-
-def _monitor_wait_item_plan(
-    item: dict[str, Any],
-    *,
-    current_time: datetime,
-) -> dict[str, Any] | None:
-    expires_at = _parse_monitor_timestamp(item.get("expires_at"))
-    if expires_at is not None and expires_at <= current_time:
-        return {
-            "phase": "expired",
-            "selected_monitor_identity": _monitor_item_identity(item),
-        }
-
-    next_due_at = _parse_monitor_timestamp(item.get("next_due_at"))
-    last_checked_at = _parse_monitor_timestamp(item.get("last_checked_at"))
-    cadence_minutes = _monitor_cadence_minutes(item.get("cadence"))
-    host_floor = MONITOR_WAIT_HOST_FLOOR_MINUTES
-    phase: str | None = None
-    cap_candidates: list[int] = []
-    include_next_due_in_reset = False
-
-    if expires_at is not None and last_checked_at is not None and last_checked_at <= current_time:
-        phase = "active_window"
-        if cadence_minutes is not None:
-            cap_candidates.append(max(host_floor, cadence_minutes))
-        if next_due_at is not None and next_due_at > current_time:
-            cap_candidates.append(max(host_floor, _minutes_until(next_due_at, current_time)))
-    elif next_due_at is not None and next_due_at > current_time:
-        minutes_until_due = _minutes_until(next_due_at, current_time)
-        phase = (
-            "near_window"
-            if minutes_until_due <= MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES
-            else "far_window"
-        )
-        cap_candidates.append(max(host_floor, minutes_until_due))
-        include_next_due_in_reset = True
-    elif cadence_minutes is not None:
-        phase = "cadence_only"
-        cap_candidates.append(max(host_floor, cadence_minutes))
-
-    if phase is None or not cap_candidates:
-        return None
-
-    cap_minutes = max(host_floor, min(cap_candidates))
-    selected_identity = _monitor_item_identity(item)
-    reset_profile = {
-        "monitor_wait_phase": phase,
-        "monitor_wait_host_floor_minutes": host_floor,
-        "monitor_wait_selected_identity": selected_identity,
-        "monitor_wait_cadence_minutes": cadence_minutes,
-        "monitor_wait_window_start_at": (
-            next_due_at.isoformat()
-            if include_next_due_in_reset and next_due_at is not None
-            else None
-        ),
-        "monitor_wait_window_end_at": expires_at.isoformat() if expires_at is not None else None,
-    }
-    progression = _cap_monitor_progression(
-        cap_minutes=cap_minutes,
-        host_floor_minutes=host_floor,
-    )
-    return {
-        "phase": phase,
-        "selected_monitor_identity": selected_identity,
-        "selected_todo_id": item.get("todo_id"),
-        "selected_target_key": item.get("target_key"),
-        "host_floor_minutes": host_floor,
-        "cap_minutes": cap_minutes,
-        "cadence_minutes": cadence_minutes,
-        "next_due_at": next_due_at.isoformat() if next_due_at is not None else None,
-        "expires_at": expires_at.isoformat() if expires_at is not None else None,
-        "last_checked_at": last_checked_at.isoformat() if last_checked_at is not None else None,
-        "progression_minutes": progression,
-        "reset_profile": reset_profile,
-    }
-
-
-def _monitor_wait_cadence_plan(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Build phase-aware monitor backoff without turning due horizon into identity."""
-
-    current_time = now_utc()
-    plans: list[dict[str, Any]] = []
-    expired_count = 0
-    for item in _monitor_wait_items(payload):
-        plan = _monitor_wait_item_plan(item, current_time=current_time)
-        if not plan:
-            continue
-        if plan.get("phase") == "expired":
-            expired_count += 1
-            continue
-        plans.append(plan)
-
-    if not plans:
-        if expired_count:
-            return {
-                "phase": "expired",
-                "expired_monitor_count": expired_count,
-                "host_floor_minutes": MONITOR_WAIT_HOST_FLOOR_MINUTES,
-                "base_progression_minutes": MONITOR_WAIT_PROGRESSION_MINUTES,
-                "progression_minutes": None,
-                "reset_profile": None,
-            }
-        return None
-
-    selected = min(
-        plans,
-        key=lambda plan: (
-            int(plan.get("cap_minutes") or 10**9),
-            MONITOR_WAIT_PHASE_RANK.get(str(plan.get("phase") or ""), 99),
-            str(plan.get("selected_monitor_identity") or ""),
-        ),
-    )
-    return {
-        **selected,
-        "base_progression_minutes": MONITOR_WAIT_PROGRESSION_MINUTES,
-        "candidate_count": len(plans),
-        "expired_monitor_count": expired_count,
     }
 
 
@@ -1241,17 +1055,25 @@ def build_scheduler_hint(
         )
 
     if arbitration.disposition == SchedulerDisposition.MONITOR_WAIT:
-        monitor_plan = _monitor_wait_cadence_plan(payload)
+        monitor_plan = build_monitor_wait_cadence_plan(
+            payload,
+            current_time=now_utc(),
+        )
         monitor_progression = (
             monitor_plan.get("progression_minutes")
             if isinstance(monitor_plan, dict)
             else None
         )
+        monitor_initial_interval = (
+            monitor_progression[0]
+            if isinstance(monitor_progression, list) and monitor_progression
+            else MONITOR_WAIT_HOST_FLOOR_MINUTES
+        )
         monitor_reset_profile = (
             {
                 "cadence_class": "monitor_wait",
-                "codex_app_initial_interval_minutes": MONITOR_WAIT_HOST_FLOOR_MINUTES,
-                "codex_app_initial_rrule": rrule_for_minutes(MONITOR_WAIT_HOST_FLOOR_MINUTES),
+                "codex_app_initial_interval_minutes": monitor_initial_interval,
+                "codex_app_initial_rrule": rrule_for_minutes(monitor_initial_interval),
                 "codex_app_max_interval_minutes": 60,
                 "unchanged_poll_backoff_multiplier": 2,
                 "local_scheduler_unchanged_poll_limit": 3,
@@ -1269,7 +1091,7 @@ def build_scheduler_hint(
                 "monitor-only quiet polls should remain alive but use a slower "
                 "cadence until material evidence, a blocker, or replan obligation appears"
             ),
-            codex_interval=15,
+            codex_interval=monitor_initial_interval,
             codex_max=60,
             cli_limit=3,
             claude_limit=3,

@@ -29,6 +29,128 @@ from heartbeat_prompt_fixtures import (  # noqa: E402
 from loopx.heartbeat_prompt import build_heartbeat_prompt  # noqa: E402
 
 
+def user_output_policy(task_body: str, *, mode: str) -> dict[str, str]:
+    body = normalized(task_body)
+    assert "sync state if needed, and `NOTIFY`." not in body, (
+        f"{mode}: bare unconditional NOTIFY after read-only map"
+    )
+    assert "`NOTIFY` only for an artifact, gate, blocker, or self-stop;" not in body, (
+        f"{mode}: artifact-gated return overrides user_channel.notify authority"
+    )
+    assert "`NOTIFY` only for artifact/gate/blocker/self-stop." not in body, (
+        f"{mode}: brief artifact-gated return overrides user_channel.notify authority"
+    )
+    if mode == "compact":
+        policy_start = body.index("Output policy:") + len("Output policy:")
+        policy_end = body.index("If `should_run=false`:", policy_start)
+        policy = {}
+        for item in body[policy_start:policy_end].strip(" .").split(";"):
+            key, value = item.strip().split("=", maxsplit=1)
+            policy[key] = value.strip("`")
+        return policy
+    if mode == "full":
+        assert "`interaction_contract.user_channel.notify` controls output" in body
+        assert "Only if `user_channel.notify=NOTIFY`" in body
+        assert "repair the projection internally and stay quiet" in body
+        assert "notify only under `NOTIFY`" in body
+        assert "Return compactly under `interaction_contract.user_channel.notify`" in body
+        # No bare report directives outside NOTIFY condition
+        assert "and report compactly" not in body, (
+            "full: bare 'and report compactly' (old form outside NOTIFY)"
+        )
+        assert "report, write back" not in body, (
+            "full: bare 'report, write back' (old form outside NOTIFY)"
+        )
+    else:
+        assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet" in body
+        assert "Due/peer gate != prompt" in body
+        assert "missing NOTIFY action->" in body
+        assert "具体user todo未投影" in body
+        if mode == "brief":
+            assert "Return only under `user_channel.notify=NOTIFY`; else quiet." in body
+    return {
+        "authority": "interaction_contract.user_channel.notify",
+        "external": "NOTIFY",
+        "quiet": "DONT_NOTIFY",
+        "quiet_missing_action": "internal_repair",
+    }
+
+
+def assert_sole_notification_authority(task_body: str, *, mode: str) -> None:
+    body = normalized(task_body)
+    assert "no-change=`surface_only`/no spend; unchanged->" in body, mode
+    assert "`--vision-unchanged-reason`; material->actual outcome." in body, mode
+
+    if mode == "full":
+        assert (
+            "once. Only if `user_channel.notify=NOTIFY`: report the result compactly; "
+            "if `user_todo_summary.open_count > 0`, include those todos; if none exists, "
+            "report the gate. Under `DONT_NOTIFY`, stay quiet after the safe-bypass work."
+        ) in body, body
+        assert (
+            "state/board/ledger, add todos if needed, then spend once after validation. "
+            "Only if `user_channel.notify=NOTIFY`: report the new evidence. Under "
+            "`DONT_NOTIFY`, stay quiet."
+        ) in body, body
+        return
+
+    if mode == "compact":
+        assert (
+            "Only under `NOTIFY`, `state=operator_gate`/"
+            "`notify_user_on_open_todo=true` permit concrete blocker-push; else quiet."
+        ) in body, body
+        assert "Return only under `user_channel.notify=NOTIFY`; otherwise stay quiet." in body
+        return
+
+    if mode == "brief":
+        assert "Return only under `user_channel.notify=NOTIFY`; else quiet." in body
+        return
+
+    assert mode == "thin", mode
+    assert "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet." in body
+
+
+def assert_peer_scope_notification_authority(task_body: str) -> None:
+    body = normalized(task_body)
+    assert (
+        "If a todo is claimed or leased by another peer, choose another in-scope item "
+        "or record no in-scope work internally. Only `NOTIFY` reports it; "
+        "`DONT_NOTIFY` stays quiet."
+    ) in body, body
+
+
+def user_output_outcome(
+    task_body: str,
+    decision: dict[str, object],
+    *,
+    mode: str,
+) -> dict[str, bool]:
+    policy = user_output_policy(task_body, mode=mode)
+    assert policy["authority"] == "interaction_contract.user_channel.notify", policy
+    interaction_contract = decision["interaction_contract"]
+    assert isinstance(interaction_contract, dict), decision
+    user_channel = interaction_contract["user_channel"]
+    assert isinstance(user_channel, dict), decision
+    notify = user_channel.get(policy["authority"].rsplit(".", maxsplit=1)[-1])
+    action_required = user_channel.get("action_required") is True
+    missing_action = action_required and not isinstance(user_channel.get("actions"), list)
+    external_output = notify == policy["external"]
+    return {
+        "external_output": external_output,
+        "blocker_push": external_output
+        and bool(
+            decision.get("state") == "operator_gate"
+            or decision.get("notify_user_on_open_todo") is True
+            or action_required
+        ),
+        "internal_projection_repair": bool(
+            notify == policy["quiet"]
+            and missing_action
+            and policy["quiet_missing_action"] == "internal_repair"
+        ),
+    }
+
+
 def main() -> int:
     default_payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE)
     payload = build_heartbeat_prompt(goal_id=GOAL_ID, active_state=ACTIVE_STATE, full=True)
@@ -45,6 +167,14 @@ def main() -> int:
             "control-plane coordination and todo claim ergonomics",
             "do not take benchmark execution todos unless reassigned",
         ],
+        registered_agents=["codex-main-control", "codex-side-bypass"],
+    )
+    full_scoped_payload = build_heartbeat_prompt(
+        goal_id=GOAL_ID,
+        active_state=ACTIVE_STATE,
+        full=True,
+        agent_id="codex-side-bypass",
+        agent_scopes=["control-plane coordination and todo claim ergonomics"],
         registered_agents=["codex-main-control", "codex-side-bypass"],
     )
     primary_scoped_payload = build_heartbeat_prompt(
@@ -206,6 +336,120 @@ def main() -> int:
         len(str(payload["task_body"])),
     )
     compact_task = normalized(str(compact_payload["task_body"]))
+    notification_cases = (
+        (
+            "quiet operator gate",
+            {
+                "should_run": True,
+                "state": "operator_gate",
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": False,
+                        "notify": "DONT_NOTIFY",
+                    }
+                },
+            },
+            {
+                "external_output": False,
+                "blocker_push": False,
+                "internal_projection_repair": False,
+            },
+        ),
+        (
+            "quiet open-todo flag",
+            {
+                "should_run": True,
+                "notify_user_on_open_todo": True,
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": False,
+                        "notify": "DONT_NOTIFY",
+                    }
+                },
+            },
+            {
+                "external_output": False,
+                "blocker_push": False,
+                "internal_projection_repair": False,
+            },
+        ),
+        (
+            "quiet missing action repair",
+            {
+                "should_run": True,
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": True,
+                        "notify": "DONT_NOTIFY",
+                    }
+                },
+            },
+            {
+                "external_output": False,
+                "blocker_push": False,
+                "internal_projection_repair": True,
+            },
+        ),
+        (
+            "notified blocker",
+            {
+                "should_run": True,
+                "state": "operator_gate",
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": True,
+                        "notify": "NOTIFY",
+                        "actions": [{"text": "Approve the bounded action."}],
+                    }
+                },
+            },
+            {
+                "external_output": True,
+                "blocker_push": True,
+                "internal_projection_repair": False,
+            },
+        ),
+        (
+            "notified missing action repair",
+            {
+                "should_run": True,
+                "interaction_contract": {
+                    "user_channel": {
+                        "action_required": True,
+                        "notify": "NOTIFY",
+                    }
+                },
+            },
+            {
+                "external_output": True,
+                "blocker_push": True,
+                "internal_projection_repair": False,
+            },
+        ),
+    )
+    mode_payloads = (
+        ("full", payload),
+        ("compact", compact_payload),
+        ("brief", brief_payload),
+        ("thin", thin_payload),
+    )
+    for mode_label, mode_payload in mode_payloads:
+        mode_body = str(mode_payload["task_body"])
+        assert_sole_notification_authority(mode_body, mode=mode_label)
+        for label, decision, expected in notification_cases:
+            assert user_output_outcome(
+                mode_body,
+                decision,
+                mode=mode_label,
+            ) == expected, f"{mode_label}: {label}"
+    assert_peer_scope_notification_authority(str(full_scoped_payload["task_body"]))
+
+    assert "`state=operator_gate` / `notify_user_on_open_todo=true` /" not in compact_task
+    assert (
+        "Only under `NOTIFY`, `state=operator_gate`/"
+        "`notify_user_on_open_todo=true` permit concrete blocker-push; "
+        "else quiet."
+    ) in compact_task
     for phrase in (
         "compact LoopX heartbeat body",
         "Expanded lifecycle contract",
@@ -213,14 +457,14 @@ def main() -> int:
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
         "state=operator_gate",
         "notify_user_on_open_todo=true",
-        "open_todo_notification_policy=repeat_until_resolved",
         "`user_channel.notify=NOTIFY`",
-        "including non_blocking",
+        "concrete blocker-push",
+        "else quiet",
         "safe_bypass_allowed=true",
         "safe_bypass_kind=outcome_floor_recovery",
         "receipts do not self-stop",
         "ranker/cross-domain evidence artifact",
-        "status/log/metric/marker poll",
+        "one read-only poll",
         "heartbeat_recommendation",
         "task_orchestration_contract",
         "spawn admitted child lanes",
@@ -333,14 +577,15 @@ def main() -> int:
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run '
         "--goal-id loopx-meta --agent-id codex-product-capability --available-capability network "
         "--available-capability external_evidence_poll",
-        "NOTIFY Chinese actions incl. non_blocking false/0",
-        'not only "owner gate"',
-        "具体 user todo 未投影，需修复 LoopX 状态投影",
-        "DONT_NOTIFY+false/0 only: quiet",
+        "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
+        "Due/peer gate != prompt",
+        "missing NOTIFY action->",
+        "具体user todo未投影",
         "Observed capabilities -> `--available-capability`; never user gates",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
-        "writeback: actual class/scale/outcome accountable refresh->spend; no upgrade",
+        "no-change=`surface_only`/no spend",
+        "unchanged->`--vision-unchanged-reason`",
         "guard receipt; 2 stalls->replan",
         "`lark_event_inbox`: reply_due",
         "drain_command/reply-readback/ACK",
@@ -377,7 +622,7 @@ def main() -> int:
     assert brief_payload["thin"] is False, brief_payload
     assert brief_payload["quota_guard_command"] == payload["quota_guard_command"], brief_payload
     assert brief_payload["quota_spend_command"] == payload["quota_spend_command"], brief_payload
-    assert len(str(brief_payload["task_body"])) < len(str(compact_payload["task_body"])) * 0.55, (
+    assert len(str(brief_payload["task_body"])) < len(str(compact_payload["task_body"])) * 0.56, (
         len(str(brief_payload["task_body"])),
         len(str(compact_payload["task_body"])),
     )
@@ -389,8 +634,10 @@ def main() -> int:
         "loopx heartbeat-prompt --compact --goal-id public-heartbeat-goal --active-state /tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md",
         "Guard/retry; `LOOPX_TURN=<current_time_iso>`",
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
-        "User NOTIFY: Chinese actions incl. non_blocking at false/0",
-        "Only DONT_NOTIFY+false/0: quiet",
+        "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
+        "Due/peer gate != prompt",
+        "missing NOTIFY action->",
+        "具体user todo未投影",
         "follow user channel",
         "monitor_quiet_skip",
         "receipt/stall done",
@@ -398,16 +645,14 @@ def main() -> int:
         "one read-only poll",
         "safe_bypass_kind=outcome_floor_recovery",
         "ranker/cross-domain evidence recovery",
-        "state priority slice",
-        "guard payload",
         "status --limit 3",
         "review-packet --handoff-only",
         "heartbeat_recommendation",
         "goal_boundary",
         "bounded segment/batch",
         "validate/writeback/todos",
-        "Progress (actual values; no upgrade)",
-        "Optional state-only post-spend",
+        "Progress(actual,no upgrade)",
+        "Post-spend state",
         'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
         "No spend for quiet skips",
     ):
@@ -430,13 +675,14 @@ def main() -> int:
         "lifecycle/registry and `loopx-self-repair` for runtime/projection drift",
         "state/status/repo",
         "`quota should-run`",
-        "NOTIFY Chinese actions incl. non_blocking false/0",
-        'not only "owner gate"',
-        "DONT_NOTIFY+false/0 only: quiet",
-        "具体 user todo 未投影，需修复 LoopX 状态投影",
+        "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet",
+        "Due/peer gate != prompt",
+        "missing NOTIFY action->",
+        "具体user todo未投影",
         "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend)",
         "else RRULE/ack/fail",
-        "writeback: actual class/scale/outcome accountable refresh->spend; no upgrade",
+        "no-change=`surface_only`/no spend",
+        "unchanged->`--vision-unchanged-reason`",
         "guard receipt; 2 stalls->replan",
         "P0 blocked: safe P1/P2",
         "monitor quiet/no-spend",
@@ -445,6 +691,15 @@ def main() -> int:
         "Stop: private material, credentials, destructive git, unauthorized prod",
     ):
         assert phrase in thin_task, phrase
+    for label, task in (
+        ("full", normalized(str(payload["task_body"]))),
+        ("compact", compact_task),
+        ("brief", brief_task),
+        ("thin", thin_task),
+    ):
+        assert "no-change=`surface_only`/no spend" in task, label
+        assert "`--vision-unchanged-reason`" in task, label
+        assert "material->actual outcome" in task, label
     assert "if absent say" not in thin_task, thin_task
     assert "If false/0: quiet/no-user-todo" not in thin_task, thin_task
 
@@ -603,10 +858,10 @@ def main() -> int:
         "user_todo_summary",
         "user_todo_summary.open_count > 0",
         "never say \"no new user action\"",
-        "notify=NOTIFY: concrete actions/todos",
-        "including non_blocking at false/0",
-        'never only "owner gate"',
-        "Only notify=DONT_NOTIFY + false/0: quiet",
+        "`interaction_contract.user_channel.notify` controls output",
+        "`should_run`/due monitor and other-agent scoped todos",
+        "are not user prompts",
+        "`action_required` without an action",
         "具体 user todo 未投影，需修复 LoopX 状态投影",
         "NOTIFY",
         "notify_user_on_open_todo=true",

@@ -63,7 +63,7 @@ async function collectGeneratedTextFiles(rootDir) {
         await visit(path);
       } else if (entry.isFile()) {
         const info = await stat(path);
-        if (info.size <= 2_000_000 && /\.(css|html|js|json|md|txt)$/i.test(path)) {
+        if (info.size <= 2_000_000 && /\.(css|html|js|json|md|sh|txt)$/i.test(path)) {
           files.push(path);
         }
       }
@@ -87,6 +87,7 @@ assertExists(resolve(siteDir, "index.html"));
 assertExists(resolve(siteDir, "frontstage/index.html"));
 assertExists(resolve(siteDir, "site-assets/home.css"));
 assertExists(resolve(siteDir, "site-assets/home.js"));
+assertExists(resolve(siteDir, "install.sh"));
 assertExists(resolve(siteDir, "site-assets/evidence/long-running-loop-openviking-trajectory.png"));
 assertExists(resolve(siteDir, "site-assets/evidence/long-running-loop-ml-experiment-trajectory.png"));
 assertExists(resolve(siteDir, "status.frontstage-share.json"));
@@ -120,11 +121,16 @@ if (homepageHtml.includes('https://github.com/huangruiteng/loopx/tree/main/docs'
 if (!homepageHtml.includes('data-copy-key="agentSetup"') || !homepageHtml.includes("One message to your current agent") || !homepageHtml.includes('href="#quickstart"')) {
   throw new Error("homepage must make the localized agent setup prompt the primary first-run path");
 }
-if (!homepageHtml.includes("scripts/install-from-github.sh | bash") || !homepageHtml.includes("loopx connect") || !homepageHtml.includes("Inspect installer")) {
+if (!homepageHtml.includes("huangruiteng.github.io/loopx/install.sh | bash") || !homepageHtml.includes("loopx connect") || !homepageHtml.includes("Inspect installer")) {
   throw new Error("homepage must retain the official manual setup fallback");
 }
-if (!homepageHtml.includes("Goal-level control plane") || !homepageHtml.includes("data-language-toggle")) {
-  throw new Error("homepage must publish the official goal-level positioning and language switch");
+const publishedInstaller = await readFile(resolve(siteDir, "install.sh"), "utf8");
+const canonicalInstaller = await readFile(resolve(repoRoot, "scripts/install-from-github.sh"), "utf8");
+if (publishedInstaller !== canonicalInstaller) {
+  throw new Error("published installer must be byte-identical to scripts/install-from-github.sh");
+}
+if (!homepageHtml.includes("provider-neutral") || !homepageHtml.includes("stateful control plane") || !homepageHtml.includes("data-language-toggle")) {
+  throw new Error("homepage must publish the official provider-neutral stateful positioning and language switch");
 }
 if (!homepageHtml.includes("Evidence from real loops") || !homepageHtml.includes("data-evidence-dialog")) {
   throw new Error("homepage must publish the curated evidence terminal and full-screen evidence viewer");
@@ -136,6 +142,8 @@ for (const terminalContract of [
   "data-terminal-control",
   "data-terminal-last",
   "Curated replay from public evidence",
+  "Redacted owner-run showcase",
+  "not a production result, company or employer endorsement, or independently reproducible evidence",
 ]) {
   if (!homepageHtml.includes(terminalContract)) {
     throw new Error(`homepage evidence terminal is missing contract: ${terminalContract}`);
@@ -150,7 +158,7 @@ for (const assetName of [
   }
 }
 const homepageScript = await readFile(resolve(siteDir, "site-assets/home.js"), "utf8");
-if (!homepageScript.includes('"hero.eyebrow": "长程目标控制面"') || !homepageScript.includes('requestedLanguage === "zh" ? "zh" : "en"')) {
+if (!homepageScript.includes('"hero.eyebrow": "开放 · 有状态 · Provider-neutral"') || !homepageScript.includes('requestedLanguage === "zh" ? "zh" : "en"')) {
   throw new Error("homepage language switch must include the public-safe Chinese locale and default to English");
 }
 for (const promptContract of [
@@ -236,12 +244,16 @@ if (manifest.base !== "/loopx/") {
 }
 if (
   manifest.homepage_entry !== "site/index.html" ||
-  manifest.frontstage_entry !== "site/frontstage/index.html"
+  manifest.frontstage_entry !== "site/frontstage/index.html" ||
+  manifest.installer_entry !== "site/install.sh"
 ) {
   throw new Error(`manifest entries mismatch: ${JSON.stringify(manifest)}`);
 }
 if (manifest.content_sources?.public_homepage !== "apps/presentation/site") {
   throw new Error(`manifest homepage source mismatch: ${JSON.stringify(manifest.content_sources)}`);
+}
+if (manifest.content_sources?.installer_script !== "scripts/install-from-github.sh") {
+  throw new Error(`manifest installer source mismatch: ${JSON.stringify(manifest.content_sources)}`);
 }
 const homepageEvidenceAssets = manifest.content_sources?.homepage_evidence_assets ?? [];
 for (const assetPath of [

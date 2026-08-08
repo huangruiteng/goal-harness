@@ -229,11 +229,44 @@ Verification checklist:
 - boundary says protected scope stayed clean;
 - negative evidence remains queryable.
 
+When evidence reaches a terminal boundary:
+
+- use `loopx auto-research decide` to record `promoted` or `retired`; a
+  promotion candidate is not a terminal result;
+- bind the decision to the current evidence graph revision and keep the
+  decision evidence refs public-safe;
+- use `loopx auto-research review --require-independent` only from a different
+  registered peer than both the hypothesis producer and decision agent;
+- treat self-review as visible review evidence, never as independent review;
+- use `loopx auto-research project-results` after decisions and reviews so
+  exact `loopx auto-research results` queries can verify Explore readback.
+
+Example terminal path:
+
+```bash
+loopx auto-research decide \
+  --goal-id "$LOOPX_GOAL_ID" \
+  --hypothesis-id "<hypothesis-id>" \
+  --outcome promoted \
+  --reason holdout_validated \
+  --agent-id "$LOOPX_AGENT_ID" \
+  --execute
+
+loopx auto-research review \
+  --goal-id "$LOOPX_GOAL_ID" \
+  --hypothesis-id "<hypothesis-id>" \
+  --reviewer-agent-id "$LOOPX_AGENT_ID" \
+  --verdict approve \
+  --require-independent \
+  --execute
+```
+
 Must not:
 
 - bypass an owner/operator gate;
 - certify a showcase claim;
 - rewrite the hypothesis graph to make the result look cleaner.
+- label the same producer or decision agent as an independent reviewer.
 
 ## Projection Narrator
 
@@ -250,9 +283,13 @@ Allowed actions:
 Useful command:
 
 ```bash
-loopx --format json auto-research frontier \
+loopx --format json auto-research project-results \
   --goal-id "$LOOPX_GOAL_ID" \
-  --agent-id "$LOOPX_AGENT_ID"
+  --execute
+
+loopx --format json auto-research results \
+  --goal-id "$LOOPX_GOAL_ID" \
+  --include-history
 ```
 
 Must stop before:

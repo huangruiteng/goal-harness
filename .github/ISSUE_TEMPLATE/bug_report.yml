@@ -1,0 +1,102 @@
+name: Bug Report
+description: Report reproducible incorrect or unexpected LoopX behavior.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve LoopX. Do not report an unpatched security vulnerability here; use [Private Vulnerability Reporting](https://github.com/huangruiteng/loopx/security/advisories/new). Remove credentials, private data, raw agent sessions, internal links, and local runtime state before submitting.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and discussions for this behavior.
+          required: true
+        - label: This report is not an unpatched security vulnerability.
+          required: true
+        - label: The report and attachments contain no credentials or private/internal material.
+          required: true
+
+  - type: dropdown
+    id: issue-origin
+    attributes:
+      label: Issue origin
+      description: How was this behavior identified?
+      options:
+        - Observed or reproduced in a real environment
+        - Inferred by an AI agent and not yet observed or reproduced
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: LoopX version or commit
+      placeholder: "For example: v0.4.2 or af85aff"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host or runtime surface
+      options:
+        - Codex App
+        - Codex CLI
+        - Claude Code
+        - OpenCode
+        - Custom or external worker
+        - Not host-specific
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: Describe the incorrect behavior and why it matters.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest public-safe sequence that reproduces the problem.
+      placeholder: |
+        1. Install or check out ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Add relevant `loopx doctor`, error, or environment details after removing local paths, credentials, private state, and unrelated logs.
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add public links, screenshots, or related issues when useful.

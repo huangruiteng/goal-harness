@@ -15,6 +15,27 @@ maintainer appointments, security-sensitive handling, and changes to this
 governance model. That tie-break role should be revisited when the active
 maintainer group grows.
 
+## Repository Developers With Write Access
+
+The following developers have, or have been invited to accept, GitHub's
+repository `write` role. Write access supports day-to-day pull-request and
+branch work within the repository rules. It does not by itself appoint someone
+as a maintainer or grant release, security, or governance authority.
+
+| GitHub account | Repository role | Access status |
+| --- | --- | --- |
+| [`@wujc12`](https://github.com/wujc12) | Write | Active |
+| [`@ZaynJarvis`](https://github.com/ZaynJarvis) | Write | Active |
+| [`@Hoey041`](https://github.com/Hoey041) | Write | Active |
+| [`@maxliux5`](https://github.com/maxliux5) | Write | Invitation pending |
+| [`@JackyCSer`](https://github.com/JackyCSer) | Write | Invitation pending |
+| [`@steven-kid`](https://github.com/steven-kid) | Write | Invitation pending |
+
+GitHub's repository settings are the operational source of truth for access.
+This public snapshot should be updated through a pull request when a write-role
+invitation is accepted, expires, or is revoked. Maintainer appointments remain
+subject to the process below.
+
 ## Project Roles
 
 ### Maintainers

@@ -10,6 +10,7 @@ from .control_plane.scheduler.execution_context import (
     render_scheduler_execution_args,
 )
 from .control_plane.todos.contract import normalize_required_capabilities
+from .install_contract import NO_CLONE_INSTALL_URL
 
 DEFAULT_HANDOFF_OBJECTIVE = "<OBJECTIVE_FROM_GOAL_DOC>"
 DEFAULT_HANDOFF_DOMAIN = "<DOMAIN>"
@@ -17,7 +18,6 @@ DEFAULT_HANDOFF_ADAPTER_KIND = "read_only_project_map_v0"
 DEFAULT_HANDOFF_ADAPTER_STATUS = "connected-read-only"
 DEFAULT_HANDOFF_NEXT_PROBE = "(omit --next-probe until a read-only pre-tick command exists)"
 SHARED_GLOBAL_REGISTRY = '"$HOME/.codex/loopx/registry.global.json"'
-NO_CLONE_INSTALL_URL = "https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh"
 CODEX_CLI_VISIBLE_SCHEDULER_CONTEXT = {
     "host_surface": "codex_cli",
     "scheduler_owner": "agent_cli_loop",

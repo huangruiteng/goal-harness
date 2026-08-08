@@ -41,7 +41,7 @@ Claude Code, OpenCode, Cursor, or a custom runner executes bounded turns.
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 

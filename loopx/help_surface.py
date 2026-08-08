@@ -69,6 +69,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "purpose": "Render a handoff or review packet with any required evidence-log reads.",
             },
             {
+                "command": "loopx goal-channel --help",
+                "purpose": "Set up, inspect, sync, or notify the provider channel bound to one goal.",
+            },
+            {
                 "command": "loopx evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin",
                 "purpose": "Read the current agent's thin public-safe ledger before replan or handoff.",
             },
@@ -125,6 +129,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
             {
                 "command": "loopx new-project-prompt",
                 "purpose": "Generate a copy-paste project connection prompt for an agent.",
+            },
+            {
+                "command": "loopx bind-agent-thread",
+                "purpose": "Persist one stable host thread binding to an already registered LoopX agent.",
             },
             {
                 "command": "loopx codex-cli-bootstrap-message",

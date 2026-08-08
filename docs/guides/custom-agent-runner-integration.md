@@ -50,7 +50,7 @@ repository edits, and one-off tool use can remain Agent work.
 Install the CLI on the machine that owns the project workspace:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor --agent-type other-agent
 ```
@@ -74,8 +74,8 @@ does not grant permission or satisfy a user gate.
 
 For `other-agent`, doctor intentionally does not inspect `~/.codex/skills`.
 CLI health and workflow delivery are separate checks. The custom host must
-deliver `loopx-project`, `loopx-pr-review`, `loopx-doc-registry`,
-and `loopx-self-repair` from the same LoopX revision through its own skill
+deliver `loopx-project`, `loopx-pr-program`, `loopx-pr-review`,
+`loopx-doc-registry`, and `loopx-self-repair` from the same LoopX revision through its own skill
 manifest or equivalent prompt injection. When the current goal enables
 `change_quality_qualification`, the onboarding packet also lists
 `loopx-change-quality` as an active project skill; deliver that workflow or its
