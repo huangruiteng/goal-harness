@@ -508,7 +508,7 @@ def quota_status(
         payload["blocked_action_scope"] = "delivery_focus"
         payload["focus_wait"] = True
     elif waiting_on == "codex":
-        if allowed_slots > 0 and spent_slots >= allowed_slots:
+        if spent_slots >= allowed_slots:
             state = "throttled"
             reason = f"{compute:g} compute quota spent {spent_slots}/{allowed_slots} slots in this window"
         else:
