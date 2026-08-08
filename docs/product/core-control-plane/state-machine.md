@@ -68,7 +68,8 @@ This is the model described in the
 [Agent Loop Effect Interpreter RFC](../../architecture/rfcs/agent-loop-effect-interpreter-v0.md).
 The agent loop is the loop. The harness is the effectful program. The state
 machine is not the product; it is the decision table inside that effect
-interpreter.
+interpreter. This framing follows the public lecture
+[主线一：Agent Loop 是 effectful program(1)](https://www.xiaohongshu.com/discovery/item/6a01d501000000003700c5de?source=webshare&xhsshare=pc_web&xsec_token=ABqpNuladcxhev099wLKw8M3ilhKBua0BQXNpxnBZEGkc=&xsec_source=pc_share).
 
 | State family | Input effect | Interpreter | Decision | Observation | Next effect |
 |---|---|---|---|---|---|
