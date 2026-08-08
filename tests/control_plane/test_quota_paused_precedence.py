@@ -121,7 +121,7 @@ def test_paused_quota_preempts_workspace_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "loopx.control_plane.quota.should_run.build_agent_workspace_guard",
+        "loopx.control_plane.quota.should_run_prepare.build_agent_workspace_guard",
         lambda *args, **kwargs: {
             "schema_version": "agent_workspace_guard_v1",
             "reason": "workspace fixture requires relocation",

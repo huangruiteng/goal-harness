@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import loopx.control_plane.quota.policy_constants as policy_constants
 import loopx.quota as quota
+from loopx.quota import (
+    AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS,
+    MONITOR_DUE_ITEM_LIMIT,
+)
 
 
 REEXPORTED_NAMES = (
@@ -22,6 +26,8 @@ def test_quota_reexports_policy_constants_unchanged() -> None:
         read_model_value = getattr(policy_constants, name)
         assert status_value == read_model_value
         assert type(status_value) is type(read_model_value)
+    assert AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS == policy_constants.AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS
+    assert MONITOR_DUE_ITEM_LIMIT == policy_constants.MONITOR_DUE_ITEM_LIMIT
 
 
 def test_quota_policy_values_are_stable() -> None:
