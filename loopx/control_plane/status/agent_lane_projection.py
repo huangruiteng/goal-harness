@@ -1,7 +1,8 @@
+"""Agent-lane status projection inside the `status` bounded context."""
+
 from __future__ import annotations
 
 from typing import Any
-
 
 AGENT_LANE_STATUS_PAYLOAD_COMPACTION_SCHEMA_VERSION = (
     "agent_lane_status_payload_compaction_v0"

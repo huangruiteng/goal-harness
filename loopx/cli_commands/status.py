@@ -11,7 +11,7 @@ from ..control_plane.runtime.status_projection_cache import (
     resolve_status_projection_cache_runtime_root,
     write_status_projection_cache,
 )
-from ..control_plane.status_agent_lane_projection import (
+from ..control_plane.status.agent_lane_projection import (
     compact_agent_lane_status_payload_for_display,
 )
 from ..control_plane.todos.contract import normalize_todo_claimed_by

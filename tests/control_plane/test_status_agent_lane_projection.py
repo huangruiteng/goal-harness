@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 
-from loopx.control_plane.status_agent_lane_projection import (
+from loopx.control_plane.status.agent_lane_projection import (
     compact_agent_lane_status_payload_for_display,
 )
 from loopx.control_plane.todos.quota_summary import (
     compact_agent_lane_todos_for_status_display,
 )
-
 
 AGENT_ID = "codex-quality"
 GOAL_ID = "status-budget-goal"
