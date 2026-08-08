@@ -70,6 +70,7 @@ def apply_todo_update_to_lines(
     role: str | None = None,
     note: str | None = None,
     evidence: str | None = None,
+    completion_turn_key: str | None = None,
     reason: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
@@ -173,6 +174,7 @@ def apply_todo_update_to_lines(
     for key, value in (
         ("note", note),
         ("evidence", evidence),
+        ("completion_turn_key", completion_turn_key),
         ("reason", reason),
         ("task_class", task_class),
         ("action_kind", action_kind),

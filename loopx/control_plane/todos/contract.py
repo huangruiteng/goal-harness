@@ -1074,7 +1074,14 @@ _TODO_METADATA_FIELD_SCHEMA = (
             _nonempty_metadata_text,
             write_normalizer=_truthy_value,
         )
-        for key in ("note", "evidence", "reason", "completed_at", "updated_at")
+        for key in (
+            "note",
+            "evidence",
+            "reason",
+            "completed_at",
+            "updated_at",
+            "completion_turn_key",
+        )
     ),
     _TodoMetadataField(
         "superseded_by",
@@ -1207,6 +1214,7 @@ def format_todo_metadata_line(
     max_no_change_before_replan: str | None = None,
     note: str | None = None,
     evidence: str | None = None,
+    completion_turn_key: str | None = None,
     reason: str | None = None,
     completed_at: str | None = None,
     updated_at: str | None = None,

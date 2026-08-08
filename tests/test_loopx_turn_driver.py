@@ -22,6 +22,7 @@ from loopx.control_plane.turn_driver import (
 )
 from loopx.control_plane.turn_driver.codex_cli import _store_codex_cli_session
 from loopx.control_plane.quota.live_decision import bind_scheduler_followup_cli_routes
+from loopx.todos import complete_goal_todo
 
 
 def _envelope(
@@ -1134,6 +1135,120 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "validated" else 7
         "fixture_progress",
         "quota_slot_spent",
     ]
+
+
+def test_turn_run_once_cli_completes_selected_todo_after_validation(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    host_project = tmp_path / "isolated-host-workspace"
+    host_project.mkdir()
+    host_script = """
+import json
+import pathlib
+import sys
+request = json.load(sys.stdin)
+pathlib.Path("completion-artifact.txt").write_text("completed", encoding="utf-8")
+json.dump({
+    "schema_version": "loopx_turn_result_v0",
+    "turn_key": request["turn_key"],
+    "result_kind": "validated_completion",
+    "completed_phases": ["host_execute", "typed_result"],
+    "classification": "fixture_completion",
+    "recommended_action": "Refresh the active goal after completion.",
+    "next_action": "Select the next Todo from a fresh decision.",
+    "delivery_batch_scale": "implementation",
+    "delivery_outcome": "outcome_progress",
+    "vision_unchanged_reason": "The active goal may have further work.",
+    "summary": "One public fixture completed."
+}, sys.stdout)
+"""
+    validation_script = """
+import json
+import pathlib
+import sys
+json.load(sys.stdin)
+artifact = pathlib.Path("completion-artifact.txt")
+raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "completed" else 7)
+"""
+    output = io.StringIO()
+    argv = [
+        "--registry",
+        str(registry),
+        "--runtime-root",
+        str(runtime),
+        "--format",
+        "json",
+        "turn",
+        "run-once",
+        "--goal-id",
+        "loopx-turn-fixture",
+        "--agent-id",
+        "codex-fixture",
+        "--project",
+        str(host_project),
+        "--host-adapter-command-json",
+        json.dumps([sys.executable, "-c", host_script]),
+        "--validation-command-json",
+        json.dumps([sys.executable, "-c", validation_script]),
+        "--scan-root",
+        str(project),
+        "--no-global-sync",
+        "--execute",
+    ]
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(argv)
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0, payload
+    assert payload["status"] == "committed"
+    assert payload["effects"]["state_written"] is True
+    assert payload["effects"]["quota_spent"] is True
+    journal_path = next(
+        (runtime / "goals" / "loopx-turn-fixture" / "turns").glob("*.json")
+    )
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    assert journal["writeback"]["completion"] == {
+        "todo_id": "todo_fixture0001",
+        "continuation": "active_goal",
+    }
+    state_path = (
+        project
+        / ".codex"
+        / "goals"
+        / "loopx-turn-fixture"
+        / "ACTIVE_GOAL_STATE.md"
+    )
+    state = state_path.read_text(encoding="utf-8")
+    assert "todo_id=todo_fixture0001 status=done" in state
+    assert "LoopX%20Turn%20validated%20completion" in state
+    assert f"completion_turn_key={payload['resume_turn_key']}" in state
+
+    recovered_completion = complete_goal_todo(
+        registry_path=registry,
+        goal_id="loopx-turn-fixture",
+        todo_id="todo_fixture0001",
+        role="agent",
+        agent_id="codex-fixture",
+        completion_turn_key=payload["resume_turn_key"],
+    )
+    assert recovered_completion["idempotent_replay"] is True
+    assert recovered_completion["changed"] is False
+
+    replayed_output = io.StringIO()
+    with contextlib.redirect_stdout(replayed_output):
+        replayed_exit_code = cli_main(
+            [
+                *argv[:-1],
+                "--resume-turn-key",
+                payload["resume_turn_key"],
+                "--execute",
+            ]
+        )
+    replayed = json.loads(replayed_output.getvalue())
+    assert replayed_exit_code == 0, replayed
+    assert replayed["replayed"] is True
+    assert not any(replayed["effects"].values())
 
 
 def test_turn_run_once_commits_independently_validated_progress(

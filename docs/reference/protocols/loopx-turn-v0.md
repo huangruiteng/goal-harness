@@ -312,6 +312,15 @@ Every attempted tick returns one result kind:
 | `validation_failed` | Host output exists but task validation failed or is inconclusive. | Preserve failure evidence and route to repair/replan. |
 | `writeback_failed` | Validated work could not be durably recorded. | Do not spend; retry idempotent writeback before more delivery. |
 
+`validated_completion` is admitted only when the Turn caller supplies an
+explicit Todo lifecycle adapter. After independent validation, the adapter must
+authorize and complete the selected Todo through the existing Todo lifecycle,
+then return a compact outcome for that same Todo: linked successors, an
+authorized `no_followup` record, or `active_goal` continuation. The durable
+Turn journal records that outcome before quota spend. A Todo completion alone
+never terminates the goal; a fresh decision owns successor selection and goal
+termination.
+
 `repair_required` and `replan_required` are distinct. Repair preserves the
 current task intent. Replan changes the runnable todo set or route because the
 existing task no longer advances the goal. Replan is required when any of the

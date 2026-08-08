@@ -44,6 +44,7 @@ TURN_KEY_RE = re.compile(r"^sha256:(?P<digest>[0-9a-f]{64})$")
 
 MATERIAL_HOST_RESULT_KINDS = {
     LoopXTurnResultKind.VALIDATED_PROGRESS,
+    LoopXTurnResultKind.VALIDATED_COMPLETION,
     LoopXTurnResultKind.REPAIR_REQUIRED,
     LoopXTurnResultKind.REPLAN_REQUIRED,
 }
@@ -68,6 +69,7 @@ HOST_RESULT_FIELDS = {
 }
 
 Writeback = Callable[[dict[str, Any]], dict[str, Any]]
+CompletionWriteback = Callable[[dict[str, Any]], dict[str, Any]]
 Spend = Callable[[], dict[str, Any]]
 Scheduler = Callable[[dict[str, Any]], dict[str, Any]]
 HostRunner = Callable[[Mapping[str, Any]], dict[str, Any]]
@@ -236,6 +238,8 @@ def _normalize_host_path_delta(
 def validate_loopx_turn_host_result(
     plan: Mapping[str, Any],
     value: Mapping[str, Any],
+    *,
+    completion_writeback_configured: bool = False,
 ) -> dict[str, Any]:
     result = dict(value)
     errors: list[str] = []
@@ -255,7 +259,10 @@ def validate_loopx_turn_host_result(
     except ValueError:
         kind = None
         errors.append("unsupported host result kind")
-    if kind is LoopXTurnResultKind.VALIDATED_COMPLETION:
+    if (
+        kind is LoopXTurnResultKind.VALIDATED_COMPLETION
+        and not completion_writeback_configured
+    ):
         errors.append("validated_completion requires a todo lifecycle adapter")
     if kind not in MATERIAL_HOST_RESULT_KINDS | STOP_HOST_RESULT_KINDS:
         if kind is not LoopXTurnResultKind.VALIDATED_COMPLETION:
@@ -731,6 +738,7 @@ def _host_result_stage(
     *,
     host_runner: HostRunner | None,
     argv: Sequence[str] | None,
+    completion_writeback_configured: bool,
     project: Path,
     timeout_seconds: float,
     journal: dict[str, Any],
@@ -785,7 +793,11 @@ def _host_result_stage(
         result = dict(host_observation["value"])
         completed_phases = list(TRANSACTION_PHASES[:2])
 
-    validation = validate_loopx_turn_host_result(plan, result or {})
+    validation = validate_loopx_turn_host_result(
+        plan,
+        result or {},
+        completion_writeback_configured=completion_writeback_configured,
+    )
     if not validation.get("ok"):
         failure = _host_failure(
             plan,
@@ -918,6 +930,41 @@ def _task_validation_stage(
     return completed_phases, None
 
 
+def _completion_writeback_outcome(
+    payload: Mapping[str, Any],
+    *,
+    plan: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    completion = payload.get("completion")
+    if not isinstance(completion, Mapping):
+        return None
+    envelope = plan.get("turn_envelope")
+    action = envelope.get("action") if isinstance(envelope, Mapping) else None
+    selected_todo = action.get("selected_todo") if isinstance(action, Mapping) else None
+    expected_todo_id = (
+        str(selected_todo.get("todo_id") or "")
+        if isinstance(selected_todo, Mapping)
+        else ""
+    )
+    todo_id = str(completion.get("todo_id") or "")
+    continuation = completion.get("continuation")
+    if not expected_todo_id or todo_id != expected_todo_id:
+        return None
+    if continuation not in {"successor", "no_followup", "active_goal"}:
+        return None
+    outcome = {"todo_id": todo_id, "continuation": continuation}
+    if continuation == "successor":
+        successor_todo_ids = completion.get("successor_todo_ids")
+        if (
+            not isinstance(successor_todo_ids, list)
+            or not successor_todo_ids
+            or not all(isinstance(item, str) and item for item in successor_todo_ids)
+        ):
+            return None
+        outcome["successor_todo_ids"] = list(successor_todo_ids)
+    return outcome
+
+
 def _transaction_closeout_stage(
     plan: Mapping[str, Any],
     result: dict[str, Any],
@@ -927,11 +974,32 @@ def _transaction_closeout_stage(
     journal_path: Path,
     effects: dict[str, bool],
     writeback: Writeback,
+    completion_writeback: CompletionWriteback | None,
     spend: Spend,
     scheduler: Scheduler,
 ) -> dict[str, Any]:
     if "durable_writeback" not in completed_phases:
-        writeback_payload = writeback(result)
+        if result.get("result_kind") == LoopXTurnResultKind.VALIDATED_COMPLETION.value:
+            if completion_writeback is None:
+                raise ValueError("validated_completion requires a todo lifecycle adapter")
+            writeback_payload = completion_writeback(result)
+            completion_outcome = _completion_writeback_outcome(
+                writeback_payload,
+                plan=plan,
+            )
+            if completion_outcome is None:
+                writeback_payload = {
+                    "ok": False,
+                    "appended": False,
+                    "reason": "todo lifecycle adapter returned an invalid completion outcome",
+                }
+            else:
+                writeback_payload = {
+                    **writeback_payload,
+                    "completion": completion_outcome,
+                }
+        else:
+            writeback_payload = writeback(result)
         if not writeback_payload.get("ok") or not writeback_payload.get("appended"):
             failure = _host_failure(
                 plan,
@@ -961,7 +1029,14 @@ def _transaction_closeout_stage(
         completed_phases = list(TRANSACTION_PHASES[:4])
         journal.update(
             completed_phases=completed_phases,
-            writeback=_compact_callback(writeback_payload),
+            writeback={
+                **_compact_callback(writeback_payload),
+                **(
+                    {"completion": writeback_payload["completion"]}
+                    if isinstance(writeback_payload.get("completion"), dict)
+                    else {}
+                ),
+            },
         )
         _write_journal(journal_path, journal)
 
@@ -1048,6 +1123,7 @@ def run_loopx_turn_once(
     retry_failed: bool = False,
     task_validator: TaskValidator | None = None,
     writeback: Writeback | None = None,
+    completion_writeback: CompletionWriteback | None = None,
     spend: Spend | None = None,
     scheduler: Scheduler | None = None,
 ) -> dict[str, Any]:
@@ -1139,6 +1215,7 @@ def run_loopx_turn_once(
             request,
             host_runner=host_runner,
             argv=argv,
+            completion_writeback_configured=completion_writeback is not None,
             project=project,
             timeout_seconds=timeout_seconds,
             journal=journal,
@@ -1169,6 +1246,7 @@ def run_loopx_turn_once(
             journal_path=journal_path,
             effects=effects,
             writeback=writeback,
+            completion_writeback=completion_writeback,
             spend=spend,
             scheduler=scheduler,
         )
