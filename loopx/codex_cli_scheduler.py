@@ -11,6 +11,7 @@ from .codex_cli_probe import (
     build_codex_cli_runtime_idle_detector,
     build_codex_cli_visible_driver_run_packet,
 )
+from .control_plane.effect_program import effect_program_from_ordered_steps
 
 
 def _scheduler_label(goal_id: str, agent_id: str | None) -> str:
@@ -195,6 +196,45 @@ def build_codex_cli_local_scheduler_tick(
     else:
         blocker_writeback_command = None
 
+    commands_program = effect_program_from_ordered_steps(
+        [
+            {
+                "id": "visible_driver_run",
+                "kind": "codex_cli_command",
+                "command": visible_driver_run_command,
+            },
+            {
+                "id": "runtime_idle_detector",
+                "kind": "codex_cli_command",
+                "command": runtime_idle_detector_command,
+            },
+            {
+                "id": "runtime_idle_detector_fixture",
+                "kind": "codex_cli_command",
+                "command": runtime_idle_fixture_command,
+            },
+            {
+                "id": "scheduler_tick",
+                "kind": "codex_cli_command",
+                "command": scheduler_tick_command,
+            },
+            {
+                "id": "candidate_codex_command",
+                "kind": "codex_cli_command",
+                "command": candidate_command or "",
+            },
+            {
+                "id": "blocker_writeback",
+                "kind": "codex_cli_command",
+                "command": blocker_writeback_command or "",
+            },
+        ],
+        execution_mode="serial",
+    )
+    commands = {
+        step.step_id: step.command for step in commands_program.steps
+    }
+
     return {
         "ok": True,
         "schema_version": "codex_cli_local_scheduler_tick_v0",
@@ -227,14 +267,7 @@ def build_codex_cli_local_scheduler_tick(
                 "Use external logging that excludes raw transcripts, session files, credentials, and private paths.",
             ],
         },
-        "commands": {
-            "visible_driver_run": visible_driver_run_command,
-            "runtime_idle_detector": runtime_idle_detector_command,
-            "runtime_idle_detector_fixture": runtime_idle_fixture_command,
-            "scheduler_tick": scheduler_tick_command,
-            "candidate_codex_command": candidate_command,
-            "blocker_writeback": blocker_writeback_command,
-        },
+        "commands": commands,
         "visible_driver_run_packet": {
             "schema_version": run_packet.get("schema_version"),
             "driver_mode": run_packet.get("driver_mode"),
