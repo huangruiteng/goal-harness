@@ -25,6 +25,7 @@ STARTER_MODULE_LIMITS = {
     "starter_visible_pilot.py": 340,
 }
 STARTER_COMMAND_OWNERS = {
+    "start-goal": "start_goal.py",
     "new-project-prompt": "starter_bootstrap_registration.py",
     "codex-cli-bootstrap-message": "starter_bootstrap_registration.py",
     "codex-cli-tui-bootstrap-smoke-bundle": "starter_bootstrap_registration.py",

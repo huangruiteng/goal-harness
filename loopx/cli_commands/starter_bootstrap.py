@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
-import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -11,12 +9,8 @@ from ..agent_onboarding import (
     render_agent_onboarding_markdown,
 )
 from ..bootstrap_command_pack import (
-    START_GOAL_CAPABILITY_ROUTES,
     build_loopx_bootstrap_command_pack,
-    build_start_goal_guided_packet,
-    build_start_goal_host_surface_selection_packet,
     render_loopx_bootstrap_command_pack_markdown,
-    render_start_goal_guided_markdown,
 )
 from ..host_loop_activation import (
     SUPPORTED_AGENT_TYPES,
@@ -34,63 +28,13 @@ from ..project_prompt import (
     render_codex_cli_tui_bootstrap_smoke_bundle_markdown,
     render_new_project_prompt_markdown,
 )
+from ._host_thread import current_host_thread_id
+from .start_goal import handle_start_goal_command
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
     None,
 ]
-
-
-def _current_host_thread_id(args: argparse.Namespace) -> str | None:
-    explicit = getattr(args, "thread_id", None)
-    if explicit:
-        return str(explicit)
-    if getattr(args, "host_surface", None) == "codex-app":
-        return os.environ.get("CODEX_THREAD_ID") or None
-    return None
-
-
-_CAPABILITY_ROUTE_SWITCH = "--capability-route"
-_CAPABILITY_ROUTE_PREFIX = re.compile(
-    r"\A--capability-route(?:=(?P<equals>\S+)|\s+(?P<spaced>\S+))"
-    r"(?P<remainder>[\s\S]*)\Z"
-)
-
-
-def _resolve_start_goal_input(args: argparse.Namespace) -> tuple[str, str | None]:
-    raw_arguments = getattr(args, "slash_command_arguments", None)
-    capability_route = getattr(args, "capability_route", None)
-    if raw_arguments is None:
-        return str(args.goal_text), capability_route
-    if capability_route is not None:
-        raise ValueError(
-            "--slash-command-arguments cannot be combined with --capability-route; "
-            "the raw argument string already owns the optional route switch"
-        )
-
-    normalized = str(raw_arguments).strip()
-    if not normalized:
-        raise ValueError("--slash-command-arguments must contain goal text")
-    if not normalized.startswith(_CAPABILITY_ROUTE_SWITCH):
-        return normalized, None
-
-    match = _CAPABILITY_ROUTE_PREFIX.fullmatch(normalized)
-    if match is None:
-        raise ValueError(
-            "malformed leading --capability-route in --slash-command-arguments"
-        )
-    route = str(match.group("equals") or match.group("spaced") or "")
-    if route not in START_GOAL_CAPABILITY_ROUTES:
-        raise ValueError(
-            "unsupported --capability-route; expected one of: "
-            + ", ".join(START_GOAL_CAPABILITY_ROUTES)
-        )
-    goal_text = str(match.group("remainder") or "").strip()
-    if not goal_text:
-        raise ValueError(
-            "--slash-command-arguments must contain goal text after --capability-route"
-        )
-    return goal_text, route
 
 
 def handle_new_project_prompt_command(
@@ -154,7 +98,7 @@ def handle_loopx_bootstrap_command_pack_command(
         project=Path(args.project),
         goal_id=args.goal_id,
         agent_id=args.agent_id,
-        thread_id=_current_host_thread_id(args),
+        thread_id=current_host_thread_id(args),
         new_peer=bool(getattr(args, "new_peer", False)),
         cli_bin=args.cli_bin,
         host_surface=args.host_surface,
@@ -166,65 +110,6 @@ def handle_loopx_bootstrap_command_pack_command(
         print(str(payload.get("message") or ""))
         return 0
     print_payload(payload, args.format, render_loopx_bootstrap_command_pack_markdown)
-    return 0
-
-
-def handle_start_goal_command(
-    args: argparse.Namespace,
-    print_payload: PrintPayload,
-) -> int:
-    if not bool(getattr(args, "guided", False)):
-        payload = {
-            "ok": False,
-            "schema_version": "loopx_start_goal_guided_v0",
-            "error": "`loopx start-goal` currently requires --guided",
-            "suggested_command": "loopx start-goal --guided --goal-text '<goal text>'",
-        }
-        print_payload(payload, args.format, render_start_goal_guided_markdown)
-        return 2
-    try:
-        goal_text, capability_route = _resolve_start_goal_input(args)
-    except ValueError as exc:
-        payload = {
-            "ok": False,
-            "schema_version": "loopx_start_goal_guided_v0",
-            "error": str(exc),
-            "suggested_command": (
-                "loopx start-goal --guided "
-                "--slash-command-arguments='<exact /loopx arguments>'"
-            ),
-        }
-        print_payload(payload, args.format, render_start_goal_guided_markdown)
-        return 2
-    if not args.host_surface:
-        payload = build_start_goal_host_surface_selection_packet(
-            project=Path(args.project),
-            goal_id=args.goal_id,
-            agent_id=args.agent_id,
-            thread_id=_current_host_thread_id(args),
-            new_peer=bool(getattr(args, "new_peer", False)),
-            cli_bin=args.cli_bin,
-            goal_text=goal_text,
-            available_capabilities=args.available_capabilities,
-            capability_route=capability_route,
-            include_command_pack_detail=bool(args.include_command_pack_detail),
-        )
-        print_payload(payload, args.format, render_start_goal_guided_markdown)
-        return 0
-    payload = build_start_goal_guided_packet(
-        project=Path(args.project),
-        goal_id=args.goal_id,
-        agent_id=args.agent_id,
-        thread_id=_current_host_thread_id(args),
-        new_peer=bool(getattr(args, "new_peer", False)),
-        cli_bin=args.cli_bin,
-        host_surface=args.host_surface,
-        goal_text=goal_text,
-        available_capabilities=args.available_capabilities,
-        capability_route=capability_route,
-        include_command_pack_detail=bool(args.include_command_pack_detail),
-    )
-    print_payload(payload, args.format, render_start_goal_guided_markdown)
     return 0
 
 

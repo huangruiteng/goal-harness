@@ -379,7 +379,7 @@ def main() -> int:
             "never infer `verified` from title",
             "formal `REQUEST_CHANGES`",
             "Read the published review back",
-            "approval still routes through `loopx-pr-merge`",
+            "Merge still routes through `loopx-pr-merge`",
         ):
             assert phrase in pr_review_text, phrase
         assert "Do not use this skill to approve" not in pr_review_text, pr_review_text
@@ -771,7 +771,7 @@ def main() -> int:
         )
         assert "`LOOPX_TURN=<current_time_iso>`; reuse." in payload["task_body"], payload
         assert "guard receipt; 2 stalls->replan" in payload["task_body"], payload
-        assert "actual class/scale/outcome accountable refresh->spend" in payload["task_body"], payload
+        assert "no-change=`surface_only`/no spend" in payload["task_body"], payload
         assert payload["cli_bin"] == "loopx", payload
 
         canary_cli = subprocess.run(

@@ -131,6 +131,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "purpose": "Generate a copy-paste project connection prompt for an agent.",
             },
             {
+                "command": "loopx bind-agent-thread",
+                "purpose": "Persist one stable host thread binding to an already registered LoopX agent.",
+            },
+            {
                 "command": "loopx codex-cli-bootstrap-message",
                 "purpose": "Generate the visible Codex CLI TUI setup message.",
             },
