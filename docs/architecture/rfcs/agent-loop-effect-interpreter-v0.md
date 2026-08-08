@@ -44,10 +44,10 @@ that model over time.
 | M0 RFC and Lecture 0 | Merged (#2905, #2906, #2908) |
 | M1 Canonical packet example | Merged (#2907, #2910) |
 | M1.5 Composition lens | Merged (#2911) |
-| M2 Bounded context alignment | Partial (#2912-#2915, #2919) |
-| M3 Focused test families | Partial (#2916-#2918) |
-| M4 Architecture documentation | Pending |
-| M5 Steady-state review | Pending |
+| M2 Bounded context alignment | Mostly complete (#2912-#2915, #2919, #2926, #2933) |
+| M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
+| M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
+| M5 Steady-state review | Mostly complete (#2922, #2931) |
 
 ## Why This Matters
 
