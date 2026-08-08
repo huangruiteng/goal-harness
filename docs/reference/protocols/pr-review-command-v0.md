@@ -87,6 +87,15 @@ head across unchanged and incomplete polls. It is a scheduling cursor only;
 callers still deduplicate Todo creation by exact target key and must not treat
 the cursor as evidence that a review happened.
 
+`review_backlog` gives the monitor a compact workload cadence hint. It counts
+open, non-draft PRs whose exact head is actionable and not yet recorded in
+`handled_exact_heads`, and returns `recommended_poll_interval_minutes`. While at
+least one unhandled PR remains, the recommendation is `3`; once the actionable
+backlog is empty, it drops to `15`. The hint is scheduling evidence only: it
+does not grant Todo, review, comment, or merge authority, and callers still
+advance the queue with an explicit handled cursor after exact-head review
+readback.
+
 `pull_request_review_queue_observation_v0` has exactly three observation
 states:
 

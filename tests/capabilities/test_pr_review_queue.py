@@ -242,3 +242,60 @@ def test_approved_transition_routes_to_merge_policy_without_granting_it() -> Non
     assert todo["action_kind"] == "qualify_pull_request_merge_readiness"
     assert "route any merge through repository policy" in todo["text"]
     assert approved["write_authority_granted"] is False
+
+
+def test_review_backlog_keeps_active_cadence_until_all_handled() -> None:
+    first = _observe([_pr(1), _pr(2), _pr(3)])
+
+    assert first["review_backlog"]["actionable_unhandled_count"] == 3
+    assert first["review_backlog"]["recommended_poll_interval_minutes"] == 3
+    assert first["review_backlog"]["recommended_cadence"] == "active_review"
+
+    after_one = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=first,
+        handled=[f"1@{1:040d}"],
+    )
+    assert after_one["candidate"]["number"] == 2
+    assert after_one["review_backlog"]["actionable_unhandled_count"] == 2
+    assert after_one["review_backlog"]["recommended_poll_interval_minutes"] == 3
+
+    after_two = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=after_one,
+        handled=[f"2@{2:040d}"],
+    )
+    assert after_two["candidate"]["number"] == 3
+    assert after_two["review_backlog"]["actionable_unhandled_count"] == 1
+    assert after_two["review_backlog"]["recommended_poll_interval_minutes"] == 3
+
+    after_three = _observe(
+        [_pr(1), _pr(2), _pr(3)],
+        previous=after_two,
+        handled=[f"3@{3:040d}"],
+    )
+    assert after_three["candidate"] is None
+    assert after_three["review_backlog"]["actionable_unhandled_count"] == 0
+    assert after_three["review_backlog"]["recommended_poll_interval_minutes"] == 15
+    assert after_three["review_backlog"]["recommended_cadence"] == "quiet_wait"
+
+
+def test_review_backlog_ignores_draft_prs_for_active_cadence() -> None:
+    mixed = _observe([_pr(1, draft=True), _pr(2)])
+
+    assert mixed["review_backlog"]["actionable_unhandled_count"] == 1
+    assert mixed["review_backlog"]["recommended_poll_interval_minutes"] == 3
+
+    only_draft = _observe([_pr(1, draft=True)])
+
+    assert only_draft["review_backlog"]["actionable_unhandled_count"] == 0
+    assert only_draft["review_backlog"]["recommended_poll_interval_minutes"] == 15
+    assert only_draft["review_backlog"]["recommended_cadence"] == "quiet_wait"
+
+
+def test_incomplete_observation_preserves_active_backlog_when_pending() -> None:
+    baseline = _observe([_pr(1), _pr(2)])
+    incomplete = _observe([_pr(1), _pr(2)], complete=False, previous=baseline)
+
+    assert incomplete["review_backlog"]["actionable_unhandled_count"] == 2
+    assert incomplete["review_backlog"]["recommended_poll_interval_minutes"] == 3
