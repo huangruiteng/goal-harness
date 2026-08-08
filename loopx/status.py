@@ -275,10 +275,6 @@ from .control_plane.agents.management_projection import (
 from .control_plane.runtime.stale_latest_run import (
     stale_latest_run_projection_warning as _stale_latest_run_projection_warning_read_model,
 )
-from .control_plane.work_items.status_contract import (
-    build_contract_health_projection as _build_contract_health_projection_read_model,
-    build_status_contract as _build_status_contract_read_model,
-)
 from .control_plane.todos.todo_summary import (
     MAX_DEFERRED_TODO_VISIBILITY_ITEMS as _TODO_SUMMARY_MAX_DEFERRED_TODO_VISIBILITY_ITEMS,
     MAX_DEPENDENCY_BLOCKERS as _TODO_SUMMARY_MAX_DEPENDENCY_BLOCKERS,
@@ -2941,18 +2937,19 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_status_contract() -> dict[str, Any]:
-    return _build_status_contract_read_model(
-        schema_version=STATUS_CONTRACT_SCHEMA_VERSION,
-        minimum_dashboard_schema_version=MINIMUM_DASHBOARD_STATUS_CONTRACT_SCHEMA_VERSION,
-        reload_hint=STATUS_CONTRACT_RELOAD_HINT,
+    from .control_plane.status.contract_projection import (
+        build_status_contract as _build_status_contract,
     )
+
+    return _build_status_contract()
 
 
 def build_contract_health_projection(contract: dict[str, Any]) -> dict[str, Any]:
-    return _build_contract_health_projection_read_model(
-        contract,
-        signal_limit=STATUS_CONTRACT_SIGNAL_LIMIT,
+    from .control_plane.status.contract_projection import (
+        build_contract_health_projection as _build_contract_health_projection,
     )
+
+    return _build_contract_health_projection(contract)
 
 
 def build_status_runtime_summary_context() -> StatusRuntimeSummaryContext:
