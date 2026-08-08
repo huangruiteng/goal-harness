@@ -16,9 +16,7 @@ from loopx.extensions.lark.goal_channel import (
     setup_lark_goal_channel,
     sync_lark_goal_channel,
 )
-from loopx.extensions.lark.goal_channel_contracts import (
-    write_goal_channel_binding,
-)
+from loopx.extensions.lark.goal_channel_contracts import write_goal_channel_binding
 from loopx.extensions.lark.presentation.kanban import (
     lark_kanban_schema_payload,
     save_lark_kanban_board_config,
@@ -150,7 +148,9 @@ def _fake_runner(
         if "+messages-send" in args:
             text = args[args.index("--text") + 1]
             message_id = (
-                GATE_MESSAGE_ID if text.startswith("LoopX human gate") else CONTROL_MESSAGE_ID
+                GATE_MESSAGE_ID
+                if text.startswith("LoopX human gate")
+                else CONTROL_MESSAGE_ID
             )
             sent_texts[message_id] = text
             return _result({"ok": True, "data": {"message_id": message_id}})
@@ -223,6 +223,26 @@ def _write_binding(binding_path: Path, kanban_path: Path) -> None:
     )
 
 
+def _provider_target() -> dict[str, Any]:
+    return {
+        "name": "loopx-dev",
+        "provider": "lark",
+        "enabled": True,
+        "channel": {
+            "chat_id": CHAT_ID,
+            "chat_name": "LoopX Development",
+        },
+        "identity": {
+            "mode": "local_user",
+            "sender_profile": "",
+            "sender_identity": "bot",
+            "bot_app_id": "cli_public_fixture",
+            "bot_display_name": "",
+            "cli_bin": "lark-cli",
+        },
+    }
+
+
 def _assert_public_packet(payload: dict[str, Any]) -> None:
     serialized = json.dumps(payload, ensure_ascii=False)
     assert "oc_" not in serialized
@@ -232,6 +252,102 @@ def _assert_public_packet(payload: dict[str, Any]) -> None:
     assert str(Path.home()) not in serialized
     assert "sender_profile" not in serialized
     assert "config_path" not in serialized
+
+
+def test_target_setup_keeps_shared_provider_values_out_of_goal_binding(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    calls: list[list[str]] = []
+    runner = _fake_runner(calls)
+
+    result = setup_lark_goal_channel(
+        registry=_registry(tmp_path),
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        target_name="loopx-dev",
+        provider_target=_provider_target(),
+        execute=True,
+        runner=runner,
+    )
+
+    assert result["ok"] is True
+    raw = read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]
+    assert raw["target_ref"] == "loopx-dev"
+    assert raw["channel"] == {"pinned_message_id": CONTROL_MESSAGE_ID}
+    assert raw["identity"] == {}
+    assert "goal-channels" in raw["kanban"]["config_path"]
+    assert CHAT_ID not in json.dumps(raw)
+    assert "cli_public_fixture" not in json.dumps(raw)
+
+    doctor = doctor_lark_goal_channel(
+        registry=_registry(tmp_path),
+        registry_path=registry_path,
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        provider_target=_provider_target(),
+        runner=runner,
+    )
+    assert doctor["ok"] is True
+
+    notified = notify_lark_goal_channel_gate(
+        registry=_registry(tmp_path),
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        provider_target=_provider_target(),
+        quota_packet={
+            "state": "operator_gate",
+            "notify_user_on_gate": True,
+            "gate_prompt": "Approve the bounded external write.",
+        },
+        execute=True,
+        runner=_fake_runner([]),
+    )
+    assert notified["ok"] is True
+    after_notify = read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]
+    assert len(after_notify["receipts"]) == 2
+    assert CHAT_ID not in json.dumps(after_notify)
+    assert "cli_public_fixture" not in json.dumps(after_notify)
+
+
+def test_two_goals_share_target_but_keep_kanban_and_receipts_separate(
+    tmp_path: Path,
+) -> None:
+    second_goal_id = "goal-second-public-fixture"
+    registry = _registry(tmp_path)
+    registry["goals"].append(
+        {
+            **registry["goals"][0],
+            "id": second_goal_id,
+            "objective": "Deliver a second isolated Goal Channel projection.",
+        }
+    )
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    runner = _fake_runner([])
+
+    for goal_id in (GOAL_ID, second_goal_id):
+        result = setup_lark_goal_channel(
+            registry=registry,
+            registry_path=registry_path,
+            goal_id=goal_id,
+            binding_path=binding_path,
+            target_name="loopx-dev",
+            provider_target=_provider_target(),
+            execute=True,
+            runner=runner,
+        )
+        assert result["ok"] is True
+
+    bindings = read_goal_channel_binding(binding_path)["bindings"]
+    first = bindings[GOAL_ID]
+    second = bindings[second_goal_id]
+    assert first["target_ref"] == second["target_ref"] == "loopx-dev"
+    assert first["kanban"]["config_path"] != second["kanban"]["config_path"]
+    assert set(first["receipts"]).isdisjoint(second["receipts"])
+    assert CHAT_ID not in json.dumps(bindings)
 
 
 def test_setup_is_preview_only_and_does_not_write_binding(tmp_path: Path) -> None:
@@ -348,9 +464,10 @@ def test_setup_execute_persists_private_binding_after_verified_pin(
         if "+messages-send" in args
         and not args[args.index("--text") + 1].startswith("LoopX human gate")
     )
-    assert "Kanban: https://example.invalid/base/public-fixture" in control_send[
-        control_send.index("--text") + 1
-    ]
+    assert (
+        "Kanban: https://example.invalid/base/public-fixture"
+        in control_send[control_send.index("--text") + 1]
+    )
     _assert_public_packet(payload)
 
 
@@ -476,7 +593,9 @@ def test_setup_retry_reuses_verified_chat_after_later_failure(
 
     assert retry["ok"] is True
     assert not any("+chat-create" in args for args in retry_calls)
-    assert read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]["enabled"] is True
+    assert (
+        read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]["enabled"] is True
+    )
     _assert_public_packet(first)
     _assert_public_packet(retry)
 
@@ -534,7 +653,9 @@ def test_setup_retry_adds_missing_bot_without_recreating_chat(
 
     assert payload["ok"] is True
     assert not any("+chat-create" in args for args in calls)
-    add_bot = next(args for args in calls if "chat.members" in args and "create" in args)
+    add_bot = next(
+        args for args in calls if "chat.members" in args and "create" in args
+    )
     assert add_bot[add_bot.index("--member-id-type") + 1] == "app_id"
     assert json.loads(add_bot[add_bot.index("--data") + 1]) == {
         "id_list": ["cli_public_fixture"]
@@ -543,7 +664,9 @@ def test_setup_retry_adds_missing_bot_without_recreating_chat(
         "+messages-send" in args and args[args.index("--as") + 1] == "bot"
         for args in calls
     )
-    assert read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]["enabled"] is True
+    assert (
+        read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]["enabled"] is True
+    )
     _assert_public_packet(payload)
 
 
@@ -600,9 +723,7 @@ def test_notify_gate_is_idempotent_after_verified_send(tmp_path: Path) -> None:
         "gate_prompt": "Approve the bounded external write.",
         "recommended_action": "Wait for the owner decision.",
         "user_todo_summary": {
-            "first_executable_items": [
-                {"text": "Approve the bounded external write."}
-            ]
+            "first_executable_items": [{"text": "Approve the bounded external write."}]
         },
     }
 
