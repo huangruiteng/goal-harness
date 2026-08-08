@@ -14,6 +14,7 @@ def _result_packet(
         "schema_version": "loopx_turn_result_v0",
         "turn_key": "sha256:fixture",
         "result_kind": result_kind,
+        "execution_mode": "serial",
         "completed_phases": ["host_execute", "typed_result"],
         "classification": "fixture_progress",
         "recommended_action": "Continue the public fixture.",
@@ -51,6 +52,7 @@ def test_turn_result_packet_maps_to_effect_turn() -> None:
     assert turn.next_effect.cli_actions == (
         "loopx refresh-state --goal-id effect-interpreter-fixture",
     )
+    assert turn.next_effect.execution_mode == "serial"
 
 
 def test_turn_result_failure_preserves_failed_phase() -> None:

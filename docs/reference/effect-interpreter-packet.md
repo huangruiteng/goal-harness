@@ -69,6 +69,7 @@ The observation points back into the loop:
 | Packet field | Role |
 |---|---|
 | `interaction_contract.cli_channel.next_cli_actions` | Next CLI effects |
+| `execution_mode` | Execution strategy (`serial` / `parallel` / `interleaved`) for an ordered effect program |
 | `scheduler_hint.action` | Scheduler around decision |
 | `scheduler_hint.cadence_class` | Cadence for the next host wake |
 | `scheduler_hint.codex_app.ack_hint.cli_args` | Host ACK effect |
@@ -77,7 +78,9 @@ The observation points back into the loop:
 `EffectTurn.next_effect` is the code lens for this slot. It keeps the
 data-encoded handler visible: the host invokes the CLI actions and settles
 success or failure through the ACK/failure hints instead of LoopX holding a
-callable across turns.
+callable across turns. `execution_mode` is the data-encoded strategy when the
+next effect is an ordered effect program; it defaults to `None` when the
+packet does not declare one.
 
 ## Around Semantics
 

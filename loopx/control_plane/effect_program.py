@@ -36,6 +36,7 @@ class EffectObservation:
 @dataclass(frozen=True)
 class EffectNext:
     cli_actions: tuple[str, ...] = ()
+    execution_mode: str | None = None
     scheduler_action: str | None = None
     cadence_class: str | None = None
     ack_cli_args: tuple[str, ...] = ()
@@ -103,6 +104,15 @@ def interpret_quota_should_run_packet(
             str(action)
             for action in cli_channel.get("next_cli_actions", [])
             if str(action).strip()
+        ),
+        execution_mode=(
+            str(
+                packet.get("execution_mode")
+                or codex_app.get("execution_mode")
+                or scheduler.get("execution_mode")
+                or None
+            )
+            or None
         ),
         scheduler_action=str(scheduler.get("action") or None) or None,
         cadence_class=str(scheduler.get("cadence_class") or None) or None,
@@ -182,6 +192,15 @@ def interpret_turn_result_packet(
             str(action)
             for action in packet.get("next_cli_actions", [])
             if str(action).strip()
+        ),
+        execution_mode=(
+            str(
+                packet.get("execution_mode")
+                or codex_app.get("execution_mode")
+                or scheduler.get("execution_mode")
+                or None
+            )
+            or None
         ),
         scheduler_action=str(scheduler.get("action") or None) or None,
         cadence_class=str(scheduler.get("cadence_class") or None) or None,

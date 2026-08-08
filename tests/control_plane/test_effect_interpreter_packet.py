@@ -148,6 +148,7 @@ def test_effect_turn_carries_scheduler_ack_and_failure_hints() -> None:
     packet = {
         "decision": "run",
         "should_run": True,
+        "execution_mode": "interleaved",
         "effective_action": "normal_run",
         "recommended_action": "advance the bounded segment",
         "interaction_contract": {
@@ -200,6 +201,7 @@ def test_effect_turn_carries_scheduler_ack_and_failure_hints() -> None:
         "loopx refresh-state --goal-id effect-interpreter-fixture",
         "loopx quota spend-slot --goal-id effect-interpreter-fixture",
     )
+    assert turn.next_effect.execution_mode == "interleaved"
     assert turn.next_effect.scheduler_action == "apply_rrule"
     assert turn.next_effect.cadence_class == "active_work"
     assert turn.next_effect.ack_cli_args == (
