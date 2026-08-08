@@ -391,6 +391,13 @@ Capability 是 preflight 条件，不是 permission：
 
 权限仍来自 goal boundary、user gate、workspace policy 和 host authority。
 
+未知或非 owner-held 的缺失能力会作为 `repair_missing` 暴露给 agent，而不是
+直接跳过。Agent 必须自己判断能否满足：例如独立 worktree/branch 可以由当前
+runtime 自证，就执行 repair 并写回 `capability_gap_status=fixed`；不能证明就写
+blocker。分支/worktree 的最终约束仍由 `--task-repository`、
+`--required-write-scope` 和 workspace guard 执行，不要在 capability gate 里
+维护能力名清单。
+
 `target_capability` 则表示 todo 正在构建或修复什么能力，不是执行这个 todo 的硬前提。
 
 ## Workspace Guard：把写入位置变成状态
