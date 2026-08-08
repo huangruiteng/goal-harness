@@ -48,7 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
-| M6 General effect-program abstraction | Pending |
+| M6 General effect-program abstraction | In progress (#2938, #2939, #2940) |
 
 ## Why This Matters
 
@@ -259,18 +259,19 @@ parallel and equally important:
 - `EffectRequest`, `EffectInterpretation`, `EffectObservation`, `EffectNext`,
   and `EffectTurn` as canonical slots.
 - `interpret_quota_should_run_packet` as the first real interpreter.
+- `interpret_turn_result_packet` as the second real interpreter.
+- `EffectNext.execution_mode` for `serial`, `parallel`, and `interleaved`
+  execution strategy.
 - around semantics encoded in `capability_gate`, `interaction_contract`,
   `work_lane_contract`, and `scheduler_hint`.
 - focused tests and docs that pin the lens.
 
 ### What Is Missing
 
-- A second real interpreter over a different packet family. Until that
-  exists, `EffectTurn` remains quota-shaped, not shared.
 - A minimal interpreter protocol or composition helper used by runtime code,
   not only by tests.
-- An execution-mode field in `EffectNext` (`serial`, `parallel`,
-  `interleaved`) and a data-encoded ordered effect program.
+- A data-encoded ordered effect program shape that turns `cli_actions` into
+  executable steps.
 - A real host or turn-driver caller that executes an ordered effect program
   while preserving failure, cancellation, permission, and budget semantics.
 
