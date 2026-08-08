@@ -22,6 +22,13 @@ LEGACY_ROOT_MODULES = {
     "loopx/scheduler_state.py": "loopx.control_plane.scheduler.state",
     "loopx/status_projection_cache.py": "loopx.control_plane.runtime.status_projection_cache",
     "loopx/task_lease.py": "loopx.control_plane.work_items.task_lease",
+    "loopx/control_plane/status_agent_lane_projection.py": (
+        "loopx.control_plane.status.agent_lane_projection"
+    ),
+    "loopx/control_plane/status_collection.py": "loopx.control_plane.status.collection",
+    "loopx/control_plane/status_runtime_summaries.py": (
+        "loopx.control_plane.status.runtime_summaries"
+    ),
 }
 LEGACY_CAPABILITY_PACKAGES = {
     "loopx/capabilities/cross_runtime/": "loopx.control_plane.handoff.cross_runtime_impl_review",
@@ -36,7 +43,18 @@ CANONICAL_MODULES = {
     "loopx.control_plane.work_items.delivery_batch_scale",
     "loopx.control_plane.work_items.delivery_outcome",
     "loopx.control_plane.work_items.task_lease",
+    "loopx.control_plane.status.agent_lane_projection",
+    "loopx.control_plane.status.collection",
+    "loopx.control_plane.status.runtime_summaries",
 }
+LEGACY_STATUS_IMPORTS = (
+    "loopx.control_plane.status_agent_lane_projection",
+    "loopx.control_plane.status_collection",
+    "loopx.control_plane.status_runtime_summaries",
+    "loopx/control_plane/status_agent_lane_projection.py",
+    "loopx/control_plane/status_collection.py",
+    "loopx/control_plane/status_runtime_summaries.py",
+)
 TEXT_SUFFIXES = {".py", ".md"}
 SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache"}
 
@@ -176,12 +194,29 @@ def assert_repo_local_imports_use_bounded_contexts() -> None:
     }
 
 
+def assert_repo_local_imports_avoid_legacy_status_paths() -> None:
+    offenders: list[str] = []
+    for path in tracked_text_files():
+        if path == Path(__file__).resolve():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for legacy in LEGACY_STATUS_IMPORTS:
+            if legacy in text:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{legacy}")
+    assert offenders == [], {
+        "reason": "status read models belong in loopx.control_plane.status",
+        "offenders": offenders[:20],
+        "offender_count": len(offenders),
+    }
+
+
 def main() -> int:
     assert_no_tracked_legacy_projection_package()
     assert_moved_root_modules_stay_in_bounded_contexts()
     assert_rehomed_capability_packages_stay_in_bounded_contexts()
     assert_moved_root_imports_are_not_shimmed()
     assert_repo_local_imports_use_bounded_contexts()
+    assert_repo_local_imports_avoid_legacy_status_paths()
     print("bounded-context-namespace-smoke ok")
     return 0
 
