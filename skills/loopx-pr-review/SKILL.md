@@ -1,6 +1,6 @@
 ---
 name: loopx-pr-review
-description: Use for `/loopx-pr-review` or evidence-backed PR queue review. Run `loopx pr-review` first, execute the capability-owned review plan for each selected exact head, then publish a review state that matches the verified findings. Use `loopx-pr-merge` for approval or merge actions.
+description: Use for `/loopx-pr-review` or evidence-backed PR queue review. Run `loopx pr-review` first, execute the capability-owned review plan for each selected exact head, then publish bilingual reviews (detailed Chinese plus concise English) that match the verified findings. Use `loopx-pr-merge` for approval or merge actions.
 ---
 
 # LoopX PR Review
@@ -94,6 +94,25 @@ context, raw logs, credentials, and internal-only links. Read the published
 review back, verify its state and rendered body, and return its URL. Merge
 still routes through `loopx-pr-merge`; an `APPROVE` is not merge authority.
 Do not leave a public blocker only in chat.
+
+## Bilingual Review Format
+
+For every selected PR, publish two public artifacts:
+
+1. **详细中文评审** - the five-block review as a standalone Chinese
+   review/comment, starting with `### Review: <结论>` or `### 结论：...`,
+   including the exact reviewed head. This is the detail carrier: motivation,
+   approach, concrete changes, main risk, and overall judgment stay in Chinese
+   with repo-relative evidence.
+2. **英文简短结论** - a concise English machine verdict (`APPROVE`,
+   `REQUEST_CHANGES`, or the author-owned `COMMENTED` fallback) stating the
+   exact head, verdict, key finding, and validation.
+
+Produce bilingual reviews: one detailed Chinese five-block review plus one
+concise English verdict. This is required even when this skill only produces
+the read-only review and a later `loopx-pr-merge` action publishes the GitHub
+verdict. Do not replace the Chinese detail with an English-only body. Read both
+published artifacts back.
 
 ## Autonomous Queue
 
