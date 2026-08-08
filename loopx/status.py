@@ -76,16 +76,8 @@ from .control_plane.agents.agent_lane_recommendation import (
     latest_agent_lane_run as _latest_agent_lane_run_read_model,
     latest_run_recommended_action_for_projection as _latest_run_recommended_action_for_projection_read_model,
 )
-from .control_plane.goals.active_state_sections import (
-    active_state_section_entries as _active_state_section_entries_read_model,
-    active_state_sections as _active_state_sections_read_model,
-)
 from .control_plane.goals.active_state_metadata import (
     parse_state_frontmatter,
-)
-from .control_plane.goals.active_state_event_projection import (
-    active_state_event_projection_fields as _active_state_event_projection_fields_read_model,
-    state_event_log_candidates as _state_event_log_candidates_read_model,
 )
 from .control_plane.todos.active_state_todos import (
     MONITOR_WRITEBACK_CONTRACT_SCHEMA_VERSION as _MONITOR_WRITEBACK_CONTRACT_SCHEMA_VERSION,
@@ -117,11 +109,9 @@ from .control_plane.work_items.autonomous_replan_obligation import (
     AUTONOMOUS_REPLAN_STALL_THRESHOLD as _AUTONOMOUS_REPLAN_STALL_THRESHOLD_READ_MODEL,
     AUTONOMOUS_REPLAN_TRIGGER_PATTERNS as _AUTONOMOUS_REPLAN_TRIGGER_PATTERNS_READ_MODEL,
     MAX_AUTONOMOUS_REPLAN_TRIGGERS as _MAX_AUTONOMOUS_REPLAN_TRIGGERS_READ_MODEL,
-    autonomous_replan_obligation_from_state as _autonomous_replan_obligation_from_state_read_model,
 )
 from .control_plane.work_items.backlog_hygiene import (
     MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS as _MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS_READ_MODEL,
-    backlog_hygiene_warning as _backlog_hygiene_warning_read_model,
 )
 from .control_plane.goals.dreaming import (
     compact_dreaming_lane_badge as _compact_dreaming_lane_badge_read_model,
@@ -236,9 +226,6 @@ from .control_plane.goals.goal_channel import (
 from .control_plane.goals.goal_vision import (
     compact_goal_vision_packet as _compact_goal_vision_packet_read_model,
 )
-from .control_plane.work_items.issue_meta_surface import (
-    parse_issue_meta_surface as _parse_issue_meta_surface_read_model,
-)
 from .control_plane.work_items.lifecycle import (
     goal_lifecycle_fields as _goal_lifecycle_fields_read_model,
     ordered_lifecycle_flags as _ordered_lifecycle_flags_read_model,
@@ -279,7 +266,6 @@ from .control_plane.todos.todo_summary import (
     compact_todo_group as compact_todo_group,
     compact_todo_item as compact_todo_item,
     first_open_todo_text,
-    normalize_todo_text,
     open_todo_items,
     project_asset_todo_summary,
     sync_connected_attention_action_from_todos as _sync_connected_attention_action_from_todos_read_model,
@@ -2024,12 +2010,11 @@ def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def state_event_log_candidates(goal: dict[str, Any], *, state_path: Path) -> list[Path]:
-    return _state_event_log_candidates_read_model(
-        goal,
-        state_path=state_path,
-        resolve_goal_local_path=resolve_goal_local_path,
-        event_log_basename=STATE_EVENT_LOG_BASENAME,
+    from .control_plane.status.active_state_projection import (
+        state_event_log_candidates as _state_event_log_candidates,
     )
+
+    return _state_event_log_candidates(goal, state_path=state_path)
 
 
 def active_state_event_projection_fields(
@@ -2040,53 +2025,49 @@ def active_state_event_projection_fields(
     rollout_events: list[dict[str, Any]] | None = None,
     item_limit: int | None = MAX_STATUS_TODOS_PER_ROLE,
 ) -> dict[str, Any]:
-    return _active_state_event_projection_fields_read_model(
+    from .control_plane.status.active_state_projection import (
+        active_state_event_projection_fields as _active_state_event_projection_fields,
+    )
+
+    return _active_state_event_projection_fields(
         goal,
         state_path=state_path,
-        resolve_goal_local_path=resolve_goal_local_path,
-        parse_active_state_todos=parse_active_state_todos,
         preferred_todo_ids=preferred_todo_ids,
         rollout_events=rollout_events,
         item_limit=item_limit,
-        event_log_basename=STATE_EVENT_LOG_BASENAME,
     )
 
 
 def active_state_sections(state_text: str, headings: tuple[str, ...]) -> dict[str, list[str]]:
-    return _active_state_sections_read_model(
-        state_text,
-        headings,
-        section_heading_pattern=SECTION_HEADING_PATTERN,
+    from .control_plane.status.active_state_projection import (
+        active_state_sections as _active_state_sections,
     )
+
+    return _active_state_sections(state_text, headings)
 
 
 def parse_issue_meta_surface(state_text: str) -> dict[str, Any] | None:
-    return _parse_issue_meta_surface_read_model(
-        state_text,
-        section_parser=active_state_sections,
-        public_safe_compact_text=public_safe_compact_text,
+    from .control_plane.status.active_state_projection import (
+        parse_issue_meta_surface as _parse_issue_meta_surface,
     )
+
+    return _parse_issue_meta_surface(state_text)
 
 
 def active_state_section_entries(lines: list[str]) -> list[str]:
-    return _active_state_section_entries_read_model(
-        lines,
-        bullet_pattern=BACKLOG_HYGIENE_BULLET_PATTERN,
-        normalize_text=normalize_todo_text,
+    from .control_plane.status.active_state_projection import (
+        active_state_section_entries as _active_state_section_entries,
     )
+
+    return _active_state_section_entries(lines)
 
 
 def backlog_hygiene_warning(state_text: str, *, agent_todos: dict[str, Any] | None) -> dict[str, Any] | None:
-    return _backlog_hygiene_warning_read_model(
-        state_text,
-        agent_todos=agent_todos,
-        section_headings=BACKLOG_HYGIENE_SECTION_HEADINGS,
-        section_parser=active_state_sections,
-        bullet_pattern=BACKLOG_HYGIENE_BULLET_PATTERN,
-        hint_pattern=BACKLOG_HYGIENE_HINT_PATTERN,
-        public_safe_compact_text=public_safe_compact_text,
-        max_evidence_items=MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS,
+    from .control_plane.status.active_state_projection import (
+        backlog_hygiene_warning as _backlog_hygiene_warning,
     )
+
+    return _backlog_hygiene_warning(state_text, agent_todos=agent_todos)
 
 
 def autonomous_replan_obligation(
@@ -2094,15 +2075,11 @@ def autonomous_replan_obligation(
     *,
     agent_todos: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    return _autonomous_replan_obligation_from_state_read_model(
-        state_text,
-        agent_todos=agent_todos,
-        section_headings=AUTONOMOUS_REPLAN_SECTION_HEADINGS,
-        section_parser=active_state_sections,
-        section_entries=active_state_section_entries,
-        public_safe_compact_text=public_safe_compact_text,
-        build_autonomous_replan_obligation=build_autonomous_replan_obligation,
+    from .control_plane.status.active_state_projection import (
+        autonomous_replan_obligation as _autonomous_replan_obligation,
     )
+
+    return _autonomous_replan_obligation(state_text, agent_todos=agent_todos)
 
 
 def build_autonomous_replan_obligation(
