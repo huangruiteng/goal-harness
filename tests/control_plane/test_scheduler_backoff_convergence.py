@@ -134,19 +134,19 @@ def test_monitor_ack_settles_before_progression_and_avoids_3_6_3_flip(
     decision = _monitor_decision(now=now, minutes_until_due=31)
     first = _hint(monkeypatch, decision, now=now)
     first_app = first["codex_app"]
-    assert first_app["recommended_rrule"] == HOST_3
+    assert first_app["recommended_rrule"] == HOST_15
 
-    settled_state = _ack_state(first, applied_rrule=HOST_3, generated_at=now)
+    settled_state = _ack_state(first, applied_rrule=HOST_15, generated_at=now)
     immediate = _hint(
         monkeypatch,
         decision,
         now=now,
         scheduler_state=settled_state,
-        host_rrule=HOST_3,
+        host_rrule=HOST_15,
     )
     immediate_app = immediate["codex_app"]
     assert immediate_app["stateful_backoff"]["state_status"] == "same_identity"
-    assert immediate_app["stateful_backoff"]["current_rrule"] == HOST_3
+    assert immediate_app["stateful_backoff"]["current_rrule"] == HOST_15
     assert immediate_app["stateful_backoff"]["apply_needed"] is False
     assert immediate_app["stateful_backoff"]["host_observation"]["status"] == (
         "matches_recommended"
@@ -158,11 +158,11 @@ def test_monitor_ack_settles_before_progression_and_avoids_3_6_3_flip(
         decision,
         now=now + timedelta(minutes=2),
         scheduler_state=settled_state,
-        host_rrule=HOST_3,
+        host_rrule=HOST_15,
     )
     near_due_app = near_due["codex_app"]
-    assert near_due_app["example_progression_minutes"] == [3]
-    assert near_due_app["stateful_backoff"]["current_rrule"] == HOST_3
+    assert near_due_app["example_progression_minutes"] == [15]
+    assert near_due_app["stateful_backoff"]["current_rrule"] == HOST_15
     assert near_due_app["stateful_backoff"]["apply_needed"] is False
     assert "recommended_rrule" not in near_due_app
 
