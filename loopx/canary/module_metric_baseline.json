@@ -23,7 +23,7 @@
     "loopx/capabilities/catalog.py": {
       "any_count": 8,
       "dict_any_count": 0,
-      "lines": 1819
+      "lines": 1863
     },
     "loopx/capabilities/content_ops/surface.py": {
       "any_count": 40,
@@ -63,7 +63,7 @@
     "loopx/heartbeat_prompt.py": {
       "any_count": 17,
       "dict_any_count": 0,
-      "lines": 1563
+      "lines": 1565
     },
     "loopx/history.py": {
       "any_count": 51,
@@ -88,7 +88,7 @@
     "loopx/todos.py": {
       "any_count": 48,
       "dict_any_count": 0,
-      "lines": 2116
+      "lines": 2141
     },
     "loopx/worker_bridge.py": {
       "any_count": 28,
