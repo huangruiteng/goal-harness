@@ -56,6 +56,33 @@ The top-level loop is simple:
 5. State changes return through LoopX write APIs, not through dashboard text or
    chat memory.
 
+## State Machine As Effect Interpretation Table
+
+Every state machine below can be read through the same lens:
+
+```text
+input effect -> interpreter -> decision -> observation -> next effect
+```
+
+This is the model described in the
+[Agent Loop Effect Interpreter RFC](../../architecture/rfcs/agent-loop-effect-interpreter-v0.md).
+The agent loop is the loop. The harness is the effectful program. The state
+machine is not the product; it is the decision table inside that effect
+interpreter.
+
+| State family | Input effect | Interpreter | Decision | Observation | Next effect |
+|---|---|---|---|---|---|
+| Todo lifecycle | Agent proposes work, claim, completion, or blocker | Todo projection and authority rules | `open` / `claimed` / `deferred` / `blocked` / `done` / `superseded` | Todo summary and frontier | Next runnable todo or successor |
+| Quota runtime | Agent proposes a bounded turn | `quota should-run` | `run` / `gate` / `wait` / `repair` / `quiet` | Quota packet + `interaction_contract` | Execute, ask owner, observe, repair, or no-op |
+| Scheduler / heartbeat | Host asks when to wake again | Scheduler hint and ACK rules | Host RRULE / initial interval / backoff | `scheduler_hint` packet | Next heartbeat or monitor poll |
+| Gate and capability | Agent requests an effect with external authority | Capability and user gate rules | `repair_bridge` / `ask_owner` / allow / block | Gate packet and primary action | Repair, ask, execute, or stop |
+| Vision and replan | Agent closes or continues a bounded stage | Replan and vision rules | Continue / replan / watch / close | `goal_frontier_projection` + `vision_continuation_audit` | Next advancement or successor |
+| Monitor | Host polls a target | Monitor scheduler and evidence rules | Due / future / quiet / external observe | Monitor poll event and scheduler hint | Next poll or material transition |
+
+Each table row should answer: who owns the source state, who may interpret the
+effect, what decision is legal, what observation is returned, and what effect
+should come next.
+
 ## 1. Todo Lifecycle Machine
 
 Todo is the smallest executable or waiting unit. Current source fields include
