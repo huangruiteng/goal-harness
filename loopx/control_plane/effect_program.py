@@ -57,6 +57,7 @@ class EffectStep:
     kind: str | None = None
     command: str | None = None
     purpose: str | None = None
+    raw: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ def effect_program_from_ordered_steps(
                     or None
                 ),
                 purpose=str(step.get("purpose") or "") or None,
+                raw=dict(step),
             )
         )
     return EffectProgram(

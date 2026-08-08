@@ -13,6 +13,7 @@ from .capabilities.issue_fix.workflow_plan import (
     ISSUE_FIX_GOAL_CANDIDATE_DISCOVERY_COMMAND_TEMPLATE,
     build_issue_fix_goal_command_templates,
 )
+from .control_plane.effect_program import effect_program_from_ordered_steps
 from .host_loop_activation import (
     agent_type_for_host_surface,
     build_host_loop_activation_packet,
@@ -1787,32 +1788,31 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
     commands = commands if isinstance(commands, dict) else {}
     selected_route = transaction.get("selected_capability_route")
     selected_route = selected_route if isinstance(selected_route, dict) else {}
-    steps = transaction.get("ordered_steps")
-    steps = steps if isinstance(steps, list) else []
+    ordered_steps = transaction.get("ordered_steps")
+    ordered_steps = ordered_steps if isinstance(ordered_steps, list) else []
+    program = effect_program_from_ordered_steps(ordered_steps)
     step_lines: list[str] = []
-    for index, step in enumerate(steps, start=1):
-        if not isinstance(step, dict):
-            continue
+    for index, step in enumerate(program.steps, start=1):
+        raw_step = step.raw
         command = (
-            step.get("command")
-            or step.get("command_template")
-            or step.get("command_source")
-            or step.get("prompt")
+            step.command
+            or raw_step.get("command_source")
+            or raw_step.get("prompt")
         )
-        if step.get("kind") == "capability_guard":
+        if step.kind == "capability_guard":
             entry_key = str(selected_route.get("entry_command_key") or "")
             admission_key = str(selected_route.get("admission_command_key") or "")
             entry_command = commands.get(entry_key)
             admission_command = commands.get(admission_key)
-            discovery_command = step.get("candidate_discovery_command_template")
+            discovery_command = raw_step.get("candidate_discovery_command_template")
             authority = (
                 "open public issue; source clues are evidence only"
-                if step.get("candidate_authority") == "public_open_tracker_issue"
-                else step.get("candidate_authority")
+                if raw_step.get("candidate_authority") == "public_open_tracker_issue"
+                else raw_step.get("candidate_authority")
             )
             step_lines.extend(
                 [
-                    f"{index}. `{step.get('id')}` ({step.get('kind')})",
+                    f"{index}. `{step.step_id}` ({step.kind})",
                     f"   - authority: {authority}",
                 ]
             )
@@ -1820,7 +1820,7 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
                 step_lines.append(
                     f"   - discover: `{str(discovery_command).splitlines()[0]}`"
                 )
-            preflight = step.get("candidate_preflight")
+            preflight = raw_step.get("candidate_preflight")
             if isinstance(preflight, dict):
                 required_evidence = " + ".join(
                     str(field)
@@ -1828,7 +1828,7 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
                 )
                 step_lines.append(
                     "   - preflight: refresh "
-                    f"{step.get('authority_refresh_required')}; "
+                    f"{raw_step.get('authority_refresh_required')}; "
                     f"provide {required_evidence}; "
                     f"{preflight.get('decision_rule')}"
                 )
@@ -1839,12 +1839,12 @@ def render_start_goal_guided_markdown(payload: dict[str, Any]) -> str:
                 ]
             )
             continue
-        step_label = f"{index}. `{step.get('id')}` ({step.get('kind')}): "
-        step_lines.append(step_label + str(step.get("purpose")))
+        step_label = f"{index}. `{step.step_id}` ({step.kind}): "
+        step_lines.append(step_label + str(step.purpose))
         if command:
             rendered_command = (
                 actionable_shell_command(command)
-                if step.get("id") == "connect_if_needed"
+                if step.step_id == "connect_if_needed"
                 else str(command).splitlines()[0]
             )
             step_lines.append(f"   - command/source: `{rendered_command}`")

@@ -3,8 +3,46 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from loopx.bootstrap_command_pack import build_start_goal_guided_packet
+from loopx.bootstrap_command_pack import (
+    build_start_goal_guided_packet,
+    render_start_goal_guided_markdown,
+)
 from loopx.control_plane.effect_program import effect_program_from_ordered_steps
+
+GOAL_ID = "guided-program-goal"
+AGENT_ID = "codex-guided-program"
+
+
+def _write_connected_project(tmp_path: Path) -> Path:
+    project = tmp_path / "project"
+    state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    state_file.parent.mkdir(parents=True)
+    state_file.write_text("# Active Goal State\n", encoding="utf-8")
+    registry = project / ".loopx" / "registry.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "status": "active",
+                        "repo": str(project),
+                        "state_file": str(state_file.relative_to(project)),
+                        "coordination": {
+                            "agent_model": "peer_v1",
+                            "registered_agents": [AGENT_ID],
+                        },
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return project
+
 
 
 def test_ordered_steps_map_to_effect_program() -> None:
@@ -58,40 +96,12 @@ def test_ordered_steps_ignore_non_mapping_entries() -> None:
 def test_real_bootstrap_ordered_steps_map_to_effect_program(
     tmp_path: Path,
 ) -> None:
-    project = tmp_path / "project"
-    state_file = (
-        project / ".codex" / "goals" / "guided-program-goal" / "ACTIVE_GOAL_STATE.md"
-    )
-    state_file.parent.mkdir(parents=True)
-    state_file.write_text("# Active Goal State\n", encoding="utf-8")
-    registry = project / ".loopx" / "registry.json"
-    registry.parent.mkdir(parents=True)
-    registry.write_text(
-        json.dumps(
-            {
-                "schema_version": "0.1",
-                "goals": [
-                    {
-                        "id": "guided-program-goal",
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": str(state_file.relative_to(project)),
-                        "coordination": {
-                            "agent_model": "peer_v1",
-                            "registered_agents": ["codex-guided-program"],
-                        },
-                    }
-                ],
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    project = _write_connected_project(tmp_path)
 
     payload = build_start_goal_guided_packet(
         project=project,
-        goal_id="guided-program-goal",
-        agent_id="codex-guided-program",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
         cli_bin="loopx",
         host_surface="codex-app",
         goal_text="Ship a bounded public issue triage workflow.",
@@ -108,3 +118,25 @@ def test_real_bootstrap_ordered_steps_map_to_effect_program(
     assert program.steps
     assert program.steps[0].step_id == "inspect_connection"
     assert program.steps[0].kind == "read_only"
+
+
+def test_start_goal_guided_render_consumes_effect_program(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text="Ship a bounded public issue triage workflow.",
+        available_capabilities=["network"],
+        include_command_pack_detail=False,
+    )
+
+    rendered = render_start_goal_guided_markdown(payload)
+
+    assert "inspect_connection" in rendered
+    assert "connect_if_needed" in rendered
+    assert "quota_guard" in rendered
