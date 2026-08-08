@@ -43,11 +43,11 @@ REQUIRED_INSTALLED_SKILL_PHRASES = {
     ),
     "loopx-pr-review": (
         "loopx --format json pr-review --state all",
-        "agent_response_contract",
-        "Do not pipe the first packet through `jq`",
-        "submit a formal `REQUEST_CHANGES` review",
-        "A plain PR comment is not an adequate substitute for `REQUEST_CHANGES`",
-        "route approval, merge, self-merge, and admin-bypass actions to",
+        "thin host adapter",
+        "agent_response_contract.review_execution_contract",
+        "pull_requests[].review_plan",
+        "completion_gate",
+        "loopx-pr-merge",
     ),
     "loopx-pr-program": (
         "one `continuous_monitor` todo",

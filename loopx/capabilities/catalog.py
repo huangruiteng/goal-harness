@@ -235,6 +235,21 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         ],
         "implemented_protocols": [
             {
+                "schema_version": "pull_request_review_execution_contract_v1",
+                "module": "loopx.capabilities.pr_review_queue.review_contract",
+                "doc": "docs/reference/protocols/pr-review-command-v0.md",
+            },
+            {
+                "schema_version": "pull_request_review_plan_v1",
+                "module": "loopx.capabilities.pr_review_queue.review_contract",
+                "doc": "docs/reference/protocols/pr-review-command-v0.md",
+            },
+            {
+                "schema_version": "pull_request_review_result_v1",
+                "module": "loopx.capabilities.pr_review_queue.review_contract",
+                "doc": "docs/reference/protocols/pr-review-command-v0.md",
+            },
+            {
                 "schema_version": "pull_request_review_queue_observation_v0",
                 "module": "loopx.capabilities.pr_review_queue.core",
                 "doc": "docs/reference/protocols/pr-review-command-v0.md",
@@ -256,6 +271,7 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
         ],
         "docs": ["docs/reference/protocols/pr-review-command-v0.md"],
         "boundaries": [
+            "The shared execution contract owns review depth, evidence completeness, exact-head freshness, symbol-map, walkthrough, validation, failure, and code-volume requirements; host skills only route and publish it.",
             "A queue is observed only when result_completeness.complete=true; partial or failed reads are not_observed and never count as unchanged.",
             "Fingerprints cover exact head, review decision, check state, draft state, and mergeability for every open PR.",
             "One observation emits at most one exact-head advancement Todo preview; unchanged observations emit no duplicate candidate and may advance only from an explicit handled exact-head cursor.",
