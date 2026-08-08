@@ -9,6 +9,20 @@ effect_request -> interpretation -> observation -> next_effect
 It does not add a new runtime contract. It names the existing packet fields
 that already play each role.
 
+## Code Lens
+
+`loopx.control_plane.effect_program.interpret_quota_should_run_packet` maps an
+existing `quota should-run` packet onto the canonical slots:
+
+- `EffectRequest`
+- `EffectInterpretation`
+- `EffectObservation`
+- `EffectTurn`
+
+The function is intentionally read-only. It does not replace quota decision
+logic or add a second runtime; it gives refactor and test code one stable
+abstraction for reading the effect program shape.
+
 ## Canonical Example
 
 ### 1. Effect Request

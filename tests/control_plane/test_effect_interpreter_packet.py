@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from loopx.control_plane.effect_program import (
+    interpret_quota_should_run_packet,
+)
 from loopx.control_plane.testing.quota_fixtures import quota_status_payload
 from loopx.quota import build_quota_should_run
 
@@ -28,24 +31,28 @@ def _advancement_payload() -> dict:
 
 def test_quota_should_run_exposes_canonical_effect_slots() -> None:
     packet = build_quota_should_run(_advancement_payload(), goal_id=GOAL_ID)
+    turn = interpret_quota_should_run_packet(
+        packet,
+        goal_id=GOAL_ID,
+        agent_id="codex-fixture",
+        capabilities=["shell", "filesystem_write"],
+    )
 
     # interpretation
-    assert packet["work_lane_contract"]["lane"] == "advancement_task"
-    assert packet["work_lane_contract"]["obligation"] == (
-        "advance_one_bounded_segment"
-    )
-    assert packet["interaction_contract"]["mode"] == "bounded_delivery"
+    assert turn.request.kind == "quota_should_run"
+    assert turn.request.goal_id == GOAL_ID
+    assert turn.request.agent_id == "codex-fixture"
+    assert turn.request.capabilities == ("shell", "filesystem_write")
+    assert turn.interpretation.route == "advancement_task"
+    assert turn.interpretation.obligation == "advance_one_bounded_segment"
+    assert turn.interpretation.interaction_mode == "bounded_delivery"
 
     # observation
-    assert packet["decision"] == "run"
-    assert packet["should_run"] is True
-    assert packet["effective_action"] == "normal_run"
-    assert packet["recommended_action"] == "[P1] Advance the bounded slice."
-    assert "lane=advancement_task" in packet["protocol_action_packet"]["summary"]
+    assert turn.observation.decision == "run"
+    assert turn.observation.should_run is True
+    assert turn.observation.effective_action == "normal_run"
+    assert turn.observation.recommended_action == "[P1] Advance the bounded slice."
+    assert "lane=advancement_task" in turn.observation.protocol_summary
 
     # next effect
-    assert isinstance(
-        packet["interaction_contract"]["cli_channel"]["next_cli_actions"],
-        list,
-    )
-    assert packet["interaction_contract"]["cli_channel"]["next_cli_actions"]
+    assert turn.observation.next_cli_actions

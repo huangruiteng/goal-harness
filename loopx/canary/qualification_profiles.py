@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
     {
         "id": "lark-goal-channel-human-gate-delivery",
@@ -273,6 +272,7 @@ CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
             "loopx/project_prompt.py",
             "loopx/quota.py",
             "loopx/status.py",
+            "loopx/control_plane/effect_program.py",
             "loopx/review_packet.py",
             "loopx/heartbeat_prompt.py",
             "loopx/todos.py",
