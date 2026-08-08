@@ -25,7 +25,6 @@ from .control_plane.work_items.delivery_outcome import (
     DELIVERY_OUTCOME_NOT_CONFIGURED,
     PROGRESS_DELIVERY_OUTCOMES,
     delivery_turn_kind_for_run,
-    normalize_delivery_outcome,
 )
 from .doctor import (
     PROMOTION_READINESS_CLASSIFICATIONS,
@@ -112,20 +111,13 @@ from .control_plane.work_items.attention_fields import (
 )
 from .control_plane.work_items.autonomous_replan_ack import (
     AUTONOMOUS_REPLAN_ACK_MATERIAL_RUN_WINDOW,
-    autonomous_replan_ack_recorded,
     compact_autonomous_replan_ack,
-    latest_autonomous_replan_ack_for_projection as _latest_autonomous_replan_ack_for_projection_read_model,
 )
 from .control_plane.work_items.autonomous_replan_obligation import (
     AUTONOMOUS_REPLAN_STALL_THRESHOLD as _AUTONOMOUS_REPLAN_STALL_THRESHOLD_READ_MODEL,
     AUTONOMOUS_REPLAN_TRIGGER_PATTERNS as _AUTONOMOUS_REPLAN_TRIGGER_PATTERNS_READ_MODEL,
     MAX_AUTONOMOUS_REPLAN_TRIGGERS as _MAX_AUTONOMOUS_REPLAN_TRIGGERS_READ_MODEL,
     autonomous_replan_obligation_from_state as _autonomous_replan_obligation_from_state_read_model,
-    autonomous_replan_obligation_from_runs as _autonomous_replan_obligation_from_runs_read_model,
-    autonomous_replan_periodic_review_from_runs as _autonomous_replan_periodic_review_from_runs_read_model,
-    build_autonomous_replan_obligation as _build_autonomous_replan_obligation_read_model,
-    run_history_monitor_wait_already_acknowledged as _run_history_monitor_wait_already_acknowledged_read_model,
-    run_history_stall_signal as _run_history_stall_signal_read_model,
 )
 from .control_plane.work_items.backlog_hygiene import (
     MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS as _MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS_READ_MODEL,
@@ -2118,27 +2110,22 @@ def build_autonomous_replan_obligation(
     *,
     agent_todos: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    return _build_autonomous_replan_obligation_read_model(
+    from .control_plane.status.autonomous_replan_projection import (
+        build_autonomous_replan_obligation as _build_autonomous_replan_obligation,
+    )
+
+    return _build_autonomous_replan_obligation(
         evidence,
         agent_todos=agent_todos,
-        public_safe_compact_text=public_safe_compact_text,
-        autonomous_replan_schema_version=AUTONOMOUS_REPLAN_SCHEMA_VERSION,
-        autonomous_replan_stall_threshold=AUTONOMOUS_REPLAN_STALL_THRESHOLD,
-        dead_monitor_repeat_threshold=DEAD_MONITOR_REPEAT_THRESHOLD,
-        dead_monitor_repeat_schema_version=DEAD_MONITOR_REPEAT_SCHEMA_VERSION,
     )
 
 
 def _run_history_stall_signal(run: dict[str, Any]) -> dict[str, Any] | None:
-    return _run_history_stall_signal_read_model(
-        run,
-        autonomous_replan_ack_recorded=autonomous_replan_ack_recorded,
-        neutral_classifications=AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS,
-        progress_outcomes=AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES,
-        stall_pattern=AUTONOMOUS_RUN_HISTORY_STALL_PATTERN,
-        public_safe_compact_text=public_safe_compact_text,
-        normalize_delivery_outcome=normalize_delivery_outcome,
+    from .control_plane.status.autonomous_replan_projection import (
+        _run_history_stall_signal as _run_history_stall_signal_projection,
     )
+
+    return _run_history_stall_signal_projection(run)
 
 
 def run_history_monitor_wait_already_acknowledged(
@@ -2146,21 +2133,24 @@ def run_history_monitor_wait_already_acknowledged(
     *,
     signal_count: int,
 ) -> bool:
-    return _run_history_monitor_wait_already_acknowledged_read_model(
+    from .control_plane.status.autonomous_replan_projection import (
+        run_history_monitor_wait_already_acknowledged as _run_history_monitor_wait_already_acknowledged,
+    )
+
+    return _run_history_monitor_wait_already_acknowledged(
         latest_runs,
         signal_count=signal_count,
-        autonomous_replan_ack_recorded=autonomous_replan_ack_recorded,
-        neutral_classifications=AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS,
     )
 
 
 def latest_autonomous_replan_ack_for_projection(
     latest_runs: list[dict[str, Any]] | None,
 ) -> dict[str, Any] | None:
-    return _latest_autonomous_replan_ack_for_projection_read_model(
-        latest_runs,
-        neutral_classifications=AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS,
+    from .control_plane.status.autonomous_replan_projection import (
+        latest_autonomous_replan_ack_for_projection as _latest_autonomous_replan_ack_for_projection,
     )
+
+    return _latest_autonomous_replan_ack_for_projection(latest_runs)
 
 
 def autonomous_replan_periodic_review_from_runs(
@@ -2168,13 +2158,13 @@ def autonomous_replan_periodic_review_from_runs(
     *,
     agent_todos: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    return _autonomous_replan_periodic_review_from_runs_read_model(
+    from .control_plane.status.autonomous_replan_projection import (
+        autonomous_replan_periodic_review_from_runs as _autonomous_replan_periodic_review_from_runs,
+    )
+
+    return _autonomous_replan_periodic_review_from_runs(
         latest_runs,
         agent_todos=agent_todos,
-        autonomous_replan_ack_recorded=autonomous_replan_ack_recorded,
-        neutral_classifications=AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS,
-        periodic_run_threshold=AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD,
-        build_autonomous_replan_obligation=build_autonomous_replan_obligation,
     )
 
 
@@ -2184,21 +2174,14 @@ def autonomous_replan_obligation_from_runs(
     agent_todos: dict[str, Any] | None,
     agent_id: str | None = None,
 ) -> dict[str, Any] | None:
-    return _autonomous_replan_obligation_from_runs_read_model(
+    from .control_plane.status.autonomous_replan_projection import (
+        autonomous_replan_obligation_from_runs as _autonomous_replan_obligation_from_runs,
+    )
+
+    return _autonomous_replan_obligation_from_runs(
         latest_runs,
         agent_todos=agent_todos,
         agent_id=agent_id,
-        autonomous_replan_ack_recorded=autonomous_replan_ack_recorded,
-        neutral_classifications=AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS,
-        progress_outcomes=AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES,
-        stall_pattern=AUTONOMOUS_RUN_HISTORY_STALL_PATTERN,
-        public_safe_compact_text=public_safe_compact_text,
-        normalize_delivery_outcome=normalize_delivery_outcome,
-        build_autonomous_replan_obligation=build_autonomous_replan_obligation,
-        autonomous_replan_stall_threshold=AUTONOMOUS_REPLAN_STALL_THRESHOLD,
-        dead_monitor_repeat_threshold=DEAD_MONITOR_REPEAT_THRESHOLD,
-        dead_monitor_repeat_schema_version=DEAD_MONITOR_REPEAT_SCHEMA_VERSION,
-        periodic_run_threshold=AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD,
     )
 
 
