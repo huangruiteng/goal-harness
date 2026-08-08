@@ -330,6 +330,86 @@ def test_global_gates_preserves_shared_route_with_supported_owner(monkeypatch, t
     assert gate["owner"] != "user_or_controller"
 
 
+def test_global_gates_agent_scope_drops_goal_controller_route_when_quota_is_runnable(
+    monkeypatch, tmp_path
+) -> None:
+    agent_id = "codex-runnable"
+    status_payload = {
+        "ok": True,
+        "attention_queue": {
+            "items": [
+                {
+                    "goal_id": "runnable-goal",
+                    "waiting_on": "controller",
+                    "operator_question": "Resolve another lane's gate?",
+                }
+            ]
+        },
+    }
+    quota_payload = {
+        "ok": True,
+        "goal_id": "runnable-goal",
+        "state": "eligible",
+        "agent_identity": {"agent_id": agent_id, "registered": True},
+        "selected_todo": {"todo_id": "runnable-todo", "status": "open"},
+        "agent_lane_next_action": {
+            "todo_id": "runnable-todo",
+            "status": "open",
+        },
+        "user_todo_summary": {"open_count": 0, "gate_open_items": []},
+        "interaction_contract": {"user_channel": {"action_required": False}},
+    }
+    patch_manager_reads(
+        monkeypatch,
+        status_payload=status_payload,
+        quota_payloads={"runnable-goal": quota_payload},
+    )
+
+    payload = build_global_gates(tmp_path, agent_id=agent_id)
+
+    assert payload["gates"] == []
+    assert payload["lanes"] == []
+    assert payload["groups"]["blocked_work"] == []
+    assert payload["summary"]["open_gate_count"] == 0
+    assert payload["summary"]["blocked_lane_count"] == 0
+
+
+def test_global_gates_agent_scope_preserves_scoped_controller_gate(
+    monkeypatch, tmp_path
+) -> None:
+    agent_id = "codex-controller-gated"
+    status_payload = {
+        "ok": True,
+        "attention_queue": {
+            "items": [
+                {
+                    "goal_id": "controller-gated-goal",
+                    "waiting_on": "controller",
+                    "operator_question": "Resolve this scoped controller gate?",
+                }
+            ]
+        },
+    }
+    patch_manager_reads(
+        monkeypatch,
+        status_payload=status_payload,
+        quota_payloads={
+            "controller-gated-goal": controller_quota(
+                "controller-gated-goal", agent_id=agent_id
+            )
+        },
+    )
+
+    payload = build_global_gates(tmp_path, agent_id=agent_id)
+
+    assert [gate["goal_id"] for gate in payload["gates"]] == [
+        "controller-gated-goal"
+    ]
+    assert payload["gates"][0]["owner"] == "controller"
+    assert payload["lanes"][0]["status"] == "operator_gate"
+    assert payload["groups"]["blocked_work"] == payload["lanes"]
+
+
 def test_global_gates_filters_every_group_to_requested_agent(monkeypatch, tmp_path) -> None:
     status_payload = {
         "ok": True,

@@ -264,6 +264,7 @@ def _global_gate_from_item(
     item: dict[str, Any],
     *,
     quota_payload: dict[str, Any],
+    agent_id: str | None,
 ) -> dict[str, Any] | None:
     interaction = _as_dict(quota_payload.get("interaction_contract"))
     user_channel = _as_dict(interaction.get("user_channel"))
@@ -272,7 +273,9 @@ def _global_gate_from_item(
     formal_gate = formal_gates[0] if formal_gates else None
     action_required = user_channel.get("action_required") is True
     waiting_on = str(item.get("waiting_on") or "").strip()
-    controller_routed = waiting_on in {"controller", "user_or_controller"}
+    controller_routed = waiting_on in {"controller", "user_or_controller"} and (
+        not agent_id or quota_payload.get("state") == "operator_gate"
+    )
     if not action_required and not formal_gate and not controller_routed:
         return None
 
@@ -334,7 +337,11 @@ def _collect_global_gate_state(
         )
         if not _quota_matches_agent_scope(quota_payload, agent_id=agent_id):
             continue
-        gate = _global_gate_from_item(item, quota_payload=quota_payload)
+        gate = _global_gate_from_item(
+            item,
+            quota_payload=quota_payload,
+            agent_id=agent_id,
+        )
         if not gate:
             continue
         gates.append(gate)
