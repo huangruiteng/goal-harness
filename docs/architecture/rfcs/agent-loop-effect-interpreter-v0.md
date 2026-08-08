@@ -262,6 +262,8 @@ parallel and equally important:
 - `interpret_turn_result_packet` as the second real interpreter.
 - `EffectNext.execution_mode` for `serial`, `parallel`, and `interleaved`
   execution strategy.
+- `EffectProgram` and `effect_program_from_ordered_steps` as a read-only shape
+  over existing `guided_transaction.ordered_steps`.
 - around semantics encoded in `capability_gate`, `interaction_contract`,
   `work_lane_contract`, and `scheduler_hint`.
 - focused tests and docs that pin the lens.
@@ -270,8 +272,6 @@ parallel and equally important:
 
 - A minimal interpreter protocol or composition helper used by runtime code,
   not only by tests.
-- A data-encoded ordered effect program shape that turns `cli_actions` into
-  executable steps.
 - A real host or turn-driver caller that executes an ordered effect program
   while preserving failure, cancellation, permission, and budget semantics.
 

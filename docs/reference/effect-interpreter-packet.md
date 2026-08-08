@@ -105,6 +105,17 @@ can carry permission, budget, validation, execution, failure semantics, ACK,
 and writeback. Vendor serial or interleaved tool APIs are execution modes
 inside the interpreter, not new state machines.
 
+## Ordered Effect Program
+
+`loopx.control_plane.effect_program.effect_program_from_ordered_steps` maps an
+existing `guided_transaction.ordered_steps` value onto `EffectProgram`:
+
+- `EffectStep` keeps `step_id`, `kind`, `command`, and `purpose`;
+- `EffectProgram` keeps ordered steps and an optional `execution_mode`.
+
+This is still a read-only lens. The executor remains host-driven until a
+LoopX runtime caller owns multi-step execution.
+
 ## Relationship To State Machines
 
 Each state family is an interpretation table over this lens:

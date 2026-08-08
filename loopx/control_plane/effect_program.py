@@ -51,8 +51,55 @@ class EffectTurn:
     next_effect: EffectNext
 
 
+@dataclass(frozen=True)
+class EffectStep:
+    step_id: str | None = None
+    kind: str | None = None
+    command: str | None = None
+    purpose: str | None = None
+
+
+@dataclass(frozen=True)
+class EffectProgram:
+    steps: tuple[EffectStep, ...] = ()
+    execution_mode: str | None = None
+
+
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def effect_program_from_ordered_steps(
+    ordered_steps: Sequence[Mapping[str, Any]],
+    *,
+    execution_mode: str | None = None,
+) -> EffectProgram:
+    """Map existing `guided_transaction.ordered_steps` onto an effect program."""
+
+    steps: list[EffectStep] = []
+    for step in ordered_steps:
+        if not isinstance(step, Mapping):
+            continue
+        steps.append(
+            EffectStep(
+                step_id=str(step.get("id") or "") or None,
+                kind=str(step.get("kind") or "") or None,
+                command=(
+                    str(
+                        step.get("command")
+                        or step.get("command_template")
+                        or step.get("prompt")
+                        or ""
+                    )
+                    or None
+                ),
+                purpose=str(step.get("purpose") or "") or None,
+            )
+        )
+    return EffectProgram(
+        steps=tuple(steps),
+        execution_mode=str(execution_mode or "") or None,
+    )
 
 
 def interpret_quota_should_run_packet(
