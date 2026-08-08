@@ -105,11 +105,12 @@ Managed Agent Goal mode without requiring prompt regeneration.
 Agent identity follows the same fail-closed rule. `agent-onboard` keeps its
 fresh-registration path, while Codex App `start-goal --guided` consumes the
 ambient `CODEX_THREAD_ID` when `--thread-id` is omitted and must reuse a
-matching stable opaque thread binding when available. A missing thread
-id or missing binding must select an existing lane; fresh registration requires
-explicit `--new-peer` intent. Existing identities are takeover choices, never
-an implicit default; selecting one requires explicit user intent for that exact
-agent. LoopX persists `(host_surface, goal_id, thread_id) -> agent_id` with
+matching stable opaque thread binding when available. A stable thread ID with
+no binding is a new host session and defaults to fresh registration. Existing
+identities are takeover choices, never an implicit default; selecting one
+requires explicit user intent for that exact agent. A missing thread ID remains
+fail-closed and requires explicit `--agent-id` or new-session intent with
+`--new-peer`. LoopX persists `(host_surface, goal_id, thread_id) -> agent_id` with
 `bind-agent-thread --execute`; later `/loopx` calls reuse that bound identity
 across `start-goal`, heartbeat, quota, refresh-state, and Todo commands. The
 preview is advisory; todo writeback requires verified registration and binding

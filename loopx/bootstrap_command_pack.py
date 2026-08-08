@@ -887,6 +887,18 @@ def build_loopx_bootstrap_command_pack(
     if not effective_agent_id and thread_binding.get("status") == "bound":
         effective_agent_id = str(thread_binding.get("agent_id"))
 
+    fresh_agent_default = bool(
+        explicit_goal_start
+        and (
+            new_peer
+            or (
+                normalized_thread_id
+                and thread_binding.get("status") == "missing"
+            )
+            or (not normalized_thread_id and agent_type != "codex-app")
+        )
+    )
+
     bootstrap_preview_command = _bootstrap_command(
         project=resolved_project,
         goal_id=resolved_goal_id,
@@ -906,13 +918,7 @@ def build_loopx_bootstrap_command_pack(
         agent_id=effective_agent_id,
         registered_agents=registered_agents,
         available_capabilities=available_capabilities,
-        fresh_agent_default=(
-            explicit_goal_start
-            and (
-                new_peer
-                or (not normalized_thread_id and agent_type != "codex-app")
-            )
-        ),
+        fresh_agent_default=fresh_agent_default,
         thread_binding=thread_binding,
     )
     selected_agent_id = host_loop_activation.get("agent_id")
@@ -1636,8 +1642,8 @@ def build_start_goal_guided_packet(
                 ),
                 "choices": identity_selection_gate.get("choices") or [],
                 "purpose": (
-                    "select an existing registered identity for this thread; register a "
-                    "fresh identity only when explicit new-peer intent is present"
+                    "register a fresh identity by default for a stable unbound host "
+                    "session; select an existing identity only for explicit takeover"
                 ),
             },
         )

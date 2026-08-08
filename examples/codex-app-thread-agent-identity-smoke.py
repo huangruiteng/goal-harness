@@ -135,9 +135,65 @@ def main() -> None:
             goal_text="start another task",
         )
         gate = unbound["guided_transaction"]["identity_selection_gate"]
-        assert gate["default_action"] == "select_agent_identity", gate
-        assert gate["fresh_agent_registration"] is None, gate
-        assert "do not register a new one" in gate["reason"], gate
+        assert gate["default_action"] == "register_fresh_agent", gate
+        assert gate["fresh_agent_registration"]["recommended"] is True, gate
+
+        register_output = io.StringIO()
+        with contextlib.redirect_stdout(register_output):
+            register_exit = cli_main(
+                [
+                    "--runtime-root",
+                    str(runtime),
+                    "--format",
+                    "json",
+                    "register-agent",
+                    "--goal-id",
+                    "goal",
+                    "--agent-id",
+                    "codex-c",
+                    "--require-new",
+                    "--execute",
+                ]
+            )
+        assert register_exit == 0, register_output.getvalue()
+        registered = json.loads(register_output.getvalue())
+        assert registered["ok"] is True, registered
+        assert registered["changed"] is True, registered
+        assert registered["registration_readback"]["verified"] is True, registered
+
+        selected_fresh = build_start_goal_guided_packet(
+            project=project,
+            goal_id="goal",
+            agent_id="codex-c",
+            thread_id="thread-b",
+            cli_bin="loopx",
+            host_surface="codex-app",
+            goal_text="start another task",
+        )
+        fresh_bind_step = next(
+            step
+            for step in selected_fresh["guided_transaction"]["ordered_steps"]
+            if step["id"] == "bind_thread_identity"
+        )
+        fresh_bind_output = io.StringIO()
+        fresh_bind_argv = shlex.split(fresh_bind_step["command"])
+        with contextlib.redirect_stdout(fresh_bind_output):
+            fresh_bind_exit = cli_main(
+                ["--runtime-root", str(runtime), *fresh_bind_argv[1:]]
+            )
+        assert fresh_bind_exit == 0, fresh_bind_output.getvalue()
+
+        reused_fresh = build_start_goal_guided_packet(
+            project=project,
+            goal_id="goal",
+            agent_id=None,
+            thread_id="thread-b",
+            cli_bin="loopx",
+            host_surface="codex-app",
+            goal_text="continue the new session",
+        )
+        assert reused_fresh["agent_id"] == "codex-c", reused_fresh
+        assert reused_fresh["thread_agent_binding"]["status"] == "bound", reused_fresh
 
         fresh = build_start_goal_guided_packet(
             project=project,

@@ -51,8 +51,10 @@ def test_host_materialization_installs_generated_loopx_entry_skill(
     assert "do not call `start-goal` or bootstrap another goal" in skill_text
     assert "reuse the packet's verified thread binding" in skill_text
     assert "already named by this host task's active LoopX interaction contract" in skill_text
+    assert "treat a stable unbound host thread as a new session" in skill_text
+    assert "Select an existing registered lane only for explicit takeover" in skill_text
     assert "Never treat a new Todo, worktree, or argument-bearing invocation as a new peer" in skill_text
-    assert "only when the user explicitly requests a new peer/session" in skill_text
+    assert "When no stable thread id is available" in skill_text
     assert materialize_loopx_entry_skill(
         skills_dir=skills_dir,
         execute=True,

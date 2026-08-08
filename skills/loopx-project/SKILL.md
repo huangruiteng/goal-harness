@@ -70,13 +70,14 @@ and Todo commands. Include `--agent-id <REGISTERED_AGENT_ID>` only when the
 current session already owns that identity, the thread binding resolves to it,
 or the user explicitly asks to take over that exact agent's work.
 
-When a thread id is present but has no binding, select an existing lane and
-bind it with the returned `bind-agent-thread` command. Do not register a new lane
-unless the user explicitly requested a new peer/session and the caller passes
-`--new-peer`. When no thread id is available, preserve the fail-closed identity
-gate and never infer takeover from registry order or the only registered lane.
-For explicit new-peer onboarding, pass `--new-peer`, choose a fresh public-safe
-id, preview then execute `register-agent`, and
+When a stable thread id is present but has no binding, treat it as a new host
+session and follow the returned fresh-registration default. Select an existing
+lane only when the user explicitly requests takeover of that exact agent, then
+bind it with the returned `bind-agent-thread` command. When no thread id is
+available, preserve the fail-closed identity gate and never infer takeover from
+registry order or the only registered lane; pass `--new-peer` only when the
+user explicitly requests fresh onboarding on that unboundable host. Choose a
+fresh public-safe id, preview then execute `register-agent`, and
 require the `--require-new --execute` result to report `ok=true`, `changed=true`,
 `written=true`, successful global sync, and verified registration readback
 before rerunning `start-goal` with that new id. A preview is advisory and never

@@ -22,10 +22,12 @@ must not create a new peer by itself.
 - Identity resolution prefers a verified thread binding. An exact agent from
   the current host task's active interaction contract is a valid initial
   selection and must then be bound before Todo writeback.
-- Missing or conflicting identity fails closed. Registry order and a single
-  registered lane are not identity evidence for a new host thread.
-- Fresh registration requires explicit user new-peer/session intent plus
-  `--new-peer`; task text never implies it.
+- A stable unbound thread is a new host session and defaults to fresh
+  registration. Registry order and a single registered lane are not identity
+  evidence for takeover.
+- A missing thread ID or conflicting binding fails closed. `--new-peer` carries
+  explicit fresh-session intent when the host cannot provide a stable ID; task
+  text, a new Todo, or a worktree never implies it.
 - Binding is an explicit, idempotent mutation. Source/global registry sync and
   binding readback must succeed before planning or Todo writeback continues.
 
@@ -50,8 +52,10 @@ Out of scope:
 For an unbound Codex App thread:
 
 1. inspect the connected goal and registered lanes;
-2. resolve the exact current lane or return an existing-lane selection gate;
-3. execute `bind-agent-thread --execute`;
+2. default to fresh registration, or select an existing lane only for explicit
+   takeover;
+3. register the fresh identity when selected, then execute
+   `bind-agent-thread --execute`;
 4. require `ok=true`, `global_sync.ok=true`, and
    `registration_readback.verified=true`;
 5. only then plan and write Todo state, refresh, activate, and run quota.
@@ -68,9 +72,10 @@ Focused validation must cover:
 - ambient Codex App thread-ID resolution;
 - an ordered bind/readback step before Todo writeback;
 - a real first-call bind followed by a second call without `--agent-id`;
-- an unbound thread that selects an existing lane without advertising fresh
-  registration;
-- explicit `--new-peer` as the only fresh-registration route;
+- a stable unbound thread that defaults to fresh registration while preserving
+  explicit existing-lane takeover;
+- a missing thread ID that stays fail closed unless `--agent-id` or
+  `--new-peer` is explicit;
 - generated Skill text that reuses active task identity and never treats a
   worktree, Todo, or argument-bearing call as a new peer;
 - standalone and official-runner execution of the public smoke.
@@ -93,7 +98,7 @@ git diff --check
 - Repeated `/loopx` calls in one Codex App task reuse one stable agent lane.
 - The first explicit lane selection is durably bound and read back before any
   Todo write.
-- Missing/conflicting identity remains fail closed without accidental peer
-  creation.
+- Missing thread IDs and conflicting bindings remain fail closed without
+  accidental peer creation.
 - Fresh peer registration is explicit, verified, and separately attributable.
 - CLI, packet, Skill, protocol, and tests express the same identity rule.

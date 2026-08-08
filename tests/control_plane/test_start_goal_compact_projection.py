@@ -756,7 +756,9 @@ def test_start_goal_binds_selected_lane_before_todo_writeback(
     }
 
 
-def test_start_goal_with_unbound_thread_requires_existing_lane_selection(tmp_path: Path) -> None:
+def test_start_goal_with_unbound_thread_defaults_to_fresh_registration(
+    tmp_path: Path,
+) -> None:
     project = _write_connected_project(tmp_path)
     registry_path = project / ".loopx" / "registry.json"
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
@@ -776,9 +778,13 @@ def test_start_goal_with_unbound_thread_requires_existing_lane_selection(tmp_pat
 
     gate = payload["guided_transaction"]["identity_selection_gate"]
     assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
-    assert gate["default_action"] == "select_agent_identity"
-    assert gate["fresh_agent_registration"] is None
-    assert "do not register a new one" in gate["reason"]
+    assert gate["state"] == "fresh_agent_registration_required"
+    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["fresh_agent_registration"]["recommended"] is True
+    assert all(
+        choice["requires_explicit_takeover_intent"] is True
+        for choice in gate["choices"]
+    )
 
 
 def test_start_goal_unbound_thread_does_not_reuse_the_only_registered_agent(
@@ -800,9 +806,9 @@ def test_start_goal_unbound_thread_does_not_reuse_the_only_registered_agent(
     assert payload["agent_id"] is None
     assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
     gate = payload["guided_transaction"]["identity_selection_gate"]
-    assert gate["state"] == "thread_binding_selection_required"
-    assert gate["default_action"] == "select_agent_identity"
-    assert gate["fresh_agent_registration"] is None
+    assert gate["state"] == "fresh_agent_registration_required"
+    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["fresh_agent_registration"]["recommended"] is True
 
 
 def test_start_goal_without_thread_id_requires_explicit_lane_selection(tmp_path: Path) -> None:
@@ -825,6 +831,41 @@ def test_start_goal_without_thread_id_requires_explicit_lane_selection(tmp_path:
     assert gate["fresh_agent_registration"] is None
     assert gate["choices"][0]["agent_id"] == AGENT_ID
     assert gate["choices"][0]["requires_explicit_takeover_intent"] is True
+
+
+def test_cli_codex_app_unbound_ambient_thread_defaults_to_fresh_registration(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = _write_connected_project(tmp_path)
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-new-session")
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            [
+                "--format",
+                "json",
+                "start-goal",
+                "--guided",
+                "--project",
+                str(project),
+                "--goal-id",
+                GOAL_ID,
+                "--host-surface",
+                "codex-app",
+                "--goal-text",
+                GOAL_TEXT,
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(output.getvalue())
+    assert payload["thread_id"] == "thread-new-session"
+    assert payload["agent_id"] is None
+    gate = payload["guided_transaction"]["identity_selection_gate"]
+    assert gate["state"] == "fresh_agent_registration_required"
+    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["fresh_agent_registration"]["recommended"] is True
 
 
 def test_start_goal_new_peer_explicitly_allows_fresh_registration(tmp_path: Path) -> None:
