@@ -233,14 +233,34 @@ def _handle_generate(
         boundary_ok = boundary.get("ok", False)
         boundary_warnings = [str(w) for w in boundary.get("warnings", [])]
 
+    if not boundary_ok:
+        # Gate before any output is produced: the scan runs before payload
+        # assembly or file creation, so a private marker can never reach the
+        # --out file or leak through the html/html_path/projection fields.
+        print_payload(
+            {
+                "ok": False,
+                "mode": "generate",
+                "focus_goal_id": projection.get("focus_goal_id"),
+                "generated_at": projection.get("generated_at"),
+                "boundary_ok": False,
+                "boundary_warnings": boundary_warnings,
+                "write_performed": False,
+                "error": "public/private boundary scan failed; output withheld",
+            },
+            output_format(args),
+            _render_markdown,
+        )
+        return 1
+
     payload: dict[str, object] = {
-        "ok": boundary_ok,
+        "ok": True,
         "mode": "generate",
         "focus_goal_id": projection.get("focus_goal_id"),
         "generated_at": projection.get("generated_at"),
         "projection": projection,
         "html_bytes": len(html.encode("utf-8")),
-        "boundary_ok": boundary_ok,
+        "boundary_ok": True,
         "boundary_warnings": boundary_warnings,
     }
 
@@ -253,11 +273,6 @@ def _handle_generate(
     else:
         payload["html"] = html
         payload["write_performed"] = False
-
-    if not boundary_ok:
-        payload["error"] = "public/private boundary scan failed; output withheld"
-        print_payload(payload, output_format(args), _render_markdown)
-        return 1
 
     print_payload(payload, output_format(args), _render_markdown)
     return 0

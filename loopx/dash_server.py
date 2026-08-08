@@ -90,6 +90,40 @@ class DashRequestHandler(BaseHTTPRequestHandler):
         )
         return projection
 
+    def _withhold_boundary(
+        self, boundary: dict[str, object], *, endpoint: str
+    ) -> None:
+        self._send_json(
+            {
+                "ok": False,
+                "error": (
+                    "public/private boundary scan failed; "
+                    f"{endpoint} withheld"
+                ),
+                "warnings": boundary.get("warnings"),
+            },
+            status=500,
+        )
+
+    def _serve_html_with_boundary(
+        self, html: str, *, endpoint: str
+    ) -> None:
+        boundary = scan_public_boundary_text(html)
+        if not boundary.get("ok"):
+            self._withhold_boundary(boundary, endpoint=endpoint)
+            return
+        self._send_html(html.encode("utf-8"))
+
+    def _serve_json_with_boundary(
+        self, payload: dict[str, Any], *, endpoint: str
+    ) -> None:
+        body = json.dumps(payload, ensure_ascii=False, indent=2)
+        boundary = scan_public_boundary_text(body)
+        if not boundary.get("ok"):
+            self._withhold_boundary(boundary, endpoint=endpoint)
+            return
+        self._send_json(payload)
+
     def do_GET(self) -> None:  # noqa: N802 - http.server naming
         path = self.path.split("?", 1)[0]
         if path == "/healthz":
@@ -108,28 +142,21 @@ class DashRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if path == DASH_PANEL_PATH:
-            self._send_html(render_session_dash_main(projection).encode("utf-8"))
+            self._serve_html_with_boundary(
+                render_session_dash_main(projection), endpoint="panel"
+            )
             return
         if path == "/status.json":
-            self._send_json(projection)
+            self._serve_json_with_boundary(projection, endpoint="status.json")
             return
         if path in {"", "/"}:
-            html = render_session_dash_html(
-                projection,
-                live_refresh_seconds=self.server.refresh_seconds,
+            self._serve_html_with_boundary(
+                render_session_dash_html(
+                    projection,
+                    live_refresh_seconds=self.server.refresh_seconds,
+                ),
+                endpoint="panel",
             )
-            boundary = scan_public_boundary_text(html)
-            if not boundary.get("ok"):
-                self._send_json(
-                    {
-                        "ok": False,
-                        "error": "public/private boundary scan failed; panel withheld",
-                        "warnings": boundary.get("warnings"),
-                    },
-                    status=500,
-                )
-                return
-            self._send_html(html.encode("utf-8"))
             return
         self._send_json(
             {

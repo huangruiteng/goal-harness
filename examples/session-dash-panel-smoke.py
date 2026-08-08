@@ -283,6 +283,179 @@ def test_live_server_handler_is_read_only() -> None:
     assert "POST" not in dir(serve_dash)
 
 
+def _build_polluted_status_fixture() -> dict[str, object]:
+    """Fleet fixture whose projected session/goal text carries private traps.
+
+    Injects PRIVATE_TRAP_MARKERS into the exact fields the projection copies
+    verbatim (goal ``recommended_action`` and session ``next_action``) so the
+    negative tests prove the boundary gate withholds on the real output path.
+    """
+
+    status = _build_fleet_fixture()
+    status = dict(status)
+    marker_text = " ".join(PRIVATE_TRAP_MARKERS)
+
+    attention = dict(status.get("attention_queue") or {})
+    items = [dict(item) for item in (attention.get("items") or [])]
+    for item in items:
+        item["recommended_action"] = marker_text
+    attention["items"] = items
+    status["attention_queue"] = attention
+
+    run_history = dict(status.get("run_history") or {})
+    goals = [dict(goal) for goal in (run_history.get("goals") or [])]
+    for goal in goals:
+        goal = dict(goal)
+        latest_runs = [dict(run) for run in (goal.get("latest_runs") or [])]
+        for run in latest_runs:
+            run["recommended_action"] = marker_text
+        goal["latest_runs"] = latest_runs
+    run_history["goals"] = goals
+    status["run_history"] = run_history
+
+    agents = [
+        dict(agent)
+        for agent in (status.get("agent_management_projection") or {}).get("agents", [])
+    ]
+    for agent in agents:
+        agent["next_action"] = marker_text
+    status["agent_management_projection"] = {
+        "schema_version": "agent_management_projection_v0",
+        "mode": "read_only",
+        "agents": agents,
+    }
+    return status
+
+
+def _build_polluted_projection() -> dict[str, object]:
+    status = _build_polluted_status_fixture()
+    return build_session_dash_projection(
+        status_payload=status,
+        run_history=status.get("run_history"),
+        todo_index=status.get("todo_index"),
+        agent_management=status.get("agent_management_projection"),
+        usage_summary=status.get("usage_summary"),
+        generated_at="2026-07-06T10:20:00Z",
+    )
+
+
+def test_private_session_text_is_withheld_from_generated_html() -> None:
+    projection = _build_polluted_projection()
+    for html in (
+        render_session_dash_html(projection),
+        render_session_dash_main(projection),
+    ):
+        boundary = scan_public_boundary_text(html)
+        assert boundary["ok"] is False, (
+            "private next_action/session text must fail the boundary scan"
+        )
+        assert boundary["warnings"], "expected at least one boundary warning"
+        for marker in PRIVATE_TRAP_MARKERS:
+            assert marker in html, (
+                f"trap marker must be present to keep the test honest: {marker}"
+            )
+
+
+def test_dash_generate_withholds_private_output_and_writes_no_file() -> None:
+    import argparse
+    import tempfile
+
+    from loopx.cli_commands import dash as dash_module
+
+    real_collect_status = dash_module.collect_status
+    dash_module.collect_status = lambda **kwargs: _build_polluted_status_fixture()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "snap.html"
+            captured: dict[str, object] = {}
+
+            def print_payload(payload: dict[str, object], fmt: str, renderer: object) -> None:
+                captured["payload"] = payload
+
+            args = argparse.Namespace(
+                command="dash",
+                dash_command="generate",
+                goal_id=None,
+                out=str(out_path),
+                no_boundary_scan=False,
+            )
+            rc = dash_module._handle_generate(
+                args,
+                registry_path=Path(tmp) / "registry.json",
+                runtime_root_arg=None,
+                print_payload=print_payload,
+                output_format=lambda unused_args: "json",
+            )
+            assert rc == 1, "private output must fail the generate command"
+            payload = captured["payload"]
+            assert payload["ok"] is False
+            assert payload["boundary_ok"] is False
+            assert payload["write_performed"] is False
+            for key in ("html", "html_path", "projection"):
+                assert key not in payload, f"private output leaked via payload.{key}"
+            assert not out_path.exists(), (
+                "--out file must not be written when the boundary scan fails"
+            )
+    finally:
+        dash_module.collect_status = real_collect_status
+
+
+def test_live_server_withholds_private_endpoints() -> None:
+    import io
+
+    import loopx.dash_server as dash_server_module
+    from loopx.dash_server import DashRequestHandler
+
+    class _StubDashServer:
+        registry_path = None
+        runtime_root_override = None
+        scan_roots = []
+        goal_id = None
+        refresh_seconds = 10
+        verbose = False
+
+    class _FakeConnection:
+        def __init__(self, request_line: bytes) -> None:
+            self._in = io.BytesIO(request_line)
+            self._out = io.BytesIO()
+
+        def makefile(self, mode: str, *args: object) -> io.BytesIO:
+            return self._in if "r" in mode else self._out
+
+        def sendall(self, data: bytes) -> None:
+            self._out.write(data)
+
+        def close(self) -> None:
+            pass
+
+    def _request(path: str) -> str:
+        conn = _FakeConnection(
+            f"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode("ascii")
+        )
+        DashRequestHandler(conn, ("127.0.0.1", 0), _StubDashServer())
+        return conn._out.getvalue().decode("utf-8", "replace")
+
+    real_collect_status = dash_server_module.collect_status
+    try:
+        dash_server_module.collect_status = (
+            lambda **kwargs: _build_polluted_status_fixture()
+        )
+        for path in ("/", "/panel", "/status.json"):
+            body = _request(path)
+            status_line = body.split("\r\n", 1)[0]
+            assert "500" in status_line, f"{path} must withhold private output"
+            assert "withheld" in body, f"{path} must explain the withhold"
+        dash_server_module.collect_status = lambda **kwargs: _build_fleet_fixture()
+        for path in ("/", "/panel", "/status.json"):
+            body = _request(path)
+            status_line = body.split("\r\n", 1)[0]
+            assert "200" in status_line, (
+                f"{path} must serve clean output: {status_line}"
+            )
+    finally:
+        dash_server_module.collect_status = real_collect_status
+
+
 if __name__ == "__main__":
     test_projection_is_read_only_and_fleet_shaped()
     test_focus_goal_id_narrows_the_fleet()
@@ -292,4 +465,7 @@ if __name__ == "__main__":
     test_escape_prevents_injection()
     test_live_serve_page_has_refresh_and_fragment()
     test_live_server_handler_is_read_only()
+    test_private_session_text_is_withheld_from_generated_html()
+    test_dash_generate_withholds_private_output_and_writes_no_file()
+    test_live_server_withholds_private_endpoints()
     print("session dash panel smoke: OK")
