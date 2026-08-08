@@ -632,7 +632,7 @@ App tick
 2. `docs/operations/long-task-cadence-policy.md`
 3. `loopx/heartbeat_prompt.py`
 4. `loopx/control_plane/scheduler/`
-5. `loopx/quota.py` 的 final composition：interaction contract、scheduler hint、protocol action packet
+5. `loopx/control_plane/quota/should_run_packet.py` 的 final composition：interaction contract、scheduler hint、protocol action packet
 6. `docs/product/core-control-plane/state-machine.md` 的 Scheduler/Heartbeat 状态机
 
 ## 代表性 Smoke

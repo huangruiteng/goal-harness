@@ -296,7 +296,8 @@ replan interval reached
 
 ### 核心代码领读：Replan 如何覆盖 Monitor Quiet
 
-入口是 `loopx/quota.py::build_quota_should_run`。先找到 monitor quiet 的候选决策，
+入口是 `loopx/control_plane/quota/should_run.py::build_quota_should_run`；prepare 与 packet
+阶段分别位于 `should_run_prepare.py` 和 `should_run_packet.py`。先找到 monitor quiet 的候选决策，
 再继续向下看 replan 分支：
 
 ```python

@@ -401,9 +401,12 @@ loopx --format json quota should-run \
 2. `loopx/cli_commands/starter_bootstrap.py`
 3. `loopx/bootstrap_command_pack.py`
 4. `loopx/heartbeat_prompt.py`
-5. `loopx/quota.py::build_quota_should_run`
+5. `loopx/control_plane/quota/should_run.py::build_quota_should_run`
 
-不要从头通读 `quota.py`。先搜索 `build_quota_should_run`，再沿它调用的 bounded-context helper 向下读。
+不要从头通读旧的 `loopx.quota` facade。真实决策在
+`loopx/control_plane/quota/should_run.py`、`should_run_prepare.py` 与
+`should_run_packet.py`。先搜索 `build_quota_should_run`，再沿 bounded-context
+helper 向下读。
 
 ### 步骤 D：带着调用链读核心代码
 
@@ -563,7 +566,9 @@ effective_action = _effective_action(...)
 
 按这个顺序领读：先确定 goal boundary，再选 work lane，再检查能力与 workspace，最后让 projection repair 覆盖普通 delivery。`should_run=True` 只说明“本轮有必须尝试的合法动作”，动作可能是 repair，并不总是产品交付。
 
-建议断点：`quota.py:1300`、`:1351`、`:1404`、`:1442`、`:1461`。每次只记录 `effective_action`、四个 `*_allowed` 与 guard 的 `reason`。
+建议断点：`should_run_prepare.py` 的 preparation 阶段，以及
+`should_run_packet.py` 的 route/build 阶段。每次只记录 `effective_action`、
+四个 `*_allowed` 与 guard 的 `reason`。
 
 #### 读完这一段应能回答
 
@@ -601,7 +606,7 @@ effective_action = _effective_action(...)
 | 新人命令路径 | `docs/guides/newcomer-command-path.md` |
 | guided start | `loopx/cli_commands/starter_bootstrap.py`、`loopx/bootstrap_command_pack.py` |
 | heartbeat body | `loopx/heartbeat_prompt.py` |
-| quota 入口 | `loopx/quota.py::build_quota_should_run` |
+| quota 入口 | `loopx/control_plane/quota/should_run.py::build_quota_should_run` |
 | Showcase 真相 | `docs/showcases/showcase-catalog.json` |
 | guided start 回归 | `examples/bootstrap-command-pack-smoke.py` |
 | quota/heartbeat 回归 | `examples/control_plane/heartbeat-quota-flow-smoke.py` |

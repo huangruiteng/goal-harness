@@ -55,7 +55,7 @@ interaction contract。后面的字段、mode 和 scheduler hint 都应能回到
 - 这一轮可以 spend 吗？
 - host 下一次多久后再唤醒？
 
-所以现在的核心函数 `loopx/quota.py::build_quota_should_run` 更像一个 decision compiler：
+所以现在的核心函数 `loopx/control_plane/quota/should_run.py::build_quota_should_run` 更像一个 decision compiler：
 
 ```text
 registered state + projections + runtime declarations
@@ -210,7 +210,8 @@ selected Todo 显式声明 `task_repository` 且当前 mode 允许验证后记�
 
 ## Decision Pipeline
 
-`build_quota_should_run` 的代码很长，但阅读时可以按决策阶段理解，而不是按行号通读。
+`quota should-run` 的决策链分布在 `should_run.py`、`should_run_prepare.py` 与
+`should_run_packet.py` 三个 bounded 模块中，阅读时按决策阶段理解，而不是按行号通读。
 
 ### 1. Resolve goal 与 agent identity
 
@@ -508,7 +509,8 @@ jq '{
 
 ### 1. 先建立 decision inputs，再谈优先级
 
-`loopx/quota.py::build_quota_should_run` 开始时解析 registry goal、quota plan、user/agent todo projection 与 peer identity。中段才进入核心 pipeline：
+`loopx/control_plane/quota/should_run_prepare.py` 负责解析 registry goal、quota plan、
+user/agent todo projection 与 peer identity。`should_run_packet.py` 才进入核心 pipeline：
 
 ```python
 goal_boundary = _goal_boundary(registry_goal or item, item=item, ...)
@@ -675,7 +677,7 @@ cli_channel   -> 下一条 CLI 写回、何时允许 spend
 
 ### 断点与 decision table
 
-建议在 `quota.py:1404`、`:1434`、`:1442`、`:1461`、`:1489` 打断点，记录下面的最小表：
+建议在 `should_run_prepare.py` 与 `should_run_packet.py` 的关键阶段打断点，记录下面的最小表：
 
 | 场景 | normal | self repair | workspace repair | terminal | 预期 action |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -699,14 +701,16 @@ cli_channel   -> 下一条 CLI 写回、何时允许 spend
 ```text
 loopx/cli.py
   -> quota command handler
-  -> loopx/quota.py::build_quota_should_run
+  -> loopx/control_plane/quota/should_run.py::build_quota_should_run
   -> loopx/control_plane/quota/
   -> loopx/control_plane/runtime/
   -> loopx/control_plane/scheduler/
   -> loopx/control_plane/todos/
 ```
 
-不要把 `quota.py` 的文件长度当成设计边界。仓库正在把已证明的规则迁入 bounded context，`docs/product/core-control-plane/bounded-context-layout.md` 和 `rule-seam-map.md` 才是导航图。
+不要把 `loopx.quota` facade 的剩余文件长度当成设计边界。已证明的规则已经迁入
+bounded context；`docs/product/core-control-plane/bounded-context-layout.md` 和
+`rule-seam-map.md` 才是导航图。
 
 ### Characterize before move
 

@@ -1614,7 +1614,7 @@ LoopX 已经提供的通用机制包括：
 
 | 机制 | 入口 | 读代码时要确认 |
 | --- | --- | --- |
-| 本轮决策 | `loopx/quota.py::build_quota_should_run` | 多种 source facts 怎样收敛成一个 interaction decision |
+| 本轮决策 | `loopx/control_plane/quota/should_run.py::build_quota_should_run`（prepare/packet 在 `should_run_prepare.py`、`should_run_packet.py`） | 多种 source facts 怎样收敛成一个 interaction decision |
 | Agent-facing packet | `loopx/control_plane/work_items/interaction_contract.py::build_interaction_contract` | selected work、gate、replan、terminal 是否完整投影 |
 | Goal frontier replan | `loopx/control_plane/goals/goal_frontier/replan_rules.py::select_goal_frontier_replan_rule` | runnable、gate、succession gap、monitor exhaustion 的优先级 |
 | Vision checkpoint | `loopx/state_refresh.py::build_vision_checkpoint` | material closeout 后如何防止局部目标替代长期方向 |

@@ -48,7 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
-| M6 General effect-program abstraction | In progress; quality gate pending (#2938-#2959) |
+| M6 General effect-program abstraction | In progress; Q3 complete (#2963-#2965), Q4 in progress; quality gate pending (#2938-#2959) |
 
 ## Why This Matters
 
@@ -314,7 +314,7 @@ replacements. It is not yet a qualitative change. M6 must not be called mostly
 complete until all of the following are true:
 
 1. Hot modules shrink to bounded sizes:
-   - `loopx/quota.py` below 2000 lines;
+   - `loopx/quota.py` below 2000 lines (currently 1043);
    - `loopx/status.py` below 2000 lines;
    - `loopx/heartbeat_prompt.py` below 1200 lines.
 2. `loopx quota should-run` builds through a bounded `should_run` decision
@@ -334,9 +334,12 @@ Phases:
 - Q2: Characterize hot modules and capture parity fixtures for
   `quota.py`, `status.py`, and `heartbeat_prompt.py`.
 - Q3: Extract the quota `should-run` decision and packet builder into
-  `loopx/control_plane/quota/should_run.py`.
+  bounded modules. Done: `should_run.py` entry decision (#2963),
+  `should_run_prepare.py` preparation chain (#2964), and
+  `should_run_packet.py` route/packet assembly (#2965).
 - Q4: Extract status read models, collection, and presentation into bounded
-  modules.
+  modules. In progress; course/RFC reading paths updated to the new quota
+  bounded modules.
 - Q5: Extract heartbeat prompt builders into bounded modules.
 - Q6: Make CLI quota, turn driver, and bootstrap construction consume
   `EffectTurn` / `EffectProgram`.
