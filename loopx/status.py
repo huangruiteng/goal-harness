@@ -70,12 +70,6 @@ from .control_plane.handoff.project_handoff import (
 from .control_plane.work_items.autonomous_candidates import (
     MAX_AUTONOMOUS_TODO_CANDIDATES as _MAX_AUTONOMOUS_TODO_CANDIDATES,
 )
-from .control_plane.agents.agent_lane_recommendation import (
-    compact_agent_lane_recommendation as _compact_agent_lane_recommendation_read_model,
-    is_status_neutral_run as _is_status_neutral_run_read_model,
-    latest_agent_lane_run as _latest_agent_lane_run_read_model,
-    latest_run_recommended_action_for_projection as _latest_run_recommended_action_for_projection_read_model,
-)
 from .control_plane.goals.active_state_metadata import (
     parse_state_frontmatter,
 )
@@ -196,9 +190,6 @@ from .control_plane.runtime.run_ingest_health import (
     worker_bridge_ingest_health_note,
 )
 from .control_plane.runtime.time import parse_timestamp
-from .control_plane.runtime.run_history import (
-    latest_run as _latest_run_read_model,
-)
 from .control_plane.runtime.decision_freshness import (
     DECISION_FRESHNESS_CLASSIFICATION_PREFIXES,
     DECISION_FRESHNESS_ITEM_LIMIT,
@@ -288,7 +279,6 @@ from .registry import registry_goals
 from .rollout_event_log import load_rollout_events, rollout_event_log_path
 from .state_projection import (
     active_state_next_action_entries,
-    actions_are_projection_aligned,
     next_action_projection_warning,
     state_projection_gap_warning,
 )
@@ -2576,26 +2566,27 @@ def collect_global_registry_health(
 
 
 def is_status_neutral_run(run: dict[str, Any]) -> bool:
-    return _is_status_neutral_run_read_model(
-        run,
-        status_neutral_classifications=STATUS_NEUTRAL_CLASSIFICATIONS,
-        agent_lane_progress_scope=AGENT_LANE_PROGRESS_SCOPE,
+    from .control_plane.status.run_projection import (
+        is_status_neutral_run as _is_status_neutral_run,
     )
+
+    return _is_status_neutral_run(run)
 
 
 def latest_agent_lane_run(goal: dict[str, Any]) -> dict[str, Any] | None:
-    return _latest_agent_lane_run_read_model(
-        goal,
-        agent_lane_progress_scope=AGENT_LANE_PROGRESS_SCOPE,
+    from .control_plane.status.run_projection import (
+        latest_agent_lane_run as _latest_agent_lane_run,
     )
+
+    return _latest_agent_lane_run(goal)
 
 
 def compact_agent_lane_recommendation(run: dict[str, Any] | None) -> dict[str, Any] | None:
-    return _compact_agent_lane_recommendation_read_model(
-        run,
-        agent_lane_progress_scope=AGENT_LANE_PROGRESS_SCOPE,
-        public_safe_compact_text=public_safe_compact_text,
+    from .control_plane.status.run_projection import (
+        compact_agent_lane_recommendation as _compact_agent_lane_recommendation,
     )
+
+    return _compact_agent_lane_recommendation(run)
 
 
 def latest_run_recommended_action_for_projection(
@@ -2606,23 +2597,25 @@ def latest_run_recommended_action_for_projection(
     preferred_agent_id: str | None = None,
     limit: int = 320,
 ) -> tuple[str | None, str | None]:
-    return _latest_run_recommended_action_for_projection_read_model(
+    from .control_plane.status.run_projection import (
+        latest_run_recommended_action_for_projection as _latest_run_recommended_action_for_projection,
+    )
+
+    return _latest_run_recommended_action_for_projection(
         current_status_run=current_status_run,
         agent_lane_recommendation=agent_lane_recommendation,
         active_state_next_action=active_state_next_action,
         preferred_agent_id=preferred_agent_id,
         limit=limit,
-        public_safe_compact_text=public_safe_compact_text,
-        actions_are_projection_aligned=actions_are_projection_aligned,
-        parse_timestamp=parse_timestamp,
     )
 
 
 def latest_run(goal: dict[str, Any]) -> dict[str, Any] | None:
-    return _latest_run_read_model(
-        goal,
-        is_status_neutral_run=is_status_neutral_run,
+    from .control_plane.status.run_projection import (
+        latest_run as _latest_run,
     )
+
+    return _latest_run(goal)
 
 
 def ordered_lifecycle_flags(flags: list[str]) -> list[str]:
