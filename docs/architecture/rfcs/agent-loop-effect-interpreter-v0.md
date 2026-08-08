@@ -36,6 +36,18 @@ This RFC establishes the mental model, defines canonical packet semantics,
 and gives a milestone plan for aligning documentation, code, and tests with
 that model over time.
 
+## Milestone Status
+
+| Milestone | Status |
+|---|---|
+| M0 RFC and Lecture 0 | Merged (#2905, #2906, #2908) |
+| M1 Canonical packet example | Merged (#2907, #2910) |
+| M1.5 Composition lens | Merged (#2911) |
+| M2 Bounded context alignment | Partial (#2912-#2915, #2919) |
+| M3 Focused test families | Partial (#2916-#2918) |
+| M4 Architecture documentation | Pending |
+| M5 Steady-state review | Pending |
+
 ## Why This Matters
 
 Today, LoopX has many correct but hard-to-explain pieces:
