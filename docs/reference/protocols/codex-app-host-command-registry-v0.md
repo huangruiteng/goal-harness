@@ -118,6 +118,7 @@ Required fields:
 | `project_root_label` | Public-safe label such as repo name or `current workspace`. |
 | `goal_id` | Existing runtime state id field; keep the field name for CLI compatibility, but present it to users as the active state id. |
 | `agent_id` | Registered LoopX agent id when the host is acting for an agent. |
+| `thread_id` | Optional stable opaque host-thread token used to resolve a durable thread-to-agent binding. |
 | `host_surface` | `chat_box`, `command_palette`, `codex_cli_tui`, or another compact host label. |
 
 If the host cannot resolve a project root, `/loopx` and `/loopx <goal text>`
@@ -139,6 +140,7 @@ After parsing, the host hands the agent or CLI a compact packet:
   "project_root_label": "current workspace",
   "goal_id": "loopx-meta",
   "agent_id": "codex-product-capability",
+  "thread_id": "opaque-host-thread-123",
   "protocol": "loopx_goal_command_v0",
   "cli_preview": "loopx start-goal --guided --project . --goal-text \"<goal text>\"",
   "authority": {
@@ -150,6 +152,16 @@ After parsing, the host hands the agent or CLI a compact packet:
   "next_step": "run_guided_start_preview_then_plan_before_todo_write"
 }
 ```
+
+When a host supplies `thread_id`, the first explicit lane selection should be
+persisted with `loopx bind-agent-thread --execute`. Later `/loopx` calls in the
+same `(host_surface, goal_id, thread_id)` reuse that agent ID and carry it through
+start, heartbeat, quota, refresh-state, and Todo commands. A missing binding must select an existing lane; it must not register a new
+peer unless the user explicitly requests one and passes `--new-peer`. If the
+host cannot supply a stable thread ID, callers must keep using explicit
+`--agent-id` or `--new-peer`, and the identity gate remains fail-closed.
+Thread IDs are opaque public-safe tokens only; raw transcripts, credentials, and
+local paths are never persisted.
 
 The packet may be rendered to the agent prompt, passed to a tool call, or used
 to run the CLI directly. It must not contain raw transcripts, credentials,

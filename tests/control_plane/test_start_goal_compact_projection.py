@@ -584,11 +584,8 @@ def test_projection_preserves_agent_identity_gate_actions(tmp_path: Path) -> Non
 
     assert compact["guided_transaction"]["blocked_by"] == "agent_identity_selection"
     gate = compact["guided_transaction"]["identity_selection_gate"]
-    assert gate["default_action"] == "register_fresh_agent"
-    assert gate["fresh_agent_registration"]["recommended"] is True
-    assert "--agent-id '<new-public-safe-agent-id>'" in gate[
-        "fresh_agent_registration"
-    ]["rerun_start_goal_command"]
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
     assert all(
         choice["mode"] == "takeover_existing_agent"
         and choice["requires_explicit_takeover_intent"] is True
@@ -601,7 +598,99 @@ def test_projection_preserves_agent_identity_gate_actions(tmp_path: Path) -> Non
     assert _host_shadow_document(compact) == _host_shadow_document(detailed)
 
 
-def test_start_goal_does_not_reuse_the_only_registered_agent(tmp_path: Path) -> None:
+def test_start_goal_reuses_bound_thread_agent_and_scopes_commands(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+    registry_path = project / ".loopx" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["coordination"]["registered_agents"].append("codex-guided-peer")
+    registry["goals"][0]["coordination"]["thread_agent_bindings"] = [
+        {"thread_id": "thread-a", "host_surface": "codex-app", "agent_id": AGENT_ID}
+    ]
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        thread_id="thread-a",
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    assert payload["agent_id"] == AGENT_ID
+    assert payload["thread_agent_binding"]["status"] == "bound"
+    assert payload["guided_transaction"].get("blocked_by") is None
+    commands = payload["command_pack"]["commands"]
+    assert f"--agent-id {AGENT_ID}" in commands["goal_start_quota_should_run"]
+    assert f"--agent-id {AGENT_ID}" in commands["goal_start_refresh_state"]
+    assert f"--agent-id {AGENT_ID}" in payload["guided_transaction"]["ordered_steps"][3]["command_template"]
+
+    explicit_override = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id="codex-guided-peer",
+        thread_id="thread-a",
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+    assert explicit_override["agent_id"] == "codex-guided-peer"
+    assert explicit_override["command_pack"]["commands"]["goal_start_bind_thread"] is None
+
+
+def test_start_goal_with_unbound_thread_requires_existing_lane_selection(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+    registry_path = project / ".loopx" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["coordination"]["registered_agents"].append("codex-guided-peer")
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        thread_id="thread-new",
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    gate = payload["guided_transaction"]["identity_selection_gate"]
+    assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
+    assert "do not register a new one" in gate["reason"]
+
+
+def test_start_goal_unbound_thread_does_not_reuse_the_only_registered_agent(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        thread_id="thread-unbound",
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+
+    assert payload["agent_id"] is None
+    assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
+    gate = payload["guided_transaction"]["identity_selection_gate"]
+    assert gate["state"] == "thread_binding_selection_required"
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
+
+
+def test_start_goal_without_thread_id_requires_explicit_lane_selection(tmp_path: Path) -> None:
     project = _write_connected_project(tmp_path)
 
     payload = build_start_goal_guided_packet(
@@ -617,10 +706,29 @@ def test_start_goal_does_not_reuse_the_only_registered_agent(tmp_path: Path) -> 
     assert payload["agent_id"] is None
     assert payload["guided_transaction"]["blocked_by"] == "agent_identity_selection"
     gate = payload["guided_transaction"]["identity_selection_gate"]
-    assert gate["state"] == "fresh_agent_registration_required"
-    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["default_action"] == "select_agent_identity"
+    assert gate["fresh_agent_registration"] is None
     assert gate["choices"][0]["agent_id"] == AGENT_ID
     assert gate["choices"][0]["requires_explicit_takeover_intent"] is True
+
+
+def test_start_goal_new_peer_explicitly_allows_fresh_registration(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+        new_peer=True,
+        available_capabilities=["network"],
+    )
+
+    gate = payload["guided_transaction"]["identity_selection_gate"]
+    assert gate["default_action"] == "register_fresh_agent"
+    assert gate["fresh_agent_registration"]["recommended"] is True
 
 
 def test_projection_preserves_multi_goal_selection_actions(tmp_path: Path) -> None:

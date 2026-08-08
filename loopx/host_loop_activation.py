@@ -406,6 +406,7 @@ def _identity_state(
     agent_id: str | None,
     registered_agents: list[str] | None,
     fresh_agent_default: bool,
+    thread_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     registered = normalize_registered_agents(registered_agents)
     selected = normalize_todo_claimed_by(agent_id)
@@ -416,6 +417,99 @@ def _identity_state(
             "agent_model": "peer_v1",
             **values,
         }
+
+    binding = thread_binding if isinstance(thread_binding, dict) else {}
+    binding_status = str(binding.get("status") or "")
+    bound_agent = normalize_todo_claimed_by(binding.get("agent_id"))
+    if binding_status == "conflict":
+        return identity_payload(
+            {
+                "state": "thread_binding_conflict",
+                "activation_allowed": False,
+                "selected_agent_id": None,
+                "requested_agent_id": selected,
+                "registered_agents": registered,
+                "action_required": True,
+                "thread_binding": binding,
+                "reason": (
+                    "the current host thread is bound to conflicting agent lanes; repair the "
+                    "binding before host-loop activation"
+                ),
+                "required_cli_arg": "--agent-id <registered-agent-id>",
+            }
+        )
+    if binding_status == "bound":
+        if not bound_agent or bound_agent not in registered:
+            return identity_payload(
+                {
+                    "state": "thread_binding_invalid",
+                    "activation_allowed": False,
+                    "selected_agent_id": None,
+                    "requested_agent_id": selected,
+                    "registered_agents": registered,
+                    "action_required": True,
+                    "thread_binding": binding,
+                    "reason": "the current host thread binding points to an unregistered agent",
+                    "required_cli_arg": "--agent-id <registered-agent-id>",
+                }
+            )
+        if selected and selected != bound_agent:
+            if selected not in registered:
+                return identity_payload(
+                    {
+                        "state": "invalid_selection",
+                        "activation_allowed": False,
+                        "selected_agent_id": None,
+                        "requested_agent_id": selected,
+                        "registered_agents": registered,
+                        "action_required": True,
+                        "thread_binding": binding,
+                        "reason": f"agent_id={selected!r} is not registered for this goal",
+                        "required_cli_arg": "--agent-id <registered-agent-id>",
+                    }
+                )
+            return identity_payload(
+                {
+                    "state": "explicit_agent_selected",
+                    "activation_allowed": True,
+                    "selected_agent_id": selected,
+                    "registered_agents": registered,
+                    "action_required": False,
+                    "thread_binding": binding,
+                    "binding_override": True,
+                }
+            )
+        return identity_payload(
+            {
+                "state": "thread_binding_selected",
+                "activation_allowed": True,
+                "selected_agent_id": bound_agent,
+                "registered_agents": registered,
+                "action_required": False,
+                "thread_binding": binding,
+            }
+        )
+    if (
+        (binding_status == "missing" or binding.get("selection_required"))
+        and not selected
+        and not fresh_agent_default
+    ):
+        return identity_payload(
+            {
+                "state": "thread_binding_selection_required",
+                "activation_allowed": False,
+                "selected_agent_id": None,
+                "registered_agents": registered,
+                "action_required": True,
+                "thread_binding": binding,
+                "reason": (
+                    "current host thread has no stored agent binding or stable thread id; "
+                    "select an existing lane and do not register a new one unless a new "
+                    "peer/session was explicitly requested"
+                ),
+                "required_cli_arg": "--agent-id <registered-agent-id>",
+            }
+        )
 
     if fresh_agent_default and not selected:
         return identity_payload(
@@ -789,12 +883,14 @@ def build_host_loop_activation_packet(
     registered_agents: list[str] | None = None,
     available_capabilities: list[str] | None = None,
     fresh_agent_default: bool = False,
+    thread_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     canonical = normalize_agent_type(agent_type)
     identity = _identity_state(
         agent_id=agent_id,
         registered_agents=registered_agents,
         fresh_agent_default=fresh_agent_default,
+        thread_binding=thread_binding,
     )
     selected_agent_id = identity.get("selected_agent_id")
     activation_allowed = bool(identity.get("activation_allowed"))
@@ -867,13 +963,12 @@ def build_host_loop_activation_packet(
                         "heartbeat_prompt": candidate_commands["heartbeat_prompt"],
                     }
                 )
-            if fresh_agent_default:
-                choice.update(
-                    {
-                        "mode": "takeover_existing_agent",
-                        "requires_explicit_takeover_intent": True,
-                    }
-                )
+            choice.update(
+                {
+                    "mode": "takeover_existing_agent",
+                    "requires_explicit_takeover_intent": True,
+                }
+            )
             choices.append(choice)
         requested_agent_id = identity.get("requested_agent_id")
         fresh_agent_id = (

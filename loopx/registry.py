@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,41 @@ def resolve_state_file(repo: Path, state_file: str | None) -> Path | None:
         return None
     path = Path(state_file).expanduser()
     return path if path.is_absolute() else repo / path
+
+
+def find_registry_goal(registry: dict[str, Any], goal_id: str) -> dict[str, Any] | None:
+    for goal in registry_goals(registry):
+        if str(goal.get("id") or "") == goal_id:
+            return goal
+    return None
+
+
+def atomic_write_json(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    preserve_mode: bool = False,
+) -> None:
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode & 0o777 if preserve_mode and path.exists() else None
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    temporary_path = Path(temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if mode is not None:
+            os.chmod(temporary_path, mode)
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def stable_path_key(path: Path) -> str:

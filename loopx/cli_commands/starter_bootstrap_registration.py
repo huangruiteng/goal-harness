@@ -74,6 +74,15 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
         help="Registered LoopX agent id to include in quota/heartbeat commands.",
     )
     bootstrap_command_pack_parser.add_argument(
+        "--thread-id",
+        help="Stable opaque host thread id used to reuse the bound agent lane.",
+    )
+    bootstrap_command_pack_parser.add_argument(
+        "--new-peer",
+        action="store_true",
+        help="Explicitly request a fresh agent identity for this host thread.",
+    )
+    bootstrap_command_pack_parser.add_argument(
         "--cli-bin",
         default="loopx",
         help="LoopX CLI binary name embedded in generated commands.",
@@ -121,9 +130,18 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
         "--agent-id",
         help=(
             "Explicit registered LoopX identity for an ongoing session or exact "
-            "user-requested takeover. When omitted, new onboarding defaults to fresh "
-            "agent registration."
+            "user-requested takeover. When omitted, a bound thread identity is reused "
+            "when available; otherwise new onboarding defaults to fresh registration."
         ),
+    )
+    start_goal_parser.add_argument(
+        "--thread-id",
+        help="Stable opaque host thread id used to reuse the bound agent lane.",
+    )
+    start_goal_parser.add_argument(
+        "--new-peer",
+        action="store_true",
+        help="Explicitly request a fresh agent identity for this host thread.",
     )
     start_goal_parser.add_argument(
         "--cli-bin",

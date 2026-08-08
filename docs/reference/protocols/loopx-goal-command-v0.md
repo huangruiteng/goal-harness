@@ -102,18 +102,18 @@ observations as durable grants, and owner-held capabilities such as credentials
 remain user gates. This contract is shared by local visible Goal hosts and Ark
 Managed Agent Goal mode without requiring prompt regeneration.
 
-Agent identity follows the same fail-closed rule. A new `agent-onboard` or
-argument-bearing `start-goal --guided` invocation with no `--agent-id` must
-default to fresh identity registration, even when the goal has zero or one
-registered agent. Its identity gate must expose a preview/apply
-`register-agent --require-new` path. The preview is advisory; todo writeback
-requires an execute result with `ok=true`, `changed=true`, `written=true`,
-successful global sync, and verified source/global registration readback.
-Existing identities are takeover choices, never an
-implicit default; selecting one requires explicit user intent for that exact
-agent. A continuation that already carries an explicit registered `--agent-id`
-keeps that identity across `agent-onboard`, `bootstrap-command-pack`,
-`start-goal`, heartbeat prompt, and quota commands. No gated path may advertise
+Agent identity follows the same fail-closed rule. `agent-onboard` keeps its
+fresh-registration path, while Codex App `start-goal --guided` must reuse a
+matching stable opaque `--thread-id` binding when available. A missing thread
+id or missing binding must select an existing lane; fresh registration requires
+explicit `--new-peer` intent. Existing identities are takeover choices, never
+an implicit default; selecting one requires explicit user intent for that exact
+agent. LoopX persists `(host_surface, goal_id, thread_id) -> agent_id` with
+`bind-agent-thread --execute`; later `/loopx` calls reuse that bound identity
+across `start-goal`, heartbeat, quota, refresh-state, and Todo commands. The
+preview is advisory; todo writeback requires verified registration and binding
+readback. Without a stable thread id, callers must continue to pass an explicit
+registered `--agent-id` or explicit `--new-peer`. No gated path may advertise
 unscoped heartbeat or quota commands.
 
 The command pack preview is still read-only. It describes the commands and
