@@ -185,7 +185,7 @@ def main() -> int:
     assert init_payload["prompt_driven_route_required"] is True, init_payload
     init_command = init_payload["command"]
     assert "mkdir -p" in init_command, init_command
-    assert "install-from-github.sh" in init_command, init_command
+    assert "huangruiteng.github.io/loopx/install.sh" in init_command, init_command
     assert "mv \"$tmp\"" in init_command, init_command
     assert " bootstrap " in init_command, init_command
     assert " configure-goal " in init_command, init_command

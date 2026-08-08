@@ -9,7 +9,8 @@ from typing import Any
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from .doctor import NO_CLONE_INSTALL_URL, collect_doctor
+from .doctor import collect_doctor
+from .install_contract import NO_CLONE_INSTALL_URL
 
 
 UPDATE_PLAN_SCHEMA_VERSION = "loopx_update_plan_v0"

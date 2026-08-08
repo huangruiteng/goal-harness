@@ -25,7 +25,7 @@ state, but it cannot make an agent continue automatically.
 Connect the current project to LoopX.
 Do not clone the LoopX repository for ordinary use. If `loopx` is not on PATH,
 install or repair it with the official no-clone installer:
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 
 Then run `loopx doctor`. Work only from the current project root:
@@ -201,7 +201,7 @@ First-run path:
 Connect this repo to LoopX from this visible Codex CLI TUI. Do not clone the
 LoopX repository for ordinary use. If `loopx` is not on PATH, install or repair
 it with the official no-clone installer:
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 
 Then run `loopx doctor`. Work only from this project root: if LoopX state
 already exists, reuse it and do not create or overwrite a goal or the active objective; if the project
@@ -345,7 +345,7 @@ python3 examples/fresh-clone-quickstart-smoke.py
 Install or update LoopX without cloning the repository:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 ```

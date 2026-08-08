@@ -50,7 +50,7 @@ repository edits, and one-off tool use can remain Agent work.
 Install the CLI on the machine that owns the project workspace:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor --agent-type other-agent
 ```

@@ -44,7 +44,7 @@ def assert_doc() -> None:
         "one-message Codex CLI TUI bootstrap",
         "proof-capture fixtures for later visible automation",
         "Start LoopX for this repo",
-        "install-from-github.sh",
+        "huangruiteng.github.io/loopx/install.sh",
         "loopx codex-cli-bootstrap-message --project . --goal-id <goal-id> --message-only",
         "loopx codex-cli-tui-bootstrap-smoke-bundle",
         "loopx --format json codex-cli-visible-attach-acceptance",
@@ -94,7 +94,7 @@ def assert_cli_surfaces_align() -> None:
     assert not message.startswith("/goal "), message
     assert "setup/bootstrap instruction" in normalized, message
     assert "/goal <thin task_body>" in normalized, message
-    assert "install-from-github.sh" in normalized, message
+    assert "huangruiteng.github.io/loopx/install.sh" in normalized, message
     assert "Codex CLI TUI" in normalized, message
     assert "quota should-run" in normalized, message
     assert "quota spend-slot" in normalized, message

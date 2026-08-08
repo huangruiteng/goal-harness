@@ -166,8 +166,8 @@ def test_main_channel_upgrade_command_preserves_source_ref(tmp_path: Path) -> No
 
     command = str(freshness["no_clone_upgrade_command"])
     assert (
-        "curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/"
-        "scripts/install-from-github.sh | env LOOPX_REF=main bash"
+        "curl -fsSL https://huangruiteng.github.io/loopx/install.sh "
+        "| env LOOPX_REF=main bash"
     ) in command
     assert freshness["upgrade_command"] == command
 
@@ -186,7 +186,7 @@ def test_stable_channel_upgrade_command_keeps_public_default(tmp_path: Path) -> 
 
     command = str(freshness["no_clone_upgrade_command"])
     assert "LOOPX_REF=" not in command
-    assert "scripts/install-from-github.sh | bash" in command
+    assert "huangruiteng.github.io/loopx/install.sh | bash" in command
     assert freshness["upgrade_command"] == command
 
 

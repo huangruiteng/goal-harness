@@ -15,6 +15,7 @@ const statusFileName = "status.frontstage-share.json";
 const manifestFileName = "frontstage-share-manifest.json";
 const showcaseCatalogPath = "docs/showcases/showcase-catalog.json";
 const projectionFixturePath = "examples/goal-channel-frontstage-fixture.py";
+const installerScriptPath = "scripts/install-from-github.sh";
 const homepageEvidenceAssets = [
   "docs/assets/long-running-loop-openviking-trajectory.png",
   "docs/assets/long-running-loop-ml-experiment-trajectory.png",
@@ -93,6 +94,7 @@ async function copyHomepage(siteDir, base) {
   await writeFile(resolve(siteDir, "index.html"), html);
   await copyFile(resolve(homepageDir, "home.css"), resolve(assetDir, "home.css"));
   await copyFile(resolve(homepageDir, "home.js"), resolve(assetDir, "home.js"));
+  await copyFile(resolve(repoRoot, installerScriptPath), resolve(siteDir, "install.sh"));
   const evidenceDir = resolve(assetDir, "evidence");
   await mkdir(evidenceDir, { recursive: true });
   for (const assetPath of homepageEvidenceAssets) {
@@ -270,9 +272,11 @@ async function writeManifest(outDir, base, interactivePages) {
     site_dir: "site",
     status_fixture: `site/${statusFileName}`,
     homepage_entry: "site/index.html",
+    installer_entry: "site/install.sh",
     frontstage_entry: "site/frontstage/index.html",
     content_sources: {
       public_homepage: "apps/presentation/site",
+      installer_script: installerScriptPath,
       homepage_evidence_assets: homepageEvidenceAssets,
       primary_public_story: showcaseCatalogPath,
       interactive_case_pages: interactivePages,
@@ -303,7 +307,7 @@ async function collectTextFiles(rootDir) {
         await visit(path);
       } else if (entry.isFile()) {
         const info = await stat(path);
-        if (info.size <= 2_000_000 && /\.(css|html|js|json|md|txt)$/i.test(path)) {
+        if (info.size <= 2_000_000 && /\.(css|html|js|json|md|sh|txt)$/i.test(path)) {
           files.push(path);
         }
       }

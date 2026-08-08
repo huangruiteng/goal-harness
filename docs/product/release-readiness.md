@@ -12,7 +12,7 @@ which control-plane surfaces are safe to build on.
 For a first-time user, prefer the no-clone archive installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 ```

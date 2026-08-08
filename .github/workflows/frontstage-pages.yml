@@ -23,6 +23,7 @@ on:
       - "examples/showcase-catalog-smoke.py"
       - "examples/status.example.json"
       - "scripts/render-star-history.py"
+      - "scripts/install-from-github.sh"
   push:
     branches:
       - main
@@ -44,6 +45,7 @@ on:
       - "examples/showcase-catalog-smoke.py"
       - "examples/status.example.json"
       - "scripts/render-star-history.py"
+      - "scripts/install-from-github.sh"
 
 permissions:
   actions: read

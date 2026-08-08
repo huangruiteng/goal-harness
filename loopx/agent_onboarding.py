@@ -14,6 +14,7 @@ from .host_loop_activation import (
     render_agent_type_catalog_markdown,
     scheduler_command_binding_for_agent_type,
 )
+from .install_contract import NO_CLONE_INSTALL_URL
 from .project_prompt import (
     render_available_capability_args,
     render_codex_cli_no_clone_preflight,
@@ -187,9 +188,7 @@ def _skill_delivery_contract(
                 "onboarding_required_for_install": False,
                 "install_script": "scripts/install-local.sh",
                 "no_clone_install_command": (
-                    "curl -fsSL "
-                    "https://raw.githubusercontent.com/huangruiteng/loopx/main/"
-                    "scripts/install-from-github.sh"
+                    f"curl -fsSL {NO_CLONE_INSTALL_URL}"
                     " | env "
                     f"LOOPX_SKILLS_DIR={shell_arg(f'{project}/.agents/skills')} "
                     "LOOPX_ENTRY_HOST_SURFACE=ark-managed-agent "

@@ -18,6 +18,7 @@ from .execution_profile import (
     execution_profile_summary,
 )
 from .global_registry import sync_project_registry_to_global
+from .install_contract import NO_CLONE_INSTALL_URL
 from .onboarding import build_onboarding_scan
 from .orchestration import (
     DEFAULT_ORCHESTRATION_MODE,
@@ -33,7 +34,6 @@ DEFAULT_DOMAIN = "project-goal-control-plane"
 GENERIC_ONBOARDING_ADAPTER_KINDS = frozenset(
     {"generic_project_goal_v0", "read_only_project_map_v0"}
 )
-NO_CLONE_INSTALL_URL = "https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh"
 NO_CLONE_INSTALL_REPAIR_COMMAND = (
     f"curl -fsSL {NO_CLONE_INSTALL_URL} | bash\n"
     'export PATH="$HOME/.local/bin:$PATH"\n'

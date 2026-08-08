@@ -177,8 +177,7 @@ def test_host_requires_host_managed_loopx_skill_delivery(monkeypatch) -> None:
     assert contract["install_script"] == "scripts/install-local.sh"
     assert (
         contract["no_clone_install_command"] == "curl -fsSL "
-        "https://raw.githubusercontent.com/huangruiteng/loopx/main/"
-        "scripts/install-from-github.sh"
+        "https://huangruiteng.github.io/loopx/install.sh"
         " | env LOOPX_SKILLS_DIR=./.agents/skills "
         "LOOPX_ENTRY_HOST_SURFACE=ark-managed-agent "
         "LOOPX_INSTALL_SLASH_COMMANDS=0 bash"

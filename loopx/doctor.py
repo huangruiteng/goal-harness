@@ -17,6 +17,7 @@ from .control_plane.runtime.promotion_readiness import (
     PROMOTION_READINESS_CLASSIFICATION,
     PROMOTION_READINESS_RUNTIME_INDEX,
 )
+from .install_contract import NO_CLONE_INSTALL_URL
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path
 from .project_skill_delivery import discover_project_scoped_skill_ids
 from .registry_writability import probe_registry_write_path
@@ -33,7 +34,6 @@ PROMOTION_READINESS_CLASSIFICATIONS = {
 }
 PROMOTION_READINESS_FRESHNESS_HOURS = 24
 INSTALL_FRESHNESS_STALE_HOURS = 168
-NO_CLONE_INSTALL_URL = "https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh"
 RELEASE_ID_TIMESTAMP_RE = re.compile(r"^\d{8}T\d{6}Z$")
 REQUIRED_INSTALLED_SKILL_PHRASES = {
     "loopx-project": (

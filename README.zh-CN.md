@@ -168,7 +168,7 @@ Git；Python package 除标准库外没有 runtime 依赖。
 无需 clone，直接安装：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
 export PATH="$HOME/.local/bin:$PATH"
 loopx doctor
 ```

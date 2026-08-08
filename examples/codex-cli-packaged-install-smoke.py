@@ -94,7 +94,7 @@ def main() -> None:
         assert "ok: `True`" in doctor.stdout, doctor.stdout
         assert "## Install Freshness" in doctor.stdout, doctor.stdout
         assert "release_manifest_available: `True`" in doctor.stdout, doctor.stdout
-        assert "install-from-github.sh" in doctor.stdout, doctor.stdout
+        assert "huangruiteng.github.io/loopx/install.sh" in doctor.stdout, doctor.stdout
         doctor_json = subprocess.run(
             [str(installed), "--format", "json", "doctor"],
             check=True,
