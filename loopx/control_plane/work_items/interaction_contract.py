@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import typing
 from collections.abc import Mapping
 from typing import Any
 
@@ -46,6 +47,19 @@ INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 INTERACTION_RESPONSE_PLAN_SCHEMA_VERSION = "interaction_response_plan_v0"
 PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 PROTOCOL_ACTION_PACKET_LLM_POLICY = "no_api"
+
+
+class _InteractionContractRequired(typing.TypedDict):
+    schema_version: str
+    mode: str
+    user_channel: dict[str, Any]
+    agent_channel: dict[str, Any]
+    cli_channel: dict[str, Any]
+
+
+class InteractionContractPacket(_InteractionContractRequired, total=False):
+    response_plan: dict[str, Any]
+    fallback_policy: dict[str, Any]
 
 
 def _blocked_successor_wait_observation_required(payload: dict[str, Any]) -> bool:
@@ -1337,7 +1351,7 @@ def build_interaction_contract(
     scheduler_execution_context: (
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
-) -> dict[str, Any]:
+) -> InteractionContractPacket:
     execution_obligation = (
         payload.get("execution_obligation")
         if isinstance(payload.get("execution_obligation"), dict)
@@ -1397,7 +1411,7 @@ def build_interaction_contract(
         delivery_allowed=delivery_allowed,
         quiet_noop_allowed=quiet_noop_allowed,
     )
-    contract = {
+    contract: dict[str, Any] = {
         "schema_version": INTERACTION_CONTRACT_SCHEMA_VERSION,
         "mode": mode,
         "user_channel": user_channel,
@@ -1424,4 +1438,4 @@ def build_interaction_contract(
     _attach_interaction_vision_wait_state(contract, payload)
     if _interaction_fallback_policy_required(payload, mode=mode):
         contract["fallback_policy"] = {"do_not_cancel_on_block": True}
-    return contract
+    return typing.cast(InteractionContractPacket, contract)

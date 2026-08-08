@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from ...state_projection import actions_are_projection_aligned
 from ..goals.contract_health import project_contract_health_for_goal
@@ -26,7 +26,26 @@ def quota_plan_items(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def compact_quota_decision(decision: dict[str, Any]) -> dict[str, Any]:
+class QuotaDecisionPacket(TypedDict):
+    should_run: bool
+    normal_delivery_allowed: bool
+    recovery_delivery_allowed: bool
+    effective_action: str | None
+    self_repair_allowed: bool
+    capability_repair_allowed: bool
+    workspace_repair_allowed: bool
+    state: str
+    safe_bypass_allowed: bool
+    safe_bypass_kind: str | None
+    blocked_action_scope: str | None
+    compute: float | None
+    window_hours: int | None
+    slot_minutes: int | None
+    spent_slots: int | None
+    allowed_slots: int | None
+
+
+def compact_quota_decision(decision: dict[str, Any]) -> QuotaDecisionPacket:
     quota = decision.get("quota") if isinstance(decision.get("quota"), dict) else {}
     return {
         "should_run": bool(decision.get("should_run")),
