@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from loopx import status as status_module  # noqa: E402
 from loopx.control_plane.runtime.time import now_utc, parse_timestamp, utc_isoformat  # noqa: E402
-from loopx.control_plane.status_runtime_summaries import (  # noqa: E402
+from loopx.control_plane.status.runtime_summaries import (  # noqa: E402
     StatusRuntimeSummaryContext,
     build_status_runtime_summaries,
 )

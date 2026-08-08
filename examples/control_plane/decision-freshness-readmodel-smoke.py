@@ -15,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx import status as status_module  # noqa: E402
-from loopx.control_plane import status_runtime_summaries  # noqa: E402
+from loopx.control_plane.status import runtime_summaries as status_runtime_summaries  # noqa: E402
 from loopx.control_plane.runtime import decision_freshness as decision_read_model  # noqa: E402
 from loopx.control_plane.runtime import event_ledger as event_ledger_read_model  # noqa: E402
 

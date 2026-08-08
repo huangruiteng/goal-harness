@@ -12,7 +12,7 @@ from .control_plane.status_collection import (
     StatusCollectionContext,
     collect_status as _collect_status_read_model,
 )
-from .control_plane.status_runtime_summaries import (
+from .control_plane.status.runtime_summaries import (
     StatusRuntimeSummaryContext,
     build_status_runtime_summaries as _build_status_runtime_summaries_read_model,
 )
