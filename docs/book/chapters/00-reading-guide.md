@@ -102,7 +102,7 @@ lifecycle 选择，不是所有贡献的默认终点。
 
 ## 版本基线
 
-当前内容以 LoopX GitHub release `v0.4.1` 为发布锚点；本地命令示例已在 `loopx 0.4.0` CLI
+当前内容以 LoopX GitHub release `v0.4.3` 为发布锚点；本地命令示例已在 `loopx 0.4.3` CLI
 表面核对。发布标签、已安装 CLI 与源码 checkout 可能处于不同 revision，因此以下表面尤其需要
 按实际环境复核：
 
