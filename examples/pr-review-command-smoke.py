@@ -293,15 +293,17 @@ def main() -> int:
     assert (
         unchanged["autonomous_review"]["observation_state"] == "observed_unchanged"
     ), unchanged
-    assert unchanged["autonomous_review"]["candidate"] is None, unchanged
+    assert unchanged["autonomous_review"]["candidate"]["number"] == 771, unchanged
+    assert (
+        unchanged["autonomous_review"]["projected_candidate_count"] == 2
+    ), unchanged
     progressed_observation = progressed["autonomous_review"]
     assert (
         progressed_observation["observation_state"] == "observed_unchanged"
     ), progressed
     assert progressed_observation["candidate"]["number"] == 771, progressed
     assert (
-        progressed_observation["candidate_selection_reason"]
-        == "unhandled_backlog_progression"
+        progressed_observation["projected_candidate_count"] == 1
     ), progressed
     assert progressed_observation["handled_exact_head_count"] == 1, progressed
 

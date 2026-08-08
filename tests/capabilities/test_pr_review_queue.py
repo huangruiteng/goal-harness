@@ -106,8 +106,49 @@ def test_unchanged_observation_emits_no_duplicate_candidate() -> None:
 
     assert repeated["observation_state"] == "observed_unchanged"
     assert repeated["changed_pr_numbers"] == []
-    assert repeated["candidate"] is None
-    assert repeated["pending_candidate_exact_head"] == f"1@{1:040d}"
+    assert repeated["candidate"]["number"] == 2
+    assert repeated["pending_candidate_exact_head"] == f"2@{2:040d}"
+
+
+def test_round_robin_rotates_through_projected_candidates() -> None:
+    first = _observe([_pr(1), _pr(2), _pr(3)])
+    assert first["candidate"]["number"] == 1
+    assert first["projected_candidate_exact_heads"] == [f"1@{1:040d}"]
+
+    second = _observe([_pr(1), _pr(2), _pr(3)], previous=first)
+    assert second["candidate"]["number"] == 2
+    assert second["projected_candidate_exact_heads"] == [
+        f"1@{1:040d}",
+        f"2@{2:040d}",
+    ]
+
+    third = _observe([_pr(1), _pr(2), _pr(3)], previous=second)
+    assert third["candidate"]["number"] == 3
+    assert third["projected_candidate_exact_heads"] == [
+        f"1@{1:040d}",
+        f"2@{2:040d}",
+        f"3@{3:040d}",
+    ]
+
+    exhausted = _observe([_pr(1), _pr(2), _pr(3)], previous=third)
+    assert exhausted["candidate"] is None
+    assert exhausted["pending_candidate_exact_head"] == f"3@{3:040d}"
+    assert exhausted["projected_candidate_count"] == 3
+
+
+def test_round_robin_accepts_handled_rotated_candidate() -> None:
+    first = _observe([_pr(1), _pr(2)])
+    second = _observe([_pr(1), _pr(2)], previous=first)
+
+    assert second["candidate"]["number"] == 2
+    handled_second = _observe(
+        [_pr(1), _pr(2)],
+        previous=second,
+        handled=[f"2@{2:040d}"],
+    )
+    assert handled_second["handled_exact_heads"] == [f"2@{2:040d}"]
+    assert handled_second["candidate"] is None
+    assert handled_second["projected_candidate_exact_heads"] == [f"1@{1:040d}"]
 
 
 def test_handled_exact_head_advances_unchanged_backlog() -> None:
@@ -123,7 +164,8 @@ def test_handled_exact_head_advances_unchanged_backlog() -> None:
 
     still_pending = _observe([_pr(1), _pr(2)], previous=repeated)
     assert still_pending["observation_state"] == "observed_unchanged"
-    assert still_pending["candidate"]["number"] == 2
+    assert still_pending["candidate"] is None
+    assert still_pending["pending_candidate_exact_head"] == f"2@{2:040d}"
 
 
 def test_handled_changed_pr_does_not_strand_unchanged_backlog() -> None:

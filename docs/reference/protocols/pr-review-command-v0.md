@@ -78,14 +78,23 @@ loopx --format json pr-review --repo owner/repo --state open \
 persists these public-safe cursors in `handled_exact_heads`. Candidate emission
 alone is not a completion receipt: callers must add the cursor only after
 review-result readback proves that exact head was handled. A newly supplied
-cursor must match the prior packet's candidate; a caller cannot skip an
-unselected PR by naming it handled. A new head is a new candidate even when the
-prior head was handled.
+cursor must match the prior packet's candidate or one of its
+`projected_candidate_exact_heads`; a caller cannot skip an unselected PR by
+naming it handled. A new head is a new candidate even when the prior head was
+handled.
 
 `pending_candidate_exact_head` preserves the last selected but unhandled exact
 head across unchanged and incomplete polls. It is a scheduling cursor only;
 callers still deduplicate Todo creation by exact target key and must not treat
 the cursor as evidence that a review happened.
+
+`projected_candidate_exact_heads` persists every candidate that has been emitted
+but not yet completed. An unchanged poll skips those projected exact heads and
+selects the next unprojected, unhandled PR in the existing review sequence, so
+the monitor keeps rotating through the backlog instead of waiting on one PR.
+When every actionable PR has already been projected, `candidate` is `None` and
+`pending_candidate_exact_head` remains the last pending cursor. A material
+transition on an already projected exact head still re-selects that head.
 
 `review_backlog` gives the monitor a compact workload cadence hint. It counts
 open, non-draft PRs whose exact head is actionable and not yet recorded in
@@ -102,11 +111,10 @@ states:
 - `not_observed`: the source or packet slice was incomplete. Preserve the
   previous baseline and do not claim the queue is unchanged.
 - `observed_unchanged`: a complete observation has the same queue fingerprint.
-  Do not create a duplicate exact-head Todo. When an explicit handled cursor
-  advances the scheduling state, the packet may select the next unhandled
-  backlog PR while preserving this observation state. An unhandled candidate
-  can remain selected across polls until the caller supplies its completion
-  cursor.
+  Do not create a duplicate exact-head Todo for a projected candidate. The
+  packet selects the next unprojected, unhandled backlog PR so the queue keeps
+  rotating. An unhandled candidate remains in `projected_candidate_exact_heads`
+  until the caller supplies its completion cursor.
 - `material_transition`: a complete observation changed an exact head, review
   decision, check state, draft state, mergeability, or open-queue membership.
 
@@ -114,7 +122,9 @@ The repository-scoped fingerprint contains only compact public PR metadata.
 Persisted `items` carry only PR number and item fingerprint, so the autonomous
 packet does not duplicate the full review queue. The capability selects at
 most one unhandled, non-draft open PR in the existing `pr-review` sequence:
-changed PRs first, then the unchanged backlog after an explicit handled cursor.
+changed PRs first, then an unchanged poll rotates to the next unprojected
+candidate. Projected-but-unhandled candidates are skipped until they are
+handled or their exact head materially changes.
 It emits a
 `pull_request_review_todo_preview_v0` bound to its exact head. The preview may
 route to initial review, re-review after changes, or merge-readiness
