@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -65,6 +67,7 @@ def _save_recovery_binding(
     bindings_payload: Mapping[str, Any],
     goal_id: str,
     existing: Mapping[str, Any],
+    target_name: str | None,
     chat_id: str,
     chat_name: str,
     identity_mode: str,
@@ -75,32 +78,80 @@ def _save_recovery_binding(
     cli_bin: str,
 ) -> None:
     recovery = dict(existing)
+    channel = _mapping(existing.get("channel"))
+    identity = _mapping(existing.get("identity"))
+    if target_name:
+        channel = {
+            **(
+                {"pinned_message_id": channel["pinned_message_id"]}
+                if channel.get("pinned_message_id")
+                else {}
+            )
+        }
+        identity = {}
+    else:
+        channel.update({"chat_id": chat_id, "chat_name": chat_name})
+        identity = {
+            "mode": identity_mode,
+            "sender_profile": sender_profile,
+            "sender_identity": sender_identity,
+            "bot_app_id": bot_app_id,
+            "bot_display_name": bot_display_name,
+            "cli_bin": cli_bin,
+        }
     recovery.update(
         {
             "goal_id": goal_id,
             "provider": "lark",
             "enabled": False,
-            "channel": {
-                **_mapping(existing.get("channel")),
-                "chat_id": chat_id,
-                "chat_name": chat_name,
-            },
-            "identity": {
-                "mode": identity_mode,
-                "sender_profile": sender_profile,
-                "sender_identity": sender_identity,
-                "bot_app_id": bot_app_id,
-                "bot_display_name": bot_display_name,
-                "cli_bin": cli_bin,
-            },
+            "channel": channel,
+            "identity": identity,
             "receipts": _mapping(existing.get("receipts")),
         }
     )
+    if target_name:
+        recovery["target_ref"] = target_name
     save_goal_binding(
         binding_path=binding_path,
         payload=bindings_payload,
         goal_id=goal_id,
         binding=recovery,
+    )
+
+
+def _goal_kanban_config_path(registry_path: Path, goal_id: str) -> Path:
+    default_path = default_lark_kanban_config_path(registry_path)
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", goal_id).strip("-._") or "goal"
+    digest = hashlib.sha256(goal_id.encode("utf-8")).hexdigest()[:8]
+    return (
+        default_path.parent
+        / "goal-channels"
+        / f"{slug[:48]}-{digest}"
+        / default_path.name
+    )
+
+
+def _resolved_binding(
+    *,
+    raw_binding: Mapping[str, Any],
+    goal_id: str,
+    target_name: str | None,
+    provider_target: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not target_name:
+        return dict(raw_binding)
+    target_binding = {
+        **raw_binding,
+        "provider": "lark",
+        "target_ref": target_name,
+    }
+    return (
+        binding_for_goal(
+            {"bindings": {goal_id: target_binding}},
+            goal_id,
+            provider_target=provider_target,
+        )
+        or {}
     )
 
 
@@ -110,6 +161,8 @@ def setup_lark_goal_channel(
     registry_path: Path,
     goal_id: str,
     binding_path: Path,
+    target_name: str | None = None,
+    provider_target: Mapping[str, Any] | None = None,
     kanban_config_path: Path | None = None,
     chat_id: str | None = None,
     chat_name: str | None = None,
@@ -127,7 +180,34 @@ def setup_lark_goal_channel(
 ) -> dict[str, Any]:
     goal = goal_from_registry(registry, goal_id)
     bindings_payload = read_goal_channel_binding(binding_path)
-    existing = binding_for_goal(bindings_payload, goal_id) or {}
+    raw_existing = binding_for_goal(bindings_payload, goal_id) or {}
+    existing_target_name = str(raw_existing.get("target_ref") or "")
+    effective_target_name = str(target_name or existing_target_name or "") or None
+    if effective_target_name:
+        if provider_target is None:
+            raise ValueError("Goal Channel shared target is required")
+        if any(
+            value is not None
+            for value in (
+                chat_id,
+                chat_name,
+                identity_mode,
+                sender_profile,
+                sender_identity,
+                bot_app_id,
+                bot_display_name,
+                cli_bin,
+            )
+        ):
+            raise ValueError(
+                "Goal Channel --target cannot be combined with channel or identity flags"
+            )
+    existing = _resolved_binding(
+        raw_binding=raw_existing,
+        goal_id=goal_id,
+        target_name=effective_target_name,
+        provider_target=provider_target,
+    )
     existing_channel = _mapping(existing.get("channel"))
     existing_identity = _mapping(existing.get("identity"))
 
@@ -326,7 +406,8 @@ def setup_lark_goal_channel(
                 binding_path=binding_path,
                 bindings_payload=bindings_payload,
                 goal_id=goal_id,
-                existing=existing,
+                existing=raw_existing,
+                target_name=effective_target_name,
                 chat_id=effective_chat_id,
                 chat_name=effective_chat_name,
                 identity_mode=effective_mode,
@@ -337,7 +418,13 @@ def setup_lark_goal_channel(
                 cli_bin=effective_cli_bin,
             )
             bindings_payload = read_goal_channel_binding(binding_path)
-            existing = binding_for_goal(bindings_payload, goal_id) or {}
+            raw_existing = binding_for_goal(bindings_payload, goal_id) or {}
+            existing = _resolved_binding(
+                raw_binding=raw_existing,
+                goal_id=goal_id,
+                target_name=effective_target_name,
+                provider_target=provider_target,
+            )
         else:
             effective_chat_id = "oc_preview"
     elif execute:
@@ -428,8 +515,14 @@ def setup_lark_goal_channel(
             external_write_performed=bool(external_writes),
         )
 
-    effective_kanban_path = (
-        kanban_config_path or default_lark_kanban_config_path(registry_path)
+    existing_kanban = _mapping(raw_existing.get("kanban"))
+    existing_kanban_path = str(existing_kanban.get("config_path") or "")
+    effective_kanban_path = kanban_config_path or (
+        Path(existing_kanban_path).expanduser()
+        if existing_kanban_path
+        else _goal_kanban_config_path(registry_path, goal_id)
+        if effective_target_name
+        else default_lark_kanban_config_path(registry_path)
     )
     kanban = setup_lark_kanban_board(
         config_path=effective_kanban_path,
@@ -647,35 +740,44 @@ def setup_lark_goal_channel(
             "message_id": control_message_id,
             "verified_at": now_iso(),
         }
+        saved_channel = {"pinned_message_id": control_message_id}
+        saved_identity: dict[str, Any] = {}
+        if not effective_target_name:
+            saved_channel.update(
+                {
+                    "chat_id": effective_chat_id,
+                    "chat_name": effective_chat_name,
+                }
+            )
+            saved_identity = {
+                "mode": effective_mode,
+                "sender_profile": effective_profile,
+                "sender_identity": effective_identity,
+                "bot_app_id": effective_app_id,
+                "bot_display_name": effective_bot_name,
+                "cli_bin": effective_cli_bin,
+            }
+        saved_binding: dict[str, Any] = {
+            "goal_id": goal_id,
+            "provider": "lark",
+            "enabled": True,
+            "channel": saved_channel,
+            "kanban": {
+                "config_path": str(effective_kanban_path),
+                "base_token": str(board.get("base_token") or ""),
+                "table_id": str(board.get("table_id") or ""),
+                "base_url": kanban_url,
+            },
+            "identity": saved_identity,
+            "receipts": mutable_receipts,
+        }
+        if effective_target_name:
+            saved_binding["target_ref"] = effective_target_name
         save_goal_binding(
             binding_path=binding_path,
             payload=bindings_payload,
             goal_id=goal_id,
-            binding={
-                "goal_id": goal_id,
-                "provider": "lark",
-                "enabled": True,
-                "channel": {
-                    "chat_id": effective_chat_id,
-                    "chat_name": effective_chat_name,
-                    "pinned_message_id": control_message_id,
-                },
-                "kanban": {
-                    "config_path": str(effective_kanban_path),
-                    "base_token": str(board.get("base_token") or ""),
-                    "table_id": str(board.get("table_id") or ""),
-                    "base_url": kanban_url,
-                },
-                "identity": {
-                    "mode": effective_mode,
-                    "sender_profile": effective_profile,
-                    "sender_identity": effective_identity,
-                    "bot_app_id": effective_app_id,
-                    "bot_display_name": effective_bot_name,
-                    "cli_bin": effective_cli_bin,
-                },
-                "receipts": mutable_receipts,
-            },
+            binding=saved_binding,
         )
     return operation_packet(
         ok=True,

@@ -86,10 +86,43 @@ def goal_from_registry(
 def binding_for_goal(
     payload: Mapping[str, Any],
     goal_id: str,
+    *,
+    provider_target: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     bindings = payload.get("bindings")
     binding = bindings.get(goal_id) if isinstance(bindings, Mapping) else None
-    return dict(binding) if isinstance(binding, Mapping) else None
+    if not isinstance(binding, Mapping):
+        return None
+    resolved = dict(binding)
+    target_ref = str(resolved.get("target_ref") or "")
+    if not target_ref or provider_target is None:
+        return resolved
+    if str(provider_target.get("name") or "") != target_ref:
+        raise ValueError("Goal Channel provider target does not match target_ref")
+    if str(provider_target.get("provider") or "") != str(
+        resolved.get("provider") or ""
+    ):
+        raise ValueError("Goal Channel provider target does not match provider")
+    target_channel = provider_target.get("channel")
+    target_identity = provider_target.get("identity")
+    if not isinstance(target_channel, Mapping) or not isinstance(
+        target_identity, Mapping
+    ):
+        raise ValueError("Goal Channel provider target is incomplete")
+    binding_channel = resolved.get("channel")
+    binding_channel = (
+        dict(binding_channel) if isinstance(binding_channel, Mapping) else {}
+    )
+    resolved["channel"] = {
+        **dict(target_channel),
+        **(
+            {"pinned_message_id": binding_channel["pinned_message_id"]}
+            if binding_channel.get("pinned_message_id")
+            else {}
+        ),
+    }
+    resolved["identity"] = dict(target_identity)
+    return resolved
 
 
 def save_goal_binding(
@@ -137,7 +170,7 @@ def parse_time(value: Any) -> datetime | None:
 def operation_packet(
     *,
     ok: bool,
-    goal_id: str,
+    goal_id: str | None,
     operation: str,
     execute: bool,
     status: str,

@@ -58,11 +58,12 @@ def doctor_lark_goal_channel(
     registry_path: Path,
     goal_id: str,
     binding_path: Path,
+    provider_target: Mapping[str, Any] | None = None,
     runner: CommandRunner = default_subprocess_runner,
 ) -> dict[str, Any]:
     goal_from_registry(registry, goal_id)
     payload = read_goal_channel_binding(binding_path)
-    binding = binding_for_goal(payload, goal_id)
+    binding = binding_for_goal(payload, goal_id, provider_target=provider_target)
     if binding is None:
         return operation_packet(
             ok=False,
@@ -185,13 +186,14 @@ def sync_lark_goal_channel(
     registry_path: Path,
     goal_id: str,
     binding_path: Path,
+    provider_target: Mapping[str, Any] | None = None,
     agent_id: str | None = None,
     execute: bool = False,
     runner: CommandRunner = default_subprocess_runner,
 ) -> dict[str, Any]:
     goal_from_registry(registry, goal_id)
     payload = read_goal_channel_binding(binding_path)
-    binding = binding_for_goal(payload, goal_id)
+    binding = binding_for_goal(payload, goal_id, provider_target=provider_target)
     if binding is None:
         return operation_packet(
             ok=False,
@@ -309,14 +311,15 @@ def notify_lark_goal_channel_gate(
     goal_id: str,
     binding_path: Path,
     quota_packet: Mapping[str, Any],
+    provider_target: Mapping[str, Any] | None = None,
     cooldown_seconds: int = DEFAULT_GATE_COOLDOWN_SECONDS,
     execute: bool = False,
     runner: CommandRunner = default_subprocess_runner,
 ) -> dict[str, Any]:
     goal = goal_from_registry(registry, goal_id)
     payload = read_goal_channel_binding(binding_path)
-    binding = binding_for_goal(payload, goal_id)
-    if binding is None:
+    raw_binding = binding_for_goal(payload, goal_id)
+    if raw_binding is None:
         return operation_packet(
             ok=False,
             goal_id=goal_id,
@@ -326,6 +329,8 @@ def notify_lark_goal_channel_gate(
             blocker="channel_binding_missing",
             public_summary="configure the Goal Channel before notifying a human gate",
         )
+    binding = binding_for_goal(payload, goal_id, provider_target=provider_target)
+    assert binding is not None
     if binding.get("enabled") is not True:
         return operation_packet(
             ok=False,
@@ -555,7 +560,7 @@ def notify_lark_goal_channel_gate(
         "message_id": message_id,
         "verified_at": now_iso(),
     }
-    mutable_binding = dict(binding)
+    mutable_binding = dict(raw_binding)
     mutable_binding["receipts"] = mutable_receipts
     save_goal_binding(
         binding_path=binding_path,

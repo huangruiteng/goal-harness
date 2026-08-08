@@ -13,16 +13,30 @@ from .goal_channel_runtime import (
     sync_lark_goal_channel,
 )
 from .goal_channel_setup import setup_lark_goal_channel
+from .goal_channel_targets import (
+    GOAL_CHANNEL_TARGETS_SCHEMA_VERSION,
+    add_lark_goal_channel_target,
+    default_goal_channel_target_path,
+    goal_channel_target_for_name,
+    list_goal_channel_targets,
+    read_goal_channel_targets,
+)
 
 
 __all__ = [
     "DEFAULT_GATE_COOLDOWN_SECONDS",
     "GOAL_CHANNEL_BINDING_SCHEMA_VERSION",
     "GOAL_CHANNEL_OPERATION_SCHEMA_VERSION",
+    "GOAL_CHANNEL_TARGETS_SCHEMA_VERSION",
+    "add_lark_goal_channel_target",
     "default_goal_channel_binding_path",
+    "default_goal_channel_target_path",
     "doctor_lark_goal_channel",
     "notify_lark_goal_channel_gate",
+    "goal_channel_target_for_name",
+    "list_goal_channel_targets",
     "read_goal_channel_binding",
+    "read_goal_channel_targets",
     "setup_lark_goal_channel",
     "sync_lark_goal_channel",
 ]
