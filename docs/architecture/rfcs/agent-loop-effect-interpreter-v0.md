@@ -287,6 +287,25 @@ Before then, keep the abstraction as a documented lens and add tests that
 prove each packet maps losslessly. This avoids building a generic `Effect`
 framework that no runtime uses.
 
+### Replacement-First Rule
+
+Every M6 code change must replace an existing real runtime call path, not add
+a parallel unused abstraction.
+
+- Before replacement: capture a parity fixture or smoke for the existing
+  path.
+- Replace: make runtime read/write flow through `EffectTurn` / `EffectProgram`.
+- After: delete the old path, or keep a compatibility wrapper only when a real
+  external import or persisted contract requires it.
+- Test-only additions do not count as M6 progress.
+
+Example replacements:
+
+- `bootstrap_command_pack` should read `ordered_steps` through
+  `effect_program_from_ordered_steps` before rendering or validation;
+- `turn_driver/executor` should derive result status and next phase through
+  `interpret_turn_result_packet` before committing a receipt.
+
 ## State Machine As Interpretation Table
 
 Instead of teaching state machines as a list of enum values, teach each state
@@ -505,10 +524,23 @@ Each focused pytest module should cover:
 
 Large smokes remain only as thin end-to-end checks.
 
+### Runtime Replacement Testing
+
+For every runtime replacement:
+
+- focused pytest covers the new seam and parity with the old path;
+- a thin public smoke exercises the real CLI or host path;
+- CLI output budget regression stays green;
+- model-behavior / Doubao shadow qualification covers agent-facing packet
+  changes;
+- canary premerge includes `core-control-plane` and `canary-runner` profiles.
+
 ## Non-Goals
 
 - Do not merge all state machines into one giant enum.
 - Do not create a generic `Effect` abstraction without two real callers.
+- Do not count test-only lenses as M6 progress; every M6 change must replace a
+  real runtime call path.
 - Do not treat the current `EffectTurn` lens as a general runtime abstraction
   until a second interpreter and a real executor caller exist.
 - Do not rewrite `quota should-run` for the sake of naming.
@@ -523,7 +555,7 @@ Large smokes remain only as thin end-to-end checks.
   Mitigation: only add a shared envelope when a second caller needs it.
 - Decorative naming: docs say "effect program" while runtime still only
   passes CLI strings. Mitigation: M6 requires a second interpreter and a real
-  executor caller before the RFC claims a general abstraction.
+  runtime replacement before the RFC claims a general abstraction.
 - Test churn: converting large smokes too fast can reduce e2e confidence.
   Mitigation: keep thin e2e until focused tests cover the same behavior.
 
