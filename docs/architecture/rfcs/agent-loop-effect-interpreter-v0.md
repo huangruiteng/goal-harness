@@ -48,6 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
+| M6 General effect-program abstraction | Pending |
 
 ## Why This Matters
 
@@ -238,6 +239,53 @@ interpreter:
   stable;
 - `next_effect` changes from one CLI command to an ordered effect program.
 
+## General Effect-Program Abstraction
+
+The current `EffectTurn` lens is intentionally read-only and quota-specific.
+It gives LoopX a stable vocabulary, a canonical read model, and around
+semantics over one real packet. It is not yet a general effect-program
+abstraction.
+
+Refactoring alone will not create that abstraction. It creates the bounded
+contexts where a shared abstraction can safely live. The two tracks are
+parallel and equally important:
+
+- refactor: keep each state family in its owning bounded context;
+- generalize: extract the shared effect shape only when real runtime callers
+  need it.
+
+### What Exists Today
+
+- `EffectRequest`, `EffectInterpretation`, `EffectObservation`, `EffectNext`,
+  and `EffectTurn` as canonical slots.
+- `interpret_quota_should_run_packet` as the first real interpreter.
+- around semantics encoded in `capability_gate`, `interaction_contract`,
+  `work_lane_contract`, and `scheduler_hint`.
+- focused tests and docs that pin the lens.
+
+### What Is Missing
+
+- A second real interpreter over a different packet family. Until that
+  exists, `EffectTurn` remains quota-shaped, not shared.
+- A minimal interpreter protocol or composition helper used by runtime code,
+  not only by tests.
+- An execution-mode field in `EffectNext` (`serial`, `parallel`,
+  `interleaved`) and a data-encoded ordered effect program.
+- A real host or turn-driver caller that executes an ordered effect program
+  while preserving failure, cancellation, permission, and budget semantics.
+
+### When To Generalize
+
+Generalize only when at least two real callers need the same shape:
+
+1. a second packet interpreter, such as a turn-result or status packet
+   interpreter;
+2. a host or turn-driver caller that executes an ordered effect program.
+
+Before then, keep the abstraction as a documented lens and add tests that
+prove each packet maps losslessly. This avoids building a generic `Effect`
+framework that no runtime uses.
+
 ## State Machine As Interpretation Table
 
 Instead of teaching state machines as a list of enum values, teach each state
@@ -406,6 +454,35 @@ Acceptance criteria:
 - The RFC is referenced by maintainer docs and course material.
 - New control-plane features state which effect they interpret.
 
+### M6: General Effect-Program Abstraction
+
+**Goal**: Move from a quota-only read lens to a shared effect-program
+abstraction without speculative framework construction.
+
+Steps:
+
+1. Add a second real interpreter, for example `interpret_turn_result_packet`
+   or `interpret_status_packet`, with focused tests that prove `EffectTurn`
+   is lossless for that family too.
+2. Extract a minimal `EffectInterpreter` protocol only when the second
+   caller needs it. Do not add a registry or a generic composition framework
+   yet.
+3. Add `execution_mode` to `EffectNext` and document
+   `serial` / `parallel` / `interleaved` semantics with focused tests.
+4. Introduce a data-encoded ordered effect program shape and a real executor
+   seam when a host or turn-driver caller can execute multiple steps.
+5. Keep failure, cancellation, permission, and budget semantics structured
+   across every interpreter. No catch-all wrapper.
+
+Acceptance criteria:
+
+- At least two packet families produce `EffectTurn`.
+- Runtime code, not only tests, consumes the shared shape.
+- `next_effect` can express an ordered effect program with an explicit
+  execution mode.
+- No generic `Effect` monad, registry, or middleware framework is added
+  without a second runtime caller.
+
 ## Test Strategy
 
 Tests should be organized by effect family, not by source-file size:
@@ -428,6 +505,8 @@ Large smokes remain only as thin end-to-end checks.
 
 - Do not merge all state machines into one giant enum.
 - Do not create a generic `Effect` abstraction without two real callers.
+- Do not treat the current `EffectTurn` lens as a general runtime abstraction
+  until a second interpreter and a real executor caller exist.
 - Do not rewrite `quota should-run` for the sake of naming.
 - Do not remove existing public compatibility routes without a migration
   window.
@@ -438,6 +517,9 @@ Large smokes remain only as thin end-to-end checks.
   Mitigation: every RFC milestone must produce a real doc or test change.
 - Over-abstraction: a generic effect envelope could become unused scaffolding.
   Mitigation: only add a shared envelope when a second caller needs it.
+- Decorative naming: docs say "effect program" while runtime still only
+  passes CLI strings. Mitigation: M6 requires a second interpreter and a real
+  executor caller before the RFC claims a general abstraction.
 - Test churn: converting large smokes too fast can reduce e2e confidence.
   Mitigation: keep thin e2e until focused tests cover the same behavior.
 
@@ -448,6 +530,10 @@ Large smokes remain only as thin end-to-end checks.
 - Should each capability own an interpretation table, or should the tables
   stay in central docs?
 - When should a new state machine be considered a new effect family?
+- Which packet family should be the second real `EffectTurn` interpreter:
+  turn result, status, or monitor poll?
+- At what point should `next_effect` stop being a flat CLI tuple and become an
+  ordered effect program with `execution_mode`?
 
 ## Success Metrics
 
