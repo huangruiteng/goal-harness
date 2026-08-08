@@ -115,6 +115,16 @@ from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
 )
 from .control_plane.quota.states import QUOTA_STATE_ORDER
+from .control_plane.quota.policy_constants import (
+    AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS,
+    DEFAULT_COMPUTE_QUOTA,
+    DEFAULT_SLOT_MINUTES,
+    DEFAULT_WINDOW_HOURS,
+    FOCUS_WAIT_LIFECYCLE_MARKERS,
+    FOCUS_WAIT_REASON,
+    MONITOR_DUE_ITEM_LIMIT,
+    SELF_REPAIR_SPEND_ACTIONS,
+)
 from .control_plane.runtime.decision_freshness import (
     decision_freshness_warning as _decision_freshness_warning,
 )
@@ -194,38 +204,12 @@ _PUBLIC_COMPAT_REEXPORTS = {
 }
 
 
-DEFAULT_COMPUTE_QUOTA = 1.0
-DEFAULT_WINDOW_HOURS = 24
-DEFAULT_SLOT_MINUTES = 1
 AUTONOMOUS_REPLAN_ACK_NEUTRAL_CLASSIFICATIONS = {
     QUOTA_SLOT_SPENT_CLASSIFICATION,
     QUOTA_SLOT_VOIDED_CLASSIFICATION,
     QUOTA_SCHEDULER_ACK_CLASSIFICATION,
     "delivery_completion_spend_accounted_v0",
 }
-FOCUS_WAIT_LIFECYCLE_MARKERS = {
-    "continuation_boundary",
-    "focus_wait",
-}
-FOCUS_WAIT_REASON = (
-    "focus wait: delivery lane has a continuation boundary or missing novelty; "
-    "wait for new evidence, owner input, external eval, or a clean baseline before "
-    "spending delivery compute"
-)
-AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS = (
-    "source",
-    "open_count",
-    "task_class",
-    "items",
-)
-SELF_REPAIR_SPEND_ACTIONS = {
-    "control_plane_health_repair",
-    "control_plane_projection_repair",
-    "state_projection_gap_repair",
-    "boundary_projection_repair",
-    "todo_decision_scope_projection_repair",
-}
-MONITOR_DUE_ITEM_LIMIT = 1
 
 def _validate_goal_id_path_segment(goal_id: str) -> str:
     value = goal_id.strip()
