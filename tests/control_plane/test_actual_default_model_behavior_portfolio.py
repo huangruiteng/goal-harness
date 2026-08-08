@@ -296,6 +296,12 @@ def _turn_decision(request: Mapping[str, Any]) -> dict[str, Any]:
         route = "ask_user"
     elif must_attempt and delivery_allowed:
         route = "execute"
+    elif must_attempt and not delivery_allowed and not quiet_noop_allowed:
+        # Must-attempt obligations that forbid normal delivery (capability
+        # bridge repair, workspace repair) still route the agent to execute:
+        # the agent must repair/materialize the missing bridge or write a
+        # compact blocker instead of waiting or stopping.
+        route = "execute"
     elif quiet_noop_allowed:
         route = "wait"
     else:
@@ -442,16 +448,16 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
     )
     capability = packets["turn_capability_monitor_repair"]
     capability_signature = quota_action_signature_document(capability)
-    assert capability_signature["action"]["selected_todo"]["todo_id"] == (
-        "todo_portfolio_monitor_schedule"
-    )
-    assert (
-        "todo_portfolio_monitor_schedule"
-        in capability_signature["action"]["primary_action"]
-    )
-    assert (
-        capability_signature["contract_capsule"]["capability_monitor_fallback"]["mode"]
-        == "monitor_schedule_metadata_repair"
+    # Unknown capability gaps are agent-resolvable: the gate routes the agent to
+    # a must-attempt capability bridge repair instead of hiding the block behind
+    # a monitor fallback or a quiet wait.
+    assert capability_signature["action"]["must_attempt"] is True
+    assert capability_signature["action"]["quiet_noop_allowed"] is False
+    assert capability["interaction_contract"]["mode"] == "capability_bridge_repair"
+    assert capability["capability_gate"]["action"] == "repair_bridge"
+    assert "private_read" in capability["capability_gate"]["repair_missing"]
+    assert "repair or materialize the missing bridge capability" in (
+        capability_signature["action"]["primary_action"]
     )
     regression_source = build_quota_hot_path_compaction_regression_source()
     regression = packets["turn_quota_hot_path_compaction_regression"]
@@ -1022,9 +1028,9 @@ def test_portfolio_oracle_rejects_waiting_on_capability_monitor_repair(
 ) -> None:
     def waiting_actor(request: Mapping[str, Any]) -> dict[str, Any]:
         result = _turn_actor(request)
-        signature = quota_action_signature_document(request["packet"])
-        fallback = signature["contract_capsule"].get("capability_monitor_fallback")
-        if isinstance(fallback, Mapping):
+        packet = request["packet"]
+        gate = packet.get("capability_gate") if isinstance(packet, Mapping) else None
+        if isinstance(gate, Mapping) and gate.get("action") == "repair_bridge":
             result["decision"] = {
                 **result["decision"],
                 "decision": "wait",

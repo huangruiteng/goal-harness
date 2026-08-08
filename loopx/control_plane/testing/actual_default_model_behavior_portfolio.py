@@ -134,7 +134,7 @@ _SCENARIOS = (
         None,
         "execute",
         "control_plane_composition",
-        ("capability_gate", "monitor_schedule", "fallback", "selected_action"),
+        ("capability_gate", "monitor_schedule", "bridge_repair", "selected_action"),
     ),
     _ScenarioSpec(
         "turn_quota_hot_path_compaction_regression",
@@ -683,6 +683,12 @@ def _turn_expected_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         route = "ask_user"
     elif must_attempt and delivery_allowed:
         route = "execute"
+    elif must_attempt and not delivery_allowed and not quiet_noop_allowed:
+        # Capability bridge repair, workspace repair, and similar agent-attempt
+        # obligations are must-attempt work even though normal delivery is not
+        # allowed: the agent must repair/materialize the missing bridge or write
+        # a compact blocker instead of waiting or stopping.
+        route = "execute"
     elif quiet_noop_allowed:
         route = "wait"
     else:
@@ -861,21 +867,37 @@ def _scenario_contract(
         signature = quota_action_signature_document(source_packet)
         capsule = dict(signature.get("contract_capsule") or {})
         lane = dict(capsule.get("work_lane_contract") or {})
-        fallback = dict(capsule.get("capability_monitor_fallback") or {})
         action = dict(signature.get("action") or {})
-        selected = dict(action.get("selected_todo") or {})
+        interaction = dict(capsule.get("interaction_contract") or {})
         if not (
-            selected.get("todo_id") == "todo_portfolio_monitor_schedule"
-            and lane.get("obligation") == "repair_monitor_schedule_metadata"
-            and fallback.get("mode") == "monitor_schedule_metadata_repair"
+            interaction.get("mode") == "capability_bridge_repair"
             and action.get("must_attempt") is True
             and action.get("quiet_noop_allowed") is False
+            and lane.get("must_attempt_work") is True
         ):
             raise ValueError(
-                "capability fallback must select the monitor schedule repair"
+                "capability gap must route the agent to a must-attempt "
+                "capability bridge repair, not a monitor fallback or quiet wait"
             )
-        if "todo_portfolio_monitor_schedule" not in str(action.get("primary_action")):
-            raise ValueError("primary action must name the selected monitor repair")
+        capability_gate = source_packet.get("capability_gate")
+        if not isinstance(capability_gate, dict) or capability_gate.get(
+            "action"
+        ) != "repair_bridge":
+            raise ValueError(
+                "capability gap must expose an agent-resolvable repair_bridge gate"
+            )
+        if "private_read" not in str(
+            capability_gate.get("repair_missing") or []
+        ):
+            raise ValueError(
+                "capability bridge repair must name the missing capability"
+            )
+        if "repair or materialize the missing bridge capability" not in str(
+            action.get("primary_action")
+        ):
+            raise ValueError(
+                "primary action must direct the agent to repair the bridge"
+            )
     compaction_selected_todos = {
         "turn_quota_hot_path_compaction_regression": "todo_c0ffee123456",
         "turn_quota_hot_path_selected_todo_invariance": "todo_portfolio001",
