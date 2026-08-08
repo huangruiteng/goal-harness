@@ -9,8 +9,8 @@ from loopx.extensions.lark.presentation.kanban import (
     lark_kanban_schema_payload,
     read_lark_kanban_local_config,
     save_lark_kanban_board_config,
-    sync_loopx_todos_to_lark_kanban,
     sync_loopx_projection_to_lark_kanban,
+    sync_loopx_todos_to_lark_kanban,
     write_lark_kanban_local_config,
 )
 
@@ -230,23 +230,17 @@ def test_partial_todo_sync_persists_successful_record_for_retry(
         encoding="utf-8",
     )
     state_file.write_text(
-        "\n".join(
-            [
-                "# Active Goal State",
-                "",
-                "## User Todo / Owner Review Reading Queue",
-                "",
-                "## Agent Todo",
-                "",
-                "- [ ] [P1] First public todo",
-                "  <!-- loopx:todo todo_id=todo_public_one status=open "
-                "task_class=advancement_task -->",
-                "- [ ] [P1] Second public todo",
-                "  <!-- loopx:todo todo_id=todo_public_two status=open "
-                "task_class=advancement_task -->",
-                "",
-            ]
-        ),
+        """# Active Goal State
+
+## User Todo / Owner Review Reading Queue
+
+## Agent Todo
+
+- [ ] [P1] First public todo
+  <!-- loopx:todo todo_id=todo_public_one status=open task_class=advancement_task -->
+- [ ] [P1] Second public todo
+  <!-- loopx:todo todo_id=todo_public_two status=open task_class=advancement_task -->
+""",
         encoding="utf-8",
     )
     config = LarkKanbanConfig(
