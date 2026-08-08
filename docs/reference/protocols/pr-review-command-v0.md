@@ -192,6 +192,11 @@ Chinese review carries the depth and evidence; the English verdict carries the
 machine-readable state and validation summary. A findings-only or blocker-only
 body is not a complete PR review.
 
+Each complete PR review must also include whole-PR interpretation depth:
+per-file responsibility mapping, 2-5 key symbol explanations with exact-head
+references, one positive runtime walkthrough, one negative/fail-closed
+walkthrough, per-surface validation, and an overall judgment for the entire PR.
+
 ## Source Reads
 
 Implementations may read compact public PR surfaces:

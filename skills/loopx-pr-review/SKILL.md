@@ -115,6 +115,26 @@ Publish two artifacts:
 Do not publish before the Chinese section covers the entire PR. Read both
 artifacts back.
 
+## Full PR Interpretation Depth
+
+A complete review is a whole-PR interpretation, not a checklist or findings
+summary. For each selected PR:
+
+1. Read every changed file and map each file to its responsibility, inputs,
+   outputs, and key symbols.
+2. Pick 2-5 behavior-bearing symbols and explain before/after behavior,
+   critical branches, callers/callees, side effects, and failure paths.
+3. Walk one positive path from user/host action to observable result.
+4. Walk one negative path (invalid input, permission, timeout, corrupt state,
+   private boundary, or rollback) and show where it fails closed.
+5. Cover all changed surfaces in the five sections: motivation, approach,
+   concrete changes, main risk, overall judgment.
+6. List validation per surface and name anything not independently verified.
+7. State overall judgment for the entire PR, not only for the top finding.
+
+A review that only repeats the PR body, only discusses one blocker, or omits
+whole files/modules is incomplete and must be reworked.
+
 ## Autonomous Queue
 
 For recurring observation, use the same capability:

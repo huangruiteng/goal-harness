@@ -70,9 +70,13 @@ def main() -> int:
         "详细中文评审",
         "英文简短结论",
         "complete Chinese five-block review plus one concise English verdict",
+        "Full PR Interpretation Depth",
+        "Walk one positive path",
+        "Walk one negative path",
+        "omits whole files/modules is incomplete",
     ):
         assert phrase in skill_text, phrase
-    assert len(skill_source.splitlines()) <= 140, len(skill_source.splitlines())
+    assert len(skill_source.splitlines()) <= 180, len(skill_source.splitlines())
     for duplicated_contract_heading in (
         "Per-PR Evidence And Depth Gate",
         "Motivation Causal Chain",
