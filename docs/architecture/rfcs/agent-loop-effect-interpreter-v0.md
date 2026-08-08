@@ -48,7 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
-| M6 General effect-program abstraction | In progress (#2938, #2939, #2940, #2942, #2943, #2945) |
+| M6 General effect-program abstraction | In progress (#2938, #2939, #2940, #2942, #2943, #2945, #2949, #2955, #2956, #2957) |
 
 ## Why This Matters
 
@@ -264,6 +264,12 @@ parallel and equally important:
   execution strategy.
 - `EffectProgram` and `effect_program_from_ordered_steps` as a read-only shape
   over existing `guided_transaction.ordered_steps`.
+- R1 replacement: bootstrap guided rendering reads `ordered_steps` through
+  `EffectProgram` (#2955).
+- R2 replacement: turn executor resolves result kind through
+  `interpret_turn_result_packet` (#2956).
+- R3 replacement: Codex CLI local scheduler commands are built through
+  `EffectProgram` (#2957).
 - around semantics encoded in `capability_gate`, `interaction_contract`,
   `work_lane_contract`, and `scheduler_hint`.
 - focused tests and docs that pin the lens.
@@ -274,6 +280,8 @@ parallel and equally important:
   not only by tests.
 - A real host or turn-driver caller that executes an ordered effect program
   while preserving failure, cancellation, permission, and budget semantics.
+
+R4 remains deferred until that real multi-step executor caller exists.
 
 ### When To Generalize
 
