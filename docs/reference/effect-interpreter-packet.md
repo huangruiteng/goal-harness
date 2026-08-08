@@ -17,6 +17,7 @@ existing `quota should-run` packet onto the canonical slots:
 - `EffectRequest`
 - `EffectInterpretation`
 - `EffectObservation`
+- `EffectNext`
 - `EffectTurn`
 
 The function is intentionally read-only. It does not replace quota decision
@@ -66,8 +67,33 @@ The observation points back into the loop:
 | Packet field | Role |
 |---|---|
 | `interaction_contract.cli_channel.next_cli_actions` | Next CLI effects |
+| `scheduler_hint.action` | Scheduler around decision |
+| `scheduler_hint.cadence_class` | Cadence for the next host wake |
 | `scheduler_hint.codex_app.ack_hint.cli_args` | Host ACK effect |
 | `scheduler_hint.codex_app.failure_hint.cli_args` | Host failure effect |
+
+`EffectTurn.next_effect` is the code lens for this slot. It keeps the
+data-encoded handler visible: the host invokes the CLI actions and settles
+success or failure through the ACK/failure hints instead of LoopX holding a
+callable across turns.
+
+## Around Semantics
+
+`capability_gate`, `interaction_contract`, `work_lane_contract`, and
+`scheduler_hint` are around decisions over the canonical effect step, not
+separate feature modules:
+
+| Around layer | Can short-circuit | Can rewrite |
+|---|---|---|
+| `capability_gate` | `ask_owner`, `repair_bridge`, `unsupported` | Repair todo and next CLI actions |
+| `interaction_contract` | `action_required`, `mode` | Primary/protocol action and notification |
+| `work_lane_contract` | Monitor/inbox preemption, `must_attempt_work=false` | Lane, obligation, `next_lane` |
+| `scheduler_hint` | Pause/delete heartbeat, no-spend quiet | RRULE, cadence, stateful backoff |
+
+The ordering and effect semantics are contracts. A capability gate must not be
+collapsed into a generic exception handler: `owner_missing`,
+`repair_missing`, and `decision_owner` stay visible because `ask_owner` and
+`repair_bridge` lead to different next effects.
 
 ## Relationship To State Machines
 

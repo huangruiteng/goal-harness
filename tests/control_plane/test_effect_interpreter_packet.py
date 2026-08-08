@@ -55,4 +55,48 @@ def test_quota_should_run_exposes_canonical_effect_slots() -> None:
     assert "lane=advancement_task" in turn.observation.protocol_summary
 
     # next effect
-    assert turn.observation.next_cli_actions
+    assert turn.next_effect.cli_actions
+    assert turn.next_effect.cli_actions[0].startswith("loopx refresh-state")
+    assert turn.next_effect.scheduler_action
+    assert turn.next_effect.cadence_class
+
+
+def test_quota_should_run_capability_gate_is_structured_around_decision() -> None:
+    todo_text = "[P1] Network-only slice."
+    payload = quota_status_payload(
+        goal_id=GOAL_ID,
+        status="active",
+        agent_todo_items=[
+            {
+                "index": 1,
+                "text": todo_text,
+                "role": "agent",
+                "status": "open",
+                "priority": "P1",
+                "task_class": "advancement_task",
+                "required_capabilities": ["network"],
+            }
+        ],
+        recommended_action=todo_text,
+        next_action=todo_text,
+    )
+    packet = build_quota_should_run(payload, goal_id=GOAL_ID)
+    turn = interpret_quota_should_run_packet(
+        packet,
+        goal_id=GOAL_ID,
+        agent_id="codex-fixture",
+        capabilities=["shell"],
+    )
+
+    # The gate is an around decision: it short-circuits the original effect
+    # and rewrites the next effect, but permission semantics stay visible.
+    assert turn.interpretation.capability_action == "repair_bridge"
+    assert turn.observation.decision == "repair_bridge"
+    assert turn.observation.effective_action == "capability_bridge_repair"
+    assert packet.get("capability_gate", {}).get("action") == "repair_bridge"
+    assert packet.get("capability_gate", {}).get("owner_missing") == []
+    assert turn.next_effect.cli_actions
+    assert any(
+        "--target-capability network" in action
+        for action in turn.next_effect.cli_actions
+    )

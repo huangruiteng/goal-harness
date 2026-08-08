@@ -11,7 +11,8 @@ interpreter。agent loop 是被解释的循环，harness 才是解释外部 effe
 全文参考：
 [Agent Loop Effect Interpreter RFC](../../architecture/rfcs/agent-loop-effect-interpreter-v0.md)。
 公开来源：
-[主线一：Agent Loop 里的小魔法：函数的组合(3)](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=CBDnukhtey6qJ1aXATVJtv4edjVUnZB1_yebMpqJdNLfc=&xsec_source=pc_share)。
+[主线一：Tool Calling 是 Kleisli arrow(2)](https://www.xiaohongshu.com/discovery/item/6a02f388000000003502b2d6?source=webshare&xhsshare=pc_web&xsec_token=ABHcIpzpd2RlhAaRr9sZZ-q1OIfRgt7rvG2jn7GUO3tNo=&xsec_source=pc_share)、
+[主线一：Agent Loop 里的小魔法：函数的组合(3)](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=AB43lNCJ5ULmfTrGfeTLWd2-jQ6q8nFMGyNAd-tlXJ1uw=&xsec_source=pc_share)。
 
 ## 一个最朴素的 Agent Loop
 
@@ -89,6 +90,43 @@ Agent proposes next bounded turn
   -> quota packet + interaction contract
   -> execute, ask owner, observe, repair, or no-op
 ```
+
+## 组合：Around 是数据，不是回调
+
+公开课程把组合分成三层：
+
+| 组合 | 形状 | LoopX 对应物 |
+|---|---|---|
+| 函数组合 | `A => B`、`B => C` | read model -> projection -> decision |
+| Kleisli 组合 | `A => F[B]`、`B => F[C]` | 一轮 bounded turn、host effect、validated writeback |
+| Middleware 组合 | `(A => F[B]) => (A => F[B])` | `capability_gate`、`interaction_contract`、`work_lane_contract`、`scheduler_hint` |
+
+很多 runtime 的 around 逻辑会拿到 `handler`：一个可继续执行主流程的回调，
+然后决定是否调用、调用几次、失败后怎样 fallback。LoopX 不能跨上下文和 session
+传递一个可调用对象。它的 `handler` 是数据：packet 里的 `next_effect` 编码下一组
+CLI 动作、scheduler ACK 和 failure hint，由 host 或下一轮 automation 执行。
+
+这个差异不是缺一个 middleware 层，而是控制面的合理形状：
+
+- 可以 short-circuit：`decision` / `effective_action` 直接表达
+  `skip`、`wait`、`monitor_quiet_skip`、`repair_bridge`、`ask_owner`，不会假装原
+  effect 已经执行；
+- 可以 rewrite：`capability_gate` 把下一步改写成先补能力，`work_lane_contract`
+  可以用 due monitor 或 Lark inbox 抢占普通 advancement；
+- 可以 settle：`scheduler_hint` 的 ACK / failure hint 告诉 host 如何提交成功或
+  失败，`unchanged_poll` 限制重复轮询。
+
+失败、取消、权限和预算必须保持结构化，不能被一个通用 catch 吞掉。看一个
+around 决策时，问七件事：
+
+1. 它在解释哪个 effect request？
+2. 哪个 around layer 拥有决策，输出什么 observation？
+3. 它能否 short-circuit，而且不假装原 effect 已执行？
+4. `next_effect` 在哪里被编码？
+5. 失败、取消、权限、预算是否仍然结构化可见？
+6. around layer 的先后顺序是否明确并有测试？
+7. host effect 之后，evidence、trace、budget 是否通过 writeback / ACK / spend
+   继续成立？
 
 ## 读代码前先问五个问题
 

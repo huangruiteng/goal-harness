@@ -23,8 +23,10 @@ The agent loop is the loop. The harness is the effectful program that
 interprets each effect request and returns an observation to the next model
 step.
 
-The framing builds on the public lecture series by 齐梦星空, especially
-[主线一：Agent Loop 里的小魔法：函数的组合(3)](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=CBDnukhtey6qJ1aXATVJtv4edjVUnZB1_yebMpqJdNLfc=&xsec_source=pc_share).
+The framing builds on the public lecture series by 齐梦星空:
+[主线一：Tool Calling 是 Kleisli arrow(2)](https://www.xiaohongshu.com/discovery/item/6a02f388000000003502b2d6?source=webshare&xhsshare=pc_web&xsec_token=ABHcIpzpd2RlhAaRr9sZZ-q1OIfRgt7rvG2jn7GUO3tNo=&xsec_source=pc_share)
+and
+[主线一：Agent Loop 里的小魔法：函数的组合(3)](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=AB43lNCJ5ULmfTrGfeTLWd2-jQ6q8nFMGyNAd-tlXJ1uw=&xsec_source=pc_share).
 
 LoopX's job is the middle two steps: it receives an effect request from an
 agent or host, decides whether and how to interpret it, writes back an
@@ -138,6 +140,73 @@ naming discipline over existing packet fields. A new packet may add an
 `effect_interpretation` envelope only when a real caller needs one canonical
 place to read all four slots.
 
+## Composition And Around Semantics
+
+The canonical loop is one effectful step:
+
+```text
+GoalState => F[QuotaDecision]
+```
+
+The public lecture series distinguishes three layers of composition:
+
+| Composition | Shape | LoopX counterpart |
+|---|---|---|
+| Function composition | `A => B`, `B => C` | Read model -> projection -> decision |
+| Kleisli composition | `A => F[B]`, `B => F[C]` | One bounded turn, host effect, validated writeback |
+| Middleware composition | `(A => F[B]) => (A => F[B])` | Around decisions in `capability_gate`, `interaction_contract`, `work_lane_contract`, `scheduler_hint` |
+
+LoopX does not expose a generic Python middleware registry. Its around
+semantics are declarative and packet-shaped.
+
+### Handler Is Data, Not a Callable
+
+Runtime middleware receives a `handler` callable and decides whether to call
+it, call it once, retry, fallback, or short-circuit. LoopX cannot receive a
+model or host callable across context and session boundaries. Instead, the
+interpreter returns a `next_effect` in the packet: CLI actions, scheduler
+ACK, and failure hint. The host or the next automation turn invokes that
+data-encoded handler.
+
+This keeps the power of around style while making the handler durable and
+replayable:
+
+- short-circuit: `decision` and `effective_action` can say `skip`, `wait`,
+  `monitor_quiet_skip`, `repair_bridge`, or `ask_owner` without pretending
+  the original effect ran;
+- rewrite: `work_lane_contract` can preempt ordinary advancement with a due
+  monitor or Lark inbox, and `capability_gate` can rewrite the next effect to
+  materialize the missing capability first;
+- settle: `scheduler_hint.ack_hint` and `failure_hint` tell the host how to
+  commit success or failure, while `unchanged_poll` bounds repeated attempts.
+
+Failure, cancellation, permission, and budget stay visible in typed packet
+fields instead of being swallowed by a catch-all wrapper:
+
+| Around layer | Packet field | Short-circuit examples | Rewrite examples |
+|---|---|---|---|
+| Capability | `capability_gate` | `ask_owner`, `repair_bridge`, `unsupported` | Repair todo and CLI actions for the missing capability |
+| Interaction | `interaction_contract` | User channel `action_required`, `mode` | Primary action, protocol action, next CLI actions |
+| Work lane | `work_lane_contract` | Monitor or inbox preemption, `must_attempt_work=false` | Selected lane, obligation, `next_lane` |
+| Scheduler | `scheduler_hint` | Pause/delete heartbeat, no-spend quiet | RRULE, cadence class, stateful backoff |
+
+The order of these around layers is a contract, not an implementation detail.
+Changing the order changes which gate is observed first, which monitor can
+preempt ordinary work, and whether an ACK is still expected after a failed
+host update. Such changes need parity fixtures and focused tests.
+
+Review a LoopX around decision with the same questions the lecture asks of a
+middleware stack:
+
+1. Which effect request is being interpreted?
+2. Which around layer owns the decision, and what observation does it emit?
+3. Can it short-circuit without pretending the effect ran?
+4. Where is the data-encoded handler (`next_effect`)?
+5. Are failure, cancellation, permission, and budget structured or swallowed?
+6. Is the around-layer order explicit and tested?
+7. Does evidence, trace, and budget continuity survive the host effect
+   through writeback, ACK, and spend?
+
 ## State Machine As Interpretation Table
 
 Instead of teaching state machines as a list of enum values, teach each state
@@ -202,6 +271,29 @@ Acceptance criteria:
 - A reader can trace one real packet from effect request to observation.
 - No CLI output budget regression.
 - No new runtime contract without a real caller.
+
+### M1.5: Composition Lens
+
+**Goal**: Make the around semantics visible in the canonical packet lens.
+
+Steps:
+
+1. Document the three composition layers and the data-encoded handler in this
+   RFC and Lecture 1.
+2. Extend `EffectTurn` with `next_effect` so all four semantic slots are
+   represented in code, not only in prose.
+3. Add a focused test proving a capability gate is a structured around
+   decision: it short-circuits, rewrites the next effect, and keeps
+   permission semantics visible.
+4. Cite the public Tool Calling and Function Composition sources in public
+   docs. Never cite internal lecture material.
+
+Acceptance criteria:
+
+- A reader can answer where `next_effect` is encoded for a real packet.
+- The code lens covers `effect_request`, `interpretation`, `observation`, and
+  `next_effect`.
+- No runtime behavior changes.
 
 ### M2: Bounded Context Alignment
 
@@ -343,6 +435,7 @@ story explicit and gives the refactor and test work a stable target.
 
 ## References
 
-- 齐梦星空, *主线一：Agent Loop 是 effectful program(1)*.
-- 齐梦星空, *主线一：Tool Calling 是 Kleisli arrow(2)*.
-- 齐梦星空, [*主线一：Agent Loop 里的小魔法：函数的组合(3)*](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=CBDnukhtey6qJ1aXATVJtv4edjVUnZB1_yebMpqJdNLfc=&xsec_source=pc_share).
+- 齐梦星空,
+  [*主线一：Tool Calling 是 Kleisli arrow(2)*](https://www.xiaohongshu.com/discovery/item/6a02f388000000003502b2d6?source=webshare&xhsshare=pc_web&xsec_token=ABHcIpzpd2RlhAaRr9sZZ-q1OIfRgt7rvG2jn7GUO3tNo=&xsec_source=pc_share).
+- 齐梦星空,
+  [*主线一：Agent Loop 里的小魔法：函数的组合(3)*](https://www.xiaohongshu.com/discovery/item/6a057524000000003701f6aa?source=webshare&xhsshare=pc_web&xsec_token=AB43lNCJ5ULmfTrGfeTLWd2-jQ6q8nFMGyNAd-tlXJ1uw=&xsec_source=pc_share).

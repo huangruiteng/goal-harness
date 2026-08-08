@@ -30,8 +30,16 @@ class EffectObservation:
     should_run: bool
     effective_action: str
     recommended_action: str
-    next_cli_actions: tuple[str, ...] = ()
     protocol_summary: str | None = None
+
+
+@dataclass(frozen=True)
+class EffectNext:
+    cli_actions: tuple[str, ...] = ()
+    scheduler_action: str | None = None
+    cadence_class: str | None = None
+    ack_cli_args: tuple[str, ...] = ()
+    failure_cli_args: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -39,6 +47,7 @@ class EffectTurn:
     request: EffectRequest
     interpretation: EffectInterpretation
     observation: EffectObservation
+    next_effect: EffectNext
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -57,6 +66,9 @@ def interpret_quota_should_run_packet(
     interaction = _mapping(packet.get("interaction_contract"))
     lane = _mapping(packet.get("work_lane_contract"))
     scheduler = _mapping(packet.get("scheduler_hint"))
+    codex_app = _mapping(scheduler.get("codex_app"))
+    ack_hint = _mapping(codex_app.get("ack_hint"))
+    failure_hint = _mapping(codex_app.get("failure_hint"))
     cli_channel = _mapping(interaction.get("cli_channel"))
     gate = packet.get("capability_gate")
     protocol = _mapping(packet.get("protocol_action_packet"))
@@ -82,17 +94,32 @@ def interpret_quota_should_run_packet(
         should_run=bool(packet.get("should_run")),
         effective_action=str(packet.get("effective_action") or ""),
         recommended_action=str(packet.get("recommended_action") or ""),
-        next_cli_actions=tuple(
+        protocol_summary=(
+            str(protocol.get("summary")) if protocol.get("summary") else None
+        ),
+    )
+    next_effect = EffectNext(
+        cli_actions=tuple(
             str(action)
             for action in cli_channel.get("next_cli_actions", [])
             if str(action).strip()
         ),
-        protocol_summary=(
-            str(protocol.get("summary")) if protocol.get("summary") else None
+        scheduler_action=str(scheduler.get("action") or None) or None,
+        cadence_class=str(scheduler.get("cadence_class") or None) or None,
+        ack_cli_args=tuple(
+            str(arg)
+            for arg in ack_hint.get("cli_args", [])
+            if str(arg).strip()
+        ),
+        failure_cli_args=tuple(
+            str(arg)
+            for arg in failure_hint.get("cli_args", [])
+            if str(arg).strip()
         ),
     )
     return EffectTurn(
         request=request,
         interpretation=interpretation,
         observation=observation,
+        next_effect=next_effect,
     )
