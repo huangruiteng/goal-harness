@@ -121,6 +121,11 @@ def assert_local_doc_links_resolve() -> None:
 
 
 def assert_effect_interpreter_docs_are_canonical() -> None:
+    public_lecture_url_fragments = (
+        "6a01d501000000003700c5de",
+        "6a02f388000000003502b2d6",
+        "6a057524000000003701f6aa",
+    )
     packet_doc = compact(read("docs/reference/effect-interpreter-packet.md"))
     for required in (
         "EffectRequest",
@@ -147,6 +152,9 @@ def assert_effect_interpreter_docs_are_canonical() -> None:
         read("docs/development/control-plane-course/01-agent-loop-effectful-program.md")
     )
     assert "Around 是数据，不是回调" in lecture
+    for fragment in public_lecture_url_fragments:
+        assert fragment in rfc, fragment
+        assert fragment in lecture, fragment
 
 
 def main() -> int:
