@@ -472,6 +472,9 @@ Steps:
    `serial` / `parallel` / `interleaved` semantics with focused tests.
 4. Introduce a data-encoded ordered effect program shape and a real executor
    seam when a host or turn-driver caller can execute multiple steps.
+   The first executor candidate is the guided bootstrap transaction, because
+   `guided_transaction.ordered_steps` already form a real ordered effect
+   program consumed by hosts; the turn driver can later reuse the same shape.
 5. Keep failure, cancellation, permission, and budget semantics structured
    across every interpreter. No catch-all wrapper.
 
@@ -535,8 +538,8 @@ Large smokes remain only as thin end-to-end checks.
   turn result, status, or monitor poll?
 - At what point should `next_effect` stop being a flat CLI tuple and become an
   ordered effect program with `execution_mode`?
-- Which runtime path should become the first ordered-effect executor: guided
-  bootstrap transaction, turn driver, or Codex CLI scheduler?
+- Confirm the guided bootstrap transaction as the first ordered-effect
+  executor path; the turn driver can reuse the same shape later.
 - When should `EffectProgram` become runtime-owned rather than host-driven?
 
 ## Success Metrics
