@@ -14,6 +14,18 @@ from ..todos.contract import normalize_todo_claimed_by
 from ..work_items.work_lane import work_lane_contract_is_due_monitor_attempt
 
 
+def quota_plan_items(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten quota plan state groups into ordered goal items."""
+
+    groups = plan.get("groups") if isinstance(plan.get("groups"), dict) else {}
+    items: list[dict[str, Any]] = []
+    for state_items in groups.values():
+        if not isinstance(state_items, list):
+            continue
+        items.extend(item for item in state_items if isinstance(item, dict))
+    return items
+
+
 def compact_quota_decision(decision: dict[str, Any]) -> dict[str, Any]:
     quota = decision.get("quota") if isinstance(decision.get("quota"), dict) else {}
     return {

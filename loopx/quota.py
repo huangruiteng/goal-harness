@@ -67,6 +67,7 @@ from .control_plane.quota.stall_repair import (
 from .control_plane.quota.decision_summary import (
     goal_status_health_ok as _goal_status_health_ok,
     quota_decision_agent_id,
+    quota_plan_items as _quota_plan_items,
     refine_quota_recommended_action,
     resolve_quota_run_decision,
 )
@@ -1029,16 +1030,6 @@ def build_quota_plan(status_payload: dict[str, Any], *, mode: str = "status") ->
         "groups": groups,
         "health_items": health_items,
     }
-
-
-def _quota_plan_items(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    groups = plan.get("groups") if isinstance(plan.get("groups"), dict) else {}
-    items: list[dict[str, Any]] = []
-    for state_items in groups.values():
-        if not isinstance(state_items, list):
-            continue
-        items.extend(item for item in state_items if isinstance(item, dict))
-    return items
 
 
 def _recent_reward_lessons(status_payload: dict[str, Any], *, goal_id: str) -> list[dict[str, Any]]:
