@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from loopx.canary.maintainability_ratchet import (
+    MODULE_METRIC_BASELINE_SCHEMA_VERSION,
     build_control_plane_maintainability_report,
     collect_dependency_debt,
+    collect_module_metric_findings,
     collect_oversized_decision_functions,
     evaluate_maintainability_findings,
+    module_metrics,
     render_control_plane_maintainability_report,
 )
 
@@ -28,6 +31,72 @@ def test_current_repository_debt_is_reviewed_without_line_count_pins() -> None:
     assert set(report["category_counts"]) == {"compatibility_facade"}
     assert report["category_counts"].get("oversized_decision_function", 0) == 0
     assert report["reviewed_exception_count"] == report["finding_count"]
+
+
+def test_current_module_metric_budget_keeps_existing_modules_grandfathered() -> None:
+    report = build_control_plane_maintainability_report(REPOSITORY_ROOT)
+
+    assert report["ok"] is True, render_control_plane_maintainability_report(report)
+    assert report["policy"]["module_line_limit"] == 1500
+    assert report["policy"]["module_any_limit"] == 300
+    assert report["policy"]["module_dict_any_limit"] == 300
+    assert report["category_counts"].get("module_metric_budget", 0) == 0
+    assert report["unreviewed_count"] == 0
+
+
+def test_module_metric_ratchet_detects_new_oversized_module(tmp_path: Path) -> None:
+    module_path = tmp_path / "loopx" / "sample.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.write_text(
+        "\n".join(["# padding"] * 1501),
+        encoding="utf-8",
+    )
+    tracked_paths = {module_path}
+
+    findings = collect_module_metric_findings(
+        tmp_path,
+        tracked_paths=tracked_paths,
+    )
+
+    assert len(findings) == 1
+    assert findings[0]["category"] == "module_metric_budget"
+    assert findings[0]["path"] == "loopx/sample.py"
+    assert findings[0]["metrics"]["lines"] == 1501
+    assert findings[0]["regressions"] == {"lines": 1501}
+
+
+def test_module_metric_ratchet_rejects_growth_above_checked_in_baseline(
+    tmp_path: Path,
+) -> None:
+    module_path = tmp_path / "loopx" / "sample.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.write_text(
+        "from typing import Any\n"
+        "value: dict[str, Any] = {}\n"
+        "extra = 'padding'\n",
+        encoding="utf-8",
+    )
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(
+        (
+            '{"schema_version": "'
+            + MODULE_METRIC_BASELINE_SCHEMA_VERSION
+            + '", "default_limits": {"lines": 1500, "any_count": 300, '
+            '"dict_any_count": 300}, "module_metric_ceilings": {'
+            '"loopx/sample.py": {"lines": 2, "any_count": 1, "dict_any_count": 1}}}'
+        ),
+        encoding="utf-8",
+    )
+
+    findings = collect_module_metric_findings(
+        tmp_path,
+        tracked_paths={module_path},
+        baseline_path=baseline_path,
+    )
+
+    assert len(findings) == 1
+    assert findings[0]["regressions"] == {"lines": 3}
+    assert module_metrics(module_path)["any_count"] == 1
 
 
 def test_reviewed_exception_lifecycle_rejects_new_debt_and_stale_entries() -> None:
