@@ -106,6 +106,7 @@ def _save_recovery_binding(
             "enabled": False,
             "channel": channel,
             "identity": identity,
+            "automation": _mapping(existing.get("automation")),
             "receipts": _mapping(existing.get("receipts")),
         }
     )
@@ -769,6 +770,7 @@ def setup_lark_goal_channel(
                 "base_url": kanban_url,
             },
             "identity": saved_identity,
+            "automation": _mapping(raw_existing.get("automation")),
             "receipts": mutable_receipts,
         }
         if effective_target_name:

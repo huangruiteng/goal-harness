@@ -8,6 +8,7 @@ from .goal_channel_contracts import (
     read_goal_channel_binding,
 )
 from .goal_channel_runtime import (
+    configure_lark_goal_channel_automation,
     doctor_lark_goal_channel,
     notify_lark_goal_channel_gate,
     sync_lark_goal_channel,
@@ -29,6 +30,7 @@ __all__ = [
     "GOAL_CHANNEL_OPERATION_SCHEMA_VERSION",
     "GOAL_CHANNEL_TARGETS_SCHEMA_VERSION",
     "add_lark_goal_channel_target",
+    "configure_lark_goal_channel_automation",
     "default_goal_channel_binding_path",
     "default_goal_channel_target_path",
     "doctor_lark_goal_channel",

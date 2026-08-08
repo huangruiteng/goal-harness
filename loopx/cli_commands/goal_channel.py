@@ -11,6 +11,7 @@ from ..extensions.lark import (
 )
 from ..extensions.lark.goal_channel import (
     add_lark_goal_channel_target,
+    configure_lark_goal_channel_automation,
     default_goal_channel_binding_path,
     default_goal_channel_target_path,
     doctor_lark_goal_channel,
@@ -127,6 +128,27 @@ def register_goal_channel_commands(
     )
     add_subcommand_format(target_list)
     target_list.add_argument("--target-path", help=argparse.SUPPRESS)
+
+    configure = sub.add_parser(
+        "configure",
+        help="Configure an existing Goal Channel. Dry-run unless --execute.",
+    )
+    add_subcommand_format(configure)
+    _add_common_args(configure)
+    automation = configure.add_mutually_exclusive_group(required=True)
+    automation.add_argument(
+        "--auto-notify-human-gates",
+        dest="auto_notify_human_gates",
+        action="store_true",
+        help="Send LoopX-selected human gates after authorized refresh-state writes.",
+    )
+    automation.add_argument(
+        "--no-auto-notify-human-gates",
+        dest="auto_notify_human_gates",
+        action="store_false",
+        help="Disable automatic human gate notifications.",
+    )
+    configure.add_argument("--execute", action="store_true")
 
     doctor = sub.add_parser(
         "doctor",
@@ -377,6 +399,32 @@ def handle_goal_channel_command(
         runtime_root_arg,
         registry_path=registry_path,
     )
+    if command == "configure" and not bool(args.auto_notify_human_gates):
+        assert goal_id is not None
+        source_registry, _, binding_path = _source_context(
+            registry=registry,
+            registry_path=registry_path,
+            goal_id=goal_id,
+            binding_path_arg=getattr(args, "binding_path", None),
+        )
+        try:
+            payload = configure_lark_goal_channel_automation(
+                registry=source_registry,
+                goal_id=goal_id,
+                binding_path=binding_path,
+                human_gate_auto_notify=False,
+                execute=execute,
+            )
+        except Exception:
+            payload = _error_packet(
+                goal_id=goal_id,
+                operation="configure",
+                execute=execute,
+                blocker="provider_api_failed",
+                summary="the Goal Channel automation setting could not be updated",
+            )
+        print_payload(payload, output_format(args), render_goal_channel_markdown)
+        return 0 if payload.get("ok") else 1
     try:
         activation = resolve_extension_activation(
             LARK_EXTENSION_ID,
@@ -485,6 +533,14 @@ def handle_goal_channel_command(
                         bot_app_id=getattr(args, "bot_app_id", None),
                         bot_display_name=args.bot_display_name,
                         cli_bin=args.cli_bin,
+                        execute=execute,
+                    )
+                elif command == "configure":
+                    payload = configure_lark_goal_channel_automation(
+                        registry=source_registry,
+                        goal_id=goal_id,
+                        binding_path=binding_path,
+                        human_gate_auto_notify=bool(args.auto_notify_human_gates),
                         execute=execute,
                     )
                 elif command == "doctor":

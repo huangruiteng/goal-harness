@@ -23,6 +23,9 @@ from ..extensions.runtime import (
     default_extension_state_file,
     resolve_extension_activation,
 )
+from ..extensions.lark.goal_channel_lifecycle import (
+    sync_human_gate_after_refresh,
+)
 from ..history import load_registry
 from ..feedback import LESSON_KINDS, append_human_reward, compact_reward, render_reward_markdown
 from ..operator_gate import (
@@ -598,6 +601,47 @@ def handle_project_lifecycle_command(
                     payload["error"] = (
                         "enabled Explore Graph sync/readback failed after the material "
                         "refresh; retry it before delivery"
+                    )
+            try:
+                gate_sync = sync_human_gate_after_refresh(
+                    registry_path=registry_path,
+                    runtime_root_override=args.runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    external_sink_delivery_authorized=not bool(
+                        args.suppress_external_sinks
+                    ),
+                )
+            except Exception as exc:
+                gate_sync = {
+                    "schema_version": "loopx_goal_channel_gate_auto_delivery_v0",
+                    "ok": False,
+                    "enabled": True,
+                    "status": "failed",
+                    "external_write_performed": False,
+                    "readback_verified": False,
+                    "delivery_postcondition": {
+                        "satisfied": False,
+                        "blocks_delivery": True,
+                    },
+                    "error": str(exc),
+                }
+            payload["goal_channel_gate_sync"] = gate_sync
+            gate_postcondition = (
+                gate_sync.get("delivery_postcondition")
+                if isinstance(gate_sync.get("delivery_postcondition"), dict)
+                else {}
+            )
+            if gate_sync.get("enabled") and not gate_postcondition.get("satisfied"):
+                payload.setdefault("warnings", []).append(
+                    "enabled Goal Channel human-gate delivery postcondition is "
+                    "unsatisfied; the notification remains retryable"
+                )
+                if gate_postcondition.get("blocks_delivery"):
+                    payload["ok"] = False
+                    payload["error"] = (
+                        "enabled Goal Channel human-gate notification/readback failed "
+                        "after the refresh; retry it before delivery"
                     )
         print_payload(payload, fmt, render_state_refresh_markdown)
         return 0 if payload.get("ok") else 1

@@ -15,6 +15,7 @@ from .private_json import write_private_json_atomic
 GOAL_CHANNEL_BINDING_SCHEMA_VERSION = "loopx_goal_channel_lark_binding_v0"
 GOAL_CHANNEL_OPERATION_SCHEMA_VERSION = "loopx_goal_channel_operation_v0"
 DEFAULT_GATE_COOLDOWN_SECONDS = 3600
+HUMAN_GATE_AUTO_NOTIFY_SETTING = "human_gate_auto_notify_enabled"
 PRIVATE_PACKET_KEYS = {
     "base_token",
     "chat_id",
@@ -123,6 +124,24 @@ def binding_for_goal(
     }
     resolved["identity"] = dict(target_identity)
     return resolved
+
+
+def human_gate_auto_notify_enabled(binding: Mapping[str, Any] | None) -> bool:
+    automation = (
+        binding.get("automation")
+        if isinstance(binding, Mapping)
+        and isinstance(binding.get("automation"), Mapping)
+        else {}
+    )
+    return automation.get(HUMAN_GATE_AUTO_NOTIFY_SETTING) is True
+
+
+def quota_selects_human_gate(quota_packet: Mapping[str, Any]) -> bool:
+    return bool(
+        quota_packet.get("state") == "operator_gate"
+        or quota_packet.get("notify_user_on_gate") is True
+        or quota_packet.get("notify_user_on_open_todo") is True
+    )
 
 
 def save_goal_binding(
