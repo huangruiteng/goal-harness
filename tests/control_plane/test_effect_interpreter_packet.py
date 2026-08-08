@@ -142,3 +142,78 @@ def test_effect_turn_keeps_monitor_quiet_around_decision_data_visible() -> None:
     assert turn.next_effect.cadence_class == "monitor_wait"
     assert turn.next_effect.ack_cli_args == ()
     assert turn.next_effect.failure_cli_args == ()
+
+
+def test_effect_turn_carries_scheduler_ack_and_failure_hints() -> None:
+    packet = {
+        "decision": "run",
+        "should_run": True,
+        "effective_action": "normal_run",
+        "recommended_action": "advance the bounded segment",
+        "interaction_contract": {
+            "mode": "bounded_delivery",
+            "cli_channel": {
+                "next_cli_actions": [
+                    "loopx refresh-state --goal-id effect-interpreter-fixture",
+                    "loopx quota spend-slot --goal-id effect-interpreter-fixture",
+                ]
+            },
+        },
+        "work_lane_contract": {
+            "lane": "advancement_task",
+            "obligation": "advance_one_bounded_segment",
+            "must_attempt_work": True,
+        },
+        "scheduler_hint": {
+            "action": "apply_rrule",
+            "cadence_class": "active_work",
+            "codex_app": {
+                "ack_hint": {
+                    "cli_args": [
+                        "quota",
+                        "scheduler-ack-current",
+                        "--goal-id",
+                        "effect-interpreter-fixture",
+                        "--execute",
+                    ]
+                },
+                "failure_hint": {
+                    "cli_args": [
+                        "quota",
+                        "scheduler-ack-current",
+                        "--goal-id",
+                        "effect-interpreter-fixture",
+                        "--failure",
+                        "--execute",
+                    ]
+                },
+            },
+        },
+    }
+    turn = interpret_quota_should_run_packet(
+        packet,
+        goal_id=GOAL_ID,
+        agent_id="codex-fixture",
+    )
+
+    assert turn.next_effect.cli_actions == (
+        "loopx refresh-state --goal-id effect-interpreter-fixture",
+        "loopx quota spend-slot --goal-id effect-interpreter-fixture",
+    )
+    assert turn.next_effect.scheduler_action == "apply_rrule"
+    assert turn.next_effect.cadence_class == "active_work"
+    assert turn.next_effect.ack_cli_args == (
+        "quota",
+        "scheduler-ack-current",
+        "--goal-id",
+        "effect-interpreter-fixture",
+        "--execute",
+    )
+    assert turn.next_effect.failure_cli_args == (
+        "quota",
+        "scheduler-ack-current",
+        "--goal-id",
+        "effect-interpreter-fixture",
+        "--failure",
+        "--execute",
+    )
