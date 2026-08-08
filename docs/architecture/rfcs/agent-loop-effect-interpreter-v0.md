@@ -48,7 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
-| M6 General effect-program abstraction | In progress (#2938, #2939, #2940, #2942, #2943, #2945, #2949, #2955, #2956, #2957) |
+| M6 General effect-program abstraction | Mostly complete (#2938-#2958); R4 executor deferred |
 
 ## Why This Matters
 
@@ -294,6 +294,18 @@ Generalize only when at least two real callers need the same shape:
 Before then, keep the abstraction as a documented lens and add tests that
 prove each packet maps losslessly. This avoids building a generic `Effect`
 framework that no runtime uses.
+
+### Replacement Status
+
+R1, R2, and R3 are complete:
+
+- R1 bootstrap guided rendering through `EffectProgram` (#2955);
+- R2 turn executor result-kind resolution through `interpret_turn_result_packet`
+  (#2956);
+- R3 Codex CLI scheduler command set through `EffectProgram` (#2957).
+
+R4 remains pending and must not be implemented until a real multi-step
+host/turn-driver caller executes an ordered effect program.
 
 ### Replacement-First Rule
 
