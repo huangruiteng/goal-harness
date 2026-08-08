@@ -34,6 +34,8 @@ a longer onboarding path.
 - [Heartbeat automation prompt](heartbeat-automation-prompt.md): scheduled
   continuation contract.
 - [Status data contract](status-data-contract.md): status and dashboard payloads.
+- [Effect interpreter packet](reference/effect-interpreter-packet.md): canonical
+  effect-request/interpretation/observation lens for `quota should-run`.
 - [Public/private boundary](public-private-boundary.md): what may be retained or
   published.
 - [Release readiness](product/release-readiness.md): supported v0.x install,

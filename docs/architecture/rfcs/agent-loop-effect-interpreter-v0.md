@@ -192,7 +192,7 @@ semantic slots visible in docs and smokes.
 Steps:
 
 1. Add a public-safe documentation section describing the four slots for
-   `quota should-run`.
+   `quota should-run` (`docs/reference/effect-interpreter-packet.md`).
 2. Add a focused pytest or smoke that asserts the mapping from raw inputs to
    the canonical interpretation fields.
 3. Keep the existing payload fields unchanged.
