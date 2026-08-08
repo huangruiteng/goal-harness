@@ -68,6 +68,44 @@ def _extension_unavailable_result(*, configured: bool) -> dict[str, Any]:
     }
 
 
+def goal_channel_gate_sync_failure(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    status: str = "failed",
+    blocker: str = "goal_channel_gate_sync_failed",
+) -> dict[str, Any]:
+    configured = False
+    try:
+        invoked_registry = load_registry(registry_path)
+        source_route = resolve_goal_source_runtime_route(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            registry=invoked_registry,
+        )
+        source_registry_path = Path(str(source_route["source_registry"]))
+        if source_registry_path.parent.name == ".loopx":
+            binding_path = default_goal_channel_binding_path(source_registry_path)
+            configured = human_gate_auto_notify_marker_enabled(
+                human_gate_auto_notify_marker_path(binding_path, goal_id)
+            )
+    except (OSError, ValueError):
+        configured = False
+    return {
+        "schema_version": "loopx_goal_channel_gate_auto_delivery_v0",
+        "ok": not configured,
+        "enabled": configured,
+        "status": status if configured else "not_configured",
+        "external_write_performed": False,
+        "readback_verified": False,
+        **({"blocker": blocker} if configured else {}),
+        "delivery_postcondition": {
+            "satisfied": not configured,
+            "blocks_delivery": configured,
+        },
+    }
+
+
 def sync_human_gate_after_refresh(
     *,
     registry_path: Path,
@@ -109,19 +147,26 @@ def sync_human_gate_after_refresh(
         return _extension_unavailable_result(
             configured=human_gate_auto_notify_marker_enabled(marker_path)
         )
-    binding_payload = read_goal_channel_binding(binding_path)
-    raw_binding = binding_for_goal(binding_payload, goal_id)
-    target_name = str((raw_binding or {}).get("target_ref") or "")
-    provider_target = (
-        goal_channel_target_for_name(
-            read_goal_channel_targets(
-                default_goal_channel_target_path(runtime_root)
-            ),
-            target_name,
+    try:
+        binding_payload = read_goal_channel_binding(binding_path)
+        raw_binding = binding_for_goal(binding_payload, goal_id)
+        target_name = str((raw_binding or {}).get("target_ref") or "")
+        provider_target = (
+            goal_channel_target_for_name(
+                read_goal_channel_targets(
+                    default_goal_channel_target_path(runtime_root)
+                ),
+                target_name,
+            )
+            if target_name
+            else None
         )
-        if target_name
-        else None
-    )
+    except (OSError, ValueError):
+        return goal_channel_gate_sync_failure(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            blocker="invalid_goal_channel_binding",
+        )
     if target_name and provider_target is None:
         return {
             "schema_version": "loopx_goal_channel_gate_auto_delivery_v0",

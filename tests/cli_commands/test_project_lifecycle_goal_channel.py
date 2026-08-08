@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from loopx.cli_commands import project_lifecycle
+from loopx.extensions.lark.goal_channel_contracts import (
+    human_gate_auto_notify_marker_path,
+    write_human_gate_auto_notify_marker,
+)
 
 
 def _args(*, suppress_external_sinks: bool = False) -> argparse.Namespace:
@@ -192,6 +197,27 @@ def test_refresh_state_redacts_goal_channel_exception_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": "goal-public-fixture",
+                        "repo": str(tmp_path),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    write_human_gate_auto_notify_marker(
+        human_gate_auto_notify_marker_path(
+            registry_path.parent / "goal-channel.json",
+            "goal-public-fixture",
+        )
+    )
     monkeypatch.setattr(
         project_lifecycle,
         "refresh_state_run",
@@ -228,7 +254,7 @@ def test_refresh_state_redacts_goal_channel_exception_details(
 
     result = project_lifecycle.handle_project_lifecycle_command(
         _args(),
-        registry_path=tmp_path / ".loopx" / "registry.json",
+        registry_path=registry_path,
         print_payload=lambda payload, fmt, renderer: captured.update(payload),
         output_format=lambda args: "json",
         append_cli_rollout_event=lambda *args, **kwargs: {},
@@ -236,7 +262,7 @@ def test_refresh_state_redacts_goal_channel_exception_details(
 
     serialized = str(captured)
     assert result == 1
-    assert captured["goal_channel_gate_sync"]["error_code"] == (
+    assert captured["goal_channel_gate_sync"]["blocker"] == (
         "goal_channel_gate_sync_failed"
     )
     assert str(tmp_path) not in serialized

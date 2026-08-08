@@ -24,6 +24,7 @@ from ..extensions.runtime import (
     resolve_extension_activation,
 )
 from ..extensions.lark.goal_channel_lifecycle import (
+    goal_channel_gate_sync_failure,
     sync_human_gate_after_refresh,
 )
 from ..history import load_registry
@@ -629,19 +630,10 @@ def handle_project_lifecycle_command(
                     ),
                 )
             except Exception:
-                gate_sync = {
-                    "schema_version": "loopx_goal_channel_gate_auto_delivery_v0",
-                    "ok": False,
-                    "enabled": True,
-                    "status": "failed",
-                    "external_write_performed": False,
-                    "readback_verified": False,
-                    "delivery_postcondition": {
-                        "satisfied": False,
-                        "blocks_delivery": True,
-                    },
-                    "error_code": "goal_channel_gate_sync_failed",
-                }
+                gate_sync = goal_channel_gate_sync_failure(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                )
             payload["goal_channel_gate_sync"] = gate_sync
             _apply_external_sink_postcondition(
                 payload,

@@ -483,8 +483,28 @@ def notify_lark_goal_channel_gate(
             blocker="channel_binding_missing",
             public_summary="configure the Goal Channel before notifying a human gate",
         )
+    target_ref = str(raw_binding.get("target_ref") or "")
+    if target_ref and provider_target is None:
+        return operation_packet(
+            ok=False,
+            goal_id=goal_id,
+            operation="notify_gate",
+            execute=execute,
+            status="blocked",
+            blocker="provider_target_missing",
+            public_summary="configure the referenced shared provider target first",
+        )
     binding = binding_for_goal(payload, goal_id, provider_target=provider_target)
-    assert binding is not None
+    if binding is None:
+        return operation_packet(
+            ok=False,
+            goal_id=goal_id,
+            operation="notify_gate",
+            execute=execute,
+            status="blocked",
+            blocker="channel_binding_incomplete",
+            public_summary="complete Goal Channel setup before notifying a human gate",
+        )
     if binding.get("enabled") is not True:
         return operation_packet(
             ok=False,

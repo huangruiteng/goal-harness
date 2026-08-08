@@ -266,6 +266,70 @@ def test_refresh_lifecycle_extension_failure_prevents_private_binding_read(
     assert result["status"] == "extension_unavailable"
 
 
+def test_refresh_lifecycle_unconfigured_malformed_binding_is_safe_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path = _registry(tmp_path)
+    binding_path = registry_path.parent / "goal-channel.json"
+    binding_path.write_text("not-json", encoding="utf-8")
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "resolve_extension_activation",
+        lambda *args, **kwargs: {"status": "active"},
+    )
+
+    result = goal_channel_lifecycle.sync_human_gate_after_refresh(
+        registry_path=registry_path,
+        runtime_root_override=None,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        external_sink_delivery_authorized=True,
+    )
+
+    assert result["ok"] is True
+    assert result["enabled"] is False
+    assert result["status"] == "not_configured"
+    assert result["delivery_postcondition"] == {
+        "satisfied": True,
+        "blocks_delivery": False,
+    }
+
+
+def test_refresh_lifecycle_configured_malformed_binding_blocks_delivery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path = _registry(tmp_path)
+    binding_path = registry_path.parent / "goal-channel.json"
+    binding_path.write_text("not-json", encoding="utf-8")
+    write_human_gate_auto_notify_marker(
+        human_gate_auto_notify_marker_path(binding_path, GOAL_ID)
+    )
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "resolve_extension_activation",
+        lambda *args, **kwargs: {"status": "active"},
+    )
+
+    result = goal_channel_lifecycle.sync_human_gate_after_refresh(
+        registry_path=registry_path,
+        runtime_root_override=None,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        external_sink_delivery_authorized=True,
+    )
+
+    assert result["ok"] is False
+    assert result["enabled"] is True
+    assert result["status"] == "failed"
+    assert result["blocker"] == "invalid_goal_channel_binding"
+    assert result["delivery_postcondition"] == {
+        "satisfied": False,
+        "blocks_delivery": True,
+    }
+
+
 def test_refresh_lifecycle_configured_extension_failure_blocks_delivery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

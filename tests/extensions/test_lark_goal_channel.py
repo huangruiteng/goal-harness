@@ -997,6 +997,38 @@ def test_notify_gate_distinguishes_different_gate_ids_with_same_question(
     assert sum("+messages-send" in args for args in calls) == 2
 
 
+def test_notify_gate_reports_missing_shared_target_for_direct_caller(
+    tmp_path: Path,
+) -> None:
+    binding_path = tmp_path / ".loopx" / "goal-channel.json"
+    binding_path.parent.mkdir(parents=True)
+    kanban_path = tmp_path / ".loopx" / "lark-kanban.json"
+    _write_binding(binding_path, kanban_path)
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["target_ref"] = "missing-target"
+    binding["bindings"][GOAL_ID]["channel"] = {}
+    binding["bindings"][GOAL_ID]["identity"] = {}
+    write_goal_channel_binding(binding_path, binding)
+
+    payload = notify_lark_goal_channel_gate(
+        registry=_registry(tmp_path),
+        goal_id=GOAL_ID,
+        binding_path=binding_path,
+        quota_packet={
+            "state": "operator_gate",
+            "notify_user_on_gate": True,
+            "gate_prompt": "Approve the bounded external write.",
+        },
+        execute=True,
+        runner=_fake_runner([]),
+    )
+
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["blocker"] == "provider_target_missing"
+    _assert_public_packet(payload)
+
+
 def test_notify_gate_resends_when_existing_receipt_readback_is_stale(
     tmp_path: Path,
 ) -> None:
