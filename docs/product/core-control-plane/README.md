@@ -42,6 +42,8 @@ See the
 [Agent Loop Effect Interpreter RFC](../../architecture/rfcs/agent-loop-effect-interpreter-v0.md)
 and
 [Harness Is the Effectful Program](../../development/control-plane-course/01-agent-loop-effectful-program.md).
+The public framing comes from 齐梦星空,
+[主线一：Agent Loop 是 effectful program(1)](https://www.xiaohongshu.com/discovery/item/6a01d501000000003700c5de?source=webshare&xhsshare=pc_web&xsec_token=ABqpNuladcxhev099wLKw8M3ilhKBua0BQXNpxnBZEGkc=&xsec_source=pc_share).
 
 ## Execution Ownership
 
