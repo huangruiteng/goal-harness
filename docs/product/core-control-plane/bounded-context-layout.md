@@ -16,6 +16,7 @@ New control-plane code should live under `loopx.control_plane`:
 | `todos` | Todo parsing summaries, todo-derived attention helpers, and todo handoff summaries. |
 | `agents` | Agent-scope filtering, lane recommendation, capability gates, subagent activity, and the reusable multi-agent execution kernel. |
 | `quota` | Quota-specific control-plane helpers. |
+| `status` | Status collection assembly, runtime summaries, agent-lane status projection, and other status read models. |
 | `scheduler` | Scheduler-facing monitor display and cadence helpers. |
 | `runtime` | Runtime/session projections and run-compaction helpers. |
 | `handoff` | Handoff readiness, handoff state, handoff-run classification, cross-runtime review packets, and exact review-decision batching. |
