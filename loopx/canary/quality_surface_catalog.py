@@ -137,6 +137,7 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
         "owner_paths": [
             "loopx/control_plane/quota/live_decision.py",
             "loopx/control_plane/scheduler/ack.py",
+            "loopx/control_plane/scheduler/monitor_wait.py",
             "loopx/control_plane/scheduler/scheduler_hint.py",
             "loopx/control_plane/scheduler/state.py",
             "loopx/control_plane/scheduler/state_transition_rules.py",

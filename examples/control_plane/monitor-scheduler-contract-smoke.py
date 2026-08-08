@@ -224,7 +224,7 @@ def assert_not_due_monitor_waits_quietly() -> None:
     assert guard["agent_todo_summary"]["monitor_due_count"] == 0, guard
 
 
-def assert_not_due_monitor_scheduler_applies_host_floor_before_cadence() -> None:
+def assert_not_due_monitor_scheduler_uses_due_horizon_before_cadence() -> None:
     guard = guard_for(
         [
             monitor_item(
@@ -243,9 +243,9 @@ def assert_not_due_monitor_scheduler_applies_host_floor_before_cadence() -> None
     assert guard["decision"] == "skip", guard
     assert guard["effective_action"] == "monitor_quiet_skip", guard
     assert scheduler["cadence_class"] == "monitor_wait", scheduler
-    assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=3", scheduler
-    assert codex_app["example_progression_minutes"] == [3], scheduler
-    assert stateful["current_rrule"] == "FREQ=MINUTELY;INTERVAL=3", scheduler
+    assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", scheduler
+    assert codex_app["example_progression_minutes"] == [15, 30, 60], scheduler
+    assert stateful["current_rrule"] == "FREQ=MINUTELY;INTERVAL=15", scheduler
 
 
 def assert_monitor_scheduler_far_window_uses_coarse_backoff() -> None:
@@ -268,9 +268,33 @@ def assert_monitor_scheduler_far_window_uses_coarse_backoff() -> None:
     context = scheduler["cold_path_detail"]["cadence_context"]
     assert guard["effective_action"] == "monitor_quiet_skip", guard
     assert context["phase"] == "far_window", context
-    assert context["cap_minutes"] == 3, context
-    assert codex_app["example_progression_minutes"] == [3], scheduler
-    assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=3", scheduler
+    assert context["cap_minutes"] == 90, context
+    assert codex_app["example_progression_minutes"] == [15, 30, 60], scheduler
+    assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=15", scheduler
+
+
+def assert_monitor_scheduler_due_horizon_can_break_host_floor() -> None:
+    guard = guard_for(
+        [
+            monitor_item(
+                index=1,
+                todo_id="todo_due_within_host_floor",
+                priority="P0",
+                cadence=None,
+                next_due_at=frozen_timestamp_after(7),
+                target_key="deadline-sensitive-watch",
+            )
+        ],
+        include_scheduler_detail=True,
+    )
+    scheduler = guard["scheduler_hint"]
+    codex_app = scheduler["codex_app"]
+    context = scheduler["cold_path_detail"]["cadence_context"]
+    assert context["phase"] == "near_window", context
+    assert context["host_floor_minutes"] == 7, context
+    assert context["cap_minutes"] == 7, context
+    assert codex_app["example_progression_minutes"] == [7], scheduler
+    assert codex_app["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=7", scheduler
 
 
 def assert_monitor_scheduler_near_window_caps_without_breaking_floor() -> None:
@@ -294,8 +318,8 @@ def assert_monitor_scheduler_near_window_caps_without_breaking_floor() -> None:
     assert guard["effective_action"] == "monitor_quiet_skip", guard
     assert context["phase"] == "near_window", context
     assert context["host_floor_minutes"] == 15, context
-    assert context["cap_minutes"] == 3, context
-    assert codex_app["example_progression_minutes"] == [3], scheduler
+    assert context["cap_minutes"] == 37, context
+    assert codex_app["example_progression_minutes"] == [15, 30], scheduler
 
 
 def assert_monitor_scheduler_near_window_reset_identity_is_stable() -> None:
@@ -328,14 +352,14 @@ def assert_monitor_scheduler_near_window_reset_identity_is_stable() -> None:
     assert first_context["phase"] == "near_window", first_context
     assert same_bucket_context["phase"] == "near_window", same_bucket_context
     assert next_bucket_context["phase"] == "near_window", next_bucket_context
-    assert first_context["cap_minutes"] == 3, first_context
-    assert same_bucket_context["cap_minutes"] == 3, same_bucket_context
-    assert next_bucket_context["cap_minutes"] == 3, next_bucket_context
-    assert first_scheduler["codex_app"]["example_progression_minutes"] == [3], first_scheduler
-    assert same_bucket_scheduler["codex_app"]["example_progression_minutes"] == [3], (
+    assert first_context["cap_minutes"] == 37, first_context
+    assert same_bucket_context["cap_minutes"] == 36, same_bucket_context
+    assert next_bucket_context["cap_minutes"] == 29, next_bucket_context
+    assert first_scheduler["codex_app"]["example_progression_minutes"] == [15, 30], first_scheduler
+    assert same_bucket_scheduler["codex_app"]["example_progression_minutes"] == [15, 30], (
         same_bucket_scheduler
     )
-    assert next_bucket_scheduler["codex_app"]["example_progression_minutes"] == [3], (
+    assert next_bucket_scheduler["codex_app"]["example_progression_minutes"] == [15], (
         next_bucket_scheduler
     )
     assert first_scheduler["reset_policy"]["reset_token"] == same_bucket_scheduler[
@@ -351,7 +375,7 @@ def assert_monitor_scheduler_near_window_reset_identity_is_stable() -> None:
     ], same_bucket_scheduler
 
 
-def assert_monitor_scheduler_active_window_respects_host_floor() -> None:
+def assert_monitor_scheduler_active_window_honors_tighter_cadence() -> None:
     guard = guard_for(
         [
             monitor_item(
@@ -373,7 +397,7 @@ def assert_monitor_scheduler_active_window_respects_host_floor() -> None:
     assert guard["effective_action"] == "monitor_quiet_skip", guard
     assert context["phase"] == "active_window", context
     assert context["cadence_minutes"] == 3, context
-    assert context["host_floor_minutes"] == 15, context
+    assert context["host_floor_minutes"] == 3, context
     assert codex_app["example_progression_minutes"] == [3], scheduler
     local_scheduler = scheduler["cold_path_detail"]["local_scheduler"]
     assert local_scheduler["example_progression_minutes"] == [3], scheduler
@@ -478,8 +502,9 @@ def assert_due_monitor_requires_available_capabilities() -> None:
     assert blocked_guard["decision"] == "repair_bridge", blocked_guard
     assert blocked_guard["effective_action"] == "capability_bridge_repair", blocked_guard
     assert blocked_guard["capability_gate"]["action"] == "repair_bridge", blocked_guard
-    assert blocked_guard["capability_gate"]["repair_missing"] == ["private_read"], blocked_guard
-    assert blocked_guard["capability_repair_allowed"] is True, blocked_guard
+    assert blocked_guard["capability_gate"]["decision_owner"] == "agent", blocked_guard
+    assert blocked_guard["capability_gate"]["missing"] == ["private_read"], blocked_guard
+    assert blocked_lane["reason_codes"][0] == "monitor_todo_only", blocked_lane
     assert blocked_summary["monitor_due_count"] == 0, blocked_summary
     assert blocked_summary["monitor_open_items"][0]["todo_id"] == item["todo_id"], blocked_summary
     assert blocked_summary["monitor_capability_blocked_due_count"] == 1, blocked_summary
@@ -489,6 +514,7 @@ def assert_due_monitor_requires_available_capabilities() -> None:
     assert blocked_item["missing_capabilities"] == ["private_read"], blocked_item
     assert blocked_lane.get("selected_todo_id") != item["todo_id"], blocked_lane
     assert blocked_guard["interaction_contract"]["agent_channel"]["must_attempt"] is True, blocked_guard
+    assert blocked_guard["interaction_contract"]["agent_channel"]["quiet_noop_allowed"] is False, blocked_guard
 
     excluded_guard = guard_for([{**item, "excluded_agents": [AGENT_ID]}])
     excluded_summary = excluded_guard["agent_todo_summary"]
@@ -546,7 +572,7 @@ def assert_runnable_due_monitor_survives_blocked_due_monitor() -> None:
     assert runnable["todo_id"] in guard["interaction_contract"]["agent_channel"]["primary_action"], guard
 
 
-def assert_capability_blocked_due_monitor_stays_quiet_with_external_signal() -> None:
+def assert_capability_blocked_due_monitor_does_not_hide_external_signal() -> None:
     blocked_due = monitor_item(
         index=1,
         todo_id="todo_private_read_monitor_due",
@@ -576,7 +602,7 @@ def assert_capability_blocked_due_monitor_stays_quiet_with_external_signal() -> 
     assert blocked_guard["decision"] == "observe", blocked_guard
     assert blocked_guard["should_run"] is True, blocked_guard
     assert blocked_guard["effective_action"] == "external_evidence_observe", blocked_guard
-    assert "external_evidence_observation" in blocked_guard, blocked_guard
+    assert blocked_guard["external_evidence_observation"]["required"] is True, blocked_guard
     assert "selected_todo" not in blocked_guard, blocked_guard
     assert blocked_guard["interaction_contract"]["agent_channel"]["must_attempt"] is True
     assert blocked_guard["interaction_contract"]["agent_channel"]["quiet_noop_allowed"] is False
@@ -691,6 +717,7 @@ def assert_due_monitor_capability_resolution_uses_full_lane() -> None:
     assert gate["owner_missing"] == [], gate
     assert gate["repair_missing"] == ["private_read", "network"], gate
     assert gate["unsupported_missing"] == [], gate
+    assert "private_read" in gate["missing"], gate
     assert "network" in gate["missing"], gate
     assert guard["heartbeat_recommendation"]["notify"] == "DONT_NOTIFY", guard
 
@@ -747,7 +774,7 @@ def assert_due_monitor_priority_does_not_steal_advancement_lane() -> None:
     assert guard["agent_todo_summary"]["monitor_due_count"] == 1, guard
 
 
-def assert_capability_skip_yields_to_monitor_schedule_repair() -> None:
+def assert_capability_repair_precedes_monitor_schedule_repair() -> None:
     guard = guard_for(
         [
             advancement_item(
@@ -769,15 +796,21 @@ def assert_capability_skip_yields_to_monitor_schedule_repair() -> None:
     assert guard["decision"] == "repair_bridge", guard
     assert guard["effective_action"] == "capability_bridge_repair", guard
     assert guard["capability_gate"]["action"] == "repair_bridge", guard
-    assert guard["capability_gate"]["repair_missing"] == ["private_read"], guard
-    assert guard["capability_repair_allowed"] is True, guard
+    assert "capability_monitor_fallback" not in guard, guard
+    assert lane["lane"] == "advancement_task", lane
+    assert lane["obligation"] == "advance_one_bounded_segment", lane
+    assert lane["must_attempt_work"] is True, lane
+    assert "todo_capability_skip_monitor_gap" in str(
+        guard["agent_todo_summary"].get("monitor_open_items")
+    ), guard
     assert guard["heartbeat_recommendation"]["recommended_mode"] == "repair_capability_bridge", guard
+    assert guard["execution_obligation"]["contract"] == "capability_gate", guard
     primary_action = guard["interaction_contract"]["agent_channel"]["primary_action"]
     assert "repair or materialize the missing bridge capability" in primary_action, guard
     assert guard["scheduler_hint"]["cadence_class"] == "active_work", guard
 
 
-def assert_capability_skip_yields_to_scheduled_monitor_wait() -> None:
+def assert_capability_repair_precedes_scheduled_monitor_wait() -> None:
     guard = guard_for(
         [
             advancement_item(
@@ -799,10 +832,10 @@ def assert_capability_skip_yields_to_scheduled_monitor_wait() -> None:
     assert guard["decision"] == "repair_bridge", guard
     assert guard["effective_action"] == "capability_bridge_repair", guard
     assert guard["capability_gate"]["action"] == "repair_bridge", guard
-    assert guard["capability_gate"]["repair_missing"] == ["private_read"], guard
-    assert guard["capability_repair_allowed"] is True, guard
+    assert "capability_monitor_fallback" not in guard, guard
     assert guard["heartbeat_recommendation"]["recommended_mode"] == "repair_capability_bridge", guard
     assert scheduler["cadence_class"] == "active_work", scheduler
+    assert scheduler["codex_app"]["recommended_rrule"] == "FREQ=MINUTELY;INTERVAL=3", scheduler
 
 
 def assert_read_only_projected_due_monitor_does_not_force_writeback() -> None:
@@ -983,23 +1016,24 @@ def assert_other_agent_claimed_work_stays_diagnostic_when_no_current_lane() -> N
 def main() -> int:
     assert_scheduler_timestamp_parser_is_shared_and_utc_normalized()
     assert_not_due_monitor_waits_quietly()
-    assert_not_due_monitor_scheduler_applies_host_floor_before_cadence()
+    assert_not_due_monitor_scheduler_uses_due_horizon_before_cadence()
     assert_monitor_scheduler_far_window_uses_coarse_backoff()
+    assert_monitor_scheduler_due_horizon_can_break_host_floor()
     assert_monitor_scheduler_near_window_caps_without_breaking_floor()
     assert_monitor_scheduler_near_window_reset_identity_is_stable()
-    assert_monitor_scheduler_active_window_respects_host_floor()
+    assert_monitor_scheduler_active_window_honors_tighter_cadence()
     assert_unscheduled_monitor_requires_metadata_repair()
     assert_unscheduled_monitor_repair_survives_handoff_gates()
     assert_due_monitor_requires_explicit_attempt()
     assert_due_monitor_requires_available_capabilities()
     assert_runnable_due_monitor_survives_blocked_due_monitor()
-    assert_capability_blocked_due_monitor_stays_quiet_with_external_signal()
+    assert_capability_blocked_due_monitor_does_not_hide_external_signal()
     assert_due_monitor_capability_resolution_is_preserved()
     assert_due_monitor_capability_resolution_uses_full_lane()
     assert_expired_monitor_does_not_catch_up()
     assert_due_monitor_priority_does_not_steal_advancement_lane()
-    assert_capability_skip_yields_to_monitor_schedule_repair()
-    assert_capability_skip_yields_to_scheduled_monitor_wait()
+    assert_capability_repair_precedes_monitor_schedule_repair()
+    assert_capability_repair_precedes_scheduled_monitor_wait()
     assert_read_only_projected_due_monitor_does_not_force_writeback()
     assert_due_monitor_is_not_overridden_by_side_agent_scope_wait()
     assert_multiple_due_monitor_cap_and_order()

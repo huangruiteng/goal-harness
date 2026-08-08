@@ -302,6 +302,7 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             "monitor_target",
             "monitor_poll_writeback",
             "loopx/control_plane/scheduler/monitor_todo.py",
+            "loopx/control_plane/scheduler/monitor_wait.py",
             "loopx/control_plane/scheduler/monitor_poll_writeback.py",
             "loopx/control_plane/scheduler/monitor_target.py",
             "loopx/control_plane/scheduler/scheduler_hint.py",

@@ -13,7 +13,7 @@
     "loopx/canary/planner.py": {
       "any_count": 22,
       "dict_any_count": 0,
-      "lines": 1983
+      "lines": 1984
     },
     "loopx/capabilities/auto_research/demo_e2e.py": {
       "any_count": 0,

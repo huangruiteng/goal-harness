@@ -224,6 +224,7 @@ CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
             "route_binding",
             "loopx/control_plane/scheduler/ack.py",
             "loopx/control_plane/scheduler/scheduler_hint.py",
+            "loopx/control_plane/scheduler/monitor_wait.py",
             "loopx/control_plane/scheduler/state.py",
             "loopx/control_plane/scheduler/state_transition_rules.py",
             "loopx/cli_commands/quota",

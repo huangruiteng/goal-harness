@@ -690,6 +690,12 @@ def test_quota_payload_compaction_preserves_earliest_frontier_deadline() -> None
             agent_id=agent_id,
             scheduler_execution_context=context,
         )
+        codex_hint = build_scheduler_hint(
+            quota,
+            scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+                SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+            ),
+        )
     finally:
         scheduler_hint_mod.now_utc = original_scheduler_now
         monitor_todo_mod.now_utc = original_monitor_now
@@ -708,6 +714,45 @@ def test_quota_payload_compaction_preserves_earliest_frontier_deadline() -> None
     assert continuation["disposition"] == "defer"
     assert continuation["recheck_after_seconds"] == 10 * 60
     assert continuation["recheck_source"] == "frontier_earliest_material_transition"
+    assert codex_hint["codex_app"]["recommended_rrule"] == (
+        "FREQ=MINUTELY;INTERVAL=10"
+    )
+
+
+@pytest.mark.parametrize(
+    ("cadence", "expected_minutes"),
+    (("5min", 5), ("5 minutes", 5), ("300s", 5), ("1s", 1)),
+)
+def test_codex_app_monitor_wait_uses_canonical_cadence_forms(
+    cadence: str,
+    expected_minutes: int,
+) -> None:
+    context = scheduler_execution_context_for_runtime_profile(
+        SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+    )
+    payload = _monitor_wait_payload()
+    payload["agent_todo_summary"] = {
+        "monitor_open_items": [
+            {
+                "todo_id": "todo_canonical_cadence",
+                "task_class": "continuous_monitor",
+                "cadence": cadence,
+            }
+        ]
+    }
+
+    hint = build_scheduler_hint(
+        payload,
+        include_detail=True,
+        scheduler_execution_context=context,
+    )
+
+    assert hint["codex_app"]["recommended_rrule"] == (
+        f"FREQ=MINUTELY;INTERVAL={expected_minutes}"
+    )
+    assert hint["cold_path_detail"]["cadence_context"]["cadence_minutes"] == (
+        expected_minutes
+    )
 
 
 def test_frontier_deadline_projection_does_not_reorder_selection_lane(
@@ -727,6 +772,12 @@ def test_frontier_deadline_projection_does_not_reorder_selection_lane(
             },
         ],
         "monitor_open_items": [
+            {
+                "todo_id": "expired_first",
+                "index": 2,
+                "next_due_at": (now + timedelta(minutes=3)).isoformat(),
+                "expires_at": (now - timedelta(minutes=1)).isoformat(),
+            },
             {
                 "todo_id": "deadline_second",
                 "index": 1,
