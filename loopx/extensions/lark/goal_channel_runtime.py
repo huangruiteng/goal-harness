@@ -237,6 +237,8 @@ def sync_lark_goal_channel(
     )
     ok = bool(result.get("ok"))
     provider_write_ok = ok
+    successful_write_count = int(result.get("successful_write_count") or 0)
+    external_write_performed = bool(result.get("external_write_performed"))
     records = [
         record for record in result.get("records") or [] if isinstance(record, Mapping)
     ]
@@ -285,15 +287,18 @@ def sync_lark_goal_channel(
             else "previewed the Goal Channel Kanban sync"
             if ok
             else "the Goal Channel Kanban sync failed readback"
-            if execute
+            if execute and provider_write_ok
+            else "the Goal Channel Kanban sync failed after partial provider writes"
+            if execute and external_write_performed
             else "the Goal Channel Kanban sync failed"
         ),
-        external_write_performed=bool(execute and result.get("ok") and records),
+        external_write_performed=external_write_performed,
         readback_verified=readback_verified,
         details={
             "kanban_ready": True,
             "todo_count": int(result.get("todo_count") or 0),
             "record_count": len(records),
+            "successful_write_count": successful_write_count,
         },
     )
 

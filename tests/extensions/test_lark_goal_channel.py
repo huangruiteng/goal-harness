@@ -1015,6 +1015,8 @@ def test_sync_requires_remote_record_readback(
         lambda *args, **kwargs: {
             "ok": True,
             "todo_count": 1,
+            "successful_write_count": 1,
+            "external_write_performed": True,
             "records": [
                 {
                     "todo_id": "todo_public_one",
@@ -1072,8 +1074,19 @@ def test_sync_preserves_provider_failure_blocker(
         "loopx.extensions.lark.goal_channel_runtime.sync_loopx_todos_to_lark_kanban",
         lambda *args, **kwargs: {
             "ok": False,
-            "todo_count": 1,
-            "records": [],
+            "todo_count": 2,
+            "successful_write_count": 1,
+            "external_write_performed": True,
+            "records": [
+                {
+                    "todo_id": "todo_public_one",
+                    "record_id": "rec_public_one",
+                },
+                {
+                    "todo_id": "todo_public_two",
+                    "record_id": None,
+                },
+            ],
         },
     )
 
@@ -1088,6 +1101,10 @@ def test_sync_preserves_provider_failure_blocker(
 
     assert payload["ok"] is False
     assert payload["blocker"] == "provider_api_failed"
-    assert payload["external_write_performed"] is False
+    assert payload["public_summary"] == (
+        "the Goal Channel Kanban sync failed after partial provider writes"
+    )
+    assert payload["external_write_performed"] is True
     assert payload["readback_verified"] is False
+    assert payload["details"]["successful_write_count"] == 1
     _assert_public_packet(payload)
