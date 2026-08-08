@@ -134,6 +134,8 @@ def assert_effect_interpreter_docs_are_canonical() -> None:
         "EffectNext",
         "EffectTurn",
         "Around Semantics",
+        "execution_mode",
+        "interpret_turn_result_packet",
     ):
         assert required in packet_doc, required
 
@@ -141,6 +143,8 @@ def assert_effect_interpreter_docs_are_canonical() -> None:
     for required in (
         "Composition And Around Semantics",
         "Handler Is Data, Not a Callable",
+        "General Effect-Program Abstraction",
+        "M6: General Effect-Program Abstraction",
         "Milestone Status",
     ):
         assert required in rfc, required
@@ -152,6 +156,7 @@ def assert_effect_interpreter_docs_are_canonical() -> None:
         read("docs/development/control-plane-course/01-agent-loop-effectful-program.md")
     )
     assert "Around 是数据，不是回调" in lecture
+    assert "CLI 是更高密度的 effect" in lecture
     for fragment in public_lecture_url_fragments:
         assert fragment in rfc, fragment
         assert fragment in lecture, fragment
