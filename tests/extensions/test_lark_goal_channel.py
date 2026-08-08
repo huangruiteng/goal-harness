@@ -11,13 +11,15 @@ from loopx.cli_commands import goal_channel as goal_channel_cli
 from loopx.extensions.lark import goal_channel_contracts
 from loopx.extensions.lark.goal_channel import (
     GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
-    auto_notify_lark_goal_channel_gate,
     configure_lark_goal_channel_automation,
     doctor_lark_goal_channel,
     notify_lark_goal_channel_gate,
     read_goal_channel_binding,
     setup_lark_goal_channel,
     sync_lark_goal_channel,
+)
+from loopx.extensions.lark.goal_channel_runtime import (
+    auto_notify_lark_goal_channel_gate,
 )
 from loopx.extensions.lark.goal_channel_contracts import write_goal_channel_binding
 from loopx.extensions.lark.presentation.kanban import (

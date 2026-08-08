@@ -196,7 +196,7 @@ def test_refresh_lifecycle_no_gate_checks_extension_without_delivery(
     assert result["ok"] is True
     assert result["enabled"] is True
     assert result["status"] == "not_selected"
-    assert "extension_activation" not in result
+    assert result["extension_activation"] == {"status": "active"}
 
 
 def test_refresh_lifecycle_extension_failure_prevents_private_binding_read(

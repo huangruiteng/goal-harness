@@ -18,7 +18,6 @@ from .goal_channel_contracts import (
     human_gate_auto_notify_enabled,
     human_gate_auto_notify_marker_enabled,
     human_gate_auto_notify_marker_path,
-    quota_selects_human_gate,
     read_goal_channel_binding,
 )
 from .goal_channel_runtime import auto_notify_lark_goal_channel_gate
@@ -142,50 +141,22 @@ def sync_human_gate_after_refresh(
         goal_id,
         provider_target=provider_target,
     )
-    if not human_gate_auto_notify_enabled(binding):
-        return auto_notify_lark_goal_channel_gate(
-            registry=source_registry,
+    quota_packet: dict[str, Any] = {}
+    if (
+        human_gate_auto_notify_enabled(binding)
+        and external_sink_delivery_authorized
+    ):
+        status = collect_status(
+            registry_path=source_registry_path,
+            runtime_root_override=str(runtime_root),
+            scan_roots=[registry_project_root(source_registry_path)],
+            limit=20,
             goal_id=goal_id,
-            binding_path=binding_path,
-            quota_packet={},
-            provider_target=provider_target,
-            external_sink_delivery_authorized=external_sink_delivery_authorized,
         )
-    if not external_sink_delivery_authorized:
-        return auto_notify_lark_goal_channel_gate(
-            registry=source_registry,
+        quota_packet = build_quota_should_run(
+            status,
             goal_id=goal_id,
-            binding_path=binding_path,
-            quota_packet={},
-            provider_target=provider_target,
-            external_sink_delivery_authorized=False,
-        )
-
-    status = collect_status(
-        registry_path=source_registry_path,
-        runtime_root_override=str(runtime_root),
-        scan_roots=[registry_project_root(source_registry_path)],
-        limit=20,
-        goal_id=goal_id,
-    )
-    quota_packet = build_quota_should_run(
-        status,
-        goal_id=goal_id,
-        agent_id=agent_id,
-    )
-    cooldown = quota_packet.get("user_gate_notification_cooldown")
-    cooldown_active = bool(
-        isinstance(cooldown, dict)
-        and cooldown.get("notification_suppressed") is True
-    )
-    if not quota_selects_human_gate(quota_packet) or cooldown_active:
-        return auto_notify_lark_goal_channel_gate(
-            registry=source_registry,
-            goal_id=goal_id,
-            binding_path=binding_path,
-            quota_packet=quota_packet,
-            provider_target=provider_target,
-            external_sink_delivery_authorized=True,
+            agent_id=agent_id,
         )
 
     result = auto_notify_lark_goal_channel_gate(
@@ -197,5 +168,6 @@ def sync_human_gate_after_refresh(
         external_sink_delivery_authorized=external_sink_delivery_authorized,
         runner=runner,
     )
-    result["extension_activation"] = activation
+    if quota_packet:
+        result["extension_activation"] = activation
     return result
