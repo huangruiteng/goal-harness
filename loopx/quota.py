@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -71,7 +70,7 @@ from .control_plane.quota.decision_summary import (
     refine_quota_recommended_action,
     resolve_quota_run_decision,
 )
-from .control_plane.quota.goal_boundary import effective_available_capabilities as _effective_available_capabilities, goal_boundary as _goal_boundary, quota_execution_profile_summary as _quota_execution_profile_summary
+from .control_plane.quota.goal_boundary import effective_available_capabilities as _effective_available_capabilities, goal_boundary as _goal_boundary, quota_execution_profile_summary as _quota_execution_profile_summary, registry_goal_by_id as _registry_goal_by_id
 from .control_plane.quota.monitor_poll import (
     QUOTA_MONITOR_POLL_CLASSIFICATION as QUOTA_MONITOR_POLL_CLASSIFICATION,
     build_quota_monitor_poll_event as build_quota_monitor_poll_event,
@@ -116,7 +115,7 @@ from .control_plane.quota.slot_accounting import (
 from .control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
 )
-from .control_plane.quota.states import QUOTA_STATE_ORDER
+from .control_plane.quota.states import QUOTA_STATE_ORDER, quota_item_is_paused as _quota_item_is_paused
 from .control_plane.quota.policy_constants import (
     AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS,
     DEFAULT_COMPUTE_QUOTA,
@@ -1100,25 +1099,6 @@ def _reward_lesson_projection_warning(
         "recommended_action": action,
         "match_count": len(matches),
         "matches": matches[:3],
-    }
-
-
-def _registry_goal_by_id(status_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    registry_value = status_payload.get("registry")
-    if not registry_value:
-        return {}
-    registry_path = Path(str(registry_value)).expanduser()
-    try:
-        payload = json.loads(registry_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    goals = payload.get("goals") if isinstance(payload, dict) else None
-    if not isinstance(goals, list):
-        return {}
-    return {
-        str(goal.get("id") or ""): goal
-        for goal in goals
-        if isinstance(goal, dict) and goal.get("id")
     }
 
 
@@ -2432,22 +2412,6 @@ def _build_quota_should_run_payload(
 
 
 QUOTA_PAUSED_MODE = "quota_paused"
-
-
-def _quota_item_is_paused(item: dict[str, Any]) -> bool:
-    """Return True when a plan item carries a Goal-level hard pause.
-
-    A paused Goal (`quota.compute<=0`) is a typed terminal decision: it is
-    evaluated before the selector builds any capability, workspace, replan,
-    monitor, or inbox candidate, so no lane can emit a contradicting execution
-    signal underneath the pause.
-    """
-
-    quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
-    if str(quota.get("state") or "") == "paused":
-        return True
-    compute = quota.get("compute")
-    return isinstance(compute, (int, float)) and not isinstance(compute, bool) and compute <= 0
 
 
 def _build_quota_paused_should_run_payload(

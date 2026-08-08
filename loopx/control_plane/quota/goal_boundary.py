@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shlex
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -61,6 +62,29 @@ def quota_execution_profile_summary(value: Any) -> dict[str, Any] | None:
             ],
         }
     return compact or None
+
+
+def registry_goal_by_id(
+    status_payload: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Return registry goals indexed by goal id from a status payload."""
+
+    registry_value = status_payload.get("registry")
+    if not registry_value:
+        return {}
+    registry_path = Path(str(registry_value)).expanduser()
+    try:
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    goals = payload.get("goals") if isinstance(payload, dict) else None
+    if not isinstance(goals, list):
+        return {}
+    return {
+        str(goal.get("id") or ""): goal
+        for goal in goals
+        if isinstance(goal, dict) and goal.get("id")
+    }
 
 
 def quota_execution_profile_boundary_summary(value: Any) -> dict[str, Any] | None:
