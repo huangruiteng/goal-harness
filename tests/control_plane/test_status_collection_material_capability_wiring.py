@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from loopx.control_plane import status_collection
+from loopx.control_plane.status import collection as status_collection
 from loopx.control_plane.agents.management_projection import (
     build_agent_management_projection,
 )

@@ -1,11 +1,13 @@
+"""Status collection assembly inside the `status` bounded context."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .goals.contract_health import project_contract_health_for_goal
-from .runtime.runtime_projection_route import (
+from ..goals.contract_health import project_contract_health_for_goal
+from ..runtime.runtime_projection_route import (
     collect_runtime_projection_route_diagnostics,
 )
 

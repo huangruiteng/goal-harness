@@ -631,7 +631,7 @@ return redacted_status_todo_fields(fields)
 
 ### 4. Status collection 是聚合器，不是第二套状态机
 
-`loopx/control_plane/status_collection.py::collect_status` 的调用顺序很值得照抄到白板：
+`loopx/control_plane/status/collection.py::collect_status` 的调用顺序很值得照抄到白板：
 
 ```python
 registry = context.load_registry(registry_path)

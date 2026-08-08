@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx import status as status_module  # noqa: E402
-from loopx.control_plane import status_collection as collection_read_model  # noqa: E402
+from loopx.control_plane.status import collection as collection_read_model  # noqa: E402
 
 
 GOAL_ID = "status-collection-fixture"

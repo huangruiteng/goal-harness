@@ -8,7 +8,7 @@ from .benchmarks.read_models.skillsbench_verifier_attribution import (
     apply_skillsbench_verifier_bootstrap_missing_score_attribution,
 )
 from .control_plane import compact_control_plane_policy
-from .control_plane.status_collection import (
+from .control_plane.status.collection import (
     StatusCollectionContext,
     collect_status as _collect_status_read_model,
 )
