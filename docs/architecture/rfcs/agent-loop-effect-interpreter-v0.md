@@ -48,7 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
-| M6 General effect-program abstraction | Mostly complete (#2938-#2958); R4 executor deferred |
+| M6 General effect-program abstraction | In progress; quality gate pending (#2938-#2959) |
 
 ## Why This Matters
 
@@ -307,6 +307,42 @@ R1, R2, and R3 are complete:
 R4 remains pending and must not be implemented until a real multi-step
 host/turn-driver caller executes an ordered effect program.
 
+### Qualitative Change Plan
+
+The current effect abstraction is a read lens plus three small runtime
+replacements. It is not yet a qualitative change. M6 must not be called mostly
+complete until all of the following are true:
+
+1. Hot modules shrink to bounded sizes:
+   - `loopx/quota.py` below 2000 lines;
+   - `loopx/status.py` below 2000 lines;
+   - `loopx/heartbeat_prompt.py` below 1200 lines.
+2. `loopx quota should-run` builds through a bounded `should_run` decision
+   module, and `loopx.quota.build_quota_should_run` becomes a thin
+   compatibility wrapper.
+3. `EffectTurn` and `EffectProgram` are consumed by CLI quota, turn driver,
+   and bootstrap construction, not only by tests and renderers.
+4. No effect abstraction remains test-only.
+5. Maintainability, import-graph, CLI output, and hot-path interface ratchets
+   pass without new exceptions.
+6. Doubao/model-behavior shadow qualification covers changed agent-facing
+   packets.
+
+Phases:
+
+- Q1: Stop milestone claims; keep M6 in progress.
+- Q2: Characterize hot modules and capture parity fixtures for
+  `quota.py`, `status.py`, and `heartbeat_prompt.py`.
+- Q3: Extract the quota `should-run` decision and packet builder into
+  `loopx/control_plane/quota/should_run.py`.
+- Q4: Extract status read models, collection, and presentation into bounded
+  modules.
+- Q5: Extract heartbeat prompt builders into bounded modules.
+- Q6: Make CLI quota, turn driver, and bootstrap construction consume
+  `EffectTurn` / `EffectProgram`.
+- Q7: Add quality gates and focused tests for each extraction.
+- Q8: Re-evaluate M6 only after the gates pass.
+
 ### Replacement-First Rule
 
 Every M6 code change must replace an existing real runtime call path, not add
@@ -561,6 +597,9 @@ For every runtime replacement:
 - Do not create a generic `Effect` abstraction without two real callers.
 - Do not count test-only lenses as M6 progress; every M6 change must replace a
   real runtime call path.
+- Do not mark M6 mostly complete while `quota.py`, `status.py`, or
+  `heartbeat_prompt.py` remain oversized or while effect abstraction is
+  test-only.
 - Do not treat the current `EffectTurn` lens as a general runtime abstraction
   until a second interpreter and a real executor caller exist.
 - Do not rewrite `quota should-run` for the sake of naming.
