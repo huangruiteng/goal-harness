@@ -82,6 +82,9 @@ Suggested command surface:
 
 ```bash
 loopx goal-channel setup --provider lark --goal-id <goal-id>
+loopx goal-channel target add --name <target> --provider lark ...
+loopx goal-channel setup --goal-id <goal-id> --target <target>
+loopx goal-channel attach --target <target> --goal-id <goal-a> --goal-id <goal-b>
 loopx goal-channel doctor --goal-id <goal-id>
 loopx goal-channel sync --goal-id <goal-id>
 loopx goal-channel notify-gate --goal-id <goal-id>
@@ -144,6 +147,40 @@ raw Lark payloads, local file paths, or credentials. Public packets may expose
 booleans, counts, sanitized provider labels, and operator-safe URLs only when
 the caller has already chosen to show them.
 
+### Shared provider targets
+
+Several Goal Channels may reference one named local-private provider target.
+The target owns the reusable Lark chat and sender identity; each Goal binding
+continues to own its control message, Kanban, receipts, and cooldown state:
+
+```bash
+loopx goal-channel target add \
+  --name loopx-dev \
+  --provider lark \
+  --chat-id <private-chat-id> \
+  --bot-app-id <private-app-id> \
+  --execute
+
+loopx goal-channel attach \
+  --target loopx-dev \
+  --goal-id goal-a \
+  --goal-id goal-b \
+  --execute
+```
+
+The target store belongs under the resolved LoopX runtime root and is never a
+public or repository-tracked configuration. A target-linked Goal binding stores
+only `target_ref` plus Goal-local state; changing a target updates the resolved
+chat or sender for every referencing Goal without merging their state.
+After moving a target to another group, rerun bounded `attach` batches so each
+Goal can establish and verify its own control message in the new group.
+
+Machines do not synchronize private chat ids or authentication profiles. To
+use the same group from a workstation and a development host, configure the
+same target name independently on each machine. Inbound routing must reply to a
+specific gate message or carry an explicit Goal id; ordinary group text must
+never be inferred as belonging to one of several Goals.
+
 ## BYO Provider Identity
 
 Open-source LoopX should default to **Bring Your Own provider identity**:
@@ -167,8 +204,9 @@ operations. Goal Control messages, pins, and gate notifications always use the
 configured bot identity. It does not require or request
 `im:message.send_as_user`.
 
-Effectful setup requires an explicit `--bot-app-id cli_...`. LoopX verifies
-that it matches the selected `lark-cli` profile before adding the bot or
+Effectful direct setup requires an explicit `--bot-app-id cli_...`; target-based
+setup obtains that explicit selection from the local-private target. LoopX
+verifies that it matches the selected `lark-cli` profile before adding the bot or
 sending a message. Omitting the flag is a preview-only convenience, not
 authorization to select the default profile's bot.
 

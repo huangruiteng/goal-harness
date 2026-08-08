@@ -73,6 +73,9 @@ chat、pinned status、Kanban、notification receipts 和 provider-specific meta
 
 ```bash
 loopx goal-channel setup --provider lark --goal-id <goal-id>
+loopx goal-channel target add --name <target> --provider lark ...
+loopx goal-channel setup --goal-id <goal-id> --target <target>
+loopx goal-channel attach --target <target> --goal-id <goal-a> --goal-id <goal-b>
 loopx goal-channel doctor --goal-id <goal-id>
 loopx goal-channel sync --goal-id <goal-id>
 loopx goal-channel notify-gate --goal-id <goal-id>
@@ -133,6 +136,37 @@ chat id、member id、message id、profile name、raw Lark payload、本地文�
 只有当调用方明确选择展示时，公开 packet 才可以展示布尔值、计数、脱敏 provider
 label 和 operator-safe URL。
 
+### 共享 provider target
+
+多个 Goal Channel 可以引用同一个具名、本地私有的 provider target。target 持有
+可复用的 Lark 群和发送身份；每个 Goal binding 仍独立持有自己的控制消息、Kanban、
+receipt 和 cooldown 状态：
+
+```bash
+loopx goal-channel target add \
+  --name loopx-dev \
+  --provider lark \
+  --chat-id <private-chat-id> \
+  --bot-app-id <private-app-id> \
+  --execute
+
+loopx goal-channel attach \
+  --target loopx-dev \
+  --goal-id goal-a \
+  --goal-id goal-b \
+  --execute
+```
+
+target store 位于解析后的 LoopX runtime root 下，绝不能成为公开或提交进仓库的配置。
+引用 target 的 Goal binding 只保存 `target_ref` 和 Goal 本地状态；更新 target 会改变
+所有引用 Goal 解析到的群或 sender，但不会合并这些 Goal 的状态。
+target 换到另一个群后，应重新执行有界 `attach` 批次，让每个 Goal 在新群中分别建立并
+回读自己的控制消息。
+
+不同机器之间不自动同步私有 chat id 或认证 profile。若本机和开发机需要使用同一个群，
+应在两台机器上分别配置同名 target。未来接收群回复时，只能接受对具体 gate 消息的回复，
+或携带明确 Goal id 的操作；不得把普通群文本推断给多个 Goal 中的某一个。
+
 ## BYO Provider Identity
 
 开源 LoopX 应默认使用 **Bring Your Own provider identity**：
@@ -154,7 +188,8 @@ label 和 operator-safe URL。
 和 gate notification 始终使用已配置的 bot identity，不请求也不依赖
 `im:message.send_as_user`。
 
-执行 setup 时必须显式传入 `--bot-app-id cli_...`。LoopX 会验证该 app id
+直接执行 setup 时必须显式传入 `--bot-app-id cli_...`；target 模式则从本地私有
+target 取得这项明确选择。LoopX 会验证该 app id
 与所选 `lark-cli` profile 一致，再允许加 bot 或发消息。省略该参数只适用于
 preview，不代表可以静默选择默认 profile 的 bot。
 
