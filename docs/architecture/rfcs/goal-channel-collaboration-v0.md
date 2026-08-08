@@ -297,10 +297,19 @@ provide context, but a gate changes only after LoopX validates and records the
 corresponding decision.
 
 Automatic lifecycle delivery resolves the enabled, doctor-verified Lark
-extension before reading the private binding. The explicit local disable
-command is the only recovery exception: it may clear the opt-in while the
-extension or binding is incomplete, and it never enters provider code or
-performs an external write.
+extension before reading the private binding. Enabling automatic delivery
+requires the canonical project-local binding path; custom `--binding-path`
+values are rejected because `refresh-state` has no per-invocation path input.
+The explicit local disable command is the only recovery exception: it may clear
+the opt-in while the extension or binding is incomplete, and it never enters
+provider code or performs an external write.
+
+Enabling also writes an owner-only local marker containing only the enabled
+boolean. The lifecycle may read this marker before extension activation solely
+to distinguish a never-configured project from a configured sink whose
+extension became unavailable. The latter fails closed with a retryable
+`extension_unavailable` postcondition; the marker contains no provider ids,
+credentials, channel metadata, or raw payloads.
 
 ## Command Contract
 

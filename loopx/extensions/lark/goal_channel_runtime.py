@@ -8,10 +8,12 @@ from typing import Any
 from .goal_channel_contracts import (
     DEFAULT_GATE_COOLDOWN_SECONDS,
     binding_for_goal,
+    clear_human_gate_auto_notify_marker,
     gate_message,
     goal_from_registry,
     goal_objective,
     human_gate_auto_notify_enabled,
+    human_gate_auto_notify_marker_path,
     now_iso,
     operation_packet,
     parse_time,
@@ -21,6 +23,7 @@ from .goal_channel_contracts import (
     read_goal_channel_binding,
     save_goal_binding,
     semantic_key,
+    write_human_gate_auto_notify_marker,
 )
 from .goal_channel_transport import (
     APP_ID_PATTERN,
@@ -88,6 +91,7 @@ def configure_lark_goal_channel_automation(
         )
     current = human_gate_auto_notify_enabled(binding)
     changed = current != human_gate_auto_notify
+    marker_path = human_gate_auto_notify_marker_path(binding_path, goal_id)
     if execute and changed:
         mutable_binding = dict(binding)
         automation = _mapping(binding.get("automation"))
@@ -99,6 +103,11 @@ def configure_lark_goal_channel_automation(
             goal_id=goal_id,
             binding=mutable_binding,
         )
+    if execute:
+        if human_gate_auto_notify:
+            write_human_gate_auto_notify_marker(marker_path)
+        else:
+            clear_human_gate_auto_notify_marker(marker_path)
     return operation_packet(
         ok=True,
         goal_id=goal_id,
@@ -496,18 +505,6 @@ def notify_lark_goal_channel_gate(
             blocker="state_transition_rejected",
             public_summary="LoopX has not selected a human gate notification",
         )
-    cooldown = quota_packet.get("user_gate_notification_cooldown")
-    if isinstance(cooldown, Mapping) and cooldown.get("notification_suppressed") is True:
-        return operation_packet(
-            ok=False,
-            goal_id=goal_id,
-            operation="notify_gate",
-            execute=execute,
-            status="suppressed",
-            blocker="notification_cooldown_active",
-            public_summary="the current human gate notification is in cooldown",
-        )
-
     channel = _mapping(binding.get("channel"))
     identity_config = _mapping(binding.get("identity"))
     kanban = _mapping(binding.get("kanban"))
@@ -563,13 +560,33 @@ def notify_lark_goal_channel_gate(
             for receipt_key, receipt in receipts.items()
             if receipt_key != key
         }
+    same_gate_receipts = [
+        receipt
+        for receipt in receipts.values()
+        if isinstance(receipt, Mapping)
+        and receipt.get("kind") == "gate_notification"
+        and str(receipt.get("gate_identity") or "") == gate_identity
+    ]
+    cooldown = quota_packet.get("user_gate_notification_cooldown")
+    if (
+        same_gate_receipts
+        and isinstance(cooldown, Mapping)
+        and cooldown.get("notification_suppressed") is True
+    ):
+        return operation_packet(
+            ok=False,
+            goal_id=goal_id,
+            operation="notify_gate",
+            execute=execute,
+            status="suppressed",
+            blocker="notification_cooldown_active",
+            public_summary="the current human gate notification is in cooldown",
+        )
     latest_gate_time = max(
         (
             parsed
-            for receipt in receipts.values()
-            if isinstance(receipt, Mapping)
-            and receipt.get("kind") == "gate_notification"
-            and (parsed := parse_time(receipt.get("verified_at"))) is not None
+            for receipt in same_gate_receipts
+            if (parsed := parse_time(receipt.get("verified_at"))) is not None
         ),
         default=None,
     )
@@ -705,6 +722,7 @@ def notify_lark_goal_channel_gate(
     mutable_receipts = dict(receipts)
     mutable_receipts[key] = {
         "kind": "gate_notification",
+        "gate_identity": gate_identity,
         "message_id": message_id,
         "verified_at": now_iso(),
     }

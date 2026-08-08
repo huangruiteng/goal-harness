@@ -9,7 +9,9 @@ import pytest
 from loopx.extensions.lark import goal_channel_lifecycle
 from loopx.extensions.lark.goal_channel_contracts import (
     GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
+    human_gate_auto_notify_marker_path,
     read_goal_channel_binding,
+    write_human_gate_auto_notify_marker,
     write_goal_channel_binding,
 )
 
@@ -223,6 +225,42 @@ def test_refresh_lifecycle_extension_failure_prevents_private_binding_read(
     assert result["ok"] is True
     assert result["enabled"] is False
     assert result["status"] == "extension_unavailable"
+
+
+def test_refresh_lifecycle_configured_extension_failure_blocks_delivery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path = _registry(tmp_path)
+    binding_path = registry_path.parent / "goal-channel.json"
+    _binding(registry_path, enabled=True)
+    write_human_gate_auto_notify_marker(
+        human_gate_auto_notify_marker_path(binding_path, GOAL_ID)
+    )
+    monkeypatch.setattr(
+        goal_channel_lifecycle,
+        "resolve_extension_activation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("extension unavailable")
+        ),
+    )
+
+    result = goal_channel_lifecycle.sync_human_gate_after_refresh(
+        registry_path=registry_path,
+        runtime_root_override=None,
+        goal_id=GOAL_ID,
+        agent_id=None,
+        external_sink_delivery_authorized=True,
+    )
+
+    assert result["ok"] is False
+    assert result["enabled"] is True
+    assert result["status"] == "extension_unavailable"
+    assert result["blocker"] == "extension_unavailable"
+    assert result["delivery_postcondition"] == {
+        "satisfied": False,
+        "blocks_delivery": True,
+    }
 
 
 def test_refresh_lifecycle_reads_quota_then_delivers_selected_gate(

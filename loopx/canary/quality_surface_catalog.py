@@ -72,7 +72,11 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
                 "examples/change-quality-qualification-smoke.py"
             ),
             "catalog_canary": _covered("change-quality-exact-receipt"),
-            "host_upgrade": _covered("examples/install-local-smoke.py"),
+            "host_upgrade": _not_applicable(
+                "This surface is exercised through the packaged CLI entrypoint in "
+                "its durable smoke; installation continuity is owned by the "
+                "separate install-update quality surface."
+            ),
             "model_behavior": _not_applicable(
                 "This catalogued surface proves deterministic scope and receipt integrity; "
                 "reviewer competence remains a provider responsibility and a receipt is "

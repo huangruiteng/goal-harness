@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -16,9 +18,6 @@ from loopx.extensions.lark.goal_channel_contracts import (
     read_goal_channel_binding,
     semantic_key,
     write_goal_channel_binding,
-)
-from loopx.extensions.lark.goal_channel_lifecycle import (
-    sync_human_gate_after_refresh,
 )
 from loopx.extensions.runtime import (
     default_extension_state_file,
@@ -37,61 +36,86 @@ MESSAGE_ID = "om_public_fixture"
 APP_ID = "cli_public_fixture"
 
 
-def result(payload: object) -> dict[str, object]:
-    return {
-        "returncode": 0,
-        "stdout": json.dumps(payload),
-        "stderr": "",
-        "timed_out": False,
+def write_fake_lark_cli(root: Path) -> tuple[Path, Path]:
+    bin_dir = root / "bin"
+    state_path = root / "fake-lark-state.json"
+    executable = bin_dir / "lark-cli"
+    bin_dir.mkdir(parents=True)
+    executable.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        f"state_path = Path({str(state_path)!r})\n"
+        "state = json.loads(state_path.read_text()) if state_path.exists() else "
+        "{'calls': [], 'sent_text': ''}\n"
+        "args = sys.argv[1:]\n"
+        "state['calls'].append(args)\n"
+        "if 'auth' in args and 'status' in args:\n"
+        f"    payload = {{'ok': True, 'appId': {APP_ID!r}, 'identities': "
+        "{'bot': {'available': True, 'verified': True, 'appName': 'LoopX Bot'}}}\n"
+        "elif 'chats' in args and 'get' in args:\n"
+        "    payload = {'ok': True}\n"
+        "elif '+messages-send' in args:\n"
+        "    state['sent_text'] = args[args.index('--text') + 1]\n"
+        f"    payload = {{'ok': True, 'data': {{'message_id': {MESSAGE_ID!r}}}}}\n"
+        "elif '+messages-mget' in args:\n"
+        f"    payload = {{'ok': True, 'data': {{'items': [{{'message_id': "
+        f"{MESSAGE_ID!r}, 'body': {{'content': state['sent_text']}}}}]}}}}\n"
+        "else:\n"
+        "    raise SystemExit('unexpected fake lark command: ' + ' '.join(args))\n"
+        "state_path.write_text(json.dumps(state))\n"
+        "print(json.dumps(payload))\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    return bin_dir, state_path
+
+
+def run_refresh(
+    *,
+    registry_path: Path,
+    runtime_root: Path,
+    project: Path,
+    bin_dir: Path,
+) -> dict[str, object]:
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
     }
-
-
-class FakeLarkRunner:
-    def __init__(self) -> None:
-        self.calls: list[list[str]] = []
-        self.sent_text = ""
-
-    def __call__(
-        self,
-        args: list[str],
-        cwd: Path | None,
-        timeout: float | None,
-    ) -> dict[str, object]:
-        self.calls.append(args)
-        if "auth" in args and "status" in args:
-            return result(
-                {
-                    "ok": True,
-                    "appId": APP_ID,
-                    "identities": {
-                        "bot": {
-                            "available": True,
-                            "verified": True,
-                            "appName": "LoopX Bot",
-                        }
-                    },
-                }
-            )
-        if "chats" in args and "get" in args:
-            return result({"ok": True})
-        if "+messages-send" in args:
-            self.sent_text = args[args.index("--text") + 1]
-            return result({"ok": True, "data": {"message_id": MESSAGE_ID}})
-        if "+messages-mget" in args:
-            return result(
-                {
-                    "ok": True,
-                    "data": {
-                        "items": [
-                            {
-                                "message_id": MESSAGE_ID,
-                                "body": {"content": self.sent_text},
-                            }
-                        ]
-                    },
-                }
-            )
-        raise AssertionError(f"unexpected Lark command: {args}")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "loopx.cli",
+            "--registry",
+            str(registry_path),
+            "--runtime-root",
+            str(runtime_root),
+            "--format",
+            "json",
+            "refresh-state",
+            "--goal-id",
+            GOAL_ID,
+            "--project",
+            str(project),
+            "--classification",
+            "validated",
+            "--recommended-action",
+            "Wait for owner approval.",
+            "--no-global-sync",
+        ],
+        cwd=project,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"refresh-state failed\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+    return json.loads(completed.stdout)
 
 
 def write_project(root: Path) -> tuple[Path, Path]:
@@ -181,6 +205,9 @@ def write_project(root: Path) -> tuple[Path, Path]:
         state_file=default_extension_state_file(runtime),
         execute=True,
     )
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["identity"]["cli_bin"] = "lark-cli"
+    write_goal_channel_binding(binding_path, binding)
     return registry_path, binding_path
 
 
@@ -189,24 +216,28 @@ def main() -> None:
         prefix="loopx-goal-channel-human-gate-"
     ) as raw:
         registry_path, binding_path = write_project(Path(raw))
-        runner = FakeLarkRunner()
-        first = sync_human_gate_after_refresh(
+        bin_dir, fake_state_path = write_fake_lark_cli(Path(raw))
+        project = registry_path.parent.parent
+        runtime_root = Path(raw) / "runtime"
+        first_refresh = run_refresh(
             registry_path=registry_path,
-            runtime_root_override=None,
-            goal_id=GOAL_ID,
-            agent_id=None,
-            external_sink_delivery_authorized=True,
-            runner=runner,
+            runtime_root=runtime_root,
+            project=project,
+            bin_dir=bin_dir,
         )
-        send_count = sum("+messages-send" in args for args in runner.calls)
-        second = sync_human_gate_after_refresh(
+        first = first_refresh["goal_channel_gate_sync"]
+        first_fake_state = json.loads(fake_state_path.read_text(encoding="utf-8"))
+        send_count = sum(
+            "+messages-send" in args for args in first_fake_state["calls"]
+        )
+        second_refresh = run_refresh(
             registry_path=registry_path,
-            runtime_root_override=None,
-            goal_id=GOAL_ID,
-            agent_id=None,
-            external_sink_delivery_authorized=True,
-            runner=runner,
+            runtime_root=runtime_root,
+            project=project,
+            bin_dir=bin_dir,
         )
+        second = second_refresh["goal_channel_gate_sync"]
+        second_fake_state = json.loads(fake_state_path.read_text(encoding="utf-8"))
 
         assert first["status"] == "sent_verified", first
         assert first["external_write_performed"] is True, first
@@ -230,13 +261,16 @@ def main() -> None:
         )
         assert notification["idempotency_key"] == expected_key, notification
         assert second["status"] == "already_sent", second
-        assert sum("+messages-send" in args for args in runner.calls) == send_count
+        assert (
+            sum("+messages-send" in args for args in second_fake_state["calls"])
+            == send_count
+        )
         receipts = read_goal_channel_binding(binding_path)["bindings"][GOAL_ID][
             "receipts"
         ]
         assert expected_key in receipts, receipts
-        assert "Approve the bounded external write." in runner.sent_text
-        assert "LoopX remains the source of truth" not in runner.sent_text
+        assert "Approve the bounded external write." in second_fake_state["sent_text"]
+        assert "LoopX remains the source of truth" not in second_fake_state["sent_text"]
         public_packet = json.dumps(first, ensure_ascii=False)
         assert CHAT_ID not in public_packet
         assert MESSAGE_ID not in public_packet

@@ -399,6 +399,39 @@ def handle_goal_channel_command(
         runtime_root_arg,
         registry_path=registry_path,
     )
+    if command == "configure" and bool(args.auto_notify_human_gates):
+        assert goal_id is not None
+        _, source_registry_path, binding_path = _source_context(
+            registry=registry,
+            registry_path=registry_path,
+            goal_id=goal_id,
+            binding_path_arg=getattr(args, "binding_path", None),
+        )
+        default_binding_path = default_goal_channel_binding_path(
+            source_registry_path
+        )
+    else:
+        binding_path = None
+        default_binding_path = None
+    if (
+        command == "configure"
+        and bool(args.auto_notify_human_gates)
+        and binding_path is not None
+        and default_binding_path is not None
+        and binding_path.resolve() != default_binding_path.resolve()
+    ):
+        payload = _error_packet(
+            goal_id=goal_id,
+            operation="configure",
+            execute=execute,
+            blocker="noncanonical_binding_path",
+            summary=(
+                "automatic human gate delivery requires the project-local "
+                "default Goal Channel binding"
+            ),
+        )
+        print_payload(payload, output_format(args), render_goal_channel_markdown)
+        return 1
     if command == "configure" and not bool(args.auto_notify_human_gates):
         assert goal_id is not None
         source_registry, _, binding_path = _source_context(

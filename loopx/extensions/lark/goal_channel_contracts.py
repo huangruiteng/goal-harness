@@ -16,6 +16,9 @@ GOAL_CHANNEL_BINDING_SCHEMA_VERSION = "loopx_goal_channel_lark_binding_v0"
 GOAL_CHANNEL_OPERATION_SCHEMA_VERSION = "loopx_goal_channel_operation_v0"
 DEFAULT_GATE_COOLDOWN_SECONDS = 3600
 HUMAN_GATE_AUTO_NOTIFY_SETTING = "human_gate_auto_notify_enabled"
+HUMAN_GATE_AUTO_NOTIFY_MARKER_SCHEMA_VERSION = (
+    "loopx_goal_channel_auto_notify_marker_v0"
+)
 PRIVATE_PACKET_KEYS = {
     "base_token",
     "chat_id",
@@ -134,6 +137,53 @@ def human_gate_auto_notify_enabled(binding: Mapping[str, Any] | None) -> bool:
         else {}
     )
     return automation.get(HUMAN_GATE_AUTO_NOTIFY_SETTING) is True
+
+
+def human_gate_auto_notify_marker_path(
+    binding_path: Path,
+    goal_id: str,
+) -> Path:
+    safe_goal_id = str(goal_id or "").strip()
+    if (
+        not safe_goal_id
+        or safe_goal_id in {".", ".."}
+        or "/" in safe_goal_id
+        or "\\" in safe_goal_id
+    ):
+        raise ValueError("Goal Channel goal id must be a single path segment")
+    return binding_path.with_name(
+        f"{binding_path.stem}.{safe_goal_id}.human-gate-auto-notify.json"
+    )
+
+
+def human_gate_auto_notify_marker_enabled(path: Path) -> bool:
+    marker_path = path.expanduser()
+    if not marker_path.exists():
+        return False
+    try:
+        payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True
+    return bool(
+        isinstance(payload, Mapping)
+        and payload.get("schema_version")
+        == HUMAN_GATE_AUTO_NOTIFY_MARKER_SCHEMA_VERSION
+        and payload.get("enabled") is True
+    )
+
+
+def write_human_gate_auto_notify_marker(path: Path) -> None:
+    write_private_json_atomic(
+        path,
+        {
+            "schema_version": HUMAN_GATE_AUTO_NOTIFY_MARKER_SCHEMA_VERSION,
+            "enabled": True,
+        },
+    )
+
+
+def clear_human_gate_auto_notify_marker(path: Path) -> None:
+    path.expanduser().unlink(missing_ok=True)
 
 
 def quota_human_gate_identity(quota_packet: Mapping[str, Any]) -> str:

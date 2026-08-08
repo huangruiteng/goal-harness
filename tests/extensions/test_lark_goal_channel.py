@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from loopx.cli_commands import goal_channel as goal_channel_cli
+from loopx.extensions.lark import goal_channel_contracts
 from loopx.extensions.lark.goal_channel import (
     GOAL_CHANNEL_BINDING_SCHEMA_VERSION,
     auto_notify_lark_goal_channel_gate,
@@ -508,6 +509,11 @@ def test_configure_auto_notify_is_preview_first_and_persists_private_opt_in(
     assert applied["readback_verified"] is True
     binding = read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]
     assert binding["automation"]["human_gate_auto_notify_enabled"] is True
+    marker_path = goal_channel_contracts.human_gate_auto_notify_marker_path(
+        binding_path,
+        GOAL_ID,
+    )
+    assert goal_channel_contracts.human_gate_auto_notify_marker_enabled(marker_path)
     assert binding["channel"]["chat_id"] == CHAT_ID
     assert binding_path.stat().st_mode & 0o777 == 0o600
     _assert_public_packet(preview)
@@ -540,6 +546,11 @@ def test_configure_can_disable_auto_notify_for_incomplete_binding(
     persisted = read_goal_channel_binding(binding_path)["bindings"][GOAL_ID]
     assert persisted["enabled"] is False
     assert persisted["automation"]["human_gate_auto_notify_enabled"] is False
+    marker_path = goal_channel_contracts.human_gate_auto_notify_marker_path(
+        binding_path,
+        GOAL_ID,
+    )
+    assert marker_path.exists() is False
     _assert_public_packet(payload)
 
 
@@ -966,7 +977,6 @@ def test_notify_gate_distinguishes_different_gate_ids_with_same_question(
         goal_id=GOAL_ID,
         binding_path=binding_path,
         quota_packet=quota("todo_gate_one"),
-        cooldown_seconds=0,
         execute=True,
         runner=runner,
     )
@@ -975,7 +985,6 @@ def test_notify_gate_distinguishes_different_gate_ids_with_same_question(
         goal_id=GOAL_ID,
         binding_path=binding_path,
         quota_packet=quota("todo_gate_two"),
-        cooldown_seconds=0,
         execute=True,
         runner=runner,
     )
@@ -1054,6 +1063,16 @@ def test_notify_gate_respects_quota_cooldown_without_external_call(
     binding_path.parent.mkdir(parents=True)
     kanban_path = tmp_path / ".loopx" / "lark-kanban.json"
     _write_binding(binding_path, kanban_path)
+    binding = read_goal_channel_binding(binding_path)
+    binding["bindings"][GOAL_ID]["receipts"] = {
+        "sha256:prior-reminder": {
+            "kind": "gate_notification",
+            "gate_identity": "todo_gate_fixture",
+            "message_id": GATE_MESSAGE_ID,
+            "verified_at": "2026-08-08T00:00:00+00:00",
+        }
+    }
+    write_goal_channel_binding(binding_path, binding)
     calls: list[list[str]] = []
 
     payload = notify_lark_goal_channel_gate(
@@ -1064,6 +1083,15 @@ def test_notify_gate_respects_quota_cooldown_without_external_call(
             "state": "operator_gate",
             "notify_user_on_gate": True,
             "gate_prompt": "Approve the bounded external write.",
+            "user_todo_summary": {
+                "gate_open_items": [
+                    {
+                        "todo_id": "todo_gate_fixture",
+                        "task_class": "user_gate",
+                        "text": "Approve the bounded external write.",
+                    }
+                ]
+            },
             "user_gate_notification_cooldown": {
                 "notification_suppressed": True,
             },
@@ -1304,6 +1332,49 @@ def test_cli_can_disable_auto_notify_when_extension_is_unavailable(
             "human_gate_auto_notify_enabled"
         ]
         is False
+    )
+
+
+def test_cli_rejects_custom_binding_path_for_auto_notify(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path = tmp_path / ".loopx" / "registry.json"
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(json.dumps(_registry(tmp_path)), encoding="utf-8")
+    custom_binding = tmp_path / ".loopx" / "custom-goal-channel.json"
+    _write_binding(custom_binding, tmp_path / ".loopx" / "lark-kanban.json")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        goal_channel_cli,
+        "resolve_extension_activation",
+        lambda *args, **kwargs: {"status": "active"},
+    )
+
+    result = goal_channel_cli.handle_goal_channel_command(
+        argparse.Namespace(
+            command="goal-channel",
+            goal_channel_command="configure",
+            goal_id=GOAL_ID,
+            binding_path=str(custom_binding),
+            auto_notify_human_gates=True,
+            execute=True,
+            subcommand_format="json",
+            format=None,
+        ),
+        registry_path=registry_path,
+        runtime_root_arg=None,
+        print_payload=lambda payload, fmt, renderer: captured.update(payload),
+        output_format=lambda args: "json",
+    )
+
+    assert result == 1
+    assert captured["blocker"] == "noncanonical_binding_path"
+    assert (
+        read_goal_channel_binding(custom_binding)["bindings"][GOAL_ID].get(
+            "automation"
+        )
+        is None
     )
 
 

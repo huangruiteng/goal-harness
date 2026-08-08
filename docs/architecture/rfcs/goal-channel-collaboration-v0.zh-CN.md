@@ -273,8 +273,16 @@ loopx goal-channel configure --goal-id <goal-id> --no-auto-notify-human-gates --
 才能改变 gate 状态。
 
 自动生命周期投递会先解析已启用且 doctor 验证通过的 Lark extension，再读取私有
-binding。唯一的恢复例外是显式本地 disable 命令：即使 extension 或 binding
+binding。启用自动投递时必须使用项目本地 canonical binding 路径；由于
+`refresh-state` 没有逐次传入 binding path 的入口，自定义 `--binding-path`
+会被拒绝。唯一的恢复例外是显式本地 disable 命令：即使 extension 或 binding
 不完整，它也可以清除 opt-in；该路径不会进入 provider 代码，也不会执行外部写。
+
+启用时还会写入一个 owner-only 的本地 marker，其中只包含 enabled boolean。
+生命周期在 extension activation 前只允许读取这个 marker，用来区分“从未配置”
+和“已配置但 extension 后续不可用”。后者会通过可重试的
+`extension_unavailable` postcondition fail closed；marker 不包含 provider id、
+凭据、channel metadata 或 raw payload。
 
 ## 命令契约
 

@@ -16,6 +16,8 @@ from .goal_channel_contracts import (
     binding_for_goal,
     default_goal_channel_binding_path,
     human_gate_auto_notify_enabled,
+    human_gate_auto_notify_marker_enabled,
+    human_gate_auto_notify_marker_path,
     quota_selects_human_gate,
     read_goal_channel_binding,
 )
@@ -46,7 +48,21 @@ def _inactive_result(status: str) -> dict[str, Any]:
     }
 
 
-def _extension_unavailable_result() -> dict[str, Any]:
+def _extension_unavailable_result(*, configured: bool) -> dict[str, Any]:
+    if configured:
+        return {
+            "schema_version": "loopx_goal_channel_gate_auto_delivery_v0",
+            "ok": False,
+            "enabled": True,
+            "status": "extension_unavailable",
+            "external_write_performed": False,
+            "readback_verified": False,
+            "blocker": "extension_unavailable",
+            "delivery_postcondition": {
+                "satisfied": False,
+                "blocks_delivery": True,
+            },
+        }
     return {
         **_inactive_result("extension_unavailable"),
         "enabled": False,
@@ -82,6 +98,8 @@ def sync_human_gate_after_refresh(
         if runtime_root_override
         else Path(str(source_route["source_runtime_root"]))
     )
+    binding_path = default_goal_channel_binding_path(source_registry_path)
+    marker_path = human_gate_auto_notify_marker_path(binding_path, goal_id)
     try:
         activation = resolve_extension_activation(
             LARK_EXTENSION_ID,
@@ -89,8 +107,9 @@ def sync_human_gate_after_refresh(
             required_permissions=(LARK_GOAL_CHANNEL_PERMISSION,),
         )
     except (OSError, ValueError):
-        return _extension_unavailable_result()
-    binding_path = default_goal_channel_binding_path(source_registry_path)
+        return _extension_unavailable_result(
+            configured=human_gate_auto_notify_marker_enabled(marker_path)
+        )
     binding_payload = read_goal_channel_binding(binding_path)
     raw_binding = binding_for_goal(binding_payload, goal_id)
     target_name = str((raw_binding or {}).get("target_ref") or "")
