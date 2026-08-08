@@ -390,12 +390,31 @@ def _cap_monitor_progression(*, cap_minutes: int, host_floor_minutes: int) -> li
     safe_cap = max(1, int(cap_minutes))
     safe_floor = max(1, int(host_floor_minutes))
     # Keep host RRULEs on stable buckets; the exact due horizon still gates routing.
+    if safe_cap < safe_floor:
+        return [safe_cap]
     progression = [
         max(safe_floor, interval)
         for interval in MONITOR_WAIT_PROGRESSION_MINUTES
         if interval <= safe_cap
     ]
     return progression or [safe_floor]
+
+
+def _select_monitor_cap_minutes(
+    cap_candidates: list[int],
+    *,
+    host_floor_minutes: int,
+) -> int | None:
+    tight_candidates = [
+        candidate
+        for candidate in cap_candidates
+        if candidate is not None and candidate < host_floor_minutes
+    ]
+    if tight_candidates:
+        return max(1, min(tight_candidates))
+    if not cap_candidates:
+        return None
+    return max(host_floor_minutes, min(cap_candidates))
 
 
 def _monitor_wait_item_plan(
@@ -421,9 +440,9 @@ def _monitor_wait_item_plan(
     if expires_at is not None and last_checked_at is not None and last_checked_at <= current_time:
         phase = "active_window"
         if cadence_minutes is not None:
-            cap_candidates.append(max(host_floor, cadence_minutes))
+            cap_candidates.append(cadence_minutes)
         if next_due_at is not None and next_due_at > current_time:
-            cap_candidates.append(max(host_floor, _minutes_until(next_due_at, current_time)))
+            cap_candidates.append(_minutes_until(next_due_at, current_time))
     elif next_due_at is not None and next_due_at > current_time:
         minutes_until_due = _minutes_until(next_due_at, current_time)
         phase = (
@@ -431,16 +450,23 @@ def _monitor_wait_item_plan(
             if minutes_until_due <= MONITOR_WAIT_NEAR_WINDOW_LEAD_MINUTES
             else "far_window"
         )
-        cap_candidates.append(max(host_floor, minutes_until_due))
+        cap_candidates.append(minutes_until_due)
+        if cadence_minutes is not None:
+            cap_candidates.append(cadence_minutes)
         include_next_due_in_reset = True
     elif cadence_minutes is not None:
         phase = "cadence_only"
-        cap_candidates.append(max(host_floor, cadence_minutes))
+        cap_candidates.append(cadence_minutes)
 
     if phase is None or not cap_candidates:
         return None
 
-    cap_minutes = max(host_floor, min(cap_candidates))
+    cap_minutes = _select_monitor_cap_minutes(
+        cap_candidates,
+        host_floor_minutes=host_floor,
+    )
+    if cap_minutes is None:
+        return None
     selected_identity = _monitor_item_identity(item)
     reset_profile = {
         "monitor_wait_phase": phase,
@@ -1247,11 +1273,17 @@ def build_scheduler_hint(
             if isinstance(monitor_plan, dict)
             else None
         )
+        monitor_cap_minutes = (
+            int(monitor_plan.get("cap_minutes"))
+            if isinstance(monitor_plan, dict)
+            and str(monitor_plan.get("cap_minutes") or "").strip().isdigit()
+            else MONITOR_WAIT_HOST_FLOOR_MINUTES
+        )
         monitor_reset_profile = (
             {
                 "cadence_class": "monitor_wait",
-                "codex_app_initial_interval_minutes": MONITOR_WAIT_HOST_FLOOR_MINUTES,
-                "codex_app_initial_rrule": rrule_for_minutes(MONITOR_WAIT_HOST_FLOOR_MINUTES),
+                "codex_app_initial_interval_minutes": monitor_cap_minutes,
+                "codex_app_initial_rrule": rrule_for_minutes(monitor_cap_minutes),
                 "codex_app_max_interval_minutes": 60,
                 "unchanged_poll_backoff_multiplier": 2,
                 "local_scheduler_unchanged_poll_limit": 3,
@@ -1269,7 +1301,7 @@ def build_scheduler_hint(
                 "monitor-only quiet polls should remain alive but use a slower "
                 "cadence until material evidence, a blocker, or replan obligation appears"
             ),
-            codex_interval=15,
+            codex_interval=monitor_cap_minutes,
             codex_max=60,
             cli_limit=3,
             claude_limit=3,
