@@ -13,6 +13,7 @@ from typing import Any
 
 from ...authority import validate_public_safe_text
 from ...file_lock import exclusive_file_lock
+from ..effect_program import interpret_turn_result_packet
 from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
@@ -851,7 +852,8 @@ def _task_validation_stage(
     journal_path: Path,
     effects: dict[str, bool],
 ) -> tuple[list[str], dict[str, Any] | None]:
-    kind = LoopXTurnResultKind(str(result["result_kind"]))
+    turn = interpret_turn_result_packet(result)
+    kind = LoopXTurnResultKind(turn.observation.decision)
     if kind in STOP_HOST_RESULT_KINDS:
         completed_phases = list(TRANSACTION_PHASES[:3])
         journal.update(

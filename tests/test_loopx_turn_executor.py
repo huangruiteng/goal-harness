@@ -13,7 +13,11 @@ from loopx.control_plane.turn_driver import (
     run_loopx_turn_once,
     validate_loopx_turn_host_result,
 )
-from loopx.control_plane.turn_driver.executor import BuiltInHostError
+from loopx.control_plane.turn_driver.executor import (
+    BuiltInHostError,
+    _task_validation_stage,
+)
+from loopx.control_plane.turn_driver.transaction import TRANSACTION_PHASES
 
 
 def _plan() -> dict[str, object]:
@@ -85,6 +89,32 @@ def _host_result(plan: dict[str, object], *, kind: str = "validated_progress") -
             ),
         )
     return result
+
+
+def test_task_validation_stage_reads_result_kind_through_effect_turn(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    result = _host_result(plan, kind="wait")
+    journal = {
+        "status": "in_progress",
+        "completed_phases": list(TRANSACTION_PHASES[:2]),
+    }
+
+    completed, payload = _task_validation_stage(
+        plan,
+        result,
+        task_validator=None,
+        completed_phases=list(TRANSACTION_PHASES[:2]),
+        journal=journal,
+        journal_path=tmp_path / "journal.json",
+        effects={},
+    )
+
+    assert completed == list(TRANSACTION_PHASES[:3])
+    assert journal["status"] == "stopped"
+    assert payload is not None
+    assert payload["status"] == "stopped"
 
 
 def _host_argv(result_path: Path, count_path: Path) -> list[str]:
