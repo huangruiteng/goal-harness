@@ -11,7 +11,7 @@ from ...rollout_event_log import (
     load_rollout_events,
     rollout_event_log_path,
 )
-from .effect_program import SETTLEMENT_IDENTITY_SCHEMA_VERSION
+from .effect_program import SETTLEMENT_IDENTITY_SCHEMA_VERSION, SettlementIdentity
 
 HEARTBEAT_RECEIPT_SCHEMA_VERSION = "heartbeat_quota_receipt_v0"
 
@@ -53,7 +53,12 @@ def _receipt_settlement_identity(
         goal_id = str(event.get("goal_id") or "").strip()
         agent_id = str(event.get("agent_id") or "").strip()
         turn_instance_id = str(event.get("run_id") or "").strip()
-        effect_id = f"{goal_id}:{agent_id}:{todo_id}:{turn_instance_id}"
+        effect_id = SettlementIdentity(
+            goal_id=goal_id,
+            agent_id=agent_id,
+            todo_id=todo_id,
+            turn_instance_id=turn_instance_id,
+        ).effect_id
     return todo_id, effect_id
 
 
@@ -116,9 +121,12 @@ def upgrade_identityless_heartbeat_receipt(
 
     normalized_todo_id = str(todo_id).strip()
     normalized_effect_id = str(settlement_effect_id).strip()
-    expected_effect_id = (
-        f"{goal_id}:{agent_id}:{normalized_todo_id}:{turn_instance_id}"
-    )
+    expected_effect_id = SettlementIdentity(
+        goal_id=goal_id,
+        agent_id=agent_id,
+        todo_id=normalized_todo_id,
+        turn_instance_id=turn_instance_id,
+    ).effect_id
     if not normalized_todo_id or normalized_effect_id != expected_effect_id:
         raise ValueError(
             "heartbeat receipt upgrade requires the deterministic selected Todo "

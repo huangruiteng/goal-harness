@@ -10,6 +10,7 @@ from ..control_plane.quota.cli_projection import (
     compact_quota_should_run_cli_payload,
 )
 from ..control_plane.quota.error_codes import quota_error_code
+from ..control_plane.quota.effect_program import SettlementIdentity
 from ..control_plane.quota.heartbeat_receipt import (
     fail_heartbeat_receipt,
     find_heartbeat_receipt,
@@ -619,9 +620,12 @@ def _reconcile_existing_heartbeat_receipt(
         existing_effect_id = str(
             existing_details.get("settlement_effect_id") or ""
         ).strip()
-        expected_effect_id = (
-            f"{args.goal_id}:{args.agent_id}:{rollout_todo_id}:{turn_instance_id}"
-        )
+        expected_effect_id = SettlementIdentity(
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+            todo_id=rollout_todo_id,
+            turn_instance_id=turn_instance_id,
+        ).effect_id
         if existing_todo_id and existing_effect_id:
             if (
                 existing_todo_id != rollout_todo_id
