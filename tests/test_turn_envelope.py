@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from loopx.control_plane.effect_program import interpret_quota_should_run_packet
 from loopx.control_plane.quota.turn_envelope import (
     TURN_ENVELOPE_BUDGET_BYTES,
     build_turn_envelope,
@@ -258,6 +259,25 @@ def test_turn_envelope_preserves_action_boundary_and_writeback() -> None:
     assert envelope["action"]["selected_todo"]["continuation_policy"] == (
         "same_agent_non_delivery"
     )
+
+
+def test_turn_envelope_derives_canonical_slots_through_effect_turn() -> None:
+    source = _full_decision()
+    turn = interpret_quota_should_run_packet(
+        source,
+        goal_id="fixture-goal",
+        agent_id="codex-fixture",
+    )
+    envelope = build_turn_envelope(source)
+
+    assert envelope["action"]["recommended_action"] == (
+        turn.observation.recommended_action
+    )
+    assert envelope["writeback"]["next_cli_actions"] == list(
+        turn.next_effect.cli_actions
+    )
+    assert envelope["scheduler"]["action"] == turn.next_effect.scheduler_action
+    assert envelope["scheduler"]["cadence_class"] == turn.next_effect.cadence_class
     assert envelope["action"]["must_attempt"] is True
     assert envelope["user"] == {
         "action_required": False,

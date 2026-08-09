@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from hashlib import sha256
 from typing import Any
 
+from ..effect_program import EffectTurn, interpret_quota_should_run_packet
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
     render_scheduler_execution_args,
@@ -378,13 +379,36 @@ def _boundary(payload: Mapping[str, Any]) -> dict[str, Any]:
     return boundary
 
 
-def _scheduler(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _quota_effect_turn(payload: Mapping[str, Any]) -> EffectTurn:
+    agent_identity = _mapping(payload.get("agent_identity"))
+    agent_id = str(
+        payload.get("agent_id") or agent_identity.get("agent_id") or ""
+    ).strip() or None
+    return interpret_quota_should_run_packet(
+        payload,
+        goal_id=str(payload.get("goal_id") or "") or None,
+        agent_id=agent_id,
+    )
+
+
+def _scheduler(
+    payload: Mapping[str, Any],
+    turn: EffectTurn | None = None,
+) -> dict[str, Any]:
     source = _mapping(payload.get("scheduler_hint"))
-    scheduler: dict[str, Any] = {
-        field: source[field]
-        for field in ("action", "cadence_class", "reason_code", "spend_policy")
-        if source.get(field) is not None
-    }
+    effect_turn = turn or _quota_effect_turn(payload)
+    scheduler: dict[str, Any] = {}
+    action = effect_turn.next_effect.scheduler_action or source.get("action")
+    cadence_class = (
+        effect_turn.next_effect.cadence_class or source.get("cadence_class")
+    )
+    if action is not None:
+        scheduler["action"] = action
+    if cadence_class is not None:
+        scheduler["cadence_class"] = cadence_class
+    for field in ("reason_code", "spend_policy"):
+        if source.get(field) is not None:
+            scheduler[field] = source[field]
     codex_app = _mapping(source.get("codex_app"))
     if not codex_app:
         return scheduler
@@ -603,15 +627,20 @@ def _contract_capsule(
     return capsule
 
 
-def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
-    agent_identity = _mapping(payload.get("agent_identity"))
-    agent_id = str(
-        payload.get("agent_id") or agent_identity.get("agent_id") or ""
-    ).strip() or None
+def _action_projection(
+    payload: Mapping[str, Any],
+    turn: EffectTurn | None = None,
+) -> dict[str, Any]:
+    effect_turn = turn or _quota_effect_turn(payload)
+    agent_id = effect_turn.request.agent_id
     interaction = _mapping(payload.get("interaction_contract"))
     agent_channel = _mapping(interaction.get("agent_channel"))
     cli_channel = _mapping(interaction.get("cli_channel"))
-    recommended_action = _text(payload.get("recommended_action"), limit=480)
+    recommended_action = _text(
+        effect_turn.observation.recommended_action
+        or payload.get("recommended_action"),
+        limit=480,
+    )
     action = {
         "recommended_action": recommended_action,
         "primary_action": _text(agent_channel.get("primary_action"), limit=480),
@@ -624,10 +653,11 @@ def _action_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
         ),
     }
     user = _user_channel(interaction, payload)
-    scheduler = _scheduler(payload)
+    scheduler = _scheduler(payload, turn=effect_turn)
     writeback = {
         "next_cli_actions": _text_list(
-            cli_channel.get("next_cli_actions"),
+            list(effect_turn.next_effect.cli_actions)
+            or cli_channel.get("next_cli_actions"),
             limit=5,
             item_limit=420,
         ),

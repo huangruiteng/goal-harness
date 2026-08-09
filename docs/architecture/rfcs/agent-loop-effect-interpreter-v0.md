@@ -270,14 +270,17 @@ parallel and equally important:
   `interpret_turn_result_packet` (#2956).
 - R3 replacement: Codex CLI local scheduler commands are built through
   `EffectProgram` (#2957).
+- R5 replacement: quota should-run TurnEnvelope derives its canonical action,
+  writeback, and scheduler slots through `interpret_quota_should_run_packet`.
 - around semantics encoded in `capability_gate`, `interaction_contract`,
   `work_lane_contract`, and `scheduler_hint`.
 - focused tests and docs that pin the lens.
 
 ### What Is Missing
 
-- A minimal interpreter protocol or composition helper used by runtime code,
-  not only by tests.
+- A minimal interpreter protocol or composition helper shared by both runtime
+  quota and turn-result consumers, once a second runtime caller needs the same
+  envelope.
 - A real host or turn-driver caller that executes an ordered effect program
   while preserving failure, cancellation, permission, and budget semantics.
 
@@ -297,12 +300,13 @@ framework that no runtime uses.
 
 ### Replacement Status
 
-R1, R2, and R3 are complete:
+R1, R2, R3, and R5 are complete:
 
 - R1 bootstrap guided rendering through `EffectProgram` (#2955);
 - R2 turn executor result-kind resolution through `interpret_turn_result_packet`
   (#2956);
 - R3 Codex CLI scheduler command set through `EffectProgram` (#2957).
+- R5 quota should-run TurnEnvelope through `interpret_quota_should_run_packet`.
 
 R4 remains pending and must not be implemented until a real multi-step
 host/turn-driver caller executes an ordered effect program.
@@ -342,7 +346,9 @@ Phases:
   bounded modules.
 - Q5: Extract heartbeat prompt builders into bounded modules.
 - Q6: Make CLI quota, turn driver, and bootstrap construction consume
-  `EffectTurn` / `EffectProgram`.
+  `EffectTurn` / `EffectProgram`. In progress: quota should-run TurnEnvelope
+  now consumes `interpret_quota_should_run_packet`; turn driver and bootstrap
+  already consume `interpret_turn_result_packet` / `effect_program_from_ordered_steps`.
 - Q7: Add quality gates and focused tests for each extraction.
 - Q8: Re-evaluate M6 only after the gates pass.
 
