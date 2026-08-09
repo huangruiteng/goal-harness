@@ -48,7 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
-| M6 General effect-program abstraction | In progress; Q3-Q6 complete (#2963-#2965, #2967-#2983); quality gate pending (Q7) |
+| M6 General effect-program abstraction | Complete (#2963-#2984); Q8 quality-gate audit passed |
 
 ## Why This Matters
 
@@ -314,8 +314,8 @@ host/turn-driver caller executes an ordered effect program.
 ### Qualitative Change Plan
 
 The current effect abstraction is a read lens plus three small runtime
-replacements. It is not yet a qualitative change. M6 must not be called mostly
-complete until all of the following are true:
+replacements. M6 must not be called mostly complete until all of the following
+are true:
 
 1. Hot modules shrink to bounded sizes:
    - `loopx/quota.py` below 2000 lines (currently 1043);
@@ -342,18 +342,31 @@ Phases:
   `should_run_prepare.py` preparation chain (#2964), and
   `should_run_packet.py` route/packet assembly (#2965).
 - Q4: Extract status read models, collection, and presentation into bounded
-  modules. In progress; course/RFC reading paths updated to the new quota
-  bounded modules.
-- Q5: Extract heartbeat prompt builders into bounded modules.
+  modules. Done: bounded status projections (#2967-#2978); `status.py` 1392.
+- Q5: Extract heartbeat prompt builders into bounded modules. Done: bounded
+  heartbeat task body/builder/support modules (#2979/#2980/#2982);
+  `heartbeat_prompt.py` 159.
 - Q6: Make CLI quota, turn driver, and bootstrap construction consume
-  `EffectTurn` / `EffectProgram`. In progress: quota should-run TurnEnvelope
-  now consumes `interpret_quota_should_run_packet`; turn driver and bootstrap
-  already consume `interpret_turn_result_packet` / `effect_program_from_ordered_steps`.
-- Q7: Add quality gates and focused tests for each extraction. In progress:
-  RFC module budgets are ratcheted in `module_metric_baseline.json` and a
-  focused M6 quality-gate pytest pins the hot-module ceilings plus the runtime
-  `EffectTurn` consumption.
-- Q8: Re-evaluate M6 only after the gates pass.
+  `EffectTurn` / `EffectProgram`. Done: quota should-run TurnEnvelope consumes
+  `interpret_quota_should_run_packet` (#2983); turn driver and bootstrap
+  consume `interpret_turn_result_packet` / `effect_program_from_ordered_steps`.
+- Q7: Add quality gates and focused tests for each extraction. Done: RFC
+  module budgets are ratcheted in `module_metric_baseline.json` and a focused
+  M6 quality-gate pytest pins the hot-module ceilings plus the runtime
+  `EffectTurn` consumption (#2984).
+- Q8: Re-evaluate M6 only after the gates pass. Done: audit evidence below.
+
+### M6 Completion Evidence
+
+- Hot module lines: `loopx/quota.py` 1049, `loopx/status.py` 1392,
+  `loopx/heartbeat_prompt.py` 159.
+- Maintainability ratchet: `ok=true`, no unreviewed findings, no stale
+  exceptions.
+- Focused M6 audit suite: 172 passed across quota parity, status re-export,
+  heartbeat support, effect interpreter/program/turn families, CLI output
+  budget/differential, import boundaries, model-behavior/Doubao shadow, and
+  turn driver/executor.
+- `loopx canary quality-audit`: `ready=true`, `gap_count=0`, `drift_count=0`.
 
 ### Replacement-First Rule
 
