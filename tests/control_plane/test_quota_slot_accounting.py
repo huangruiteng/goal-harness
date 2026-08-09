@@ -10,6 +10,7 @@ from loopx.control_plane.quota.slot_accounting import (
     build_quota_slot_preview_for_decision,
     build_quota_slot_spend_event,
 )
+from loopx.rollout_event_log import rollout_event_log_path
 
 GOAL_ID = "quota-slot-accounting-fixture"
 AGENT_A = "codex-monitor-a"
@@ -558,6 +559,96 @@ def test_heartbeat_spend_reselection_strands_completed_todo_settlement(
     assert preview["ok"] is False
     assert "selected todo is todo_new_successor" in preview["reason"]
     assert "--todo-id is todo_completed_delivery" in preview["reason"]
+
+
+def test_turn_scoped_spend_keeps_original_todo_across_successor_reselection(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime"
+    original_todo_id = "todo_completed_delivery"
+    turn_instance_id = "turn-completed-delivery"
+    effect_id = (
+        f"{GOAL_ID}:{AGENT_A}:{original_todo_id}:{turn_instance_id}"
+    )
+    _write_run_index(
+        runtime,
+        [
+            {
+                **_run(
+                    "2026-01-01T00:01:00+00:00",
+                    classification="validated_progress",
+                    delivery_outcome="outcome_progress",
+                    agent_id=AGENT_A,
+                ),
+                "todo_id": original_todo_id,
+                "turn_instance_id": turn_instance_id,
+                "settlement_identity": {
+                    "effect_id": effect_id,
+                    "goal_id": GOAL_ID,
+                    "agent_id": AGENT_A,
+                    "todo_id": original_todo_id,
+                    "turn_instance_id": turn_instance_id,
+                },
+            }
+        ],
+    )
+    rollout_path = rollout_event_log_path(runtime, GOAL_ID)
+    rollout_path.parent.mkdir(parents=True, exist_ok=True)
+    rollout_path.write_text(
+        "".join(
+            json.dumps(event) + "\n"
+            for event in (
+                {
+                    "schema_version": "loopx_rollout_event_v0",
+                    "event_id": "event-guard",
+                    "event_kind": "quota_should_run",
+                    "goal_id": GOAL_ID,
+                    "agent_id": AGENT_A,
+                    "run_id": turn_instance_id,
+                    "details": {
+                        "todo_id": original_todo_id,
+                        "settlement_effect_id": effect_id,
+                    },
+                },
+                {
+                    "schema_version": "loopx_rollout_event_v0",
+                    "event_id": "event-writeback",
+                    "event_kind": "refresh_state",
+                    "goal_id": GOAL_ID,
+                    "agent_id": AGENT_A,
+                    "run_id": turn_instance_id,
+                    "details": {"settlement_effect_id": effect_id},
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+    before = _normal_run_before(todo_id="todo_new_successor")
+
+    preview = build_quota_slot_preview_for_decision(
+        _normal_run_status(runtime),
+        goal_id=GOAL_ID,
+        before=before,
+        after_decision=lambda _: {
+            **before,
+            "quota": {**before["quota"], "spent_slots": 1},
+        },
+        quota_status_builder=lambda goal, **_: goal["quota"],
+        self_repair_spend_actions=frozenset(),
+        agent_id=AGENT_A,
+        todo_id=original_todo_id,
+        turn_instance_id=turn_instance_id,
+        source="heartbeat",
+    )
+
+    assert preview["ok"] is True
+    assert preview["delivery_completion_spend"] is True
+    assert preview["todo_id"] == original_todo_id
+    assert preview["settlement_identity"]["effect_id"] == effect_id
+    assert [
+        receipt["step_kind"]
+        for receipt in preview["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback"]
 
 
 def test_heartbeat_spend_records_matching_todo_binding(tmp_path: Path) -> None:

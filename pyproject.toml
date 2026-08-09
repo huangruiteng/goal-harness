@@ -48,6 +48,7 @@ files = [
   "loopx/benchmarks/read_models/benchmark_run_execution_contract.py",
   "loopx/benchmarks/read_models/benchmark_run_failure.py",
   "loopx/control_plane/__init__.py",
+  "loopx/control_plane/quota/effect_program.py",
   "loopx/control_plane/quota/states.py",
   "loopx/control_plane/runtime/active_user_assisted_pilot.py",
   "loopx/control_plane/runtime/event_store_migration_bridge.py",
