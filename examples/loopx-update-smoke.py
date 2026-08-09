@@ -210,8 +210,83 @@ def test_explicit_archive_url_reaches_installer() -> None:
     )
     assert payload["source"]["channel"] == "github_archive_url_override", payload
     assert "LOOPX_ARCHIVE_URL=https://example.invalid/loopx.tar.gz" in payload["plan"]["install_command"], payload
+    assert "set -o errexit -o pipefail" in payload["plan"]["install_command"], payload
+    assert "export LOOPX_REPO=example/loopx" in payload["plan"]["install_command"], payload
+    assert "export LOOPX_REF=fixture" in payload["plan"]["install_command"], payload
     installer_env = _installer_env_for_source(payload["source"], base_env={})
     assert installer_env["LOOPX_ARCHIVE_URL"] == "https://example.invalid/loopx.tar.gz", installer_env
+
+
+def test_update_preview_stops_before_doctor_when_download_fails() -> None:
+    payload = build_update_plan(
+        repo="example/loopx",
+        ref="fixture",
+        archive_url="https://example.invalid/loopx.tar.gz",
+        execute=False,
+        doctor_payload=fake_doctor_payload(),
+    )
+    with TemporaryDirectory() as tmpdir:
+        bin_dir = Path(tmpdir)
+        marker_path = bin_dir / "doctor-ran"
+        curl_bin = bin_dir / "curl"
+        curl_bin.write_text("#!/usr/bin/env bash\nexit 22\n", encoding="utf-8")
+        curl_bin.chmod(0o755)
+        loopx_bin = bin_dir / "loopx"
+        loopx_bin.write_text(
+            "#!/usr/bin/env bash\n"
+            f"touch {json.dumps(str(marker_path))}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        loopx_bin.chmod(0o755)
+        env = dict(os.environ)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        result = subprocess.run(
+            ["bash", "-c", payload["plan"]["install_command"]],
+            text=True,
+            capture_output=True,
+            env=env,
+        )
+
+        assert result.returncode == 22, result
+        assert not marker_path.exists(), result
+
+
+def test_execute_update_propagates_installer_download_failure() -> None:
+    payload = build_update_plan(
+        repo="example/loopx",
+        ref="fixture",
+        archive_url="https://example.invalid/loopx.tar.gz",
+        execute=True,
+        doctor_payload=fake_doctor_payload(),
+    )
+    install_failed = subprocess.CompletedProcess(
+        args=[],
+        returncode=22,
+        stdout="",
+        stderr="curl: (22) requested URL returned error",
+    )
+    doctor_passed = subprocess.CompletedProcess(
+        args=[],
+        returncode=0,
+        stdout='{"ok": true}',
+        stderr="",
+    )
+    with mock.patch(
+        "loopx.self_update._installer_env_for_source",
+        return_value={},
+    ), mock.patch(
+        "loopx.self_update.subprocess.run",
+        side_effect=[install_failed, doctor_passed],
+    ) as run:
+        result = execute_update_plan(payload)
+
+    assert result["ok"] is False, result
+    install_command = run.call_args_list[0].args[0]
+    assert install_command[:2] == ["bash", "-lc"], install_command
+    assert "set -o pipefail" in install_command[2], install_command
+    assert result["execution"]["install_returncode"] == 22, result
+    assert result["execution"]["doctor_returncode"] == 0, result
 
 
 def test_active_release_python_reaches_installer() -> None:
@@ -480,6 +555,8 @@ def main() -> int:
     test_module_plan()
     test_default_source_uses_stable_ref()
     test_explicit_archive_url_reaches_installer()
+    test_update_preview_stops_before_doctor_when_download_fails()
+    test_execute_update_propagates_installer_download_failure()
     test_active_release_python_reaches_installer()
     test_active_release_python_marker_fails_closed()
     test_execute_update_uses_persisted_release_python()

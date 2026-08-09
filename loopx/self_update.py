@@ -65,8 +65,9 @@ def _command_for_source(source: dict[str, Any]) -> str:
     if source.get("channel") == "github_archive_url_override" and archive_url:
         exports.append(f"LOOPX_ARCHIVE_URL={shlex.quote(str(archive_url))}")
     return (
-        " ".join(exports)
-        + f" curl -fsSL {shlex.quote(str(source['installer_url']))} | bash\n"
+        "set -o errexit -o pipefail\n"
+        + "\n".join(f"export {value}" for value in exports)
+        + f"\ncurl -fsSL {shlex.quote(str(source['installer_url']))} | bash\n"
         'export PATH="$HOME/.local/bin:$PATH"\n'
         "loopx doctor"
     )
@@ -546,7 +547,7 @@ def execute_update_plan(payload: dict[str, Any], *, timeout_seconds: int = 600) 
         ),
     )
     install_result = subprocess.run(
-        ["bash", "-lc", f"curl -fsSL {shlex.quote(installer_url)} | bash"],
+        ["bash", "-lc", f"set -o pipefail; curl -fsSL {shlex.quote(installer_url)} | bash"],
         text=True,
         capture_output=True,
         env=env,
