@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import loopx.control_plane.runtime.status_classifications as classifications
 import loopx.status as status
+from loopx.status import DREAMING_ADVISORY_CLASSIFICATIONS
 
 
 REEXPORTED_NAMES = (
@@ -19,6 +20,7 @@ def test_status_reexports_classification_sets_unchanged() -> None:
         read_model_value = getattr(classifications, name)
         assert status_value == read_model_value
         assert type(status_value) is type(read_model_value)
+    assert DREAMING_ADVISORY_CLASSIFICATIONS == classifications.DREAMING_ADVISORY_CLASSIFICATIONS
 
 
 def test_status_classification_membership_is_stable() -> None:

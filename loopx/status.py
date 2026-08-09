@@ -103,12 +103,6 @@ from .control_plane.work_items.autonomous_replan_obligation import (
 from .control_plane.work_items.backlog_hygiene import (
     MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS as _MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS_READ_MODEL,
 )
-from .control_plane.goals.dreaming import (
-    compact_dreaming_lane_badge as _compact_dreaming_lane_badge_read_model,
-    compact_dreaming_proposal as _compact_dreaming_proposal_read_model,
-    compact_server_planning_contract as _compact_server_planning_contract_read_model,
-    dreaming_attention_fields as _dreaming_attention_fields_read_model,
-)
 from .control_plane.work_items.delivery_signals import (
     classification_contains_any as _classification_contains_any_read_model,
     delivery_batch_scale_for_run as _delivery_batch_scale_for_run_read_model,
@@ -136,7 +130,7 @@ from .control_plane.runtime.run_compaction import (
 from .control_plane.runtime.status_classifications import (
     BLOCKING_CLASSIFICATIONS,
     CODEX_READY_CLASSIFICATIONS,
-    DREAMING_ADVISORY_CLASSIFICATIONS,
+    DREAMING_ADVISORY_CLASSIFICATIONS,  # noqa: F401
     HANDOFF_READY_CLASSIFICATIONS,
     USER_OR_CONTROLLER_CLASSIFICATIONS,
 )
@@ -284,6 +278,7 @@ from .control_plane.todos.projection import (
 
 
 _PUBLIC_COMPAT_REEXPORTS = {
+    "DREAMING_ADVISORY_CLASSIFICATIONS": "loopx.control_plane.runtime.status_classifications",
     "TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION": "loopx.control_plane.work_items.project_asset",
     "TODO_PROJECTION_VIEW_SCHEMA_VERSION": "loopx.control_plane.work_items.project_asset",
     "project_asset_summary_is_public_safe": "loopx.control_plane.work_items.project_asset",
@@ -2664,37 +2659,35 @@ def operator_gate_attention_fields(run: dict[str, Any] | None) -> dict[str, Any]
 
 
 def compact_server_planning_contract(value: Any) -> dict[str, Any]:
-    return _compact_server_planning_contract_read_model(
-        value,
-        public_safe_compact_text=public_safe_compact_text,
-        public_safe_compact_list=public_safe_compact_list,
+    from .control_plane.status.dreaming_projection import (
+        compact_server_planning_contract as _compact_server_planning_contract,
     )
+
+    return _compact_server_planning_contract(value)
 
 
 def compact_dreaming_proposal(run: dict[str, Any] | None) -> dict[str, Any] | None:
-    return _compact_dreaming_proposal_read_model(
-        run,
-        dreaming_advisory_classifications=DREAMING_ADVISORY_CLASSIFICATIONS,
-        public_safe_compact_text=public_safe_compact_text,
-        public_safe_compact_list=public_safe_compact_list,
+    from .control_plane.status.dreaming_projection import (
+        compact_dreaming_proposal as _compact_dreaming_proposal,
     )
+
+    return _compact_dreaming_proposal(run)
 
 
 def compact_dreaming_lane_badge(proposal: dict[str, Any] | None) -> dict[str, Any] | None:
-    return _compact_dreaming_lane_badge_read_model(
-        proposal,
-        public_safe_compact_text=public_safe_compact_text,
+    from .control_plane.status.dreaming_projection import (
+        compact_dreaming_lane_badge as _compact_dreaming_lane_badge,
     )
+
+    return _compact_dreaming_lane_badge(proposal)
 
 
 def dreaming_attention_fields(run: dict[str, Any] | None) -> dict[str, Any]:
-    return _dreaming_attention_fields_read_model(
-        run,
-        dreaming_advisory_classifications=DREAMING_ADVISORY_CLASSIFICATIONS,
-        public_safe_compact_text=public_safe_compact_text,
-        public_safe_compact_list=public_safe_compact_list,
-        normalize_operator_question=normalize_operator_question,
+    from .control_plane.status.dreaming_projection import (
+        dreaming_attention_fields as _dreaming_attention_fields,
     )
+
+    return _dreaming_attention_fields(run)
 
 
 def legacy_runtime_goal_attention(
