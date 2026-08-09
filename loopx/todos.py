@@ -1718,6 +1718,7 @@ def complete_goal_todo(
                 )
                 event_result["linked_successor_id"] = completion_policy.linked_successor_id
                 event_result["mutation_authority"] = mutation_authority
+                event_result["task_lease_fence"] = task_lease_fence
                 return event_result
         update_result = apply_todo_update_to_lines(
             lines,

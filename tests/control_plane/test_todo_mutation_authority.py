@@ -352,6 +352,61 @@ def test_active_task_lease_fences_same_agent_completion_instance(
     assert "Create a duplicate stale successor." not in todo_titles
 
 
+def test_event_projected_completion_reports_task_lease_fence(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    event_log = state.with_name("events.jsonl")
+    store = AppendOnlyStateEventStore(event_log)
+    todo_id = "todo_event_lease"
+    store.append(
+        make_state_event(
+            event_id="evt-event-lease-parent",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": todo_id},
+            payload={
+                "role": "agent",
+                "title": "Complete the event-projected leased task.",
+                "task_class": "advancement_task",
+                "claimed_by": AUTHOR_AGENT,
+            },
+            recorded_at="2026-07-18T00:00:00+00:00",
+        )
+    )
+    lease_key = "event-projection-instance"
+    acquire_task_lease(
+        registry_path=registry,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        owner=AUTHOR_AGENT,
+        idempotency_key=lease_key,
+        ttl_seconds=600,
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        claimed_by=AUTHOR_AGENT,
+        task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1,
+        evidence="event-projected lease owner validated the result",
+        no_followup=True,
+    )
+
+    assert result["source"] == "event_log"
+    assert result["task_lease_fence"] == {
+        "schema_version": "task_lease_v0",
+        "required": True,
+        "active": True,
+        "owner": AUTHOR_AGENT,
+        "version": 1,
+        "execution_instance_verified": True,
+    }
+
+
 def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -> None:
     registry, state = _write_fixture(tmp_path)
     add_goal_todo(
