@@ -36,6 +36,13 @@ from .control_plane.quota.scheduler_ack import (
     QUOTA_SCHEDULER_ACK_CLASSIFICATION,
     record_quota_scheduler_ack_for_decision,
 )
+from .control_plane.quota.settlement import (
+    find_settlement_spend_run,
+    require_settlement_spend,
+    require_settlement_writeback,
+    resolve_heartbeat_settlement_identity,
+    settlement_result_payload,
+)
 from .control_plane.quota.slot_accounting import (
     QUOTA_SLOT_SPENT_CLASSIFICATION,
     QUOTA_SLOT_VOIDED_CLASSIFICATION,
@@ -813,6 +820,7 @@ def build_quota_slot_preview(
     available_capabilities: Any = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     todo_id: str | None = None,
+    turn_instance_id: str | None = None,
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
@@ -838,6 +846,7 @@ def build_quota_slot_preview(
         quota_status_builder=quota_status,
         self_repair_spend_actions=SELF_REPAIR_SPEND_ACTIONS,
         todo_id=todo_id,
+        turn_instance_id=turn_instance_id,
         source=source,
     )
 
@@ -1032,8 +1041,85 @@ def spend_quota_slot(
     available_capabilities: Any = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     todo_id: str | None = None,
+    turn_instance_id: str | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
+    if turn_instance_id and source != DEFAULT_SLOT_SPEND_SOURCE:
+        return {
+            "ok": False,
+            "mode": "spend-slot",
+            "dry_run": not execute,
+            "appended": False,
+            "goal_id": safe_goal_id,
+            "reason": "turn-scoped settlement is valid only for heartbeat spend",
+        }
+    raw_runtime_root = status_payload.get("runtime_root")
+    if turn_instance_id and raw_runtime_root:
+        runtime_root = Path(str(raw_runtime_root)).expanduser()
+        guard_result = resolve_heartbeat_settlement_identity(
+            runtime_root,
+            goal_id=safe_goal_id,
+            agent_id=agent_id,
+            todo_id=todo_id,
+            turn_instance_id=turn_instance_id,
+        )
+        if guard_result.failure is not None or guard_result.value is None:
+            return {
+                "ok": False,
+                "mode": "spend-slot",
+                "dry_run": not execute,
+                "appended": False,
+                "goal_id": safe_goal_id,
+                "reason": (
+                    guard_result.failure.reason
+                    if guard_result.failure is not None
+                    else "turn-scoped spend has no settlement identity"
+                ),
+                "settlement_result": settlement_result_payload(guard_result),
+            }
+        identity = guard_result.value
+        spent_result = guard_result.bind(
+            lambda resolved: require_settlement_writeback(
+                runtime_root,
+                resolved,
+            )
+        ).bind(
+            lambda _writeback: require_settlement_spend(
+                runtime_root,
+                identity,
+            )
+        )
+        if spent_result.failure is None:
+            return {
+                "ok": True,
+                "mode": "spend-slot",
+                "dry_run": not execute,
+                "appended": False,
+                "idempotent_replay": True,
+                "goal_id": safe_goal_id,
+                "agent_id": identity.agent_id,
+                "todo_id": identity.todo_id,
+                "turn_instance_id": identity.turn_instance_id,
+                "settlement_identity": identity.as_dict(),
+                "settlement_result": settlement_result_payload(spent_result),
+                "reason": "quota spend receipt replayed for the same settlement identity",
+            }
+        prior_spend_run = find_settlement_spend_run(runtime_root, identity)
+        if prior_spend_run is not None:
+            return {
+                "ok": True,
+                "mode": "spend-slot",
+                "dry_run": not execute,
+                "appended": False,
+                "receipt_repair_required": bool(execute),
+                "goal_id": safe_goal_id,
+                "agent_id": identity.agent_id,
+                "todo_id": identity.todo_id,
+                "turn_instance_id": identity.turn_instance_id,
+                "settlement_identity": identity.as_dict(),
+                "settlement_result": settlement_result_payload(spent_result),
+                "reason": "quota spend run exists; repair its missing settlement receipt",
+            }
     preview = build_quota_slot_preview(
         status_payload,
         goal_id=safe_goal_id,
@@ -1043,6 +1129,7 @@ def spend_quota_slot(
         available_capabilities=available_capabilities,
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
         todo_id=todo_id,
+        turn_instance_id=turn_instance_id,
         source=source,
     )
     if not preview.get("ok"):

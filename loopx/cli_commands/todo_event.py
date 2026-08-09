@@ -26,7 +26,12 @@ def append_todo_rollout_event(
     runtime_root_arg: str | None,
     append_cli_rollout_event: RolloutEventAppender,
 ) -> None:
-    if not payload.get("ok") or payload.get("dry_run"):
+    turn_instance_id = getattr(args, "turn_instance_id", None)
+    if (
+        not payload.get("ok")
+        or payload.get("dry_run")
+        or (payload.get("idempotent_replay") and not turn_instance_id)
+    ):
         return
     append_cli_rollout_event(
         payload,
@@ -35,6 +40,7 @@ def append_todo_rollout_event(
         event_kind=TODO_EVENT_KINDS.get(args.todo_command, "todo_update"),
         agent_id=args.agent_id or args.claimed_by,
         todo_id=args.todo_id or str(payload.get("todo_id") or "").strip() or None,
+        run_id=turn_instance_id,
         status=str(payload.get("status") or args.todo_command or "").strip(),
         summary=(
             f"todo {args.todo_command} recorded for "
@@ -48,7 +54,17 @@ def append_todo_rollout_event(
             "added": bool(payload.get("added")),
             "already_exists": bool(payload.get("already_exists")),
             "mutation_authority": payload.get("mutation_authority"),
+            "settlement_effect_id": (
+                payload.get("settlement_identity", {}).get("effect_id")
+                if isinstance(payload.get("settlement_identity"), dict)
+                else None
+            ),
         },
+        idempotency_fields=(
+            ["goal_id", "event_kind", "agent_id", "todo_id", "run_id"]
+            if turn_instance_id
+            else None
+        ),
     )
     capability_gap_status = str(
         getattr(args, "capability_gap_status", None) or ""

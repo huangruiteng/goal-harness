@@ -15,6 +15,11 @@ from ..control_plane.agents.capability_gate import (
 from ..control_plane.goals.goal_vision_policy import (
     GOAL_VISION_ADVANCEMENT_POLICY_CHOICES,
 )
+from ..control_plane.quota.settlement import (
+    require_settlement_writeback,
+    resolve_heartbeat_settlement_identity,
+    settlement_result_payload,
+)
 from ..control_plane.work_items.delivery_batch_scale import (
     DELIVERY_BATCH_SCALE_INPUT_CHOICES,
 )
@@ -212,6 +217,20 @@ def register_project_lifecycle_commands(
             "Local git worktree that produced this accountable delivery. Use when "
             "refresh-state must run from a separate registry checkout; the local "
             "path is validated but is not persisted."
+        ),
+    )
+    refresh_state_parser.add_argument(
+        "--todo-id",
+        help=(
+            "Selected Todo from the original turn-scoped quota guard. Requires "
+            "--turn-instance-id and an accountable delivery outcome."
+        ),
+    )
+    refresh_state_parser.add_argument(
+        "--turn-instance-id",
+        help=(
+            "Stable quota guard turn id for settlement writeback. Reuse the same "
+            "value on retries."
         ),
     )
     refresh_state_parser.add_argument(
@@ -537,6 +556,8 @@ def handle_project_lifecycle_command(
                     if args.delivery_workspace_path
                     else None
                 ),
+                todo_id=getattr(args, "todo_id", None),
+                turn_instance_id=getattr(args, "turn_instance_id", None),
                 agent_id=args.agent_id,
                 agent_lane=args.agent_lane,
                 progress_scope=args.progress_scope,
@@ -567,14 +588,34 @@ def handle_project_lifecycle_command(
         payload["external_sink_delivery_authorized"] = not bool(
             args.suppress_external_sinks
         )
-        if payload.get("ok") and payload.get("appended") and not payload.get("dry_run"):
+        material_refresh_ready = bool(
+            payload.get("ok")
+            and (
+                payload.get("appended")
+                or payload.get("idempotent_replay")
+            )
+            and not payload.get("dry_run")
+        )
+        settlement_receipt_repair = bool(
+            payload.get("ok")
+            and payload.get("receipt_repair_required")
+            and getattr(args, "turn_instance_id", None)
+            and getattr(args, "todo_id", None)
+        )
+        if material_refresh_ready or settlement_receipt_repair:
             append_cli_rollout_event(
                 payload,
                 registry_path=registry_path,
                 runtime_root_arg=args.runtime_root,
                 event_kind="refresh_state",
                 agent_id=args.agent_id,
-                status="appended",
+                todo_id=getattr(args, "todo_id", None),
+                run_id=getattr(args, "turn_instance_id", None),
+                status=(
+                    "receipt_repaired"
+                    if settlement_receipt_repair
+                    else "appended"
+                ),
                 summary=(
                     "refresh-state appended compact control-plane state with "
                     f"classification={payload.get('classification')}"
@@ -590,8 +631,52 @@ def handle_project_lifecycle_command(
                         isinstance(payload.get("global_sync"), dict)
                         and payload["global_sync"].get("wrote")
                     ),
+                    "settlement_effect_id": (
+                        payload.get("settlement_identity", {}).get("effect_id")
+                        if isinstance(payload.get("settlement_identity"), dict)
+                        else None
+                    ),
                 },
+                idempotency_fields=(
+                    ["goal_id", "event_kind", "agent_id", "todo_id", "run_id"]
+                    if getattr(args, "turn_instance_id", None)
+                    else None
+                ),
             )
+            if getattr(args, "turn_instance_id", None) and getattr(
+                args,
+                "todo_id",
+                None,
+            ):
+                runtime_root = resolve_runtime_root(
+                    load_registry(registry_path),
+                    args.runtime_root,
+                )
+                settlement_result = resolve_heartbeat_settlement_identity(
+                    runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    todo_id=getattr(args, "todo_id", None),
+                    turn_instance_id=getattr(args, "turn_instance_id", None),
+                ).bind(
+                    lambda identity: require_settlement_writeback(
+                        runtime_root,
+                        identity,
+                    )
+                )
+                payload["settlement_result"] = settlement_result_payload(
+                    settlement_result
+                )
+                if settlement_result.failure is not None:
+                    payload["ok"] = False
+                    payload["receipt_repair_required"] = True
+                    payload["error"] = settlement_result.failure.reason
+                elif settlement_receipt_repair:
+                    payload["receipt_repair_required"] = False
+                    payload["receipt_repaired"] = True
+            if not material_refresh_ready:
+                print_payload(payload, fmt, render_state_refresh_markdown)
+                return 0 if payload.get("ok") else 1
             graph_sync = sync_explore_graph_after_material_refresh(
                 registry_path=registry_path,
                 goal_id=args.goal_id,

@@ -5,6 +5,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..control_plane.todos.contract import TODO_CONTINUATION_POLICY_VALUES
+from ..control_plane.quota.settlement import (
+    require_settlement_todo_completion,
+    resolve_heartbeat_settlement_identity,
+    settlement_result_payload,
+)
+from ..history import load_registry
+from ..paths import resolve_runtime_root
 from ..todo_suggestion_prompt import (
     ALLOWED_TODO_SUGGESTION_SOURCES,
     ALLOWED_TODO_SUGGESTION_TRIGGERS,
@@ -94,6 +101,13 @@ def register_todo_command(
         help="For capture-followups, append one public-safe agent follow-up todo. Repeat up to the requested batch.",
     )
     todo_parser.add_argument("--todo-id", help="Structured todo id from status/quota, such as todo_ab12cd34ef56.")
+    todo_parser.add_argument(
+        "--turn-instance-id",
+        help=(
+            "For todo complete, bind the lifecycle receipt to the original "
+            "turn-scoped quota guard and reuse it on retries."
+        ),
+    )
     todo_parser.add_argument("--status", choices=["open", "done", "blocked", "deferred"], help="For todo add/update, set the lifecycle status.")
     todo_parser.add_argument("--note", help="Public-safe note to attach to a lifecycle transition.")
     todo_parser.add_argument("--evidence", help="Public-safe evidence pointer or short result for complete/update.")
@@ -541,6 +555,25 @@ def handle_todo_command(
             )
         elif args.todo_command == "complete":
             validate_todo_complete_options(args)
+            settlement_result = None
+            completion_turn_key = None
+            if getattr(args, "turn_instance_id", None):
+                runtime_root = resolve_runtime_root(
+                    load_registry(registry_path),
+                    runtime_root_arg,
+                )
+                settlement_result = resolve_heartbeat_settlement_identity(
+                    runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    todo_id=args.todo_id,
+                    turn_instance_id=getattr(args, "turn_instance_id", None),
+                )
+                if settlement_result.failure is not None:
+                    raise ValueError(settlement_result.failure.reason)
+                if settlement_result.value is None:
+                    raise ValueError("turn-scoped Todo completion has no identity")
+                completion_turn_key = settlement_result.value.effect_id
             payload = complete_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -548,6 +581,7 @@ def handle_todo_command(
                 role=args.role,
                 decision_outcome=args.decision_outcome,
                 evidence=args.evidence,
+                completion_turn_key=completion_turn_key,
                 note=args.note,
                 no_followup=bool(args.no_follow_up),
                 successor_todo_ids=args.successor_todo_ids,
@@ -569,6 +603,11 @@ def handle_todo_command(
                 **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
+            if settlement_result is not None and settlement_result.value is not None:
+                payload["settlement_identity"] = settlement_result.value.as_dict()
+                payload["settlement_result"] = settlement_result_payload(
+                    settlement_result
+                )
         elif args.todo_command == "supersede":
             validate_todo_supersede_options(args)
             payload = supersede_goal_todo(
@@ -657,6 +696,40 @@ def handle_todo_command(
         runtime_root_arg=runtime_root_arg,
         append_cli_rollout_event=append_cli_rollout_event,
     )
+    if (
+        args.todo_command == "complete"
+        and getattr(args, "turn_instance_id", None)
+        and payload.get("ok")
+        and not payload.get("dry_run")
+    ):
+        runtime_root = resolve_runtime_root(
+            load_registry(registry_path),
+            runtime_root_arg,
+        )
+        guard_result = resolve_heartbeat_settlement_identity(
+            runtime_root,
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+            todo_id=args.todo_id,
+            turn_instance_id=getattr(args, "turn_instance_id", None),
+        )
+        identity = guard_result.value
+        if identity is None:
+            settlement_result = guard_result
+        else:
+            settlement_result = guard_result.bind(
+                lambda resolved: require_settlement_todo_completion(
+                    runtime_root,
+                    resolved,
+                )
+            )
+        payload["settlement_result"] = settlement_result_payload(
+            settlement_result
+        )
+        if settlement_result.failure is not None:
+            payload["ok"] = False
+            payload["receipt_repair_required"] = True
+            payload["error"] = settlement_result.failure.reason
     print_payload(
         payload,
         format_name or str(getattr(args, "format", None) or "markdown"),

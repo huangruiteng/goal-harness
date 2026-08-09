@@ -11,6 +11,12 @@ from ..agents.agent_scope_frontier import (
 from ..agents.capability_gate import runtime_capabilities_for_cli_projection
 from ..goals.goal_frontier import AUTONOMOUS_REPLAN_REQUIRED_MODE
 from ..goals.goal_vision_wait import exact_blocked_successor_wait_state
+from ..quota.settlement import (
+    SettlementStepKind,
+    build_codex_app_settlement_plan,
+    settlement_binding_args,
+    settlement_step_command,
+)
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
     SchedulerRuntimeProfile,
@@ -40,21 +46,6 @@ INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 INTERACTION_RESPONSE_PLAN_SCHEMA_VERSION = "interaction_response_plan_v0"
 PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 PROTOCOL_ACTION_PACKET_LLM_POLICY = "no_api"
-
-
-def _heartbeat_spend_command(
-    goal_id: str,
-    *,
-    scoped_cli_args: str,
-    payload: dict[str, Any],
-) -> str:
-    selected = payload.get("selected_todo") if isinstance(payload.get("selected_todo"), dict) else {}
-    todo_id = normalize_todo_id(selected.get("todo_id"))
-    todo_arg = f" --todo-id {todo_id}" if todo_id else ""
-    return (
-        f"loopx quota spend-slot --goal-id {goal_id} --slots 1 "
-        f"--source heartbeat --execute{todo_arg}{scoped_cli_args}"
-    )
 
 
 def _blocked_successor_wait_observation_required(payload: dict[str, Any]) -> bool:
@@ -513,6 +504,75 @@ def _scoped_cli_args(
     return f" --agent-id {agent_id}{capability_args}"
 
 
+def _codex_app_settlement_plan(
+    payload: dict[str, Any],
+    *,
+    available_capabilities: Any,
+    scheduler_execution_context: (
+        Mapping[str, Any] | SchedulerExecutionContextResolution | None
+    ),
+) -> dict[str, Any] | None:
+    if (
+        scheduler_runtime_profile_for_execution_context(
+            scheduler_execution_context
+        )
+        is not SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+    ):
+        return None
+    agent_identity = (
+        payload.get("agent_identity")
+        if isinstance(payload.get("agent_identity"), dict)
+        else {}
+    )
+    selected_todo = (
+        payload.get("selected_todo")
+        if isinstance(payload.get("selected_todo"), dict)
+        else {}
+    )
+    goal_id = str(payload.get("goal_id") or "").strip()
+    agent_id = str(agent_identity.get("agent_id") or "").strip()
+    todo_id = normalize_todo_id(selected_todo.get("todo_id"))
+    if not goal_id or not agent_id or not todo_id:
+        return None
+    scoped_cli_args = _scoped_cli_args(
+        agent_identity,
+        available_capabilities=available_capabilities,
+    )
+    return build_codex_app_settlement_plan(
+        goal_id=goal_id,
+        agent_id=agent_id,
+        todo_id=todo_id,
+        scoped_cli_args=scoped_cli_args,
+        lifecycle_actor_args=f" --agent-id {shlex.quote(agent_id)}",
+    ).as_dict()
+
+
+def _quota_spend_action(
+    goal_id: str,
+    *,
+    scoped_cli_args: str,
+    payload: dict[str, Any],
+    settlement_plan: Mapping[str, Any] | None,
+) -> str:
+    typed_command = settlement_step_command(
+        settlement_plan,
+        SettlementStepKind.QUOTA_SPEND,
+    )
+    if typed_command:
+        return typed_command
+    selected = (
+        payload.get("selected_todo")
+        if isinstance(payload.get("selected_todo"), dict)
+        else {}
+    )
+    todo_id = normalize_todo_id(selected.get("todo_id"))
+    todo_arg = f" --todo-id {todo_id}" if todo_id else ""
+    return (
+        f"loopx quota spend-slot --goal-id {goal_id} --slots 1 "
+        f"--source heartbeat --execute{todo_arg}{scoped_cli_args}"
+    )
+
+
 def interaction_next_cli_actions(
     payload: dict[str, Any],
     *,
@@ -522,6 +582,7 @@ def interaction_next_cli_actions(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
     capability_reentry: dict[str, Any] | None = None,
+    settlement_plan: Mapping[str, Any] | None = None,
 ) -> list[str]:
     goal_id = str(payload.get("goal_id") or "<GOAL_ID>")
     agent_identity = (
@@ -538,6 +599,13 @@ def interaction_next_cli_actions(
         if agent_identity.get("agent_id")
         else ""
     )
+    if settlement_plan is None:
+        settlement_plan = _codex_app_settlement_plan(
+            payload,
+            available_capabilities=available_capabilities,
+            scheduler_execution_context=scheduler_execution_context,
+        )
+    settlement_args = settlement_binding_args(settlement_plan)
     try:
         scheduler_args = render_scheduler_execution_args(
             scheduler_execution_context=scheduler_execution_context,
@@ -662,8 +730,13 @@ def interaction_next_cli_actions(
             return [
                 f"loopx todo complete --goal-id {goal_id} --todo-id {monitor_todo_id}{lifecycle_actor_args} --evidence '<validated gate evidence>'",
                 f"loopx todo update --goal-id {goal_id} --todo-id {gated_todo_id}{lifecycle_actor_args} --note '<public-safe gate repair reason>'",
-                f"loopx refresh-state --goal-id {goal_id} --classification standing_monitor_gate_repair_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{scoped_cli_args}",
-                _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
+                f"loopx refresh-state --goal-id {goal_id} --classification standing_monitor_gate_repair_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
+                _quota_spend_action(
+                    goal_id,
+                    scoped_cli_args=scoped_cli_args,
+                    payload=payload,
+                    settlement_plan=settlement_plan,
+                ),
             ]
         route_candidates = (
             agent_scope_frontier.get("route_continuation_replan_candidates")
@@ -673,8 +746,13 @@ def interaction_next_cli_actions(
         if route_candidates:
             return [
                 f"loopx todo add --goal-id {goal_id} --role agent --text '<public-safe route continuation advancement todo>'",
-                f"loopx refresh-state --goal-id {goal_id} --classification route_continuation_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{scoped_cli_args}",
-                _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
+                f"loopx refresh-state --goal-id {goal_id} --classification route_continuation_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
+                _quota_spend_action(
+                    goal_id,
+                    scoped_cli_args=scoped_cli_args,
+                    payload=payload,
+                    settlement_plan=settlement_plan,
+                ),
             ]
         candidates = (
             agent_scope_frontier.get("deferred_resume_candidates")
@@ -689,8 +767,13 @@ def interaction_next_cli_actions(
             f"{lifecycle_actor_args} --status open --clear-resume-when "
             "--note '<public-safe successor replan reason>'"
             ),
-            f"loopx refresh-state --goal-id {goal_id} --classification successor_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{scoped_cli_args}",
-            _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
+            f"loopx refresh-state --goal-id {goal_id} --classification successor_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{settlement_args}{scoped_cli_args}",
+            _quota_spend_action(
+                goal_id,
+                scoped_cli_args=scoped_cli_args,
+                payload=payload,
+                settlement_plan=settlement_plan,
+            ),
         ]
     if (
         mode == AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value
@@ -709,7 +792,12 @@ def interaction_next_cli_actions(
         return [
             "read approved controller/job/marker/writeback surfaces only",
             f"loopx refresh-state --goal-id {goal_id} --classification <compact_blocker_or_transition>{scoped_cli_args}",
-            _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
+            _quota_spend_action(
+                goal_id,
+                scoped_cli_args=scoped_cli_args,
+                payload=payload,
+                settlement_plan=settlement_plan,
+            ),
         ]
     if mode == "agent_workspace_repair":
         return [
@@ -755,11 +843,11 @@ def interaction_next_cli_actions(
             else "<delta_kind>"
         )
         actions.extend([
-            f"loopx refresh-state --goal-id {goal_id} --classification autonomous_replan_recorded --autonomous-replan-recorded --repair-delta-kind {delta_kind} --delivery-batch-scale <scale> --delivery-outcome <outcome>{scoped_cli_args}",
+            f"loopx refresh-state --goal-id {goal_id} --classification autonomous_replan_recorded --autonomous-replan-recorded --repair-delta-kind {delta_kind} --delivery-batch-scale <scale> --delivery-outcome <outcome>{settlement_args}{scoped_cli_args}",
             (
                 "if the replan writeback records an accountable delta such as "
                 "outcome_progress or primary_goal_outcome, run "
-                f"{_heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload)}; "
+                f"{_quota_spend_action(goal_id, scoped_cli_args=scoped_cli_args, payload=payload, settlement_plan=settlement_plan)}; "
                 "otherwise do not spend for surface_only watch-lane continuation/no-followup"
             ),
         ])
@@ -773,10 +861,20 @@ def interaction_next_cli_actions(
         "scoped_user_gate_fallback",
         "bounded_delivery_with_user_notice",
     }:
+        typed_writeback = settlement_step_command(
+            settlement_plan,
+            SettlementStepKind.DURABLE_WRITEBACK,
+        )
         return [
             *capability_resolution_actions,
-            f"loopx refresh-state --goal-id {goal_id} --classification <validated_progress>{scoped_cli_args}",
-            _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
+            typed_writeback
+            or f"loopx refresh-state --goal-id {goal_id} --classification <validated_progress>{scoped_cli_args}",
+            _quota_spend_action(
+                goal_id,
+                scoped_cli_args=scoped_cli_args,
+                payload=payload,
+                settlement_plan=settlement_plan,
+            ),
         ]
     if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
         return [
@@ -1081,6 +1179,11 @@ def _build_interaction_cli_channel(
         available_capabilities=available_capabilities,
         scheduler_execution_context=scheduler_execution_context,
     )
+    settlement_plan = _codex_app_settlement_plan(
+        payload,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=scheduler_execution_context,
+    )
     channel = {
         "next_cli_actions": interaction_next_cli_actions(
             payload,
@@ -1088,6 +1191,7 @@ def _build_interaction_cli_channel(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
             capability_reentry=capability_reentry,
+            settlement_plan=settlement_plan,
         ),
         "spend_allowed_now": False,
         "spend_after_validation": spend_after_validation,
@@ -1098,6 +1202,8 @@ def _build_interaction_cli_channel(
             spend_after_validation=spend_after_validation,
         ),
     }
+    if settlement_plan is not None and spend_after_validation:
+        channel["settlement_plan"] = settlement_plan
     if capability_reentry is not None:
         channel["runtime_capability_reentry"] = capability_reentry
     selected_todo = (

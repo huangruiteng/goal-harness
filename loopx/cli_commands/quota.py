@@ -20,6 +20,12 @@ from ..control_plane.quota.monitor_poll import find_quota_monitor_poll_turn
 from ..control_plane.quota.scheduler_ack import (
     record_quota_scheduler_failure_for_decision,
 )
+from ..control_plane.quota.settlement import (
+    require_settlement_spend,
+    require_settlement_writeback,
+    resolve_heartbeat_settlement_identity,
+    settlement_result_payload,
+)
 from ..control_plane.quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
     VALID_SLOT_SPEND_SOURCES,
@@ -35,6 +41,7 @@ from ..control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
 )
+from ..control_plane.todos.contract import normalize_todo_id
 from ..file_lock import lock_timeout_error_fields
 from ..presentation.renderers.quota_event_markdown import (
     render_quota_monitor_poll_markdown,
@@ -279,9 +286,9 @@ def register_quota_command(subparsers: argparse._SubParsersAction) -> None:
     quota_parser.add_argument(
         "--turn-instance-id",
         help=(
-            "Stable heartbeat trigger id for `quota should-run`. The command "
-            "persists one idempotent receipt and, for a quiet no-progress "
-            "decision, its stall observation. Reuse the same id on retries."
+            "Stable heartbeat settlement id for `quota should-run` and "
+            "`quota spend-slot`. The guard persists one idempotent receipt; "
+            "reuse the same id through writeback, spend, and retries."
         ),
     )
     quota_parser.add_argument("--slots", type=int, default=1, help="Slots to account for `quota spend-slot`.")
@@ -398,11 +405,14 @@ def _prepare_quota_command_context(
     heartbeat_turn_id = normalize_turn_instance_id(
         getattr(args, "turn_instance_id", None)
     )
-    if heartbeat_turn_id and command != "should-run":
-        raise ValueError("--turn-instance-id is only valid with `quota should-run`")
+    if heartbeat_turn_id and command not in {"should-run", "spend-slot"}:
+        raise ValueError(
+            "--turn-instance-id is only valid with `quota should-run` or "
+            "`quota spend-slot`"
+        )
     if heartbeat_turn_id and not args.agent_id:
-        raise ValueError("turn-scoped `quota should-run` requires --agent-id")
-    if heartbeat_turn_id and bool(args.dry_run):
+        raise ValueError("turn-scoped quota settlement requires --agent-id")
+    if heartbeat_turn_id and command == "should-run" and bool(args.dry_run):
         raise ValueError("turn-scoped `quota should-run` cannot use --dry-run")
 
     scan_roots = [Path(item).expanduser() for item in args.scan_path]
@@ -583,6 +593,100 @@ def _quota_renderer(
         "spend-slot": render_quota_slot_preview_markdown,
         "void-slot": render_quota_slot_preview_markdown,
     }.get(command, render_quota_markdown)
+
+
+def _quota_rollout_todo_id(
+    payload: Mapping[str, object],
+    args: argparse.Namespace,
+) -> str | None:
+    selected_todo = (
+        payload.get("selected_todo")
+        if isinstance(payload.get("selected_todo"), Mapping)
+        else {}
+    )
+    return (
+        normalize_todo_id(payload.get("todo_id"))
+        or normalize_todo_id(selected_todo.get("todo_id"))
+        or normalize_todo_id(args.todo_id)
+    )
+
+
+def _quota_rollout_details(
+    payload: Mapping[str, object],
+    args: argparse.Namespace,
+    *,
+    todo_id: str | None,
+) -> dict[str, object]:
+    successor_todo_ids = (
+        payload.get("successor_todo_ids")
+        if isinstance(payload.get("successor_todo_ids"), list)
+        else []
+    )
+    return {
+        "command": "quota",
+        "quota_command": args.quota_command,
+        "ok": bool(payload.get("ok")),
+        "should_run": bool(payload.get("should_run")),
+        "appended": bool(payload.get("appended")),
+        "slots": payload.get("slots") or "",
+        "source": payload.get("source") or "",
+        "todo_id": todo_id or "",
+        "target_key": payload.get("target_key") or "",
+        "successor_todo_ids": ",".join(
+            str(successor_id)
+            for successor_id in successor_todo_ids
+            if str(successor_id).strip()
+        ),
+        "applied_rrule": payload.get("applied_rrule") or "",
+        "settlement_effect_id": (
+            payload.get("settlement_identity", {}).get("effect_id")
+            if isinstance(payload.get("settlement_identity"), Mapping)
+            else ""
+        ),
+    }
+
+
+def _attach_spend_settlement_result(
+    payload: dict[str, object],
+    *,
+    runtime_root: Path,
+    goal_id: str,
+    agent_id: str | None,
+    todo_id: str | None,
+    turn_instance_id: str,
+) -> None:
+    guard_result = resolve_heartbeat_settlement_identity(
+        runtime_root,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        todo_id=todo_id,
+        turn_instance_id=turn_instance_id,
+    )
+    identity = guard_result.value
+    if identity is None:
+        settlement_result = guard_result
+    else:
+        settlement_result = guard_result.bind(
+            lambda resolved: require_settlement_writeback(
+                runtime_root,
+                resolved,
+            )
+        ).bind(
+            lambda _writeback: require_settlement_spend(
+                runtime_root,
+                identity,
+            )
+        )
+    payload["settlement_result"] = settlement_result_payload(
+        settlement_result
+    )
+    if settlement_result.failure is not None:
+        payload["ok"] = False
+        payload["receipt_repair_required"] = True
+        payload["reason"] = settlement_result.failure.reason
+    elif payload.get("receipt_repair_required"):
+        payload["receipt_repair_required"] = False
+        payload["receipt_repaired"] = True
 
 
 def handle_quota_command(
@@ -801,6 +905,7 @@ def handle_quota_command(
                 available_capabilities=args.available_capabilities,
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
                 todo_id=args.todo_id,
+                turn_instance_id=heartbeat_turn_id,
             )
         elif args.quota_command == "void-slot":
             payload = void_quota_slot(
@@ -826,30 +931,21 @@ def handle_quota_command(
         )
     should_log_quota = args.quota_command in QUOTA_EVENT_KINDS and (
         args.quota_command == "should-run"
-        or (payload.get("ok") and bool(payload.get("appended")))
+        or (
+            payload.get("ok")
+            and (
+                bool(payload.get("appended"))
+                or bool(payload.get("receipt_repair_required"))
+            )
+        )
     )
     if should_log_quota:
-        rollout_details = {
-            "command": "quota",
-            "quota_command": args.quota_command,
-            "ok": bool(payload.get("ok")),
-            "should_run": bool(payload.get("should_run")),
-            "appended": bool(payload.get("appended")),
-            "slots": payload.get("slots") or "",
-            "source": payload.get("source") or "",
-            "todo_id": payload.get("todo_id") or "",
-            "target_key": payload.get("target_key") or "",
-            "successor_todo_ids": ",".join(
-                str(todo_id)
-                for todo_id in (
-                    payload.get("successor_todo_ids")
-                    if isinstance(payload.get("successor_todo_ids"), list)
-                    else []
-                )
-                if str(todo_id).strip()
-            ),
-            "applied_rrule": payload.get("applied_rrule") or "",
-        }
+        rollout_todo_id = _quota_rollout_todo_id(payload, args)
+        rollout_details = _quota_rollout_details(
+            payload,
+            args,
+            todo_id=rollout_todo_id,
+        )
         if heartbeat_turn_id and args.quota_command == "should-run":
             if not heartbeat_receipt_ready:
                 prior_reason = str(payload.get("reason") or "").strip()
@@ -882,6 +978,12 @@ def handle_quota_command(
                     {
                         "turn_instance_id": heartbeat_turn_id,
                         "stall_observation": heartbeat_stall_observation,
+                        "settlement_effect_id": (
+                            f"{args.goal_id}:{args.agent_id}:{rollout_todo_id}:"
+                            f"{heartbeat_turn_id}"
+                            if rollout_todo_id
+                            else ""
+                        ),
                     }
                 )
                 append_cli_rollout_event(
@@ -938,6 +1040,12 @@ def handle_quota_command(
                 runtime_root_arg=runtime_root_arg,
                 event_kind=QUOTA_EVENT_KINDS[args.quota_command],
                 agent_id=args.agent_id,
+                todo_id=rollout_todo_id,
+                run_id=(
+                    heartbeat_turn_id
+                    if args.quota_command == "spend-slot"
+                    else None
+                ),
                 status=str(
                     payload.get("effective_action")
                     or payload.get("decision")
@@ -952,6 +1060,15 @@ def handle_quota_command(
                 details=rollout_details,
                 allow_failed=args.quota_command == "should-run",
             )
+            if args.quota_command == "spend-slot" and heartbeat_turn_id:
+                _attach_spend_settlement_result(
+                    payload,
+                    runtime_root=runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    todo_id=rollout_todo_id,
+                    turn_instance_id=heartbeat_turn_id,
+                )
     if bool(getattr(args, "turn_envelope", False)):
         payload = build_turn_envelope(
             payload,

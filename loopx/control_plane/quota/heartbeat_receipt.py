@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ...rollout_event_log import load_rollout_events, rollout_event_log_path
+from .effect_program import SETTLEMENT_IDENTITY_SCHEMA_VERSION
 
 HEARTBEAT_RECEIPT_SCHEMA_VERSION = "heartbeat_quota_receipt_v0"
 
@@ -33,8 +34,11 @@ def heartbeat_receipt_view(
     turn_instance_id: str,
     status: str,
 ) -> dict[str, object]:
-    details = event.get("details") if isinstance(event.get("details"), Mapping) else {}
-    return {
+    details_value = event.get("details")
+    details: Mapping[str, object] = (
+        details_value if isinstance(details_value, Mapping) else {}
+    )
+    receipt: dict[str, object] = {
         "schema_version": HEARTBEAT_RECEIPT_SCHEMA_VERSION,
         "turn_instance_id": turn_instance_id,
         "status": status,
@@ -42,6 +46,18 @@ def heartbeat_receipt_view(
         "event_id": event.get("event_id"),
         "recorded_at": event.get("recorded_at"),
     }
+    todo_id = str(details.get("todo_id") or "").strip()
+    effect_id = str(details.get("settlement_effect_id") or "").strip()
+    if todo_id and effect_id:
+        receipt["settlement_identity"] = {
+            "schema_version": SETTLEMENT_IDENTITY_SCHEMA_VERSION,
+            "effect_id": effect_id,
+            "goal_id": event.get("goal_id"),
+            "agent_id": event.get("agent_id"),
+            "todo_id": todo_id,
+            "turn_instance_id": turn_instance_id,
+        }
+    return receipt
 
 
 def fail_heartbeat_receipt(

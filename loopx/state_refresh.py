@@ -17,6 +17,13 @@ from .control_plane.work_items.delivery_outcome import (
     require_delivery_outcome,
 )
 from .control_plane.agents.workspace_guard import capture_delivery_workspace
+from .control_plane.quota.settlement import (
+    SettlementIdentity,
+    find_settlement_writeback,
+    require_settlement_writeback,
+    resolve_heartbeat_settlement_identity,
+    settlement_result_payload,
+)
 from .control_plane.work_items.repair_delta import (
     REPAIR_DELTA_KIND_CHOICES as REPAIR_DELTA_KIND_CHOICES,
     normalize_repair_delta_kinds,
@@ -583,6 +590,7 @@ def build_state_refresh_record(
     agent_vision: dict[str, Any] | None = None,
     vision_checkpoint: dict[str, Any] | None = None,
     delivery_workspace: dict[str, Any] | None = None,
+    settlement_identity: SettlementIdentity | None = None,
 ) -> dict[str, Any]:
     frontmatter = parse_frontmatter(state_text)
     next_action = extract_section_lines(state_text, "Next Action")
@@ -627,6 +635,10 @@ def build_state_refresh_record(
         record["delivery_outcome"] = delivery_outcome
     if delivery_workspace:
         record["delivery_workspace"] = delivery_workspace
+    if settlement_identity:
+        record["settlement_identity"] = settlement_identity.as_dict()
+        record["turn_instance_id"] = settlement_identity.turn_instance_id
+        record["todo_id"] = settlement_identity.todo_id
     if autonomous_replan_recorded:
         record["autonomous_replan_ack"] = {
             "schema_version": "autonomous_replan_ack_v0",
@@ -684,7 +696,14 @@ def _build_state_refresh_output_projections(
         },
         "runtime_projection_route": record["runtime_projection_route"],
     })
-    for field in ("delivery_batch_scale", "delivery_outcome", "delivery_workspace"):
+    for field in (
+        "delivery_batch_scale",
+        "delivery_outcome",
+        "delivery_workspace",
+        "settlement_identity",
+        "turn_instance_id",
+        "todo_id",
+    ):
         if field in record:
             index_record[field] = record[field]
 
@@ -933,6 +952,8 @@ def refresh_state_run(
     delivery_batch_scale: str | None = None,
     delivery_outcome: str | None = None,
     delivery_workspace_path: Path | None = None,
+    todo_id: str | None = None,
+    turn_instance_id: str | None = None,
     agent_id: str | None = None,
     agent_lane: str | None = None,
     progress_scope: str | None = None,
@@ -970,6 +991,80 @@ def refresh_state_run(
     normalized_repair_delta_kinds = normalize_repair_delta_kinds(repair_delta_kinds)
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
+    settlement_identity = None
+    settlement_result = None
+    if todo_id or turn_instance_id:
+        if normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES:
+            raise ValueError(
+                "turn-scoped refresh-state requires an accountable --delivery-outcome"
+            )
+        settlement_result = resolve_heartbeat_settlement_identity(
+            runtime_root,
+            goal_id=safe_goal_id,
+            agent_id=normalized_agent_id or None,
+            todo_id=todo_id,
+            turn_instance_id=turn_instance_id,
+        )
+        if settlement_result.failure is not None:
+            raise ValueError(settlement_result.failure.reason)
+        settlement_identity = settlement_result.value
+        if settlement_identity is None:
+            raise ValueError("turn-scoped refresh-state has no settlement identity")
+        if not dry_run:
+            prior_writeback = require_settlement_writeback(
+                runtime_root,
+                settlement_identity,
+            )
+            if prior_writeback.failure is None and prior_writeback.value is not None:
+                return {
+                    "ok": True,
+                    "dry_run": False,
+                    "appended": False,
+                    "idempotent_replay": True,
+                    "registry": str(registry_path),
+                    "runtime_root": str(runtime_root),
+                    "goal_id": safe_goal_id,
+                    "classification": prior_writeback.value.get("classification"),
+                    "delivery_batch_scale": prior_writeback.value.get(
+                        "delivery_batch_scale"
+                    ),
+                    "delivery_outcome": prior_writeback.value.get(
+                        "delivery_outcome"
+                    ),
+                    "settlement_identity": settlement_identity.as_dict(),
+                    "settlement_result": settlement_result_payload(
+                        settlement_result.bind(
+                            lambda _identity: prior_writeback
+                        )
+                    ),
+                }
+            prior_writeback_run = find_settlement_writeback(
+                runtime_root,
+                settlement_identity,
+            )
+            if prior_writeback_run is not None:
+                return {
+                    "ok": True,
+                    "dry_run": False,
+                    "appended": False,
+                    "receipt_repair_required": True,
+                    "registry": str(registry_path),
+                    "runtime_root": str(runtime_root),
+                    "goal_id": safe_goal_id,
+                    "classification": prior_writeback_run.get("classification"),
+                    "delivery_batch_scale": prior_writeback_run.get(
+                        "delivery_batch_scale"
+                    ),
+                    "delivery_outcome": prior_writeback_run.get(
+                        "delivery_outcome"
+                    ),
+                    "settlement_identity": settlement_identity.as_dict(),
+                    "settlement_result": settlement_result_payload(
+                        settlement_result.bind(
+                            lambda _identity: prior_writeback
+                        )
+                    ),
+                }
     runtime_projection_route = resolve_runtime_projection_route(
         registry_path=registry_path,
         goal_id=safe_goal_id,
@@ -1195,6 +1290,7 @@ def refresh_state_run(
         agent_vision=agent_vision,
         vision_checkpoint=vision_checkpoint,
         delivery_workspace=delivery_workspace,
+        settlement_identity=settlement_identity,
     )
     if autonomous_replan_recorded:
         if "autonomous_replan_ack" not in record:

@@ -11,6 +11,7 @@ TODO_OPTION_FIELDS = (
     ("--text", "text"),
     ("--follow-up", "followups"),
     ("--todo-id", "todo_id"),
+    ("--turn-instance-id", "turn_instance_id"),
     ("--status", "status"),
     ("--note", "note"),
     ("--evidence", "evidence"),
@@ -443,6 +444,10 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
         "complete",
         "supersede",
     }
+    if getattr(args, "turn_instance_id", None) and args.todo_command != "complete":
+        raise ValueError(
+            "--turn-instance-id is supported only by todo complete settlement"
+        )
     if args.capability_binding_ref and args.todo_command != "add":
         raise ValueError(
             "--capability-binding-ref is immutable and supported only by todo add"
