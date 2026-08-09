@@ -47,6 +47,7 @@ __all__ = [
     "find_settlement_spend_run",
     "find_settlement_step_event",
     "find_settlement_writeback",
+    "infer_persisted_heartbeat_settlement_identity",
     "require_settlement_spend",
     "require_settlement_todo_completion",
     "require_settlement_writeback",
@@ -55,6 +56,14 @@ __all__ = [
     "settlement_result_payload",
     "settlement_step_command",
 ]
+
+
+def _identity_mismatch(reason: str) -> SettlementResult[SettlementIdentity]:
+    return SettlementResult.failed(
+        kind=SettlementFailureKind.IDENTITY_MISMATCH,
+        step_kind=SettlementStepKind.VALIDATION,
+        reason=reason,
+    )
 
 
 def resolve_heartbeat_settlement_identity(
@@ -160,6 +169,92 @@ def _run_index_records(runtime_root: Path, goal_id: str) -> list[dict[str, Any]]
         if isinstance(record, dict):
             records.append(record)
     return records
+
+
+def infer_persisted_heartbeat_settlement_identity(
+    runtime_root: Path,
+    *,
+    goal_id: str,
+    agent_id: str | None,
+    todo_id: str | None,
+) -> SettlementResult[SettlementIdentity] | None:
+    """Recover the latest typed heartbeat identity when a caller omits its turn id.
+
+    This is a compatibility recovery seam, not a second source of truth. It
+    considers only the newest same-agent accountable writeback or spend, and
+    then revalidates that candidate against the original heartbeat guard.
+    Unrelated Todo lineages and legacy untyped runs fall back to the existing
+    frontier binding rules.
+    """
+
+    normalized_agent_id = normalize_todo_claimed_by(agent_id)
+    normalized_todo_id = normalize_todo_id(todo_id)
+    if not normalized_agent_id or not normalized_todo_id:
+        return None
+
+    candidate: dict[str, Any] | None = None
+    for run in reversed(_run_index_records(runtime_root, goal_id)):
+        run_agent_id = normalize_todo_claimed_by(run.get("agent_id"))
+        if run_agent_id and run_agent_id != normalized_agent_id:
+            continue
+        classification = str(run.get("classification") or "").strip()
+        delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
+        if classification == "quota_slot_voided":
+            continue
+        if classification == "quota_scheduler_ack":
+            continue
+        if classification == "quota_monitor_poll" and run.get("material_change") is not True:
+            continue
+        if (
+            classification == "state_refreshed"
+            and delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
+        ):
+            continue
+        if (
+            classification == "quota_slot_spent"
+            or delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES
+        ):
+            candidate = run
+        break
+
+    if candidate is None:
+        return None
+    candidate_todo_id = normalize_todo_id(candidate.get("todo_id"))
+    if candidate_todo_id != normalized_todo_id:
+        return None
+    candidate_turn_id = str(candidate.get("turn_instance_id") or "").strip()
+    if not candidate_turn_id:
+        return None
+
+    identity = SettlementIdentity(
+        goal_id=goal_id,
+        agent_id=normalized_agent_id,
+        todo_id=normalized_todo_id,
+        turn_instance_id=candidate_turn_id,
+    )
+    persisted_value = candidate.get("settlement_identity")
+    persisted = persisted_value if isinstance(persisted_value, Mapping) else {}
+    for field, expected in (
+        ("goal_id", identity.goal_id),
+        ("agent_id", identity.agent_id),
+        ("todo_id", identity.todo_id),
+        ("turn_instance_id", identity.turn_instance_id),
+        ("effect_id", identity.effect_id),
+    ):
+        actual = str(persisted.get(field) or "").strip()
+        if actual and actual != expected:
+            return _identity_mismatch(
+                "persisted settlement identity mismatch: "
+                f"{field} is {actual} but expected {expected}"
+            )
+
+    return resolve_heartbeat_settlement_identity(
+        runtime_root,
+        goal_id=goal_id,
+        agent_id=normalized_agent_id,
+        todo_id=normalized_todo_id,
+        turn_instance_id=candidate_turn_id,
+    )
 
 
 def find_settlement_writeback(

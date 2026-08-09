@@ -26,6 +26,7 @@ from ..work_items.delivery_outcome import (
 )
 from .settlement import (
     SettlementIdentity,
+    infer_persisted_heartbeat_settlement_identity,
     require_settlement_writeback,
     resolve_heartbeat_settlement_identity,
     settlement_result_payload,
@@ -73,6 +74,57 @@ def _todo_binding_error(
             "delivery so the accounted turn is bound to the selected todo"
         )
     return None
+
+
+def _resolve_preview_settlement(
+    *,
+    raw_runtime_root: Any,
+    source: str,
+    goal_id: str,
+    agent_id: str | None,
+    todo_id: str | None,
+    turn_instance_id: str | None,
+) -> dict[str, Any]:
+    if turn_instance_id and source != DEFAULT_SLOT_SPEND_SOURCE:
+        return {"reason": "turn-scoped settlement is valid only for heartbeat spend"}
+    if turn_instance_id and not raw_runtime_root:
+        return {"reason": "status payload does not include runtime_root"}
+    if source != DEFAULT_SLOT_SPEND_SOURCE or not raw_runtime_root:
+        return {}
+
+    runtime_root = Path(str(raw_runtime_root)).expanduser()
+    result = (
+        resolve_heartbeat_settlement_identity(
+            runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            todo_id=todo_id,
+            turn_instance_id=turn_instance_id,
+        )
+        if turn_instance_id
+        else infer_persisted_heartbeat_settlement_identity(
+            runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            todo_id=todo_id,
+        )
+    )
+    if result is None:
+        return {}
+    identity = result.value if result.failure is None else None
+    if identity is not None:
+        result = result.bind(
+            lambda resolved: require_settlement_writeback(
+                runtime_root,
+                resolved,
+            )
+        )
+    return {
+        "identity": identity,
+        "result": result,
+        "delivery_run": result.value if result.failure is None else None,
+        "reason": result.failure.reason if result.failure is not None else None,
+    }
 
 
 def _now_local() -> str:
@@ -234,71 +286,36 @@ def build_quota_slot_preview_for_decision(
     settlement_identity = None
     settlement_result = None
     delivery_completion_run = None
-    if turn_instance_id:
-        if source != DEFAULT_SLOT_SPEND_SOURCE:
-            return {
-                "ok": False,
-                "mode": "spend-slot",
-                "dry_run": True,
-                "goal_id": safe_goal_id,
-                "slots": safe_slots,
-                "agent_id": safe_requested_agent_id,
-                "appended": False,
-                "registry_mutated": False,
-                "reason": "turn-scoped settlement is valid only for heartbeat spend",
-                "before": before,
-                "after": None,
-            }
-        if not raw_runtime_root:
-            return {
-                "ok": False,
-                "mode": "spend-slot",
-                "dry_run": True,
-                "goal_id": safe_goal_id,
-                "slots": safe_slots,
-                "agent_id": safe_requested_agent_id,
-                "appended": False,
-                "registry_mutated": False,
-                "reason": "status payload does not include runtime_root",
-                "before": before,
-                "after": None,
-            }
-        runtime_root = Path(str(raw_runtime_root)).expanduser()
-        settlement_result = resolve_heartbeat_settlement_identity(
-            runtime_root,
-            goal_id=safe_goal_id,
-            agent_id=safe_requested_agent_id,
-            todo_id=normalized_todo_id,
-            turn_instance_id=turn_instance_id,
-        )
-        if settlement_result.failure is None:
-            settlement_identity = settlement_result.value
-        if settlement_identity is not None:
-            settlement_result = settlement_result.bind(
-                lambda identity: require_settlement_writeback(
-                    runtime_root,
-                    identity,
-                )
-            )
-            if settlement_result.failure is None:
-                delivery_completion_run = settlement_result.value
-        if settlement_result.failure is not None:
-            return {
-                "ok": False,
-                "mode": "spend-slot",
-                "dry_run": True,
-                "goal_id": safe_goal_id,
-                "slots": safe_slots,
-                "agent_id": safe_requested_agent_id,
-                "appended": False,
-                "registry_mutated": False,
-                "reason": settlement_result.failure.reason,
-                "settlement_result": settlement_result_payload(
-                    settlement_result
-                ),
-                "before": before,
-                "after": None,
-            }
+    settlement = _resolve_preview_settlement(
+        raw_runtime_root=raw_runtime_root,
+        source=source,
+        goal_id=safe_goal_id,
+        agent_id=safe_requested_agent_id,
+        todo_id=normalized_todo_id,
+        turn_instance_id=turn_instance_id,
+    )
+    settlement_identity = settlement.get("identity")
+    settlement_result = settlement.get("result")
+    delivery_completion_run = settlement.get("delivery_run")
+    if settlement.get("reason"):
+        return {
+            "ok": False,
+            "mode": "spend-slot",
+            "dry_run": True,
+            "goal_id": safe_goal_id,
+            "slots": safe_slots,
+            "agent_id": safe_requested_agent_id,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": settlement["reason"],
+            "settlement_result": (
+                settlement_result_payload(settlement_result)
+                if settlement_result is not None
+                else None
+            ),
+            "before": before,
+            "after": None,
+        }
     binding_error = _todo_binding_error(
         source=source,
         before=before,

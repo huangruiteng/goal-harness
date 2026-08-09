@@ -38,6 +38,7 @@ from .control_plane.quota.scheduler_ack import (
 )
 from .control_plane.quota.settlement import (
     find_settlement_spend_run,
+    infer_persisted_heartbeat_settlement_identity,
     require_settlement_spend,
     require_settlement_writeback,
     resolve_heartbeat_settlement_identity,
@@ -1054,6 +1055,33 @@ def spend_quota_slot(
             "reason": "turn-scoped settlement is valid only for heartbeat spend",
         }
     raw_runtime_root = status_payload.get("runtime_root")
+    if (
+        not turn_instance_id
+        and source == DEFAULT_SLOT_SPEND_SOURCE
+        and raw_runtime_root
+    ):
+        inferred_result = infer_persisted_heartbeat_settlement_identity(
+            Path(str(raw_runtime_root)).expanduser(),
+            goal_id=safe_goal_id,
+            agent_id=agent_id,
+            todo_id=todo_id,
+        )
+        if inferred_result is not None:
+            if inferred_result.failure is not None or inferred_result.value is None:
+                return {
+                    "ok": False,
+                    "mode": "spend-slot",
+                    "dry_run": not execute,
+                    "appended": False,
+                    "goal_id": safe_goal_id,
+                    "reason": (
+                        inferred_result.failure.reason
+                        if inferred_result.failure is not None
+                        else "persisted heartbeat settlement has no identity"
+                    ),
+                    "settlement_result": settlement_result_payload(inferred_result),
+                }
+            turn_instance_id = inferred_result.value.turn_instance_id
     if turn_instance_id and raw_runtime_root:
         runtime_root = Path(str(raw_runtime_root)).expanduser()
         guard_result = resolve_heartbeat_settlement_identity(
