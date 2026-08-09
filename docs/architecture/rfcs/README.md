@@ -8,6 +8,7 @@ defined by the implementation and stable reference contracts.
 ## Active Drafts
 
 - [Agent Loop Effect Interpreter v0](agent-loop-effect-interpreter-v0.md): model LoopX as the effect interpreter around an agent loop, with canonical effect-request/interpretation/observation packet semantics.
+- [Agent Loop Effect Interpreter v0（中文版）](agent-loop-effect-interpreter-v0.zh-CN.md): 把 LoopX 建模为 agent loop 外围的 effect interpreter，并给出 canonical effect-request/interpretation/observation packet 语义。
 - [Agent IM, LoopX, and OpenViking collaboration v0](agent-im-openviking-collaboration-v0.md): separate runtime delivery, durable control state, and scoped context while preserving direct agent-to-LoopX interaction.
 - [Goal Channel collaboration v0](goal-channel-collaboration-v0.md): bind one external collaboration channel to one LoopX goal while preserving LoopX as the source of truth.
 - [Goal Channel 协作模型 v0](goal-channel-collaboration-v0.zh-CN.md): 将一个外部协作通道绑定到一个 LoopX goal，同时保持 LoopX 作为事实源。

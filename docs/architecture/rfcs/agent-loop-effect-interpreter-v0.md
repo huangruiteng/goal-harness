@@ -7,6 +7,10 @@
 | Author | LoopX maintainers |
 | Scope | Public control-plane docs, packet contracts, refactor direction, test strategy |
 
+> Language note: the
+> [Chinese version](./agent-loop-effect-interpreter-v0.zh-CN.md) and this
+> English version are semantic mirrors. A difference between them is a defect.
+
 ## Summary
 
 LoopX harness should be explained, designed, and tested as **the effectful
