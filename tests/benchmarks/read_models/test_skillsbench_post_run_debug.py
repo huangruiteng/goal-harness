@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from loopx import status
 from loopx.benchmarks.read_models.skillsbench_post_run_debug import (
     build_skillsbench_post_run_debug_gate,
 )
+from loopx.status import build_skillsbench_post_run_debug_gate as status_build_skillsbench_post_run_debug_gate
 
 
 def _typed_repair_exhausted_compact() -> dict[str, object]:
@@ -136,7 +136,7 @@ def _turn_plan_repair_exhausted_compact() -> dict[str, object]:
 
 def test_status_preserves_skillsbench_post_run_debug_import() -> None:
     assert (
-        status.build_skillsbench_post_run_debug_gate
+        status_build_skillsbench_post_run_debug_gate
         is build_skillsbench_post_run_debug_gate
     )
 
