@@ -145,6 +145,39 @@ def test_typed_settlement_fails_closed_when_journal_receipt_payload_is_missing()
     assert calls == {"writeback": 0, "spend": 0, "checkpoint": 0}
 
 
+def test_typed_settlement_fails_closed_when_plan_has_no_settlement_plan() -> None:
+    transaction = _plan()["transaction"]
+    assert isinstance(transaction, dict)
+    legacy = {
+        key: value
+        for key, value in transaction.items()
+        if key != "settlement_plan"
+    }
+    calls = {"writeback": 0, "spend": 0, "checkpoint": 0}
+
+    result = execute_turn_driver_settlement(
+        legacy,
+        transaction_phases=TRANSACTION_PHASES,
+        completed_phases=TRANSACTION_PHASES[:3],
+        writeback_payload=None,
+        quota_spend_payload=None,
+        writeback=lambda: calls.__setitem__("writeback", calls["writeback"] + 1)
+        or {"ok": True, "appended": True},
+        spend=lambda: calls.__setitem__("spend", calls["spend"] + 1)
+        or {"ok": True, "appended": True},
+        checkpoint=lambda _kind, _payload, _phases: calls.__setitem__(
+            "checkpoint", calls["checkpoint"] + 1
+        ),
+    )
+
+    assert result.failure is not None
+    assert result.failure.kind.value == "receipt_missing"
+    assert result.failure.step_kind.value == "validation"
+    assert "typed settlement plan" in result.failure.reason
+    assert result.receipts == ()
+    assert calls == {"writeback": 0, "spend": 0, "checkpoint": 0}
+
+
 def _host_argv(result_path: Path, count_path: Path) -> list[str]:
     script = """
 import json
@@ -327,6 +360,47 @@ def test_run_once_commits_once_and_replays_without_duplicate_effects(tmp_path: P
     assert replay["replayed"] is True
     assert not any(replay["effects"].values())
     assert count_path.read_text(encoding="utf-8") == "1"
+    assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
+
+
+def test_run_once_legacy_plan_without_settlement_plan_is_upgraded(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    transaction.pop("settlement_plan", None)
+    result_path = tmp_path / "result.json"
+    result_path.write_text(json.dumps(_host_result(plan)), encoding="utf-8")
+    count_path = tmp_path / "host-count"
+    calls = {"writeback": 0, "spend": 0, "scheduler": 0}
+    writeback, spend, scheduler = _callbacks(calls)
+
+    committed = run_loopx_turn_once(
+        plan,
+        host_argv=_host_argv(result_path, count_path),
+        project=tmp_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id="fixture-goal",
+        timeout_seconds=5,
+        execute=True,
+        task_validator=_passing_validator,
+        writeback=writeback,
+        spend=spend,
+        scheduler=scheduler,
+    )
+
+    assert committed["ok"] is True
+    assert committed["status"] == "committed"
+    assert committed["receipt"]["status"] == "committed"
+    assert committed["settlement_result"]["ok"] is True
+    assert (
+        [
+            receipt["step_kind"]
+            for receipt in committed["settlement_result"]["receipts"]
+        ]
+        == ["validation", "durable_writeback", "quota_spend"]
+    )
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
 
 
