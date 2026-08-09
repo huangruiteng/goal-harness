@@ -250,6 +250,18 @@ loopx refresh-state         # what should the next turn see?
 loopx quota spend-slot      # account for a completed, validated slice
 ```
 
+### First-Run Feedback
+
+If LoopX works for you, a one-minute public issue helps us learn what a real
+first run looks like. It is optional, contains no telemetry, and should not
+include logs, paths, credentials, internal project names, or goal contents:
+
+- [First-run feedback](https://github.com/huangruiteng/loopx/issues/new?template=first_run.yml)
+- [Usage story for longer runs](https://github.com/huangruiteng/loopx/issues/new?template=usage_story.yml)
+
+`loopx first-run-report` prints the same prefilled link locally without
+sending anything.
+
 A successful connection has:
 
 - `loopx doctor` passing;

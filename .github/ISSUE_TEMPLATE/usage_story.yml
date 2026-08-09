@@ -1,0 +1,60 @@
+name: Usage story
+description: Optional public report from users who ran LoopX over time, not just once.
+title: "Usage story: [duration] / [task type]"
+labels: ["usage-story", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing a longer-run LoopX story. This issue is optional and public.
+        Do not paste logs, absolute paths, credentials, internal project names, or goal contents.
+  - type: dropdown
+    id: duration
+    attributes:
+      label: How long did the loop run?
+      options:
+        - Several hours
+        - Several days
+        - Several weeks
+        - More than a month
+  - type: checkboxes
+    id: capabilities
+    attributes:
+      label: What did the run exercise?
+      options:
+        - label: Resume after crash or reboot
+        - label: Resume after model or runtime switch
+        - label: Multiple agents or parallel lanes
+        - label: Human gates and approval
+        - label: Quota / budget control
+        - label: Handoff across sessions
+  - type: input
+    id: scale
+    attributes:
+      label: Approximate scale (optional)
+      description: Wall-clock duration, number of goals, or number of turns.
+      placeholder: "5 days / 3 goals"
+  - type: textarea
+    id: blockers
+    attributes:
+      label: What broke, and how did you recover? (optional)
+      description: Public-safe failure mode only; no logs or private details.
+      placeholder: "Lost a session after a reboot; resumed from the saved state and completed the goal."
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What did LoopX help you finish? (optional)
+      description: One public-safe outcome sentence.
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Public/private boundary
+      options:
+        - label: This issue does not contain logs, paths, credentials, internal project names, or goal contents.
+          required: true
+  - type: checkboxes
+    id: citation
+    attributes:
+      label: Usage evidence
+      options:
+        - label: I allow maintainers to cite this issue as an anonymous usage-story sample.

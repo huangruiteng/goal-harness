@@ -27,6 +27,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "purpose": "Check install, PATH, release snapshot, skills, and import health.",
             },
             {
+                "command": "loopx first-run-report",
+                "purpose": "Print a local first-run receipt and an optional public feedback issue link.",
+            },
+            {
                 "command": "loopx slash-commands --install",
                 "purpose": "Refresh host slash-command prompt and skill files.",
             },

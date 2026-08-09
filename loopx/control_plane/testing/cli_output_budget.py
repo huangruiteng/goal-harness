@@ -538,6 +538,12 @@ CLI_OUTPUT_COMMAND_CLASSIFICATIONS: tuple[CliOutputCommandClassification, ...] =
         rationale="installation diagnostic invoked on demand, not a recurring decision payload",
     ),
     CliOutputCommandClassification(
+        command_id="first-run-report",
+        qualification="explicit_cold_path_exception",
+        surface_id=None,
+        rationale="explicit local feedback receipt invoked on demand and sends nothing",
+    ),
+    CliOutputCommandClassification(
         command_id="slash-commands",
         qualification="explicit_cold_path_exception",
         surface_id=None,

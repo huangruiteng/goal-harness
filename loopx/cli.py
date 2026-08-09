@@ -68,6 +68,7 @@ from .cli_commands import (
     handle_evidence_log_command,
     handle_extension_command,
     handle_explore_command,
+    handle_first_run_report_command,
     handle_goal_channel_command,
     handle_history_command,
     handle_lark_inbox_command,
@@ -104,6 +105,7 @@ from .cli_commands import (
     register_extension_commands,
     register_explore_commands,
     register_goal_channel_commands,
+    register_first_run_report_command,
     register_history_command,
     register_lark_inbox_commands,
     build_lark_issue_fix_reviewer_provider_hooks,
@@ -214,6 +216,8 @@ def build_parser() -> LoopXArgumentParser:
 
     register_doctor_command(sub)
 
+    register_first_run_report_command(sub)
+
     register_worker_bridge_commands(sub, add_subcommand_format)
 
     register_support_control_commands(sub, add_subcommand_format)
@@ -321,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             "codex-cli-visible-session-proof",
             "demo",
             "doctor",
+            "first-run-report",
             "new-project-prompt",
             "start-goal",
             "slash-commands",
@@ -367,6 +372,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         return handle_doctor_command(args, print_payload)
+
+    if args.command == "first-run-report":
+        return handle_first_run_report_command(args, print_payload)
 
     worker_bridge_result = handle_worker_bridge_command(
         args,

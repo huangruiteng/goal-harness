@@ -87,6 +87,10 @@ from .canary import handle_canary_command, register_canary_commands
 from .capability import handle_capability_command, register_capability_commands
 from .extension import handle_extension_command, register_extension_commands
 from .doctor import handle_doctor_command, register_doctor_command
+from .first_run_report import (
+    handle_first_run_report_command,
+    register_first_run_report_command,
+)
 from .dreaming import handle_dreaming_command, register_dreaming_commands
 from .evidence_log import handle_evidence_log_command, register_evidence_log_command
 from .explore import handle_explore_command, register_explore_commands
@@ -227,6 +231,7 @@ __all__ = [
     "handle_diagnose_command",
     "handle_demo_command",
     "handle_doctor_command",
+    "handle_first_run_report_command",
     "handle_dreaming_command",
     "handle_evidence_log_command",
     "handle_explore_command",
@@ -286,6 +291,7 @@ __all__ = [
     "register_capability_commands",
     "register_extension_commands",
     "register_doctor_command",
+    "register_first_run_report_command",
     "register_dreaming_commands",
     "register_evidence_log_command",
     "register_explore_commands",

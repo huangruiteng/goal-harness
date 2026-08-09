@@ -1,0 +1,71 @@
+name: First run
+description: Optional public feedback after installing and running LoopX for the first time.
+title: "First run: [OS] / [host]"
+labels: ["first-run", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying LoopX. This issue is optional and public. Do not paste logs,
+        absolute paths, credentials, internal project names, or goal contents.
+  - type: input
+    id: version
+    attributes:
+      label: LoopX version
+      description: Output of `loopx --version`, if available.
+      placeholder: "0.4.4"
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - WSL
+        - Other
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host surface
+      options:
+        - Codex App
+        - Codex CLI
+        - Claude Code
+        - OpenCode
+        - TraeX
+        - Pi
+        - Gemini CLI
+        - Cursor
+        - Shell or custom runner
+        - Other
+  - type: checkboxes
+    id: steps
+    attributes:
+      label: Completed steps
+      options:
+        - label: Install
+        - label: loopx doctor
+        - label: connect
+        - label: Create a goal or todo
+        - label: Complete a writeback
+        - label: Resume across sessions
+  - type: input
+    id: task_type
+    attributes:
+      label: Task type (optional)
+      description: One short generic label such as research, coding, ops, or a personal project.
+      placeholder: "research"
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Public/private boundary
+      options:
+        - label: This issue does not contain logs, paths, credentials, internal project names, or goal contents.
+          required: true
+  - type: checkboxes
+    id: citation
+    attributes:
+      label: Usage evidence
+      options:
+        - label: I allow maintainers to cite this issue as an anonymous first-run adoption sample.

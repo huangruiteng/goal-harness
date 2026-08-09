@@ -229,6 +229,16 @@ loopx refresh-state         # 下一轮应该看到什么？
 loopx quota spend-slot      # 为完成并验证的 slice 记账
 ```
 
+### 首次运行反馈
+
+如果 LoopX 帮你跑通了第一个任务，欢迎用一分钟提交一条公开反馈（可选，无任何
+遥测；不要粘贴日志、路径、凭据、内部项目名或 goal 内容）：
+
+- [首次运行反馈](https://github.com/huangruiteng/loopx/issues/new?template=first_run.yml)
+- [长程使用案例](https://github.com/huangruiteng/loopx/issues/new?template=usage_story.yml)
+
+`loopx first-run-report` 会在本地打印同样的预填链接，不会发送任何数据。
+
 成功连接后应该满足：
 
 - `loopx doctor` 通过；
