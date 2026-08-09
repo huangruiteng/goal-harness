@@ -43,7 +43,7 @@ from .history import STATUS_NEUTRAL_CLASSIFICATIONS as HISTORY_STATUS_NEUTRAL_CL
 from .interface_budget import interface_budget_cadence_for_runs
 from .long_task_cadence import build_long_task_cadence_hint
 from .orchestration import compact_orchestration_policy
-from .paths import global_registry_path, resolve_runtime_root
+from .paths import resolve_runtime_root
 from .control_plane.work_items.task_graph import (
     build_task_graph_projection as _build_task_graph_projection_read_model,
 )
@@ -85,7 +85,6 @@ from .control_plane.work_items.attention_item import (
 from .control_plane.work_items.attention_queue import (
     AttentionQueueContext,
     build_attention_queue as _build_attention_queue_read_model,
-    merge_global_registry_findings as _merge_global_registry_findings_read_model,
 )
 from .control_plane.work_items.autonomous_replan_ack import (
     AUTONOMOUS_REPLAN_ACK_MATERIAL_RUN_WINDOW,
@@ -186,10 +185,7 @@ from .control_plane.handoff.handoff_runs import (
 from .control_plane.goals.global_registry_shadow import (
     attach_global_registry_shadow_finding,
 )
-from .control_plane.goals.global_registry_health import (
-    collect_global_registry_health as _collect_global_registry_health_read_model,
-)
-from .control_plane.goals.path_resolution import resolve_goal_local_path, same_path
+from .control_plane.goals.path_resolution import resolve_goal_local_path
 from .control_plane.goals.goal_channel import (
     attach_goal_channel_projection as _attach_goal_channel_projection_read_model,
 )
@@ -245,7 +241,6 @@ from .control_plane.todos.todo_index import (
 )
 from .promotion_gate import build_promotion_gate
 from .quota import quota_status, quota_with_handoff_outcome_floor
-from .registry import registry_goals
 from .rollout_event_log import load_rollout_events, rollout_event_log_path
 from .state_projection import (
     active_state_next_action_entries,
@@ -2506,14 +2501,15 @@ def merge_global_registry_attention_findings(
     findings: list[Any],
     goal_id_filter: str | None,
 ) -> None:
-    _merge_global_registry_findings_read_model(
+    from .control_plane.status.registry_health_projection import (
+        merge_global_registry_attention_findings as _merge_global_registry_attention_findings,
+    )
+
+    _merge_global_registry_attention_findings(
         health_items=health_items,
         history_items=history_items,
         findings=findings,
         goal_id_filter=goal_id_filter,
-        source_registry_shadow_findings=SOURCE_REGISTRY_SHADOW_FINDINGS,
-        attention_item=attention_item,
-        attach_global_registry_shadow_finding=attach_global_registry_shadow_finding,
     )
 
 
@@ -2523,16 +2519,14 @@ def collect_global_registry_health(
     runtime_root: Path,
     current_registry: dict[str, Any],
 ) -> dict[str, Any]:
-    return _collect_global_registry_health_read_model(
+    from .control_plane.status.registry_health_projection import (
+        collect_global_registry_health as _collect_global_registry_health,
+    )
+
+    return _collect_global_registry_health(
         registry_path=registry_path,
         runtime_root=runtime_root,
         current_registry=current_registry,
-        global_registry_path=global_registry_path,
-        load_registry=load_registry,
-        registry_goals=registry_goals,
-        same_path=same_path,
-        resolve_goal_local_path=resolve_goal_local_path,
-        parse_timestamp=parse_timestamp,
     )
 
 
