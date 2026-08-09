@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...heartbeat_prompt import (
+from .rules import (
     CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE,
     DEFAULT_MATERIAL_QUEUE_RULE,
     DEFAULT_PERMISSION_RULE,

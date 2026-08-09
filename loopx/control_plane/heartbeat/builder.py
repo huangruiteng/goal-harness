@@ -8,30 +8,6 @@ from typing import Any
 
 from ...agent_registry import normalize_registered_agents
 from ...ark_managed_agent_host import build_ark_managed_agent_host_contract
-from ...heartbeat_prompt import (
-    DEFAULT_MATERIAL_QUEUE_RULE,
-    DEFAULT_PERMISSION_RULE,
-    NATIVE_GOAL_HOST_MAX_CHARS,
-    agent_prompt_command_args,
-    agent_profile_prompt_projection,
-    agent_profile_scopes,
-    build_interface_budget,
-    build_peer_identity_required_error,
-    build_visible_goal_initial_runtime_capability_projection,
-    normalize_agent_scopes,
-    render_peer_agent_scope_instruction,
-    uses_ark_managed_agent_goal_host,
-    uses_native_goal_host_loop,
-    validate_visible_goal_policy_rule,
-)
-from ...project_prompt import (
-    render_accountable_progress_refresh_command,
-    render_available_capability_args,
-    render_cli_preflight,
-    render_quota_guard_command,
-    render_quota_spend_command,
-    render_refresh_state_command,
-)
 from ..agents.runtime_model import AgentRuntimeModel
 from ..quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
@@ -45,6 +21,26 @@ from ..todos.contract import (
     normalize_required_capabilities,
     normalize_todo_claimed_by,
 )
+from .agent import (
+    agent_prompt_command_args,
+    agent_profile_prompt_projection,
+    agent_profile_scopes,
+    build_peer_identity_required_error,
+    normalize_agent_scopes,
+    render_peer_agent_scope_instruction,
+)
+from .budget import (
+    NATIVE_GOAL_HOST_MAX_CHARS,
+    build_interface_budget,
+)
+from .host import (
+    uses_ark_managed_agent_goal_host,
+    uses_native_goal_host_loop,
+)
+from .rules import (
+    DEFAULT_MATERIAL_QUEUE_RULE,
+    DEFAULT_PERMISSION_RULE,
+)
 from .task_body import (
     render_ark_managed_agent_goal_task_body,
     render_brief_heartbeat_task_body,
@@ -53,6 +49,18 @@ from .task_body import (
     render_thin_heartbeat_task_body,
     render_traex_visible_goal_task_body,
     render_visible_goal_task_body,
+)
+from .visible_goal import (
+    build_visible_goal_initial_runtime_capability_projection,
+    validate_visible_goal_policy_rule,
+)
+from ...project_prompt import (
+    render_accountable_progress_refresh_command,
+    render_available_capability_args,
+    render_cli_preflight,
+    render_quota_guard_command,
+    render_quota_spend_command,
+    render_refresh_state_command,
 )
 
 
