@@ -113,8 +113,8 @@ Do not bypass a newer permission or lifecycle check just to make an older exampl
 
 ## Version baseline
 
-The current release anchor is LoopX GitHub release `v0.4.3`. Local command examples were checked against
-the installed `loopx 0.4.3` CLI surface. A release tag, installed CLI, and source checkout can be on
+The current release anchor is LoopX GitHub release `v0.4.4`. Local command examples were checked against
+the installed `loopx 0.4.4` CLI surface. A release tag, installed CLI, and source checkout can be on
 different revisions, so verify these surfaces against your actual environment:
 
 - install and update;

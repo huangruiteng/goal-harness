@@ -79,7 +79,7 @@ versioned or optional functionality, not the default shape of every contribution
 - Source format: Markdown
 - Site generator: MkDocs Material
 - Hosting: GitHub Pages
-- LoopX release anchor: `v0.4.3`
+- LoopX release anchor: `v0.4.4`
 
 The official public protocols remain authoritative for protocol facts. Commands that change across
 releases remain authoritative in the release you use, its current `--help`, and official documentation.
