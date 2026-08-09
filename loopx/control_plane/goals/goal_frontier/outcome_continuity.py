@@ -1,0 +1,389 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+from ...agents.agent_scope import agent_scope_item_claimed_by
+from ...work_items.repair_delta import repair_delta_kinds_have_frontier_delta
+from ..goal_vision_state import goal_vision_state_is_closed
+
+VISION_OUTCOME_CHECKPOINT_REQUIRED_TRIGGER = "vision_outcome_checkpoint_required"
+VISION_CHECKPOINT_MISSING_TRIGGER = "vision_checkpoint_missing"
+VISION_OUTCOME_CHECKPOINT_MATERIAL_OUTCOMES = {
+    "outcome_gap",
+    "outcome_progress",
+    "primary_goal_outcome",
+}
+VISION_OUTCOME_CHECKPOINT_CONTINUATION_OUTCOMES = {
+    "continue",
+    "no_change",
+}
+REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
+    "runnable_todo_set",
+    "successor_or_supersede",
+)
+
+
+def _compact_text(value: Any, *, limit: int) -> str | None:
+    text = " ".join(str(value or "").strip().split())
+    return text[:limit] if text else None
+
+
+def _dict_field(value: dict[str, Any], key: str) -> dict[str, Any]:
+    field = value.get(key)
+    return field if isinstance(field, dict) else {}
+
+
+def _latest_runs_for_goal(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+) -> list[dict[str, Any]]:
+    run_history = _dict_field(status_payload, "run_history")
+    goals_value = run_history.get("goals")
+    goals: list[Any] = goals_value if isinstance(goals_value, list) else []
+    goal = next(
+        (
+            item
+            for item in goals
+            if isinstance(item, dict) and str(item.get("id") or "") == goal_id
+        ),
+        None,
+    )
+    latest_runs = goal.get("latest_runs") if isinstance(goal, dict) else None
+    return (
+        [item for item in latest_runs if isinstance(item, dict)]
+        if isinstance(latest_runs, list)
+        else []
+    )
+
+
+def latest_outcome_vision_checkpoint_from_status_payload(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    agent_id: str | None,
+) -> dict[str, Any] | None:
+    """Return the newest outcome-relevant per-agent vision checkpoint."""
+
+    for run in _latest_runs_for_goal(status_payload, goal_id=goal_id):
+        checkpoint = run.get("vision_checkpoint")
+        if not isinstance(checkpoint, dict):
+            continue
+        checkpoint_agent_id = str(
+            checkpoint.get("agent_id") or run.get("agent_id") or ""
+        ).strip()
+        if agent_id and checkpoint_agent_id != agent_id:
+            continue
+        if not agent_id and checkpoint_agent_id:
+            continue
+        trigger_kinds = {
+            str(trigger.get("kind") or "").strip()
+            for trigger in (checkpoint.get("triggers") or [])
+            if isinstance(trigger, dict)
+            and str(trigger.get("kind") or "").strip()
+        }
+        if not (
+            "material_delivery_outcome" in trigger_kinds
+            or "autonomous_replan_recorded" in trigger_kinds
+        ):
+            continue
+        result: dict[str, Any] = {
+            "schema_version": checkpoint.get("schema_version"),
+            "goal_id": goal_id,
+            "agent_id": checkpoint_agent_id or agent_id,
+            "required": checkpoint.get("required") is True,
+            "satisfied": checkpoint.get("satisfied") is True,
+            "decision": checkpoint.get("decision"),
+            "triggers": checkpoint.get("triggers")
+            if isinstance(checkpoint.get("triggers"), list)
+            else [],
+            "repair_delta_kinds": checkpoint.get("repair_delta_kinds")
+            if isinstance(checkpoint.get("repair_delta_kinds"), list)
+            else [],
+            "generated_at": run.get("generated_at"),
+        }
+        run_vision = run.get("agent_vision")
+        if isinstance(run_vision, dict):
+            result["qualification_agent_vision"] = {
+                "agent_id": run_vision.get("agent_id") or checkpoint_agent_id,
+                "state": run_vision.get("state"),
+                "vision_patch": _dict_field(run_vision, "vision_patch"),
+                "path_delta": _dict_field(run_vision, "path_delta"),
+                "generated_at": run.get("generated_at"),
+            }
+        return result
+    return None
+
+
+def acceptance_gaps_from_vision_checkpoint(
+    checkpoint: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Convert a missing per-agent vision checkpoint into a frontier gap."""
+
+    if not isinstance(checkpoint, dict):
+        return []
+    trigger_kinds = [
+        str(trigger.get("kind") or "").strip()
+        for trigger in (checkpoint.get("triggers") or [])
+        if isinstance(trigger, dict) and str(trigger.get("kind") or "").strip()
+    ]
+    trigger_text = ", ".join(trigger_kinds[:3]) or "required vision checkpoint"
+    missing_baseline = checkpoint.get("missing_baseline") is True
+    gap: dict[str, Any] = {
+        "kind": VISION_CHECKPOINT_MISSING_TRIGGER,
+        "source": "latest_vision_checkpoint",
+        "agent_id": checkpoint.get("agent_id"),
+        "decision": checkpoint.get("decision"),
+        "replan_trigger_summary": (
+            "refresh-state tried to keep vision unchanged without a persisted "
+            f"per-agent baseline; triggers={trigger_text}"
+            if missing_baseline
+            else "refresh-state closed a material segment without a per-agent vision "
+            f"decision; triggers={trigger_text}"
+        ),
+        "acceptance_summary": (
+            "Write a bounded agent vision patch, or retire/supersede the frontier "
+            "with an explicit rationale."
+            if missing_baseline
+            else "Write a bounded agent vision patch, record an unchanged reason, "
+            "or retire/supersede the frontier with an explicit rationale."
+        ),
+    }
+    if missing_baseline:
+        gap["missing_baseline"] = True
+    generated_at = _compact_text(checkpoint.get("generated_at"), limit=80)
+    if generated_at:
+        gap["generated_at"] = generated_at
+    return [gap]
+
+
+def acceptance_gaps_from_outcome_checkpoint(
+    agent_vision: dict[str, Any] | None,
+    checkpoint: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Require a fresh evidence-linked path decision after material closeout."""
+
+    if not isinstance(agent_vision, dict) or not isinstance(checkpoint, dict):
+        return []
+    if goal_vision_state_is_closed(str(agent_vision.get("state") or "")):
+        return []
+    qualification_vision_value = checkpoint.get("qualification_agent_vision")
+    qualification_vision = (
+        qualification_vision_value
+        if isinstance(qualification_vision_value, dict)
+        else agent_vision
+    )
+    vision_agent_id = str(qualification_vision.get("agent_id") or "").strip()
+    checkpoint_agent_id = str(checkpoint.get("agent_id") or "").strip()
+    if (
+        vision_agent_id
+        and checkpoint_agent_id
+        and vision_agent_id != checkpoint_agent_id
+    ):
+        return []
+
+    triggers = [
+        trigger
+        for trigger in (checkpoint.get("triggers") or [])
+        if isinstance(trigger, dict)
+    ]
+    delivery_outcomes = [
+        outcome
+        for trigger in triggers
+        if trigger.get("kind") == "material_delivery_outcome"
+        and (
+            outcome := _compact_text(
+                trigger.get("delivery_outcome"),
+                limit=32,
+            )
+        )
+        in VISION_OUTCOME_CHECKPOINT_MATERIAL_OUTCOMES
+    ]
+    if not delivery_outcomes:
+        return []
+
+    patch = _dict_field(qualification_vision, "vision_patch")
+    current_patch = _dict_field(agent_vision, "vision_patch")
+    claim = _compact_text(patch.get("acceptance_summary"), limit=420)
+    path_delta = _dict_field(qualification_vision, "path_delta")
+    path_outcome = _compact_text(path_delta.get("outcome"), limit=32)
+    evidence_refs = [
+        evidence_ref
+        for value in (path_delta.get("evidence_refs") or [])
+        if (evidence_ref := _compact_text(value, limit=140))
+    ][:4]
+    fresh_vision_patch = bool(
+        checkpoint.get("decision") == "patched"
+        and checkpoint.get("generated_at")
+        and checkpoint.get("generated_at")
+        == qualification_vision.get("generated_at")
+    )
+    autonomous_replan_recorded = any(
+        trigger.get("kind") == "autonomous_replan_recorded"
+        for trigger in triggers
+    )
+    frontier_delta_recorded = repair_delta_kinds_have_frontier_delta(
+        checkpoint.get("repair_delta_kinds")
+    )
+    outcome_gap_reported = "outcome_gap" in delivery_outcomes
+    continuation_checkpoint_complete = bool(
+        checkpoint.get("satisfied") is True
+        and fresh_vision_patch
+        and claim
+        and evidence_refs
+        and path_outcome in VISION_OUTCOME_CHECKPOINT_CONTINUATION_OUTCOMES
+        and not outcome_gap_reported
+    )
+    replan_checkpoint_complete = bool(
+        checkpoint.get("satisfied") is True
+        and fresh_vision_patch
+        and claim
+        and evidence_refs
+        and path_outcome == "replan"
+        and autonomous_replan_recorded
+        and frontier_delta_recorded
+    )
+    if continuation_checkpoint_complete or replan_checkpoint_complete:
+        return []
+
+    gap: dict[str, Any] = {
+        "kind": VISION_OUTCOME_CHECKPOINT_REQUIRED_TRIGGER,
+        "source": "latest_vision_checkpoint",
+        "agent_id": checkpoint.get("agent_id") or agent_vision.get("agent_id"),
+        "replan_trigger_summary": (
+            "a material milestone closed without a fresh evidence-linked final-outcome "
+            "path decision"
+        ),
+        "acceptance_summary": _compact_text(
+            current_patch.get("acceptance_summary"),
+            limit=420,
+        )
+        or claim
+        or "Name the active final-outcome claim and its authoritative evidence.",
+        "advancement_policy": current_patch.get("advancement_policy"),
+        "checkpoint_decision": checkpoint.get("decision"),
+        "delivery_outcomes": delivery_outcomes[:3],
+        "fresh_vision_patch": fresh_vision_patch,
+        "path_outcome": path_outcome,
+        "evidence_ref_count": len(evidence_refs),
+        "required_path_outcomes": ["continue", "no_change", "replan"],
+    }
+    generated_at = _compact_text(checkpoint.get("generated_at"), limit=80)
+    if generated_at:
+        gap["generated_at"] = generated_at
+    return [gap]
+
+
+def _iso_timestamp(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _checkpoint_covers_completed_todo(
+    agent_vision: dict[str, Any],
+    checkpoint: dict[str, Any],
+) -> bool:
+    if checkpoint.get("satisfied") is not True:
+        return False
+    trigger_kinds = {
+        str(trigger.get("kind") or "").strip()
+        for trigger in (checkpoint.get("triggers") or [])
+        if isinstance(trigger, dict) and str(trigger.get("kind") or "").strip()
+    }
+    material_checkpoint = any(
+        trigger.get("kind") == "material_delivery_outcome"
+        and str(trigger.get("delivery_outcome") or "").strip()
+        in VISION_OUTCOME_CHECKPOINT_MATERIAL_OUTCOMES
+        for trigger in (checkpoint.get("triggers") or [])
+        if isinstance(trigger, dict)
+    )
+    if material_checkpoint:
+        return not acceptance_gaps_from_outcome_checkpoint(agent_vision, checkpoint)
+    if "autonomous_replan_recorded" not in trigger_kinds:
+        return False
+    repair_delta_kinds = {
+        str(value or "").strip()
+        for value in (checkpoint.get("repair_delta_kinds") or [])
+        if str(value or "").strip()
+    }
+    return bool(
+        repair_delta_kinds & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS)
+    )
+
+
+def acceptance_gaps_from_todo_completion_checkpoint(
+    agent_vision: dict[str, Any] | None,
+    checkpoint: dict[str, Any] | None,
+    *,
+    agent_todo_summary: dict[str, Any] | None,
+    agent_id: str | None,
+) -> list[dict[str, Any]]:
+    """Require a qualified outcome checkpoint after a scoped todo completion."""
+
+    if not isinstance(agent_vision, dict):
+        return []
+    if goal_vision_state_is_closed(str(agent_vision.get("state") or "")):
+        return []
+    if not agent_id:
+        return []
+    summary = agent_todo_summary if isinstance(agent_todo_summary, dict) else {}
+    completed_items = [
+        item
+        for item in (summary.get("recent_completed_advancement_items") or [])
+        if isinstance(item, dict)
+        and agent_scope_item_claimed_by(item) == agent_id
+    ]
+    latest_item = max(
+        completed_items,
+        key=lambda item: _iso_timestamp(item.get("completed_at")) or 0.0,
+        default=None,
+    )
+    if not isinstance(latest_item, dict):
+        return []
+    completed_at = _iso_timestamp(latest_item.get("completed_at"))
+    if completed_at is None:
+        return []
+    checkpoint_generated_at = _iso_timestamp(
+        checkpoint.get("generated_at") if isinstance(checkpoint, dict) else None
+    )
+    if (
+        isinstance(checkpoint, dict)
+        and checkpoint_generated_at is not None
+        and checkpoint_generated_at >= completed_at
+        and _checkpoint_covers_completed_todo(agent_vision, checkpoint)
+    ):
+        return []
+
+    patch = _dict_field(agent_vision, "vision_patch")
+    return [
+        {
+            "kind": VISION_OUTCOME_CHECKPOINT_REQUIRED_TRIGGER,
+            "source": "recent_completed_advancement_todo",
+            "agent_id": agent_id or agent_vision.get("agent_id"),
+            "replan_trigger_summary": (
+                "completed advancement work has no later final-outcome checkpoint"
+            ),
+            "acceptance_summary": (
+                _compact_text(patch.get("acceptance_summary"), limit=420)
+                or "Name the active final-outcome claim and its authoritative evidence."
+            ),
+            "advancement_policy": patch.get("advancement_policy"),
+            "completed_todo_id": latest_item.get("todo_id"),
+            "completed_at": latest_item.get("completed_at"),
+            "checkpoint_generated_at": (
+                checkpoint.get("generated_at")
+                if isinstance(checkpoint, dict)
+                else None
+            ),
+            "required_path_outcomes": ["continue", "no_change", "replan"],
+        }
+    ]

@@ -191,6 +191,25 @@ For the same `agent_id`, a newer satisfied checkpoint with `patched`,
 `unchanged_with_reason`, or `retired_or_superseded` supersedes older
 `missing_required` checkpoints; `not_required` does not.
 
+A satisfied checkpoint is protocol-complete, but a material closeout also has
+to qualify its relationship to the final outcome. For an open vision, the same
+refresh must name the active `acceptance_summary`, attach public-safe
+`goal_path_delta_v0.evidence_refs`, and record one of these decisions:
+
+- `continue` or `no_change` when the new evidence supports the final-outcome
+  path and the delivery did not report `outcome_gap`; or
+- `replan` when the evidence contradicts or leaves the path open and the same
+  refresh records an autonomous replan with a real frontier delta.
+
+An older path delta, an unchanged-with-reason decision, or an unrelated
+runnable todo does not qualify the material closeout. Quota projects
+`vision_outcome_checkpoint_required` ahead of ordinary runnable work until a
+fresh evidence-linked continuation or replan is recorded. The same rule
+applies when a same-agent advancement todo was completed after the latest
+qualifying checkpoint. Todo completion is therefore the checkpoint timing
+signal, not proof that the final acceptance contract is done; the evidence
+decides whether to continue, replan/supersede, or close.
+
 Checkpoint and autonomous-replan ACK packets are protocol records, not semantic
 completion proof. A future monitor schedule is also not completion proof; it
 only says when to poll. A recent same-agent ACK may suppress duplicate

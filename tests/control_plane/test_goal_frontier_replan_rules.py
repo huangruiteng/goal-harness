@@ -50,6 +50,16 @@ from loopx.control_plane.goals.goal_frontier.replan_rules import (
         ),
         (
             {
+                "acceptance_gap_count": 1,
+                "selectable_frontier_advancement": 1,
+                "outcome_checkpoint_replan_required": True,
+                "acceptance_allows_watch_lane_continuation": True,
+            },
+            GoalFrontierReplanRule.VISION_ACCEPTANCE_GAP,
+            True,
+        ),
+        (
+            {
                 "long_todo_chain_triggered": True,
                 "selectable_frontier_advancement": 15,
             },

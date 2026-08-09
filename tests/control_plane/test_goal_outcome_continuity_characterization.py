@@ -71,7 +71,8 @@ def _semantic_replan_required(case: dict[str, Any]) -> bool:
 
 def _progress_run(case: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
     agent_id = case["agent_id"]
-    return {
+    satisfies_final_outcome = event["satisfies_final_outcome"] is True
+    run: dict[str, Any] = {
         "classification": event["event_kind"],
         "generated_at": event["generated_at"],
         "agent_id": agent_id,
@@ -82,8 +83,9 @@ def _progress_run(case: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]
             "agent_id": agent_id,
             "required": True,
             "satisfied": True,
-            "decision": "unchanged_with_reason",
-            "unchanged_reason": case["vision"]["unchanged_reason"],
+            "decision": (
+                "patched" if satisfies_final_outcome else "unchanged_with_reason"
+            ),
             "triggers": [
                 {
                     "kind": "material_delivery_outcome",
@@ -92,6 +94,30 @@ def _progress_run(case: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]
             ],
         },
     }
+    if satisfies_final_outcome:
+        run["agent_vision"] = {
+            "schema_version": "goal_vision_replan_contract_v0",
+            "agent_id": agent_id,
+            "state": case["vision"]["state"],
+            "vision_patch": {
+                "acceptance_summary": case["vision"]["acceptance_summary"],
+                "advancement_policy": case["vision"]["advancement_policy"],
+            },
+            "path_delta": {
+                "schema_version": "goal_path_delta_v0",
+                "outcome": "continue",
+                "prior_assumption": "The milestone path still serves the final outcome.",
+                "observed_reality": "The final-outcome evidence is now present.",
+                "retained": ["Continue the evidence-backed milestone path."],
+                "evidence_refs": event["supporting_evidence"],
+            },
+        }
+        run["vision_checkpoint"]["agent_vision_state"] = case["vision"]["state"]
+    else:
+        run["vision_checkpoint"]["unchanged_reason"] = case["vision"][
+            "unchanged_reason"
+        ]
+    return run
 
 
 def _vision_run(case: dict[str, Any]) -> dict[str, Any]:
@@ -151,10 +177,15 @@ def _replay_current_path(case: dict[str, Any]) -> dict[str, Any]:
         agent_id=agent_id,
         scheduler_execution_context=APP_SCHEDULER_CONTEXT,
     )
+    selected_todo = decision.get("selected_todo")
     return {
         "decision": decision["decision"],
         "effective_action": decision["effective_action"],
-        "selected_todo_id": decision["selected_todo"]["todo_id"],
+        "selected_todo_id": (
+            selected_todo.get("todo_id")
+            if isinstance(selected_todo, dict)
+            else None
+        ),
         "acceptance_gap_decision": decision["vision_continuation_audit"][
             "decision"
         ],
@@ -194,14 +225,16 @@ def test_final_outcome_evidence_changes_the_independent_oracle() -> None:
     case["progress_events"][-1]["satisfies_final_outcome"] = True
 
     assert _semantic_replan_required(case) is False
+    assert _replay_current_path(case)["replan_required"] is False
 
 
-def test_current_path_misses_semantic_divergence_during_local_progress() -> None:
+def test_repaired_path_replans_semantic_divergence_during_local_progress() -> None:
     case = _load_case()
 
     observed = _replay_current_path(case)
 
-    assert observed == case["characterized_current_path"]
-    assert observed["replan_required"] is not case["independent_oracle"][
+    assert observed["acceptance_gap_decision"] == "acceptance_gap_open"
+    assert observed["replan_required"] is case["independent_oracle"][
         "replan_required"
     ]
+    assert case["characterized_legacy_path"]["replan_required"] is False

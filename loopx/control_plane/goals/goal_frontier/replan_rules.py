@@ -44,6 +44,7 @@ class GoalFrontierReplanFacts:
     total_frontier_advancement: int = 0
     acceptance_gap_count: int = 0
     selectable_frontier_advancement: int = 0
+    outcome_checkpoint_replan_required: bool = False
     acceptance_allows_watch_lane_continuation: bool = False
     long_todo_chain_triggered: bool = False
     long_todo_chain_acknowledged: bool = False
@@ -114,11 +115,18 @@ def select_goal_frontier_replan_rule(
             facts.acceptance_gap_count > 0
             and (
                 facts.successor_vision_required
+                or facts.outcome_checkpoint_replan_required
                 or facts.selectable_frontier_advancement == 0
             )
-            and not facts.acceptance_allows_watch_lane_continuation,
+            and (
+                facts.outcome_checkpoint_replan_required
+                or not facts.acceptance_allows_watch_lane_continuation
+            ),
             True,
-            "the scoped vision gap has no satisfying runnable frontier",
+            (
+                "the scoped vision gap lacks a fresh evidence-linked outcome "
+                "checkpoint or satisfying runnable frontier"
+            ),
         ),
         (
             GoalFrontierReplanRule.LONG_TODO_CHAIN,

@@ -123,6 +123,7 @@ QUOTA_PAYLOAD_LANE_LIMITS = {
     "current_agent_claimed_advancement_items": QUOTA_PAYLOAD_VISIBILITY_LANE_LIMIT,
     "current_agent_claimed_monitor_items": QUOTA_PAYLOAD_VISIBILITY_LANE_LIMIT,
     "current_agent_blocker_items": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
+    "recent_completed_advancement_items": 5,
     "claimed_by_others_items": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
     "other_agent_scoped_items": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
     "other_agent_bound_user_action_items": QUOTA_PAYLOAD_DIAGNOSTIC_LANE_LIMIT,
@@ -481,6 +482,12 @@ def summarize_user_todos_for_quota(
         and str(item.get("reason") or "").strip()
     ]
     agent_id = str((agent_identity or {}).get("agent_id") or "").strip()
+    recent_completed_advancement_items = [
+        compact_todo_summary_item(item, text=str(item.get("text") or "").strip())
+        for item in (value.get("recent_completed_advancement_items") or [])
+        if isinstance(item, dict)
+        if not agent_id or agent_scope_item_claimed_by(item) == agent_id
+    ]
     current_agent_blocker_items = [
         item
         for item in blocker_items
@@ -512,6 +519,7 @@ def summarize_user_todos_for_quota(
         "active_next_action_executable_items": lanes.active_next_action_executable_items,
         "backlog_items": lanes.display_open_items[:TODO_BACKLOG_ITEM_LIMIT],
         "executable_backlog_items": lanes.executable_items[:TODO_BACKLOG_ITEM_LIMIT],
+        "recent_completed_advancement_items": recent_completed_advancement_items,
     }
     if blocker_items:
         summary["blocker_open_count"] = len(blocker_items)

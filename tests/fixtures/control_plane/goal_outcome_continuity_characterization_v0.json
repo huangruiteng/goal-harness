@@ -59,7 +59,7 @@
     "replan_required": true,
     "rationale": "The final-outcome claim remains open and every progress event is supporting evidence only; another runnable milestone does not prove that the selected path serves the final outcome."
   },
-  "characterized_current_path": {
+  "characterized_legacy_path": {
     "decision": "run",
     "effective_action": "normal_run",
     "selected_todo_id": "todo_continue_packet_mapping",

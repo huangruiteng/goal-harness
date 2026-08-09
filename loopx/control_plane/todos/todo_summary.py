@@ -68,6 +68,7 @@ MAX_DEFERRED_TODO_VISIBILITY_ITEMS = 8
 MAX_MONITOR_DUE_ITEMS = 1
 MAX_DEPENDENCY_BLOCKERS = 4
 MAX_COMPLETED_SUCCESSION_WARNING_ITEMS = 5
+MAX_RECENT_COMPLETED_ADVANCEMENT_ITEMS = MAX_TODO_VISIBILITY_LANE_ITEMS
 
 TODO_ITEM_SCHEMA_VERSION = "todo_item_v0"
 TODO_SUCCESSION_WARNING_SCHEMA_VERSION = "todo_succession_warning_v0"
@@ -1235,6 +1236,22 @@ def compact_todo_group(
         lanes.done_items,
         all_items=items,
     )
+    recent_completed_advancement_items = [
+        compact_todo_item(item)
+        for item in sorted(
+            (
+                item
+                for item in lanes.done_items
+                if todo_item_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
+                and str(item.get("completed_at") or "").strip()
+            ),
+            key=_completed_succession_sort_key,
+            reverse=True,
+        )[:MAX_RECENT_COMPLETED_ADVANCEMENT_ITEMS]
+    ]
+    for item in recent_completed_advancement_items:
+        for key in ("note", "evidence", "reason"):
+            item.pop(key, None)
     handoff_gates = build_todo_handoff_gate_states(items)
     route_replan_required = any(
         item.get("route_continuation_replan_required") is True
@@ -1308,6 +1325,9 @@ def compact_todo_group(
             for item in lanes.projected_deferred_items
             if item.get("resume_ready") is True
         ][:MAX_DEFERRED_TODO_VISIBILITY_ITEMS],
+        "recent_completed_advancement_items": (
+            recent_completed_advancement_items
+        ),
         "items": lanes.budgeted_items if item_limit is None else lanes.budgeted_items[:item_limit],
     }
     if include_task_orchestration_authority:

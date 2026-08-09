@@ -6,6 +6,16 @@ from loopx.control_plane.goals.goal_frontier import (
     acceptance_gaps_from_agent_vision,
     derive_goal_frontier_replan_obligation_from_summaries,
 )
+from loopx.control_plane.goals.goal_frontier.outcome_continuity import (
+    acceptance_gaps_from_outcome_checkpoint,
+    acceptance_gaps_from_todo_completion_checkpoint,
+    latest_outcome_vision_checkpoint_from_status_payload,
+)
+from loopx.control_plane.todos.quota_summary import (
+    compact_quota_todo_summary_for_payload,
+    summarize_user_todos_for_quota,
+)
+from loopx.control_plane.todos.todo_summary import compact_todo_group
 
 
 AGENT_ID = "fixture-agent"
@@ -143,3 +153,309 @@ def test_other_agent_work_does_not_satisfy_scoped_repeat_vision() -> None:
     assert obligation["agent_id"] == AGENT_ID
     assert obligation["triggers"][0]["kind"] == "vision_acceptance_gap"
     assert obligation["todo_actions"][0]["action"] == "add"
+
+
+def _outcome_vision(
+    *,
+    generated_at: str = "2026-07-12T00:01:00Z",
+    outcome: str = "continue",
+    evidence_refs: list[str] | None = None,
+) -> dict[str, object]:
+    packet = vision("vision_active")
+    packet["generated_at"] = generated_at
+    packet["path_delta"] = {
+        "schema_version": "goal_path_delta_v0",
+        "outcome": outcome,
+        "evidence_refs": evidence_refs or [],
+    }
+    return packet
+
+
+def _material_checkpoint(
+    *,
+    generated_at: str = "2026-07-12T00:01:00Z",
+    decision: str = "patched",
+    autonomous_replan_recorded: bool = False,
+    repair_delta_kinds: list[str] | None = None,
+) -> dict[str, object]:
+    triggers: list[dict[str, object]] = [
+        {
+            "kind": "material_delivery_outcome",
+            "delivery_outcome": "outcome_progress",
+        }
+    ]
+    if autonomous_replan_recorded:
+        triggers.insert(0, {"kind": "autonomous_replan_recorded"})
+    return {
+        "schema_version": "vision_checkpoint_v0",
+        "agent_id": AGENT_ID,
+        "required": True,
+        "satisfied": True,
+        "decision": decision,
+        "triggers": triggers,
+        "repair_delta_kinds": repair_delta_kinds or [],
+        "generated_at": generated_at,
+    }
+
+
+def test_material_unchanged_checkpoint_rejects_stale_planning_evidence() -> None:
+    active_vision = _outcome_vision(
+        generated_at="2026-07-12T00:00:00Z",
+        evidence_refs=["todo:planned-stage"],
+    )
+    checkpoint = _material_checkpoint(decision="unchanged_with_reason")
+
+    gaps = acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint)
+
+    assert len(gaps) == 1
+    assert gaps[0]["kind"] == "vision_outcome_checkpoint_required"
+    assert gaps[0]["fresh_vision_patch"] is False
+
+
+def test_fresh_evidence_linked_continue_checkpoint_preserves_frontier() -> None:
+    active_vision = _outcome_vision(evidence_refs=["result:final-outcome-receipt"])
+    checkpoint = _material_checkpoint()
+
+    assert acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint) == []
+
+
+def test_unsatisfied_material_checkpoint_cannot_preserve_frontier() -> None:
+    active_vision = _outcome_vision(evidence_refs=["result:final-outcome-receipt"])
+    checkpoint = {**_material_checkpoint(), "satisfied": False}
+
+    gaps = acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint)
+
+    assert len(gaps) == 1
+    assert gaps[0]["kind"] == "vision_outcome_checkpoint_required"
+
+
+@pytest.mark.parametrize(
+    ("repair_delta_kinds", "expects_gap"),
+    [
+        ([], True),
+        (["monitor_target"], True),
+        (["successor_or_supersede"], False),
+    ],
+)
+def test_fresh_replan_checkpoint_requires_frontier_delta(
+    repair_delta_kinds: list[str],
+    expects_gap: bool,
+) -> None:
+    active_vision = _outcome_vision(
+        outcome="replan",
+        evidence_refs=["result:outcome-conflict"],
+    )
+    checkpoint = _material_checkpoint(
+        autonomous_replan_recorded=True,
+        repair_delta_kinds=repair_delta_kinds,
+    )
+
+    gaps = acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint)
+
+    assert bool(gaps) is expects_gap
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_generated_at", "expects_gap"),
+    [
+        ("2026-07-12T00:01:00Z", True),
+        ("2026-07-12T00:03:00Z", False),
+    ],
+)
+def test_completed_todo_requires_a_later_outcome_checkpoint(
+    checkpoint_generated_at: str,
+    expects_gap: bool,
+) -> None:
+    active_vision = _outcome_vision(
+        generated_at=checkpoint_generated_at,
+        evidence_refs=["result:completed-milestone"],
+    )
+    checkpoint = _material_checkpoint(generated_at=checkpoint_generated_at)
+    summary = {
+        "recent_completed_advancement_items": [
+            {
+                "todo_id": "todo_completed_milestone",
+                "claimed_by": AGENT_ID,
+                "completed_at": "2026-07-12T00:02:00Z",
+            }
+        ]
+    }
+
+    gaps = acceptance_gaps_from_todo_completion_checkpoint(
+        active_vision,
+        checkpoint,
+        agent_todo_summary=summary,
+        agent_id=AGENT_ID,
+    )
+
+    assert bool(gaps) is expects_gap
+
+
+def test_plain_refresh_after_completed_todo_does_not_clear_checkpoint_gap() -> None:
+    active_vision = _outcome_vision(generated_at="2026-07-12T00:00:00Z")
+    checkpoint = {
+        **_material_checkpoint(generated_at="2026-07-12T00:03:00Z"),
+        "triggers": [{"kind": "heartbeat_refresh"}],
+    }
+    summary = {
+        "recent_completed_advancement_items": [
+            {
+                "todo_id": "todo_completed_milestone",
+                "claimed_by": AGENT_ID,
+                "completed_at": "2026-07-12T00:02:00Z",
+            }
+        ]
+    }
+
+    gaps = acceptance_gaps_from_todo_completion_checkpoint(
+        active_vision,
+        checkpoint,
+        agent_todo_summary=summary,
+        agent_id=AGENT_ID,
+    )
+
+    assert len(gaps) == 1
+    assert gaps[0]["kind"] == "vision_outcome_checkpoint_required"
+
+
+def test_plain_refresh_does_not_supersede_older_material_checkpoint() -> None:
+    status = {
+        "run_history": {
+            "goals": [
+                {
+                    "id": "goal-outcome",
+                    "latest_runs": [
+                        {
+                            "agent_id": AGENT_ID,
+                            "generated_at": "2026-07-12T00:03:00Z",
+                            "vision_checkpoint": {
+                                "agent_id": AGENT_ID,
+                                "satisfied": True,
+                                "decision": "not_required",
+                                "triggers": [{"kind": "heartbeat_refresh"}],
+                            },
+                        },
+                        {
+                            "agent_id": AGENT_ID,
+                            "generated_at": "2026-07-12T00:02:00Z",
+                            "vision_checkpoint": _material_checkpoint(
+                                generated_at="2026-07-12T00:02:00Z",
+                                decision="unchanged_with_reason",
+                            ),
+                        },
+                    ],
+                }
+            ]
+        }
+    }
+
+    checkpoint = latest_outcome_vision_checkpoint_from_status_payload(
+        status,
+        goal_id="goal-outcome",
+        agent_id=AGENT_ID,
+    )
+
+    assert checkpoint is not None
+    assert checkpoint["generated_at"] == "2026-07-12T00:02:00Z"
+
+
+def test_later_vision_patch_does_not_invalidate_qualified_checkpoint() -> None:
+    qualified_vision = _outcome_vision(
+        generated_at="2026-07-12T00:02:00Z",
+        evidence_refs=["result:qualified-milestone"],
+    )
+    status = {
+        "run_history": {
+            "goals": [
+                {
+                    "id": "goal-outcome",
+                    "latest_runs": [
+                        {
+                            "agent_id": AGENT_ID,
+                            "generated_at": "2026-07-12T00:03:00Z",
+                            "agent_vision": _outcome_vision(
+                                generated_at="2026-07-12T00:03:00Z",
+                                outcome="replan",
+                                evidence_refs=["result:new-planning-evidence"],
+                            ),
+                        },
+                        {
+                            "agent_id": AGENT_ID,
+                            "generated_at": "2026-07-12T00:02:00Z",
+                            "agent_vision": qualified_vision,
+                            "vision_checkpoint": _material_checkpoint(
+                                generated_at="2026-07-12T00:02:00Z",
+                            ),
+                        },
+                    ],
+                }
+            ]
+        }
+    }
+    checkpoint = latest_outcome_vision_checkpoint_from_status_payload(
+        status,
+        goal_id="goal-outcome",
+        agent_id=AGENT_ID,
+    )
+
+    assert checkpoint is not None
+    assert (
+        acceptance_gaps_from_outcome_checkpoint(
+            _outcome_vision(generated_at="2026-07-12T00:03:00Z"),
+            checkpoint,
+        )
+        == []
+    )
+
+
+def test_recent_completed_advancement_projection_is_agent_scoped() -> None:
+    source = compact_todo_group(
+        [
+            *[
+                {
+                    "todo_id": f"todo_current_completed_{minute}",
+                    "role": "agent",
+                    "status": "done",
+                    "done": True,
+                    "text": "Complete a current-agent milestone.",
+                    "task_class": "advancement_task",
+                    "claimed_by": AGENT_ID,
+                    "completed_at": f"2026-07-12T00:0{minute}:00Z",
+                }
+                for minute in range(1, 8)
+            ],
+            {
+                "todo_id": "todo_other_completed",
+                "role": "agent",
+                "status": "done",
+                "done": True,
+                "text": "Complete another agent milestone.",
+                "task_class": "advancement_task",
+                "claimed_by": "other-agent",
+                "completed_at": "2026-07-12T00:08:00Z",
+            },
+        ],
+        source_section="Agent Todo",
+        role="agent",
+        include_empty_source=True,
+        item_limit=None,
+    )
+
+    summary = summarize_user_todos_for_quota(
+        source,
+        agent_identity={"agent_id": AGENT_ID},
+    )
+
+    assert summary is not None
+    assert len(summary["recent_completed_advancement_items"]) == 7
+    payload = compact_quota_todo_summary_for_payload(summary)
+    assert [
+        item["todo_id"]
+        for item in payload["recent_completed_advancement_items"]
+    ] == [
+        "todo_current_completed_7",
+        "todo_current_completed_6",
+        "todo_current_completed_5",
+        "todo_current_completed_4",
+        "todo_current_completed_3",
+    ]

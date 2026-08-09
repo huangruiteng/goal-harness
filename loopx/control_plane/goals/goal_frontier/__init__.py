@@ -26,6 +26,7 @@ from ..goal_vision_state import (
     goal_vision_state_requires_successor,
 )
 from ..goal_vision_wait import build_goal_vision_wait_state
+from . import outcome_continuity
 from .replan_rules import (
     GoalFrontierReplanFacts,
     GoalFrontierReplanRule,
@@ -47,8 +48,7 @@ AUTONOMOUS_REPLAN_DECISION_SCHEMA_VERSION = "autonomous_replan_decision_v0"
 AUTONOMOUS_REPLAN_SCOPE_SCHEMA_VERSION = "autonomous_replan_scope_v0"
 AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION = "autonomous_replan_obligation_v0"
 REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
-    "runnable_todo_set",
-    "successor_or_supersede",
+    outcome_continuity.REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
 )
 AUTONOMOUS_REPLAN_REQUIRED_MODE = "autonomous_replan_required"
 FRONTIER_EXHAUSTED_MONITOR_TRIGGER = "frontier_exhausted_monitor_lane"
@@ -56,7 +56,6 @@ MONITOR_NO_CHANGE_STREAK_TRIGGER = "monitor_no_change_streak"
 LONG_TODO_CHAIN_TRIGGER = "long_todo_chain"
 VISION_ACCEPTANCE_GAP_TRIGGER = "vision_acceptance_gap"
 VISION_SUCCESSOR_GAP_TRIGGER = "vision_successor_required"
-VISION_CHECKPOINT_MISSING_TRIGGER = "vision_checkpoint_missing"
 VISION_PROFILE_MISSING_TRIGGER = "required_agent_vision_missing"
 TODO_SUCCESSION_GAP_TRIGGER = "completed_advancement_without_successor"
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
@@ -724,48 +723,6 @@ def acceptance_gaps_from_agent_profile_requirement(
     ]
 
 
-def acceptance_gaps_from_vision_checkpoint(
-    checkpoint: dict[str, Any] | None,
-) -> list[dict[str, Any]]:
-    """Convert a missing per-agent vision checkpoint into a frontier gap."""
-
-    if not isinstance(checkpoint, dict):
-        return []
-    trigger_kinds = [
-        str(trigger.get("kind") or "").strip()
-        for trigger in (checkpoint.get("triggers") or [])
-        if isinstance(trigger, dict) and str(trigger.get("kind") or "").strip()
-    ]
-    trigger_text = ", ".join(trigger_kinds[:3]) or "required vision checkpoint"
-    missing_baseline = checkpoint.get("missing_baseline") is True
-    gap: dict[str, Any] = {
-        "kind": VISION_CHECKPOINT_MISSING_TRIGGER,
-        "source": "latest_vision_checkpoint",
-        "agent_id": checkpoint.get("agent_id"),
-        "decision": checkpoint.get("decision"),
-        "replan_trigger_summary": (
-            "refresh-state tried to keep vision unchanged without a persisted "
-            f"per-agent baseline; triggers={trigger_text}"
-            if missing_baseline
-            else "refresh-state closed a material segment without a per-agent vision "
-            f"decision; triggers={trigger_text}"
-        ),
-        "acceptance_summary": (
-            "Write a bounded agent vision patch, or retire/supersede the frontier "
-            "with an explicit rationale."
-            if missing_baseline
-            else "Write a bounded agent vision patch, record an unchanged reason, "
-            "or retire/supersede the frontier with an explicit rationale."
-        ),
-    }
-    if missing_baseline:
-        gap["missing_baseline"] = True
-    generated_at = _compact_projection_text(checkpoint.get("generated_at"), limit=80)
-    if generated_at:
-        gap["generated_at"] = generated_at
-    return [gap]
-
-
 def build_vision_continuation_audit(
     *,
     goal_id: str | None = None,
@@ -1373,6 +1330,11 @@ def derive_goal_frontier_replan_obligation_from_summaries(
         in {VISION_SUCCESSOR_GAP_TRIGGER, VISION_PROFILE_MISSING_TRIGGER}
         for item in compact_acceptance_gaps
     )
+    outcome_checkpoint_replan_required = any(
+        item.get("kind")
+        == outcome_continuity.VISION_OUTCOME_CHECKPOINT_REQUIRED_TRIGGER
+        for item in compact_acceptance_gaps
+    )
     acceptance_allows_watch_lane_continuation = bool(
         compact_acceptance_gaps
         and not any(
@@ -1418,6 +1380,9 @@ def derive_goal_frontier_replan_obligation_from_summaries(
             total_frontier_advancement=total_frontier_advancement,
             acceptance_gap_count=len(compact_acceptance_gaps),
             selectable_frontier_advancement=selectable_frontier_advancement,
+            outcome_checkpoint_replan_required=(
+                outcome_checkpoint_replan_required
+            ),
             acceptance_allows_watch_lane_continuation=(
                 acceptance_allows_watch_lane_continuation
             ),
@@ -1785,6 +1750,13 @@ def build_goal_frontier_projection_context_from_status(
         goal_id=goal_id,
         agent_id=agent_id,
     )
+    latest_vision_checkpoint = (
+        outcome_continuity.latest_outcome_vision_checkpoint_from_status_payload(
+            status_payload,
+            goal_id=goal_id,
+            agent_id=agent_id,
+        )
+    )
     source_acceptance_gaps = (
         acceptance_gaps_from_agent_profile_requirement(
             agent_profile,
@@ -1796,7 +1768,19 @@ def build_goal_frontier_projection_context_from_status(
             latest_agent_vision,
             goal_status=goal_status,
         )
-        + acceptance_gaps_from_vision_checkpoint(latest_missing_vision_checkpoint)
+        + outcome_continuity.acceptance_gaps_from_vision_checkpoint(
+            latest_missing_vision_checkpoint
+        )
+        + outcome_continuity.acceptance_gaps_from_outcome_checkpoint(
+            latest_agent_vision,
+            latest_vision_checkpoint,
+        )
+        + outcome_continuity.acceptance_gaps_from_todo_completion_checkpoint(
+            latest_agent_vision,
+            latest_vision_checkpoint,
+            agent_todo_summary=agent_todo_summary,
+            agent_id=agent_id,
+        )
     )
     if _terminal_no_followup_resolves_vision_checkpoint(
         user_todo_summary=user_todo_summary,
@@ -1806,7 +1790,8 @@ def build_goal_frontier_projection_context_from_status(
         source_acceptance_gaps = [
             gap
             for gap in source_acceptance_gaps
-            if gap.get("kind") != VISION_CHECKPOINT_MISSING_TRIGGER
+            if gap.get("kind")
+            != outcome_continuity.VISION_CHECKPOINT_MISSING_TRIGGER
         ]
     replan_obligation = align_autonomous_replan_guidance_with_acceptance_policy(
         replan_obligation,
