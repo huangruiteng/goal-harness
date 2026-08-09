@@ -96,7 +96,7 @@ jobs:
       - name: Validate public showcase catalog
         run: python3 examples/showcase-catalog-smoke.py
 
-- name: Validate README star history
+      - name: Validate README star history
         run: python3 examples/readme-star-history-smoke.py
 
       - name: Validate Developer Book publication
