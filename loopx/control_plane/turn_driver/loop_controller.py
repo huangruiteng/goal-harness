@@ -24,7 +24,7 @@ from enum import Enum
 from typing import Any
 
 from ..effect_program import SettlementStepKind
-from .driver import LoopXTurnRoute, _typed_route
+from .driver import LoopXTurnRoute, _typed_route, selected_turn_todo
 from .transaction import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION,
@@ -86,8 +86,7 @@ def _disposition(
 
 
 def _decision_lineage(decision: Mapping[str, Any]) -> dict[str, str]:
-    action = _mapping(decision.get("action"))
-    selected_todo = _mapping(action.get("selected_todo"))
+    selected_todo = selected_turn_todo(decision)
     return {
         "goal_id": str(decision.get("goal_id") or ""),
         "agent_id": str(decision.get("agent_id") or ""),
@@ -504,9 +503,12 @@ def decide_loop_disposition(
                 reason="fresh Goal frontier proves terminal no-follow-up",
                 lineage=decision_lineage,
             )
-        if not decision_lineage["todo_id"]:
-            raise ValueError("executable quota decision is missing selected Todo lineage")
         disposition = _route_to_disposition(route)
+        if not decision_lineage["todo_id"] and disposition not in {
+            LoopDisposition.WAIT,
+            LoopDisposition.USER_ACTION_REQUIRED,
+        }:
+            raise ValueError("executable quota decision is missing selected Todo lineage")
         if disposition is LoopDisposition.REPLAN:
             return _replan_disposition(
                 reason="fresh decision requires replan",
@@ -540,19 +542,30 @@ def decide_loop_disposition(
             route=route,
         )
 
-    if not decision_lineage["todo_id"]:
-        raise ValueError("receipt-backed decision is missing selected Todo lineage")
-    _assert_same_todo(
-        receipt_lineage=turn_receipt.lineage,
-        decision_lineage=decision_lineage,
-    )
+    effective_lineage = dict(decision_lineage)
+    if decision_lineage["todo_id"]:
+        _assert_same_todo(
+            receipt_lineage=turn_receipt.lineage,
+            decision_lineage=decision_lineage,
+        )
+    elif (
+        result_kind is LoopXTurnResultKind.VALIDATED_PROGRESS
+        and route
+        not in {LoopXTurnRoute.USER_ACTION_REQUIRED, LoopXTurnRoute.WAIT}
+    ):
+        raise ValueError("receipt-backed executable decision is missing selected Todo lineage")
+    else:
+        # A valid user gate or quiet wait may intentionally have no runnable
+        # selected Todo. Preserve the committed predecessor lineage for that
+        # no-spend disposition instead of rejecting the envelope.
+        effective_lineage["todo_id"] = turn_receipt.lineage["todo_id"]
 
     # Decision user action outranks every non-terminal disposition.
     if route is LoopXTurnRoute.USER_ACTION_REQUIRED:
         return _disposition(
             LoopDisposition.USER_ACTION_REQUIRED,
             reason="fresh decision projects a concrete user action",
-            lineage=decision_lineage,
+            lineage=effective_lineage,
         )
 
     if result_kind is LoopXTurnResultKind.VALIDATED_PROGRESS:
@@ -562,50 +575,50 @@ def decide_loop_disposition(
             )
         _assert_budget_lineage_match(
             budget_lineage=bounded_turn_budget.lineage,
-            decision_lineage=decision_lineage,
+            decision_lineage=effective_lineage,
         )
         if bounded_turn_budget.remaining <= 0:
             return _replan_disposition(
                 reason="bounded turn budget exhausted; replan before another Turn",
-                decision_lineage=decision_lineage,
+                decision_lineage=effective_lineage,
             )
         disposition = _route_to_disposition(route)
         if disposition is LoopDisposition.REPLAN:
             return _replan_disposition(
                 reason="fresh decision requires replan after progress",
-                decision_lineage=decision_lineage,
+                decision_lineage=effective_lineage,
             )
         return _disposition(
             disposition,
             reason=_progress_reason(disposition),
-            lineage=decision_lineage,
+            lineage=effective_lineage,
         )
 
     if result_kind is LoopXTurnResultKind.REPLAN_REQUIRED:
         return _replan_disposition(
             reason="turn receipt requires replan",
-            decision_lineage=decision_lineage,
+            decision_lineage=effective_lineage,
         )
 
     if result_kind is LoopXTurnResultKind.REPAIR_REQUIRED:
         return _disposition(
             LoopDisposition.REPAIR,
             reason="turn receipt requires repair",
-            lineage=decision_lineage,
+            lineage=effective_lineage,
         )
 
     if result_kind is LoopXTurnResultKind.USER_ACTION_REQUIRED:
         return _disposition(
             LoopDisposition.USER_ACTION_REQUIRED,
             reason="turn receipt projects a concrete user action",
-            lineage=decision_lineage,
+            lineage=effective_lineage,
         )
 
     if result_kind is LoopXTurnResultKind.WAIT:
         return _disposition(
             LoopDisposition.WAIT,
             reason="turn receipt is a typed no-spend wait",
-            lineage=decision_lineage,
+            lineage=effective_lineage,
         )
 
     # host_failure, validation_failed, writeback_failed, quota_spend_failed:
@@ -616,7 +629,7 @@ def decide_loop_disposition(
             f"turn receipt ended in {result_kind.value}; "
             "route to repair before any successor turn"
         ),
-        lineage=decision_lineage,
+        lineage=effective_lineage,
     )
 
 

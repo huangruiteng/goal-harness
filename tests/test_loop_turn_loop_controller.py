@@ -204,12 +204,19 @@ def _envelope(
     signature_matches: bool = True,
     predecessor_turn_key: str | None = None,
     state: str | None = None,
+    selected_todo_id: str | None = "from_lineage",
+    adaptive_primary_todo_id: str | None = None,
 ) -> dict[str, object]:
     lin = _lineage() if lineage is None else lineage
     signature: dict[str, object] = {"matches": signature_matches}
     if signature_matches:
         signature["source_hash"] = "sha256:test"
         signature["envelope_hash"] = "sha256:test"
+    selected_todo = (
+        {"todo_id": lin["todo_id"]}
+        if selected_todo_id == "from_lineage"
+        else ({"todo_id": selected_todo_id} if selected_todo_id else None)
+    )
     envelope: dict[str, object] = {
         "schema_version": "loopx_turn_envelope_v0",
         "goal_id": lin["goal_id"],
@@ -222,7 +229,7 @@ def _envelope(
             "delivery_allowed": delivery_allowed,
             "must_attempt": must_attempt,
             "quiet_noop_allowed": quiet_noop_allowed,
-            "selected_todo": {"todo_id": lin["todo_id"]},
+            "selected_todo": selected_todo,
         },
         "user": {"action_required": user_action_required},
     }
@@ -230,6 +237,12 @@ def _envelope(
         envelope["state"] = state
     if predecessor_turn_key is not None:
         envelope["predecessor_turn_key"] = predecessor_turn_key
+    if adaptive_primary_todo_id is not None:
+        envelope["task_orchestration_contract"] = {
+            "schema_version": "task_orchestration_contract_v2",
+            "mode": "adaptive",
+            "primary_todo_id": adaptive_primary_todo_id,
+        }
     return envelope
 
 
@@ -285,6 +298,56 @@ def test_no_receipt_with_quiet_decision_waits_no_spend() -> None:
         quota_decision=_envelope(should_run=False, quiet_noop_allowed=True),
     )
     _assert_markers(payload, "wait")
+
+
+def test_no_receipt_user_gate_without_selected_todo_is_valid() -> None:
+    payload = decide_loop_disposition(
+        turn_receipt=None,
+        quota_decision=_envelope(
+            should_run=False,
+            user_action_required=True,
+            selected_todo_id=None,
+        ),
+    )
+
+    _assert_markers(payload, "user_action_required")
+    assert payload["lineage"]["todo_id"] == ""
+
+
+def test_no_receipt_quiet_wait_without_selected_todo_is_valid() -> None:
+    payload = decide_loop_disposition(
+        turn_receipt=None,
+        quota_decision=_envelope(
+            should_run=False,
+            quiet_noop_allowed=True,
+            selected_todo_id=None,
+        ),
+    )
+
+    _assert_markers(payload, "wait")
+    assert payload["lineage"]["todo_id"] == ""
+
+
+def test_no_receipt_delivery_without_selected_todo_fails_closed() -> None:
+    with pytest.raises(ValueError, match="missing selected Todo"):
+        decide_loop_disposition(
+            turn_receipt=None,
+            quota_decision=_envelope(should_run=True, selected_todo_id=None),
+        )
+
+
+def test_adaptive_primary_todo_owns_controller_lineage() -> None:
+    payload = decide_loop_disposition(
+        turn_receipt=None,
+        quota_decision=_envelope(
+            should_run=True,
+            selected_todo_id="todo-child",
+            adaptive_primary_todo_id="todo-primary",
+        ),
+    )
+
+    _assert_markers(payload, "run_now")
+    assert payload["lineage"]["todo_id"] == "todo-primary"
 
 
 def test_no_receipt_terminal_requires_fresh_goal_frontier_state() -> None:
@@ -479,6 +542,22 @@ def test_user_action_from_decision_wins_even_with_receipt() -> None:
         bounded_turn_budget=_budget(max_turns=3, completed_turns=1),
     )
     _assert_markers(payload, "user_action_required")
+
+
+def test_receipt_backed_user_gate_without_selected_todo_preserves_lineage() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
+    payload = decide_loop_disposition(
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=False,
+            user_action_required=True,
+            predecessor_turn_key=receipt.turn_key,
+            selected_todo_id=None,
+        ),
+    )
+
+    _assert_markers(payload, "user_action_required")
+    assert payload["lineage"]["todo_id"] == receipt.lineage["todo_id"]
 
 
 def test_validated_no_followup_wins_over_decision_user_action() -> None:
