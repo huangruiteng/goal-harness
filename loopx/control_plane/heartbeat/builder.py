@@ -55,6 +55,31 @@ from .task_body import (
     render_visible_goal_task_body,
 )
 
+
+def _select_task_body_renderer(
+    *,
+    traex_visible_goal: bool,
+    ark_managed_agent_goal: bool,
+    native_goal_host: bool,
+    thin: bool,
+    brief: bool,
+    compact: bool,
+) -> Any:
+    if traex_visible_goal:
+        return render_traex_visible_goal_task_body
+    if ark_managed_agent_goal:
+        return render_ark_managed_agent_goal_task_body
+    if native_goal_host:
+        return render_visible_goal_task_body
+    if thin:
+        return render_thin_heartbeat_task_body
+    if brief:
+        return render_brief_heartbeat_task_body
+    if compact:
+        return render_compact_heartbeat_task_body
+    return render_heartbeat_task_body
+
+
 def build_heartbeat_prompt(
     *,
     goal_id: str,
@@ -248,20 +273,14 @@ def build_heartbeat_prompt(
     compact_prompt_command = f"{cli_bin} heartbeat-prompt --compact --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     brief_prompt_command = f"{cli_bin} heartbeat-prompt --brief --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
     thin_prompt_command = f"{cli_bin} heartbeat-prompt --thin --goal-id {goal_id}{active_state_arg}{agent_args}{capability_args}{scheduler_args}"
-    if traex_visible_goal:
-        task_body_renderer = render_traex_visible_goal_task_body
-    elif ark_managed_agent_goal:
-        task_body_renderer = render_ark_managed_agent_goal_task_body
-    elif native_goal_host:
-        task_body_renderer = render_visible_goal_task_body
-    elif thin:
-        task_body_renderer = render_thin_heartbeat_task_body
-    elif brief:
-        task_body_renderer = render_brief_heartbeat_task_body
-    elif compact:
-        task_body_renderer = render_compact_heartbeat_task_body
-    else:
-        task_body_renderer = render_heartbeat_task_body
+    task_body_renderer = _select_task_body_renderer(
+        traex_visible_goal=traex_visible_goal,
+        ark_managed_agent_goal=ark_managed_agent_goal,
+        native_goal_host=native_goal_host,
+        thin=thin,
+        brief=brief,
+        compact=compact,
+    )
     task_body = task_body_renderer(
         goal_id=goal_id,
         active_state=active_state_text,
