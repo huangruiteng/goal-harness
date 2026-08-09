@@ -49,7 +49,7 @@ that model over time.
 | M4 Architecture documentation | Merged/Complete (#2921, #2923, #2924, #2985) |
 | M5 Steady-state review | Merged/Complete (#2922, #2931, #2984, #2985) |
 | M6 General effect-program abstraction | Narrow gate complete (#2963-#2987); qualitative transformation requires M7 |
-| M7 Effect Program Runtime | In progress; plan todo `todo_dbd4425374fc` |
+| M7 Effect Program Runtime | Replanned: outcome contract and one vertical runtime slice before generalization |
 
 ## Why This Matters
 
@@ -255,6 +255,64 @@ parallel and equally important:
 - generalize: extract the shared effect shape only when real runtime callers
   need it.
 
+### Boundary With Goal Replan
+
+Effect execution and goal replan are adjacent but different control-plane
+problems:
+
+| Plane | Question | Authoritative state |
+|---|---|---|
+| Goal path | Why continue, what outcome is still missing, and which path should run next? | Vision, acceptance evidence, path delta, Todo frontier |
+| Effect runtime | How should one selected path execute, fail, resume, and settle? | Effect plan, host execution receipts, observation, writeback |
+
+The effect runtime must not decide whether a milestone still serves the final
+goal. Conversely, goal replan must not duplicate permission, idempotency,
+failure, or settlement semantics from the effect runtime. A more general
+effect interpreter does not by itself improve long-horizon goal alignment.
+
+### Product Outcome Contract
+
+M7 is justified only if it produces at least one of these end effects:
+
+1. Remove a competing source of transition or command truth from a real host
+   path.
+2. Make partial execution recoverable through stable effect ids, explicit
+   authority, idempotency, and typed receipts.
+3. Let a second runtime caller reuse the same execution contract with less
+   orchestration code and no loss of domain invariants.
+
+The following are supporting evidence, not product outcomes by themselves:
+
+- a protocol or dataclass exists;
+- `EffectTurn` is constructed earlier in a packet builder;
+- another packet can be mapped onto the same four nouns;
+- module line budgets and parity tests pass; or
+- more Todo, monitor, or gate families sit behind one interface.
+
+The first M7 vertical slice must satisfy all of these acceptance checks:
+
+- one real path owns `request -> plan -> host execution -> receipt -> reduce`;
+- at least one previous command builder, settlement branch, or parallel
+  runtime path is deleted;
+- fault injection proves retry/resume does not duplicate an external effect,
+  ACK, writeback, or spend;
+- permission denial, cancellation, budget rejection, and partial completion
+  remain distinguishable;
+- public packets, CLI budgets, and existing domain transition invariants stay
+  compatible; and
+- a second caller is identified before a shared interpreter protocol is
+  extracted.
+
+Stop or narrow M7 when any kill criterion holds:
+
+- the new layer primarily passes raw mappings or CLI strings through another
+  object without owning execution semantics;
+- production code grows while no prior source of truth is removed;
+- the proposed executor crosses a model, user, or host ownership boundary it
+  cannot settle itself;
+- parity cannot attribute changed behavior to the new path; or
+- a second real caller does not need the proposed shared protocol.
+
 ### What Exists Today
 
 - `EffectRequest`, `EffectInterpretation`, `EffectObservation`, `EffectNext`,
@@ -279,9 +337,9 @@ parallel and equally important:
 
 ### What Is Missing
 
-- A minimal interpreter protocol or composition helper shared by both runtime
-  quota and turn-result consumers, once a second runtime caller needs the same
-  envelope.
+- A minimal interpreter or executor protocol only after two runtime execution
+  paths need the same plan/receipt semantics. Two packet readers do not prove
+  that contract by themselves.
 - A real host or turn-driver caller that executes an ordered effect program
   while preserving failure, cancellation, permission, and budget semantics.
 
@@ -289,11 +347,9 @@ R4 remains deferred until that real multi-step executor caller exists.
 
 ### When To Generalize
 
-Generalize only when at least two real callers need the same shape:
-
-1. a second packet interpreter, such as a turn-result or status packet
-   interpreter;
-2. a host or turn-driver caller that executes an ordered effect program.
+Generalize only when at least two real runtime execution paths need the same
+plan/receipt semantics. Packet interpreters can establish a common read model,
+but do not justify a shared executor protocol by themselves.
 
 Before then, keep the abstraction as a documented lens and add tests that
 prove each packet maps losslessly. This avoids building a generic `Effect`
@@ -371,30 +427,54 @@ Phases:
 
 ### M7: Effect Program Runtime
 
-M6 makes the effect lens runtime-consumed but still descriptive: the main
-packet builders compute their decisions first and map them onto `EffectTurn`
-afterward. M7 is the prescriptive rewrite that makes LoopX core execute as an
-effect program rather than explain itself as one.
+M6 makes the effect lens runtime-consumed but still descriptive: packet
+builders compute their decisions and then map them onto `EffectTurn`. M7 must
+not react by making every state family implement one protocol. It must first
+prove that a typed effect runtime removes one real orchestration split-brain.
 
-R5: add a minimal `EffectInterpreter` protocol shared by quota and turn-result
-runtime callers. Do not add a registry or generic composition framework.
+M7.0: inventory real multi-step runtime candidates. Compare at least turn
+closeout, guided bootstrap, and quota-to-host scheduling. For each candidate,
+name the executor owner, externally visible effects, idempotency key,
+settlement receipt, partial-failure boundary, and old source of truth that
+would be deleted. Guided bootstrap is a candidate, not a preselected answer:
+some ordered steps belong to the model, user, or host and cannot safely run in
+one in-process executor.
 
-R6: make `quota should-run` build `EffectTurn` before rendering its
-observation packet, so the packet becomes a derived view instead of the
-source.
+M7.1: characterize the selected vertical slice before adding a protocol.
+Capture parity fixtures for legal and illegal transitions, partial execution,
+retry, cancellation, permission denial, budget rejection, and settlement.
 
-R7: execute the guided bootstrap ordered steps through `EffectProgram` with
-typed failure, cancellation, permission, and budget semantics.
+M7.2: replace that slice with one typed plan/receipt path. A plan step must
+carry a stable kind, owner, precondition, idempotency identity, and expected
+receipt. Raw mappings and free-form CLI commands may remain compatibility
+payloads, but they are not the semantic execution contract. Delete the old
+builder or settlement path in the same stage.
 
-R8: make the turn driver execute `next_effect` as an ordered effect program,
-unifying scheduler ACK, spend, and writeback as effect steps.
+M7.3: generalize only after a second runtime caller needs the proven plan and
+receipt semantics. At that point, extract the smallest shared interpreter or
+executor protocol; do not add a registry or generic composition framework.
+`quota should-run` may derive both its packet and effect projection from one
+canonical decision plan, but constructing `EffectTurn` earlier is not itself
+an acceptance condition.
 
-R9: align todos, monitors, and gates family by family behind the same
-interpreter protocol, each with parity fixtures before replacing the old
-path.
+M7.4: expand one bounded family at a time only when it removes duplicate
+knowledge. Todo, monitor, capability, scheduler, and gate state machines keep
+their domain transition invariants. They do not move behind a shared protocol
+merely because their packets have similar fields.
 
-M7 is not complete until packet builders and the ordered executor are driven
-by the abstraction, not merely mapped onto it.
+The earlier R5-R9 list is therefore not an implementation queue:
+
+- the shared `EffectInterpreter` protocol is deferred to M7.3;
+- packet-before-view ordering is replaced by one canonical decision-plan
+  source;
+- guided bootstrap remains one candidate, subject to host-boundary review;
+- turn closeout is another candidate and may be the better first vertical
+  slice; and
+- family-wide alignment is replaced by the duplicate-knowledge gate in M7.4.
+
+M7 completes only when a real vertical slice meets the Product Outcome
+Contract, its old path is removed, and a second caller provides evidence for
+the abstraction that remains.
 
 ### Replacement-First Rule
 
@@ -593,16 +673,17 @@ Steps:
 1. Add a second real interpreter, for example `interpret_turn_result_packet`
    or `interpret_status_packet`, with focused tests that prove `EffectTurn`
    is lossless for that family too.
-2. Extract a minimal `EffectInterpreter` protocol only when the second
-   caller needs it. Do not add a registry or a generic composition framework
-   yet.
+2. Keep packet interpretation as a read-model seam. Extract a shared runtime
+   interpreter or executor protocol only when two execution paths need the
+   same plan/receipt semantics. Do not add a registry or generic composition
+   framework yet.
 3. Add `execution_mode` to `EffectNext` and document
    `serial` / `parallel` / `interleaved` semantics with focused tests.
 4. Introduce a data-encoded ordered effect program shape and a real executor
-   seam when a host or turn-driver caller can execute multiple steps.
-   The first executor candidate is the guided bootstrap transaction, because
-   `guided_transaction.ordered_steps` already form a real ordered effect
-   program consumed by hosts; the turn driver can later reuse the same shape.
+   seam when one owner can execute and settle multiple steps. Qualify turn
+   closeout, guided bootstrap, and quota-to-host scheduling before selecting
+   the first slice; an existing ordered list does not establish one executable
+   authority boundary.
 5. Keep failure, cancellation, permission, and budget semantics structured
    across every interpreter. No catch-all wrapper.
 
@@ -656,6 +737,13 @@ For every runtime replacement:
 - Do not treat the current `EffectTurn` lens as a general runtime abstraction
   until a second interpreter and a real executor caller exist.
 - Do not rewrite `quota should-run` for the sake of naming.
+- Do not use effect-runtime generalization as a substitute for final-goal
+  acceptance, evidence, or replan.
+- Do not make guided bootstrap executable merely because its ordered steps
+  can be rendered as `EffectProgram`; preserve model, user, and host ownership
+  boundaries.
+- Do not align Todo, monitor, and gate families behind a shared protocol
+  without proving duplicate transition knowledge and deleting it.
 - Do not remove existing public compatibility routes without a migration
   window.
 
@@ -670,6 +758,12 @@ For every runtime replacement:
   runtime replacement before the RFC claims a general abstraction.
 - Test churn: converting large smokes too fast can reduce e2e confidence.
   Mitigation: keep thin e2e until focused tests cover the same behavior.
+- Goal/effect conflation: a reliable executor can keep executing the wrong
+  milestone. Mitigation: keep goal-path evidence and effect settlement as
+  separate contracts, and require both at milestone closeout.
+- Executor boundary overreach: ordered steps may belong to different actors.
+  Mitigation: select the first vertical slice only after its owner and receipt
+  boundaries are explicit.
 
 ## Open Questions
 
@@ -682,9 +776,14 @@ For every runtime replacement:
   turn result, status, or monitor poll?
 - At what point should `next_effect` stop being a flat CLI tuple and become an
   ordered effect program with `execution_mode`?
-- Confirm the guided bootstrap transaction as the first ordered-effect
-  executor path; the turn driver can reuse the same shape later.
-- When should `EffectProgram` become runtime-owned rather than host-driven?
+- Which candidate removes the most duplicate orchestration with the narrowest
+  authority boundary: turn closeout, guided bootstrap, or quota-to-host
+  scheduling?
+- What stable effect identity and receipt let that path resume after partial
+  execution without duplicate ACK, writeback, spend, or external action?
+- Which second runtime caller needs the same proven plan/receipt semantics?
+- When should `EffectProgram` become runtime-owned rather than host-driven,
+  and which steps must remain model-, user-, or host-owned?
 
 ## Success Metrics
 
@@ -694,6 +793,9 @@ For every runtime replacement:
 - Focused pytest coverage grows while large smoke files shrink.
 - Public docs and course material use the same loop vocabulary.
 - Existing CLI output budgets and public compatibility contracts remain green.
+- At least one M7 vertical slice deletes an old command/settlement source and
+  passes retry, partial-failure, permission, cancellation, and budget tests.
+- Shared runtime protocol code exists only after two real callers use it.
 
 ## Conclusion
 
