@@ -42,7 +42,6 @@ from .history import collect_history, load_registry
 from .history import STATUS_NEUTRAL_CLASSIFICATIONS as HISTORY_STATUS_NEUTRAL_CLASSIFICATIONS
 from .interface_budget import interface_budget_cadence_for_runs
 from .long_task_cadence import build_long_task_cadence_hint
-from .operator_gate import DEFAULT_OPERATOR_GATE, default_operator_question, normalize_operator_question
 from .orchestration import compact_orchestration_policy
 from .paths import global_registry_path, resolve_runtime_root
 from .control_plane.work_items.task_graph import (
@@ -87,9 +86,6 @@ from .control_plane.work_items.attention_queue import (
     AttentionQueueContext,
     build_attention_queue as _build_attention_queue_read_model,
     merge_global_registry_findings as _merge_global_registry_findings_read_model,
-)
-from .control_plane.work_items.attention_routing import (
-    goal_attention as _goal_attention_read_model,
 )
 from .control_plane.work_items.autonomous_replan_ack import (
     AUTONOMOUS_REPLAN_ACK_MATERIAL_RUN_WINDOW,
@@ -209,7 +205,6 @@ from .control_plane.goals.goal_vision import (
 )
 from .control_plane.runtime.session_runtime import (
     compact_session_runtime_projection_from_run,
-    legacy_runtime_goal_attention as _legacy_runtime_goal_attention_read_model,
 )
 from .benchmarks.read_models.skillsbench_post_run_debug import (
     build_skillsbench_post_run_debug_gate,
@@ -2695,43 +2690,23 @@ def legacy_runtime_goal_attention(
     current_run: dict[str, Any] | None,
     readiness_fields: dict[str, Any],
 ) -> dict[str, Any] | None:
-    return _legacy_runtime_goal_attention_read_model(
+    from .control_plane.status.goal_attention_projection import (
+        legacy_runtime_goal_attention as _legacy_runtime_goal_attention,
+    )
+
+    return _legacy_runtime_goal_attention(
         goal,
         current_run,
         readiness_fields,
-        attention_item=attention_item,
-        goal_lifecycle_fields=goal_lifecycle_fields,
-        blocking_classifications=BLOCKING_CLASSIFICATIONS,
-        user_or_controller_classifications=USER_OR_CONTROLLER_CLASSIFICATIONS,
-        codex_ready_classifications=CODEX_READY_CLASSIFICATIONS,
     )
 
 
 def goal_attention(goal: dict[str, Any]) -> dict[str, Any] | None:
-    return _goal_attention_read_model(
-        goal,
-        latest_run=latest_run,
-        readiness_attention_fields=readiness_attention_fields,
-        operator_gate_attention_fields=operator_gate_attention_fields,
-        dreaming_attention_fields=dreaming_attention_fields,
-        goal_lifecycle_fields=goal_lifecycle_fields,
-        legacy_runtime_goal_attention=legacy_runtime_goal_attention,
-        compact_session_runtime_projection_from_run=compact_session_runtime_projection_from_run,
-        public_safe_compact_text=public_safe_compact_text,
-        attention_item=attention_item,
-        run_has_external_evidence_watch_signal=run_has_external_evidence_watch_signal,
-        default_operator_question=default_operator_question,
-        normalize_operator_question=normalize_operator_question,
-        monitor_signal_waiting_on=MONITOR_SIGNAL_WAITING_ON,
-        default_operator_gate=DEFAULT_OPERATOR_GATE,
-        planned_controller_opt_in_recommended_action=PLANNED_CONTROLLER_OPT_IN_RECOMMENDED_ACTION,
-        connected_adapter_statuses=CONNECTED_ADAPTER_STATUSES,
-        connected_delivery_adapter_statuses=CONNECTED_DELIVERY_ADAPTER_STATUSES,
-        registry_waiting_on_overrides=REGISTRY_WAITING_ON_OVERRIDES,
-        blocking_classifications=BLOCKING_CLASSIFICATIONS,
-        user_or_controller_classifications=USER_OR_CONTROLLER_CLASSIFICATIONS,
-        codex_ready_classifications=CODEX_READY_CLASSIFICATIONS,
+    from .control_plane.status.goal_attention_projection import (
+        goal_attention as _goal_attention,
     )
+
+    return _goal_attention(goal)
 
 
 def build_task_graph_projection(
