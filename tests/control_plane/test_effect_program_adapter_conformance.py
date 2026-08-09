@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,7 @@ class AdapterSpec:
     name: str
     run: AdapterRunner
     success_receipts: tuple[SettlementStepKind, ...]
+    success_calls: tuple[SettlementStepKind, ...]
     calls_before_writeback_failure: tuple[SettlementStepKind, ...]
 
 
@@ -271,6 +272,11 @@ ADAPTERS = (
             SettlementStepKind.DURABLE_WRITEBACK,
             SettlementStepKind.QUOTA_SPEND,
         ),
+        success_calls=(
+            SettlementStepKind.TODO_COMPLETION,
+            SettlementStepKind.DURABLE_WRITEBACK,
+            SettlementStepKind.QUOTA_SPEND,
+        ),
         calls_before_writeback_failure=(
             SettlementStepKind.TODO_COMPLETION,
             SettlementStepKind.DURABLE_WRITEBACK,
@@ -284,9 +290,122 @@ ADAPTERS = (
             SettlementStepKind.DURABLE_WRITEBACK,
             SettlementStepKind.QUOTA_SPEND,
         ),
+        success_calls=(
+            SettlementStepKind.DURABLE_WRITEBACK,
+            SettlementStepKind.QUOTA_SPEND,
+        ),
         calls_before_writeback_failure=(SettlementStepKind.DURABLE_WRITEBACK,),
     ),
 )
+
+
+def _assert_semantic_settlement(
+    adapter: AdapterSpec,
+    observation: AdapterObservation,
+) -> None:
+    result = observation.result
+    receipt_steps = tuple(receipt.step_kind for receipt in result.receipts)
+    if len(observation.effect_calls) != len(set(observation.effect_calls)):
+        raise AssertionError("duplicate side effect observed for one identity")
+    if result.failure is None:
+        if receipt_steps != adapter.success_receipts:
+            raise AssertionError("success receipt sequence is not protocol ordered")
+        if observation.effect_calls != adapter.success_calls:
+            raise AssertionError("success side-effect trace is not protocol ordered")
+    else:
+        failure_index = adapter.success_receipts.index(result.failure.step_kind)
+        expected_receipts = adapter.success_receipts[:failure_index]
+        expected_calls = tuple(
+            step
+            for step in adapter.success_calls
+            if adapter.success_receipts.index(step) <= failure_index
+        )
+        if receipt_steps != expected_receipts:
+            raise AssertionError("failure receipt prefix crosses the failed step")
+        if observation.effect_calls != expected_calls:
+            raise AssertionError("failure did not short-circuit later effects")
+
+    identity = observation.settlement_plan["identity"]
+    assert isinstance(identity, Mapping)
+    if {receipt.effect_id for receipt in result.receipts} - {identity["effect_id"]}:
+        raise AssertionError("receipt effect identity drifted within one settlement")
+
+
+@dataclass(frozen=True, slots=True)
+class MutationSpec:
+    name: str
+    scenario: str
+    mutate: Callable[[AdapterObservation], AdapterObservation]
+    expected_error: str
+
+
+def _reorder_receipts(observation: AdapterObservation) -> AdapterObservation:
+    receipts = observation.result.receipts
+    mutated = (*receipts[:-2], receipts[-1], receipts[-2])
+    return replace(observation, result=replace(observation.result, receipts=mutated))
+
+
+def _drop_failure(observation: AdapterObservation) -> AdapterObservation:
+    result = replace(observation.result, value={"mutated": "success"}, failure=None)
+    return replace(observation, result=result)
+
+
+def _drift_effect_id(observation: AdapterObservation) -> AdapterObservation:
+    receipts = observation.result.receipts
+    drifted = replace(receipts[-1], effect_id="drifted-effect-id")
+    return replace(
+        observation,
+        result=replace(observation.result, receipts=(*receipts[:-1], drifted)),
+    )
+
+
+def _duplicate_side_effect(observation: AdapterObservation) -> AdapterObservation:
+    return replace(
+        observation,
+        effect_calls=(*observation.effect_calls, observation.effect_calls[-1]),
+    )
+
+
+MUTATIONS = (
+    MutationSpec("step-reordering", "success", _reorder_receipts, "receipt sequence"),
+    MutationSpec("lost-failure", "writeback_failure", _drop_failure, "receipt sequence"),
+    MutationSpec("effect-id-drift", "success", _drift_effect_id, "effect identity"),
+    MutationSpec(
+        "duplicate-side-effect",
+        "success",
+        _duplicate_side_effect,
+        "duplicate side effect",
+    ),
+)
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda adapter: adapter.name)
+@pytest.mark.parametrize("scenario", ("success", "writeback_failure"))
+def test_semantic_oracle_accepts_real_adapter_traces(
+    adapter: AdapterSpec,
+    scenario: str,
+    tmp_path: Path,
+) -> None:
+    _assert_semantic_settlement(
+        adapter,
+        adapter.run(tmp_path / f"{adapter.name}-{scenario}", scenario),
+    )
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda adapter: adapter.name)
+@pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda mutation: mutation.name)
+def test_semantic_oracle_kills_effect_program_mutations(
+    adapter: AdapterSpec,
+    mutation: MutationSpec,
+    tmp_path: Path,
+) -> None:
+    observation = adapter.run(
+        tmp_path / f"{adapter.name}-{mutation.name}",
+        mutation.scenario,
+    )
+
+    with pytest.raises(AssertionError, match=mutation.expected_error):
+        _assert_semantic_settlement(adapter, mutation.mutate(observation))
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda adapter: adapter.name)
