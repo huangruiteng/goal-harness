@@ -93,12 +93,15 @@ def resolve_heartbeat_settlement_identity(
                 "turn_instance_id"
             ),
         )
-    receipt_event = find_heartbeat_receipt(
-        runtime_root,
-        goal_id=goal_id,
-        agent_id=normalized_agent_id,
-        turn_instance_id=normalized_turn_id,
-    )
+    try:
+        receipt_event = find_heartbeat_receipt(
+            runtime_root,
+            goal_id=goal_id,
+            agent_id=normalized_agent_id,
+            turn_instance_id=normalized_turn_id,
+        )
+    except ValueError as exc:
+        return _identity_mismatch(str(exc))
     if receipt_event is None:
         return SettlementResult.failed(
             kind=SettlementFailureKind.RECEIPT_MISSING,

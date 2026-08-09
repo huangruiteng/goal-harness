@@ -13,13 +13,22 @@ TODO_ID = "todo_fixture_settlement"
 TURN_ID = "turn-settlement-cli-1"
 
 
-def _write_fixture(root: Path) -> tuple[Path, Path, Path]:
+def _write_fixture(
+    root: Path,
+    *,
+    required_capability: str | None = None,
+) -> tuple[Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     state_path = project / state_file
     registry_path = project / ".loopx" / "registry.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
+    capability_metadata = (
+        f" required_capabilities={required_capability}"
+        if required_capability
+        else ""
+    )
     state_path.write_text(
         "---\n"
         "status: active-read-only\n"
@@ -35,7 +44,8 @@ def _write_fixture(root: Path) -> tuple[Path, Path, Path]:
         "## Agent Todo\n\n"
         "- [ ] [P1] Validate and settle the selected delivery.\n"
         f"  <!-- loopx:todo todo_id={TODO_ID} status=open "
-        "task_class=advancement_task action_kind=validate -->\n",
+        "task_class=advancement_task action_kind=validate"
+        f"{capability_metadata} -->\n",
         encoding="utf-8",
     )
     registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,6 +133,21 @@ def _classification_count(runtime: Path, classification: str) -> int:
         1
         for line in index_path.read_text(encoding="utf-8").splitlines()
         if json.loads(line).get("classification") == classification
+    )
+
+
+def _heartbeat_receipt_count(runtime: Path, turn_instance_id: str) -> int:
+    log_path = runtime / "goals" / GOAL_ID / "rollout-event-log.jsonl"
+    if not log_path.exists():
+        return 0
+    return sum(
+        1
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if (
+            (event := json.loads(line)).get("event_kind") == "quota_should_run"
+            and event.get("run_id") == turn_instance_id
+            and event.get("agent_id") == AGENT_ID
+        )
     )
 
 
@@ -275,3 +300,145 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     assert replay["idempotent_replay"] is True
     assert replay["appended"] is False
     assert _spend_run_count(runtime) == 1
+
+
+def test_same_turn_identityless_guard_upgrades_and_settles_full_chain(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(
+        tmp_path,
+        required_capability="network",
+    )
+    binding = (
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        TURN_ID,
+    )
+    guard_args = (
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        TURN_ID,
+        "--scan-path",
+        str(project),
+    )
+
+    first_rc, first = _run_cli(registry_path, runtime, *guard_args)
+    upgraded_rc, upgraded = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        "--available-capability",
+        "network",
+    )
+    replay_rc, replay = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        "--available-capability",
+        "network",
+    )
+
+    assert first_rc == 0, first
+    assert "settlement_identity" not in first["heartbeat_receipt"]
+    assert upgraded_rc == 0, upgraded
+    assert upgraded["heartbeat_receipt"]["status"] == "upgraded"
+    identity = upgraded["heartbeat_receipt"]["settlement_identity"]
+    assert identity["todo_id"] == TODO_ID
+    assert identity["effect_id"] == f"{GOAL_ID}:{AGENT_ID}:{TODO_ID}:{TURN_ID}"
+    assert replay_rc == 0, replay
+    assert replay["heartbeat_receipt"]["status"] == "replayed"
+    assert replay["heartbeat_receipt"]["event_id"] == upgraded["heartbeat_receipt"]["event_id"]
+    assert _heartbeat_receipt_count(runtime, TURN_ID) == 2
+
+    complete_rc, complete = _run_cli(
+        registry_path,
+        runtime,
+        "todo",
+        "complete",
+        "--goal-id",
+        GOAL_ID,
+        *binding,
+        "--claimed-by",
+        AGENT_ID,
+        "--evidence",
+        "identity upgrade delivery validated",
+        "--next-agent-todo",
+        "Continue after the identity upgrade delivery.",
+        "--next-claimed-by",
+        AGENT_ID,
+        "--next-action-kind",
+        "implement",
+    )
+    assert complete_rc == 0, complete
+    successor_id = complete["next_todos"][0]["todo_id"]
+    assert successor_id != TODO_ID
+
+    refresh_rc, refresh = _run_cli(
+        registry_path,
+        runtime,
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "identity_upgrade_validated",
+        "--delivery-batch-scale",
+        "single_surface",
+        "--delivery-outcome",
+        "outcome_progress",
+        *binding,
+        "--no-global-sync",
+        "--suppress-external-sinks",
+    )
+    assert refresh_rc == 0, refresh
+
+    successor_guard_rc, successor_guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--available-capability",
+        "network",
+        "--scan-path",
+        str(project),
+    )
+    assert successor_guard_rc == 0, successor_guard
+    assert successor_guard["selected_todo"]["todo_id"] == successor_id
+
+    spend_args = (
+        "quota",
+        "spend-slot",
+        "--goal-id",
+        GOAL_ID,
+        "--slots",
+        "1",
+        "--source",
+        "heartbeat",
+        "--execute",
+        *binding,
+        "--scan-path",
+        str(project),
+    )
+    spend_rc, spend = _run_cli(registry_path, runtime, *spend_args)
+    spend_replay_rc, spend_replay = _run_cli(registry_path, runtime, *spend_args)
+
+    assert spend_rc == 0, spend
+    assert spend["settlement_result"]["ok"] is True
+    assert spend_replay_rc == 0, spend_replay
+    assert spend_replay["idempotent_replay"] is True
+    assert spend_replay["appended"] is False
+    assert _spend_run_count(runtime) == 1
+    assert _heartbeat_receipt_count(runtime, TURN_ID) == 2

@@ -277,3 +277,21 @@ def test_guard_receipt_rejects_different_effect_identity(tmp_path: Path) -> None
     assert result.failure is not None
     assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
     assert "different-effect" in result.failure.reason
+
+
+def test_guard_receipt_returns_typed_failure_for_effect_without_todo(
+    tmp_path: Path,
+) -> None:
+    _append_guard_receipt(tmp_path, todo_id="", effect_id="effect-without-todo")
+
+    result = resolve_heartbeat_settlement_identity(
+        tmp_path,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        todo_id=TODO_ID,
+        turn_instance_id=TURN_ID,
+    )
+
+    assert result.failure is not None
+    assert result.failure.kind is SettlementFailureKind.IDENTITY_MISMATCH
+    assert "effect identity without a Todo" in result.failure.reason
