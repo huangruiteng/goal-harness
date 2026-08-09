@@ -439,3 +439,112 @@ def test_same_agent_spend_blocks_duplicate_completion(tmp_path: Path) -> None:
     )
 
     assert _preview(runtime, agent_id=AGENT_A)["ok"] is False
+
+
+def _normal_run_before(*, todo_id: str) -> dict[str, Any]:
+    quota = {
+        "compute": 1.0,
+        "window_hours": 24,
+        "slot_minutes": 1,
+        "spent_slots": 0,
+        "allowed_slots": 1440,
+    }
+    return {
+        "ok": True,
+        "goal_id": GOAL_ID,
+        "should_run": True,
+        "normal_delivery_allowed": True,
+        "effective_action": "normal_run",
+        "state": "eligible",
+        "safe_bypass_allowed": False,
+        "quota": quota,
+        "selected_todo": {"todo_id": todo_id},
+    }
+
+
+def _normal_run_status(runtime: Path) -> dict[str, Any]:
+    quota = {
+        "compute": 1.0,
+        "window_hours": 24,
+        "slot_minutes": 1,
+        "spent_slots": 0,
+        "allowed_slots": 1440,
+    }
+    return {
+        "runtime_root": str(runtime),
+        "attention_queue": {"items": [{"goal_id": GOAL_ID}]},
+        "run_history": {"goals": [{"id": GOAL_ID, "quota": quota}]},
+    }
+
+
+def test_heartbeat_spend_requires_todo_binding(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    before = _normal_run_before(todo_id="todo_selected_binding")
+
+    preview = build_quota_slot_preview_for_decision(
+        _normal_run_status(runtime),
+        goal_id=GOAL_ID,
+        before=before,
+        after_decision=lambda _: {
+            **before,
+            "quota": {**before["quota"], "spent_slots": 1},
+        },
+        quota_status_builder=lambda goal, **_: goal["quota"],
+        self_repair_spend_actions=frozenset(),
+        agent_id=None,
+        source="heartbeat",
+    )
+
+    assert preview["ok"] is False
+    assert "requires --todo-id todo_selected_binding" in preview["reason"]
+
+
+def test_heartbeat_spend_rejects_mismatched_todo_binding(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    before = _normal_run_before(todo_id="todo_selected_binding")
+
+    preview = build_quota_slot_preview_for_decision(
+        _normal_run_status(runtime),
+        goal_id=GOAL_ID,
+        before=before,
+        after_decision=lambda _: {
+            **before,
+            "quota": {**before["quota"], "spent_slots": 1},
+        },
+        quota_status_builder=lambda goal, **_: goal["quota"],
+        self_repair_spend_actions=frozenset(),
+        agent_id=None,
+        todo_id="todo_other_binding",
+        source="heartbeat",
+    )
+
+    assert preview["ok"] is False
+    assert "binding mismatch" in preview["reason"]
+
+
+def test_heartbeat_spend_records_matching_todo_binding(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    before = _normal_run_before(todo_id="todo_selected_binding")
+
+    preview = build_quota_slot_preview_for_decision(
+        _normal_run_status(runtime),
+        goal_id=GOAL_ID,
+        before=before,
+        after_decision=lambda _: {
+            **before,
+            "quota": {**before["quota"], "spent_slots": 1},
+        },
+        quota_status_builder=lambda goal, **_: goal["quota"],
+        self_repair_spend_actions=frozenset(),
+        agent_id=None,
+        todo_id="todo_selected_binding",
+        source="heartbeat",
+    )
+    event = build_quota_slot_spend_event(
+        preview,
+        self_repair_spend_actions=frozenset(),
+        source="heartbeat",
+    )
+
+    assert preview["ok"] is True
+    assert event["quota_event"]["todo_id"] == "todo_selected_binding"

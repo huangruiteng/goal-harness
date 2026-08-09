@@ -20,6 +20,7 @@ from ..scheduler.execution_context import (
 from ..todos.contract import (
     TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_ACTION,
+    normalize_todo_id,
 )
 from ..todos.projection import todo_item_task_class
 from ..todos.user_gate import open_todo_count
@@ -39,6 +40,21 @@ INTERACTION_CONTRACT_SCHEMA_VERSION = "loopx_interaction_contract_v0"
 INTERACTION_RESPONSE_PLAN_SCHEMA_VERSION = "interaction_response_plan_v0"
 PROTOCOL_ACTION_PACKET_SCHEMA_VERSION = "protocol_action_packet_v0"
 PROTOCOL_ACTION_PACKET_LLM_POLICY = "no_api"
+
+
+def _heartbeat_spend_command(
+    goal_id: str,
+    *,
+    scoped_cli_args: str,
+    payload: dict[str, Any],
+) -> str:
+    selected = payload.get("selected_todo") if isinstance(payload.get("selected_todo"), dict) else {}
+    todo_id = normalize_todo_id(selected.get("todo_id"))
+    todo_arg = f" --todo-id {todo_id}" if todo_id else ""
+    return (
+        f"loopx quota spend-slot --goal-id {goal_id} --slots 1 "
+        f"--source heartbeat --execute{todo_arg}{scoped_cli_args}"
+    )
 
 
 def _blocked_successor_wait_observation_required(payload: dict[str, Any]) -> bool:
@@ -647,7 +663,7 @@ def interaction_next_cli_actions(
                 f"loopx todo complete --goal-id {goal_id} --todo-id {monitor_todo_id}{lifecycle_actor_args} --evidence '<validated gate evidence>'",
                 f"loopx todo update --goal-id {goal_id} --todo-id {gated_todo_id}{lifecycle_actor_args} --note '<public-safe gate repair reason>'",
                 f"loopx refresh-state --goal-id {goal_id} --classification standing_monitor_gate_repair_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{scoped_cli_args}",
-                f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{scoped_cli_args}",
+                _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
             ]
         route_candidates = (
             agent_scope_frontier.get("route_continuation_replan_candidates")
@@ -658,7 +674,7 @@ def interaction_next_cli_actions(
             return [
                 f"loopx todo add --goal-id {goal_id} --role agent --text '<public-safe route continuation advancement todo>'",
                 f"loopx refresh-state --goal-id {goal_id} --classification route_continuation_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{scoped_cli_args}",
-                f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{scoped_cli_args}",
+                _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
             ]
         candidates = (
             agent_scope_frontier.get("deferred_resume_candidates")
@@ -669,12 +685,12 @@ def interaction_next_cli_actions(
         todo_id = str(first_candidate.get("todo_id") or "<todo_id>")
         return [
             (
-                f"loopx todo update --goal-id {goal_id} --todo-id {todo_id}"
-                f"{lifecycle_actor_args} --status open --clear-resume-when "
-                "--note '<public-safe successor replan reason>'"
+            f"loopx todo update --goal-id {goal_id} --todo-id {todo_id}"
+            f"{lifecycle_actor_args} --status open --clear-resume-when "
+            "--note '<public-safe successor replan reason>'"
             ),
             f"loopx refresh-state --goal-id {goal_id} --classification successor_replan_recorded --delivery-batch-scale single_surface --delivery-outcome outcome_progress{scoped_cli_args}",
-            f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{scoped_cli_args}",
+            _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
         ]
     if (
         mode == AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value
@@ -693,7 +709,7 @@ def interaction_next_cli_actions(
         return [
             "read approved controller/job/marker/writeback surfaces only",
             f"loopx refresh-state --goal-id {goal_id} --classification <compact_blocker_or_transition>{scoped_cli_args}",
-            f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{scoped_cli_args}",
+            _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
         ]
     if mode == "agent_workspace_repair":
         return [
@@ -743,7 +759,7 @@ def interaction_next_cli_actions(
             (
                 "if the replan writeback records an accountable delta such as "
                 "outcome_progress or primary_goal_outcome, run "
-                f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{scoped_cli_args}; "
+                f"{_heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload)}; "
                 "otherwise do not spend for surface_only watch-lane continuation/no-followup"
             ),
         ])
@@ -760,7 +776,7 @@ def interaction_next_cli_actions(
         return [
             *capability_resolution_actions,
             f"loopx refresh-state --goal-id {goal_id} --classification <validated_progress>{scoped_cli_args}",
-            f"loopx quota spend-slot --goal-id {goal_id} --slots 1 --source heartbeat --execute{scoped_cli_args}",
+            _heartbeat_spend_command(goal_id, scoped_cli_args=scoped_cli_args, payload=payload),
         ]
     if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
         return [

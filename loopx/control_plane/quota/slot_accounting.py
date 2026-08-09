@@ -19,7 +19,7 @@ from ..agents.workspace_guard import (
     build_delivery_workspace_guard,
     delivery_workspace_repository,
 )
-from ..todos.contract import normalize_todo_claimed_by
+from ..todos.contract import normalize_todo_claimed_by, normalize_todo_id
 from ..work_items.delivery_outcome import (
     ACCOUNTABLE_DELIVERY_OUTCOMES,
     normalize_delivery_outcome,
@@ -31,6 +31,33 @@ QUOTA_SLOT_VOIDED_CLASSIFICATION = "quota_slot_voided"
 
 QuotaDecisionBuilder = Callable[[dict[str, Any]], dict[str, Any]]
 QuotaStatusBuilder = Callable[..., dict[str, Any]]
+
+
+def _todo_binding_error(
+    *,
+    source: str,
+    before: dict[str, Any],
+    requested_todo_id: str | None,
+) -> str | None:
+    selected = before.get("selected_todo") if isinstance(before.get("selected_todo"), dict) else {}
+    selected_todo_id = normalize_todo_id(selected.get("todo_id"))
+    if requested_todo_id and selected_todo_id and requested_todo_id != selected_todo_id:
+        return (
+            f"quota spend todo binding mismatch: selected todo is "
+            f"{selected_todo_id} but --todo-id is {requested_todo_id}; "
+            "complete or update the selected todo first, or record a replan"
+        )
+    if (
+        source == DEFAULT_SLOT_SPEND_SOURCE
+        and before.get("normal_delivery_allowed") is True
+        and selected_todo_id
+        and not requested_todo_id
+    ):
+        return (
+            f"quota spend requires --todo-id {selected_todo_id} for heartbeat "
+            "delivery so the accounted turn is bound to the selected todo"
+        )
+    return None
 
 
 def _now_local() -> str:
@@ -180,10 +207,32 @@ def build_quota_slot_preview_for_decision(
     slots: int = 1,
     agent_id: str | None = None,
     workspace_path: Path | None = None,
+    todo_id: str | None = None,
+    source: str = DEFAULT_SLOT_SPEND_SOURCE,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
     safe_slots = max(1, _int_number(slots, default=1))
     safe_requested_agent_id = normalize_todo_claimed_by(agent_id)
+    normalized_todo_id = normalize_todo_id(todo_id) if todo_id else None
+    binding_error = _todo_binding_error(
+        source=source,
+        before=before,
+        requested_todo_id=normalized_todo_id,
+    )
+    if binding_error:
+        return {
+            "ok": False,
+            "mode": "spend-slot",
+            "dry_run": True,
+            "goal_id": safe_goal_id,
+            "slots": safe_slots,
+            "agent_id": safe_requested_agent_id,
+            "appended": False,
+            "registry_mutated": False,
+            "reason": binding_error,
+            "before": before,
+            "after": None,
+        }
     safe_bypass_requested = (
         (
             before.get("state") == "operator_gate"
@@ -386,6 +435,7 @@ def build_quota_slot_preview_for_decision(
             "recomputes spent_slots from quota_slot_spent events still inside window_hours, "
             "so the visible total can stay flat if an older spend expires."
         ),
+        "todo_id": normalized_todo_id,
         "safe_bypass_spend": safe_bypass_spend,
         "self_repair_spend": self_repair_spend,
         "capability_repair_spend": capability_repair_spend,
@@ -502,6 +552,7 @@ def build_quota_slot_spend_event(
         "quota_event": {
             "event_type": QUOTA_SLOT_SPENT_CLASSIFICATION,
             "source": safe_source,
+            "todo_id": preview.get("todo_id"),
             "slots": slots,
             "reason_summary": (
                 f"{slots} automatic agent slot(s) completed under an eligible quota guard"

@@ -800,6 +800,7 @@ def handle_quota_command(
                 agent_id=args.agent_id,
                 available_capabilities=args.available_capabilities,
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                todo_id=args.todo_id,
             )
         elif args.quota_command == "void-slot":
             payload = void_quota_slot(

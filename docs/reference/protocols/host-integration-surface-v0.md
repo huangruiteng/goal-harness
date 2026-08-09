@@ -221,7 +221,7 @@ the host lacks authority. A host adapter may expose these write classes:
 | Gate decision | `loopx operator-gate --decision approve|reject|defer` | explicit controller/user decision, dry-run preview before write |
 | Human reward | `loopx reward ... --dry-run` then explicit write | run-bound judgment, public-safe reason, no score impersonation |
 | Soft claim or optional hard lease | `claimed_by` by default; explicit `loopx task-lease acquire/renew/transfer/release/inspect` when a host needs hard write-scope exclusion | `(goal_id, todo_id)` contention key; `task_lease_v0` is opt-in and is not enforced by `quota should-run` |
-| State refresh and quota spend | `refresh-state`, then `quota spend-slot --source heartbeat --execute` | validation evidence first, one spend per completed automatic turn |
+| State refresh and quota spend | `refresh-state`, then `quota spend-slot --todo-id <SELECTED_TODO_ID> --source heartbeat --execute` | validation evidence first, one spend per completed automatic turn, bound to the selected todo |
 
 The adapter must not translate a host approval, model confidence, browser click,
 frontstage action, server callback, or scheduler timer into a protected write
@@ -284,7 +284,7 @@ loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota s
 loopx todo claim --goal-id <goal-id> --todo-id <todo_id> --claimed-by <agent-id>
 loopx todo complete --goal-id <goal-id> --todo-id <todo_id> --claimed-by <agent-id> --evidence "<public-safe evidence>"
 loopx refresh-state --goal-id <goal-id> --agent-id <agent-id>
-loopx quota spend-slot --goal-id <goal-id> --slots 1 --source heartbeat --execute --agent-id <agent-id>
+loopx quota spend-slot --goal-id <goal-id> --todo-id <selected-todo-id> --slots 1 --source heartbeat --execute --agent-id <agent-id>
 ```
 
 When a host explicitly advertises `task_lease_v0`, it must also expose the

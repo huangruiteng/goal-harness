@@ -810,7 +810,10 @@ def build_quota_slot_preview(
     slots: int = 1,
     agent_id: str | None = None,
     workspace_path: Path | None = None,
-    available_capabilities: Any = None, operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    available_capabilities: Any = None,
+    operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    todo_id: str | None = None,
+    source: str = DEFAULT_SLOT_SPEND_SOURCE,
 ) -> dict[str, Any]:
     safe_goal_id = str(goal_id or "").strip()
     before = build_quota_should_run(
@@ -834,6 +837,8 @@ def build_quota_slot_preview(
         ),
         quota_status_builder=quota_status,
         self_repair_spend_actions=SELF_REPAIR_SPEND_ACTIONS,
+        todo_id=todo_id,
+        source=source,
     )
 
 
@@ -1024,7 +1029,9 @@ def spend_quota_slot(
     source: str = DEFAULT_SLOT_SPEND_SOURCE,
     agent_id: str | None = None,
     workspace_path: Path | None = None,
-    available_capabilities: Any = None, operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    available_capabilities: Any = None,
+    operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    todo_id: str | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
     preview = build_quota_slot_preview(
@@ -1033,7 +1040,10 @@ def spend_quota_slot(
         slots=slots,
         agent_id=agent_id,
         workspace_path=workspace_path,
-        available_capabilities=available_capabilities, operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+        available_capabilities=available_capabilities,
+        operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+        todo_id=todo_id,
+        source=source,
     )
     if not preview.get("ok"):
         return preview
