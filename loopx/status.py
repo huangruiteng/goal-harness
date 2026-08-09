@@ -107,13 +107,6 @@ from .control_plane.work_items.delivery_signals import (
     outcome_gap_streak as _outcome_gap_streak_read_model,
     small_delivery_batch_scale_streak as _small_delivery_batch_scale_streak_read_model,
 )
-from .control_plane.scheduler.monitor_display import (
-    attention_item_is_monitor_quiet_display_candidate as _attention_item_is_monitor_quiet_display_candidate,
-    normalize_monitor_quiet_attention_display as _normalize_monitor_quiet_attention_display,
-    quiet_monitor_display_action as _quiet_monitor_display_action,
-    todo_summary_lane_items as _todo_summary_lane_items,
-    todo_summary_open_count as _todo_summary_open_count,
-)
 from .control_plane.runtime.run_compaction import (
     RUN_BASE_COMPACT_FIELDS,
     attach_run_summary_projections as _attach_run_summary_projections_read_model,
@@ -239,7 +232,6 @@ from .control_plane.todos.todo_summary import (
     project_asset_todo_summary,
     sync_connected_attention_action_from_todos as _sync_connected_attention_action_from_todos_read_model,
     todo_lane_items as todo_lane_items,
-    todo_item_is_actionable_open,
     todo_item_is_deferred as todo_item_is_deferred,
     todo_item_is_due_monitor as todo_item_is_due_monitor,
     todo_item_missing_monitor_schedule as todo_item_missing_monitor_schedule,
@@ -2468,43 +2460,43 @@ def active_state_todo_attention_item(
 
 
 def todo_summary_open_count(summary: dict[str, Any] | None) -> int:
-    return _todo_summary_open_count(
-        summary,
-        open_todo_items=open_todo_items,
-        todo_item_is_actionable_open=todo_item_is_actionable_open,
-        fallback_limit=MAX_STATUS_TODOS_PER_ROLE,
+    from .control_plane.status.monitor_display_projection import (
+        todo_summary_open_count as _todo_summary_open_count,
     )
+
+    return _todo_summary_open_count(summary)
 
 
 def todo_summary_lane_items(summary: dict[str, Any] | None, lane: str) -> list[dict[str, Any]]:
+    from .control_plane.status.monitor_display_projection import (
+        todo_summary_lane_items as _todo_summary_lane_items,
+    )
+
     return _todo_summary_lane_items(summary, lane)
 
 
 def attention_item_is_monitor_quiet_display_candidate(item: dict[str, Any]) -> bool:
-    return _attention_item_is_monitor_quiet_display_candidate(
-        item,
-        open_todo_items=open_todo_items,
-        todo_item_is_actionable_open=todo_item_is_actionable_open,
-        fallback_limit=MAX_STATUS_TODOS_PER_ROLE,
+    from .control_plane.status.monitor_display_projection import (
+        attention_item_is_monitor_quiet_display_candidate as _attention_item_is_monitor_quiet_display_candidate,
     )
+
+    return _attention_item_is_monitor_quiet_display_candidate(item)
 
 
 def quiet_monitor_display_action(raw_action: str | None) -> str:
-    return _quiet_monitor_display_action(
-        raw_action,
-        fallback_action=MONITOR_DISPLAY_FALLBACK_ACTION,
+    from .control_plane.status.monitor_display_projection import (
+        quiet_monitor_display_action as _quiet_monitor_display_action,
     )
+
+    return _quiet_monitor_display_action(raw_action)
 
 
 def normalize_monitor_quiet_attention_display(item: dict[str, Any]) -> None:
-    _normalize_monitor_quiet_attention_display(
-        item,
-        is_monitor_quiet_display_candidate=attention_item_is_monitor_quiet_display_candidate,
-        display_fallback_action=MONITOR_DISPLAY_FALLBACK_ACTION,
-        monitor_signal_waiting_on=MONITOR_SIGNAL_WAITING_ON,
-        monitor_display_schema_version=MONITOR_DISPLAY_SCHEMA_VERSION,
-        monitor_display_stop_condition=MONITOR_DISPLAY_STOP_CONDITION,
+    from .control_plane.status.monitor_display_projection import (
+        normalize_monitor_quiet_attention_display as _normalize_monitor_quiet_attention_display,
     )
+
+    _normalize_monitor_quiet_attention_display(item)
 
 
 def merge_global_registry_attention_findings(
