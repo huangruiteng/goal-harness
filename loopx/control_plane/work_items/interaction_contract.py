@@ -789,14 +789,24 @@ def interaction_next_cli_actions(
             typed_quota_guard,
         ]
     if mode == "external_evidence_observation":
+        spend_action = _quota_spend_action(
+            goal_id,
+            scoped_cli_args=scoped_cli_args,
+            payload=payload,
+            settlement_plan=settlement_plan,
+        )
         return [
             "read approved controller/job/marker/writeback surfaces only",
-            f"loopx refresh-state --goal-id {goal_id} --classification <compact_blocker_or_transition>{scoped_cli_args}",
-            _quota_spend_action(
-                goal_id,
-                scoped_cli_args=scoped_cli_args,
-                payload=payload,
-                settlement_plan=settlement_plan,
+            (
+                "on a substantive transition or blocker only: "
+                f"loopx refresh-state --goal-id {goal_id} "
+                "--classification <compact_blocker_or_transition> "
+                "--delivery-batch-scale <scale> --delivery-outcome <outcome>"
+                f"{settlement_args}{scoped_cli_args}"
+            ),
+            (
+                "after that accountable writeback receipt only: "
+                f"{spend_action}; otherwise do not spend for unchanged observation"
             ),
         ]
     if mode == "agent_workspace_repair":

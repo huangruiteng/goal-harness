@@ -194,6 +194,32 @@ def test_standard_codex_app_actions_use_typed_settlement_before_turn_driver() ->
         assert '--turn-instance-id "${LOOPX_TURN:?}"' in command
 
 
+def test_codex_app_external_observation_settles_only_substantive_writeback() -> None:
+    todo_id = "todo_external_observation"
+    actions = interaction_next_cli_actions(
+        {
+            "goal_id": GOAL_ID,
+            "agent_identity": {"agent_id": AGENT_ID},
+            "selected_todo": {"todo_id": todo_id},
+        },
+        mode="external_evidence_observation",
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+        ),
+    )
+
+    assert len(actions) == 3
+    assert actions[0].startswith("read approved")
+    assert actions[1].startswith("on a substantive transition or blocker only:")
+    assert "--delivery-outcome <outcome>" in actions[1]
+    assert f"--todo-id {todo_id}" in actions[1]
+    assert '--turn-instance-id "${LOOPX_TURN:?}"' in actions[1]
+    assert actions[2].startswith("after that accountable writeback receipt only:")
+    assert f"--todo-id {todo_id}" in actions[2]
+    assert '--turn-instance-id "${LOOPX_TURN:?}"' in actions[2]
+    assert "otherwise do not spend for unchanged observation" in actions[2]
+
+
 def test_guard_receipt_resolves_stable_settlement_identity(tmp_path: Path) -> None:
     _append_guard_receipt(tmp_path)
 
