@@ -15,17 +15,23 @@ Turn Loop Controller plan.
 
 | Input | Shape | Notes |
 | --- | --- | --- |
-| `turn_receipt` | one `ValidatedTurnReceipt` (proven by `validate_loopx_turn_receipt`) | may be absent when no Turn has run yet |
-| `quota_decision` | fresh `loopx_turn_envelope_v0` | must satisfy the shared typed envelope contract |
+| `turn_receipt` | one `ValidatedTurnReceipt` (proven by `validate_loopx_turn_receipt`) | may be absent when no Turn has run yet; material results require `status="committed"` |
+| `quota_decision` | fresh `loopx_turn_envelope_v0` | must satisfy the shared typed envelope contract and declare `predecessor_turn_key` matching the receipt |
 | `bounded_turn_budget` | one `BoundedTurnBudget` | required when the receipt is `validated_progress` |
 
 Inputs are typed and validated at the boundary. The controller does not accept
 caller-authored `result_kind + lineage` mappings: a receipt must be a
 `loopx_turn_receipt_validation_v0` result with `ok=true`, a supported result
-kind, and full `(goal_id, agent_id, todo_id)` lineage. A budget must carry
-strict integer domains (`type(...) is int`, `max_turns > 0`,
-`0 <= completed_turns <= max_turns`) and the same lineage as the fresh
-decision. Invalid or stale input raises `ValueError`; it is never encoded as a
+kind, full `(goal_id, agent_id, todo_id)` lineage, and a `turn_key`. Material
+results (`validated_completion` / `validated_progress`) additionally require
+`status="committed"` so the loop never terminates or continues before the full
+`run-once` transaction (writeback, quota spend, scheduler apply/ack) has
+closed. A budget must carry strict integer domains (`type(...) is int`,
+`max_turns > 0`, `0 <= completed_turns <= max_turns`) and the same lineage as
+the fresh decision. When a receipt is supplied, the fresh decision must declare
+`predecessor_turn_key` equal to the receipt's `turn_key` to prove causal
+succession; an old receipt for the same todo cannot be replayed against a later
+envelope. Invalid or stale input raises `ValueError`; it is never encoded as a
 disposition.
 
 ## Output
@@ -69,10 +75,17 @@ and `writes_state=false`.
 ## Precedence And Fail-Closed Rules
 
 - A `validated_completion` receipt wins over a decision-only user action, but
-  only after the receipt is proven valid and fresh. Material receipts must
-  carry full `(goal_id, agent_id, todo_id)` lineage, and any mismatch with the
-  fresh decision (including `todo_id`) raises `ValueError` (`stale_receipt`),
-  never `terminal`.
+  only after the receipt is proven valid, fresh, and fully committed. Material
+  receipts must carry full `(goal_id, agent_id, todo_id)` lineage and
+  `status="committed"`; a validation-only intermediate (`status="validated"`)
+  cannot drive `terminal` or `run_now`. Any lineage mismatch with the fresh
+  decision (including `todo_id`) raises `ValueError` (`stale_receipt`), never
+  `terminal`.
+- When a receipt is supplied, the fresh decision must declare
+  `predecessor_turn_key` equal to the receipt's `turn_key`. A missing or
+  mismatched key raises `ValueError` (`stale_receipt`); this closes the
+  stale-replay gap where an old receipt for the same todo could be replayed
+  against a later envelope.
 - Every other user-action signal (from receipt or decision) routes to
   `user_action_required` before delivery dispositions.
 - The fresh decision must satisfy the shared Turn envelope contract

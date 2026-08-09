@@ -362,6 +362,14 @@ def handle_turn_command(
                 boundary = payload.get("boundary")
                 if isinstance(boundary, dict):
                     boundary.pop("opaque_session_handle_omitted", None)
+            else:
+                # The transaction plan carries an internal lineage used by
+                # receipt validation and the turn_key hash. It is not part of
+                # the agent-facing CLI contract, so strip it before rendering
+                # to keep the output budget stable.
+                transaction = payload.get("transaction")
+                if isinstance(transaction, dict):
+                    transaction.pop("lineage", None)
         elif args.turn_command == "run-once":
             if args.resume_turn_key:
                 if args.turn_instance_id:
