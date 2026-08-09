@@ -10,6 +10,9 @@ If you are new to LoopX, start with the shorter
 surface to the host LoopX task entry, project connection, and one manual CLI
 quickstart. This page keeps the full operator and contributor detail.
 
+For the curated learning path, start with the
+[Developer Book](/loopx/docs/book/) before moving into the full guide.
+
 ## Codex App And Other Agent Setup
 
 If you already use Codex, Claude Code, Cursor, or another terminal agent, paste

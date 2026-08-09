@@ -4,6 +4,10 @@ LoopX is the local control plane for long-running AI agent work. It keeps
 objectives, gates, todos, evidence, quota, and handoffs stable while Codex,
 Claude Code, OpenCode, Cursor, or a custom runner executes bounded turns.
 
+New to LoopX? Start with the
+[Developer Book](/loopx/docs/book/) for a curated bilingual path, or
+[Getting started](guides/getting-started.md) to run your first loop.
+
 ## Choose Your Path
 
 <div class="grid cards" markdown>
