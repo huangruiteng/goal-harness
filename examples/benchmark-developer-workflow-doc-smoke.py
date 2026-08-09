@@ -154,9 +154,10 @@ def main() -> int:
     require(
         tasks,
         [
-            "GH-C40",
-            "bounded benchmark lifecycle/read-model seams",
-            "raw logs, task text, verifier output, or host paths",
+            "Benchmark boundary",
+            "Shared lifecycle, readiness, ledger, and reducer contracts are the public seam;",
+            "Terminal-Bench, ALE, and EdgeBench now sit on the same seams as SkillsBench",
+            "raw task text, logs, trajectories, verifier tails, credentials, uploads, or local paths",
         ],
         source=TASKS,
     )
