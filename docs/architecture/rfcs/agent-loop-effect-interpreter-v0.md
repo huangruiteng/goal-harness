@@ -48,7 +48,7 @@ that model over time.
 | M3 Focused test families | Mostly complete (#2916-#2918, #2925, #2929) |
 | M4 Architecture documentation | Mostly complete (#2921, #2923, #2924) |
 | M5 Steady-state review | Mostly complete (#2922, #2931) |
-| M6 General effect-program abstraction | In progress; Q3 complete (#2963-#2965), Q4 in progress; quality gate pending (#2938-#2959) |
+| M6 General effect-program abstraction | In progress; Q3-Q6 complete (#2963-#2965, #2967-#2983); quality gate pending (Q7) |
 
 ## Why This Matters
 
@@ -349,7 +349,10 @@ Phases:
   `EffectTurn` / `EffectProgram`. In progress: quota should-run TurnEnvelope
   now consumes `interpret_quota_should_run_packet`; turn driver and bootstrap
   already consume `interpret_turn_result_packet` / `effect_program_from_ordered_steps`.
-- Q7: Add quality gates and focused tests for each extraction.
+- Q7: Add quality gates and focused tests for each extraction. In progress:
+  RFC module budgets are ratcheted in `module_metric_baseline.json` and a
+  focused M6 quality-gate pytest pins the hot-module ceilings plus the runtime
+  `EffectTurn` consumption.
 - Q8: Re-evaluate M6 only after the gates pass.
 
 ### Replacement-First Rule
