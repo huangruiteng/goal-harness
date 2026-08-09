@@ -15,24 +15,35 @@ Turn Loop Controller plan.
 
 | Input | Shape | Notes |
 | --- | --- | --- |
-| `turn_receipt` | one `ValidatedTurnReceipt` (proven by `validate_loopx_turn_receipt`) | may be absent when no Turn has run yet; material results require `status="committed"` |
-| `quota_decision` | fresh `loopx_turn_envelope_v0` | must satisfy the shared typed envelope contract and declare `predecessor_turn_key` matching the receipt |
+| `turn_receipt` | one `ValidatedTurnReceipt` qualified from `loopx_turn_execution_v0` | may be absent when no Turn has run yet; material results require the complete M7 settlement evidence described below |
+| `quota_decision` | fresh `loopx_turn_envelope_v0` | must satisfy the shared typed envelope contract |
+| `predecessor_turn_key` | causal binding supplied by the outer continuation adapter | required with a receipt and must equal its `turn_key`; it is deliberately not an unsigned field inside the quota envelope |
 | `bounded_turn_budget` | one `BoundedTurnBudget` | required when the receipt is `validated_progress` |
 
 Inputs are typed and validated at the boundary. The controller does not accept
-caller-authored `result_kind + lineage` mappings: a receipt must be a
-`loopx_turn_receipt_validation_v0` result with `ok=true`, a supported result
-kind, full `(goal_id, agent_id, todo_id)` lineage, and a `turn_key`. Material
-results (`validated_completion` / `validated_progress`) additionally require
-`status="committed"` so the loop never terminates or continues before the full
-`run-once` transaction (writeback, quota spend, scheduler apply/ack) has
-closed. A budget must carry strict integer domains (`type(...) is int`,
+caller-authored `result_kind + lineage` or phase-only mappings. A receipt is
+qualified from one public `loopx_turn_execution_v0` whose transaction receipt
+has `ok=true`, a supported result kind, full `(goal_id, agent_id, todo_id)`
+lineage, and a `turn_key`. Material results (`validated_completion` /
+`validated_progress`) additionally require all of these facts:
+
+- execution and transaction receipt are both `committed`;
+- the core M7 settlement succeeded and emitted exactly the ordered
+  `validation -> durable_writeback -> quota_spend` receipt chain;
+- every settlement receipt is committed under the same `effect_id`, and that
+  id matches the transaction's typed settlement identity;
+- public execution effects prove durable state write and one quota spend;
+- the scheduler handoff completed;
+- `validated_completion` carries the durable Todo lifecycle outcome
+  (`successor`, `active_goal`, or `no_followup`).
+
+This keeps settlement truth in the core Effect Program rather than duplicating
+it as Turn-controller phase logic. A budget must carry strict integer domains (`type(...) is int`,
 `max_turns > 0`, `0 <= completed_turns <= max_turns`) and the same lineage as
-the fresh decision. When a receipt is supplied, the fresh decision must declare
-`predecessor_turn_key` equal to the receipt's `turn_key` to prove causal
-succession; an old receipt for the same todo cannot be replayed against a later
-envelope. Invalid or stale input raises `ValueError`; it is never encoded as a
-disposition.
+the fresh decision. When a receipt is supplied, the outer adapter must bind the
+fresh decision with a separate `predecessor_turn_key` equal to the receipt's
+`turn_key`; an old receipt cannot be replayed against a later envelope. Invalid
+or stale input raises `ValueError`; it is never encoded as a disposition.
 
 ## Output
 
@@ -45,7 +56,7 @@ Exactly one typed disposition:
 | `user_action_required` | a concrete user action is projected by receipt or decision | no spend |
 | `repair` | repair-class recovery is required before any successor Turn | no spend |
 | `replan` | replan-class recovery; see continuation boundary below | no spend |
-| `terminal` | terminal postcondition met or bounded budget exhausted | no spend |
+| `terminal` | fresh Goal frontier plus durable no-follow-up prove Goal closure | no spend |
 
 The output space is exactly these six dispositions. There is no
 `contract_error` disposition: contract failures are rejected at the typed-input
@@ -58,14 +69,19 @@ and `writes_state=false`.
 | --- | --- | --- |
 | none | delivery allowed | `run_now` |
 | none | quiet / cadence-only | `wait` |
-| `validated_completion` | any | `terminal` |
+| none | fresh `terminal_no_followup` Goal frontier | `terminal` |
+| `validated_completion` + durable `successor` | selected Todo is a declared successor | route the fresh decision (`run_now`, `wait`, `repair`, `replan`, or user action) |
+| `validated_completion` + durable `active_goal` | fresh Goal frontier selects a different Todo | route the fresh decision |
+| `validated_completion` + durable `no_followup` | fresh Goal frontier is also terminal no-follow-up | `terminal` |
+| `validated_completion` | stale, missing, or undeclared continuation | `ValueError` |
 | `validated_progress`, budget remaining | delivery allowed | `run_now` |
-| `validated_progress`, budget exhausted | any | `terminal` |
+| `validated_progress`, budget exhausted | any | `replan` with bounded-delta requirement |
 | `validated_progress` | no delivery | `wait` |
 | `repair_required` | any | `repair` |
 | `replan_required` | any | `replan` |
 | `user_action_required` | any | `user_action_required` |
-| `validated_completion` + decision user action | — | `terminal` (completion wins) |
+| durable `no_followup` + fresh terminal frontier + decision user action | — | `terminal` (proven Goal closure wins) |
+| continuing completion + decision user action | — | `user_action_required` |
 | `wait` | any | `wait` |
 | `host_failure` / `validation_failed` / `writeback_failed` / `quota_spend_failed` | any | `repair` (route before any successor Turn) |
 | replan-class decision action (`autonomous_replan*`) | — | `replan` |
@@ -74,18 +90,19 @@ and `writes_state=false`.
 
 ## Precedence And Fail-Closed Rules
 
-- A `validated_completion` receipt wins over a decision-only user action, but
-  only after the receipt is proven valid, fresh, and fully committed. Material
-  receipts must carry full `(goal_id, agent_id, todo_id)` lineage and
-  `status="committed"`; a validation-only intermediate (`status="validated"`)
-  cannot drive `terminal` or `run_now`. Any lineage mismatch with the fresh
-  decision (including `todo_id`) raises `ValueError` (`stale_receipt`), never
-  `terminal`.
-- When a receipt is supplied, the fresh decision must declare
+- `validated_completion` proves a Todo transition, not Goal closure. A
+  declared successor or active Goal frontier continues through the fresh
+  decision. Only durable `no_followup` plus a fresh terminal Goal frontier may
+  produce `terminal`. An undeclared successor, reselected completed Todo, or
+  missing lifecycle outcome raises `ValueError`.
+- A validation-only intermediate, phase-only committed mapping, incomplete
+  settlement receipt chain, mismatched effect identity, missing durable
+  effects, or incomplete scheduler handoff cannot drive `terminal`, `run_now`,
+  or any other material continuation.
+- When a receipt is supplied, the outer adapter must supply a separate
   `predecessor_turn_key` equal to the receipt's `turn_key`. A missing or
-  mismatched key raises `ValueError` (`stale_receipt`); this closes the
-  stale-replay gap where an old receipt for the same todo could be replayed
-  against a later envelope.
+  mismatched key raises `ValueError` (`stale_receipt`); this closes the stale
+  replay gap without adding an unsigned field to `loopx_turn_envelope_v0`.
 - Every other user-action signal (from receipt or decision) routes to
   `user_action_required` before delivery dispositions.
 - The fresh decision must satisfy the shared Turn envelope contract
@@ -94,7 +111,9 @@ and `writes_state=false`.
   forged or truncated envelopes raise `ValueError`, never `run_now`.
 - `validated_progress` may continue only with a proven `BoundedTurnBudget`
   whose lineage matches the fresh decision; without it the controller raises
-  `ValueError` instead of guessing an unbounded continuation.
+  `ValueError` instead of guessing an unbounded continuation. Budget
+  exhaustion routes to `replan`, not `terminal`, because a bounded Turn chain
+  ending is not evidence that the Goal ended.
 - Input validity is enforced at the typed-input boundary, not encoded as a
   seventh disposition. The transition output space is always one of the six
   dispositions above.
