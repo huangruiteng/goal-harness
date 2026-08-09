@@ -1,7 +1,7 @@
 name: Feature Request
 description: Propose a concrete LoopX product or documentation improvement.
 title: "[Feature]: "
-labels: ["enhancement"]
+labels: ["enhancement", "triage"]
 body:
   - type: markdown
     attributes:
@@ -58,16 +58,16 @@ body:
   - type: dropdown
     id: area
     attributes:
-      label: Product area
+      label: LoopX area
+      description: Which public product area does this request target? Maintainers use this to apply the matching area label.
       options:
-        - Goal, todo, and gate lifecycle
-        - Quota, scheduler, and heartbeat
-        - Issue-fix or another domain capability
-        - Host and runtime integration
-        - Dashboard and operator surfaces
-        - Extensions and external integrations
-        - Documentation and onboarding
-        - Other
+        - Control plane (goals, todos, quota, scheduler, registry, runtime)
+        - Benchmark boundary (adapters, runners, verifiers, scoring, evidence)
+        - Capability or extension (providers, adapters, skills)
+        - Public docs or presentation surface (README, protocols, dashboard)
+        - Build, packaging, installer, or CI
+        - Host or runtime integration
+        - Not sure
     validations:
       required: true
 

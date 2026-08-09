@@ -19,5 +19,9 @@ goals.
 - [Integration guide](../integration.md)
 - [Status data contract](../status-data-contract.md)
 
+## Maintainer And Triage
+
+- [PR and issue labels](pr-issue-labels.md)
+
 Runtime-specific adapters belong under
 [`docs/integrations/`](../integrations/README.md).

@@ -1,7 +1,7 @@
 name: Bug Report
 description: Report reproducible incorrect or unexpected LoopX behavior.
 title: "[Bug]: "
-labels: ["bug"]
+labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
@@ -51,6 +51,22 @@ body:
         - Custom or external worker
         - Not host-specific
         - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: LoopX area
+      description: Which public product area does this bug affect? Maintainers use this to apply the matching area label.
+      options:
+        - Control plane (goals, todos, quota, scheduler, registry, runtime)
+        - Benchmark boundary (adapters, runners, verifiers, scoring, evidence)
+        - Capability or extension (providers, adapters, skills)
+        - Public docs or presentation surface (README, protocols, dashboard)
+        - Build, packaging, installer, or CI
+        - Host or runtime integration
+        - Not sure
     validations:
       required: true
 
