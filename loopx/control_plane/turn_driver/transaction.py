@@ -8,19 +8,19 @@ from enum import Enum
 from hashlib import sha256
 from typing import Any
 
+from ...turn_identity import normalize_turn_instance_id
 from ..effect_program import (
     SettlementIdentity,
     SettlementPlan,
     SettlementStep,
     SettlementStepKind,
 )
-from ...turn_identity import normalize_turn_instance_id
-
 
 LOOPX_TURN_TRANSACTION_PLAN_SCHEMA_VERSION = "loopx_turn_transaction_plan_v0"
 LOOPX_TURN_RESULT_SCHEMA_VERSION = "loopx_turn_result_v0"
 LOOPX_TURN_RECEIPT_SCHEMA_VERSION = "loopx_turn_receipt_v0"
 LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION = "loopx_turn_receipt_validation_v0"
+LOOPX_TURN_EXECUTION_SCHEMA_VERSION = "loopx_turn_execution_v0"
 TRANSACTION_PHASES = (
     "host_execute",
     "typed_result",
@@ -191,11 +191,6 @@ def build_loopx_turn_transaction_plan(
         "schema_version": LOOPX_TURN_TRANSACTION_PLAN_SCHEMA_VERSION,
         "status": "planned" if planned else "not_applicable",
         "turn_key": turn_key,
-        "lineage": {
-            "goal_id": str(lineage.get("goal_id") or ""),
-            "agent_id": str(lineage.get("agent_id") or ""),
-            "todo_id": str(lineage.get("todo_id") or ""),
-        },
         "phases": list(TRANSACTION_PHASES) if planned else [],
         "commit_policy": "result<validate<writeback<spend;apply<ack;cadence:no-spend",
         "receipt_seed": {
@@ -230,6 +225,54 @@ def _completed_phases(value: Any, errors: list[str]) -> list[str]:
     return phases
 
 
+def _settlement_identity(
+    transaction_plan: Mapping[str, Any],
+    errors: list[str],
+) -> dict[str, str]:
+    settlement_plan = _mapping(transaction_plan.get("settlement_plan"))
+    identity = _mapping(settlement_plan.get("identity"))
+    normalized = {
+        "goal_id": str(identity.get("goal_id") or ""),
+        "agent_id": str(identity.get("agent_id") or ""),
+        "todo_id": str(identity.get("todo_id") or ""),
+        "effect_id": str(identity.get("effect_id") or ""),
+    }
+    if not all(normalized.values()):
+        errors.append("transaction plan is missing its typed settlement identity")
+    return normalized
+
+
+def require_loopx_turn_completion_outcome(
+    completion: Any,
+    *,
+    expected_todo_id: str,
+) -> dict[str, Any]:
+    """Validate the durable Todo lifecycle outcome of a completed Turn."""
+
+    if not isinstance(completion, Mapping):
+        raise TypeError("validated completion is missing its durable Todo outcome")
+    todo_id = str(completion.get("todo_id") or "")
+    if not expected_todo_id or todo_id != expected_todo_id:
+        raise ValueError("validated completion is missing its durable Todo outcome")
+    continuation = str(completion.get("continuation") or "")
+    if continuation not in {"successor", "active_goal", "no_followup"}:
+        raise ValueError("validated completion has an invalid continuation outcome")
+    outcome: dict[str, Any] = {
+        "todo_id": todo_id,
+        "continuation": continuation,
+    }
+    if continuation == "successor":
+        successor_ids = completion.get("successor_todo_ids")
+        if (
+            not isinstance(successor_ids, list)
+            or not successor_ids
+            or not all(isinstance(item, str) and item for item in successor_ids)
+        ):
+            raise ValueError("successor completion requires successor Todo ids")
+        outcome["successor_todo_ids"] = list(successor_ids)
+    return outcome
+
+
 def validate_loopx_turn_receipt(
     transaction_plan: Mapping[str, Any],
     execution_result: Mapping[str, Any],
@@ -249,6 +292,7 @@ def validate_loopx_turn_receipt(
     turn_key = str(plan.get("turn_key") or "")
     if not turn_key or str(result.get("turn_key") or "") != turn_key:
         errors.append("execution result turn_key does not match the transaction plan")
+    settlement_identity = _settlement_identity(plan, errors)
 
     kind = _result_kind(result.get("result_kind"), errors)
     completed = _completed_phases(result.get("completed_phases"), errors)
@@ -291,10 +335,11 @@ def validate_loopx_turn_receipt(
         "schema_version": LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION,
         "turn_key": turn_key or None,
         "lineage": {
-            "goal_id": str(plan.get("lineage", {}).get("goal_id") or ""),
-            "agent_id": str(plan.get("lineage", {}).get("agent_id") or ""),
-            "todo_id": str(plan.get("lineage", {}).get("todo_id") or ""),
+            "goal_id": settlement_identity["goal_id"],
+            "agent_id": settlement_identity["agent_id"],
+            "todo_id": settlement_identity["todo_id"],
         },
+        "settlement_effect_id": settlement_identity["effect_id"] or None,
         "result_kind": kind.value if kind is not None else None,
         "completed_phases": completed,
         "failed_phase": failed_phase,

@@ -23,15 +23,15 @@ from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
 from .settlement import execute_turn_driver_settlement
 from .transaction import (
+    LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_RESULT_SCHEMA_VERSION,
     TRANSACTION_PHASES,
     LoopXTurnResultKind,
+    require_loopx_turn_completion_outcome,
     validate_loopx_turn_receipt,
 )
 
-
 LOOPX_TURN_HOST_REQUEST_SCHEMA_VERSION = "loopx_turn_host_request_v0"
-LOOPX_TURN_EXECUTION_SCHEMA_VERSION = "loopx_turn_execution_v0"
 LOOPX_TURN_JOURNAL_SCHEMA_VERSION = "loopx_turn_journal_v0"
 LOOPX_TURN_TASK_VALIDATION_SCHEMA_VERSION = "loopx_turn_task_validation_v0"
 HOST_RESULT_MAX_BYTES = 12_000
@@ -201,7 +201,7 @@ def _normalize_host_path_delta(
             try:
                 packet = json.loads(agent_vision_json)
                 if not isinstance(packet, dict):
-                    raise ValueError("agent_vision_json must decode to a JSON object")
+                    raise TypeError("agent_vision_json must decode to a JSON object")
                 envelope = (
                     plan.get("turn_envelope")
                     if isinstance(plan.get("turn_envelope"), dict)
@@ -270,9 +270,11 @@ def validate_loopx_turn_host_result(
         and not completion_writeback_configured
     ):
         errors.append("validated_completion requires a todo lifecycle adapter")
-    if kind not in MATERIAL_HOST_RESULT_KINDS | STOP_HOST_RESULT_KINDS:
-        if kind is not LoopXTurnResultKind.VALIDATED_COMPLETION:
-            errors.append("host result kind is not accepted by run-once")
+    if (
+        kind not in MATERIAL_HOST_RESULT_KINDS | STOP_HOST_RESULT_KINDS
+        and kind is not LoopXTurnResultKind.VALIDATED_COMPLETION
+    ):
+        errors.append("host result kind is not accepted by run-once")
 
     phases = result.get("completed_phases")
     if phases != list(TRANSACTION_PHASES[:2]):
@@ -414,7 +416,7 @@ def _run_task_validator(
         )
     try:
         value = validator(plan, result)
-    except Exception:
+    except Exception:  # noqa: BLE001 - validator plugins fail closed at this boundary
         return _task_validation_receipt(
             status="inconclusive",
             validator_kind="callback",
@@ -576,7 +578,7 @@ def load_loopx_turn_plan_from_journal(
         raise ValueError("LoopX Turn resume journal does not exist")
     plan = journal.get("plan")
     if not isinstance(plan, dict):
-        raise ValueError("LoopX Turn resume journal does not contain a plan")
+        raise TypeError("LoopX Turn resume journal does not contain a plan")
     transaction = plan.get("transaction") if isinstance(plan.get("transaction"), dict) else {}
     if transaction.get("turn_key") != turn_key or journal.get("turn_key") != turn_key:
         raise ValueError("LoopX Turn resume journal has mismatched turn lineage")
@@ -645,8 +647,7 @@ def _run_host(
             cwd=project,
             input=json.dumps(request, ensure_ascii=False, separators=(",", ":")),
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=max(1.0, timeout_seconds),
             check=False,
         )
@@ -680,7 +681,7 @@ def _run_host_runner(
         value = runner(request)
     except BuiltInHostError as exc:
         return {"ok": False, "reason": exc.reason, "returncode": None}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - host adapters fail closed at boundary
         return {"ok": False, "reason": type(exc).__name__, "returncode": None}
     if not isinstance(value, dict):
         return {"ok": False, "reason": "built-in host result must be one JSON object"}
@@ -698,6 +699,10 @@ def _compact_callback(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
 def _execution_payload(
     plan: Mapping[str, Any],
     journal: Mapping[str, Any],
@@ -709,6 +714,8 @@ def _execution_payload(
     transaction = plan.get("transaction") if isinstance(plan.get("transaction"), dict) else {}
     turn_key = str(transaction.get("turn_key") or "")
     planned_host = plan.get("host") if isinstance(plan.get("host"), dict) else {}
+    writeback = _mapping(journal.get("writeback"))
+    todo_completion = _mapping(writeback.get("completion"))
     quota_spent = effects.get("quota_spent") is True or "quota_spend" in list(
         journal.get("completed_phases") or []
     )
@@ -739,6 +746,7 @@ def _execution_payload(
             if isinstance(journal.get("settlement_result"), Mapping)
             else {}
         ),
+        **({"todo_completion": todo_completion} if todo_completion else {}),
         **({"reason": journal.get("reason")} if journal.get("reason") else {}),
     }
 
@@ -958,23 +966,13 @@ def _completion_writeback_outcome(
         if isinstance(selected_todo, Mapping)
         else ""
     )
-    todo_id = str(completion.get("todo_id") or "")
-    continuation = completion.get("continuation")
-    if not expected_todo_id or todo_id != expected_todo_id:
+    try:
+        return require_loopx_turn_completion_outcome(
+            completion,
+            expected_todo_id=expected_todo_id,
+        )
+    except ValueError:
         return None
-    if continuation not in {"successor", "no_followup", "active_goal"}:
-        return None
-    outcome = {"todo_id": todo_id, "continuation": continuation}
-    if continuation == "successor":
-        successor_todo_ids = completion.get("successor_todo_ids")
-        if (
-            not isinstance(successor_todo_ids, list)
-            or not successor_todo_ids
-            or not all(isinstance(item, str) and item for item in successor_todo_ids)
-        ):
-            return None
-        outcome["successor_todo_ids"] = list(successor_todo_ids)
-    return outcome
 
 
 def _typed_settlement_stage(

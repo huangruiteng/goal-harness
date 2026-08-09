@@ -5,6 +5,14 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+from ..control_plane.quota.live_decision import build_live_quota_should_run_decision
+from ..control_plane.quota.turn_envelope import build_turn_envelope
+from ..control_plane.runtime.status_projection_cache import (
+    resolve_status_projection_cache_runtime_root,
+)
+from ..control_plane.scheduler.execution_context import (
+    scheduler_execution_context_for_turn,
+)
 from ..control_plane.turn_driver import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
@@ -16,20 +24,11 @@ from ..control_plane.turn_driver import (
     run_loopx_turn_once,
     selected_turn_todo,
 )
-from ..control_plane.scheduler.execution_context import (
-    scheduler_execution_context_for_turn,
-)
-from ..control_plane.quota.live_decision import build_live_quota_should_run_decision
-from ..control_plane.quota.turn_envelope import build_turn_envelope
-from ..control_plane.runtime.status_projection_cache import (
-    resolve_status_projection_cache_runtime_root,
-)
 from ..quota import spend_quota_slot
 from ..state_refresh import refresh_state_run
 from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
 from ..todos import complete_goal_todo, update_goal_todo
 from .lark_inbox import build_lark_operator_inbox_urgency_projector
-
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -363,13 +362,10 @@ def handle_turn_command(
                 if isinstance(boundary, dict):
                     boundary.pop("opaque_session_handle_omitted", None)
             else:
-                # The transaction plan carries internal lineage and typed
-                # settlement details used by validation and execution. They
-                # are not part of the agent-facing CLI contract, so strip
-                # both before rendering to keep the output budget stable.
+                # The typed settlement plan is used by validation and
+                # execution, but is not part of the agent-facing CLI contract.
                 transaction = payload.get("transaction")
                 if isinstance(transaction, dict):
-                    transaction.pop("lineage", None)
                     transaction.pop("settlement_plan", None)
         elif args.turn_command == "run-once":
             if args.resume_turn_key:
@@ -613,7 +609,7 @@ def handle_turn_command(
             )
         else:
             raise ValueError("turn requires the `plan` or `run-once` subcommand")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary renders typed JSON failure
         payload = {
             "ok": False,
             "schema_version": (

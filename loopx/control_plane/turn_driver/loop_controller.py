@@ -23,12 +23,14 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Any
 
+from ..effect_program import SettlementStepKind
 from .driver import LoopXTurnRoute, _typed_route
 from .transaction import (
+    LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION,
     LoopXTurnResultKind,
+    require_loopx_turn_completion_outcome,
 )
-
 
 LOOP_CONTROLLER_DISPOSITION_SCHEMA_VERSION = "loop_turn_loop_disposition_v0"
 BOUNDED_TURN_BUDGET_SCHEMA_VERSION = "loop_bounded_turn_budget_v0"
@@ -41,6 +43,11 @@ _MATERIAL_PROGRESS_KINDS = {
     LoopXTurnResultKind.VALIDATED_COMPLETION,
     LoopXTurnResultKind.VALIDATED_PROGRESS,
 }
+_MATERIAL_RECEIPT_ORDER = (
+    SettlementStepKind.VALIDATION.value,
+    SettlementStepKind.DURABLE_WRITEBACK.value,
+    SettlementStepKind.QUOTA_SPEND.value,
+)
 
 
 class LoopDisposition(str, Enum):
@@ -123,19 +130,23 @@ def _route_to_disposition(route: LoopXTurnRoute) -> LoopDisposition:
 
 
 class ValidatedTurnReceipt:
-    """A Turn receipt proven by ``validate_loopx_turn_receipt``.
+    """A controller view qualified from one complete Turn execution.
 
-    Only a successful ``loopx_turn_receipt_validation_v0`` result (``ok=true``)
-    with a supported result kind can construct one. Material progress results
-    (``validated_completion`` / ``validated_progress``) additionally require
-    ``status="committed"`` so the loop never terminates or continues before the
-    full ``run-once`` transaction (writeback, quota spend, scheduler apply/ack)
-    has closed. The ``turn_key`` binds the receipt to one concrete transaction
-    so a fresh envelope can prove causal succession via
-    ``predecessor_turn_key``.
+    Material results are admitted only when the public execution proves the
+    M7 typed settlement receipt sequence, one stable effect identity, durable
+    writeback and spend, and a completed scheduler handoff. Todo completion
+    additionally retains its durable continuation outcome so a local Todo
+    completion cannot be confused with Goal terminal closure.
     """
 
-    __slots__ = ("result_kind", "status", "lineage", "turn_key")
+    __slots__ = (
+        "lineage",
+        "result_kind",
+        "settlement_effect_id",
+        "status",
+        "todo_completion",
+        "turn_key",
+    )
 
     def __init__(
         self,
@@ -144,6 +155,8 @@ class ValidatedTurnReceipt:
         status: str,
         lineage: Mapping[str, str],
         turn_key: str | None,
+        settlement_effect_id: str | None = None,
+        todo_completion: Mapping[str, Any] | None = None,
     ) -> None:
         self.result_kind = result_kind
         self.status = status
@@ -153,45 +166,71 @@ class ValidatedTurnReceipt:
             "todo_id": str(lineage.get("todo_id") or ""),
         }
         self.turn_key = turn_key
+        self.settlement_effect_id = settlement_effect_id
+        self.todo_completion = dict(todo_completion or {}) or None
 
     @classmethod
-    def from_validation_result(
-        cls, validation_result: Mapping[str, Any]
-    ) -> "ValidatedTurnReceipt":
-        result = _mapping(validation_result)
-        if result.get("schema_version") != LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION:
+    def from_execution(
+        cls, execution_payload: Mapping[str, Any]
+    ) -> ValidatedTurnReceipt:
+        execution = _mapping(execution_payload)
+        if execution.get("schema_version") != LOOPX_TURN_EXECUTION_SCHEMA_VERSION:
+            raise ValueError(
+                "validated turn receipt requires schema_version="
+                f"{LOOPX_TURN_EXECUTION_SCHEMA_VERSION}"
+            )
+        receipt = _mapping(execution.get("receipt"))
+        if receipt.get("schema_version") != LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION:
             raise ValueError(
                 "validated turn receipt requires schema_version="
                 f"{LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION}"
             )
-        if result.get("ok") is not True:
+        if receipt.get("ok") is not True:
             raise ValueError("validated turn receipt requires ok=true")
-        raw_kind = result.get("result_kind")
+        raw_kind = receipt.get("result_kind")
         try:
             result_kind = LoopXTurnResultKind(str(raw_kind or ""))
         except ValueError:
             raise ValueError(
                 f"validated turn receipt has unsupported result_kind {raw_kind!r}"
             ) from None
-        status = str(result.get("status") or "")
-        if result_kind in _MATERIAL_PROGRESS_KINDS and status != "committed":
+        if execution.get("result_kind") != result_kind.value:
+            raise ValueError("execution result_kind does not match its receipt")
+        status = str(receipt.get("status") or "")
+        if result_kind in _MATERIAL_PROGRESS_KINDS and (
+            status != "committed" or execution.get("status") != "committed"
+        ):
             raise ValueError(
                 f"material result {result_kind.value} requires a fully committed "
-                f"transaction (status=committed); got status={status!r}"
+                "Turn execution and receipt"
             )
-        lineage = _mapping(result.get("lineage"))
+        lineage = _mapping(receipt.get("lineage"))
         if not all(lineage.get(k) for k in ("goal_id", "agent_id", "todo_id")):
             raise ValueError(
                 "validated turn receipt is missing goal/agent/todo lineage"
             )
-        turn_key = str(result.get("turn_key") or "") or None
+        turn_key = str(receipt.get("turn_key") or "") or None
         if not turn_key:
             raise ValueError("validated turn receipt is missing turn_key")
+        settlement_effect_id = str(receipt.get("settlement_effect_id") or "") or None
+        todo_completion = _mapping(execution.get("todo_completion"))
+        if result_kind in _MATERIAL_PROGRESS_KINDS:
+            settlement_effect_id = _qualified_material_effect_id(
+                execution,
+                expected_effect_id=settlement_effect_id,
+            )
+        if result_kind is LoopXTurnResultKind.VALIDATED_COMPLETION:
+            todo_completion = require_loopx_turn_completion_outcome(
+                todo_completion,
+                expected_todo_id=str(lineage["todo_id"]),
+            )
         return cls(
             result_kind=result_kind,
             status=status,
             lineage=lineage,
             turn_key=turn_key,
+            settlement_effect_id=settlement_effect_id,
+            todo_completion=todo_completion,
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -201,7 +240,50 @@ class ValidatedTurnReceipt:
             "status": self.status,
             "lineage": dict(self.lineage),
             "turn_key": self.turn_key,
+            "settlement_effect_id": self.settlement_effect_id,
+            **(
+                {"todo_completion": dict(self.todo_completion)}
+                if self.todo_completion
+                else {}
+            ),
         }
+
+
+def _qualified_material_effect_id(
+    execution: Mapping[str, Any],
+    *,
+    expected_effect_id: str | None,
+) -> str:
+    settlement = _mapping(execution.get("settlement_result"))
+    if settlement.get("ok") is not True or settlement.get("failure") is not None:
+        raise ValueError("material Turn execution requires a successful settlement")
+    raw_receipts = settlement.get("receipts")
+    if not isinstance(raw_receipts, list):
+        raise TypeError("material Turn execution is missing settlement receipts")
+    receipts = [_mapping(item) for item in raw_receipts]
+    if [str(item.get("step_kind") or "") for item in receipts] != list(
+        _MATERIAL_RECEIPT_ORDER
+    ):
+        raise ValueError(
+            "material Turn execution requires ordered validation/writeback/spend receipts"
+        )
+    effect_ids = {str(item.get("effect_id") or "") for item in receipts}
+    if "" in effect_ids or len(effect_ids) != 1:
+        raise ValueError("material Turn settlement receipts must share one effect identity")
+    effect_id = next(iter(effect_ids))
+    if not expected_effect_id or expected_effect_id != effect_id:
+        raise ValueError(
+            "material Turn settlement identity does not match the transaction receipt"
+        )
+    if any(item.get("status") != "committed" for item in receipts):
+        raise ValueError("material Turn settlement receipts must be committed")
+    effects = _mapping(execution.get("effects"))
+    if effects.get("state_written") is not True or effects.get("quota_spent") is not True:
+        raise ValueError("material Turn execution is missing durable effect evidence")
+    scheduler = _mapping(execution.get("scheduler"))
+    if scheduler.get("completed") is not True:
+        raise ValueError("material Turn execution is missing completed scheduler handoff")
+    return effect_id
 
 
 class BoundedTurnBudget:
@@ -211,7 +293,7 @@ class BoundedTurnBudget:
     sane range, so the transition never guesses an unbounded continuation.
     """
 
-    __slots__ = ("lineage", "max_turns", "completed_turns")
+    __slots__ = ("completed_turns", "lineage", "max_turns")
 
     def __init__(
         self,
@@ -255,18 +337,31 @@ class BoundedTurnBudget:
         return self.max_turns - self.completed_turns
 
 
-def _assert_lineage_match(
+def _assert_goal_agent_match(
     *,
     receipt_lineage: Mapping[str, str],
     decision_lineage: Mapping[str, str],
 ) -> None:
-    for key in ("goal_id", "agent_id", "todo_id"):
+    for key in ("goal_id", "agent_id"):
         if receipt_lineage.get(key) != decision_lineage.get(key):
             raise ValueError(
                 "stale_receipt: receipt lineage does not match the fresh decision "
                 f"on {key} (receipt={receipt_lineage.get(key)!r}, "
                 f"decision={decision_lineage.get(key)!r})"
             )
+
+
+def _assert_same_todo(
+    *,
+    receipt_lineage: Mapping[str, str],
+    decision_lineage: Mapping[str, str],
+) -> None:
+    if receipt_lineage.get("todo_id") != decision_lineage.get("todo_id"):
+        raise ValueError(
+            "stale_receipt: receipt Todo does not match the fresh decision "
+            f"(receipt={receipt_lineage.get('todo_id')!r}, "
+            f"decision={decision_lineage.get('todo_id')!r})"
+        )
 
 
 def _assert_budget_lineage_match(
@@ -286,20 +381,19 @@ def _assert_budget_lineage_match(
 def _assert_predecessor_binding(
     *,
     receipt: ValidatedTurnReceipt,
-    decision: Mapping[str, Any],
+    predecessor_turn_key: str | None,
 ) -> None:
     """Prove the fresh envelope causally succeeds the receipt.
 
-    The envelope must declare ``predecessor_turn_key`` equal to the receipt's
-    ``turn_key``. Without this binding an old receipt for the same todo could
-    be replayed against any later envelope. A missing or mismatched key raises
-    ``ValueError`` (``stale_receipt``) rather than guessing succession.
+    The outer adapter must bind the fresh decision to the receipt's
+    ``turn_key``. The causal assertion stays beside the envelope instead of
+    adding an unsigned field to ``loopx_turn_envelope_v0``.
     """
 
-    predecessor = str(decision.get("predecessor_turn_key") or "")
+    predecessor = str(predecessor_turn_key or "")
     if not predecessor:
         raise ValueError(
-            "stale_receipt: fresh decision is missing predecessor_turn_key; "
+            "stale_receipt: continuation is missing predecessor_turn_key; "
             "cannot prove causal succession from the receipt"
         )
     if predecessor != receipt.turn_key:
@@ -310,20 +404,81 @@ def _assert_predecessor_binding(
         )
 
 
+def _completion_disposition(
+    *,
+    receipt: ValidatedTurnReceipt,
+    decision: Mapping[str, Any],
+    decision_lineage: Mapping[str, str],
+    route: LoopXTurnRoute,
+) -> dict[str, Any]:
+    completion = dict(receipt.todo_completion or {})
+    continuation = str(completion.get("continuation") or "")
+    if continuation == "no_followup":
+        if (
+            decision.get("effective_action") != "terminal_no_followup"
+            or decision.get("state") != "terminal_no_followup"
+        ):
+            raise ValueError(
+                "no_followup completion requires fresh terminal Goal frontier evidence"
+            )
+        return _disposition(
+            LoopDisposition.TERMINAL,
+            reason="durable no-follow-up and fresh Goal frontier prove terminal closure",
+            lineage=receipt.lineage,
+        )
+
+    selected_todo_id = str(decision_lineage.get("todo_id") or "")
+    if not selected_todo_id:
+        raise ValueError("Todo completion continuation requires a fresh selected Todo")
+    if continuation == "successor":
+        successor_ids = completion.get("successor_todo_ids")
+        if not isinstance(successor_ids, list) or selected_todo_id not in successor_ids:
+            raise ValueError(
+                "stale_receipt: fresh decision is not a declared completion successor"
+            )
+    elif continuation == "active_goal" and selected_todo_id == receipt.lineage["todo_id"]:
+        raise ValueError(
+            "stale_receipt: active Goal continuation reselected the completed Todo"
+        )
+
+    if route is LoopXTurnRoute.USER_ACTION_REQUIRED:
+        return _disposition(
+            LoopDisposition.USER_ACTION_REQUIRED,
+            reason="fresh decision projects a concrete user action after Todo completion",
+            lineage=decision_lineage,
+        )
+    disposition = _route_to_disposition(route)
+    if disposition is LoopDisposition.REPLAN:
+        return _replan_disposition(
+            reason="fresh decision requires replan after Todo completion",
+            decision_lineage=decision_lineage,
+        )
+    return _disposition(
+        disposition,
+        reason=(
+            "durable Todo completion continues through its declared successor"
+            if continuation == "successor"
+            else "durable Todo completion continues through the fresh Goal frontier"
+        ),
+        lineage=decision_lineage,
+    )
+
+
 def decide_loop_disposition(
     *,
     turn_receipt: ValidatedTurnReceipt | None,
     quota_decision: Mapping[str, Any],
+    predecessor_turn_key: str | None = None,
     bounded_turn_budget: BoundedTurnBudget | None = None,
 ) -> dict[str, Any]:
     """Decide the next loop disposition from one validated receipt and a fresh decision.
 
     ``turn_receipt`` is a :class:`ValidatedTurnReceipt` (or ``None`` when no
     prior Turn has committed). ``quota_decision`` is a fresh
-    ``loopx_turn_envelope_v0`` that must declare ``predecessor_turn_key``
-    matching the receipt when one is supplied. ``bounded_turn_budget`` is a
-    :class:`BoundedTurnBudget` and is required when the receipt is
-    ``validated_progress`` so continuation can prove a bound.
+    ``loopx_turn_envelope_v0``. The outer adapter supplies a separate
+    ``predecessor_turn_key`` matching the receipt when one is present; this
+    keeps causal continuation out of the signed quota envelope schema.
+    ``bounded_turn_budget`` is required for ``validated_progress``.
 
     The function is pure: it launches no host, writes no state, and spends no
     quota. Invalid or stale input raises ``ValueError`` at the typed-input
@@ -333,12 +488,24 @@ def decide_loop_disposition(
 
     route = _envelope_route(quota_decision)
     decision_lineage = _decision_lineage(quota_decision)
-    if not all(decision_lineage.values()):
+    if not decision_lineage["goal_id"] or not decision_lineage["agent_id"]:
         raise ValueError(
-            "fresh quota decision is missing goal/agent/todo lineage"
+            "fresh quota decision is missing goal/agent lineage"
         )
 
     if turn_receipt is None:
+        if str(quota_decision.get("effective_action") or "") == "terminal_no_followup":
+            if quota_decision.get("state") != "terminal_no_followup":
+                raise ValueError(
+                    "terminal no-follow-up requires fresh Goal frontier state"
+                )
+            return _disposition(
+                LoopDisposition.TERMINAL,
+                reason="fresh Goal frontier proves terminal no-follow-up",
+                lineage=decision_lineage,
+            )
+        if not decision_lineage["todo_id"]:
+            raise ValueError("executable quota decision is missing selected Todo lineage")
         disposition = _route_to_disposition(route)
         if disposition is LoopDisposition.REPLAN:
             return _replan_disposition(
@@ -354,22 +521,31 @@ def decide_loop_disposition(
     # Prove the envelope causally succeeds this exact receipt before any
     # disposition is considered. This closes the stale-replay gap: an old
     # receipt for the same todo cannot be replayed against a later envelope.
-    _assert_predecessor_binding(receipt=turn_receipt, decision=quota_decision)
-    _assert_lineage_match(
+    _assert_predecessor_binding(
+        receipt=turn_receipt,
+        predecessor_turn_key=predecessor_turn_key,
+    )
+    _assert_goal_agent_match(
         receipt_lineage=turn_receipt.lineage,
         decision_lineage=decision_lineage,
     )
 
     result_kind = turn_receipt.result_kind
 
-    # A met terminal postcondition outranks a decision-only user action, but
-    # only after the receipt is proven valid, fresh, and fully committed.
     if result_kind is LoopXTurnResultKind.VALIDATED_COMPLETION:
-        return _disposition(
-            LoopDisposition.TERMINAL,
-            reason="terminal postcondition met by validated completion",
-            lineage=decision_lineage,
+        return _completion_disposition(
+            receipt=turn_receipt,
+            decision=quota_decision,
+            decision_lineage=decision_lineage,
+            route=route,
         )
+
+    if not decision_lineage["todo_id"]:
+        raise ValueError("receipt-backed decision is missing selected Todo lineage")
+    _assert_same_todo(
+        receipt_lineage=turn_receipt.lineage,
+        decision_lineage=decision_lineage,
+    )
 
     # Decision user action outranks every non-terminal disposition.
     if route is LoopXTurnRoute.USER_ACTION_REQUIRED:
@@ -389,10 +565,9 @@ def decide_loop_disposition(
             decision_lineage=decision_lineage,
         )
         if bounded_turn_budget.remaining <= 0:
-            return _disposition(
-                LoopDisposition.TERMINAL,
-                reason="bounded turn budget exhausted after validated progress",
-                lineage=decision_lineage,
+            return _replan_disposition(
+                reason="bounded turn budget exhausted; replan before another Turn",
+                decision_lineage=decision_lineage,
             )
         disposition = _route_to_disposition(route)
         if disposition is LoopDisposition.REPLAN:
