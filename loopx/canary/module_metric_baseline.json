@@ -23,7 +23,7 @@
     "loopx/capabilities/catalog.py": {
       "any_count": 8,
       "dict_any_count": 0,
-      "lines": 1863
+      "lines": 1892
     },
     "loopx/capabilities/content_ops/surface.py": {
       "any_count": 40,

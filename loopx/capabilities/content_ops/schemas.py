@@ -34,6 +34,8 @@ CONTENT_OPS_ITEM_TRANSITION_RECEIPT_SCHEMA_VERSION = (
     "content_ops_item_transition_receipt_v0"
 )
 CONTENT_OPS_ITEM_PROJECTION_SCHEMA_VERSION = "content_ops_item_projection_v0"
+CONTENT_OPS_QUEUE_PROJECTION_SCHEMA_VERSION = "content_ops_queue_projection_v0"
+CONTENT_OPS_QUEUE_STATUS_PACKET_SCHEMA_VERSION = "content_ops_queue_status_packet_v0"
 CONTENT_OPS_EXPLORATION_PLAN_PACKET_SCHEMA_VERSION = (
     "content_ops_exploration_plan_packet_v0"
 )

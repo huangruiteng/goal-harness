@@ -1374,6 +1374,21 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "purpose": "Merge public source packets and private owner gates into a control-plane surface.",
                 "write_boundary": "local packet aggregation only",
             },
+            {
+                "command": "loopx content-ops item-create --item-id <id> --item-kind <kind> --channel <channel> --content-digest <sha256> --content-ref <ref> --created-at <iso> --format json",
+                "purpose": "Create one provider-neutral content item without draft bodies.",
+                "write_boundary": "local item packet only; no external write",
+            },
+            {
+                "command": "loopx content-ops item-transition --item-json <item.json> --event-json <event.json> --format json",
+                "purpose": "Apply one content item lifecycle event and emit a compact receipt.",
+                "write_boundary": "local item transition only; no external write",
+            },
+            {
+                "command": "loopx content-ops queue-status --item-json <item.json> --format json",
+                "purpose": "Project caller-owned content items into one read-only managed queue surface.",
+                "write_boundary": "local queue projection only; no external read or write",
+            },
         ],
         "implemented_protocols": [
             {
@@ -1406,6 +1421,16 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "module": "loopx.capabilities.content_ops.social_browser_x",
                 "doc": "docs/capabilities/content-ops/README.md",
             },
+            {
+                "schema_version": "content_ops_item_v0",
+                "module": "loopx.capabilities.content_ops.item_lifecycle",
+                "doc": "docs/reference/protocols/content-ops-item-lifecycle-v0.md",
+            },
+            {
+                "schema_version": "content_ops_queue_projection_v0",
+                "module": "loopx.capabilities.content_ops.item_lifecycle",
+                "doc": "docs/reference/protocols/content-ops-queue-v0.md",
+            },
         ],
         "smokes": [
             "python3 examples/content-ops-exploration-plan-smoke.py",
@@ -1413,15 +1438,19 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
             "python3 examples/content-ops-private-connector-gate-smoke.py",
             "python3 examples/content-ops-chatview-report-smoke.py",
             "python3 examples/content-ops-packet-aggregation-smoke.py",
+            "python3 examples/content-ops-queue-status-smoke.py",
         ],
         "docs": [
             "docs/capabilities/content-ops/README.md",
             "docs/reference/protocols/content-ops-surface-v0.md",
+            "docs/reference/protocols/content-ops-item-lifecycle-v0.md",
+            "docs/reference/protocols/content-ops-queue-v0.md",
         ],
         "boundaries": [
             "Private connectors enter as owner gates or compact approved counts first.",
             "Raw chats, transcripts, auth material, logs, and local paths are not copied into public packets.",
             "Publish remains blocked until an explicit user decision.",
+            "Queue projection is read-only and never stores draft bodies or provider credentials.",
         ],
         "next_real_step": (
             "Turn the aggregated surface into a small review/feed UI where a user "
