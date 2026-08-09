@@ -21,6 +21,7 @@ from ..effect_program import (
 from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
+from .driver import selected_turn_todo
 from .settlement import execute_turn_driver_settlement
 from .transaction import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
@@ -960,13 +961,8 @@ def _completion_writeback_outcome(
     if not isinstance(completion, Mapping):
         return None
     envelope = plan.get("turn_envelope")
-    action = envelope.get("action") if isinstance(envelope, Mapping) else None
-    selected_todo = action.get("selected_todo") if isinstance(action, Mapping) else None
-    expected_todo_id = (
-        str(selected_todo.get("todo_id") or "")
-        if isinstance(selected_todo, Mapping)
-        else ""
-    )
+    selected_todo = selected_turn_todo(envelope) if isinstance(envelope, Mapping) else {}
+    expected_todo_id = str(selected_todo.get("todo_id") or "")
     try:
         return require_loopx_turn_completion_outcome(
             completion,
@@ -993,12 +989,7 @@ def _ensure_turn_settlement_plan(
     envelope = plan.get("turn_envelope")
     if not isinstance(envelope, Mapping):
         return
-    action = envelope.get("action")
-    if not isinstance(action, Mapping):
-        return
-    selected_todo = action.get("selected_todo")
-    if not isinstance(selected_todo, Mapping):
-        return
+    selected_todo = selected_turn_todo(envelope)
     lineage = {
         "goal_id": str(envelope.get("goal_id") or ""),
         "agent_id": str(envelope.get("agent_id") or ""),

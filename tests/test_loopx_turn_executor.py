@@ -54,6 +54,23 @@ def _plan() -> dict[str, object]:
     )
 
 
+def _adaptive_plan() -> dict[str, object]:
+    plan = _plan()
+    envelope = plan["turn_envelope"]
+    assert isinstance(envelope, dict)
+    envelope["action"]["selected_todo"] = {"todo_id": "todo-stale"}
+    envelope["task_orchestration_contract"] = {
+        "schema_version": "task_orchestration_contract_v2",
+        "mode": "adaptive",
+        "primary_todo_id": "todo_fixture0001",
+    }
+    return build_loopx_turn_plan(
+        envelope,
+        host="generic-cli",
+        execution_mode="isolated-headless",
+    )
+
+
 def _host_result(plan: dict[str, object], *, kind: str = "validated_progress") -> dict[str, object]:
     transaction = plan["transaction"]
     assert isinstance(transaction, dict)
@@ -402,6 +419,53 @@ def test_run_once_legacy_plan_without_settlement_plan_is_upgraded(
         == ["validation", "durable_writeback", "quota_spend"]
     )
     assert calls == {"writeback": 1, "spend": 1, "scheduler": 1}
+
+
+def test_adaptive_completion_upgrades_legacy_plan_with_primary_todo_identity(
+    tmp_path: Path,
+) -> None:
+    plan = _adaptive_plan()
+    transaction = plan["transaction"]
+    assert isinstance(transaction, dict)
+    transaction.pop("settlement_plan", None)
+    calls = {"completion": 0, "spend": 0, "scheduler": 0}
+
+    def completion_writeback(_result: dict[str, object]) -> dict[str, object]:
+        calls["completion"] += 1
+        return {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "active_goal",
+            },
+        }
+
+    committed = run_loopx_turn_once(
+        plan,
+        host_runner=lambda _request: _host_result(
+            plan,
+            kind="validated_completion",
+        ),
+        project=tmp_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id="fixture-goal",
+        timeout_seconds=5,
+        execute=True,
+        task_validator=_passing_validator,
+        writeback=lambda _result: {"ok": True, "appended": True},
+        completion_writeback=completion_writeback,
+        spend=lambda: calls.__setitem__("spend", calls["spend"] + 1)
+        or {"ok": True, "appended": True},
+        scheduler=lambda _spend: calls.__setitem__(
+            "scheduler", calls["scheduler"] + 1
+        )
+        or {"completed": True, "acknowledged": True},
+    )
+
+    assert committed["status"] == "committed"
+    assert committed["receipt"]["lineage"]["todo_id"] == "todo_fixture0001"
+    assert calls == {"completion": 1, "spend": 1, "scheduler": 1}
 
 
 def test_validated_completion_requires_explicit_lifecycle_writeback(
