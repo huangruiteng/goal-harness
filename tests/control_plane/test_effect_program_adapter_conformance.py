@@ -313,7 +313,10 @@ def _assert_semantic_settlement(
         if observation.effect_calls != adapter.success_calls:
             raise AssertionError("success side-effect trace is not protocol ordered")
     else:
-        failure_index = adapter.success_receipts.index(result.failure.step_kind)
+        failure_step = result.failure.step_kind
+        if failure_step not in adapter.success_receipts:
+            raise AssertionError("failure step is outside the settlement protocol")
+        failure_index = adapter.success_receipts.index(failure_step)
         expected_receipts = adapter.success_receipts[:failure_index]
         expected_calls = tuple(
             step
@@ -406,6 +409,19 @@ def test_semantic_oracle_kills_effect_program_mutations(
 
     with pytest.raises(AssertionError, match=mutation.expected_error):
         _assert_semantic_settlement(adapter, mutation.mutate(observation))
+
+
+def test_semantic_oracle_rejects_out_of_protocol_failure(tmp_path: Path) -> None:
+    adapter = next(adapter for adapter in ADAPTERS if adapter.name == "turn_driver")
+    observation = adapter.run(tmp_path / adapter.name, "writeback_failure")
+    failure = observation.result.failure
+    assert failure is not None
+    mutated_failure = replace(failure, step_kind=SettlementStepKind.TODO_COMPLETION)
+    mutated_result = replace(observation.result, failure=mutated_failure)
+    mutated = replace(observation, result=mutated_result)
+
+    with pytest.raises(AssertionError, match="outside the settlement protocol"):
+        _assert_semantic_settlement(adapter, mutated)
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda adapter: adapter.name)
