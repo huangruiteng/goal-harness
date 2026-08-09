@@ -26,6 +26,7 @@ from .transaction import (
     LOOPX_TURN_RESULT_SCHEMA_VERSION,
     TRANSACTION_PHASES,
     LoopXTurnResultKind,
+    build_loopx_turn_transaction_plan,
     validate_loopx_turn_receipt,
 )
 
@@ -977,6 +978,53 @@ def _completion_writeback_outcome(
     return outcome
 
 
+def _ensure_turn_settlement_plan(
+    plan: Mapping[str, Any],
+    transaction_plan: dict[str, Any],
+) -> None:
+    """Upgrade a legacy transaction plan with a typed settlement plan.
+
+    Turn plans produced by older LoopX releases (for example plans read from a
+    scored-workspace image) do not carry ``settlement_plan``. Rebuild it from
+    the plan's own ``turn_envelope`` lineage so the typed closeout can bind
+    validation -> writeback -> spend instead of failing every legacy run.
+    """
+
+    if isinstance(transaction_plan.get("settlement_plan"), Mapping):
+        return
+    envelope = plan.get("turn_envelope")
+    if not isinstance(envelope, Mapping):
+        return
+    action = envelope.get("action")
+    if not isinstance(action, Mapping):
+        return
+    selected_todo = action.get("selected_todo")
+    if not isinstance(selected_todo, Mapping):
+        return
+    lineage = {
+        "goal_id": str(envelope.get("goal_id") or ""),
+        "agent_id": str(envelope.get("agent_id") or ""),
+        "todo_id": str(selected_todo.get("todo_id") or ""),
+    }
+    if not all(lineage.values()):
+        return
+    host = plan.get("host")
+    host_fields = host if isinstance(host, Mapping) else {}
+    built = build_loopx_turn_transaction_plan(
+        planned=True,
+        lineage=lineage,
+        host=str(host_fields.get("kind") or "generic-cli"),
+        execution_mode=str(
+            host_fields.get("execution_mode") or "isolated-headless"
+        ),
+        session_action=str(host_fields.get("session_action") or "resume"),
+        turn_instance_id=transaction_plan.get("turn_instance_id"),
+    )
+    settlement_plan = built.get("settlement_plan")
+    if isinstance(settlement_plan, Mapping):
+        transaction_plan["settlement_plan"] = settlement_plan
+
+
 def _typed_settlement_stage(
     plan: Mapping[str, Any],
     result: dict[str, Any],
@@ -995,6 +1043,7 @@ def _typed_settlement_stage(
         if isinstance(plan.get("transaction"), Mapping)
         else {}
     )
+    _ensure_turn_settlement_plan(plan, transaction_plan)
 
     def writeback_effect() -> Mapping[str, Any]:
         if result.get("result_kind") == LoopXTurnResultKind.VALIDATED_COMPLETION.value:

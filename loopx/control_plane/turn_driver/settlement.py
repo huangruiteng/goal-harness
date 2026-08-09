@@ -41,6 +41,40 @@ def _effect_id(transaction_plan: Mapping[str, Any]) -> str:
     return effect_id
 
 
+def _settlement_effect_id(
+    transaction_plan: Mapping[str, Any],
+) -> SettlementResult[str]:
+    """Resolve the typed effect id, failing closed instead of raising.
+
+    Legacy or journaled Turn plans created before the typed settlement binding
+    may have no ``settlement_plan``. The turn driver must surface that as a
+    typed validation failure rather than crash with ``ValueError``.
+    """
+
+    settlement_plan = transaction_plan.get("settlement_plan")
+    if not isinstance(settlement_plan, Mapping):
+        return SettlementResult.failed(
+            kind=SettlementFailureKind.RECEIPT_MISSING,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason="Turn transaction has no typed settlement plan",
+        )
+    identity = settlement_plan.get("identity")
+    if not isinstance(identity, Mapping):
+        return SettlementResult.failed(
+            kind=SettlementFailureKind.INVALID_IDENTITY,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason="Turn settlement plan has no identity",
+        )
+    effect_id = str(identity.get("effect_id") or "").strip()
+    if not effect_id:
+        return SettlementResult.failed(
+            kind=SettlementFailureKind.INVALID_IDENTITY,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason="Turn settlement plan has no effect id",
+        )
+    return SettlementResult.pure(effect_id)
+
+
 def _receipt(
     *,
     effect_id: str,
@@ -194,7 +228,11 @@ def execute_turn_driver_settlement(
 ) -> SettlementResult[TurnSettlementState]:
     """Bind validation -> writeback -> spend for the isolated Turn adapter."""
 
-    effect_id = _effect_id(transaction_plan)
+    effect_result = _settlement_effect_id(transaction_plan)
+    if effect_result.failure is not None:
+        return effect_result
+    effect_id = effect_result.value
+    assert effect_id is not None
     result = _seed_result(
         transaction_plan,
         transaction_phases=transaction_phases,
