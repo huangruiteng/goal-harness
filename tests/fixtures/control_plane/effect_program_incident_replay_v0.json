@@ -1,0 +1,132 @@
+{
+  "schema_version": "effect_program_incident_replay_v0",
+  "public_boundary": {
+    "source_class": "generalized_regression_incidents",
+    "retained_fields": [
+      "adapter",
+      "phase_prefix",
+      "receipt_presence",
+      "failure_point",
+      "semantic_outcome"
+    ],
+    "excluded_fields": [
+      "raw_logs",
+      "trajectories",
+      "local_paths",
+      "private_links",
+      "people",
+      "incident_timeline"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "spend-claim-without-writeback-receipt",
+      "adapter": "turn_driver",
+      "incident_class": "partial_journal_replay",
+      "invariant_id": "INV-WRITEBACK-BEFORE-SPEND",
+      "rationale": "A persisted spend claim cannot establish settlement when the same identity has no committed writeback receipt.",
+      "input": {
+        "completed_phases": [
+          "host_execute",
+          "typed_result",
+          "validation",
+          "durable_writeback",
+          "quota_spend"
+        ],
+        "writeback_committed": false,
+        "spend_committed": true
+      },
+      "expected": {
+        "status": "failure",
+        "failure_kind": "receipt_missing",
+        "failure_step": "durable_writeback",
+        "effect_calls": [],
+        "checkpoint_steps": [],
+        "receipt_steps": [
+          "validation"
+        ],
+        "receipt_identity_count": 1
+      }
+    },
+    {
+      "case_id": "writeback-rejection-short-circuits-spend",
+      "adapter": "turn_driver",
+      "incident_class": "effect_failure",
+      "invariant_id": "INV-FAILURE-SHORT-CIRCUIT",
+      "rationale": "A rejected writeback remains the terminal failure and no quota spend effect may execute afterward.",
+      "input": {
+        "completed_phases": [
+          "host_execute",
+          "typed_result",
+          "validation"
+        ],
+        "writeback_committed": false,
+        "spend_committed": false,
+        "reject_at": "durable_writeback"
+      },
+      "expected": {
+        "status": "failure",
+        "failure_kind": "writeback_rejected",
+        "failure_step": "durable_writeback",
+        "effect_calls": [
+          "durable_writeback"
+        ],
+        "checkpoint_steps": [],
+        "receipt_steps": [
+          "validation"
+        ],
+        "receipt_identity_count": 1
+      }
+    },
+    {
+      "case_id": "guard-effect-identity-drift",
+      "adapter": "quota",
+      "incident_class": "identity_drift",
+      "invariant_id": "INV-ONE-EFFECT-IDENTITY",
+      "rationale": "A guard receipt bound to another effect identity fails validation before any settlement effect can run.",
+      "input": {
+        "guard_effect_id": "replay-goal:replay-agent:todo_incident:another-turn"
+      },
+      "expected": {
+        "status": "failure",
+        "failure_kind": "identity_mismatch",
+        "failure_step": "validation",
+        "effect_calls": [],
+        "checkpoint_steps": [],
+        "receipt_steps": [],
+        "receipt_identity_count": 0
+      }
+    },
+    {
+      "case_id": "committed-settlement-replay-is-idempotent",
+      "adapter": "turn_driver",
+      "incident_class": "duplicate_delivery_retry",
+      "invariant_id": "INV-AT-MOST-ONCE-SETTLEMENT",
+      "rationale": "Replaying a fully committed settlement reconstructs receipts without invoking writeback or spend again.",
+      "input": {
+        "completed_phases": [
+          "host_execute",
+          "typed_result",
+          "validation",
+          "durable_writeback",
+          "quota_spend"
+        ],
+        "writeback_committed": true,
+        "spend_committed": true
+      },
+      "expected": {
+        "status": "success",
+        "failure_kind": null,
+        "failure_step": null,
+        "effect_calls": [],
+        "checkpoint_steps": [],
+        "receipt_steps": [
+          "validation",
+          "durable_writeback",
+          "quota_spend"
+        ],
+        "receipt_identity_count": 1
+      }
+    }
+  ]
+}
