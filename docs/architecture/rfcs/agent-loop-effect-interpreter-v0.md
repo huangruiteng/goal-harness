@@ -48,7 +48,8 @@ that model over time.
 | M3 Focused test families | Merged/Complete (#2916-#2918, #2925, #2929, #2984) |
 | M4 Architecture documentation | Merged/Complete (#2921, #2923, #2924, #2985) |
 | M5 Steady-state review | Merged/Complete (#2922, #2931, #2984, #2985) |
-| M6 General effect-program abstraction | Complete (#2963-#2984); Q8 quality-gate audit passed |
+| M6 General effect-program abstraction | Narrow gate complete (#2963-#2987); qualitative transformation requires M7 |
+| M7 Effect Program Runtime | In progress; plan todo `todo_dbd4425374fc` |
 
 ## Why This Matters
 
@@ -367,6 +368,33 @@ Phases:
   budget/differential, import boundaries, model-behavior/Doubao shadow, and
   turn driver/executor.
 - `loopx canary quality-audit`: `ready=true`, `gap_count=0`, `drift_count=0`.
+
+### M7: Effect Program Runtime
+
+M6 makes the effect lens runtime-consumed but still descriptive: the main
+packet builders compute their decisions first and map them onto `EffectTurn`
+afterward. M7 is the prescriptive rewrite that makes LoopX core execute as an
+effect program rather than explain itself as one.
+
+R5: add a minimal `EffectInterpreter` protocol shared by quota and turn-result
+runtime callers. Do not add a registry or generic composition framework.
+
+R6: make `quota should-run` build `EffectTurn` before rendering its
+observation packet, so the packet becomes a derived view instead of the
+source.
+
+R7: execute the guided bootstrap ordered steps through `EffectProgram` with
+typed failure, cancellation, permission, and budget semantics.
+
+R8: make the turn driver execute `next_effect` as an ordered effect program,
+unifying scheduler ACK, spend, and writeback as effect steps.
+
+R9: align todos, monitors, and gates family by family behind the same
+interpreter protocol, each with parity fixtures before replacing the old
+path.
+
+M7 is not complete until packet builders and the ordered executor are driven
+by the abstraction, not merely mapped onto it.
 
 ### Replacement-First Rule
 
