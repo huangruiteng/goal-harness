@@ -15,6 +15,8 @@ from .schemas import (
     CONTENT_OPS_ITEM_SCHEMA_VERSION,
     CONTENT_OPS_ITEM_TRANSITION_PACKET_SCHEMA_VERSION,
     CONTENT_OPS_ITEM_TRANSITION_RECEIPT_SCHEMA_VERSION,
+    CONTENT_OPS_QUEUE_PROJECTION_SCHEMA_VERSION,
+    CONTENT_OPS_QUEUE_STATUS_PACKET_SCHEMA_VERSION,
 )
 
 ALLOWED_ITEM_KINDS = {"article", "post", "profile_update", "reply", "repost"}
@@ -734,6 +736,110 @@ def project_content_ops_item(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_content_ops_queue_projection(
+    *,
+    items: Sequence[Mapping[str, Any]],
+    queue_id: str = "content_ops_managed_queue",
+    generated_at: str = "2026-08-10T00:00:00Z",
+) -> dict[str, Any]:
+    """Project caller-owned content items into one managed queue surface."""
+
+    queue_token = _token(queue_id, "queue_id")
+    timestamp = _timestamp(generated_at, "generated_at")
+    if not items:
+        raise ValueError("content queue requires at least one item")
+    normalized = [_require_item(item) for item in items]
+    item_projections = [project_content_ops_item(item) for item in normalized]
+
+    counts: dict[str, int] = {}
+    terminal_count = 0
+    for projection in item_projections:
+        state = str(projection["state"])
+        counts[state] = counts.get(state, 0) + 1
+        if projection["terminal"]:
+            terminal_count += 1
+
+    actionable = [
+        {
+            "priority_index": index,
+            "item_id": projection["item_id"],
+            "item_kind": projection["item_kind"],
+            "channel": projection["channel"],
+            "state": projection["state"],
+            "revision": projection["revision"],
+            "next_actions": projection["next_actions"],
+        }
+        for index, projection in enumerate(item_projections, start=1)
+        if not projection["terminal"]
+    ]
+    next_action = None
+    if actionable:
+        first = actionable[0]
+        next_action = {
+            "item_id": first["item_id"],
+            "state": first["state"],
+            "priority_index": first["priority_index"],
+            "next_actions": first["next_actions"],
+        }
+
+    return {
+        "schema_version": CONTENT_OPS_QUEUE_PROJECTION_SCHEMA_VERSION,
+        "queue_id": queue_token,
+        "generated_at": timestamp,
+        "item_count": len(item_projections),
+        "counts": counts,
+        "terminal_count": terminal_count,
+        "items": [
+            {
+                "priority_index": index,
+                "item_id": projection["item_id"],
+                "item_kind": projection["item_kind"],
+                "channel": projection["channel"],
+                "state": projection["state"],
+                "revision": projection["revision"],
+                "content_ref": normalized[index - 1]["content_ref"],
+                "terminal": projection["terminal"],
+                "published_url": projection["published_url"],
+                "next_actions": projection["next_actions"],
+            }
+            for index, projection in enumerate(item_projections, start=1)
+        ],
+        "next_action": next_action,
+        "truth_contract": {
+            "projection_is_writable": False,
+            "external_effect_authority": "none",
+            "autopublish_allowed": False,
+        },
+    }
+
+
+def build_content_ops_queue_status_packet(
+    *,
+    items: Sequence[Mapping[str, Any]],
+    queue_id: str = "content_ops_managed_queue",
+    generated_at: str = "2026-08-10T00:00:00Z",
+) -> dict[str, Any]:
+    """Build a read-only queue status packet without draft bodies."""
+
+    projection = build_content_ops_queue_projection(
+        items=items,
+        queue_id=queue_id,
+        generated_at=generated_at,
+    )
+    return {
+        "ok": True,
+        "schema_version": CONTENT_OPS_QUEUE_STATUS_PACKET_SCHEMA_VERSION,
+        "queue_id": projection["queue_id"],
+        "generated_at": projection["generated_at"],
+        "item_count": projection["item_count"],
+        "projection": projection,
+        "external_reads_performed": False,
+        "external_writes_performed": False,
+        "private_source_bodies_read": False,
+        "autopublish_allowed": False,
+    }
+
+
 def build_content_ops_item_packet(**kwargs: Any) -> dict[str, Any]:
     item = build_content_ops_item(**kwargs)
     return {
@@ -840,4 +946,55 @@ def render_content_ops_item_packet_markdown(packet: Mapping[str, Any]) -> str:
                 f"- transition: `{receipt.get('from_state')} -> {receipt.get('to_state')}`",
             ]
         )
+    return "\n".join(lines) + "\n"
+
+
+def render_content_ops_queue_status_markdown(packet: Mapping[str, Any]) -> str:
+    if not packet.get("ok"):
+        return f"# LoopX Content-Ops Queue\n\n- error: `{packet.get('error')}`\n"
+    projection = (
+        packet.get("projection")
+        if isinstance(packet.get("projection"), Mapping)
+        else {}
+    )
+    counts = projection.get("counts") if isinstance(projection.get("counts"), Mapping) else {}
+    next_action = (
+        projection.get("next_action")
+        if isinstance(projection.get("next_action"), Mapping)
+        else None
+    )
+    lines = [
+        "# LoopX Content-Ops Queue",
+        "",
+        f"- queue_id: `{projection.get('queue_id')}`",
+        f"- item_count: `{projection.get('item_count')}`",
+        f"- terminal_count: `{projection.get('terminal_count')}`",
+        f"- counts: `{counts}`",
+        f"- external_writes_performed: `{packet.get('external_writes_performed')}`",
+    ]
+    if next_action:
+        lines.extend(
+            [
+                "",
+                "## Next Action",
+                "",
+                f"- item_id: `{next_action.get('item_id')}`",
+                f"- state: `{next_action.get('state')}`",
+                f"- priority_index: `{next_action.get('priority_index')}`",
+                f"- next_actions: `{next_action.get('next_actions')}`",
+            ]
+        )
+    items = projection.get("items")
+    if isinstance(items, Sequence) and not isinstance(items, (str, bytes)):
+        lines.extend(["", "## Queue Items", ""])
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            lines.append(
+                f"- `{item.get('priority_index')}` "
+                f"`{item.get('item_id')}` "
+                f"state=`{item.get('state')}` "
+                f"kind=`{item.get('item_kind')}` "
+                f"rev=`{item.get('revision')}`"
+            )
     return "\n".join(lines) + "\n"

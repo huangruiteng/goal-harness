@@ -14,7 +14,9 @@ from ..issue_fix.content_ops_cli import (
 from .item_lifecycle import (
     apply_content_ops_item_event,
     build_content_ops_item_packet,
+    build_content_ops_queue_status_packet,
     render_content_ops_item_packet_markdown,
+    render_content_ops_queue_status_markdown,
 )
 from .surface import (
     build_content_ops_chatview_report_packet,
@@ -388,6 +390,33 @@ def register_content_ops_commands(
         required=True,
         help="Path to a content item event JSON object.",
     )
+    queue_parser = content_ops_sub.add_parser(
+        "queue-status",
+        help=(
+            "Project caller-owned content_ops_item_v0 files into one read-only "
+            "managed queue surface."
+        ),
+    )
+    add_subcommand_format(queue_parser)
+    queue_parser.add_argument(
+        "--item-json",
+        action="append",
+        required=True,
+        help=(
+            "Path to content_ops_item_v0 JSON; repeat in priority order. "
+            "Use '-' to read one item from stdin."
+        ),
+    )
+    queue_parser.add_argument(
+        "--queue-id",
+        default="content_ops_managed_queue",
+        help="Stable queue id for the projection.",
+    )
+    queue_parser.add_argument(
+        "--generated-at",
+        default="2026-08-10T00:00:00Z",
+        help="Public-safe generated_at timestamp for the queue projection.",
+    )
 
 
 def handle_content_ops_command(
@@ -489,13 +518,23 @@ def handle_content_ops_command(
                 _load_json_object(args.event_json),
             )
             renderer = render_content_ops_item_packet_markdown
+        elif args.content_ops_command == "queue-status":
+            payload = build_content_ops_queue_status_packet(
+                items=[
+                    _load_json_object(path) for path in args.item_json
+                ],
+                queue_id=args.queue_id,
+                generated_at=args.generated_at,
+            )
+            renderer = render_content_ops_queue_status_markdown
         else:
             raise ValueError(
                 "content-ops requires `preview`, `exploration-plan`, "
                 "`issue-fix-intake`, `issue-fix-metadata-preview`, "
                 "`observe-public-handle`, `project-private-connector-gate`, "
                 "`aggregate-packets`, `project-chatview-report`, or "
-                "`walkthrough-artifact`, `item-create`, or `item-transition`"
+                "`walkthrough-artifact`, `item-create`, `item-transition`, "
+                "or `queue-status`"
             )
     except Exception as exc:
         payload = {

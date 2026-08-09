@@ -14,6 +14,12 @@ delivery receipts, exact readback, and supersession without copying draft bodies
 or provider credentials into LoopX state. See
 [`content_ops_item_v0`](../../reference/protocols/content-ops-item-lifecycle-v0.md).
 
+`loopx content-ops queue-status` projects caller-owned item files into one
+read-only managed queue surface with state counts and a next action. Priority is
+the order of the `--item-json` inputs; windows live in item approval and delivery
+intent records. See
+[`content_ops_queue_projection_v0`](../../reference/protocols/content-ops-queue-v0.md).
+
 ## Implemented Surface
 
 | Layer | Current path |
@@ -21,6 +27,7 @@ or provider credentials into LoopX state. See
 | Capability module | `loopx/capabilities/content_ops/` |
 | CLI entry | `loopx content-ops ...` |
 | Protocol docs | `docs/reference/protocols/content-ops-surface-v0.md` |
+| Queue projection | `docs/reference/protocols/content-ops-queue-v0.md` |
 | Smoke | `examples/content-ops-*-smoke.py` |
 
 ## Safe Defaults
