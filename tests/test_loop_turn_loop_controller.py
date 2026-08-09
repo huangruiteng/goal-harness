@@ -8,7 +8,10 @@ markers.
 Receipts are produced through the real
 ``build_loopx_turn_transaction_plan -> validate_loopx_turn_receipt`` path so
 the controller consumes only proven ``loopx_turn_receipt_validation_v0``
-output, never a caller-forged ``result_kind + lineage`` mapping.
+output, never a caller-forged ``result_kind + lineage`` mapping. Material
+results (completion/progress) require a fully committed transaction (all seven
+phases); a validation-only intermediate cannot drive a terminal or progress
+transition.
 """
 
 from __future__ import annotations
@@ -29,6 +32,17 @@ from loopx.control_plane.turn_driver.loop_controller import (
     ValidatedTurnReceipt,
     decide_loop_disposition,
 )
+
+
+_ALL_PHASES = [
+    "host_execute",
+    "typed_result",
+    "validation",
+    "durable_writeback",
+    "quota_spend",
+    "scheduler_apply",
+    "scheduler_ack",
+]
 
 
 def _lineage(
@@ -64,7 +78,7 @@ def _result(
         "completed_phases": (
             completed_phases
             if completed_phases is not None
-            else ["host_execute", "typed_result", "validation"]
+            else list(_ALL_PHASES)
         ),
     }
     if failed_phase:
@@ -123,13 +137,14 @@ def _envelope(
     quiet_noop_allowed: bool = False,
     lineage: dict[str, str] | None = None,
     signature_matches: bool = True,
+    predecessor_turn_key: str | None = None,
 ) -> dict[str, object]:
     lin = _lineage() if lineage is None else lineage
     signature: dict[str, object] = {"matches": signature_matches}
     if signature_matches:
         signature["source_hash"] = "sha256:test"
         signature["envelope_hash"] = "sha256:test"
-    return {
+    envelope: dict[str, object] = {
         "schema_version": "loopx_turn_envelope_v0",
         "goal_id": lin["goal_id"],
         "agent_id": lin["agent_id"],
@@ -145,6 +160,9 @@ def _envelope(
         },
         "user": {"action_required": user_action_required},
     }
+    if predecessor_turn_key is not None:
+        envelope["predecessor_turn_key"] = predecessor_turn_key
+    return envelope
 
 
 def _budget(
@@ -185,28 +203,37 @@ def test_no_receipt_with_quiet_decision_waits_no_spend() -> None:
 
 
 def test_validated_completion_is_terminal() -> None:
+    receipt = _validated_receipt(
+        result_kind=LoopXTurnResultKind.VALIDATED_COMPLETION
+    )
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(
-            result_kind=LoopXTurnResultKind.VALIDATED_COMPLETION
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True, predecessor_turn_key=receipt.turn_key
         ),
-        quota_decision=_envelope(should_run=True),
     )
     _assert_markers(payload, "terminal")
 
 
 def test_validated_progress_with_budget_runs_now() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS),
-        quota_decision=_envelope(should_run=True),
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True, predecessor_turn_key=receipt.turn_key
+        ),
         bounded_turn_budget=_budget(max_turns=3, completed_turns=1),
     )
     _assert_markers(payload, "run_now")
 
 
 def test_validated_progress_with_exhausted_budget_is_terminal() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS),
-        quota_decision=_envelope(should_run=True),
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True, predecessor_turn_key=receipt.turn_key
+        ),
         bounded_turn_budget=_budget(max_turns=3, completed_turns=3),
     )
     _assert_markers(payload, "terminal")
@@ -214,36 +241,50 @@ def test_validated_progress_with_exhausted_budget_is_terminal() -> None:
 
 
 def test_validated_progress_without_delivery_decision_waits() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS),
-        quota_decision=_envelope(should_run=False, quiet_noop_allowed=True),
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=False,
+            quiet_noop_allowed=True,
+            predecessor_turn_key=receipt.turn_key,
+        ),
         bounded_turn_budget=_budget(max_turns=3, completed_turns=1),
     )
     _assert_markers(payload, "wait")
 
 
 def test_validated_progress_without_bounded_budget_raises() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
     with pytest.raises(ValueError, match="bounded turn budget"):
         decide_loop_disposition(
-            turn_receipt=_validated_receipt(
-                result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS
+            turn_receipt=receipt,
+            quota_decision=_envelope(
+                should_run=True, predecessor_turn_key=receipt.turn_key
             ),
-            quota_decision=_envelope(should_run=True),
         )
 
 
 def test_repair_receipt_routes_to_repair() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.REPAIR_REQUIRED)
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(result_kind=LoopXTurnResultKind.REPAIR_REQUIRED),
-        quota_decision=_envelope(should_run=True),
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True, predecessor_turn_key=receipt.turn_key
+        ),
     )
     _assert_markers(payload, "repair")
 
 
 def test_replan_receipt_requires_bounded_delta_before_successor() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.REPLAN_REQUIRED)
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(result_kind=LoopXTurnResultKind.REPLAN_REQUIRED),
-        quota_decision=_envelope(should_run=True, effective_action="autonomous_replan"),
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True,
+            effective_action="autonomous_replan",
+            predecessor_turn_key=receipt.turn_key,
+        ),
     )
     _assert_markers(payload, "replan")
     continuation = payload["replan_continuation"]
@@ -265,19 +306,27 @@ def test_replan_decision_without_receipt_also_requires_delta() -> None:
 
 
 def test_user_action_from_receipt_wins() -> None:
+    receipt = _validated_receipt(
+        result_kind=LoopXTurnResultKind.USER_ACTION_REQUIRED
+    )
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(
-            result_kind=LoopXTurnResultKind.USER_ACTION_REQUIRED
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True, predecessor_turn_key=receipt.turn_key
         ),
-        quota_decision=_envelope(should_run=True),
     )
     _assert_markers(payload, "user_action_required")
 
 
 def test_user_action_from_decision_wins_even_with_receipt() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS),
-        quota_decision=_envelope(should_run=True, user_action_required=True),
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True,
+            user_action_required=True,
+            predecessor_turn_key=receipt.turn_key,
+        ),
         bounded_turn_budget=_budget(max_turns=3, completed_turns=1),
     )
     _assert_markers(payload, "user_action_required")
@@ -285,21 +334,30 @@ def test_user_action_from_decision_wins_even_with_receipt() -> None:
 
 def test_validated_completion_wins_over_decision_user_action() -> None:
     # Precedence: a met terminal postcondition is stronger than a decision-only
-    # user action, but only after the receipt is proven valid and fresh.
+    # user action, but only after the receipt is proven valid, fresh, and
+    # fully committed.
+    receipt = _validated_receipt(
+        result_kind=LoopXTurnResultKind.VALIDATED_COMPLETION
+    )
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(
-            result_kind=LoopXTurnResultKind.VALIDATED_COMPLETION
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True,
+            user_action_required=True,
+            predecessor_turn_key=receipt.turn_key,
         ),
-        quota_decision=_envelope(should_run=True, user_action_required=True),
     )
     _assert_markers(payload, "terminal")
     assert "validated completion" in str(payload["reason"])
 
 
 def test_wait_receipt_waits() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.WAIT)
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(result_kind=LoopXTurnResultKind.WAIT),
-        quota_decision=_envelope(should_run=True),
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True, predecessor_turn_key=receipt.turn_key
+        ),
     )
     _assert_markers(payload, "wait")
 
@@ -310,9 +368,12 @@ def test_wait_receipt_waits() -> None:
 )
 def test_failure_receipts_route_to_repair(failure_kind: str) -> None:
     kind = LoopXTurnResultKind(failure_kind)
+    receipt = _validated_receipt(result_kind=kind)
     payload = decide_loop_disposition(
-        turn_receipt=_validated_receipt(result_kind=kind),
-        quota_decision=_envelope(should_run=True),
+        turn_receipt=receipt,
+        quota_decision=_envelope(
+            should_run=True, predecessor_turn_key=receipt.turn_key
+        ),
     )
     _assert_markers(payload, "repair")
     assert failure_kind in str(payload["reason"])
@@ -327,7 +388,11 @@ def test_stale_todo_receipt_raises_not_terminal() -> None:
     with pytest.raises(ValueError, match="stale_receipt"):
         decide_loop_disposition(
             turn_receipt=receipt,
-            quota_decision=_envelope(should_run=True, lineage=_lineage(todo_id="todo-new")),
+            quota_decision=_envelope(
+                should_run=True,
+                lineage=_lineage(todo_id="todo-new"),
+                predecessor_turn_key=receipt.turn_key,
+            ),
         )
 
 
@@ -339,7 +404,11 @@ def test_stale_agent_receipt_raises() -> None:
     with pytest.raises(ValueError, match="stale_receipt"):
         decide_loop_disposition(
             turn_receipt=receipt,
-            quota_decision=_envelope(should_run=True, lineage=_lineage(agent_id="agent-1")),
+            quota_decision=_envelope(
+                should_run=True,
+                lineage=_lineage(agent_id="agent-1"),
+                predecessor_turn_key=receipt.turn_key,
+            ),
         )
 
 
@@ -362,8 +431,77 @@ def test_receipt_requires_ok_true() -> None:
                 "schema_version": "loopx_turn_receipt_validation_v0",
                 "ok": False,
                 "result_kind": "validated_progress",
+                "turn_key": "sha256:abc",
+            }
+        )
+
+
+def test_material_result_requires_committed_status() -> None:
+    # A validation-only (3-phase) completion must not construct a receipt; the
+    # loop must not terminate before writeback/spend/scheduler close the
+    # run-once transaction.
+    plan = _plan()
+    result = _result(
+        plan,
+        result_kind=LoopXTurnResultKind.VALIDATED_COMPLETION,
+        completed_phases=["host_execute", "typed_result", "validation"],
+    )
+    validation = validate_loopx_turn_receipt(plan, result)
+    assert validation["ok"] is True
+    assert validation["status"] == "validated"
+    with pytest.raises(ValueError, match="committed"):
+        ValidatedTurnReceipt.from_validation_result(validation)
+
+
+def test_material_progress_requires_committed_status() -> None:
+    plan = _plan()
+    result = _result(
+        plan,
+        result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS,
+        completed_phases=["host_execute", "typed_result", "validation"],
+    )
+    validation = validate_loopx_turn_receipt(plan, result)
+    assert validation["ok"] is True
+    with pytest.raises(ValueError, match="committed"):
+        ValidatedTurnReceipt.from_validation_result(validation)
+
+
+def test_forged_ok_true_mapping_requires_turn_key() -> None:
+    # A caller-authored mapping with ok=true and lineage but no turn_key must
+    # not construct a receipt; the turn_key is the causal binding handle.
+    with pytest.raises(ValueError, match="turn_key"):
+        ValidatedTurnReceipt.from_validation_result(
+            {
+                "schema_version": "loopx_turn_receipt_validation_v0",
+                "ok": True,
+                "result_kind": "wait",
+                "status": "stopped",
                 "lineage": _lineage(),
             }
+        )
+
+
+def test_missing_predecessor_turn_key_raises() -> None:
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
+    with pytest.raises(ValueError, match="predecessor_turn_key"):
+        decide_loop_disposition(
+            turn_receipt=receipt,
+            quota_decision=_envelope(should_run=True),
+            bounded_turn_budget=_budget(max_turns=3, completed_turns=1),
+        )
+
+
+def test_mismatched_predecessor_turn_key_raises() -> None:
+    # An old receipt for the same todo cannot be replayed against a later
+    # envelope that references a different predecessor turn.
+    receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
+    with pytest.raises(ValueError, match="predecessor_turn_key"):
+        decide_loop_disposition(
+            turn_receipt=receipt,
+            quota_decision=_envelope(
+                should_run=True, predecessor_turn_key="sha256:some-other-turn"
+            ),
+            bounded_turn_budget=_budget(max_turns=3, completed_turns=1),
         )
 
 
@@ -469,24 +607,25 @@ def test_budget_requires_lineage() -> None:
 
 def test_stale_budget_lineage_raises() -> None:
     receipt = _validated_receipt(result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
-    with pytest.raises(ValueError, match="stale_receipt"):
+    with pytest.raises(ValueError, match="stale_budget"):
         decide_loop_disposition(
             turn_receipt=receipt,
-            quota_decision=_envelope(should_run=True),
+            quota_decision=_envelope(
+                should_run=True, predecessor_turn_key=receipt.turn_key
+            ),
             bounded_turn_budget=_budget(lineage=_lineage(agent_id="agent-2")),
         )
 
 
-def test_validated_receipt_carries_lineage_from_plan() -> None:
-    receipt = _validated_receipt(
-        result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS,
-        lineage=_lineage(goal_id="goal-x", agent_id="agent-y", todo_id="todo-z"),
+def test_validated_receipt_carries_turn_key() -> None:
+    plan = _plan(
+        lineage=_lineage(goal_id="goal-x", agent_id="agent-y", todo_id="todo-z")
     )
-    assert receipt.lineage == {
-        "goal_id": "goal-x",
-        "agent_id": "agent-y",
-        "todo_id": "todo-z",
-    }
+    result = _result(plan, result_kind=LoopXTurnResultKind.VALIDATED_PROGRESS)
+    validation = validate_loopx_turn_receipt(plan, result)
+    receipt = ValidatedTurnReceipt.from_validation_result(validation)
+    assert receipt.turn_key == plan["turn_key"]
+    assert receipt.status == "committed"
 
 
 def test_budget_schema_version() -> None:

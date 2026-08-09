@@ -34,9 +34,13 @@ LOOP_CONTROLLER_DISPOSITION_SCHEMA_VERSION = "loop_turn_loop_disposition_v0"
 BOUNDED_TURN_BUDGET_SCHEMA_VERSION = "loop_bounded_turn_budget_v0"
 VALIDATED_TURN_RECEIPT_SCHEMA_VERSION = "loop_validated_turn_receipt_v0"
 
-# Statuses that prove a material result has been independently validated and
-# may therefore drive a terminal or progress transition.
-_VALIDATED_RECEIPT_STATUSES = {"validated", "committed"}
+# Material result kinds that prove a durable delivery effect and may therefore
+# drive a terminal or progress transition. They require a fully committed
+# transaction (all seven phases), not a validation-only intermediate.
+_MATERIAL_PROGRESS_KINDS = {
+    LoopXTurnResultKind.VALIDATED_COMPLETION,
+    LoopXTurnResultKind.VALIDATED_PROGRESS,
+}
 
 
 class LoopDisposition(str, Enum):
@@ -122,10 +126,13 @@ class ValidatedTurnReceipt:
     """A Turn receipt proven by ``validate_loopx_turn_receipt``.
 
     Only a successful ``loopx_turn_receipt_validation_v0`` result (``ok=true``)
-    with a supported result kind can construct one. The normalized
-    ``(goal_id, agent_id, todo_id)`` lineage is taken from the validation
-    result, so a caller cannot forge a completion by hand-writing
-    ``result_kind + lineage``.
+    with a supported result kind can construct one. Material progress results
+    (``validated_completion`` / ``validated_progress``) additionally require
+    ``status="committed"`` so the loop never terminates or continues before the
+    full ``run-once`` transaction (writeback, quota spend, scheduler apply/ack)
+    has closed. The ``turn_key`` binds the receipt to one concrete transaction
+    so a fresh envelope can prove causal succession via
+    ``predecessor_turn_key``.
     """
 
     __slots__ = ("result_kind", "status", "lineage", "turn_key")
@@ -166,16 +173,25 @@ class ValidatedTurnReceipt:
             raise ValueError(
                 f"validated turn receipt has unsupported result_kind {raw_kind!r}"
             ) from None
+        status = str(result.get("status") or "")
+        if result_kind in _MATERIAL_PROGRESS_KINDS and status != "committed":
+            raise ValueError(
+                f"material result {result_kind.value} requires a fully committed "
+                f"transaction (status=committed); got status={status!r}"
+            )
         lineage = _mapping(result.get("lineage"))
         if not all(lineage.get(k) for k in ("goal_id", "agent_id", "todo_id")):
             raise ValueError(
                 "validated turn receipt is missing goal/agent/todo lineage"
             )
+        turn_key = str(result.get("turn_key") or "") or None
+        if not turn_key:
+            raise ValueError("validated turn receipt is missing turn_key")
         return cls(
             result_kind=result_kind,
-            status=str(result.get("status") or ""),
+            status=status,
             lineage=lineage,
-            turn_key=str(result.get("turn_key") or "") or None,
+            turn_key=turn_key,
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -253,6 +269,47 @@ def _assert_lineage_match(
             )
 
 
+def _assert_budget_lineage_match(
+    *,
+    budget_lineage: Mapping[str, str],
+    decision_lineage: Mapping[str, str],
+) -> None:
+    for key in ("goal_id", "agent_id", "todo_id"):
+        if budget_lineage.get(key) != decision_lineage.get(key):
+            raise ValueError(
+                "stale_budget: budget lineage does not match the fresh decision "
+                f"on {key} (budget={budget_lineage.get(key)!r}, "
+                f"decision={decision_lineage.get(key)!r})"
+            )
+
+
+def _assert_predecessor_binding(
+    *,
+    receipt: ValidatedTurnReceipt,
+    decision: Mapping[str, Any],
+) -> None:
+    """Prove the fresh envelope causally succeeds the receipt.
+
+    The envelope must declare ``predecessor_turn_key`` equal to the receipt's
+    ``turn_key``. Without this binding an old receipt for the same todo could
+    be replayed against any later envelope. A missing or mismatched key raises
+    ``ValueError`` (``stale_receipt``) rather than guessing succession.
+    """
+
+    predecessor = str(decision.get("predecessor_turn_key") or "")
+    if not predecessor:
+        raise ValueError(
+            "stale_receipt: fresh decision is missing predecessor_turn_key; "
+            "cannot prove causal succession from the receipt"
+        )
+    if predecessor != receipt.turn_key:
+        raise ValueError(
+            "stale_receipt: fresh decision predecessor_turn_key "
+            f"({predecessor!r}) does not match the receipt turn_key "
+            f"({receipt.turn_key!r})"
+        )
+
+
 def decide_loop_disposition(
     *,
     turn_receipt: ValidatedTurnReceipt | None,
@@ -263,7 +320,8 @@ def decide_loop_disposition(
 
     ``turn_receipt`` is a :class:`ValidatedTurnReceipt` (or ``None`` when no
     prior Turn has committed). ``quota_decision`` is a fresh
-    ``loopx_turn_envelope_v0``. ``bounded_turn_budget`` is a
+    ``loopx_turn_envelope_v0`` that must declare ``predecessor_turn_key``
+    matching the receipt when one is supplied. ``bounded_turn_budget`` is a
     :class:`BoundedTurnBudget` and is required when the receipt is
     ``validated_progress`` so continuation can prove a bound.
 
@@ -293,14 +351,19 @@ def decide_loop_disposition(
             lineage=decision_lineage,
         )
 
+    # Prove the envelope causally succeeds this exact receipt before any
+    # disposition is considered. This closes the stale-replay gap: an old
+    # receipt for the same todo cannot be replayed against a later envelope.
+    _assert_predecessor_binding(receipt=turn_receipt, decision=quota_decision)
     _assert_lineage_match(
         receipt_lineage=turn_receipt.lineage,
         decision_lineage=decision_lineage,
     )
+
     result_kind = turn_receipt.result_kind
 
     # A met terminal postcondition outranks a decision-only user action, but
-    # only after the receipt is proven valid and fresh (above).
+    # only after the receipt is proven valid, fresh, and fully committed.
     if result_kind is LoopXTurnResultKind.VALIDATED_COMPLETION:
         return _disposition(
             LoopDisposition.TERMINAL,
@@ -321,8 +384,8 @@ def decide_loop_disposition(
             raise ValueError(
                 "validated progress cannot continue without a proven bounded turn budget"
             )
-        _assert_lineage_match(
-            receipt_lineage=bounded_turn_budget.lineage,
+        _assert_budget_lineage_match(
+            budget_lineage=bounded_turn_budget.lineage,
             decision_lineage=decision_lineage,
         )
         if bounded_turn_budget.remaining <= 0:
