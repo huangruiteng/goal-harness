@@ -427,7 +427,8 @@ def main() -> int:
         loopx_command_skill = codex_home / "skills" / "loopx" / "SKILL.md"
         loopx_command_skill_text = loopx_command_skill.read_text(encoding="utf-8")
         assert "surface=codex-skills" in loopx_command_skill_text, loopx_command_skill_text
-        assert "`ark-managed-agent` for Ark Managed Agent" in loopx_command_skill_text
+        assert "Identify the exact current host surface" in loopx_command_skill_text
+        assert "`goal_start_contract` as authoritative" in loopx_command_skill_text
         loopx_openai_metadata = loopx_command_skill.parent / "agents" / "openai.yaml"
         loopx_openai_metadata_text = loopx_openai_metadata.read_text(encoding="utf-8")
         assert 'display_name: "LoopX"' in loopx_openai_metadata_text, loopx_openai_metadata_text

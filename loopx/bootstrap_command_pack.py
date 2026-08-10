@@ -687,6 +687,10 @@ def _goal_start_contract(
 ) -> dict[str, Any]:
     return {
         "schema_version": GOAL_START_SCHEMA_VERSION,
+        "behavior_authority": (
+            "ordered_steps + goal_start_contract; skill passes raw arguments after host "
+            "detection, executes packet"
+        ),
         "slash_syntax": "/loopx <goal text>",
         "goal_text": goal_text,
         "selected_capability_route": selected_capability_route,
@@ -725,26 +729,24 @@ def _goal_start_contract(
             "default_task_class": "advancement_task",
             "required_fields": ["priority", "text", "task_class", "action_kind"],
             "public_safe_only": True,
-            "budget_policy": (
-                "For clear bounded problems, planning should sharpen action selection "
-                "rather than crowd out task work; prefer the minimum sufficient ordered "
-                "todo plan over fixed-count filler."
-            ),
+            "budget_policy": "minimum sufficient plan; no fixed-count filler",
         },
         "priority_ordering": {
             "bucket_order": ["P0", "P1", "P2"],
             "same_priority_tie_breaker": "planner_order_then_todo_write_order",
-            "prompt_constraint": (
-                "Sort planned todos by priority bucket and relative rank before writing. "
-                "For multiple P0/P1/P2 items, earlier items are higher rank; preserve that "
-                "exact order when running todo add commands."
-            ),
-            "storage_contract": (
-                "LoopX status/quota already use todo index as the same-priority tie-breaker, "
-                "so host integrations must write todos in planner order instead of adding "
-                "a separate rank field."
-            ),
+            "prompt_constraint": "priority then exact write order",
+            "storage_contract": "Todo index is same-priority rank; no extra field",
         },
+        "execution_invariants": (
+            "identity: fresh public-safe agent after verified/active; explicit takeover; "
+            "bind/readback before Todo; no peer inference; unknown: "
+            "loopx agent-onboard --list-agent-types | route: selected_capability_route only; "
+            "never infer from text/URLs; #/activation+#/stop_conditions; review/pasteable "
+            "gates | Todo/writeback: Agent advancement_task; User owner/private; business Todo "
+            "before work; current evidence + next Todo; refresh/quota; chat not durable | "
+            "returned typed quota_guard; one bounded validation+writeback or exact blocker; "
+            "optional need/preview/explicit apply"
+        ),
         "activation": {
             "after_write": ["refresh-state", "host_loop_activation", "quota should-run"],
             "host_loop_required_after_todo_writeback": True,
@@ -766,10 +768,7 @@ def _goal_start_contract(
                 "Do not claim autonomous setup complete from registry/quota identity alone. "
                 "If the host cannot mutate its loop surface, report the exact pasteable gate."
             ),
-            "low_cost_recheck_policy": (
-                "Only recompute onboarding/activation when activation is missing, unknown, stale, "
-                "or the agent type changed; normal ticks should read quota/status/state directly."
-            ),
+            "low_cost_recheck_policy": "missing/unknown/stale/type-changed only",
             "begin_automation_when_quota_allows": True,
             "spend_quota_after_writeback": True,
         },
@@ -792,14 +791,9 @@ def _goal_start_contract(
                     "issue_fix_pr_lifecycle_template"
                 ],
                 "writeback": (
-                    "persist source-qualified candidate preflight; only proceed enters "
-                    "feasibility and writes its successor; otherwise reuse, disposition, or close; "
-                    "private repro material, issue body/comment reads, external comments, PR creation, "
-                    "merge, publish, destructive git, and production actions stay explicit gates; "
-                    "after PR creation, use active external-review-request authority to call "
-                    "reviewer-request, verify the formal request or its permission-only reviewer "
-                    "comment fallback, then use one monitor per PR state bucket, never per PR; "
-                    "actions/messages stay one-shot; domain-state stays compact"
+                    "persist candidate preflight; only proceed enters feasibility and writes "
+                    "its successor; keep private/external/publish/destructive/production gates; "
+                    "after PR creation verify reviewer-request, then monitor one PR state bucket"
                 ),
             }
         },
@@ -821,19 +815,19 @@ def _goal_start_prompt(*, goal_text: str | None, goal_id: str, agent_id: str | N
         else "Goal text: use the text after `/loopx`; if it is empty, handle bare `/loopx` instead."
     )
     agent_clause = f" Use agent id `{agent_id}` for quota/claim commands." if agent_id else ""
-    return f"""Plan before writing todos for `/loopx <goal text>`.
+    return f"""Plan; returned `ordered_steps` + `goal_start_contract` are authoritative.
 
 {goal_clause}
 Goal id: {goal_id}.{agent_clause}
 
-Planning rules:
-1. Choose the planning profile: broad or fuzzy product direction uses 2-5 public-safe todos; clear bounded problems use a planner-sized ordered todo plan with enough steps to make the approach explicit.
-2. Before substantive work, plan then write concise todos; avoid management-only filler.
-3. Every new todo starts with `[P0]`, `[P1]`, or `[P2]`; include at least one `[P0]` unless the first useful step is blocked by a user gate.
-4. If several todos share the same priority, their listed order is their relative priority. Preserve that exact order when writing them.
-5. Prefer executable Agent Todo items with `task_class=advancement_task`; use User Todo only for concrete owner decisions or private-material gates.
-6. After writing todos, run `loopx refresh-state --goal-id {goal_id}`, activate the host loop if it is missing, unknown, or stale (Codex App automation, Codex CLI `/goal <task_body>`, Claude Code `/loop`, OpenCode bridge, or a custom host-loop gate), then run its typed `quota_guard` and begin the first allowed bounded segment.
-7. Enter issue-fix only when `selected_capability_route.capability_id=issue-fix`; never infer it from goal text or URLs. Run workflow-plan and feasibility before implementation, write only the admitted successor or no-follow-up, preserve private/external/destructive gates, verify reviewer requests, and reconcile PR lifecycle one PR per message.
+Rules:
+1. Identity: use verified binding/active contract; a stable unbound host gets a fresh public-safe agent. Existing lanes require explicit takeover plus bind/readback before Todo; never infer peers from Todo/worktree/arguments. Unknown host: `loopx agent-onboard --list-agent-types`.
+2. Capability: only `selected_capability_route`; run entry/admission and its later `capability show`; never infer from text/URLs. Capability state owns facts; generic Todos schedule.
+3. Todos: broad goal 2-5 public-safe items, bounded goal minimum sufficient plan; `[P0]`/`[P1]`/`[P2]`, no `--priority`, preserve order, prefer Agent `advancement_task`, User Todo only for owner/private gates. Write one business Todo before work.
+4. Writeback: current Todo evidence + next executable Todo, then `loopx refresh-state --goal-id {goal_id}` and quota readback. Chat/model summaries are not durable state.
+5. Host loop: after Todo write, activate missing/unknown/stale/type-changed Codex App heartbeat automation, CLI/TraeX `/goal`, Claude `/loop`, OpenCode bridge, Ark one-shot, or custom gate. Else surface the exact pasteable gate; never claim autonomy.
+6. Run the returned typed `quota_guard`; finish one bounded segment with validation + LoopX writeback or an exact blocker. Setup/planning/claim is not delivery.
+7. Optional features: need, preview, explicit apply. Respect private data, credentials, destructive git, production authority, and review rules.
 """
 
 

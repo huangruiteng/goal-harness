@@ -45,20 +45,17 @@ def test_host_materialization_installs_generated_loopx_entry_skill(
         "status": "created",
     }
     assert 'name: "loopx"' in skill_text
-    assert "`ark-managed-agent` for Ark Managed Agent" in skill_text
-    assert "Ark Managed Agent one-shot Goal submission" in skill_text
+    assert "ark-managed-agent" in skill_text
     assert "--slash-command-arguments" in skill_text
     assert "The CLI, not the model, owns parsing" in skill_text
-    assert "Never split and recompose the switch" in skill_text
-    assert "Never infer a route from issue/PR wording or URLs" in skill_text
-    assert "run its exact CLI `interaction_contract` or quota command first" in skill_text
-    assert "do not call `start-goal` or bootstrap another goal" in skill_text
-    assert "reuse the packet's verified thread binding" in skill_text
-    assert "already named by this host task's active LoopX interaction contract" in skill_text
-    assert "treat a stable unbound host thread as a new session" in skill_text
-    assert "Select an existing registered lane only for explicit takeover" in skill_text
-    assert "Never treat a new Todo, worktree, or argument-bearing invocation as a new peer" in skill_text
-    assert "When no stable thread id is available" in skill_text
+    assert "Never split or recompose" in skill_text
+    assert "never infer a route from issue/PR wording or URLs" in skill_text
+    assert "`ordered_steps` and `goal_start_contract` as authoritative" in skill_text
+    assert "surface the exact pasteable gate" in skill_text
+    assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
+    assert "reuse the packet's verified thread binding" not in skill_text
+    assert "capability show <capability-id> --format json" not in skill_text
+    assert "Chat/model summaries are not durable state" not in skill_text
     assert materialize_loopx_entry_skill(
         skills_dir=skills_dir,
         execute=True,
@@ -82,18 +79,11 @@ def test_host_materialization_can_bind_exact_managed_agent_surface(
     assert "--host-surface <exact-current-host>" not in skill_text
     assert "--slash-command-arguments" in skill_text
     assert "The CLI, not the model, owns parsing" in skill_text
-    assert "before substantive task work" in skill_text
-    assert "has no `--priority` flag" in skill_text
-    assert "Before dependent work, persist material scope" in skill_text
-    assert "current Todo evidence and the next executable Todo" in skill_text
-    assert "Chat/model summaries are not durable state" in skill_text
-    assert "run its entry and admission commands" in skill_text
-    assert "capability show <capability-id> --format json" in skill_text
-    assert "instead of substituting provider CLIs" in skill_text
-    assert "generic Todos remain scheduling records" in skill_text
-    assert "Never infer a route" in skill_text
-    assert "run its exact CLI `interaction_contract` or quota command first" in skill_text
-    assert "Only when no active goal contract is present" in skill_text
+    assert "`ordered_steps` and `goal_start_contract` as authoritative" in skill_text
+    assert "never infer a route" in skill_text
+    assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
+    assert "current Todo evidence and the next executable Todo" not in skill_text
+    assert "generic Todos remain scheduling records" not in skill_text
 
 
 def test_host_materialization_rejects_unknown_fixed_surface(tmp_path: Path) -> None:
@@ -123,16 +113,13 @@ def test_codex_install_upgrades_managed_loopx_facade(tmp_path: Path) -> None:
     skill_text = skill.read_text(encoding="utf-8")
     assert "Treat this as the LoopX `/loopx` explicit LoopX command skill." in skill_text
     assert "--host-surface <exact-current-host>" in skill_text
-    assert "`codex-ide-plugin` only for the IDE plugin" in skill_text
-    assert "`ark-managed-agent` for Ark Managed Agent" in skill_text
-    assert (
-        "Codex App over SSH, the Codex IDE plugin, or CLI visible "
-        "`/goal <task_body>`"
-    ) in skill_text
+    assert "Identify the exact current host surface" in skill_text
+    assert "ark-managed-agent" in skill_text
+    assert "`ordered_steps` and `goal_start_contract` as authoritative" in skill_text
     assert "use `codex-ide` for the IDE" not in skill_text
-    assert "do not return merely after setup, planning, or claim" in skill_text
-    assert "run its exact CLI `interaction_contract` or quota command first" in skill_text
-    assert "Only when no active goal contract is present" in skill_text
+    assert "surface the exact pasteable gate" in skill_text
+    assert "follow its exact CLI `interaction_contract` or quota command first" in skill_text
+    assert "do not return merely after setup, planning, or claim" not in skill_text
     metadata_text = metadata.read_text(encoding="utf-8")
     assert 'display_name: "LoopX"' in metadata_text
     assert 'display_name: "LoopX /loopx"' not in metadata_text

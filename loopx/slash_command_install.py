@@ -122,10 +122,9 @@ def _loopx_start_goal_arguments_instruction(
         "unchanged as one value to "
         f'`{cli_bin} start-goal --guided --project . --slash-command-arguments='
         f'"<complete visible $ARGUMENTS>" --host-surface {selected_host}`. '
-        "The CLI, not the model, owns parsing the optional leading typed "
-        "`--capability-route issue-fix` switch and preserving the remaining goal "
-        "text. Never split and recompose the switch. Never infer a route from "
-        "issue/PR wording or URLs."
+        "The CLI, not the model, owns parsing supported leading switches and "
+        "preserving the remaining goal text. Never split or recompose the "
+        "arguments, and never infer a route from issue/PR wording or URLs."
     )
     if host_surface is None:
         instruction += (
@@ -144,21 +143,15 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "argument_hint": "[--capability-route issue-fix] [task text]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                "Before start-goal, identify the exact current host: use `codex-app` for the desktop app with automation tools, `codex-app-ssh` for the desktop app over SSH without automation tools, `codex-ide-plugin` only for the IDE plugin, `codex-cli-tui` for the terminal TUI, `opencode` for OpenCode, `traex-cli` for the TraeX terminal TUI, `pi` for Pi, `gemini-cli` for the Gemini CLI, `cursor-agent` for the Cursor agent CLI, or `ark-managed-agent` for Ark Managed Agent.",
+                "Identify the exact current host surface (codex-app, codex-app-ssh, codex-ide-plugin, codex-cli-tui, opencode, traex-cli, pi, gemini-cli, cursor-agent, or ark-managed-agent).",
                 _loopx_start_goal_arguments_instruction(
                     cli_bin=cli_bin,
                     host_surface=None,
                 ),
-                f"Treat the returned `ordered_steps` as a required transaction. On first connection, run its bootstrap command and resolve the returned agent-identity gate before planning; a stable unbound host thread is a new session and defaults to fresh registration. Then plan and execute at least one business `{cli_bin} todo add` derived from `$ARGUMENTS` before substantive task work. Encode priority in the todo text such as `[P0]`; `{cli_bin} todo add` has no `--priority` flag. Do not continue until LoopX status shows that business Agent Todo.",
-                f"If `selected_capability_route` is present, run its entry and admission commands before substantive implementation, and treat `{cli_bin} capability show <capability-id> --format json` as the authoritative later-transition command surface. Use capability-owned commands for listed external transitions instead of substituting provider CLIs. Keep capability facts in capability-owned state; generic Todos remain scheduling records.",
-                f"Before dependent work, persist material scope, acceptance, or non-goal changes in current Todo evidence and the next executable Todo; then run `{cli_bin} refresh-state` and verify quota readback. Chat/model summaries are not durable state.",
-                f"If that packet exposes a goal-selection gate, rerun one exact choice before any mutation. Resolve agent identity in this order: reuse the packet's verified thread binding; otherwise reuse the exact agent id already named by this host task's active LoopX interaction contract or heartbeat; otherwise treat a stable unbound host thread as a new session and follow the packet's fresh-registration default. Select an existing registered lane only for explicit takeover, then complete the returned bind/readback step. Codex App `start-goal` automatically reads its stable ambient thread id when available. Never treat a new Todo, worktree, or argument-bearing invocation as a new peer by itself, and never infer identity from registry order. When no stable thread id is available, fresh registration requires explicit new-peer/session intent and `--new-peer`. Preview `{cli_bin} register-agent --goal-id <selected-goal-id> --agent-id <new-agent-id> --require-new`, then apply with `--execute` and continue only when the result reports `ok=true`, `changed=true`, `written=true`, successful global sync, and verified registration readback. Rerun start-goal with the verified `--agent-id` before todo writeback.",
-                f"If arguments are empty and the host task already identifies an active LoopX goal, run its exact CLI `interaction_contract` or quota command first; do not call `start-goal` or bootstrap another goal. Only when no active goal contract is present, inspect `{cli_bin} bootstrap-command-pack --project .`, `{cli_bin} status`, and `{cli_bin} slash-commands` before changing files.",
-                f"Use `{cli_bin} agent-onboard --list-agent-types` when the host runtime is unclear; pass an exact type such as `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli`, `claude-code`, `opencode`, `traex-cli`, `pi`, or `ark-managed-agent`, never ambiguous `codex`.",
-                f"Do not configure optional features during first-run. Only when the task needs bounded child agents or Explore, inspect `{cli_bin} configure-goal --goal-id <resolved-goal-id>` and its `configuration_catalog`; preview before explicit apply and never auto-enable a feature merely because it exists.",
-                "When project work is started, plan ordered P0/P1/P2 todos, write them through LoopX todo state, refresh state, activate the host loop if missing/stale, run quota, and complete one bounded delivery segment through validation plus LoopX writeback or an exact blocker; do not return merely after setup, planning, or claim.",
-                "Host loop activation means Codex App heartbeat automation; Codex App over SSH, the Codex IDE plugin, or CLI visible `/goal <task_body>`; Claude Code native `/loop`; OpenCode `loopx_goal_activate`; TraeX visible `/goal <task_body>`; Ark Managed Agent one-shot Goal submission; or a custom host-loop gate from `loopx agent-onboard`.",
-                "If this session cannot mutate the host loop surface, surface the exact pasteable gate instead of saying LoopX is autonomously connected.",
+                "Treat the returned `ordered_steps` and `goal_start_contract` as authoritative. Follow their identity, capability-route, Todo, writeback, host-loop, quota, and stop/gate rules before substantive work; do not reconstruct those rules from skill memory.",
+                "If the packet exposes a goal-selection gate, rerun one exact choice before any mutation.",
+                f"If arguments are empty and the host already identifies an active LoopX goal, follow its exact CLI `interaction_contract` or quota command first; otherwise inspect `{cli_bin} status` and `{cli_bin} bootstrap-command-pack --project .` before changing files.",
+                "If this session cannot mutate the host loop surface, surface the exact pasteable gate instead of claiming autonomous setup.",
             ],
         },
         {

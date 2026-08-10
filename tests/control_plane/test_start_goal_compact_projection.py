@@ -190,6 +190,51 @@ def test_default_projection_preserves_host_actions_and_json_anchors(
         _resolve_pointer(projection, ref["json_pointer"])
 
 
+def test_goal_start_packet_is_parity_complete_behavior_authority(
+    tmp_path: Path,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    payload = _build(project, include_detail=False)
+
+    contract = payload["command_pack"]["goal_start_contract"]
+    assert "ordered_steps + goal_start_contract" in contract["behavior_authority"]
+    assert "passes raw arguments" in contract["behavior_authority"]
+
+    invariants = contract["execution_invariants"]
+    for marker in (
+        "fresh public-safe agent",
+        "explicit takeover",
+        "bind/readback before Todo",
+        "loopx agent-onboard --list-agent-types",
+        "selected_capability_route",
+        "never infer from text/URLs",
+        "#/activation",
+        "#/stop_conditions",
+        "Agent advancement_task",
+        "business Todo before work",
+        "current evidence + next Todo",
+        "chat not durable",
+        "returned typed quota_guard",
+        "one bounded validation+writeback",
+        "exact blocker",
+        "explicit apply",
+    ):
+        assert marker in invariants
+
+    prompt = payload["command_pack"]["commands"]["goal_start_plan_prompt"]
+    for required_text in (
+        "stable unbound host gets a fresh public-safe agent",
+        "selected_capability_route",
+        "no `--priority`",
+        "current Todo evidence + next executable Todo",
+        "Chat/model summaries are not durable state",
+        "Codex App heartbeat automation",
+        "returned typed `quota_guard`",
+        "surface the exact pasteable gate",
+    ):
+        assert required_text in prompt
+
+
 def test_issue_fix_goal_projects_capability_guard_without_todo_fields(
     tmp_path: Path,
 ) -> None:
