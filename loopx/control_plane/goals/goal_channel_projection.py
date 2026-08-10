@@ -255,10 +255,87 @@ def _open_gates(
     return gates
 
 
+def _hard_lease_entries(
+    *,
+    runtime_root: Any,
+    goal_id: str,
+    agent_todos: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Best-effort read of the on-disk hard task-lease store.
+
+    Missing or empty lease directories stay silent because most goals never
+    use task leases. A corrupt or unreadable lease file degrades to a typed
+    note instead of failing the status projection.
+    """
+
+    if runtime_root is None:
+        return []
+    from pathlib import Path
+
+    from ..work_items.task_lease import (
+        TaskLeaseError,
+        lease_is_active,
+        read_lease,
+        task_lease_dir,
+    )
+
+    try:
+        lease_dir = task_lease_dir(
+            runtime_root=Path(runtime_root),
+            goal_id=str(goal_id),
+        )
+        lease_paths = sorted(lease_dir.glob("todo_*.json"))
+    except (TaskLeaseError, OSError, TypeError, ValueError):
+        return []
+    if not lease_paths:
+        return []
+    claim_by_todo: dict[str, str] = {}
+    for item in agent_todos:
+        todo_id = str(item.get("todo_id") or "").strip()
+        claimed_by = str(item.get("claimed_by") or "").strip()
+        if todo_id and claimed_by:
+            claim_by_todo[todo_id] = claimed_by
+    entries: list[dict[str, Any]] = []
+    for path in lease_paths:
+        try:
+            lease = read_lease(path)
+        except (TaskLeaseError, OSError):
+            entries.append(
+                {
+                    "todo_id": path.stem,
+                    "status": "hard_lease_unreadable",
+                    "reason": "corrupt_lease",
+                }
+            )
+            continue
+        if not lease_is_active(lease):
+            continue
+        assert lease is not None
+        todo_id = _text(lease.get("todo_id"), limit=120) or path.stem
+        entry: dict[str, Any] = {"todo_id": todo_id, "status": "hard_lease"}
+        owner = _text(lease.get("owner"), limit=120)
+        if owner:
+            entry["owner_agent"] = owner
+        version = lease.get("version")
+        if isinstance(version, int):
+            entry["lease_version"] = version
+        expires_at = _text(lease.get("expires_at"), limit=80)
+        if expires_at:
+            entry["expires_at"] = expires_at
+        claimed_by = claim_by_todo.get(todo_id)
+        if owner and claimed_by and claimed_by != owner:
+            entry["reason"] = "owner_conflicts_with_claim"
+            entry["claimed_by"] = claimed_by
+        entries.append(entry)
+    return entries
+
+
 def _active_leases(
     *,
     active_leases: Sequence[Mapping[str, Any]] | None,
     agent_todos: Sequence[Mapping[str, Any]],
+    runtime_root: Any = None,
+    goal_id: str = "",
 ) -> list[dict[str, Any]]:
     explicit = _as_mappings(active_leases)
     if explicit:
@@ -296,6 +373,13 @@ def _active_leases(
                 if scope
             ]
         compact.append(lease)
+    compact.extend(
+        _hard_lease_entries(
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_todos=agent_todos,
+        )
+    )
     return compact
 
 
@@ -362,6 +446,7 @@ def build_goal_channel_projection(
     artifacts: Sequence[Mapping[str, Any]] | None = None,
     active_leases: Sequence[Mapping[str, Any]] | None = None,
     generated_at: str | None = None,
+    runtime_root: Any = None,
 ) -> dict[str, Any]:
     """Build a read-only channel snapshot for a LoopX goal.
 
@@ -454,6 +539,8 @@ def build_goal_channel_projection(
         "active_leases": _active_leases(
             active_leases=active_leases,
             agent_todos=agent_todos,
+            runtime_root=runtime_root,
+            goal_id=str(goal_id),
         ),
         "recent_events": _recent_events(run_history_goal_dict),
         "source_warnings": _source_warnings(raw_keys),

@@ -12,6 +12,7 @@ def attach_goal_channel_projection(
     goal: dict[str, Any],
     goal_latest_runs: list[dict[str, Any]],
     build_goal_channel_projection: GoalChannelProjectionBuilder,
+    runtime_root: Any = None,
 ) -> None:
     """Attach a read-only frontstage projection to a status attention item."""
 
@@ -29,4 +30,5 @@ def attach_goal_channel_projection(
         status_item=item,
         quota_payload=quota_payload,
         run_history_goal=run_history_goal,
+        runtime_root=runtime_root,
     )

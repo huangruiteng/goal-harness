@@ -1166,12 +1166,14 @@ def attach_goal_channel_projection(
     *,
     goal: dict[str, Any],
     goal_latest_runs: list[dict[str, Any]],
+    runtime_root: Path | None = None,
 ) -> None:
     _attach_goal_channel_projection_read_model(
         item,
         goal=goal,
         goal_latest_runs=goal_latest_runs,
         build_goal_channel_projection=build_goal_channel_projection,
+        runtime_root=runtime_root,
     )
 
 

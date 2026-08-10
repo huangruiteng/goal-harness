@@ -294,6 +294,7 @@ def build_attention_queue(
                 item,
                 goal=goal,
                 goal_latest_runs=goal_latest_runs,
+                runtime_root=runtime_root,
             )
             history_items.append(item)
 

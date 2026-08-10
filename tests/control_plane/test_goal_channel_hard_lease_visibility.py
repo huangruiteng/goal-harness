@@ -1,0 +1,212 @@
+from __future__ import annotations
+
+import json
+from datetime import timedelta
+from pathlib import Path
+from typing import Any
+
+from loopx.control_plane.goals.goal_channel import attach_goal_channel_projection
+from loopx.control_plane.goals.goal_channel_projection import (
+    build_goal_channel_projection,
+)
+from loopx.control_plane.work_items.task_lease import (
+    build_lease,
+    isoformat,
+    now_utc,
+    task_lease_dir,
+    task_lease_path,
+)
+
+
+GOAL_ID = "goal-hard-lease-visibility"
+TODO_ID = "todo_lease_visibility"
+
+
+def _status_item(*, claimed_by: str | None) -> dict[str, Any]:
+    todo: dict[str, Any] = {
+        "title": "ship the lease visibility fix",
+        "status": "open",
+        "todo_id": TODO_ID,
+    }
+    if claimed_by:
+        todo["claimed_by"] = claimed_by
+    return {
+        "goal_id": GOAL_ID,
+        "status": "working",
+        "project_asset": {
+            "agent_todos": {"first_open_items": [todo]},
+        },
+    }
+
+
+def _write_active_lease(
+    runtime_root: Path,
+    *,
+    owner: str,
+    todo_id: str = TODO_ID,
+    version: int = 3,
+    ttl_seconds: int = 600,
+) -> dict[str, Any]:
+    at = now_utc()
+    lease = build_lease(
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        owner=owner,
+        idempotency_key=f"{owner}-instance-1",
+        write_scopes=["src/"],
+        acquire_ttl_seconds=ttl_seconds,
+        version=version,
+        acquired_at=isoformat(at),
+        updated_at=isoformat(at),
+        expires_at=isoformat(at + timedelta(seconds=ttl_seconds)),
+    )
+    path = task_lease_path(runtime_root=runtime_root, goal_id=GOAL_ID, todo_id=todo_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(lease), encoding="utf-8")
+    return lease
+
+
+def _active_leases(projection: dict[str, Any]) -> list[dict[str, Any]]:
+    leases = projection.get("active_leases")
+    assert isinstance(leases, list)
+    return leases
+
+
+def _entries_with_status(projection: dict[str, Any], status: str) -> list[dict[str, Any]]:
+    return [item for item in _active_leases(projection) if item.get("status") == status]
+
+
+def test_divergent_hard_lease_is_surfaced_with_conflict_reason(tmp_path: Path) -> None:
+    lease = _write_active_lease(tmp_path, owner="agent-a")
+    projection = build_goal_channel_projection(
+        goal_id=GOAL_ID,
+        status_item=_status_item(claimed_by="agent-b"),
+        runtime_root=tmp_path,
+    )
+
+    soft = _entries_with_status(projection, "soft_claim")
+    assert soft == [
+        {"todo_id": TODO_ID, "owner_agent": "agent-b", "status": "soft_claim"}
+    ]
+    hard = _entries_with_status(projection, "hard_lease")
+    assert hard == [
+        {
+            "todo_id": TODO_ID,
+            "status": "hard_lease",
+            "owner_agent": "agent-a",
+            "lease_version": 3,
+            "expires_at": lease["expires_at"],
+            "reason": "owner_conflicts_with_claim",
+            "claimed_by": "agent-b",
+        }
+    ]
+
+
+def test_matching_hard_lease_is_surfaced_without_conflict(tmp_path: Path) -> None:
+    lease = _write_active_lease(tmp_path, owner="agent-a")
+    projection = build_goal_channel_projection(
+        goal_id=GOAL_ID,
+        status_item=_status_item(claimed_by="agent-a"),
+        runtime_root=tmp_path,
+    )
+
+    hard = _entries_with_status(projection, "hard_lease")
+    assert hard == [
+        {
+            "todo_id": TODO_ID,
+            "status": "hard_lease",
+            "owner_agent": "agent-a",
+            "lease_version": 3,
+            "expires_at": lease["expires_at"],
+        }
+    ]
+
+
+def test_soft_only_goal_preserves_previous_projection_shape(tmp_path: Path) -> None:
+    projection = build_goal_channel_projection(
+        goal_id=GOAL_ID,
+        status_item=_status_item(claimed_by="agent-b"),
+        runtime_root=tmp_path,
+    )
+
+    assert _active_leases(projection) == [
+        {"todo_id": TODO_ID, "owner_agent": "agent-b", "status": "soft_claim"}
+    ]
+
+
+def test_missing_runtime_root_preserves_previous_projection_shape() -> None:
+    projection = build_goal_channel_projection(
+        goal_id=GOAL_ID,
+        status_item=_status_item(claimed_by="agent-b"),
+    )
+
+    assert _active_leases(projection) == [
+        {"todo_id": TODO_ID, "owner_agent": "agent-b", "status": "soft_claim"}
+    ]
+
+
+def test_expired_lease_is_not_surfaced(tmp_path: Path) -> None:
+    at = now_utc()
+    lease = build_lease(
+        goal_id=GOAL_ID,
+        todo_id=TODO_ID,
+        owner="agent-a",
+        idempotency_key="agent-a-instance-1",
+        write_scopes=[],
+        acquire_ttl_seconds=60,
+        version=1,
+        acquired_at=isoformat(at - timedelta(seconds=120)),
+        updated_at=isoformat(at - timedelta(seconds=120)),
+        expires_at=isoformat(at - timedelta(seconds=60)),
+    )
+    path = task_lease_path(runtime_root=tmp_path, goal_id=GOAL_ID, todo_id=TODO_ID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(lease), encoding="utf-8")
+
+    projection = build_goal_channel_projection(
+        goal_id=GOAL_ID,
+        status_item=_status_item(claimed_by="agent-b"),
+        runtime_root=tmp_path,
+    )
+
+    assert _entries_with_status(projection, "hard_lease") == []
+
+
+def test_corrupt_lease_degrades_to_typed_note(tmp_path: Path) -> None:
+    lease_dir = task_lease_dir(runtime_root=tmp_path, goal_id=GOAL_ID)
+    lease_dir.mkdir(parents=True, exist_ok=True)
+    (lease_dir / f"{TODO_ID}.json").write_text("{not json", encoding="utf-8")
+
+    projection = build_goal_channel_projection(
+        goal_id=GOAL_ID,
+        status_item=_status_item(claimed_by="agent-b"),
+        runtime_root=tmp_path,
+    )
+
+    assert _entries_with_status(projection, "hard_lease_unreadable") == [
+        {
+            "todo_id": TODO_ID,
+            "status": "hard_lease_unreadable",
+            "reason": "corrupt_lease",
+        }
+    ]
+    # soft claim entry is still present alongside the typed note
+    assert _entries_with_status(projection, "soft_claim")
+
+
+def test_attach_goal_channel_projection_forwards_runtime_root(tmp_path: Path) -> None:
+    _write_active_lease(tmp_path, owner="agent-a")
+    item = _status_item(claimed_by="agent-b")
+    attach_goal_channel_projection(
+        item,
+        goal={"id": GOAL_ID},
+        goal_latest_runs=[],
+        build_goal_channel_projection=build_goal_channel_projection,
+        runtime_root=tmp_path,
+    )
+
+    projection = item["goal_channel_projection"]
+    hard = _entries_with_status(projection, "hard_lease")
+    assert len(hard) == 1
+    assert hard[0]["owner_agent"] == "agent-a"
+    assert hard[0]["reason"] == "owner_conflicts_with_claim"
