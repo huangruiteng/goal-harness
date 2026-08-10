@@ -861,6 +861,13 @@ when `codex_app.stateful_backoff.apply_needed=true`; if the desired RRULE is
 already applied, it is omitted so the agent does not call a host tool again.
 If that match still needs a reset-token/identity binding,
 `stateful_backoff.ack_needed=true` and the bound ack runs without a host update.
+When an apply is required but `automation_update` is unavailable in the
+session, `codex_app.fallback_hint` carries the bounded `loopx-apply-rrule`
+command for the resolved automation (backup `codex-dev.db`, sync TOML+SQLite,
+run the bound ACK). Direct SQLite edits bypass the app API, so the fallback is
+projected only for this gap and never as the routine path; an unresolved
+automation id projects `available=false` and requires the pasteable heartbeat
+gate instead of guessing.
 After a successful host RRULE update, the agent records that fact with
 `loopx` plus `codex_app.ack_hint.cli_args`; current payloads use
 `quota scheduler-ack-current` to re-read the latest scheduler hint before LoopX

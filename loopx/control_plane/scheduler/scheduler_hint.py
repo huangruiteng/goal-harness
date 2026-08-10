@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -51,9 +52,13 @@ SCHEDULER_HINT_DETAIL_SCHEMA_VERSION = "scheduler_hint_detail_v0"
 CODEX_APP_STATEFUL_BACKOFF_SCHEMA_VERSION = "codex_app_stateful_backoff_v0"
 CODEX_APP_SCHEDULER_ACK_HINT_SCHEMA_VERSION = "codex_app_scheduler_ack_hint_v0"
 CODEX_APP_SCHEDULER_FAILURE_HINT_SCHEMA_VERSION = "codex_app_scheduler_failure_hint_v0"
+CODEX_APP_SCHEDULER_FALLBACK_HINT_SCHEMA_VERSION = (
+    "codex_app_scheduler_fallback_hint_v0"
+)
 USER_GATE_NOTIFICATION_COOLDOWN_SCHEMA_VERSION = "user_gate_notification_cooldown_v0"
 CODEX_APP_MAX_INTERVAL_MINUTES = 60
 DEFAULT_ACK_CAPABILITIES = {"shell", "filesystem_read", "filesystem_write"}
+FALLBACK_AUTOMATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 SCHEDULER_BASE_IDENTITY_KEYS = (
     "goal_id",
     "agent_identity.agent_id",
@@ -331,6 +336,70 @@ def build_codex_app_scheduler_failure_hint(
     }
 
 
+def build_codex_app_scheduler_fallback_hint(
+    *,
+    goal_id: Any,
+    agent_id: Any,
+    automation_id: Any,
+    turn_instance_id: Any = "${LOOPX_TURN:?}",
+) -> dict[str, Any]:
+    """Project the bounded SQLite/TOML RRULE fallback for automation_update gaps.
+
+    The fallback is a standalone host bridge (``loopx-apply-rrule``) that backs
+    up ``codex-dev.db``, syncs the automation TOML and SQLite row, and runs the
+    bound scheduler ACK. It directly edits the Codex App automation store,
+    bypassing the app API, so it is projected only when the host tool is
+    unavailable or failed and ``apply_needed=true`` - never as the routine path.
+    """
+
+    safe_goal_id = str(goal_id or "").strip()
+    safe_agent_id = str(agent_id or "").strip()
+    safe_automation_id = str(automation_id or "").strip()
+    safe_turn_instance_id = str(turn_instance_id or "").strip() or "${LOOPX_TURN:?}"
+    if not FALLBACK_AUTOMATION_ID_PATTERN.match(safe_automation_id):
+        return {
+            "schema_version": CODEX_APP_SCHEDULER_FALLBACK_HINT_SCHEMA_VERSION,
+            "available": False,
+            "reason": (
+                "automation_id_unresolved: no unique matching Codex App heartbeat "
+                "automation for this goal/agent; do not guess an automation id"
+            ),
+            "action": "surface_pasteable_heartbeat_gate",
+        }
+    cli_args = [
+        "loopx-apply-rrule",
+        "--goal-id",
+        safe_goal_id,
+        "--agent-id",
+        safe_agent_id,
+        "--automation-id",
+        safe_automation_id,
+        "--turn-instance-id",
+        safe_turn_instance_id,
+    ]
+    return {
+        "schema_version": CODEX_APP_SCHEDULER_FALLBACK_HINT_SCHEMA_VERSION,
+        "available": True,
+        "command": "loopx-apply-rrule",
+        "after": "automation_update_unavailable_or_failed",
+        "cli_args": cli_args,
+        "args": {
+            "goal_id": safe_goal_id,
+            "agent_id": safe_agent_id,
+            "automation_id": safe_automation_id,
+            "turn_instance_id": safe_turn_instance_id,
+        },
+        "no_spend": True,
+        "reason": (
+            "fallback only when automation_update is unavailable or failed and "
+            "apply_needed=true; loopx-apply-rrule directly updates the Codex App "
+            "SQLite automation store (codex-dev.db) and TOML, which bypasses the "
+            "app API - use only as a bounded fallback, never as the routine path; "
+            "run the bound ack_hint after it succeeds"
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class _SchedulerHintBuilder:
     payload: dict[str, Any]
@@ -340,6 +409,7 @@ class _SchedulerHintBuilder:
     scheduler_ack_capabilities: Any
     codex_app_scheduler_state: dict[str, Any] | None
     codex_app_current_rrule: Any
+    codex_app_automation_id: Any
     include_detail: bool
 
     def _identity_value(self, path: str) -> Any:
@@ -655,6 +725,11 @@ class _SchedulerHintBuilder:
                     observed_host_rrule=effective_host_rrule,
                     available_capabilities=self.scheduler_ack_capabilities,
                 )
+                codex_app["fallback_hint"] = build_codex_app_scheduler_fallback_hint(
+                    goal_id=goal_id,
+                    agent_id=agent_id,
+                    automation_id=self.codex_app_automation_id,
+                )
         if ack_needed and goal_id and agent_id:
             codex_app["ack_hint"] = build_codex_app_scheduler_ack_hint(
                 goal_id=goal_id,
@@ -783,6 +858,7 @@ def build_scheduler_hint(
     codex_app_scheduler_state: dict[str, Any] | None = None,
     available_capabilities: Any = None,
     codex_app_current_rrule: Any = None,
+    codex_app_automation_id: Any = None,
     scheduler_execution_context: (
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
@@ -950,6 +1026,7 @@ def build_scheduler_hint(
         scheduler_ack_capabilities=scheduler_ack_capabilities,
         codex_app_scheduler_state=codex_app_scheduler_state,
         codex_app_current_rrule=codex_app_current_rrule,
+        codex_app_automation_id=codex_app_automation_id,
         include_detail=include_detail,
     )
     if arbitration.disposition == SchedulerDisposition.AGENT_MONITOR_ONLY_WAIT:

@@ -23,16 +23,20 @@ HEARTBEAT_VISION_WRITEBACK_RULE_SHORT = (
 )
 SCHEDULER_HINT_APPLICATION_RULE = (
     "`scheduler_hint` no-spend. host_action=pause_or_delete_current_heartbeat -> "
-    "automation_update stop once, verify, end; else apply_needed -> RRULE then "
-    "ack/failure_hint; ack_needed -> ack."
+    "automation_update stop once, verify, end; else apply_needed -> RRULE via "
+    "automation_update; if automation_update is unavailable or fails, execute "
+    "fallback_hint.cli_args (loopx-apply-rrule; direct SQLite write bypasses the "
+    "app API - fallback only), then ack; further failure -> failure_hint; "
+    "ack_needed -> ack."
 )
 SCHEDULER_HINT_COMPACT_RULE = (
     "host_action=pause_or_delete_current_heartbeat: automation_update stop; "
-    "else RRULE apply/ack/fail. No spend."
+    "else RRULE apply via automation_update, fallback_hint when unavailable, "
+    "then ack/fail. No spend."
 )
 SCHEDULER_HINT_THIN_RULE = (
     "host_action=pause_or_delete_current_heartbeat->automation_update stop(no-spend); "
-    "else RRULE/ack/fail."
+    "else RRULE via automation_update, fallback_hint when unavailable, then ack/fail."
 )
 RUNTIME_CAPABILITY_PROJECTION_THIN_RULE = (
     "Observed capabilities -> `--available-capability`; never user gates."

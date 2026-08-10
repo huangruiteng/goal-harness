@@ -130,6 +130,7 @@ class _QuotaDecisionPreparation:
     boundary_projection_repair: dict[str, Any] | None
     include_scheduler_detail: bool
     codex_app_current_rrule: Any
+    codex_app_automation_id: Any
     resolved_scheduler_context: SchedulerExecutionContextResolution
 
 def _same_todo_identity(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -347,6 +348,7 @@ def _prepare_quota_should_run_item(
     available_capabilities: Any,
     include_scheduler_detail: bool,
     codex_app_current_rrule: Any,
+    codex_app_automation_id: Any = None,
     resolved_scheduler_context: SchedulerExecutionContextResolution,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None,
     registry_goal: dict[str, Any],
@@ -660,5 +662,6 @@ def _prepare_quota_should_run_item(
         boundary_projection_repair=boundary_projection_repair,
         include_scheduler_detail=include_scheduler_detail,
         codex_app_current_rrule=codex_app_current_rrule,
+        codex_app_automation_id=codex_app_automation_id,
         resolved_scheduler_context=resolved_scheduler_context,
     )

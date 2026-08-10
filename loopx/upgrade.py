@@ -344,6 +344,7 @@ def resolve_codex_app_automation_rrule(
     return {
         "available": True,
         "rrule": entry["rrule"],
+        "automation_id": str(entry.get("automation_id") or "").strip(),
         "source": "codex_app_automation_manifest",
     }
 

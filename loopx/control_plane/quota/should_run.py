@@ -52,6 +52,7 @@ def build_quota_paused_should_run_payload(
     goal_health_ok: bool,
     include_scheduler_detail: bool,
     codex_app_current_rrule: Any,
+    codex_app_automation_id: Any = None,
     resolved_scheduler_context: SchedulerExecutionContextResolution,
 ) -> dict[str, Any]:
     """Project one canonical paused contract with no contradicting lane authority.
@@ -127,6 +128,7 @@ def build_quota_paused_should_run_payload(
         include_detail=include_scheduler_detail,
         available_capabilities=None,
         codex_app_current_rrule=codex_app_current_rrule,
+        codex_app_automation_id=codex_app_automation_id,
         scheduler_execution_context=resolved_scheduler_context,
     )
     payload["protocol_action_packet"] = build_protocol_action_packet(payload)
@@ -141,6 +143,7 @@ def build_quota_should_run(
     available_capabilities: Any = None,
     include_scheduler_detail: bool = False,
     codex_app_current_rrule: Any = None,
+    codex_app_automation_id: Any = None,
     scheduler_execution_context: (
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
@@ -187,6 +190,7 @@ def build_quota_should_run(
                 goal_health_ok=goal_health_ok,
                 include_scheduler_detail=include_scheduler_detail,
                 codex_app_current_rrule=codex_app_current_rrule,
+                codex_app_automation_id=codex_app_automation_id,
                 resolved_scheduler_context=resolved_scheduler_context,
             )
         prepared = _prepare_quota_should_run_item(
@@ -196,6 +200,7 @@ def build_quota_should_run(
             available_capabilities=available_capabilities,
             include_scheduler_detail=include_scheduler_detail,
             codex_app_current_rrule=codex_app_current_rrule,
+            codex_app_automation_id=codex_app_automation_id,
             resolved_scheduler_context=resolved_scheduler_context,
             operator_inbox_urgency_projector=operator_inbox_urgency_projector,
             registry_goal=registry_goal,

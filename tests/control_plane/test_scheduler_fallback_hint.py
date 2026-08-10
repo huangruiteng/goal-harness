@@ -1,0 +1,223 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from loopx.control_plane.heartbeat.rules import (
+    SCHEDULER_HINT_APPLICATION_RULE,
+    SCHEDULER_HINT_COMPACT_RULE,
+    SCHEDULER_HINT_THIN_RULE,
+)
+from loopx.control_plane.quota.live_decision import (
+    bind_scheduler_followup_cli_routes,
+)
+from loopx.control_plane.scheduler.ack import build_codex_app_scheduler_ack_event
+from loopx.control_plane.scheduler.execution_context import (
+    scheduler_execution_context_for_runtime_profile,
+)
+from loopx.control_plane.scheduler.scheduler_hint import build_scheduler_hint
+from loopx.upgrade import resolve_codex_app_automation_rrule
+
+
+GOAL_ID = "fallback-hint-goal"
+AGENT_ID = "codex-fixture"
+APP_CONTEXT = scheduler_execution_context_for_runtime_profile("codex_app_heartbeat")
+
+
+def _active_decision() -> dict:
+    return {
+        "goal_id": GOAL_ID,
+        "agent_identity": {"agent_id": AGENT_ID},
+        "should_run": True,
+        "effective_action": "normal_run",
+        "recommended_action": "run the next bounded segment",
+        "heartbeat_recommendation": {
+            "recommended_mode": "steering_audit_then_one_step",
+            "notify": "DONT_NOTIFY",
+        },
+        "execution_obligation": {
+            "must_attempt_work": True,
+            "kind": "work_lane_contract",
+            "contract_obligation": "advance_one_bounded_segment",
+        },
+        "interaction_contract": {
+            "schema_version": "loopx_interaction_contract_v0",
+            "mode": "bounded_delivery",
+            "user_channel": {"action_required": False, "notify": "DONT_NOTIFY"},
+            "agent_channel": {
+                "must_attempt": True,
+                "delivery_allowed": True,
+                "quiet_noop_allowed": False,
+            },
+        },
+        "automation_liveness": {
+            "keep_active": True,
+            "automation_action": "execute_bounded_work",
+            "spend_policy": "spend once only after validated writeback",
+        },
+        "capability_gate": {
+            "action": "run",
+            "available": ["shell", "filesystem_read", "filesystem_write"],
+        },
+    }
+
+
+def _hint(
+    decision: dict,
+    *,
+    scheduler_state: dict | None = None,
+    host_rrule: str | None = None,
+    automation_id: str | None = None,
+) -> dict:
+    return build_scheduler_hint(
+        decision,
+        codex_app_scheduler_state=scheduler_state,
+        codex_app_current_rrule=host_rrule,
+        codex_app_automation_id=automation_id,
+        scheduler_execution_context=APP_CONTEXT,
+    )
+
+
+def _ack_state(hint: dict, *, applied_rrule: str, generated_at: datetime) -> dict:
+    event = build_codex_app_scheduler_ack_event(
+        {"goal_id": GOAL_ID, "scheduler_hint": hint},
+        agent_id=AGENT_ID,
+        applied_rrule=applied_rrule,
+        generated_at=generated_at.isoformat(),
+    )
+    return event["scheduler_ack_event"]["scheduler_state"]
+
+
+def test_apply_needed_projects_fallback_hint_when_automation_id_resolved() -> None:
+    hint = _hint(_active_decision(), automation_id="loopx")
+    codex_app = hint["codex_app"]
+    assert codex_app["stateful_backoff"]["apply_needed"] is True
+
+    fallback = codex_app["fallback_hint"]
+    assert fallback["available"] is True
+    assert fallback["schema_version"] == "codex_app_scheduler_fallback_hint_v0"
+    assert fallback["command"] == "loopx-apply-rrule"
+    assert fallback["cli_args"][0] == "loopx-apply-rrule"
+    assert "--goal-id" in fallback["cli_args"]
+    assert GOAL_ID in fallback["cli_args"]
+    assert "--agent-id" in fallback["cli_args"]
+    assert AGENT_ID in fallback["cli_args"]
+    assert "--automation-id" in fallback["cli_args"]
+    assert "loopx" in fallback["cli_args"]
+    assert "--turn-instance-id" in fallback["cli_args"]
+    assert "${LOOPX_TURN:?}" in fallback["cli_args"]
+    assert "bypasses" in fallback["reason"]
+    assert "never as the routine path" in fallback["reason"]
+    assert codex_app["failure_hint"]["cli_args"][0] == "quota"
+
+
+def test_apply_needed_without_automation_id_emits_gate_not_guess() -> None:
+    hint = _hint(_active_decision(), automation_id=None)
+    fallback = hint["codex_app"]["fallback_hint"]
+    assert fallback["available"] is False
+    assert fallback["reason"].startswith("automation_id_unresolved")
+    assert "do not guess an automation id" in fallback["reason"]
+    assert fallback["action"] == "surface_pasteable_heartbeat_gate"
+    assert "cli_args" not in fallback
+
+
+def test_settled_cadence_omits_fallback_hint() -> None:
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    first = _hint(_active_decision(), automation_id="loopx")
+    applied_rrule = first["codex_app"]["recommended_rrule"]
+    settled = _ack_state(first, applied_rrule=applied_rrule, generated_at=now)
+
+    second = _hint(
+        _active_decision(),
+        scheduler_state=settled,
+        host_rrule=applied_rrule,
+        automation_id="loopx",
+    )
+    assert second["codex_app"]["stateful_backoff"]["apply_needed"] is False
+    assert "fallback_hint" not in second["codex_app"]
+
+
+def test_fallback_hint_cli_route_binds_registry(tmp_path: Path) -> None:
+    payload = {
+        "scheduler_hint": {
+            "codex_app": {
+                "fallback_hint": {
+                    "cli_args": [
+                        "loopx-apply-rrule",
+                        "--goal-id",
+                        GOAL_ID,
+                        "--agent-id",
+                        AGENT_ID,
+                        "--automation-id",
+                        "loopx",
+                        "--turn-instance-id",
+                        "${LOOPX_TURN:?}",
+                    ],
+                }
+            }
+        }
+    }
+    registry_path = tmp_path / "registry.json"
+    bind_scheduler_followup_cli_routes(
+        payload,
+        registry_path=registry_path,
+        runtime_root=tmp_path / "runtime",
+    )
+    fallback = payload["scheduler_hint"]["codex_app"]["fallback_hint"]
+    assert fallback["cli_args"][:3] == [
+        "loopx-apply-rrule",
+        "--registry",
+        str(registry_path.resolve()),
+    ]
+    assert fallback["route_binding"]["schema_version"] == (
+        "codex_app_scheduler_fallback_route_v0"
+    )
+    assert fallback["route_binding"]["registry_bound"] is True
+    assert fallback["route_binding"]["runtime_root_bound"] is False
+
+
+def test_heartbeat_scheduler_rules_name_the_fallback(tmp_path: Path) -> None:
+    for rule in (
+        SCHEDULER_HINT_APPLICATION_RULE,
+        SCHEDULER_HINT_COMPACT_RULE,
+        SCHEDULER_HINT_THIN_RULE,
+    ):
+        assert "fallback_hint" in rule
+    assert "SQLite" in SCHEDULER_HINT_APPLICATION_RULE
+    assert "app API" in SCHEDULER_HINT_APPLICATION_RULE
+
+
+def test_resolve_codex_app_automation_rrule_returns_automation_id(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    automation_path = tmp_path / "automations" / "fixture" / "automation.toml"
+    automation_path.parent.mkdir(parents=True, exist_ok=True)
+    automation_path.write_text(
+        "\n".join(
+            [
+                "version = 1",
+                'id = "fixture"',
+                'kind = "heartbeat"',
+                'name = "Fallback fixture"',
+                (
+                    'prompt = "Advance `fallback-hint-goal` from active state. '
+                    'Agent: `codex-fixture`."'
+                ),
+                'status = "ACTIVE"',
+                'rrule = "FREQ=MINUTELY;INTERVAL=3"',
+                'target_thread_id = "fixture-thread"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = resolve_codex_app_automation_rrule(
+        goal_id="fallback-hint-goal",
+        agent_id="codex-fixture",
+        root=tmp_path,
+    )
+    assert result["available"] is True
+    assert result["automation_id"] == "fixture"
