@@ -142,6 +142,21 @@ the first viewport. Do not move the review gate into a PR comment, todo note, or
 final summary after the fact. It must happen before the public first-screen
 change is finalized.
 
+## UI Design Standard
+
+Read the repository-root `DESIGN.md` before changing or reproducing any user
+interface, including the public website, dashboard, desktop application,
+documentation chrome, prototypes, visual fixtures, and screenshots.
+
+Use that document as the default visual contract for UI implementation and
+framework migrations. New LoopX surfaces should share its Vercel-inspired
+black-and-white precision, Geist typography, hairline surfaces, restrained
+accent system, spacing, shape, responsive, motion, and accessibility rules.
+When a task supplies an explicitly approved screenshot or design file, match
+that source and use `DESIGN.md` for unspecified details. Framework migrations
+must preserve existing visual and behavioral parity unless the task explicitly
+authorizes a redesign.
+
 ## Public And Private Boundary
 
 Do not commit internal department, team, customer, meeting, reporting,
