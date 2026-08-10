@@ -105,6 +105,10 @@ from .control_plane.todos.write_policy import (
     require_user_todo_task_class,
     resolve_user_gate_global_gate_update,
 )
+from .control_plane.todos.handoff_mode import (
+    enter_todo_ownership_handoff_gate,
+    resolve_todo_completion_handoff,
+)
 from .control_plane.work_items.task_lease import (
     hold_task_lease_mutation_fence,
     release_verified_task_lease_fence,
@@ -1195,7 +1199,7 @@ def update_goal_todo(
         resolved_state_file,
         agent_id=agent_id or claimed_by,
         operation="todo_update",
-    ):
+    ), ExitStack() as handoff_gate_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
@@ -1274,6 +1278,16 @@ def update_goal_todo(
             authority_action=None if claim_only else authority_action,
             authority_reason=authority_reason,
             requested_claimed_by=effective_claimed_by,
+        )
+        handoff_gate = enter_todo_ownership_handoff_gate(
+            handoff_gate_stack,
+            state_text=original,
+            registry_path=registry_path,
+            goal_id=goal_id,
+            todo_id=str(authority_todo.get("todo_id") or todo_id),
+            mutation_authority=mutation_authority,
+            actor_agent_id=effective_agent_id or effective_claimed_by,
+            ownership_mutation=(claimed_by is not None or clear_claim) and target_role == "agent",
         )
         target_task_class = task_class or str(existing_block.get("task_class") or "")
         if target_role == "user" and claimed_by:
@@ -1478,6 +1492,7 @@ def update_goal_todo(
         "goal_id": goal_id,
         "agent_id": effective_agent_id,
         "mutation_authority": mutation_authority,
+        **handoff_gate,
         **update_result,
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
@@ -1619,6 +1634,7 @@ def complete_goal_todo(
         )
         if terminal_replay:
             return terminal_replay
+        completion_handoff = resolve_todo_completion_handoff(state_text=original, mutation_authority=mutation_authority)
         task_lease_fence = lease_fence_stack.enter_context(
             hold_task_lease_mutation_fence(
                 registry_path=registry_path,
@@ -1634,6 +1650,7 @@ def complete_goal_todo(
                     task_lease_idempotency_key is not None
                     or task_lease_expected_version is not None
                 ),
+                handoff=completion_handoff,
             )
         )
         normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
@@ -1721,6 +1738,7 @@ def complete_goal_todo(
                 event_result["linked_successor_id"] = completion_policy.linked_successor_id
                 event_result["mutation_authority"] = mutation_authority
                 event_result["task_lease_fence"] = task_lease_fence
+                event_result.update(completion_handoff)
                 release_verified_task_lease_fence(
                     task_lease_fence,
                     committed=bool(event_result.get("changed")) and not dry_run,
@@ -1851,6 +1869,7 @@ def complete_goal_todo(
         "linked_successor_id": completion_policy.linked_successor_id,
         "mutation_authority": mutation_authority,
         "task_lease_fence": task_lease_fence,
+        **completion_handoff,
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,

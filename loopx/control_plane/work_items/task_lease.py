@@ -24,7 +24,13 @@ from ..todos.contract import (
     normalize_todo_excluded_agents,
     normalize_todo_id,
 )
-
+from ..todos.handoff_mode import (
+    HANDOFF_MODE_HARD_LEASE,
+    HANDOFF_MODE_LEGACY,
+    HANDOFF_MODE_SOFT_CLAIM,
+    HandoffModeError,
+    goal_handoff_mode_for_goal,
+)
 
 TASK_LEASE_SCHEMA_VERSION = "task_lease_v0"
 DEFAULT_TASK_LEASE_TTL_SECONDS = 45 * 60
@@ -112,6 +118,138 @@ class _VerifiedTaskLeaseFence(dict):
     release_hook: Callable[[], None] | None = None
 
 
+def goal_handoff_mode_for_lease(registry_path: Path, goal_id: str) -> str:
+    """Resolve the goal handoff mode for lease verbs.
+
+    An invalid ``handoff_mode`` value is re-typed as a TaskLeaseError. A goal
+    or state file that cannot be resolved falls back to legacy: each lease
+    verb's own todo-projection checks already own that failure surface.
+    """
+
+    try:
+        return goal_handoff_mode_for_goal(registry_path=registry_path, goal_id=goal_id)
+    except HandoffModeError as exc:
+        raise TaskLeaseError(str(exc), code=exc.code, payload=exc.payload) from exc
+    except (OSError, ValueError):
+        return HANDOFF_MODE_LEGACY
+
+
+def _require_lease_mutation_allowed_by_handoff_mode(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    todo_id: str,
+    action: str,
+) -> str:
+    handoff_mode = goal_handoff_mode_for_lease(registry_path, goal_id)
+    if handoff_mode == HANDOFF_MODE_SOFT_CLAIM:
+        raise TaskLeaseError(
+            f"goal handoff mode 'soft_claim' forbids task lease {action}; "
+            "release and inspect remain available for legacy leftovers",
+            code="handoff_mode_forbids_lease",
+            payload={
+                "goal_id": goal_id,
+                "todo_id": todo_id,
+                "action": action,
+                "handoff_mode": handoff_mode,
+            },
+        )
+    return handoff_mode
+
+
+def _optional_handoff_mode(registry_path: Path | None, goal_id: str) -> str | None:
+    if registry_path is None:
+        return None
+    try:
+        return goal_handoff_mode_for_lease(registry_path, goal_id)
+    except (TaskLeaseError, OSError, ValueError):
+        return None
+
+
+@contextmanager
+def hold_handoff_lease_holder_gate(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    todo_id: str,
+    actor_agent_id: str | None,
+) -> Iterator[dict[str, Any]]:
+    """Hold the per-goal lease lock while proving the actor owns the lease.
+
+    hard_lease handoff mode only: an ownership mutation (claim, claimed_by
+    update, clear) on an existing todo requires the acting agent to hold that
+    todo's time-active lease. Identity is compared with
+    normalize_todo_claimed_by on both sides. Callers must already hold the
+    markdown state lock; this guard then takes the per-goal lease lock, the
+    same markdown-lock-then-lease-lock order used by the completion fence,
+    and the caller keeps it held until the markdown write commits.
+    """
+
+    normalized_goal_id = normalize_goal_id(goal_id)
+    normalized_todo_id = normalize_lease_todo_id(todo_id)
+    actor = normalize_todo_claimed_by(actor_agent_id)
+    runtime_root = runtime_root_from_registry(registry_path, None)
+    lease_path = task_lease_path(
+        runtime_root=runtime_root,
+        goal_id=normalized_goal_id,
+        todo_id=normalized_todo_id,
+    )
+    base_payload: dict[str, Any] = {
+        "goal_id": normalized_goal_id,
+        "todo_id": normalized_todo_id,
+        "handoff_mode": HANDOFF_MODE_HARD_LEASE,
+        "lease_path": str(lease_path),
+    }
+    if not actor:
+        raise TaskLeaseError(
+            "hard_lease handoff mode requires an attributed actor for "
+            "ownership changes; provide --agent-id",
+            code="handoff_mode_requires_lease",
+            payload={**base_payload, "reason": "missing_actor"},
+        )
+    lock_target = task_lease_lock_path(
+        runtime_root=runtime_root,
+        goal_id=normalized_goal_id,
+    )
+    with exclusive_file_lock(
+        lock_target,
+        agent_id=actor,
+        operation="handoff_lease_holder_gate",
+    ):
+        lease = read_lease(lease_path)
+        if not lease_is_active(lease):
+            raise TaskLeaseError(
+                "hard_lease handoff mode requires a time-active task lease "
+                "before ownership of an existing todo can change; acquire one "
+                "with `loopx task-lease acquire`",
+                code="handoff_mode_requires_lease",
+                payload={**base_payload, "reason": "no_active_lease"},
+            )
+        assert lease is not None
+        owner = normalize_todo_claimed_by(lease.get("owner"))
+        if owner != actor:
+            raise TaskLeaseError(
+                f"hard_lease handoff mode: actor {actor!r} does not own the "
+                f"time-active task lease held by {owner!r}",
+                code="handoff_mode_requires_lease",
+                payload={
+                    **base_payload,
+                    "reason": "lease_owner_mismatch",
+                    "actor_agent_id": actor,
+                    "lease_owner": owner,
+                    "lease_version": lease.get("version"),
+                    "expires_at": lease.get("expires_at"),
+                },
+            )
+        yield {
+            "schema_version": TASK_LEASE_SCHEMA_VERSION,
+            "checked": True,
+            "active": True,
+            "owner": owner,
+            "version": lease.get("version"),
+        }
+
+
 @contextmanager
 def hold_task_lease_mutation_fence(
     *,
@@ -123,14 +261,22 @@ def hold_task_lease_mutation_fence(
     idempotency_key: str | None,
     expected_version: int | None = None,
     require_active_when_key_supplied: bool = True,
+    handoff: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Hold the per-goal lease lock while one todo lifecycle write commits.
 
-    Task leases are optional. Once an effective lease exists, however, the
-    lifecycle writer must prove that it is the execution instance that acquired
-    the lease. The idempotency key is the execution-instance fence; agent ids
-    alone are insufficient because multiple host processes may share one peer
-    identity.
+    Task leases are optional in legacy and soft_claim handoff modes. Once an
+    effective lease exists, however, the lifecycle writer must prove that it
+    is the execution instance that acquired the lease. The idempotency key is
+    the execution-instance fence; agent ids alone are insufficient because
+    multiple host processes may share one peer identity.
+
+    ``handoff`` carries the resolved goal handoff mode plus the delegated
+    authority door marker. In hard_lease mode (without the door) the fence is
+    mandatory: no effective lease is a typed error instead of a silent
+    ``{"required": False}``, and a time-active lease whose owner constraint is
+    no longer effective (the legacy self-disarm state) fails loudly instead of
+    letting a keyless completion through.
     """
 
     normalized_goal_id = normalize_goal_id(goal_id)
@@ -150,13 +296,18 @@ def hold_task_lease_mutation_fence(
         runtime_root=runtime_root,
         goal_id=normalized_goal_id,
     )
+    handoff = handoff or {}
+    handoff_mode = str(handoff.get("handoff_mode") or HANDOFF_MODE_LEGACY)
+    handoff_gate_overridden = handoff.get("handoff_gate_overridden") is True
     with exclusive_file_lock(
         lock_target,
         agent_id=actor_agent_id,
         operation="task_lease_mutation_fence",
     ):
         lease = read_lease(lease_path)
-        active = lease_is_active(lease)
+        time_active = lease_is_active(lease)
+        active = time_active
+        constraint: dict[str, Any] | None = None
         if active and lease:
             constraint = task_lease_owner_constraint(
                 todo,
@@ -169,6 +320,36 @@ def hold_task_lease_mutation_fence(
             active = constraint.get("effective") is True
 
         if not active:
+            if handoff_mode == HANDOFF_MODE_HARD_LEASE and not handoff_gate_overridden:
+                if time_active and lease:
+                    raise TaskLeaseError(
+                        "hard_lease handoff mode found a time-active lease "
+                        "diverged from the todo projection; refusing keyless "
+                        "completion. Repair ownership (release or transfer the "
+                        "lease, or restore claimed_by) before completing.",
+                        code="handoff_mode_lease_claim_divergence",
+                        payload={
+                            "goal_id": normalized_goal_id,
+                            "todo_id": normalized_todo_id,
+                            "handoff_mode": handoff_mode,
+                            "lease_owner": lease.get("owner"),
+                            "lease_version": lease.get("version"),
+                            "constraint": constraint,
+                            "lease_path": str(lease_path),
+                        },
+                    )
+                raise TaskLeaseError(
+                    "hard_lease handoff mode requires an effective task lease "
+                    "to complete this todo; acquire one with "
+                    "`loopx task-lease acquire`",
+                    code="handoff_mode_requires_lease",
+                    payload={
+                        "goal_id": normalized_goal_id,
+                        "todo_id": normalized_todo_id,
+                        "handoff_mode": handoff_mode,
+                        "lease_path": str(lease_path),
+                    },
+                )
             if (
                 require_active_when_key_supplied
                 and (requested_key is not None or expected_version is not None)
@@ -649,6 +830,12 @@ def acquire_task_lease(
         agent_id=owner,
         operation="task_lease_acquire",
     ):
+        handoff_mode = _require_lease_mutation_allowed_by_handoff_mode(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            todo_id=todo_id,
+            action="acquire",
+        )
         todo = require_task_lease_owner_allowed(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -697,6 +884,7 @@ def acquire_task_lease(
                     "idempotent": True,
                     "lease": existing,
                     "lease_path": str(lease_path),
+                    "handoff_mode": handoff_mode,
                 }
             raise TaskLeaseError(
                 "todo already has an active lease",
@@ -741,6 +929,7 @@ def acquire_task_lease(
             "idempotent": False,
             "lease": lease,
             "lease_path": str(lease_path),
+            "handoff_mode": handoff_mode,
         }
 
 
@@ -768,6 +957,12 @@ def renew_task_lease(
         agent_id=owner,
         operation="task_lease_renew",
     ):
+        handoff_mode = _require_lease_mutation_allowed_by_handoff_mode(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            todo_id=todo_id,
+            action="renew",
+        )
         require_task_lease_owner_allowed(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -792,6 +987,7 @@ def renew_task_lease(
             "renewed": True,
             "lease": lease,
             "lease_path": str(lease_path),
+            "handoff_mode": handoff_mode,
         }
 
 
@@ -823,6 +1019,12 @@ def transfer_task_lease(
         agent_id=owner,
         operation="task_lease_transfer",
     ):
+        handoff_mode = _require_lease_mutation_allowed_by_handoff_mode(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            todo_id=todo_id,
+            action="transfer",
+        )
         require_registered_task_lease_owner(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -855,6 +1057,7 @@ def transfer_task_lease(
             "transferred": True,
             "lease": lease,
             "lease_path": str(lease_path),
+            "handoff_mode": handoff_mode,
         }
 
 
@@ -866,11 +1069,16 @@ def release_task_lease(
     owner: str,
     idempotency_key: str,
     expected_version: int | None = None,
+    registry_path: Path | None = None,
 ) -> dict[str, Any]:
     goal_id = normalize_goal_id(goal_id)
     todo_id = normalize_lease_todo_id(todo_id)
     owner = normalize_owner(owner)
     idempotency_key = normalize_idempotency_key(idempotency_key)
+    # Release stays allowed in every handoff mode (cleanup of legacy
+    # leftovers); the mode is reported additively when resolvable.
+    handoff_mode = _optional_handoff_mode(registry_path, goal_id)
+    handoff_extra = {"handoff_mode": handoff_mode} if handoff_mode else {}
     lock_target = task_lease_lock_path(runtime_root=runtime_root, goal_id=goal_id)
     lease_path = task_lease_path(runtime_root=runtime_root, goal_id=goal_id, todo_id=todo_id)
     at = now_utc()
@@ -889,6 +1097,7 @@ def release_task_lease(
                 "released": False,
                 "missing": True,
                 "lease_path": str(lease_path),
+                **handoff_extra,
             }
         if lease_is_active(lease, at=at) and (
             lease.get("owner") != owner or lease.get("idempotency_key") != idempotency_key
@@ -906,6 +1115,7 @@ def release_task_lease(
             "released": True,
             "lease": released_lease,
             "lease_path": str(lease_path),
+            **handoff_extra,
         }
 
 
@@ -945,6 +1155,7 @@ def inspect_task_lease(
                 active = False
             else:
                 executor_constraint = None
+    handoff_mode = _optional_handoff_mode(registry_path, goal_id)
     return {
         "ok": True,
         "schema_version": TASK_LEASE_SCHEMA_VERSION,
@@ -954,5 +1165,6 @@ def inspect_task_lease(
         "active": active,
         "lease": lease,
         "lease_path": str(lease_path),
+        **({"handoff_mode": handoff_mode} if handoff_mode else {}),
         **({"executor_constraint": executor_constraint} if executor_constraint else {}),
     }
