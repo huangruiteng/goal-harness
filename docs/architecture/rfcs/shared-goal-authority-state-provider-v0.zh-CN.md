@@ -212,8 +212,9 @@ owner，新 host 或 extension 也可以新增本地 artifact，而无需修改�
 
 该 schema 不包含 raw todo body、transcript、credential、绝对路径或 raw evidence。
 它只包含裁决这一命令切片与恢复其凭证所需的事实。与现有 LoopX 一致，claim 后
-todo 仍为 `open`；soft ownership 由 `claimed_by` 表示，执行权由 lease/fence 表示，
-不会引入一个本地状态机不存在的 `claimed` status。
+todo 仍为 `open`，不会引入一个本地状态机不存在的 `claimed` status。在目标合同里，
+soft ownership 由 `claimed_by` 表示，执行权由 lease/fence 表示；当前实现尚未做到
+这一点：两本账分叉时，软认领方在写路径上实际胜出，详见附录 B。
 
 这里的 eligibility revision/digest 都是目标 todo 所引用的快照：authorization 只覆盖
 该 todo 的 actor scope，dependency 只覆盖它的传递依赖闭包，gate 只覆盖实际约束
@@ -553,3 +554,60 @@ stale-fence writeback、production authorization-projection publisher、保留 r
 `python3 examples/nokv-shadow-provider/probes.py contract` 通过并不表示上面的完整 P0
 验收门通过。历史 latency 或 fault 结果只具有参考意义，不构成 durability、recovery、
 HA 或 production qualification 声明。
+
+## 附录 B：交接模式决策记录（2026-08-10）
+
+本附录把 PR #2787 评审中已同意的方向落成文字，作为实施前置条件的一部分。
+只改文档，不改任何运行时行为。
+
+### 起因
+
+用真实 CLI 验证时复现了一个事实：领任务的两本账可以各说各话。一个 agent 先拿到
+某个 todo 的硬租约，另一个 agent 之后仍能软认领同一个 todo，两边都成功。分叉之后
+的实际行为更关键：
+
+- 后来的软认领会让先前的活租约直接失效：持约人续租、重新领取都被拒绝；
+- 完成栅栏恰好在这种矛盾状态下自动失效：软认领方不带钥匙就能完成；
+- 持约人反而完不成：授权检查先看软认领，租约凭证根本轮不到被检查。
+
+也就是说，今天两本账一旦分叉，软认领方全胜，租约不单独构成执行权。第 4 节中
+"执行权由 lease/fence 表示"描述的是目标合同，正文已随本修订改口。
+
+### 决定
+
+不做两本账之间的互相同步，改为每个 goal 声明一种交接模式（`handoff_mode`），
+用模式把两种领法隔开。字段暂放在 goal 状态文件头部（front-matter），跟着文件
+跨端走；共享模式上线后由共享权威托管。三个取值：
+
+- 不填或 `legacy`：与今天完全一样，两种领法都开放。分叉的口子在此模式下仍然
+  存在；这是有意保留的默认值，不是疏漏。
+- `soft_claim`：该 goal 只用软认领。acquire/renew/transfer 被拒绝；release 与
+  inspect 保留，用于清理和查看遗留租约。
+- `hard_lease`：改动已有 todo 的认领关系必须持有它的活租约；完成必须带钥匙；
+  "矛盾态自动失效"改为响亮报错。新建 todo 时顺手指定认领人仍然允许——新 todo
+  不可能已有租约。
+
+配套约定：
+
+1. 默认 `legacy`，存量 goal 行为零变化；洞还在，实现 PR 必须明说。
+2. 字段落点如上；registry 与租约文件都是单机的，只有 goal 状态文件跨端。
+3. 跨端窗口：模式靠文件同步传播，两端可能短暂看到不同的值。现在只能收敛、
+   不能消灭，如实声明；共享模式才能关死。
+4. `hard_lease` 留一扇门：既有的委托授权（todo_lifecycle_authority，附说明
+   理由）可以不持租约改认领，结果里带明确的越门标记，可审计。不新增任何
+   绕过开关。
+5. 切换模式要求静止：goal 内仍有未完成的认领或活租约时拒绝切换，并列出
+   阻挡者。v0 不提供强制切换。
+
+### 与分阶段交付的关系
+
+对应 #2787 评审结论中的五阶段计划：先在 characterization 阶段把今天的真实行为
+（含上面三条分叉事实）做成用例入册；门禁本身是一次显式声明的行为变更，作为
+独立 PR 在 file provider shadow 之前落地，避免分叉数据污染 shadow 对账基线；
+本地 canonical promotion 把 claim 与 lease 收进同一本账后，这类分叉从结构上
+不再可能，门禁自然被吸收。读侧与卫生修复（status 显示真实租约、完成后销掉已
+验证的租约）不涉及判断语义，已先行提交。
+
+characterization 阶段的负向用例在原清单上补充：软认领盖掉活租约、完成栅栏在
+矛盾态失效、授权检查先于租约栅栏、尚未设防的认领变更入口、租约获取读取投影
+与状态文件锁之间的窗口。

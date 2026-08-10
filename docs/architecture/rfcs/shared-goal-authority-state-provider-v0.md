@@ -238,10 +238,12 @@ One provider key stores one goal's v0 aggregate. The illustrative shape is:
 
 The schema contains no raw todo body, transcript, credential, absolute path,
 or raw evidence. It contains only the facts needed to adjudicate the command
-slice and recover its proof. As in current LoopX, a claimed todo remains `open`:
-`claimed_by` carries soft ownership and the lease/fence carries execution
-authority, without inventing a `claimed` lifecycle status that local mode does
-not have.
+slice and recover its proof. As in current LoopX, a claimed todo remains `open`,
+without inventing a `claimed` lifecycle status that local mode does not have.
+In the target contract, `claimed_by` carries soft ownership and the lease/fence
+carries execution authority; the current implementation does not honor this
+yet: when the two records diverge, the markdown claimant wins on the write
+path. See Appendix B.
 
 Each eligibility revision or digest is scoped to the snapshot referenced by the
 target todo: authorization covers only that todo's actor scope, dependency
@@ -632,3 +634,83 @@ live NoKV restart/recovery. Passing
 claim that the complete P0 acceptance gate above passes. Historical latency or
 fault results are informative only; they are not a durability, recovery, HA,
 or production qualification claim.
+
+## Appendix B: Handoff-Mode Decision Record (2026-08-10)
+
+This appendix writes down a direction already agreed during the PR #2787
+review, as part of the implementation prerequisite. It changes documentation
+only; no runtime behavior changes.
+
+### Why
+
+Live CLI verification reproduced a fact: the two claim records can disagree.
+One agent acquires a hard lease on a todo; another agent can still soft-claim
+the same todo afterwards, and both succeed. What happens after the divergence
+matters more:
+
+- The later soft claim invalidates the earlier active lease outright: the
+  holder's renew and re-acquire are rejected;
+- The completion fence disarms itself in exactly this conflicted state: the
+  soft claimant completes without any key;
+- The lease holder cannot complete at all: authorization checks the soft
+  claim first, so the lease credentials are never even evaluated.
+
+In short, once the two records diverge today, the soft claimant wins
+everywhere; the lease does not carry execution authority on its own. The
+sentence in section 4 ("the lease/fence carries execution authority")
+describes the target contract; the body text has been corrected in this
+revision.
+
+### Decision
+
+Do not synchronize the two records against each other. Instead, each goal
+declares a handoff mode (`handoff_mode`) that separates the two ways of
+taking work. The field lives in the goal state file's front matter for now,
+traveling with the file across endpoints; once shared mode ships, the shared
+authority owns it. Three values:
+
+- absent or `legacy`: exactly today's behavior, both paths open. The
+  divergence hole remains in this mode; that is a deliberate default, not an
+  oversight.
+- `soft_claim`: this goal uses soft claims only. acquire/renew/transfer are
+  rejected; release and inspect remain available to clean up and view
+  leftover leases.
+- `hard_lease`: changing the claim on an existing todo requires holding its
+  active lease; completion requires the key; the self-disarm-on-conflict
+  behavior becomes a loud error. Assigning a claimant at todo creation stays
+  allowed: a fresh todo cannot have a lease yet.
+
+Companion rules:
+
+1. Default is `legacy`; existing goals see zero behavior change. The hole
+   stays open there, and the implementation PR must say so plainly.
+2. Field placement as above; the registry and lease files are per-host, only
+   the goal state file travels across endpoints.
+3. Cross-endpoint window: the mode propagates by file sync, so two endpoints
+   can briefly see different values. Today this can only converge, not be
+   eliminated; state it honestly. Shared mode closes it.
+4. `hard_lease` keeps one door: the existing delegated authority
+   (todo_lifecycle_authority, with a stated reason) may change claims
+   without holding the lease, with an explicit, auditable override marker in
+   the result. No new bypass switches.
+5. Switching modes requires quiescence: refuse while the goal still has open
+   claims or active leases, and list what blocks it. No forced switch in v0.
+
+### Relation to Staged Delivery
+
+Mapped to the five-stage plan from the #2787 review: the characterization
+stage first records today's actual behavior (including the three divergence
+facts above) as fixtures; the gate itself is an explicitly declared behavior
+change, landing as its own PR before the file provider shadow so divergent
+data does not pollute the shadow parity baseline; once local canonical
+promotion folds claim and lease into one ledger, this class of divergence
+becomes structurally impossible and the gate is absorbed. The read-surface
+and hygiene fixes (status showing real leases; releasing the verified lease
+on completion) touch no decision semantics and were submitted ahead of this
+record.
+
+The characterization stage's negative cases extend the original list: a soft
+claim overriding an active lease; the completion fence disarming in the
+conflicted state; authorization running before the lease fence; claim-change
+entry points not yet gated; the window between the lease acquire's projection
+read and the state-file lock.
