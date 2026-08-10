@@ -352,6 +352,48 @@ def test_active_task_lease_fences_same_agent_completion_instance(
     assert "Create a duplicate stale successor." not in todo_titles
 
 
+def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path)
+    todo = _add_agent_todo(registry)
+
+    completed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AUTHOR_AGENT,
+        evidence="turn A validated the selected Todo",
+        completion_turn_key="turn-a",
+        no_followup=True,
+    )
+    assert completed["completed"] is True
+    assert _agent_todo(state, todo["todo_id"])["completion_turn_key"] == "turn-a"
+    completed_state = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="different completion_turn_key"):
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            agent_id=AUTHOR_AGENT,
+            evidence="turn B must not claim turn A's completion",
+            completion_turn_key="turn-b",
+            no_followup=True,
+        )
+    assert state.read_text(encoding="utf-8") == completed_state
+
+    replayed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AUTHOR_AGENT,
+        evidence="turn A retried after its durable write",
+        completion_turn_key="turn-a",
+        no_followup=True,
+    )
+    assert replayed["idempotent_replay"] is True
+    assert replayed["changed"] is False
+
+
 def test_event_projected_completion_reports_task_lease_fence(
     tmp_path: Path,
 ) -> None:
