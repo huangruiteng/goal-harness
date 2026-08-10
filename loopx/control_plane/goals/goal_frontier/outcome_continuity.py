@@ -5,7 +5,10 @@ from typing import Any
 
 from ...agents.agent_scope import agent_scope_item_claimed_by
 from ...work_items.repair_delta import repair_delta_kinds_have_frontier_delta
-from ..goal_vision_policy import COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD
+from ..goal_vision_policy import (
+    COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD,
+    goal_vision_repeats_advancement_until_closed,
+)
 from ..goal_vision_state import goal_vision_state_is_closed
 
 VISION_OUTCOME_CHECKPOINT_REQUIRED_TRIGGER = "vision_outcome_checkpoint_required"
@@ -360,8 +363,40 @@ def _checkpoint_covers_completed_todo(
         for value in (checkpoint.get("repair_delta_kinds") or [])
         if str(value or "").strip()
     }
+    if repair_delta_kinds & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS):
+        return True
+    qualification_vision_value = checkpoint.get("qualification_agent_vision")
+    qualification_vision = (
+        qualification_vision_value
+        if isinstance(qualification_vision_value, dict)
+        else agent_vision
+    )
+    qualification_patch = _dict_field(qualification_vision, "vision_patch")
+    if goal_vision_repeats_advancement_until_closed(
+        qualification_patch.get("advancement_policy")
+    ):
+        return False
+    path_delta = _dict_field(qualification_vision, "path_delta")
+    evidence_refs = [
+        value
+        for value in (path_delta.get("evidence_refs") or [])
+        if _compact_text(value, limit=140)
+    ]
+    fresh_vision_patch = bool(
+        checkpoint.get("decision") == "patched"
+        and checkpoint.get("generated_at")
+        and checkpoint.get("generated_at")
+        == qualification_vision.get("generated_at")
+    )
     return bool(
-        repair_delta_kinds & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS)
+        fresh_vision_patch
+        and _compact_text(qualification_patch.get("acceptance_summary"), limit=420)
+        and _compact_text(path_delta.get("outcome"), limit=32) == "replan"
+        and evidence_refs
+        and {
+            "goal_vision_patch",
+            "watch_lane_continuation",
+        }.issubset(repair_delta_kinds)
     )
 
 

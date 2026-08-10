@@ -317,6 +317,61 @@ def test_completed_todo_chain_requires_a_later_outcome_checkpoint(
         assert gaps[0]["completed_todo_threshold"] == 5
 
 
+@pytest.mark.parametrize(
+    ("advancement_policy", "repair_delta_kinds", "expects_gap"),
+    [
+        ("as_needed", ["goal_vision_patch", "watch_lane_continuation"], False),
+        ("as_needed", ["goal_vision_patch"], True),
+        (
+            "repeat_until_closed",
+            ["goal_vision_patch", "watch_lane_continuation"],
+            True,
+        ),
+    ],
+)
+def test_completed_chain_accepts_only_bounded_as_needed_watch_replan(
+    advancement_policy: str,
+    repair_delta_kinds: list[str],
+    expects_gap: bool,
+) -> None:
+    active_vision = _outcome_vision(
+        generated_at="2026-07-12T00:03:00Z",
+        outcome="replan",
+        evidence_refs=["todo:bounded-watch"],
+    )
+    active_vision["vision_patch"]["advancement_policy"] = advancement_policy
+    checkpoint = {
+        "schema_version": "vision_checkpoint_v0",
+        "agent_id": AGENT_ID,
+        "required": True,
+        "satisfied": True,
+        "decision": "patched",
+        "triggers": [{"kind": "autonomous_replan_recorded"}],
+        "repair_delta_kinds": repair_delta_kinds,
+        "generated_at": "2026-07-12T00:03:00Z",
+        "qualification_agent_vision": active_vision,
+    }
+    summary = {
+        "recent_completed_advancement_items": [
+            {
+                "todo_id": f"todo_completed_milestone_{index}",
+                "claimed_by": AGENT_ID,
+                "completed_at": f"2026-07-12T00:02:0{index}Z",
+            }
+            for index in range(5)
+        ]
+    }
+
+    gaps = acceptance_gaps_from_todo_completion_checkpoint(
+        active_vision,
+        checkpoint,
+        agent_todo_summary=summary,
+        agent_id=AGENT_ID,
+    )
+
+    assert bool(gaps) is expects_gap
+
+
 def test_four_completed_todos_do_not_force_a_chain_checkpoint() -> None:
     active_vision = _outcome_vision(
         generated_at="2026-07-12T00:01:00Z",

@@ -604,6 +604,10 @@ def build_autonomous_replan_obligation(
         extra_fields["frontier_identity"] = blocked_successor_evidence.get(
             "frontier_identity"
         )
+    elif dead_monitor_evidence and dead_monitor_evidence.get("monitor_target_id"):
+        extra_fields["frontier_identity"] = dead_monitor_evidence.get(
+            "monitor_target_id"
+        )
 
     result = build_autonomous_replan_obligation_payload(
         schema_version=autonomous_replan_schema_version,

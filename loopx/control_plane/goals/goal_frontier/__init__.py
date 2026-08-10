@@ -18,7 +18,10 @@ from ...work_items.autonomous_replan_obligation import (
     MONITOR_NO_CHANGE_STREAK_THRESHOLD,
     build_autonomous_replan_obligation_payload,
 )
-from ...work_items.repair_delta import repair_delta_kinds_have_frontier_delta
+from ...work_items.repair_delta import (
+    repair_delta_kinds_have_frontier_delta,
+    validate_repair_delta_claims,
+)
 from ..goal_vision_policy import goal_vision_repeats_advancement_until_closed
 from ..goal_vision_state import (
     goal_vision_state_is_closed,
@@ -243,6 +246,8 @@ def _watch_lane_ack_covers_dead_monitor_repeat(
     *,
     replan_obligation: dict[str, Any] | None,
     acceptance_gaps: list[dict[str, Any]],
+    agent_todo_summary: dict[str, Any] | None,
+    agent_id: str | None,
 ) -> bool:
     """Keep an as-needed watch ACK valid across unchanged heartbeat receipts."""
 
@@ -262,15 +267,66 @@ def _watch_lane_ack_covers_dead_monitor_repeat(
         delta_kind="watch_lane_continuation",
     ):
         return False
+    if not isinstance(ack, dict):
+        return False
     if not acceptance_gaps or any(
         gap.get("kind") != "vision_acceptance_gap"
         for gap in acceptance_gaps
     ):
         return False
-    return not any(
+    if any(
         goal_vision_repeats_advancement_until_closed(gap.get("advancement_policy"))
         for gap in acceptance_gaps
+    ):
+        return False
+    frontier_identity = str(
+        replan_obligation.get("frontier_identity")
+        if isinstance(replan_obligation, dict)
+        else ""
+    ).strip()
+    if (
+        not frontier_identity
+        or str(ack.get("frontier_identity") or "").strip() != frontier_identity
+    ):
+        return False
+    delta_contract = ack.get("delta_contract")
+    evidence_todo_ids = {
+        str(todo_id).strip()
+        for evidence in (
+            delta_contract.get("auto_evidence") or []
+            if isinstance(delta_contract, dict)
+            else []
+        )
+        if isinstance(evidence, dict)
+        and evidence.get("kind") == "watch_lane_continuation"
+        for todo_id in (evidence.get("todo_ids") or [])
+        if str(todo_id or "").strip()
+    }
+    if not evidence_todo_ids:
+        return False
+    summary = agent_todo_summary if isinstance(agent_todo_summary, dict) else {}
+    exact_watch_items_by_id: dict[str, dict[str, Any]] = {}
+    for lane in (
+        "items",
+        "current_agent_claimed_monitor_items",
+        "claimed_monitor_open_items",
+        "monitor_open_items",
+    ):
+        for item in summary.get(lane) or []:
+            if not isinstance(item, dict):
+                continue
+            todo_id = str(item.get("todo_id") or "").strip()
+            if todo_id in evidence_todo_ids:
+                exact_watch_items_by_id[todo_id] = item
+    accepted, _, _ = validate_repair_delta_claims(
+        ["watch_lane_continuation"],
+        agent_todo_summary={"items": list(exact_watch_items_by_id.values())},
+        agent_id=agent_id,
+        advancement_policy="as_needed",
+        next_action_changed=False,
+        vision_patch_written=False,
     )
+    return "watch_lane_continuation" in accepted
 
 
 def _watch_lane_ack_covers_blocked_successor_repeat(
@@ -1670,6 +1726,8 @@ def build_goal_frontier_projection_context_from_status(
             effective_replan_ack,
             replan_obligation=replan_obligation,
             acceptance_gaps=acceptance_gaps,
+            agent_todo_summary=agent_todo_summary,
+            agent_id=agent_id,
         )
     )
     watch_lane_ack_covers_blocked_successor_repeat = (
@@ -1692,6 +1750,7 @@ def build_goal_frontier_projection_context_from_status(
                 replan_obligation,
             )
             or watch_lane_ack_covers_blocked_successor_repeat
+            or watch_lane_ack_covers_dead_monitor_repeat
         )
         and (
             not acceptance_gaps

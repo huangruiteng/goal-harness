@@ -22,10 +22,12 @@ def compact_autonomous_replan_ack(run: dict[str, Any] | None) -> dict[str, Any] 
     if not isinstance(run, dict) or not autonomous_replan_ack_recorded(run):
         return None
     ack = run.get("autonomous_replan_ack")
+    if not isinstance(ack, dict):
+        return None
     delta_contract = ack.get("delta_contract") if isinstance(ack, dict) else {}
     if not isinstance(delta_contract, dict):
         return None
-    compact_delta = {
+    compact_delta: dict[str, Any] = {
         "schema_version": delta_contract.get("schema_version"),
         "delta_present": bool(delta_contract.get("delta_present")),
         "delta_kinds": [
@@ -34,6 +36,24 @@ def compact_autonomous_replan_ack(run: dict[str, Any] | None) -> dict[str, Any] 
             if str(item or "").strip()
         ],
     }
+    watch_evidence: list[dict[str, Any]] = []
+    for item in delta_contract.get("auto_evidence") or []:
+        if not isinstance(item, dict) or item.get("kind") != "watch_lane_continuation":
+            continue
+        todo_ids = [
+            str(todo_id).strip()
+            for todo_id in (item.get("todo_ids") or [])
+            if str(todo_id or "").strip()
+        ][:4]
+        if todo_ids:
+            watch_evidence.append(
+                {
+                    "kind": "watch_lane_continuation",
+                    "todo_ids": todo_ids,
+                }
+            )
+    if watch_evidence:
+        compact_delta["auto_evidence"] = watch_evidence
     result = {
         "schema_version": ack.get("schema_version"),
         "recorded": True,
@@ -56,6 +76,33 @@ def latest_blocked_successor_frontier_identity(
     latest_runs: list[dict[str, Any]] | None,
     *,
     agent_id: str | None = None,
+) -> str | None:
+    return _latest_monitor_replan_frontier_identity(
+        latest_runs,
+        agent_id=agent_id,
+        include_generic_watch=False,
+    )
+
+
+def latest_monitor_replan_frontier_identity(
+    latest_runs: list[dict[str, Any]] | None,
+    *,
+    agent_id: str | None = None,
+) -> str | None:
+    """Return the latest monitor identity that a durable replan ACK must bind."""
+
+    return _latest_monitor_replan_frontier_identity(
+        latest_runs,
+        agent_id=agent_id,
+        include_generic_watch=True,
+    )
+
+
+def _latest_monitor_replan_frontier_identity(
+    latest_runs: list[dict[str, Any]] | None,
+    *,
+    agent_id: str | None,
+    include_generic_watch: bool,
 ) -> str | None:
     normalized_agent_id = str(agent_id or "").strip()
     for run in latest_runs or []:
@@ -84,7 +131,14 @@ def latest_blocked_successor_frontier_identity(
         if target.get("monitor_mode") != (
             "blocked_successor_wait_without_material_transition"
         ):
-            continue
+            if not (
+                include_generic_watch
+                and target.get("monitor_mode")
+                == "monitor_quiet_until_material_transition"
+            ):
+                continue
+            target_identity = str(target.get("target_id") or "").strip()
+            return target_identity or None
         frontier_identity = str(target.get("frontier_identity") or "").strip()
         return frontier_identity or None
     return None

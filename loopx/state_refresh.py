@@ -32,7 +32,7 @@ from .control_plane.work_items.repair_delta import (
     validate_repair_delta_claims,
 )
 from .control_plane.work_items.autonomous_replan_ack import (
-    latest_blocked_successor_frontier_identity,
+    latest_monitor_replan_frontier_identity,
 )
 from .control_plane.runtime.shared_runtime_refresh_projection import (
     build_shared_runtime_projection,
@@ -1163,7 +1163,7 @@ def refresh_state_run(
         )
         if autonomous_replan_recorded:
             autonomous_replan_frontier_identity = (
-                latest_blocked_successor_frontier_identity(
+                latest_monitor_replan_frontier_identity(
                     newest_first_runs,
                     agent_id=normalized_agent_id,
                 )
