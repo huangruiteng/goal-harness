@@ -89,6 +89,7 @@ from .cli_commands import (
     handle_starter_command,
     handle_summary_all_command,
     handle_support_control_command,
+    handle_handoff_mode_command,
     handle_task_lease_command,
     handle_todo_command,
     handle_version_command,
@@ -125,6 +126,7 @@ from .cli_commands import (
     register_status_commands,
     register_summary_all_command,
     register_support_control_commands,
+    register_handoff_mode_command,
     register_task_lease_command,
     register_todo_command,
     register_version_command,
@@ -285,6 +287,7 @@ def build_parser() -> LoopXArgumentParser:
     register_explore_commands(sub, add_subcommand_format)
     register_todo_command(sub, add_subcommand_format)
     register_task_lease_command(sub, add_subcommand_format)
+    register_handoff_mode_command(sub, add_subcommand_format)
     register_quota_command(sub)
 
     return parser
@@ -771,6 +774,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     if task_lease_result is not None:
         return task_lease_result
+
+    handoff_mode_result = handle_handoff_mode_command(
+        args,
+        registry_path=registry_path,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if handoff_mode_result is not None:
+        return handoff_mode_result
 
     if args.command == "quota":
         return handle_quota_command(

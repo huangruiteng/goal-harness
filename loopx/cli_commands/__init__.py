@@ -94,6 +94,7 @@ from .first_run_report import (
 from .dreaming import handle_dreaming_command, register_dreaming_commands
 from .evidence_log import handle_evidence_log_command, register_evidence_log_command
 from .explore import handle_explore_command, register_explore_commands
+from .handoff_mode import handle_handoff_mode_command, register_handoff_mode_command
 from .history import handle_history_command, register_history_command
 from .goal_channel import handle_goal_channel_command, register_goal_channel_commands
 from .lark_inbox import (
@@ -235,6 +236,7 @@ __all__ = [
     "handle_dreaming_command",
     "handle_evidence_log_command",
     "handle_explore_command",
+    "handle_handoff_mode_command",
     "handle_history_command",
     "handle_goal_channel_command",
     "build_lark_issue_fix_reviewer_provider_hooks",
@@ -295,6 +297,7 @@ __all__ = [
     "register_dreaming_commands",
     "register_evidence_log_command",
     "register_explore_commands",
+    "register_handoff_mode_command",
     "register_history_command",
     "register_goal_channel_commands",
     "register_lark_inbox_commands",

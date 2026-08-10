@@ -10,6 +10,7 @@ from ..control_plane.quota.settlement import (
     resolve_heartbeat_settlement_identity,
     settlement_result_payload,
 )
+from ..control_plane.todos.handoff_mode import HandoffModeError
 from ..control_plane.todos.markdown import render_todo_markdown
 from ..control_plane.work_items.task_lease import TaskLeaseError
 from ..file_lock import lock_timeout_error_fields
@@ -815,7 +816,7 @@ def handle_todo_command(
             "error": str(exc),
             **lock_timeout_error_fields(exc),
         }
-        if isinstance(exc, TaskLeaseError):
+        if isinstance(exc, (TaskLeaseError, HandoffModeError)):
             payload["error_code"] = exc.code
             payload.update(exc.payload)
     append_todo_rollout_event(

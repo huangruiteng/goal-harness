@@ -57,16 +57,18 @@ def _typed_failure(
     step_kind: SettlementStepKind,
     reason: str,
     code: str | None = None,
+    task_lease_payload: dict[str, Any] | None = None,
 ) -> SettlementResult[Any]:
+    details: dict[str, Any] = {}
+    if code:
+        details["task_lease_error_code"] = code
+    if task_lease_payload:
+        details["task_lease_payload"] = dict(task_lease_payload)
     return SettlementResult.failed(
         kind=kind,
         step_kind=step_kind,
         reason=reason,
-        details=(
-            {"task_lease_error_code": code}
-            if code
-            else None
-        ),
+        details=details or None,
     )
 
 
@@ -319,6 +321,7 @@ def _map_task_lease_error(exc: TaskLeaseError) -> SettlementResult[dict[str, Any
         step_kind=SettlementStepKind.DURABLE_WRITEBACK,
         reason=str(exc),
         code=exc.code,
+        task_lease_payload=exc.payload,
     )
 
 

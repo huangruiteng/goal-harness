@@ -177,6 +177,9 @@ def handle_task_lease_command(
                     },
                 }
                 if isinstance(failure_details, dict):
+                    task_lease_payload = failure_details.get("task_lease_payload")
+                    if isinstance(task_lease_payload, dict):
+                        payload.update(task_lease_payload)
                     if failure_details.get("conflicts") is not None:
                         payload["conflicts"] = failure_details["conflicts"]
                     if failure_details.get("lease") is not None:
@@ -250,6 +253,7 @@ def handle_task_lease_command(
                 owner=args.owner,
                 idempotency_key=args.idempotency_key,
                 expected_version=args.expected_version,
+                registry_path=registry_path,
             )
         else:
             unsupported = [
