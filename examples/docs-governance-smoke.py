@@ -162,6 +162,24 @@ def assert_effect_interpreter_docs_are_canonical() -> None:
         assert fragment in lecture, fragment
 
 
+def assert_contributor_task_board_is_current() -> None:
+    tasks = compact(read("CONTRIBUTOR_TASKS.md"))
+    for required in (
+        "/loopx-global-todos` (all implemented)",
+        "Implement `/loopx-global-risks` next",
+        "A shared typed Effect Program now drives quota and Turn settlement",
+        "The scheduler remains outside settlement",
+        "do not force pure decision logic into Kleisli form",
+        "Do not add a generic executor until a second real caller proves the abstraction",
+    ):
+        assert required in tasks, required
+    for stale in (
+        "Implement `/loopx-global-todos` or `/loopx-global-risks` next",
+        "Add one negative fixture proving fail-closed legacy upgrade",
+    ):
+        assert stale not in tasks, stale
+
+
 def main() -> int:
     docs_index = read("docs/README.md")
     root_readme = read("README.md")
@@ -330,6 +348,7 @@ def main() -> int:
 
     assert_local_doc_links_resolve()
     assert_effect_interpreter_docs_are_canonical()
+    assert_contributor_task_board_is_current()
 
     collaboration_rfc = read(
         "docs/architecture/rfcs/agent-im-openviking-collaboration-v0.md"

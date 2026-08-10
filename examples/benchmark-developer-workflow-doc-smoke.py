@@ -157,11 +157,11 @@ def main() -> int:
             "Benchmark boundary",
             "Shared lifecycle, readiness, ledger, and reducer contracts are the public seam;",
             "Terminal-Bench, ALE, and EdgeBench now sit on the same seams as SkillsBench",
+            "do not change benchmark scoring or authorize live runs",
             "raw task text, logs, trajectories, verifier tails, credentials, uploads, or local paths",
         ],
         source=TASKS,
     )
-
     print("benchmark-developer-workflow-doc-smoke ok")
     return 0
 
