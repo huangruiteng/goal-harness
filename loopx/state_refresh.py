@@ -33,6 +33,7 @@ from .control_plane.work_items.repair_delta import (
 )
 from .control_plane.work_items.autonomous_replan_ack import (
     latest_monitor_replan_frontier_identity,
+    watch_lane_continuation_todo_ids,
 )
 from .control_plane.runtime.shared_runtime_refresh_projection import (
     build_shared_runtime_projection,
@@ -1140,6 +1141,7 @@ def refresh_state_run(
     agent_vision: dict[str, Any] | None = None
     existing_agent_vision: dict[str, Any] | None = None
     autonomous_replan_frontier_identity: str | None = None
+    newest_first_runs: list[dict[str, Any]] = []
     if normalized_agent_id and (
         agent_vision_packet is not None
         or normalized_vision_unchanged_reason
@@ -1161,13 +1163,6 @@ def refresh_state_run(
             goal_id=safe_goal_id,
             agent_id=normalized_agent_id,
         )
-        if autonomous_replan_recorded:
-            autonomous_replan_frontier_identity = (
-                latest_monitor_replan_frontier_identity(
-                    newest_first_runs,
-                    agent_id=normalized_agent_id,
-                )
-            )
     if agent_vision_packet is not None:
         agent_vision = normalize_goal_vision_update(
             agent_vision_packet,
@@ -1236,6 +1231,16 @@ def refresh_state_run(
             )
         ):
             normalized_delivery_outcome = "outcome_gap"
+        if effective_autonomous_replan_recorded and normalized_agent_id:
+            autonomous_replan_frontier_identity = (
+                latest_monitor_replan_frontier_identity(
+                    newest_first_runs,
+                    agent_id=normalized_agent_id,
+                    watch_todo_ids=watch_lane_continuation_todo_ids(
+                        repair_delta_contract
+                    ),
+                )
+            )
     vision_checkpoint = build_vision_checkpoint(
         agent_id=normalized_agent_id or None,
         agent_vision=agent_vision,

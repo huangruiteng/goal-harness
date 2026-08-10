@@ -304,6 +304,18 @@ def _watch_lane_ack_covers_dead_monitor_repeat(
     }
     if not evidence_todo_ids:
         return False
+    vision_todo_ids = {
+        str(todo_id).strip()
+        for gap in acceptance_gaps
+        for todo_id in (gap.get("vision_todo_ids") or [])
+        if str(todo_id or "").strip()
+    }
+    if (
+        len(evidence_todo_ids) != 1
+        or not vision_todo_ids
+        or not evidence_todo_ids.issubset(vision_todo_ids)
+    ):
+        return False
     summary = agent_todo_summary if isinstance(agent_todo_summary, dict) else {}
     exact_watch_items_by_id: dict[str, dict[str, Any]] = {}
     for lane in (
