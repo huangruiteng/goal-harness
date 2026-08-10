@@ -210,3 +210,154 @@ def test_attach_goal_channel_projection_forwards_runtime_root(tmp_path: Path) ->
     assert len(hard) == 1
     assert hard[0]["owner_agent"] == "agent-a"
     assert hard[0]["reason"] == "owner_conflicts_with_claim"
+
+
+def test_lease_released_between_glob_and_read_is_skipped(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A lease unlinked after the directory listing is not labeled corrupt."""
+
+    from loopx.control_plane.work_items import task_lease as task_lease_module
+
+    _write_active_lease(tmp_path, owner="agent-a")
+
+    def _raise_file_not_found(path: Path) -> dict[str, Any] | None:
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(task_lease_module, "read_lease", _raise_file_not_found)
+    projection = build_goal_channel_projection(
+        goal_id=GOAL_ID,
+        status_item=_status_item(claimed_by="agent-b"),
+        runtime_root=tmp_path,
+    )
+
+    assert _entries_with_status(projection, "hard_lease") == []
+    assert _entries_with_status(projection, "hard_lease_unreadable") == []
+    # soft claim entry is unaffected by the vanished lease file
+    assert _entries_with_status(projection, "soft_claim")
+
+
+def test_html_renderer_shows_hard_lease_conflict_fields(tmp_path: Path) -> None:
+    from loopx.presentation.renderers.goal_channel_html import (
+        render_goal_channel_projection_html,
+    )
+
+    _write_active_lease(tmp_path, owner="agent-a")
+    projection = build_goal_channel_projection(
+        goal_id=GOAL_ID,
+        status_item=_status_item(claimed_by="agent-b"),
+        runtime_root=tmp_path,
+    )
+
+    html = render_goal_channel_projection_html(projection)
+    assert "hard_lease" in html
+    assert "owner_conflicts_with_claim" in html
+    assert "Claimed By" in html
+
+
+def _write_status_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Registry + markdown workspace mirroring the live split-brain e2e."""
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = repo / "ACTIVE_GOAL_STATE.md"
+    state.write_text(
+        "\n".join(
+            [
+                "---",
+                f"goal_id: {GOAL_ID}",
+                "updated_at: 2026-08-10T00:00:00+00:00",
+                "---",
+                "",
+                "## Agent Todo",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "registry.global.json"
+    runtime_root = tmp_path / "runtime"
+    registry.write_text(
+        json.dumps(
+            {
+                "common_runtime_root": str(runtime_root),
+                "goals": [
+                    {
+                        "id": GOAL_ID,
+                        "domain": "harness_self_improvement",
+                        "status": "active",
+                        "repo": str(repo),
+                        "state_file": state.name,
+                        "adapter": {"kind": "harness_self_improvement"},
+                        "coordination": {
+                            "agent_model": "peer_v1",
+                            "registered_agents": ["agent-a", "agent-b"],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return registry, repo, runtime_root
+
+
+def test_status_attention_queue_surfaces_hard_lease_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """Regression pin for the real delivery surface.
+
+    Drives loopx.status.collect_status (the same path the status CLI uses)
+    over an on-disk workspace, so the runtime_root forwarding hunks in
+    loopx/status.py and loopx/control_plane/work_items/attention_queue.py are
+    both load-bearing: reverting either one makes the hard_lease entry vanish
+    from the attention item's goal_channel_projection and fails this test.
+    """
+
+    from loopx.status import collect_status
+    from loopx.todos import add_goal_todo
+
+    registry, repo, runtime_root = _write_status_workspace(tmp_path)
+    added = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Deliver one bounded control-plane change.",
+        task_class="advancement_task",
+        claimed_by="agent-b",
+    )
+    todo_id = added["todo_id"]
+    lease = _write_active_lease(runtime_root, owner="agent-a", todo_id=todo_id)
+
+    payload = collect_status(
+        registry_path=registry,
+        runtime_root_override=None,
+        scan_roots=[repo],
+        limit=5,
+        goal_id=GOAL_ID,
+    )
+
+    queue = payload["attention_queue"]
+    items = [
+        item
+        for item in queue.get("items") or []
+        if item.get("goal_id") == GOAL_ID
+    ]
+    assert items, "expected an attention item for the fixture goal"
+    projection = items[0].get("goal_channel_projection")
+    assert isinstance(projection, dict)
+    assert _entries_with_status(projection, "soft_claim") == [
+        {"todo_id": todo_id, "owner_agent": "agent-b", "status": "soft_claim"}
+    ]
+    assert _entries_with_status(projection, "hard_lease") == [
+        {
+            "todo_id": todo_id,
+            "status": "hard_lease",
+            "owner_agent": "agent-a",
+            "lease_version": 3,
+            "expires_at": lease["expires_at"],
+            "reason": "owner_conflicts_with_claim",
+            "claimed_by": "agent-b",
+        }
+    ]

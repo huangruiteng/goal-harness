@@ -299,6 +299,10 @@ def _hard_lease_entries(
     for path in lease_paths:
         try:
             lease = read_lease(path)
+        except FileNotFoundError:
+            # Lease released between directory listing and read: nothing left
+            # to surface, so skip instead of mislabeling it as corrupt.
+            continue
         except (TaskLeaseError, OSError):
             entries.append(
                 {
@@ -308,9 +312,8 @@ def _hard_lease_entries(
                 }
             )
             continue
-        if not lease_is_active(lease):
+        if lease is None or not lease_is_active(lease):
             continue
-        assert lease is not None
         todo_id = _text(lease.get("todo_id"), limit=120) or path.stem
         entry: dict[str, Any] = {"todo_id": todo_id, "status": "hard_lease"}
         owner = _text(lease.get("owner"), limit=120)
