@@ -42,7 +42,10 @@ LoopX 的职责是中间两步：它接收来自 agent 或 host 的 effect reque
 | M4 架构文档 | 已合并/完成（#2921、#2923、#2924、#2985） |
 | M5 稳态评审 | 已合并/完成（#2922、#2931、#2984、#2985） |
 | M6 通用 effect-program 抽象 | Narrow gate 已完成（#2963-#2987）；定性提升需要 M7 |
-| M7 Effect Program Runtime | 已重新规划：先做 outcome contract 和一个纵向 runtime slice，再泛化 |
+| M7.1 因果刻画 | 已合并/完成（#2994、#2998、#3009、#3022、#3026） |
+| M7.2 Typed settlement runtime | 已合并/完成（#3016、#3020、#3023、#3024、#3033-#3036） |
+| M7.3 共享 executor 决策 | 以 no-follow-up 关闭：两个 adapter 共享 algebra，但不共享执行所有权 |
+| M7.4 有界核心路径采用 | 仅在 typed effect 能删除重复 runtime truth 时继续 |
 
 ## 为什么这很重要
 
@@ -274,10 +277,13 @@ M7 只有在至少产生一个下列最终 effect 时才有理由存在：
 ### 今天已存在什么
 
 - `EffectRequest`、`EffectInterpretation`、`EffectObservation`、`EffectNext` 和 `EffectTurn` 作为 canonical slots。
-- `interpret_quota_should_run_packet` 作为第一个真实 interpreter。
-- `interpret_turn_result_packet` 作为第二个真实 interpreter。
-- `EffectNext.execution_mode` 支持 `serial`、`parallel` 和 `interleaved` 执行策略。
-- `EffectProgram` 和 `effect_program_from_ordered_steps` 作为现有 `guided_transaction.ordered_steps` 上的 read-only 形状。
+- 核心层已经拥有 settlement algebra：`SettlementIdentity`、`SettlementPlan`、`SettlementReceipt`、typed failure kinds，以及保留 receipt 的 `SettlementResult.bind`。
+- 默认 Codex App / CLI quota 路径构建一份 typed settlement plan，把 validation、可选 Todo completion、durable writeback 和 quota spend 绑定到原始 turn effect identity（#3016、#3033、#3034）。
+- 隔离 turn driver 通过自己的 callback executor 消费同一套 plan、identity、receipt、failure、replay 和 short-circuit algebra（#3020、#3023）；loop controller 从已提交 receipt chain 派生 continuation，不再维护第二份 settlement truth（#3024）。
+- Scheduler apply、ACK、failure writeback 和 cadence 仍是 agent-owned settlement 之外的数据化 host handoff。
+- `interpret_quota_should_run_packet` 与 `interpret_turn_result_packet` 继续作为 packet lens；`EffectProgram` 和 `effect_program_from_ordered_steps` 继续为 bootstrap 与本地 scheduler construction 提供兼容的 ordered-step reader。
+- Outcome-continuity wait 已按因果关系判断。没有 material trigger 和 fresh evidence-linked path decision 的 `unchanged_with_reason` checkpoint，不能清除更早的 material checkpoint 或五条 Todo 完成长链 gap。这是有意的 qualification 行为，不是 watch-ACK 集成回归（#2998、#3009、#3022）。
+- 正式测试已经覆盖合法 phase prefix、failure short-circuit、replay、effect identity exactly-once、跨 adapter conformance、语义 mutation sentinel 和 public-safe 事故回放（#3026、#3032、#3035、#3036）。
 - R1 替换：bootstrap guided rendering 通过 `EffectProgram` 读取 `ordered_steps`（#2955）。
 - R2 替换：turn executor 通过 `interpret_turn_result_packet` 解析 result kind（#2956）。
 - R3 替换：Codex CLI 本地 scheduler commands 通过 `EffectProgram` 构建（#2957）。
@@ -287,14 +293,28 @@ M7 只有在至少产生一个下列最终 effect 时才有理由存在：
 
 ### 还缺什么
 
-- 只有在两个 runtime execution path 需要相同的 plan/receipt 语义后，才定义最小 interpreter 或 executor protocol。两个 packet reader 本身不足以证明该合同。
-- 一个真实 host 或 turn-driver caller，在执行有序 effect program 时保留 failure、cancellation、permission 和 budget 语义。
+- 通用共享 executor 被有意保留为空。当前两个 adapter 共享 plan/receipt algebra，却拥有不同的执行边界，因此 M7.3 应以 no-follow-up 关闭，而不是用推测性 framework 填充。
+- 常规 LoopX 核心路径仍需逐条做有界采用判断。只有当路径包含多步 external effect、单一稳定 identity、durable receipt、replay 要求，并且变更能删除重复 settlement truth 时，才应该使用这套 algebra。
+- Race/CAS qualification 推迟到真实并发执行入口出现后；同步 adapter 本身不足以证明需要并发基础设施或测试。
+- M7.4 仍是 evidence-driven replacement gate，而不是把每个 Todo、gate、monitor、scheduler 或 replan rule 都改成 Kleisli arrow 的要求。
 
-R4 继续保持 deferred，直到存在真实的多步 executor caller。
+### 核心路径采用矩阵
+
+| 核心路径 | 决策 | 边界 |
+|---|---|---|
+| Codex App / CLI 常规 turn closeout | 已采用 | core plan/receipt algebra；quota adapter 拥有 CLI binding 和 durable settlement check |
+| 隔离 turn-driver closeout | 已采用 | 共享同一 algebra；local callback executor 与 journal 仍归 turn driver 所有 |
+| Turn continuation | 作为 consumer 采用 | pure controller 读取已提交 receipt chain，不执行 host effect |
+| Todo completion、`refresh-state`、quota spend | 仅作为 settlement step 采用 | 各自的 domain lifecycle 与 persistence reducer 保留在 bounded context |
+| Goal vision 与 replan checkpoint | 选择性 typed qualification | causal evidence 与完成链 checkpoint 是共享 invariant；vision policy 不进入 settlement executor |
+| Capability gate、user gate、monitor selection | 保持 domain-local | 除非未来证明存在重复 external-effect settlement，否则它们仍是 decision state machine |
+| Scheduler apply、ACK、cadence、failure hint | settlement 之外 | host-owned effect 保持数据化，不隐藏到 agent executor 后面 |
+| Bootstrap 与本地 scheduler command rendering | 只复用 read model | `EffectProgram` 可以读取 ordered steps；没有可删除的重复 truth 就不迁移 runtime |
+| 并发/racing settlement | 推迟 | 只有真实 concurrent caller 与 authority boundary 出现后才加入 race/CAS 行为 |
 
 ### 何时泛化
 
-只有至少两个真实 runtime execution path 需要相同的 plan/receipt 语义时才泛化。Packet interpreters 可以建立共同 read model，但本身不足以证明共享 executor protocol 的合理性。
+只有至少两个真实 runtime path 同时共享 plan/receipt 语义和执行所有权时，才泛化执行层。当前 adapter 证明了共享 algebra，却反证了共享 executor：一条路径跨越 CLI/host boundary，另一条拥有 in-process callback。Packet 相似或共同的 `bind` 方法不能覆盖这个边界。
 
 在此之前，把抽象保持为文档化视角，并增加证明每个 packet 无损映射的测试。这可以避免构建一个没有 runtime 使用的通用 `Effect` 框架。
 
@@ -307,7 +327,7 @@ R1、R2、R3 和 R5 已完成：
 - R3 Codex CLI scheduler command set 通过 `EffectProgram`（#2957）；
 - R5 quota should-run TurnEnvelope 通过 `interpret_quota_should_run_packet`。
 
-R4 仍 pending，并且在真实多步 host/turn-driver caller 执行有序 effect program 之前不得实现。
+R4 原来的 generic-executor 提案以 no-follow-up 关闭。只有当另一个真实 caller 能在不跨 authority boundary 的前提下删除重复编排时，才重新开启。
 
 ### 定性改进计划
 

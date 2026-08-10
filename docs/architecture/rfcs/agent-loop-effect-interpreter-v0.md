@@ -53,7 +53,10 @@ that model over time.
 | M4 Architecture documentation | Merged/Complete (#2921, #2923, #2924, #2985) |
 | M5 Steady-state review | Merged/Complete (#2922, #2931, #2984, #2985) |
 | M6 General effect-program abstraction | Narrow gate complete (#2963-#2987); qualitative transformation requires M7 |
-| M7 Effect Program Runtime | Replanned: outcome contract and one vertical runtime slice before generalization |
+| M7.1 Causal characterization | Merged/Complete (#2994, #2998, #3009, #3022, #3026) |
+| M7.2 Typed settlement runtime | Merged/Complete (#3016, #3020, #3023, #3024, #3033-#3036) |
+| M7.3 Shared executor decision | Closed with no follow-up: the adapters share algebra, not execution ownership |
+| M7.4 Bounded core-path adoption | Active only where a typed effect removes duplicate runtime truth |
 
 ## Why This Matters
 
@@ -361,12 +364,30 @@ Stop or narrow M7 when any kill criterion holds:
 
 - `EffectRequest`, `EffectInterpretation`, `EffectObservation`, `EffectNext`,
   and `EffectTurn` as canonical slots.
-- `interpret_quota_should_run_packet` as the first real interpreter.
-- `interpret_turn_result_packet` as the second real interpreter.
-- `EffectNext.execution_mode` for `serial`, `parallel`, and `interleaved`
-  execution strategy.
-- `EffectProgram` and `effect_program_from_ordered_steps` as a read-only shape
-  over existing `guided_transaction.ordered_steps`.
+- A core-owned settlement algebra: `SettlementIdentity`, `SettlementPlan`,
+  `SettlementReceipt`, typed failure kinds, and receipt-preserving
+  `SettlementResult.bind`.
+- The default Codex App / CLI quota path builds one typed settlement plan and
+  binds validation, optional Todo completion, durable writeback, and quota
+  spend to the original turn effect identity (#3016, #3033, #3034).
+- The isolated turn driver consumes the same plan, identity, receipt, failure,
+  replay, and short-circuit algebra through its local callback executor
+  (#3020, #3023). Its loop controller derives continuation from the committed
+  receipt chain rather than a second settlement truth (#3024).
+- Scheduler apply, ACK, failure writeback, and cadence remain data-encoded host
+  handoffs outside agent-owned settlement.
+- `interpret_quota_should_run_packet` and `interpret_turn_result_packet` remain
+  packet lenses, while `EffectProgram` and
+  `effect_program_from_ordered_steps` still serve compatible ordered-step
+  readers for bootstrap and local scheduler construction.
+- Outcome-continuity waits are causal. An `unchanged_with_reason` checkpoint
+  without a material trigger and fresh evidence-linked path decision does not
+  clear an earlier material checkpoint or a five-Todo completion-chain gap.
+  This is intentional qualification behavior, not a watch-ACK integration
+  regression (#2998, #3009, #3022).
+- Formal tests now cover legal phase prefixes, failure short-circuit, replay,
+  exactly-once effect identity, cross-adapter conformance, semantic mutation
+  sentinels, and public-safe incident replays (#3026, #3032, #3035, #3036).
 - R1 replacement: bootstrap guided rendering reads `ordered_steps` through
   `EffectProgram` (#2955).
 - R2 replacement: turn executor resolves result kind through
@@ -381,19 +402,41 @@ Stop or narrow M7 when any kill criterion holds:
 
 ### What Is Missing
 
-- A minimal interpreter or executor protocol only after two runtime execution
-  paths need the same plan/receipt semantics. Two packet readers do not prove
-  that contract by themselves.
-- A real host or turn-driver caller that executes an ordered effect program
-  while preserving failure, cancellation, permission, and budget semantics.
+- A generic shared executor is deliberately absent. The two current adapters
+  share plan/receipt algebra but have different execution ownership, so M7.3
+  is closed with no follow-up rather than filled with a speculative framework.
+- Regular LoopX paths still need bounded adoption decisions. A path should use
+  the algebra only when it has multi-step external effects, one stable
+  identity, durable receipts, replay requirements, and duplicate settlement
+  truth that the change can delete.
+- Race/CAS qualification remains deferred until a real concurrent execution
+  entry point exists. Synchronous adapters do not justify concurrency
+  infrastructure or tests by themselves.
+- M7.4 remains open as an evidence-driven replacement gate, not a request to
+  convert every Todo, gate, monitor, scheduler, or replan rule into a Kleisli
+  arrow.
 
-R4 remains deferred until that real multi-step executor caller exists.
+### Core-Path Adoption Matrix
+
+| Core path | Decision | Boundary |
+|---|---|---|
+| Codex App / CLI normal-turn closeout | Adopted | Core plan/receipt algebra; quota adapter owns CLI binding and durable settlement checks |
+| Isolated turn-driver closeout | Adopted | Same algebra; local callback executor and journal remain turn-driver-owned |
+| Turn continuation | Adopted as a consumer | Pure controller reads the committed receipt chain; it does not execute host effects |
+| Todo completion, `refresh-state`, quota spend | Adopted only as settlement steps | Their domain lifecycle and persistence reducers remain in their bounded contexts |
+| Goal vision and replan checkpoints | Selective typed qualification | Causal evidence and completion-chain checkpoints are shared invariants; vision policy is not moved into the settlement executor |
+| Capability gates, user gates, monitor selection | Keep domain-local | These are decision state machines unless a future change proves duplicated external-effect settlement |
+| Scheduler apply, ACK, cadence, failure hint | Outside settlement | Host-owned effects stay data-encoded and are never hidden behind the agent executor |
+| Bootstrap and local scheduler command rendering | Read-model reuse only | `EffectProgram` may read ordered steps; no runtime migration without duplicate truth to remove |
+| Concurrent/racing settlement | Deferred | Add race/CAS behavior only with a real concurrent caller and authority boundary |
 
 ### When To Generalize
 
-Generalize only when at least two real runtime execution paths need the same
-plan/receipt semantics. Packet interpreters can establish a common read model,
-but do not justify a shared executor protocol by themselves.
+Generalize execution only when at least two real runtime paths share both
+plan/receipt semantics and execution ownership. The current adapters prove the
+algebra but refute a shared executor: one crosses CLI/host boundaries and one
+owns in-process callbacks. Packet similarity or a common `bind` method does
+not override that boundary.
 
 Before then, keep the abstraction as a documented lens and add tests that
 prove each packet maps losslessly. This avoids building a generic `Effect`
@@ -409,8 +452,9 @@ R1, R2, R3, and R5 are complete:
 - R3 Codex CLI scheduler command set through `EffectProgram` (#2957).
 - R5 quota should-run TurnEnvelope through `interpret_quota_should_run_packet`.
 
-R4 remains pending and must not be implemented until a real multi-step
-host/turn-driver caller executes an ordered effect program.
+R4's original generic-executor proposal is closed with no follow-up. Reopen it
+only when another real caller can delete duplicate orchestration without
+crossing an authority boundary.
 
 ### Qualitative Change Plan
 
