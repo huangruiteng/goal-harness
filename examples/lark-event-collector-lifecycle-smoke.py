@@ -19,12 +19,20 @@ from loopx.extensions.lark.event_collector import (  # noqa: E402
     plan_lark_event_collector,
 )
 from loopx.extensions.lark.event_collector_runtime import (  # noqa: E402
+    add_lark_event_received_reaction,
     enrich_lark_event_reply_context,
     lark_event_requires_reply_context_lookup,
     run_lark_event_collector,
 )
 from loopx.extensions.lark.event_inbox import (  # noqa: E402
     project_lark_event_inbox_urgency,
+)
+from loopx.cli_commands.lark_inbox import (  # noqa: E402
+    _collector_permissions,
+)
+from loopx.extensions.lark import (  # noqa: E402
+    LARK_COLLECTOR_PERMISSION,
+    LARK_REPLY_PERMISSION,
 )
 
 
@@ -65,6 +73,7 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
                     "sender_identity": "bot",
                     "bot_display_name": "Project Review Bot",
                     "chat_id": "oc_private_fixture_chat",
+                    "received_reaction_emoji": "Get",
                 },
             }
         ),
@@ -130,6 +139,13 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
             config_path=collector_config,
             runtime_root=runtime_root,
         )
+        assert _collector_permissions(
+            project=project,
+            config_path=collector_config,
+        ) == (
+            LARK_COLLECTOR_PERMISSION,
+            LARK_REPLY_PERMISSION,
+        )
         assert plan["status"] == "install_ready", plan
         assert plan["thread_complete"] is True, plan
         assert plan["profile_bound"] is True, plan
@@ -192,6 +208,79 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
             {"message_id": "om_plain_fixture", "content": "普通群聊消息"},
             bot_display_name="Project Review Bot",
         )
+        reaction_calls: list[list[str]] = []
+
+        def reaction_runner(
+            argv: list[str], **_: object
+        ) -> subprocess.CompletedProcess[str]:
+            reaction_calls.append(list(argv))
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=json.dumps(
+                    {
+                        "ok": True,
+                        "data": {"reaction_id": "reaction_fixture"},
+                    }
+                ),
+                stderr="",
+            )
+
+        assert add_lark_event_received_reaction(
+            direct_event,
+            runner=reaction_runner,
+            command_prefix=["lark-cli"],
+            profile="project-review-bot",
+            emoji_type="Get",
+        )
+        def timeout_runner(
+            argv: list[str], **_: object
+        ) -> subprocess.CompletedProcess[str]:
+            raise subprocess.TimeoutExpired(argv, 5)
+
+        assert not add_lark_event_received_reaction(
+            direct_event,
+            runner=timeout_runner,
+            command_prefix=["lark-cli"],
+            profile="project-review-bot",
+            emoji_type="Get",
+        )
+        assert reaction_calls[0][:3] == [
+            "lark-cli",
+            "--profile",
+            "project-review-bot",
+        ], reaction_calls
+        assert reaction_calls[0][3:6] == [
+            "im",
+            "reactions",
+            "create",
+        ], reaction_calls
+        assert json.loads(
+            reaction_calls[0][reaction_calls[0].index("--data") + 1]
+        ) == {"reaction_type": {"emoji_type": "Get"}}, reaction_calls
+        invalid_inbox = json.loads(inbox_config.read_text())
+        invalid_inbox["reply"]["enabled"] = False
+        inbox_config.write_text(json.dumps(invalid_inbox), encoding="utf-8")
+        try:
+            plan_lark_event_collector(
+                project=project,
+                config_path=collector_config,
+            )
+        except ValueError as exc:
+            assert "requires enabled reply" in str(exc), exc
+        else:
+            raise AssertionError(
+                "collector accepted received reaction with disabled reply"
+            )
+        invalid_inbox["reply"]["enabled"] = True
+        invalid_inbox["reply"].pop("received_reaction_emoji")
+        inbox_config.write_text(json.dumps(invalid_inbox), encoding="utf-8")
+        assert _collector_permissions(
+            project=project,
+            config_path=collector_config,
+        ) == (LARK_COLLECTOR_PERMISSION,)
+        invalid_inbox["reply"]["received_reaction_emoji"] = "Get"
+        inbox_config.write_text(json.dumps(invalid_inbox), encoding="utf-8")
 
         messages = {
             "om_reply_fixture": {
@@ -344,6 +433,11 @@ elif "whoami" in args:
 elif "+messages-mget" in args:
     message_id = args[args.index("--message-ids") + 1]
     print(json.dumps({"items": [messages[message_id]]}))
+elif "reactions" in args and "create" in args:
+    message_id = args[args.index("--message-id") + 1]
+    if message_id == "om_runtime_direct":
+        raise SystemExit(1)
+    print(json.dumps({"ok": True, "data": {"reaction_id": "reaction_runtime"}}))
 else:
     raise SystemExit(2)
 """,
@@ -359,6 +453,9 @@ else:
         assert runtime_result["captured_count"] == 3, runtime_result
         assert runtime_result["reply_context_verified_count"] == 2, runtime_result
         assert runtime_result["reply_to_bot_count"] == 1, runtime_result
+        assert runtime_result["received_reaction_count"] == 1, runtime_result
+        assert runtime_result["received_reaction_failure_count"] == 1, runtime_result
+        assert runtime_result["external_writes_performed"] is True, runtime_result
         runtime_urgency = project_lark_event_inbox_urgency(
             project=project,
             config_path=inbox_config,

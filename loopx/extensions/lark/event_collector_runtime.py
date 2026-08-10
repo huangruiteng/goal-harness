@@ -26,14 +26,22 @@ CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 Sleeper = Callable[[float], None]
 
 
-def _run_json(runner: CommandRunner, argv: Sequence[str]) -> object:
-    result = runner(
-        list(argv),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
+def _run_json(
+    runner: CommandRunner,
+    argv: Sequence[str],
+    *,
+    timeout_seconds: float = 30,
+) -> object:
+    try:
+        result = runner(
+            list(argv),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return {}
     if result.returncode != 0:
         return {}
     try:
@@ -227,6 +235,47 @@ def lark_event_requires_reply_context_lookup(
     return direct_attention not in {"direct_question", "direct_mention"}
 
 
+def add_lark_event_received_reaction(
+    event: Mapping[str, Any],
+    *,
+    runner: CommandRunner,
+    command_prefix: Sequence[str],
+    profile: str,
+    emoji_type: str,
+) -> bool:
+    message_id = str(event.get("message_id") or "").strip()
+    if not MESSAGE_ID_PATTERN.fullmatch(message_id) or not emoji_type:
+        return False
+    payload = _run_json(
+        runner,
+        [
+            *command_prefix,
+            "--profile",
+            profile,
+            "im",
+            "reactions",
+            "create",
+            "--message-id",
+            message_id,
+            "--data",
+            json.dumps(
+                {"reaction_type": {"emoji_type": emoji_type}},
+                separators=(",", ":"),
+            ),
+            "--as",
+            "bot",
+            "--format",
+            "json",
+        ],
+        timeout_seconds=5,
+    )
+    return bool(
+        isinstance(payload, Mapping)
+        and payload.get("ok") is True
+        and _find_string_by_key(payload, {"reaction_id"})
+    )
+
+
 def run_lark_event_collector(
     *,
     project: str | Path,
@@ -261,6 +310,8 @@ def run_lark_event_collector(
     captured_count = 0
     verified_count = 0
     reply_to_bot_count = 0
+    received_reaction_count = 0
+    received_reaction_failure_count = 0
     profile_app_id: str | None = None
     profile_identity_checked = False
     try:
@@ -319,6 +370,26 @@ def run_lark_event_collector(
             captured_count += 1
             verified_count += int(enriched.get("reply_context_verified") is True)
             reply_to_bot_count += int(enriched.get("reply_to_bot") is True)
+            attention_kind = _event_attention_kind(
+                enriched,
+                bot_display_name=str(
+                    config["inbox"]["reply"].get("bot_display_name") or ""
+                ),
+                capture_scope="configured_chat_all",
+            )
+            received_reaction_emoji = str(
+                config["inbox"]["reply"].get("received_reaction_emoji") or ""
+            )
+            if attention_kind is not None and received_reaction_emoji:
+                reaction_added = add_lark_event_received_reaction(
+                    enriched,
+                    runner=runner,
+                    command_prefix=command_prefix,
+                    profile=str(config["profile"]),
+                    emoji_type=received_reaction_emoji,
+                )
+                received_reaction_count += int(reaction_added)
+                received_reaction_failure_count += int(not reaction_added)
         returncode = process.wait()
     finally:
         if process.poll() is None:
@@ -337,6 +408,9 @@ def run_lark_event_collector(
         "captured_count": captured_count,
         "reply_context_verified_count": verified_count,
         "reply_to_bot_count": reply_to_bot_count,
+        "received_reaction_count": received_reaction_count,
+        "received_reaction_failure_count": received_reaction_failure_count,
+        "external_writes_performed": received_reaction_count > 0,
         "profile_identity_checked": profile_identity_checked,
         "profile_identity_verified": profile_app_id is not None,
         "private_content_returned": False,

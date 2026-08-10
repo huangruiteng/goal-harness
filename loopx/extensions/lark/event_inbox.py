@@ -21,6 +21,7 @@ MESSAGE_ID_PATTERN = re.compile(r"om_[A-Za-z0-9_-]+")
 EVENT_ID_PATTERN = re.compile(r"[A-Za-z0-9:_-]{1,200}")
 SAFE_PROFILE_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 CHAT_ID_PATTERN = re.compile(r"oc_[A-Za-z0-9_-]+")
+REACTION_EMOJI_PATTERN = re.compile(r"[A-Za-z0-9_]{1,64}")
 LARK_OPERATOR_INBOX_SOURCE_CONTRACT = OperatorInboxSourceContract(
     config_schema_version=CONFIG_SCHEMA_VERSION,
     event_schema_version=EVENT_SCHEMA_VERSION,
@@ -91,6 +92,19 @@ def load_lark_event_inbox_config(
         str(reply_payload.get("bot_display_name") or "").split()
     )[:100]
     chat_id = str(reply_payload.get("chat_id") or "").strip()
+    received_reaction_emoji = str(
+        reply_payload.get("received_reaction_emoji") or ""
+    ).strip()
+    if received_reaction_emoji and not REACTION_EMOJI_PATTERN.fullmatch(
+        received_reaction_emoji
+    ):
+        raise ValueError(
+            "lark inbox received_reaction_emoji must be a valid emoji type"
+        )
+    if received_reaction_emoji and not reply_enabled:
+        raise ValueError(
+            "lark inbox received_reaction_emoji requires enabled reply"
+        )
     if reply_enabled and (
         capture_scope != "configured_chat_all"
         or not SAFE_PROFILE_PATTERN.fullmatch(sender_profile)
@@ -115,6 +129,7 @@ def load_lark_event_inbox_config(
             "sender_identity": sender_identity,
             "bot_display_name": bot_display_name,
             "chat_id": chat_id,
+            "received_reaction_emoji": received_reaction_emoji,
         },
     }
 

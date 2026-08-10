@@ -102,10 +102,19 @@ bot profile to the same local-private chat:
     "sender_profile": "project-review-bot",
     "sender_identity": "bot",
     "bot_display_name": "Project Review Bot",
-    "chat_id": "oc_<local-private-chat-id>"
+    "chat_id": "oc_<local-private-chat-id>",
+    "received_reaction_emoji": "Get"
   }
 }
 ```
+
+`reply.received_reaction_emoji` is optional and belongs to the same explicit
+sender boundary as source-thread replies. When configured, the collector adds
+that reaction only after an event is accepted into the inbox and classified as
+a direct mention, direct question, or verified reply to the configured bot.
+The reaction is a best-effort receipt: provider failure increments compact
+failure accounting but does not discard the inbox event or grant execution
+authority. Ordinary group conversation does not receive the reaction.
 
 The reply path never uses the machine default profile. Before any send it
 verifies that the named profile resolves to the expected bot and that the bot
