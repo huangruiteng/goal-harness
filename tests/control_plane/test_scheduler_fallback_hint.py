@@ -111,14 +111,17 @@ def test_apply_needed_projects_fallback_hint_when_automation_id_resolved() -> No
     assert codex_app["failure_hint"]["cli_args"][0] == "quota"
 
 
-def test_apply_needed_without_automation_id_emits_gate_not_guess() -> None:
+def test_apply_needed_without_automation_id_projects_deterministic_fallback() -> None:
     hint = _hint(_active_decision(), automation_id=None)
     fallback = hint["codex_app"]["fallback_hint"]
-    assert fallback["available"] is False
-    assert fallback["reason"].startswith("automation_id_unresolved")
-    assert "do not guess an automation id" in fallback["reason"]
-    assert fallback["action"] == "surface_pasteable_heartbeat_gate"
-    assert "cli_args" not in fallback
+    assert fallback["available"] is True
+    assert fallback["automation_id_projected"] is True
+    assert fallback["action"] == "create_then_apply_rrule_via_fallback"
+    assert fallback["args"]["automation_id"] == (
+        "loopx-fallback-hint-goal-codex-fixture"
+    )
+    assert "--automation-id" in fallback["cli_args"]
+    assert "automation_id_projected" in fallback["reason"]
 
 
 def test_settled_cadence_omits_fallback_hint() -> None:

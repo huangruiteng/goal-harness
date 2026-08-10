@@ -66,6 +66,31 @@ SCHEDULER_BASE_IDENTITY_KEYS = (
     "heartbeat_recommendation.recommended_mode",
     "interaction_contract.mode",
 )
+
+
+def build_projected_codex_app_automation_id(
+    *,
+    goal_id: Any,
+    agent_id: Any,
+) -> str:
+    """Build a deterministic Codex App automation id when none is installed yet.
+
+    The fallback bridge needs a stable automation id to create the first
+    heartbeat automation for a goal/agent pair. The id is derived from the
+    same identity keys used by the scheduler so a later run can resolve it
+    back to the installed automation without guessing.
+    """
+
+    safe_goal_id = str(goal_id or "").strip()
+    safe_agent_id = str(agent_id or "").strip()
+    raw = (
+        f"loopx-{safe_goal_id}-{safe_agent_id}"
+        if safe_agent_id
+        else f"loopx-{safe_goal_id}"
+    )
+    projected = re.sub(r"[^A-Za-z0-9._:-]", "-", raw)
+    projected = re.sub(r"-+", "-", projected).strip("-")
+    return projected[:128] or "loopx-fallback"
 SCHEDULER_FRONTIER_IDENTITY_KEYS = (
     "selected_todo.todo_id",
     "selected_todo.action_kind",
@@ -350,22 +375,21 @@ def build_codex_app_scheduler_fallback_hint(
     bound scheduler ACK. It directly edits the Codex App automation store,
     bypassing the app API, so it is projected only when the host tool is
     unavailable or failed and ``apply_needed=true`` - never as the routine path.
+    When no automation is installed yet, a deterministic automation id is
+    projected so the fallback bridge can create the first heartbeat automation.
     """
 
     safe_goal_id = str(goal_id or "").strip()
     safe_agent_id = str(agent_id or "").strip()
     safe_automation_id = str(automation_id or "").strip()
     safe_turn_instance_id = str(turn_instance_id or "").strip() or "${LOOPX_TURN:?}"
+    projected_automation_id = False
     if not FALLBACK_AUTOMATION_ID_PATTERN.match(safe_automation_id):
-        return {
-            "schema_version": CODEX_APP_SCHEDULER_FALLBACK_HINT_SCHEMA_VERSION,
-            "available": False,
-            "reason": (
-                "automation_id_unresolved: no unique matching Codex App heartbeat "
-                "automation for this goal/agent; do not guess an automation id"
-            ),
-            "action": "surface_pasteable_heartbeat_gate",
-        }
+        safe_automation_id = build_projected_codex_app_automation_id(
+            goal_id=safe_goal_id,
+            agent_id=safe_agent_id,
+        )
+        projected_automation_id = True
     cli_args = [
         "loopx-apply-rrule",
         "--goal-id",
@@ -396,6 +420,21 @@ def build_codex_app_scheduler_fallback_hint(
             "SQLite automation store (codex-dev.db) and TOML, which bypasses the "
             "app API - use only as a bounded fallback, never as the routine path; "
             "run the bound ack_hint after it succeeds"
+            + (
+                "; automation_id_projected: no installed heartbeat automation "
+                "matched this goal/agent, so loopx-apply-rrule will create it "
+                "before applying the rrule"
+                if projected_automation_id
+                else ""
+            )
+        ),
+        **(
+            {
+                "automation_id_projected": True,
+                "action": "create_then_apply_rrule_via_fallback",
+            }
+            if projected_automation_id
+            else {}
         ),
     }
 

@@ -237,3 +237,95 @@ def test_update_toml_and_sqlite_helpers(tmp_path: Path) -> None:
     finally:
         connection.close()
     assert row == ("FREQ=MINUTELY;INTERVAL=10",)
+
+
+def test_apply_creates_missing_automation_toml_and_sqlite(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    automations_root = tmp_path / "automations"
+    db_path = tmp_path / "codex-dev.db"
+    registry_path = tmp_path / "registry.json"
+    sqlite3.connect(str(db_path)).close()
+    registry_path.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": "goal",
+                        "repo": "/tmp/workspace",
+                        "coordination": {
+                            "thread_agent_bindings": [
+                                {
+                                    "agent_id": "agent",
+                                    "thread_id": "thread-1",
+                                }
+                            ]
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        if "should-run" in command:
+            return _FakeCompleted(_hint_payload(apply_needed=True))
+        if "heartbeat-prompt" in command:
+            return _FakeCompleted(
+                {
+                    "ok": True,
+                    "task_body": (
+                        "Advance `goal` from active state. "
+                        "Agent: `agent`."
+                    ),
+                }
+            )
+        calls.append(command)
+        return _FakeCompleted({"ok": True})
+
+    monkeypatch.setattr("scripts.codex_app_apply_rrule.subprocess.run", fake_run)
+
+    code = main(
+        [
+            "--automations-root",
+            str(automations_root),
+            "--db-path",
+            str(db_path),
+            "--registry",
+            str(registry_path),
+            "--goal-id",
+            "goal",
+            "--agent-id",
+            "agent",
+            "--automation-id",
+            "loopx-goal-agent",
+            "--loopx",
+            "loopx",
+        ]
+    )
+
+    assert code == 0
+    toml_path = automations_root / "loopx-goal-agent" / "automation.toml"
+    assert toml_path.exists()
+    toml_text = toml_path.read_text(encoding="utf-8")
+    assert 'rrule = "FREQ=MINUTELY;INTERVAL=5"' in toml_text
+    assert 'target_thread_id = "thread-1"' in toml_text
+    assert 'prompt = """Advance `goal` from active state.' in toml_text
+
+    connection = sqlite3.connect(str(db_path))
+    try:
+        row = connection.execute(
+            "SELECT id, rrule, prompt, cwds FROM automations "
+            "WHERE id='loopx-goal-agent'"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row is not None
+    assert row[1] == "FREQ=MINUTELY;INTERVAL=5"
+    assert "Advance `goal`" in row[2]
+    assert "/tmp/workspace" in row[3]
+    assert any("scheduler-ack-current" in call for call in calls)
+    assert list(tmp_path.glob("codex-dev.db.bak-*"))
