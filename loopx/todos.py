@@ -105,7 +105,10 @@ from .control_plane.todos.write_policy import (
     require_user_todo_task_class,
     resolve_user_gate_global_gate_update,
 )
-from .control_plane.work_items.task_lease import hold_task_lease_mutation_fence
+from .control_plane.work_items.task_lease import (
+    hold_task_lease_mutation_fence,
+    release_verified_task_lease_fence,
+)
 
 
 ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE = max(0, MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE - 2)
@@ -1719,6 +1722,10 @@ def complete_goal_todo(
                 event_result["linked_successor_id"] = completion_policy.linked_successor_id
                 event_result["mutation_authority"] = mutation_authority
                 event_result["task_lease_fence"] = task_lease_fence
+                release_verified_task_lease_fence(
+                    task_lease_fence,
+                    committed=bool(event_result.get("changed")) and not dry_run,
+                )
                 return event_result
         update_result = apply_todo_update_to_lines(
             lines,
@@ -1830,6 +1837,10 @@ def complete_goal_todo(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
+        release_verified_task_lease_fence(
+            task_lease_fence,
+            committed=changed and not dry_run,
+        )
     result = {
         "ok": True,
         "dry_run": dry_run,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -100,6 +100,16 @@ def task_lease_path(*, runtime_root: Path, goal_id: str, todo_id: str) -> Path:
 
 def task_lease_lock_path(*, runtime_root: Path, goal_id: str) -> Path:
     return task_lease_dir(runtime_root=runtime_root, goal_id=goal_id) / ".task-leases"
+
+
+class _VerifiedTaskLeaseFence(dict):
+    """Key-verified fence payload with its release hook held out-of-band.
+
+    The hook lives on the instance attribute, never inside the mapping, so
+    the payload stays JSON-serializable for every consumer at all times.
+    """
+
+    release_hook: Callable[[], None] | None = None
 
 
 @contextmanager
@@ -210,14 +220,54 @@ def hold_task_lease_mutation_fence(
                 },
             )
         assert_expected_version(lease, expected_version)
-        yield {
-            "schema_version": TASK_LEASE_SCHEMA_VERSION,
-            "required": True,
-            "active": True,
-            "owner": normalized_actor,
-            "version": lease.get("version"),
-            "execution_instance_verified": True,
-        }
+        fence = _VerifiedTaskLeaseFence(
+            {
+                "schema_version": TASK_LEASE_SCHEMA_VERSION,
+                "required": True,
+                "active": True,
+                "owner": normalized_actor,
+                "version": lease.get("version"),
+                "execution_instance_verified": True,
+            }
+        )
+        fence.release_hook = lambda: remove_lease(lease_path)
+        yield fence
+
+
+def release_verified_task_lease_fence(
+    fence: dict[str, Any] | None,
+    *,
+    committed: bool,
+) -> None:
+    """Release the lease behind a key-verified fence once its write committed.
+
+    Must run while the hold_task_lease_mutation_fence context is still open so
+    the per-goal lease lock it acquired is still held; the lease therefore
+    cannot have been renewed, transferred, or re-acquired since the fence
+    verified the owner and idempotency key. The release reuses the CLI release
+    semantics (the lease file is removed; no new lifecycle state).
+
+    The private release hook rides on the fence object's attribute, not inside
+    the payload mapping, and is disarmed here on every call. Only a committed,
+    key-verified fence releases the lease; non-verified fences carry no hook
+    and are never touched. A release failure never unwinds the committed
+    lifecycle write: it is surfaced additively as fence["released"] = False
+    and the lease file is left for an explicit `loopx task-lease release` or
+    TTL expiry.
+    """
+
+    hook = getattr(fence, "release_hook", None)
+    if hook is None or not isinstance(fence, dict):
+        return
+    fence.release_hook = None  # type: ignore[attr-defined]
+    if not committed or fence.get("execution_instance_verified") is not True:
+        return
+    try:
+        hook()
+    except OSError:
+        fence["released"] = False
+        return
+    fence["released"] = True
 
 
 def runtime_root_from_registry(registry_path: Path, runtime_root_override: str | None) -> Path:
