@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,9 @@ GOAL_ID = "replan-decision-plane-fixture"
 PRIMARY_AGENT = "codex-main-control"
 SIDE_AGENT = "codex-side-bypass"
 FUTURE_DUE_AT = "2999-01-01T00:00:00+00:00"
+FUTURE_EXPIRY_AT = "2999-12-31T00:00:00+00:00"
+WATCH_FRONTIER_ID = "fixture-monitor-target"
+WATCH_TODO_ID = "todo_monitor_wait"
 APP_SCHEDULER_CONTEXT = scheduler_execution_context_for_runtime_profile(
     "codex_app_heartbeat"
 )
@@ -54,12 +58,13 @@ SIDE_AGENT_REPLAN_OBLIGATION = {
 
 SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION = {
     **GLOBAL_REPLAN_OBLIGATION,
+    "frontier_identity": WATCH_FRONTIER_ID,
     "triggers": [
         {
             "kind": "dead_monitor_repeat",
             "source": "run_history",
             "agent_id": SIDE_AGENT,
-            "monitor_target_id": "fixture-monitor-target",
+            "monitor_target_id": WATCH_FRONTIER_ID,
         }
     ],
 }
@@ -69,6 +74,7 @@ def monitor_item(
     *,
     cadence: str | None = "15m",
     next_due_at: str | None = FUTURE_DUE_AT,
+    expires_at: str | None = None,
 ) -> dict:
     item = {
         "index": 1,
@@ -86,6 +92,8 @@ def monitor_item(
         item["cadence"] = cadence
     if next_due_at is not None:
         item["next_due_at"] = next_due_at
+    if expires_at is not None:
+        item["expires_at"] = expires_at
     return item
 
 
@@ -300,7 +308,7 @@ def peer_status_payload(
     return payload
 
 
-def agent_vision_gap_run() -> dict:
+def agent_vision_gap_run(*, vision_todo_ids: list[str] | None = None) -> dict:
     return {
         "classification": "state_refreshed",
         "generated_at": "2026-07-04T00:00:00+00:00",
@@ -314,7 +322,9 @@ def agent_vision_gap_run() -> dict:
                 "acceptance_summary": "Show the next runnable auto-research frontier without owner prompting.",
                 "replan_trigger_summary": "Auto-research evidence is still synthetic and needs a next-round live validation todo.",
             },
-            "todo_delta": [],
+            "todo_delta": [
+                f"activate:{todo_id}" for todo_id in (vision_todo_ids or [])
+            ],
             "vision_budget": {
                 "schema_version": "goal_vision_budget_v0",
                 "status": "ok",
@@ -362,8 +372,10 @@ def agent_vision_acceptance_only_run(
 def watch_lane_continuation_ack_run(
     *,
     delta_kinds: list[str] | None = None,
+    frontier_identity: str | None = None,
+    watch_todo_ids: list[str] | None = None,
 ) -> dict:
-    return {
+    run: dict[str, Any] = {
         "classification": "monitor_poll_autonomous_replan_recorded_v0",
         "agent_id": SIDE_AGENT,
         "progress_scope": "agent_lane",
@@ -378,6 +390,16 @@ def watch_lane_continuation_ack_run(
             },
         },
     }
+    if frontier_identity:
+        run["autonomous_replan_ack"]["frontier_identity"] = frontier_identity
+    if watch_todo_ids:
+        run["autonomous_replan_ack"]["delta_contract"]["auto_evidence"] = [
+            {
+                "kind": "watch_lane_continuation",
+                "todo_ids": watch_todo_ids,
+            }
+        ]
+    return run
 
 
 def unchanged_heartbeat_monitor_runs() -> list[dict]:
@@ -1658,12 +1680,15 @@ def assert_explicit_as_needed_vision_gap_uses_watch_lane_continuation_ack() -> N
 def assert_as_needed_watch_ack_covers_repeated_heartbeat_receipts() -> None:
     latest_runs = [
         *unchanged_heartbeat_monitor_runs(),
-        watch_lane_continuation_ack_run(),
-        agent_vision_gap_run(),
+        watch_lane_continuation_ack_run(
+            frontier_identity=WATCH_FRONTIER_ID,
+            watch_todo_ids=[WATCH_TODO_ID],
+        ),
+        agent_vision_gap_run(vision_todo_ids=[WATCH_TODO_ID]),
     ]
     guard = build_quota_should_run(
         status_payload(
-            [monitor_item()],
+            [monitor_item(expires_at=FUTURE_EXPIRY_AT)],
             replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
             latest_runs=latest_runs,
         ),
@@ -1677,7 +1702,12 @@ def assert_as_needed_watch_ack_covers_repeated_heartbeat_receipts() -> None:
 
     due_guard = build_quota_should_run(
         status_payload(
-            [monitor_item(next_due_at="2000-01-01T00:00:00+00:00")],
+            [
+                monitor_item(
+                    next_due_at="2000-01-01T00:00:00+00:00",
+                    expires_at=FUTURE_EXPIRY_AT,
+                )
+            ],
             replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
             latest_runs=latest_runs,
         ),
@@ -1688,6 +1718,36 @@ def assert_as_needed_watch_ack_covers_repeated_heartbeat_receipts() -> None:
     assert due_guard["effective_action"] == "normal_run", due_guard
     assert due_guard["work_lane_contract"]["obligation"] == "attempt_due_monitor", due_guard
     assert due_guard.get("autonomous_replan_obligation") is None, due_guard
+
+
+def assert_as_needed_watch_ack_requires_exact_causal_identity() -> None:
+    cases = (
+        watch_lane_continuation_ack_run(),
+        watch_lane_continuation_ack_run(
+            frontier_identity="unrelated-frontier",
+            watch_todo_ids=[WATCH_TODO_ID],
+        ),
+        watch_lane_continuation_ack_run(
+            frontier_identity=WATCH_FRONTIER_ID,
+            watch_todo_ids=["todo_unrelated_watch"],
+        ),
+    )
+    for ack_run in cases:
+        guard = build_quota_should_run(
+            status_payload(
+                [monitor_item(expires_at=FUTURE_EXPIRY_AT)],
+                replan_obligation=SIDE_AGENT_DEAD_MONITOR_REPLAN_OBLIGATION,
+                latest_runs=[
+                    *unchanged_heartbeat_monitor_runs(),
+                    ack_run,
+                    agent_vision_gap_run(vision_todo_ids=[WATCH_TODO_ID]),
+                ],
+            ),
+            goal_id=GOAL_ID,
+            agent_id=SIDE_AGENT,
+        )
+        assert guard["decision"] == "autonomous_replan_required", guard
+        assert guard["goal_frontier_projection"]["replan_required"] is True, guard
 
 
 def assert_repeat_vision_keeps_repeated_heartbeat_replan() -> None:
@@ -1765,6 +1825,7 @@ def main() -> None:
     assert_projected_replan_ack_is_agent_scoped()
     assert_explicit_as_needed_vision_gap_uses_watch_lane_continuation_ack()
     assert_as_needed_watch_ack_covers_repeated_heartbeat_receipts()
+    assert_as_needed_watch_ack_requires_exact_causal_identity()
     assert_repeat_vision_keeps_repeated_heartbeat_replan()
     assert_blocking_handoff_gate_beats_derived_monitor_replan()
     print("quota-replan-decision-plane-smoke ok")
