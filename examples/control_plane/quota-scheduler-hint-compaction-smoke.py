@@ -316,7 +316,9 @@ def assert_compact_scheduler(name: str, source_payload: dict) -> None:
     assert "automation_update" in reset_detail["codex_app_apply"], (name, detailed)
     assert len(reset_detail["profile_signature"]) == 12, (name, detailed)
     assert json_size(compact) < json_size(detailed), (name, json_size(compact), json_size(detailed))
-    assert json_size(compact) <= 3_550, (name, json_size(compact))
+    # #3058 added the required codex_app.fallback_hint to the compact hot path;
+    # keep the budget tight but above the shipped-contract size.
+    assert json_size(compact) <= 3_900, (name, json_size(compact))
 
 
 def run_should_run_cli(
