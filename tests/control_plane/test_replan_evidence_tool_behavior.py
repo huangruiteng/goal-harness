@@ -74,6 +74,27 @@ def test_real_tool_loop_observes_production_evidence_log_intent(
         "evidence_log",
     ]
     assert receipt["evidence_log_matched_required_read"] is True
+    assert {
+        field: receipt[field]
+        for field in (
+            "decision",
+            "selected_todo_id",
+            "user_action_required",
+            "must_attempt_work",
+            "delivery_allowed",
+            "quiet_noop_allowed",
+            "external_write_requested",
+        )
+    } == {
+        "decision": "execute",
+        "selected_todo_id": None,
+        "user_action_required": False,
+        "must_attempt_work": True,
+        "delivery_allowed": True,
+        "quiet_noop_allowed": False,
+        "external_write_requested": False,
+    }
+    assert receipt["vision_trigger_kinds"] == ["required_agent_vision_missing"]
     assert receipt["boundary"] == {
         "raw_prompt_persisted": False,
         "raw_provider_response_persisted": False,

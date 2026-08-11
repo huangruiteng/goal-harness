@@ -25,6 +25,9 @@ from loopx.control_plane.testing.doubao_model_behavior_actor import (  # noqa: E
 from loopx.control_plane.testing.release_commit_qualification import (  # noqa: E402
     collect_release_source_identity,
 )
+from loopx.control_plane.testing.replan_evidence_tool_behavior import (  # noqa: E402
+    DoubaoReplanEvidenceToolBehaviorActor,
+)
 from loopx.control_plane.testing.selected_todo_tool_behavior import (  # noqa: E402
     DoubaoSelectedTodoToolBehaviorActor,
 )
@@ -59,6 +62,9 @@ def main() -> int:
     selected_todo_actor = DoubaoSelectedTodoToolBehaviorActor.from_environment(
         timeout_seconds=args.timeout_seconds
     )
+    replan_evidence_actor = DoubaoReplanEvidenceToolBehaviorActor.from_environment(
+        timeout_seconds=args.timeout_seconds
+    )
     with TemporaryDirectory(prefix="loopx-doubao-live-") as temp_dir:
         temp_root = Path(temp_dir)
 
@@ -67,6 +73,13 @@ def main() -> int:
             return selected_todo_actor.qualify(
                 qualification_id=run_id,
                 fixture_root=temp_root / "selected-todo" / run_digest,
+            )
+
+        def qualify_replan_evidence(run_id: str) -> dict[str, object]:
+            run_digest = sha256(run_id.encode("utf-8")).hexdigest()[:16]
+            return replan_evidence_actor.qualify(
+                qualification_id=run_id,
+                fixture_root=temp_root / "replan-evidence" / run_digest,
             )
 
         sources, packets = build_actual_default_model_behavior_scenario_inputs(
@@ -79,6 +92,7 @@ def main() -> int:
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
             selected_todo_actor=qualify_selected_todo,
+            replan_evidence_actor=qualify_replan_evidence,
         )
     result["source"] = source
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))

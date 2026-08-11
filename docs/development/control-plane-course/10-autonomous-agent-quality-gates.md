@@ -475,11 +475,15 @@ guided_transaction = {
 `loopx/control_plane/testing/actual_default_model_behavior_portfolio.py::_scenario_contract`：
 
 ```python
-if spec.actor_kind == "turn":
-    action_signature = dict(packet.get("action_signature") or {})
-    if action_signature.get("matches") is not True:
-        raise ValueError("turn scenario action signature parity is not verified")
-    build_model_behavior_actor_request(packet, semantic_contract_required=True, ...)
+if spec.actor_kind in {"turn", "turn_tool", "replan_tool"}:
+    build_model_behavior_actor_request(
+        packet,
+        semantic_contract_required=False,
+        ...,
+    )
+    contract = _turn_expected_contract(source_packet)
+    if _turn_expected_contract(packet) != contract:
+        raise ValueError("actor packet diverges from source action contract")
 else:
     if spec.phase == "entry":
         _validate_actual_default_projection(packet)

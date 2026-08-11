@@ -385,6 +385,23 @@ def _selected_todo_actor(_: str) -> dict[str, Any]:
     }
 
 
+def _replan_evidence_actor(_: str) -> dict[str, Any]:
+    return {
+        "schema_version": "replan_evidence_tool_behavior_receipt_v0",
+        "qualification_passed": True,
+        "failure_code": None,
+        "decision": "execute",
+        "selected_todo_id": None,
+        "user_action_required": False,
+        "must_attempt_work": True,
+        "delivery_allowed": True,
+        "quiet_noop_allowed": False,
+        "external_write_requested": False,
+        "evidence_log_matched_required_read": True,
+        "vision_trigger_kinds": ["required_agent_vision_missing"],
+    }
+
+
 def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) -> None:
     sources, packets = build_actual_default_model_behavior_scenario_inputs(tmp_path)
 
@@ -599,6 +616,7 @@ def test_portfolio_oracle_catches_wrong_selected_todo(tmp_path: Path) -> None:
         turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=wrong_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     selected = next(
@@ -637,6 +655,7 @@ def test_portfolio_source_oracle_rejects_mutated_compact_user_action(
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
+            replan_evidence_actor=_replan_evidence_actor,
         )
 
     assert calls == 0
@@ -660,6 +679,7 @@ def test_portfolio_rejects_mutated_blocking_gate_response_plan(tmp_path: Path) -
             turn_actor=_turn_actor,
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
+            replan_evidence_actor=_replan_evidence_actor,
         )
 
 
@@ -683,6 +703,7 @@ def test_portfolio_oracle_rejects_silent_wait_for_user_gate(tmp_path: Path) -> N
         turn_actor=silent_wait_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     gate = next(
@@ -707,7 +728,7 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
         scenario["packet_view"]
         == (
             "production_heartbeat_tool_loop"
-            if scenario["actor_kind"] == "turn_tool"
+            if scenario["actor_kind"] in {"turn_tool", "replan_tool"}
             else (
                 "quota_should_run_default"
                 if scenario["actor_kind"] == "turn"
@@ -775,6 +796,7 @@ def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) 
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
+            replan_evidence_actor=_replan_evidence_actor,
         )
 
     assert calls == 0
@@ -801,6 +823,7 @@ def test_portfolio_aborts_on_authentication_failure_with_bounded_receipt(
         turn_actor=turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     assert calls == 1
@@ -840,6 +863,7 @@ def test_portfolio_preflight_rejects_wrong_same_agent_route(tmp_path: Path) -> N
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
+            replan_evidence_actor=_replan_evidence_actor,
         )
 
     assert calls == 0
@@ -864,6 +888,7 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
         turn_actor=turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     assert result["qualification_passed"] is True
@@ -914,6 +939,7 @@ def test_portfolio_selected_todo_uses_real_action_actor_when_supplied(
         turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     assert result["qualification_passed"] is True
@@ -922,8 +948,35 @@ def test_portfolio_selected_todo_uses_real_action_actor_when_supplied(
         "actual-default-portfolio-real-selected-action:turn_selected_todo:r2",
     ]
     assert result["boundary"]["tools_enabled"] is True
-    assert result["boundary"]["tool_enabled_scenario_count"] == 1
-    assert result["boundary"]["packet_interpretation_scenario_count"] == 14
+    assert result["boundary"]["tool_enabled_scenario_count"] == 2
+    assert result["boundary"]["packet_interpretation_scenario_count"] == 13
+
+
+def test_portfolio_required_vision_replan_uses_real_action_actor_when_supplied(
+    tmp_path: Path,
+) -> None:
+    replan_calls: list[str] = []
+
+    def replan_evidence_actor(run_id: str) -> Mapping[str, Any]:
+        replan_calls.append(run_id)
+        return _replan_evidence_actor(run_id)
+
+    sources, packets = _scenario_inputs(tmp_path)
+    result = run_actual_default_model_behavior_portfolio(
+        packets,
+        scenario_sources=sources,
+        qualification_id="actual-default-portfolio-real-replan-evidence",
+        turn_actor=_turn_actor,
+        onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=replan_evidence_actor,
+    )
+
+    assert result["qualification_passed"] is True
+    assert replan_calls == [
+        "actual-default-portfolio-real-replan-evidence:turn_required_vision_replan:r1",
+        "actual-default-portfolio-real-replan-evidence:turn_required_vision_replan:r2",
+    ]
 
 
 def test_portfolio_preflight_rejects_invalid_contrast_before_actor_spend(
@@ -956,6 +1009,7 @@ def test_portfolio_preflight_rejects_invalid_contrast_before_actor_spend(
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
+            replan_evidence_actor=_replan_evidence_actor,
         )
 
     assert calls == 0
@@ -986,6 +1040,7 @@ def test_portfolio_contrast_rejects_noisy_gate_semantic_collapse(
         turn_actor=collapsed_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     contrast = next(
@@ -1004,26 +1059,21 @@ def test_portfolio_contrast_rejects_noisy_gate_semantic_collapse(
 def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
     tmp_path: Path,
 ) -> None:
-    def quiet_wait_actor(request: Mapping[str, Any]) -> dict[str, Any]:
-        result = _turn_actor(request)
-        semantics = result["decision"]["semantic_contract"]
-        vision = semantics["vision_continuation"]
-        if "required_agent_vision_missing" in vision.get("trigger_kinds", []):
-            result["decision"] = {
-                **result["decision"],
-                "decision": "wait",
-                "intended_action_kinds": ["wait"],
-            }
-        return result
+    def quiet_wait_actor(run_id: str) -> dict[str, Any]:
+        return {
+            **_replan_evidence_actor(run_id),
+            "decision": "wait",
+        }
 
     sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
         packets,
         scenario_sources=sources,
         qualification_id="actual-default-portfolio-required-vision-wait",
-        turn_actor=quiet_wait_actor,
+        turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=quiet_wait_actor,
     )
 
     scenario = next(
@@ -1060,6 +1110,7 @@ def test_portfolio_oracle_rejects_waiting_on_hot_path_compaction_refs(
         turn_actor=waiting_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     scenario = next(
@@ -1098,6 +1149,7 @@ def test_portfolio_oracle_rejects_treating_non_blocking_notice_as_gate(
         turn_actor=blocking_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     scenario = next(
@@ -1134,6 +1186,7 @@ def test_portfolio_oracle_rejects_waiting_on_capability_monitor_repair(
         turn_actor=waiting_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
     )
 
     scenario = next(

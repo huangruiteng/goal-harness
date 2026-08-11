@@ -246,13 +246,15 @@ stochastic output.
 ## Actual-Default Scenario Portfolio
 
 `actual_default_model_behavior_portfolio_v0` is the regular low-frequency live
-suite. Its selected-Todo scenario starts from the shipped thin Codex App
-heartbeat task, lets the model call the real `quota should-run` CLI, and then
-requires a real read-only action against the selected Todo target. The other
-turn scenarios still feed the live actor the same default full quota packet
-consumed by Codex App automation, because their current proof is packet
-interpretation rather than tool execution. Onboarding scenarios use the shipped
-guided-onboarding packet. The suite does not introduce a third model protocol or
+suite. Its selected-Todo and required-vision replan scenarios start from the
+shipped thin Codex App heartbeat task and let the model call the real
+`quota should-run` CLI. The first requires a real read-only action against the
+selected Todo target; the second requires the exact agent-scoped evidence-log
+read projected by a hermetic missing-vision replan state. The other turn
+scenarios still feed the live actor the same default full quota packet consumed
+by Codex App automation, because their current proof is packet interpretation
+rather than tool execution. Onboarding scenarios use the shipped guided-
+onboarding packet. The suite does not introduce a third model protocol or
 retain a retired product arm. Its fixed catalog covers nine core decisions:
 
 1. the normal guided onboarding packet selects `connect_if_needed`;
@@ -272,7 +274,8 @@ snapshots; each packet is generated through the production quota, interaction,
 and scheduler paths and deliberately contains competing signals:
 
 10. a monitor lane and peer-owned advancement both look non-runnable, but a
-    missing required per-agent vision still selects autonomous replan;
+    missing required per-agent vision still selects autonomous replan and the
+    model executes the projected evidence-log read before choosing a delta;
 11. an open user notice coexists with a ready deferred successor, so the model
     must surface the notice and execute the successor replan rather than treat
     every `user_action_required` value as a blocking gate;

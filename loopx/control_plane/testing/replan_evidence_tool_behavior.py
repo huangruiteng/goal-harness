@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ...heartbeat_prompt import build_heartbeat_prompt
+from ..quota.turn_envelope import quota_action_signature_document
 from ..runtime.agent_scoped_evidence_log import (
     build_agent_scoped_evidence_log_command,
 )
@@ -20,6 +21,9 @@ from .doubao_model_behavior_actor import (
     DOUBAO_MODEL_ENV,
     DoubaoActorTransport,
     _direct_ark_transport,
+)
+from .model_behavior_qualification import (
+    model_behavior_semantic_contract_from_packet,
 )
 from .model_tool_behavior import (
     DoubaoExecToolClient,
@@ -116,6 +120,18 @@ def _build_fixture(root: Path) -> _ReplanEvidenceToolFixture:
                 "coordination": {
                     "registered_agents": [_FIXTURE_AGENT_ID],
                     "agent_model": "peer_v1",
+                    "agent_profiles": {
+                        _FIXTURE_AGENT_ID: {
+                            "schema_version": "agent_profile_v1",
+                            "agent_id": _FIXTURE_AGENT_ID,
+                            "profile_role": "quality-qualification",
+                            "scope_summary": "Qualify bounded replan behavior.",
+                            "default_task_classes": [
+                                "advancement_task",
+                                "continuous_monitor",
+                            ],
+                        }
+                    },
                 },
                 "authority_sources": [],
                 "quota": {
@@ -250,6 +266,45 @@ def _required_evidence_command_from_packet(packet: Mapping[str, Any]) -> str:
     return command
 
 
+def _quota_behavior_observation(packet: Mapping[str, Any]) -> dict[str, Any]:
+    signature = quota_action_signature_document(packet)
+    action = dict(signature.get("action") or {})
+    user = dict(signature.get("user") or {})
+    selected_todo = dict(action.get("selected_todo") or {})
+    semantics = model_behavior_semantic_contract_from_packet(
+        packet,
+        arm="full_packet",
+    )
+    vision = dict(semantics.get("vision_continuation") or {})
+    trigger_kinds = sorted(
+        str(item) for item in vision.get("trigger_kinds") or [] if str(item)
+    )
+    required_reads = list(semantics.get("required_reads") or [])
+    if (
+        vision.get("required") is not True
+        or "required_agent_vision_missing" not in trigger_kinds
+        or len(required_reads) != 1
+    ):
+        raise ValueError(
+            "real quota packet must bind evidence-log replan to the missing vision"
+        )
+    must_attempt = bool(action.get("must_attempt"))
+    delivery_allowed = bool(action.get("delivery_allowed"))
+    quiet_noop_allowed = bool(action.get("quiet_noop_allowed"))
+    if not (must_attempt and delivery_allowed and not quiet_noop_allowed):
+        raise ValueError("real quota packet must require an executable replan")
+    return {
+        "decision": "execute",
+        "selected_todo_id": selected_todo.get("todo_id"),
+        "user_action_required": bool(user.get("action_required")),
+        "must_attempt_work": must_attempt,
+        "delivery_allowed": delivery_allowed,
+        "quiet_noop_allowed": quiet_noop_allowed,
+        "external_write_requested": False,
+        "vision_trigger_kinds": trigger_kinds,
+    }
+
+
 def _execute_loopx_read(
     command: str,
     *,
@@ -321,10 +376,11 @@ def _receipt(
     passed: bool,
     failure_code: str | None,
     required_evidence_command: str,
+    quota_observation: Mapping[str, Any] | None,
     local_fixture_writes_executed: bool,
     read_only_host_commands_executed: bool,
 ) -> dict[str, Any]:
-    return {
+    receipt = {
         "schema_version": REPLAN_EVIDENCE_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION,
         "qualification_id": qualification_id,
         "actor_ref": actor_ref,
@@ -346,6 +402,9 @@ def _receipt(
             "read_only_host_commands_executed": read_only_host_commands_executed,
         },
     }
+    if quota_observation is not None:
+        receipt.update(dict(quota_observation))
+    return receipt
 
 
 class DoubaoReplanEvidenceToolBehaviorActor:
@@ -407,6 +466,7 @@ class DoubaoReplanEvidenceToolBehaviorActor:
         ]
         steps: list[dict[str, Any]] = []
         quota_observed = False
+        quota_observation: dict[str, Any] | None = None
         required_evidence_command: str | None = None
         seen_once: set[str] = set()
         actor_ref = self._client.actor_ref
@@ -425,6 +485,7 @@ class DoubaoReplanEvidenceToolBehaviorActor:
                 required_evidence_command=(
                     required_evidence_command or fixture.required_evidence_command
                 ),
+                quota_observation=quota_observation,
                 local_fixture_writes_executed=local_fixture_writes_executed,
                 read_only_host_commands_executed=read_only_host_commands_executed,
             )
@@ -502,6 +563,7 @@ class DoubaoReplanEvidenceToolBehaviorActor:
                     required_evidence_command = _required_evidence_command_from_packet(
                         quota_packet
                     )
+                    quota_observation = _quota_behavior_observation(quota_packet)
                     if required_evidence_command != fixture.required_evidence_command:
                         raise ValueError("quota required-read command drifted from fixture")
                     quota_observed = True

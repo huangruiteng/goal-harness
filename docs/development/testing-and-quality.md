@@ -343,8 +343,10 @@ The regular live suite is
 `actual_default_model_behavior_portfolio_v0`: fifteen one-arm scenarios and two
 attempts each. Its selected-Todo case starts from a production thin heartbeat,
 executes real quota, and requires the model to perform the selected Todo's
-read-only target action. The other turn cases remain bounded packet-interpretation
-checks. Nine core scenarios check normal
+read-only target action. Its required-vision replan case independently builds a
+hermetic missing-vision state, executes real quota, and requires the model to
+perform the exact projected evidence-log read. The other turn cases remain
+bounded packet-interpretation checks. Nine core scenarios check normal
 onboarding, agent identity and goal selection, selected todo, peer identity
 routing, same-agent continuation, final human gate, healthy continuation, and
 projection repair. Three composition scenarios check vision/monitor/peer replan
@@ -361,7 +363,7 @@ remaining live turn actor cases consume the default CLI hot-path
 `quota should-run` projection used by Codex App automation and return
 runtime-facing decisions rather than echoing the testing-only nine-field
 semantic contract. The suite has 30 bounded scenario attempts and, after
-accounting for the selected-Todo tool loop, at most 40 provider turns.
+accounting for both tool loops, at most 50 provider turns.
 Exact scheduler, vision, writeback, and warning fields stay in deterministic
 action-signature coverage; pair mode keeps TurnEnvelope semantic extraction for
 explicit packet differentials or outcome claims.
@@ -377,12 +379,14 @@ clean/noisy 场景保持不变，同时要求 blocking gate 与 non-blocking not
 work 与 required vision replan 仍然可区分。每个
 场景都有在 CLI projection 前推导的独立确定性 source oracle，所有重复都必须通过；
 actor 硬错误不自动重试。selected-Todo 场景从正式 thin heartbeat 开始，执行真实 quota，
-并要求模型实际读取 selected Todo 指向的目标；其他 turn 场景仍直接读取 Codex App
+并要求模型实际读取 selected Todo 指向的目标；required-vision replan 场景独立构造
+缺失 vision 的 hermetic 状态，执行真实 quota，并要求模型实际读取投影出的精确
+evidence-log；其他 turn 场景仍直接读取 Codex App
 automation 使用的默认 CLI hot-path `quota should-run` projection 并返回运行时决策，
 因此属于 packet interpretation，而不是工具行为证明。scheduler、vision、writeback 与
 warning 的精确字段继续由 action-signature 确定性覆盖；pair 中的 TurnEnvelope 只用于
-明确的 packet 差分或结果提升声明。全套仍是 30 个有界 scenario attempt；考虑
-selected-Todo 每次最多 6 个 provider turn，最坏上限为 40 个 provider turn。
+明确的 packet 差分或结果提升声明。全套仍是 30 个有界 scenario attempt；考虑两个
+工具场景各自每次最多 6 个 provider turn，最坏上限为 50 个 provider turn。
 
 For onboarding packets, the suite uses the shipped guided packet builder and
 redacts only local absolute path surfaces before provider transport. The
