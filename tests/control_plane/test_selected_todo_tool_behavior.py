@@ -43,7 +43,7 @@ def test_real_tool_loop_executes_action_selected_by_real_quota(
     commands = [
         "date -Iseconds",
         fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
-        "cat fixture/selected-lane.json",
+        'ls -la fixture/ && echo "---" && cat fixture/selected-lane.json',
     ]
 
     def transport(**kwargs: Any) -> Mapping[str, Any]:

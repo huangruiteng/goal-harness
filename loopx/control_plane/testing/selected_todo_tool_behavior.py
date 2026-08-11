@@ -62,6 +62,13 @@ class _SelectedTodoToolFixture:
     selected_target: Path
 
 
+@dataclass(frozen=True)
+class _ReadStep:
+    kind: str
+    argv: tuple[str, ...]
+    target: Path | None = None
+
+
 def _build_fixture(root: Path) -> _SelectedTodoToolFixture:
     source_root = Path(__file__).resolve().parents[3]
     project_root = root / "project"
@@ -226,21 +233,97 @@ def _is_quota_guard(command: str) -> bool:
     )
 
 
-def _read_target(command: str) -> tuple[str, list[str]] | None:
+def _resolve_project_path(
+    value: str,
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> Path | None:
+    path = Path(value)
+    resolved = (
+        path.resolve()
+        if path.is_absolute()
+        else (fixture.project_root / path).resolve()
+    )
+    try:
+        resolved.relative_to(fixture.project_root.resolve())
+    except ValueError:
+        return None
+    return resolved
+
+
+def _read_plan(
+    command: str,
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> list[_ReadStep] | None:
     try:
         tokens = shlex.split(command)
     except ValueError:
         return None
-    if not tokens or any(token in {";", "&&", "||", "|", ">", ">>"} for token in tokens):
+    if not tokens or any(token in {";", "||", "|", ">", ">>"} for token in tokens):
         return None
-    executable = Path(tokens[0]).name
-    if executable == "cat" and len(tokens) == 2:
-        return tokens[1], tokens
-    if executable == "head" and len(tokens) in {2, 4}:
-        return tokens[-1], tokens
-    if executable == "sed" and len(tokens) == 4 and tokens[1] == "-n":
-        return tokens[-1], tokens
-    return None
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token == "&&":
+            if not segments[-1]:
+                return None
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    if not segments[-1] or len(segments) > 4:
+        return None
+
+    plan: list[_ReadStep] = []
+    for segment in segments:
+        executable = Path(segment[0]).name
+        if executable == "echo" and len(segment) == 2:
+            plan.append(_ReadStep("separator", tuple(segment)))
+            continue
+        if executable == "ls":
+            paths = [token for token in segment[1:] if not token.startswith("-")]
+            options = [token for token in segment[1:] if token.startswith("-")]
+            if (
+                len(paths) > 1
+                or any(set(option[1:]) - {"a", "l"} for option in options)
+                or (
+                    paths
+                    and _resolve_project_path(paths[0], fixture=fixture) is None
+                )
+            ):
+                return None
+            plan.append(_ReadStep("metadata", tuple(segment)))
+            continue
+        content_shape = bool(
+            (executable == "cat" and len(segment) == 2)
+            or (
+                executable == "head"
+                and (
+                    len(segment) == 2
+                    or (
+                        len(segment) == 4
+                        and segment[1] == "-n"
+                        and segment[2].isdigit()
+                    )
+                )
+            )
+            or (
+                executable == "sed"
+                and len(segment) == 4
+                and segment[1] == "-n"
+                and segment[2].endswith("p")
+                and all(
+                    character.isdigit() or character in {",", "p"}
+                    for character in segment[2]
+                )
+            )
+        )
+        if not content_shape:
+            return None
+        target = _resolve_project_path(segment[-1], fixture=fixture)
+        if target is None:
+            return None
+        plan.append(_ReadStep("content", tuple(segment), target))
+    return plan
 
 
 def _execute_selected_read(
@@ -248,38 +331,40 @@ def _execute_selected_read(
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> str:
-    parsed = _read_target(command)
-    if parsed is None:
+    plan = _read_plan(command, fixture=fixture)
+    content_steps = [step for step in (plan or []) if step.kind == "content"]
+    if not plan or not content_steps:
         raise ValueError("selected action is not a bounded file read")
-    target, argv = parsed
-    target_path = Path(target)
-    resolved_target = (
-        target_path.resolve()
-        if target_path.is_absolute()
-        else (fixture.project_root / target_path).resolve()
-    )
-    if resolved_target != fixture.selected_target.resolve():
+    if any(
+        step.target != fixture.selected_target.resolve()
+        for step in content_steps
+    ):
         raise ValueError("selected action does not target the selected todo")
-    completed = subprocess.run(
-        argv,
-        cwd=fixture.project_root,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"selected todo read failed with exit={completed.returncode}"
+    outputs: list[str] = []
+    for step in plan:
+        completed = subprocess.run(
+            list(step.argv),
+            cwd=fixture.project_root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
-    observed = json.loads(completed.stdout)
-    if observed != {
-        "contract": "public-safe-read-only",
-        "lane": "selected",
-        "next_checkpoint": "qualify-one-bounded-slice",
-    }:
-        raise ValueError("selected todo readback does not match the fixture")
-    return completed.stdout
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"selected todo read failed with exit={completed.returncode}"
+            )
+        outputs.append(completed.stdout)
+        if step.kind != "content":
+            continue
+        observed = json.loads(completed.stdout)
+        if observed != {
+            "contract": "public-safe-read-only",
+            "lane": "selected",
+            "next_checkpoint": "qualify-one-bounded-slice",
+        }:
+            raise ValueError("selected todo readback does not match the fixture")
+    return "".join(outputs)
 
 
 def _execute_workspace_read(
@@ -315,22 +400,23 @@ def _classify_tool_command(
         return "clock", clock_output
     if command in _READ_ONLY_PREFLIGHT_COMMANDS:
         return "workspace_read", None
-    read = _read_target(command)
-    if read is not None:
-        target, _ = read
-        target_path = Path(target)
-        resolved_target = (
-            target_path.resolve()
-            if target_path.is_absolute()
-            else (fixture.project_root / target_path).resolve()
-        )
-        if resolved_target == fixture.selected_target.resolve():
+    plan = _read_plan(command, fixture=fixture)
+    if plan is not None:
+        content_targets = [
+            step.target for step in plan if step.kind == "content"
+        ]
+        if content_targets and all(
+            target == fixture.selected_target.resolve()
+            for target in content_targets
+        ):
             return (
                 "selected_action"
                 if quota_observed
                 else "selected_action_before_quota"
             ), None
-        return "wrong_selected_todo_target", None
+        if content_targets:
+            return "wrong_selected_todo_target", None
+        return "workspace_read", None
     return "unexpected_command", None
 
 
