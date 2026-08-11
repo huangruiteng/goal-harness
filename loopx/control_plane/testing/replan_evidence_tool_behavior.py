@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import contextlib
-import io
 import json
 import os
 import shlex
 import subprocess
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from ...cli import main as cli_main
 from ...heartbeat_prompt import build_heartbeat_prompt
 from ..runtime.agent_scoped_evidence_log import (
     build_agent_scoped_evidence_log_command,
@@ -396,16 +394,6 @@ def _replace_argument(tokens: list[str], option: str, value: str) -> None:
     tokens[index + 1] = value
 
 
-@contextlib.contextmanager
-def _working_directory(path: Path):
-    previous = Path.cwd()
-    os.chdir(path)
-    try:
-        yield
-    finally:
-        os.chdir(previous)
-
-
 def _execute_loopx_read(
     command: str,
     *,
@@ -420,16 +408,28 @@ def _execute_loopx_read(
     if quota_guard:
         _replace_argument(argv, "--registry", str(fixture.global_registry_path))
         _replace_argument(argv, "--turn-instance-id", turn_instance_id)
-    output = io.StringIO()
-    error = io.StringIO()
-    with _working_directory(fixture.project_root):
-        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(error):
-            exit_code = cli_main(argv)
-    if exit_code != 0:
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(fixture.source_root)
+        if not existing_pythonpath
+        else os.pathsep.join((str(fixture.source_root), existing_pythonpath))
+    )
+    completed = subprocess.run(
+        [sys.executable, "-m", "loopx.cli", *argv],
+        cwd=fixture.project_root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if completed.returncode != 0:
         raise RuntimeError(
-            f"LoopX read command failed with exit={exit_code}: {error.getvalue()[-500:]}"
+            "LoopX read command failed with "
+            f"exit={completed.returncode}: {completed.stderr[-500:]}"
         )
-    return output.getvalue()
+    return completed.stdout
 
 
 def _execute_workspace_read(
