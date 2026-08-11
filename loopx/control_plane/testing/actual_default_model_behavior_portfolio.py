@@ -126,7 +126,7 @@ _SCENARIOS = (
     ),
     _ScenarioSpec(
         "turn_scoped_gate_successor_replan",
-        "turn",
+        "scoped_gate_tool",
         None,
         "execute",
         "control_plane_composition",
@@ -263,7 +263,8 @@ def actual_default_model_behavior_scenario_catalog() -> dict[str, Any]:
                 "composition_dimensions": list(spec.composition_dimensions),
                 "packet_view": (
                     "production_heartbeat_tool_loop"
-                    if spec.actor_kind in {"turn_tool", "replan_tool"}
+                    if spec.actor_kind
+                    in {"turn_tool", "replan_tool", "scoped_gate_tool"}
                     else (
                         "quota_should_run_default"
                         if spec.actor_kind == "turn"
@@ -749,7 +750,12 @@ def _scenario_contract(
     source_packet: Mapping[str, Any],
     actor_packet: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if spec.actor_kind in {"turn", "turn_tool", "replan_tool"}:
+    if spec.actor_kind in {
+        "turn",
+        "turn_tool",
+        "replan_tool",
+        "scoped_gate_tool",
+    }:
         build_model_behavior_actor_request(
             actor_packet,
             qualification_id=f"portfolio-preflight-{spec.scenario_id}",
@@ -999,7 +1005,12 @@ def _receipt_alignment(
     receipt: Mapping[str, Any],
     expected: Mapping[str, Any],
 ) -> tuple[bool, list[str]]:
-    if spec.actor_kind in {"turn", "turn_tool", "replan_tool"}:
+    if spec.actor_kind in {
+        "turn",
+        "turn_tool",
+        "replan_tool",
+        "scoped_gate_tool",
+    }:
         fields = tuple(expected)
         mismatches = [
             f"source_mismatch:{field}"
@@ -1027,6 +1038,7 @@ def _scenario_result(
     onboarding_actor: OnboardingModelBehaviorActor,
     selected_todo_actor: Callable[[str], Mapping[str, Any]],
     replan_evidence_actor: Callable[[str], Mapping[str, Any]],
+    scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
 ) -> tuple[dict[str, Any], bool, list[dict[str, Any]]]:
     receipt_digests: list[str] = []
     observed_routes: list[str] = []
@@ -1045,6 +1057,13 @@ def _scenario_result(
                 observed_route = str(receipt.get("decision") or "")
             elif spec.actor_kind == "replan_tool":
                 receipt = dict(replan_evidence_actor(run_id))
+                if receipt.get("qualification_passed") is not True:
+                    failure_codes.append(
+                        str(receipt.get("failure_code") or "tool_behavior_failed")
+                    )
+                observed_route = str(receipt.get("decision") or "")
+            elif spec.actor_kind == "scoped_gate_tool":
+                receipt = dict(scoped_gate_successor_actor(run_id))
                 if receipt.get("qualification_passed") is not True:
                     failure_codes.append(
                         str(receipt.get("failure_code") or "tool_behavior_failed")
@@ -1158,6 +1177,7 @@ def run_actual_default_model_behavior_portfolio(
     onboarding_actor: OnboardingModelBehaviorActor,
     selected_todo_actor: Callable[[str], Mapping[str, Any]],
     replan_evidence_actor: Callable[[str], Mapping[str, Any]],
+    scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Run the fixed low-frequency one-arm portfolio with bounded receipts."""
     expected_ids = {spec.scenario_id for spec in _SCENARIOS}
@@ -1217,6 +1237,7 @@ def run_actual_default_model_behavior_portfolio(
             onboarding_actor=onboarding_actor,
             selected_todo_actor=selected_todo_actor,
             replan_evidence_actor=replan_evidence_actor,
+            scoped_gate_successor_actor=scoped_gate_successor_actor,
         )
         actor_call_count += int(result["repeats_completed"])
         if actor_error:
@@ -1260,9 +1281,9 @@ def run_actual_default_model_behavior_portfolio(
         "contrasts": contrast_results,
         "boundary": {
             "tools_enabled": True,
-            "tool_enabled_scenario_count": 2,
+            "tool_enabled_scenario_count": 3,
             "packet_interpretation_scenario_count": (
-                ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT - 2
+                ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT - 3
             ),
             "raw_packets_persisted": False,
             "raw_model_responses_persisted": False,

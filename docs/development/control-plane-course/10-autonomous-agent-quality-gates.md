@@ -475,7 +475,9 @@ guided_transaction = {
 `loopx/control_plane/testing/actual_default_model_behavior_portfolio.py::_scenario_contract`：
 
 ```python
-if spec.actor_kind in {"turn", "turn_tool", "replan_tool"}:
+if spec.actor_kind in {
+    "turn", "turn_tool", "replan_tool", "scoped_gate_tool"
+}:
     build_model_behavior_actor_request(
         packet,
         semantic_contract_required=False,

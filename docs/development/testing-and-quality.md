@@ -339,6 +339,18 @@ evidence-log 命令才算通过。模型看不到测试专用 decision schema、
 不调用 shell，quota 的正常 receipt 只写入临时 fixture，仓库与外部系统均不写入，最终
 receipt 只保留 action kind 与 command digest。
 
+The scoped-gate successor composition case is also a real tool loop. Its
+hermetic Goal contains an unrelated open user gate and a deferred successor
+whose prerequisite is complete. After real quota selects the successor, the
+model must surface the user action as a non-blocking assistant notice and read
+the exact successor target. Waiting after the notice, omitting it, or reading
+the gated decoy fails.
+
+```bash
+python3 scripts/qualify-doubao-scoped-gate-successor-tool-live.py \
+  --qualification-id <public-safe-run-id>
+```
+
 The regular live suite is
 `actual_default_model_behavior_portfolio_v0`: fifteen one-arm scenarios and two
 attempts each. Its selected-Todo case starts from a production thin heartbeat,
@@ -363,7 +375,7 @@ remaining live turn actor cases consume the default CLI hot-path
 `quota should-run` projection used by Codex App automation and return
 runtime-facing decisions rather than echoing the testing-only nine-field
 semantic contract. The suite has 30 bounded scenario attempts and, after
-accounting for both tool loops, at most 50 provider turns.
+accounting for all three tool loops, at most 60 provider turns.
 Exact scheduler, vision, writeback, and warning fields stay in deterministic
 action-signature coverage; pair mode keeps TurnEnvelope semantic extraction for
 explicit packet differentials or outcome claims.
@@ -383,10 +395,12 @@ actor 硬错误不自动重试。selected-Todo 场景从正式 thin heartbeat �
 缺失 vision 的 hermetic 状态，执行真实 quota，并要求模型实际读取投影出的精确
 evidence-log；其他 turn 场景仍直接读取 Codex App
 automation 使用的默认 CLI hot-path `quota should-run` projection 并返回运行时决策，
-因此属于 packet interpretation，而不是工具行为证明。scheduler、vision、writeback 与
+scoped-gate successor 场景也从 hermetic Goal 与正式 heartbeat 开始：真实 quota 必须
+同时投影非阻塞 user notice 和 ready deferred successor，模型随后既要呈现提醒，也要
+实际执行被选中的 successor；其他 turn 场景仍属于 packet interpretation。scheduler、vision、writeback 与
 warning 的精确字段继续由 action-signature 确定性覆盖；pair 中的 TurnEnvelope 只用于
-明确的 packet 差分或结果提升声明。全套仍是 30 个有界 scenario attempt；考虑两个
-工具场景各自每次最多 6 个 provider turn，最坏上限为 50 个 provider turn。
+明确的 packet 差分或结果提升声明。全套仍是 30 个有界 scenario attempt；考虑三个
+工具场景各自每次最多 6 个 provider turn，最坏上限为 60 个 provider turn。
 
 For onboarding packets, the suite uses the shipped guided packet builder and
 redacts only local absolute path surfaces before provider transport. The

@@ -18,7 +18,9 @@ from loopx.control_plane.testing.actual_default_model_behavior_portfolio import 
     actual_default_model_behavior_scenario_catalog,
     build_actual_default_model_behavior_scenario_inputs,
     build_quota_hot_path_compaction_regression_source,
-    run_actual_default_model_behavior_portfolio,
+)
+from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (
+    run_actual_default_model_behavior_portfolio as _run_actual_default_model_behavior_portfolio,
 )
 from loopx.control_plane.testing.doubao_model_behavior_actor import (
     DoubaoActorTransportError,
@@ -402,6 +404,34 @@ def _replan_evidence_actor(_: str) -> dict[str, Any]:
     }
 
 
+def _scoped_gate_successor_actor(_: str) -> dict[str, Any]:
+    return {
+        "schema_version": "scoped_gate_successor_tool_behavior_receipt_v0",
+        "qualification_passed": True,
+        "failure_code": None,
+        "decision": "execute",
+        "selected_todo_id": "todo_portfolio_deferred",
+        "user_action_required": True,
+        "must_attempt_work": True,
+        "delivery_allowed": True,
+        "quiet_noop_allowed": False,
+        "external_write_requested": False,
+        "non_blocking_notice_surfaced": True,
+        "selected_action_matched_todo": True,
+    }
+
+
+def run_actual_default_model_behavior_portfolio(
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    kwargs.setdefault(
+        "scoped_gate_successor_actor",
+        _scoped_gate_successor_actor,
+    )
+    return _run_actual_default_model_behavior_portfolio(*args, **kwargs)
+
+
 def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) -> None:
     sources, packets = build_actual_default_model_behavior_scenario_inputs(tmp_path)
 
@@ -617,6 +647,7 @@ def test_portfolio_oracle_catches_wrong_selected_todo(tmp_path: Path) -> None:
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=wrong_selected_todo_actor,
         replan_evidence_actor=_replan_evidence_actor,
+        scoped_gate_successor_actor=_scoped_gate_successor_actor,
     )
 
     selected = next(
@@ -656,6 +687,7 @@ def test_portfolio_source_oracle_rejects_mutated_compact_user_action(
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
             replan_evidence_actor=_replan_evidence_actor,
+            scoped_gate_successor_actor=_scoped_gate_successor_actor,
         )
 
     assert calls == 0
@@ -728,7 +760,8 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
         scenario["packet_view"]
         == (
             "production_heartbeat_tool_loop"
-            if scenario["actor_kind"] in {"turn_tool", "replan_tool"}
+            if scenario["actor_kind"]
+            in {"turn_tool", "replan_tool", "scoped_gate_tool"}
             else (
                 "quota_should_run_default"
                 if scenario["actor_kind"] == "turn"
@@ -948,8 +981,8 @@ def test_portfolio_selected_todo_uses_real_action_actor_when_supplied(
         "actual-default-portfolio-real-selected-action:turn_selected_todo:r2",
     ]
     assert result["boundary"]["tools_enabled"] is True
-    assert result["boundary"]["tool_enabled_scenario_count"] == 2
-    assert result["boundary"]["packet_interpretation_scenario_count"] == 13
+    assert result["boundary"]["tool_enabled_scenario_count"] == 3
+    assert result["boundary"]["packet_interpretation_scenario_count"] == 12
 
 
 def test_portfolio_required_vision_replan_uses_real_action_actor_when_supplied(
@@ -970,12 +1003,47 @@ def test_portfolio_required_vision_replan_uses_real_action_actor_when_supplied(
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
         replan_evidence_actor=replan_evidence_actor,
+        scoped_gate_successor_actor=_scoped_gate_successor_actor,
     )
 
     assert result["qualification_passed"] is True
     assert replan_calls == [
         "actual-default-portfolio-real-replan-evidence:turn_required_vision_replan:r1",
         "actual-default-portfolio-real-replan-evidence:turn_required_vision_replan:r2",
+    ]
+
+
+def test_portfolio_scoped_gate_uses_real_successor_actor_when_supplied(
+    tmp_path: Path,
+) -> None:
+    scoped_calls: list[str] = []
+
+    def scoped_gate_successor_actor(run_id: str) -> Mapping[str, Any]:
+        scoped_calls.append(run_id)
+        return _scoped_gate_successor_actor(run_id)
+
+    sources, packets = _scenario_inputs(tmp_path)
+    result = run_actual_default_model_behavior_portfolio(
+        packets,
+        scenario_sources=sources,
+        qualification_id="actual-default-portfolio-real-scoped-gate",
+        turn_actor=_turn_actor,
+        onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
+        replan_evidence_actor=_replan_evidence_actor,
+        scoped_gate_successor_actor=scoped_gate_successor_actor,
+    )
+
+    assert result["qualification_passed"] is True
+    assert scoped_calls == [
+        (
+            "actual-default-portfolio-real-scoped-gate:"
+            "turn_scoped_gate_successor_replan:r1"
+        ),
+        (
+            "actual-default-portfolio-real-scoped-gate:"
+            "turn_scoped_gate_successor_replan:r2"
+        ),
     ]
 
 
@@ -1074,6 +1142,7 @@ def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
         replan_evidence_actor=quiet_wait_actor,
+        scoped_gate_successor_actor=_scoped_gate_successor_actor,
     )
 
     scenario = next(
@@ -1127,29 +1196,25 @@ def test_portfolio_oracle_rejects_waiting_on_hot_path_compaction_refs(
 def test_portfolio_oracle_rejects_treating_non_blocking_notice_as_gate(
     tmp_path: Path,
 ) -> None:
-    def blocking_actor(request: Mapping[str, Any]) -> dict[str, Any]:
-        result = _turn_actor(request)
-        signature = quota_action_signature_document(request["packet"])
-        if (
-            signature["user"]["action_required"] is True
-            and signature.get("response_plan") is None
-        ):
-            result["decision"] = {
-                **result["decision"],
-                "decision": "ask_user",
-                "intended_action_kinds": ["notify", "wait"],
-            }
-        return result
+    def blocking_actor(run_id: str) -> dict[str, Any]:
+        return {
+            **_scoped_gate_successor_actor(run_id),
+            "qualification_passed": False,
+            "failure_code": "waited_on_non_blocking_notice",
+            "decision": "ask_user",
+            "selected_action_matched_todo": False,
+        }
 
     sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
         packets,
         scenario_sources=sources,
         qualification_id="actual-default-portfolio-non-blocking-notice",
-        turn_actor=blocking_actor,
+        turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
         replan_evidence_actor=_replan_evidence_actor,
+        scoped_gate_successor_actor=blocking_actor,
     )
 
     scenario = next(

@@ -50,6 +50,13 @@ class ExecToolCall:
     call_id: str
     command: str
     provider_value: dict[str, Any]
+    assistant_content: str | None = None
+
+
+@dataclass(frozen=True)
+class ExecToolStep:
+    assistant_content: str | None
+    tool_call: ExecToolCall | None
 
 
 class DoubaoExecToolClient:
@@ -84,6 +91,12 @@ class DoubaoExecToolClient:
         self,
         messages: list[dict[str, Any]],
     ) -> ExecToolCall | None:
+        return self.next_step(messages).tool_call
+
+    def next_step(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> ExecToolStep:
         body = {
             "model": self._model,
             "messages": messages,
@@ -109,7 +122,7 @@ class DoubaoExecToolClient:
                 ).encode("utf-8"),
                 timeout_seconds=self._timeout_seconds,
             )
-            return provider_exec_tool_call(response)
+            return provider_exec_tool_step(response)
         except DoubaoActorTransportError:
             raise
         except Exception:  # noqa: BLE001 - custom transports may raise any error.
@@ -118,9 +131,96 @@ class DoubaoExecToolClient:
                 error_code="provider_transport_failed",
             ) from None
 
+    def next_final_content(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> str | None:
+        """Request the host finalization turn after the tool action is done."""
+
+        body = {
+            "model": self._model,
+            "messages": messages,
+            "thinking": {"type": "disabled"},
+            "temperature": 0,
+            "max_tokens": MAX_PROVIDER_TOKENS,
+            "stream": False,
+        }
+        try:
+            response = self._transport(
+                endpoint=DOUBAO_CHAT_COMPLETIONS_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                body=json.dumps(
+                    body,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8"),
+                timeout_seconds=self._timeout_seconds,
+            )
+            step = provider_exec_tool_step(response)
+            if step.tool_call is not None:
+                raise DoubaoActorTransportError(
+                    "Doubao finalization returned an unavailable tool call",
+                    error_code="provider_invalid_tool_call",
+                )
+            return step.assistant_content
+        except DoubaoActorTransportError:
+            raise
+        except Exception:  # noqa: BLE001 - custom transports may raise any error.
+            raise DoubaoActorTransportError(
+                "Doubao finalization provider transport failed",
+                error_code="provider_transport_failed",
+            ) from None
+
 
 def digest_text(value: str) -> str:
     return f"sha256:{sha256(value.encode('utf-8')).hexdigest()}"
+
+
+def provider_exec_tool_step(response: Mapping[str, Any]) -> ExecToolStep:
+    """Decode one assistant step while retaining only its bounded text."""
+
+    choices = response.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior response must contain exactly one choice",
+            error_code="provider_invalid_shape",
+        )
+    choice = choices[0]
+    if not isinstance(choice, Mapping):
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior choice must be an object",
+            error_code="provider_invalid_shape",
+        )
+    message = choice.get("message")
+    if not isinstance(message, Mapping):
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior choice is missing its message",
+            error_code="provider_invalid_shape",
+        )
+    assistant_content = message.get("content")
+    if assistant_content is not None and not isinstance(assistant_content, str):
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior assistant content must be text or null",
+            error_code="provider_invalid_shape",
+        )
+    normalized_content = (
+        assistant_content.strip() if isinstance(assistant_content, str) else None
+    ) or None
+    tool_calls = message.get("tool_calls")
+    if tool_calls in (None, []):
+        return ExecToolStep(
+            assistant_content=normalized_content,
+            tool_call=None,
+        )
+    tool_call = provider_exec_tool_call(response)
+    return ExecToolStep(
+        assistant_content=normalized_content,
+        tool_call=tool_call,
+    )
 
 
 def provider_exec_tool_call(response: Mapping[str, Any]) -> ExecToolCall | None:
@@ -201,6 +301,12 @@ def provider_exec_tool_call(response: Mapping[str, Any]) -> ExecToolCall | None:
             "Doubao tool call is missing its id",
             error_code="provider_invalid_tool_call",
         )
+    assistant_content = message.get("content")
+    if assistant_content is not None and not isinstance(assistant_content, str):
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior assistant content must be text or null",
+            error_code="provider_invalid_shape",
+        )
     return ExecToolCall(
         call_id=call_id,
         command=command.strip(),
@@ -212,6 +318,10 @@ def provider_exec_tool_call(response: Mapping[str, Any]) -> ExecToolCall | None:
                 "arguments": arguments_text,
             },
         },
+        assistant_content=(
+            assistant_content.strip() if isinstance(assistant_content, str) else None
+        )
+        or None,
     )
 
 

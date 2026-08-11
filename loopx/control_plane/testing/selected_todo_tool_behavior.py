@@ -67,6 +67,7 @@ class _ReadStep:
     argv: tuple[str, ...]
     target: Path | None = None
     operator: str = ";"
+    line_limit: int | None = None
 
 
 def _build_fixture(root: Path) -> _SelectedTodoToolFixture:
@@ -256,9 +257,91 @@ def _resolve_metadata_path(
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> Path | None:
-    if value.rstrip("/") == "~/.codex/loopx":
-        return fixture.global_registry_path.parent.resolve()
+    runtime_marker = "~/.codex/loopx"
+    normalized = value.rstrip("/")
+    if normalized == runtime_marker or normalized.startswith(runtime_marker + "/"):
+        suffix = normalized[len(runtime_marker) :].lstrip("/")
+        runtime_root = fixture.global_registry_path.parent.resolve()
+        resolved = (runtime_root / suffix).resolve()
+        try:
+            resolved.relative_to(runtime_root)
+        except ValueError:
+            return None
+        return resolved
     return _resolve_project_path(value, fixture=fixture)
+
+
+def _is_fixture_metadata_target(
+    target: Path | None,
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> bool:
+    if target is None:
+        return False
+    allowed = {
+        (fixture.project_root / ".loopx" / "registry.json").resolve(),
+        (
+            fixture.project_root
+            / ".codex"
+            / "goals"
+            / SELECTED_TODO_TOOL_FIXTURE_GOAL_ID
+            / "ACTIVE_GOAL_STATE.md"
+        ).resolve(),
+    }
+    return target.resolve() in allowed
+
+
+def _metadata_pipeline_step(
+    segment: list[str],
+    *,
+    fixture: _SelectedTodoToolFixture,
+    operator: str,
+) -> _ReadStep | None:
+    if segment.count("|") != 1:
+        return None
+    pipe_index = segment.index("|")
+    left = segment[:pipe_index]
+    right = segment[pipe_index + 1 :]
+    if len(left) >= 3 and left[-3:] == ["2", ">", "/dev/null"]:
+        left = left[:-3]
+    if len(right) == 2 and Path(right[0]).name == "head":
+        limit_token = right[1]
+        if not limit_token.startswith("-") or not limit_token[1:].isdigit():
+            return None
+        limit = int(limit_token[1:])
+    elif (
+        len(right) == 3
+        and Path(right[0]).name == "head"
+        and right[1] == "-n"
+        and right[2].isdigit()
+    ):
+        limit = int(right[2])
+    else:
+        return None
+    if limit < 1 or limit > 200:
+        return None
+    discovery_argv = _discovery_tokens(left, fixture=fixture)
+    if discovery_argv is not None:
+        return _ReadStep(
+            "metadata",
+            tuple(discovery_argv),
+            operator=operator,
+            line_limit=limit,
+        )
+    if len(left) != 2 or Path(left[0]).name != "cat":
+        return None
+    target = _resolve_metadata_path(left[1], fixture=fixture)
+    allowed_registries = {
+        fixture.global_registry_path.resolve(),
+        (fixture.project_root / ".loopx" / "registry.json").resolve(),
+    }
+    if target not in allowed_registries:
+        return None
+    return _ReadStep(
+        "metadata",
+        ("head", "-n", str(limit), str(target)),
+        operator=operator,
+    )
 
 
 def _read_plan_tokens(command: str) -> list[str] | None:
@@ -287,7 +370,9 @@ def _read_plan(
                 return None
             segments.append([])
             operators.append(token)
-        elif token in {"&", "|", "<", "<<", ">>", "<<<"}:
+        elif token == "|":
+            segments[-1].append(token)
+        elif token in {"&", "<", "<<", ">>", "<<<"}:
             return None
         else:
             segments[-1].append(token)
@@ -297,6 +382,16 @@ def _read_plan(
     plan: list[_ReadStep] = []
     for operator, raw_segment in zip(operators, segments, strict=True):
         segment = list(raw_segment)
+        if "|" in segment:
+            pipeline_step = _metadata_pipeline_step(
+                segment,
+                fixture=fixture,
+                operator=operator,
+            )
+            if pipeline_step is None:
+                return None
+            plan.append(pipeline_step)
+            continue
         if len(segment) >= 3 and segment[-3:] == ["2", ">", "/dev/null"]:
             segment = segment[:-3]
         if not segment or any(
@@ -437,6 +532,21 @@ def _discovery_tokens(
                 return None
             index += 2
             continue
+        if (
+            token == "-not"
+            and index + 2 < len(tokens)
+            and tokens[index + 1] == "-path"
+        ):
+            pattern = tokens[index + 2]
+            if (
+                not pattern
+                or len(pattern.encode("utf-8")) > 128
+                or Path(pattern).is_absolute()
+                or ".." in Path(pattern).parts
+            ):
+                return None
+            index += 3
+            continue
         return None
     argv = [executable, str(root), *tokens[2:]]
     if not has_maxdepth:
@@ -465,15 +575,21 @@ def _execute_selected_read(
 ) -> str:
     plan = _read_plan(command, fixture=fixture)
     content_steps = [step for step in (plan or []) if step.kind == "content"]
-    if not plan or not content_steps:
+    selected_steps = [
+        step
+        for step in content_steps
+        if step.target == fixture.selected_target.resolve()
+    ]
+    if not plan or not selected_steps:
         raise ValueError("selected action is not a bounded file read")
     if any(
         step.target != fixture.selected_target.resolve()
+        and not _is_fixture_metadata_target(step.target, fixture=fixture)
         for step in content_steps
     ):
         raise ValueError("selected action does not target the selected todo")
     output, executed_content = _execute_read_plan(plan, fixture=fixture)
-    if executed_content != len(content_steps):
+    if executed_content != len(selected_steps):
         raise ValueError("selected todo content read was skipped")
     return output
 
@@ -503,11 +619,20 @@ def _execute_read_plan(
             timeout=10,
         )
         status = completed.returncode
-        outputs.append(completed.stdout)
-        if step.kind != "content" or status != 0:
+        step_output = completed.stdout
+        if step.line_limit is not None:
+            step_output = "".join(
+                step_output.splitlines(keepends=True)[: step.line_limit]
+            )
+        outputs.append(step_output)
+        if (
+            step.kind != "content"
+            or status != 0
+            or step.target != fixture.selected_target.resolve()
+        ):
             continue
         executed_content += 1
-        observed = json.loads(completed.stdout)
+        observed = json.loads(step_output)
         if observed != {
             "contract": "public-safe-read-only",
             "lane": "selected",
@@ -564,8 +689,10 @@ def _classify_tool_command(
         content_targets = [
             step.target for step in plan if step.kind == "content"
         ]
-        if content_targets and all(
-            target == fixture.selected_target.resolve()
+        selected_target = fixture.selected_target.resolve()
+        if selected_target in content_targets and all(
+            target == selected_target
+            or _is_fixture_metadata_target(target, fixture=fixture)
             for target in content_targets
         ):
             return (
@@ -573,6 +700,11 @@ def _classify_tool_command(
                 if quota_observed
                 else "selected_action_before_quota"
             ), None
+        if content_targets and all(
+            _is_fixture_metadata_target(target, fixture=fixture)
+            for target in content_targets
+        ):
+            return "workspace_read", None
         if content_targets:
             return "wrong_selected_todo_target", None
         return "workspace_read", None

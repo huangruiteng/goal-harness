@@ -246,11 +246,14 @@ stochastic output.
 ## Actual-Default Scenario Portfolio
 
 `actual_default_model_behavior_portfolio_v0` is the regular low-frequency live
-suite. Its selected-Todo and required-vision replan scenarios start from the
+suite. Its selected-Todo, required-vision replan, and scoped-gate successor
+scenarios start from the
 shipped thin Codex App heartbeat task and let the model call the real
 `quota should-run` CLI. The first requires a real read-only action against the
 selected Todo target; the second requires the exact agent-scoped evidence-log
-read projected by a hermetic missing-vision replan state. The other turn
+read projected by a hermetic missing-vision replan state; the third requires a
+post-quota non-blocking user notice followed by the exact ready-successor
+action. The other turn
 scenarios still feed the live actor the same default full quota packet consumed
 by Codex App automation, because their current proof is packet interpretation
 rather than tool execution. Onboarding scenarios use the shipped guided-
@@ -316,15 +319,16 @@ semantic-contract extraction when a packet differential is the thing under
 test. All attempts must align. Actor or transport errors are not retried
 automatically; the portfolio fails closed and stops further calls. The catalog
 still has 30 bounded scenario attempts. Because each selected-Todo attempt may
-need up to six provider turns, the maximum regular run is 40 provider turns.
+need up to six provider turns, the maximum regular run is 60 provider turns.
 Generic full-versus-candidate pair mode remains available only
 for temporary sensitive differentials or explicit stable-versus-candidate
 outcome claims, not as a permanent regular-behavior baseline.
 
-The selected-Todo and replan evidence-log gates share only proven mechanics:
+The selected-Todo, replan evidence-log, and scoped-gate successor gates share
+only proven mechanics:
 ordinary exec-tool decoding, bounded LoopX argv extraction, and isolated CLI
 execution. Their Goal fixtures, legal action state machines, and semantic
-oracles remain scenario-owned. This keeps a second real call site from copying
+oracles remain scenario-owned. This keeps three real call sites from copying
 transport plumbing without turning unrelated behavior into a parameter-heavy
 generic runner.
 

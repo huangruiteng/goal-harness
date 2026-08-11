@@ -15,8 +15,8 @@ if sys.path[0] != repo_root_text:
 from loopx.control_plane.testing.release_commit_qualification import (
     collect_release_source_identity,
 )
-from loopx.control_plane.testing.selected_todo_tool_behavior import (
-    DoubaoSelectedTodoToolBehaviorActor,
+from loopx.control_plane.testing.scoped_gate_successor_tool_behavior import (
+    DoubaoScopedGateSuccessorToolBehaviorActor,
 )
 
 
@@ -24,8 +24,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run one production-heartbeat Doubao function-tool loop against "
-            "a hermetic real LoopX goal and verify that the model executes the "
-            "Todo selected by real quota output."
+            "a hermetic scoped user gate and verify that the model surfaces "
+            "the notice without suppressing the ready successor action."
         )
     )
     parser.add_argument("--qualification-id", required=True)
@@ -41,10 +41,12 @@ def main() -> int:
         raise RuntimeError(
             "live Doubao qualification requires a clean candidate checkout"
         )
-    actor = DoubaoSelectedTodoToolBehaviorActor.from_environment(
+    actor = DoubaoScopedGateSuccessorToolBehaviorActor.from_environment(
         timeout_seconds=args.timeout_seconds
     )
-    with TemporaryDirectory(prefix="loopx-doubao-selected-todo-tool-") as temp_dir:
+    with TemporaryDirectory(
+        prefix="loopx-doubao-scoped-gate-successor-tool-"
+    ) as temp_dir:
         result = actor.qualify(
             qualification_id=args.qualification_id,
             fixture_root=Path(temp_dir),
