@@ -82,7 +82,7 @@ def build_review_template(item: Mapping[str, Any]) -> dict[str, Any]:
             _section(
                 "对主干的风险",
                 "250-500字",
-                "Use `failure_analysis`, `walkthroughs.negative`, and `validation_matrix`; trace each finding from triggering state to observed outcome and minimum repair.",
+                "Use `failure_analysis`, `walkthroughs.negative`, and `validation_matrix`; trace each finding from triggering state to observed outcome and minimum repair. When `scope_fit` applies, name the active production caller or explicitly record a coverage-only boundary.",
             ),
             _section(
                 "我的整体评价",
@@ -145,6 +145,26 @@ def build_review_execution_contract() -> dict[str, Any]:
                 ],
                 "fields": ["files", "additions", "deletions", "behavior_role"],
                 "rule": "Classify the exact base..head diff before judging code volume.",
+            },
+            {
+                "evidence_id": "scope_fit",
+                "required_when": "code_change",
+                "fields": [
+                    "shipped_behavior",
+                    "active_call_sites",
+                    "caller_path_or_none",
+                    "coverage_only_declared",
+                    "scope_fit_verdict",
+                ],
+                "rule": (
+                    "For every added or moved production module, adapter, CLI "
+                    "command, or control-plane contract, verify a shipped "
+                    "behavior and at least one active production call site in "
+                    "the reviewed branch. Test-only coverage of an unused "
+                    "module is not a shipped behavior; name the gap and treat "
+                    "it as blocking unless an explicit, owner-accepted "
+                    "coverage-only boundary is recorded."
+                ),
             },
             {
                 "evidence_id": "symbol_map",
@@ -288,6 +308,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
     ]
     if code_change:
         required_evidence.insert(3, "symbol_map")
+        required_evidence.append("scope_fit")
     number = item.get("number")
     head_oid = str(item.get("head_oid") or "").strip()
     target_key = f"{number}@{head_oid}" if number and head_oid else None
@@ -305,6 +326,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             "code_change": code_change,
             "docs_only": docs_only,
             "symbol_map_required": code_change,
+            "scope_fit_required": code_change,
             "negative_walkthrough_required": bool(areas & NEGATIVE_PATH_AREAS),
         },
         "required_evidence_ids": required_evidence,

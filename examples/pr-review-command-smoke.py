@@ -82,6 +82,7 @@ def main() -> int:
         "Motivation Causal Chain",
         "Implementation Execution Chain",
         "Code Volume And Simplification Review",
+        "Scope-Fit And Active Call-Site Gate",
     ):
         assert duplicated_contract_heading not in skill_source, duplicated_contract_heading
 
@@ -229,6 +230,47 @@ def main() -> int:
     assert main_risk["post_merge_review"] is False, main_risk
     assert main_risk["potential_regressions"], main_risk
     assert main_risk["bug_risks"], main_risk
+    contract = payload.get("agent_response_contract", {}).get(
+        "review_execution_contract", {}
+    )
+    scope_fit_reqs = [
+        req
+        for req in contract.get("evidence_requirements", [])
+        if req.get("evidence_id") == "scope_fit"
+    ]
+    assert scope_fit_reqs, "scope_fit evidence requirement missing from contract"
+    assert scope_fit_reqs[0]["required_when"] == "code_change", scope_fit_reqs
+    code_pr = next(
+        (
+            p
+            for p in payload.get("pull_requests", [])
+            if p.get("review_plan", {}).get("applicability", {}).get("code_change")
+        ),
+        None,
+    )
+    assert code_pr is not None, "fixture must include a code-change PR"
+    assert "scope_fit" in code_pr["review_plan"]["required_evidence_ids"], code_pr[
+        "review_plan"
+    ]
+    assert (
+        code_pr["review_plan"]["applicability"]["scope_fit_required"] is True
+    ), code_pr["review_plan"]
+    docs_pr = next(
+        (
+            p
+            for p in payload.get("pull_requests", [])
+            if not p.get("review_plan", {}).get("applicability", {}).get("code_change")
+        ),
+        None,
+    )
+    assert docs_pr is not None, "fixture must include a docs-only PR"
+    assert docs_pr["review_plan"]["applicability"]["scope_fit_required"] is False
+    risk_section = next(
+        section
+        for section in template["sections"]
+        if section["label"] == "对主干的风险"
+    )
+    assert "scope_fit" in risk_section["agent_instruction"], risk_section
 
     default_payload = json.loads(
         run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE)).stdout
@@ -427,6 +469,7 @@ def main() -> int:
         "problem_context",
         "architecture_flow",
         "changed_line_classification",
+        "scope_fit",
         "symbol_map",
         "walkthroughs",
         "validation_matrix",
