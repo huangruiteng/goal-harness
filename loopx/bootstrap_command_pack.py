@@ -1492,9 +1492,9 @@ def build_start_goal_guided_packet(
                     "--project . "
                     "--role agent "
                     + (
-                        f"--agent-id {shell_arg(str(command_pack.get('agent_id') or ''))} "
+                        f"--claimed-by {shell_arg(str(command_pack.get('agent_id') or ''))} "
                         if command_pack.get("agent_id")
-                        else "--agent-id <agent-id> "
+                        else "--claimed-by <agent-id> "
                     )
                     + "--task-class advancement_task --action-kind <action_kind> "
                     "[--target-key <target_key>] --text '<[P0/P1/P2] ...>'"
