@@ -19,6 +19,7 @@ from ...work_items.autonomous_replan_ack import (
 )
 from ...work_items.autonomous_replan_obligation import (
     MONITOR_NO_CHANGE_STREAK_THRESHOLD,
+    REPLAN_NOVELTY_GUIDANCE,
     build_autonomous_replan_obligation_payload,
 )
 from ...work_items.repair_delta import (
@@ -222,6 +223,7 @@ def align_autonomous_replan_guidance_with_acceptance_policy(
         "create or claim one safe in-scope runnable advancement todo, or record "
         "an explicit successor/supersede transition; watch-lane continuation "
         "alone does not satisfy a repeat-until-closed vision"
+        + REPLAN_NOVELTY_GUIDANCE
     )
     aligned["satisfying_repair_delta_kinds"] = list(
         REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
@@ -1906,6 +1908,8 @@ def compact_replan_obligation(replan_obligation: dict[str, Any]) -> dict[str, An
         compact["agent_todo_writeback_required"] = True
     if replan_obligation.get("frontier_identity"):
         compact["frontier_identity"] = replan_obligation.get("frontier_identity")
+    if isinstance(replan_obligation.get("replan_novelty_policy"), dict):
+        compact["replan_novelty_policy"] = replan_obligation["replan_novelty_policy"]
     if isinstance(replan_obligation.get("replan_ack_feedback"), dict):
         compact["replan_ack_feedback"] = replan_obligation["replan_ack_feedback"]
         compact["recommended_action"] = replan_obligation.get("recommended_action")

@@ -1121,7 +1121,8 @@ def _quota_required_reads(decision: dict[str, Any]) -> list[dict[str, Any]]:
         agent_id=quota_decision_agent_id(decision),
         reason=(
             "read recent public-safe evidence across this agent lane before "
-            "replan; if local evidence is thin, use bounded public-safe search"
+            "replan; avoid repeating already-covered directions; use bounded "
+            "public-safe search when local evidence is thin"
         ),
     )
     return [read] if read else []

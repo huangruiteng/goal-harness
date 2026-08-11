@@ -24,6 +24,22 @@ SectionEntries = Callable[[list[str]], list[str]]
 
 MAX_AUTONOMOUS_REPLAN_TRIGGERS = 3
 AUTONOMOUS_REPLAN_STALL_THRESHOLD = 2
+REPLAN_NOVELTY_POLICY_SCHEMA_VERSION = "replan_novelty_policy_v0"
+# Generic agent-facing guidance appended to every autonomous replan
+# recommended_action. It is deliberately surface-neutral: it tells the agent
+# to consult its own evidence ledger, prefer an untried direction, and only
+# close on an explicit coverage-backed terminal state instead of restating an
+# already-tried action or blocker.
+REPLAN_NOVELTY_GUIDANCE = (
+    " Review the agent-scoped evidence log first (required_reads carries the "
+    "exact `loopx evidence-log` command), then keep proposing new approaches: "
+    "prefer a direction not already covered by recent runs, such as a new "
+    "surface, method, parameter combination, validation command, or hypothesis. "
+    "Do not repeat an already-tried action or restate the same blocker. If no "
+    "new direction remains, list which surfaces and combinations are already "
+    "covered and record an explicit exploration_exhausted blocker with that "
+    "coverage evidence."
+)
 # Unchanged-poll streak before a monitor-only lane is forced to replan. Kept
 # deliberately above the 2-turn run-history stall threshold: quiet monitors
 # legitimately wait several cadence cycles for external evidence, and forcing
@@ -572,22 +588,26 @@ def build_autonomous_replan_obligation(
             "run a bounded autonomous replan for the exact blocked successor: "
             "promote one safe in-scope evidence-backed successor when available; "
             "otherwise record a no-spend wait continuation for this frontier"
+            + REPLAN_NOVELTY_GUIDANCE
         )
     elif dead_monitor_evidence:
         recommended_action = (
             "resolve a dead monitor loop: record watch-lane continuation with expiry, "
             "a concrete blocker, todo supersede, or successor runnable todo before "
             "another quiet monitor poll"
+            + REPLAN_NOVELTY_GUIDANCE
         )
     elif any(item.get("kind") in {"periodic_review", "periodic_review_due"} for item in evidence):
         recommended_action = (
             "run a bounded autonomous periodic review: keep, split, add, retire, or ask for "
             "a decision; then update todos and select the next validated slice"
+            + REPLAN_NOVELTY_GUIDANCE
         )
     else:
         recommended_action = (
             "run an autonomous replan after two consecutive stalled turns before another "
             "monitor-only or repeated action consumes the eligible turn"
+            + REPLAN_NOVELTY_GUIDANCE
         )
 
     extra_fields: dict[str, Any] = {}
@@ -608,6 +628,29 @@ def build_autonomous_replan_obligation(
         extra_fields["frontier_identity"] = dead_monitor_evidence.get(
             "monitor_target_id"
         )
+    repeated_stall = bool(
+        blocked_successor_evidence
+        or dead_monitor_evidence
+        or any(
+            item.get("kind")
+            in {"run_history_no_progress_repeat", "no_progress_streak", "repeated_action_loop"}
+            for item in evidence
+        )
+    )
+    extra_fields["replan_novelty_policy"] = {
+        "schema_version": REPLAN_NOVELTY_POLICY_SCHEMA_VERSION,
+        "review_evidence_log": True,
+        "prefer_unattempted_direction": True,
+        "repeated_blocker_restatement_rejected": repeated_stall,
+        "no_new_direction_closure": (
+            ["watch_lane_expiry", "exploration_exhausted_with_coverage_evidence"]
+            if dead_monitor_evidence
+            else [
+                "exploration_exhausted_with_coverage_evidence",
+                "explicit_terminal_blocker_or_no_followup",
+            ]
+        ),
+    }
 
     result = build_autonomous_replan_obligation_payload(
         schema_version=autonomous_replan_schema_version,
