@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -520,3 +523,47 @@ def test_malformed_receipt_ledger_fails_closed(tmp_path: Path) -> None:
     else:
         raise AssertionError("malformed reaction receipts must fail closed")
     assert runner.calls == []
+
+
+def test_reaction_module_uses_cross_platform_lock_fallback(
+    tmp_path: Path,
+) -> None:
+    script = """
+import builtins
+import tempfile
+from pathlib import Path
+
+original_import = builtins.__import__
+
+def without_fcntl(name, *args, **kwargs):
+    if name == "fcntl":
+        raise ImportError("simulated non-POSIX platform")
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = without_fcntl
+from loopx.extensions.lark.inbox_reactions import lark_inbox_reaction_lock
+
+with tempfile.TemporaryDirectory() as raw:
+    inbox = Path(raw) / ".loopx" / "inbox" / "feedback"
+    with lark_inbox_reaction_lock(
+        inbox=inbox,
+        message_id="om_cross_platform_fixture",
+    ):
+        pass
+print("cross-platform reaction lock: ok")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "cross-platform reaction lock: ok"

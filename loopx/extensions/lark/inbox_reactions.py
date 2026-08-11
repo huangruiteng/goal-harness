@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
-import os
 import re
 import subprocess
 from collections.abc import Callable, Mapping
@@ -12,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
+from ...file_lock import exclusive_file_lock
 from .event_inbox import (
     MESSAGE_ID_PATTERN,
     REACTION_EMOJI_PATTERN,
@@ -103,13 +102,9 @@ def _receipt_path(inbox: Path) -> Path:
     return inbox / "reactions" / "receipts.json"
 
 
-def _lock_path(inbox: Path) -> Path:
-    return inbox / "reactions" / "receipts.lock"
-
-
-def _operation_lock_path(inbox: Path, message_id: str) -> Path:
+def _operation_lock_target(inbox: Path, message_id: str) -> Path:
     bucket = hashlib.sha256(message_id.encode("utf-8")).hexdigest()[:2]
-    return inbox / "reactions" / f"operation-{bucket}.lock"
+    return inbox / "reactions" / f"operation-{bucket}"
 
 
 @contextmanager
@@ -119,15 +114,11 @@ def lark_inbox_reaction_lock(
     normalized = str(message_id or "").strip()
     if not MESSAGE_ID_PATTERN.fullmatch(normalized):
         raise ValueError("reaction lock requires a valid Lark message id")
-    lock_path = _operation_lock_path(inbox, normalized)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+", encoding="utf-8") as lock:
-        os.fchmod(lock.fileno(), 0o600)
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    with exclusive_file_lock(
+        _operation_lock_target(inbox, normalized),
+        operation="lark_inbox_reaction_transition",
+    ):
+        yield
 
 
 def _valid_receipt(value: object) -> dict[str, str] | None:
@@ -193,12 +184,11 @@ def _update_receipts(
     inbox: Path,
     update: Callable[[dict[str, dict[str, dict[str, str]]]], None],
 ) -> None:
-    lock_path = _lock_path(inbox)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+", encoding="utf-8") as lock:
-        os.fchmod(lock.fileno(), 0o600)
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        path = _receipt_path(inbox)
+    path = _receipt_path(inbox)
+    with exclusive_file_lock(
+        path,
+        operation="lark_inbox_reaction_receipts",
+    ):
         receipts = _load_receipts(path)
         update(receipts)
         write_private_json_atomic(
@@ -209,7 +199,6 @@ def _update_receipts(
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def record_lark_inbox_reaction(
