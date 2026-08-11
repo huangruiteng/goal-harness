@@ -157,6 +157,75 @@ def test_tool_loop_allows_bounded_file_discovery_before_selected_action(
     ]
 
 
+def test_tool_loop_allows_bounded_state_and_fallback_discovery(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        (
+            'ls -la ~/.codex/loopx/ 2>/dev/null; echo "---"; '
+            'find ~/.codex/loopx -maxdepth 3 -name "fixture" -type d '
+            '2>/dev/null; echo "---"; find ~/.codex/loopx '
+            '-name "selected-lane.json" 2>/dev/null'
+        ),
+        (
+            'ls -la && echo "---" && ls -la fixture/ 2>/dev/null '
+            '|| echo "no fixture dir in cwd" && echo "---" && pwd'
+        ),
+        "cat fixture/selected-lane.json",
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-natural-discovery",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "workspace_read",
+        "workspace_read",
+        "selected_action",
+    ]
+
+
+def test_tool_loop_rejects_unbounded_host_metadata_read(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        "ls -la /etc",
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-reject-host-read",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "unexpected_command"
+
+
 def test_tool_loop_rejects_action_for_deferred_decoy(tmp_path: Path) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
     commands = [

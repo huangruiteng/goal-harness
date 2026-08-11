@@ -67,6 +67,7 @@ class _ReadStep:
     kind: str
     argv: tuple[str, ...]
     target: Path | None = None
+    operator: str = ";"
 
 
 def _build_fixture(root: Path) -> _SelectedTodoToolFixture:
@@ -251,47 +252,100 @@ def _resolve_project_path(
     return resolved
 
 
+def _resolve_metadata_path(
+    value: str,
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> Path | None:
+    if value.rstrip("/") == "~/.codex/loopx":
+        return fixture.global_registry_path.parent.resolve()
+    return _resolve_project_path(value, fixture=fixture)
+
+
+def _read_plan_tokens(command: str) -> list[str] | None:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    return tokens or None
+
+
 def _read_plan(
     command: str,
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> list[_ReadStep] | None:
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return None
-    if not tokens or any(token in {"||", "|", ">", ">>"} for token in tokens):
+    tokens = _read_plan_tokens(command)
+    if not tokens:
         return None
     segments: list[list[str]] = [[]]
+    operators = [";"]
     for token in tokens:
-        if token in {"&&", ";"}:
+        if token in {"&&", "||", ";"}:
             if not segments[-1]:
                 return None
             segments.append([])
+            operators.append(token)
+        elif token in {"&", "|", "<", "<<", ">>", "<<<"}:
+            return None
         else:
             segments[-1].append(token)
-    if not segments[-1] or len(segments) > 4:
+    if not segments[-1] or len(segments) > 8:
         return None
 
     plan: list[_ReadStep] = []
-    for segment in segments:
+    for operator, raw_segment in zip(operators, segments, strict=True):
+        segment = list(raw_segment)
+        if len(segment) >= 3 and segment[-3:] == ["2", ">", "/dev/null"]:
+            segment = segment[:-3]
+        if not segment or any(
+            token in {"&", "|", "<", ">", "<<", ">>", "<<<"}
+            for token in segment
+        ):
+            return None
         executable = Path(segment[0]).name
+        if executable == "pwd" and len(segment) == 1:
+            plan.append(_ReadStep("metadata", (executable,), operator=operator))
+            continue
         if executable == "echo" and len(segment) == 2:
-            plan.append(_ReadStep("separator", (executable, *segment[1:])))
+            plan.append(
+                _ReadStep(
+                    "separator",
+                    (executable, *segment[1:]),
+                    operator=operator,
+                )
+            )
             continue
         if executable == "ls":
             paths = [token for token in segment[1:] if not token.startswith("-")]
             options = [token for token in segment[1:] if token.startswith("-")]
+            resolved_path = (
+                _resolve_metadata_path(paths[0], fixture=fixture)
+                if paths
+                else None
+            )
             if (
                 len(paths) > 1
                 or any(set(option[1:]) - {"a", "l"} for option in options)
-                or (
-                    paths
-                    and _resolve_project_path(paths[0], fixture=fixture) is None
-                )
+                or (paths and resolved_path is None)
             ):
                 return None
-            plan.append(_ReadStep("metadata", (executable, *segment[1:])))
+            argv = [executable, *options]
+            if resolved_path is not None:
+                argv.append(str(resolved_path))
+            plan.append(_ReadStep("metadata", tuple(argv), operator=operator))
+            continue
+        discovery_argv = _discovery_tokens(segment, fixture=fixture)
+        if discovery_argv is not None:
+            plan.append(
+                _ReadStep(
+                    "metadata",
+                    tuple(discovery_argv),
+                    operator=operator,
+                )
+            )
             continue
         content_shape = bool(
             (executable == "cat" and len(segment) == 2)
@@ -322,22 +376,23 @@ def _read_plan(
         target = _resolve_project_path(segment[-1], fixture=fixture)
         if target is None:
             return None
-        plan.append(_ReadStep("content", (executable, *segment[1:]), target))
+        plan.append(
+            _ReadStep(
+                "content",
+                (executable, *segment[1:-1], str(target)),
+                target,
+                operator,
+            )
+        )
     return plan
 
 
-def _discovery_argv(
-    command: str,
+def _discovery_tokens(
+    tokens: list[str],
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> list[str] | None:
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return None
-    if not tokens or any(
-        token in {";", "&&", "||", "|", ">", ">>"} for token in tokens
-    ):
+    if not tokens:
         return None
     executable = Path(tokens[0]).name
     if executable == "rg":
@@ -350,9 +405,11 @@ def _discovery_argv(
         return [executable, *tokens[1:]]
     if executable != "find" or len(tokens) < 2:
         return None
-    if _resolve_project_path(tokens[1], fixture=fixture) is None:
+    root = _resolve_metadata_path(tokens[1], fixture=fixture)
+    if root is None:
         return None
     index = 2
+    has_maxdepth = False
     while index < len(tokens):
         token = tokens[index]
         if token == "-print":
@@ -362,6 +419,7 @@ def _discovery_argv(
             depth = tokens[index + 1]
             if not depth.isdigit() or int(depth) > 4:
                 return None
+            has_maxdepth = True
             index += 2
             continue
         if token == "-type" and index + 1 < len(tokens):
@@ -369,8 +427,36 @@ def _discovery_argv(
                 return None
             index += 2
             continue
+        if token == "-name" and index + 1 < len(tokens):
+            pattern = tokens[index + 1]
+            if (
+                not pattern
+                or len(pattern.encode("utf-8")) > 128
+                or "/" in pattern
+                or pattern.startswith("-")
+            ):
+                return None
+            index += 2
+            continue
         return None
-    return [executable, *tokens[1:]]
+    argv = [executable, str(root), *tokens[2:]]
+    if not has_maxdepth:
+        argv[2:2] = ["-maxdepth", "4"]
+    return argv
+
+
+def _discovery_argv(
+    command: str,
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> list[str] | None:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    if any(token in {";", "&&", "||", "|", ">", ">>"} for token in tokens):
+        return None
+    return _discovery_tokens(tokens, fixture=fixture)
 
 
 def _execute_selected_read(
@@ -387,8 +473,28 @@ def _execute_selected_read(
         for step in content_steps
     ):
         raise ValueError("selected action does not target the selected todo")
+    output, executed_content = _execute_read_plan(plan, fixture=fixture)
+    if executed_content != len(content_steps):
+        raise ValueError("selected todo content read was skipped")
+    return output
+
+
+def _execute_read_plan(
+    plan: list[_ReadStep],
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> tuple[str, int]:
     outputs: list[str] = []
+    status = 0
+    executed_content = 0
     for step in plan:
+        should_run = bool(
+            step.operator == ";"
+            or (step.operator == "&&" and status == 0)
+            or (step.operator == "||" and status != 0)
+        )
+        if not should_run:
+            continue
         completed = subprocess.run(
             list(step.argv),
             cwd=fixture.project_root,
@@ -397,13 +503,11 @@ def _execute_selected_read(
             text=True,
             timeout=10,
         )
-        if completed.returncode != 0:
-            raise RuntimeError(
-                f"selected todo read failed with exit={completed.returncode}"
-            )
+        status = completed.returncode
         outputs.append(completed.stdout)
-        if step.kind != "content":
+        if step.kind != "content" or status != 0:
             continue
+        executed_content += 1
         observed = json.loads(completed.stdout)
         if observed != {
             "contract": "public-safe-read-only",
@@ -411,7 +515,9 @@ def _execute_selected_read(
             "next_checkpoint": "qualify-one-bounded-slice",
         }:
             raise ValueError("selected todo readback does not match the fixture")
-    return "".join(outputs)
+    if status != 0:
+        raise RuntimeError(f"bounded read plan failed with exit={status}")
+    return "".join(outputs), executed_content
 
 
 def _execute_workspace_read(
@@ -419,6 +525,10 @@ def _execute_workspace_read(
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> str:
+    plan = _read_plan(command, fixture=fixture)
+    if plan is not None:
+        output, _ = _execute_read_plan(plan, fixture=fixture)
+        return output
     argv = _discovery_argv(command, fixture=fixture) or shlex.split(command)
     completed = subprocess.run(
         argv,
