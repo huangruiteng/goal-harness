@@ -20,6 +20,10 @@ REQUIRED_EXPORTS = {
         "project_lark_event_inbox_urgency",
     ),
     "loopx.extensions.lark.inbox_reply": ("reply_lark_event_inbox",),
+    "loopx.extensions.lark.inbox_reactions": (
+        "complete_lark_event_inbox_reactions",
+        "mark_lark_event_inbox_processing",
+    ),
     "loopx.extensions.lark.reviewer_notification": (
         "lark_reviewer_notification_sink",
     ),

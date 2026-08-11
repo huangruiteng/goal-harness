@@ -22,6 +22,10 @@ from ..extensions.lark.event_inbox import (
     project_lark_event_inbox_urgency,
 )
 from ..extensions.lark.inbox_reply import reply_lark_event_inbox
+from ..extensions.lark.inbox_reactions import (
+    complete_lark_event_inbox_reactions,
+    mark_lark_event_inbox_processing,
+)
 from ..extensions.lark.reviewer_notification import (
     lark_reviewer_notification_sink,
 )
@@ -113,6 +117,29 @@ def register_lark_inbox_commands(
     reply.add_argument("--message-id", required=True)
     reply.add_argument("--text", required=True)
     reply.add_argument("--execute", action="store_true")
+    processing = sub.add_parser(
+        "processing",
+        help=(
+            "Mark one captured message as actively processing and replace its "
+            "received reaction when configured."
+        ),
+    )
+    add_subcommand_format(processing)
+    processing.add_argument("--project")
+    processing.add_argument("--config")
+    processing.add_argument("--goal-id")
+    processing.add_argument("--message-id", required=True)
+    processing.add_argument("--execute", action="store_true")
+    reaction_complete = sub.add_parser(
+        "reaction-complete",
+        help="Remove bot-owned lifecycle reactions for one captured message.",
+    )
+    add_subcommand_format(reaction_complete)
+    reaction_complete.add_argument("--project")
+    reaction_complete.add_argument("--config")
+    reaction_complete.add_argument("--goal-id")
+    reaction_complete.add_argument("--message-id", required=True)
+    reaction_complete.add_argument("--execute", action="store_true")
     ingest = sub.add_parser(
         "ingest",
         help=(
@@ -176,7 +203,7 @@ def _required_extension_permissions(command: str) -> tuple[str, ...]:
         return (LARK_INBOX_READ_PERMISSION,)
     if command in {"ack", "ingest"}:
         return (LARK_INBOX_WRITE_PERMISSION,)
-    if command == "reply":
+    if command in {"reply", "processing", "reaction-complete"}:
         return (LARK_REPLY_PERMISSION,)
     return (LARK_COLLECTOR_PERMISSION,)
 
@@ -289,7 +316,14 @@ def handle_lark_inbox_command(
         return None
     activation: dict[str, object] | None = None
     try:
-        inbox_commands = {"drain", "ack", "reply", "ingest"}
+        inbox_commands = {
+            "drain",
+            "ack",
+            "reply",
+            "processing",
+            "reaction-complete",
+            "ingest",
+        }
         project: Path | None = None
         config_path: str | None = None
         if args.lark_inbox_command in inbox_commands:
@@ -335,6 +369,20 @@ def handle_lark_inbox_command(
                 config_path=config_path,
                 message_id=args.message_id,
                 text=args.text,
+                execute=args.execute,
+            )
+        elif args.lark_inbox_command == "processing":
+            payload = mark_lark_event_inbox_processing(
+                project=project,
+                config_path=config_path,
+                message_id=args.message_id,
+                execute=args.execute,
+            )
+        elif args.lark_inbox_command == "reaction-complete":
+            payload = complete_lark_event_inbox_reactions(
+                project=project,
+                config_path=config_path,
+                message_id=args.message_id,
                 execute=args.execute,
             )
         elif args.lark_inbox_command == "ingest":

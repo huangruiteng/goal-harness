@@ -19,6 +19,10 @@ from .event_inbox import (
     _event_attention_kind,
     ingest_lark_event_inbox,
 )
+from .inbox_reactions import (
+    lark_inbox_reaction_lock,
+    record_lark_inbox_reaction,
+)
 
 
 APP_ID_PATTERN = re.compile(r"cli_[A-Za-z0-9_-]+")
@@ -235,17 +239,17 @@ def lark_event_requires_reply_context_lookup(
     return direct_attention not in {"direct_question", "direct_mention"}
 
 
-def add_lark_event_received_reaction(
+def _create_lark_event_received_reaction(
     event: Mapping[str, Any],
     *,
     runner: CommandRunner,
     command_prefix: Sequence[str],
     profile: str,
     emoji_type: str,
-) -> bool:
+) -> str | None:
     message_id = str(event.get("message_id") or "").strip()
     if not MESSAGE_ID_PATTERN.fullmatch(message_id) or not emoji_type:
-        return False
+        return None
     payload = _run_json(
         runner,
         [
@@ -269,11 +273,60 @@ def add_lark_event_received_reaction(
         ],
         timeout_seconds=5,
     )
-    return bool(
-        isinstance(payload, Mapping)
-        and payload.get("ok") is True
-        and _find_string_by_key(payload, {"reaction_id"})
+    if not isinstance(payload, Mapping) or payload.get("ok") is not True:
+        return None
+    return _find_string_by_key(payload, {"reaction_id"})
+
+
+def add_lark_event_received_reaction(
+    event: Mapping[str, Any],
+    *,
+    runner: CommandRunner,
+    command_prefix: Sequence[str],
+    profile: str,
+    emoji_type: str,
+) -> bool:
+    return (
+        _create_lark_event_received_reaction(
+            event,
+            runner=runner,
+            command_prefix=command_prefix,
+            profile=profile,
+            emoji_type=emoji_type,
+        )
+        is not None
     )
+
+
+def _delete_lark_event_reaction(
+    *,
+    runner: CommandRunner,
+    command_prefix: Sequence[str],
+    profile: str,
+    message_id: str,
+    reaction_id: str,
+) -> bool:
+    payload = _run_json(
+        runner,
+        [
+            *command_prefix,
+            "--profile",
+            profile,
+            "im",
+            "reactions",
+            "delete",
+            "--message-id",
+            message_id,
+            "--reaction-id",
+            reaction_id,
+            "--as",
+            "bot",
+            "--format",
+            "json",
+        ],
+        timeout_seconds=5,
+    )
+    return bool(isinstance(payload, Mapping) and payload.get("ok") is True)
 
 
 def run_lark_event_collector(
@@ -359,37 +412,73 @@ def run_lark_event_collector(
                         "reply_to_bot": False,
                     }
                 )
-            result = ingest_lark_event_inbox(
-                project=config["project"],
-                config_path=config["event_inbox_config_ref"],
-                events=[{"schema_version": "lark_event_inbox_event_v0", **enriched}],
-                execute=True,
-            )
-            if int(result.get("accepted_count") or 0) == 0:
+            message_id = str(enriched.get("message_id") or "")
+            if not MESSAGE_ID_PATTERN.fullmatch(message_id):
                 continue
-            captured_count += 1
-            verified_count += int(enriched.get("reply_context_verified") is True)
-            reply_to_bot_count += int(enriched.get("reply_to_bot") is True)
-            attention_kind = _event_attention_kind(
-                enriched,
-                bot_display_name=str(
-                    config["inbox"]["reply"].get("bot_display_name") or ""
-                ),
-                capture_scope="configured_chat_all",
-            )
-            received_reaction_emoji = str(
-                config["inbox"]["reply"].get("received_reaction_emoji") or ""
-            )
-            if attention_kind is not None and received_reaction_emoji:
-                reaction_added = add_lark_event_received_reaction(
-                    enriched,
-                    runner=runner,
-                    command_prefix=command_prefix,
-                    profile=str(config["profile"]),
-                    emoji_type=received_reaction_emoji,
+            with lark_inbox_reaction_lock(
+                inbox=config["inbox"]["inbox_path"],
+                message_id=message_id,
+            ):
+                result = ingest_lark_event_inbox(
+                    project=config["project"],
+                    config_path=config["event_inbox_config_ref"],
+                    events=[
+                        {
+                            "schema_version": "lark_event_inbox_event_v0",
+                            **enriched,
+                        }
+                    ],
+                    execute=True,
                 )
-                received_reaction_count += int(reaction_added)
-                received_reaction_failure_count += int(not reaction_added)
+                if int(result.get("accepted_count") or 0) == 0:
+                    continue
+                captured_count += 1
+                verified_count += int(
+                    enriched.get("reply_context_verified") is True
+                )
+                reply_to_bot_count += int(enriched.get("reply_to_bot") is True)
+                attention_kind = _event_attention_kind(
+                    enriched,
+                    bot_display_name=str(
+                        config["inbox"]["reply"].get("bot_display_name")
+                        or ""
+                    ),
+                    capture_scope="configured_chat_all",
+                )
+                received_reaction_emoji = str(
+                    config["inbox"]["reply"].get("received_reaction_emoji")
+                    or ""
+                )
+                if attention_kind is not None and received_reaction_emoji:
+                    reaction_id = _create_lark_event_received_reaction(
+                        enriched,
+                        runner=runner,
+                        command_prefix=command_prefix,
+                        profile=str(config["profile"]),
+                        emoji_type=received_reaction_emoji,
+                    )
+                    if reaction_id:
+                        try:
+                            record_lark_inbox_reaction(
+                                inbox=config["inbox"]["inbox_path"],
+                                message_id=message_id,
+                                phase="received",
+                                reaction_id=reaction_id,
+                                emoji_type=received_reaction_emoji,
+                            )
+                        except (OSError, ValueError):
+                            _delete_lark_event_reaction(
+                                runner=runner,
+                                command_prefix=command_prefix,
+                                profile=str(config["profile"]),
+                                message_id=message_id,
+                                reaction_id=reaction_id,
+                            )
+                            reaction_id = None
+                    received_reaction_count += int(reaction_id is not None)
+                    received_reaction_failure_count += int(
+                        reaction_id is None
+                    )
         returncode = process.wait()
     finally:
         if process.poll() is None:
