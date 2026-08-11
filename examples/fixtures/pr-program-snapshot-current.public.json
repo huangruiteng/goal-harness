@@ -1,0 +1,43 @@
+{
+  "schema_version": "loopx_pr_program_snapshot_v0",
+  "program_id": "example-runtime-reliability",
+  "generated_at": "2026-08-11T01:00:00Z",
+  "result_completeness": {
+    "complete": true,
+    "scope": {
+      "repositories": ["example/runtime"],
+      "states": ["open"],
+      "authors": [],
+      "time_window": {"since": null, "until": null}
+    }
+  },
+  "requirements": [
+    {
+      "id": "runtime-controls",
+      "title": "Expose runtime controls",
+      "priority": "P0",
+      "coverage": "partial"
+    }
+  ],
+  "change_requests": [
+    {
+      "ref": "example/runtime#42",
+      "title": "feat(runtime): expose control status",
+      "state": "open",
+      "draft": false,
+      "target_branch": "main",
+      "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "updated_at": "2026-08-11T01:00:00Z",
+      "checks": "passed",
+      "review": "approved",
+      "work_item": "passed",
+      "theme": "runtime controls",
+      "priority": "P0",
+      "requirement_ids": ["runtime-controls"],
+      "depends_on": [],
+      "supersedes": [],
+      "description_digest": "sha256:example-description-42",
+      "review_digest": "sha256:example-review-42"
+    }
+  ]
+}
