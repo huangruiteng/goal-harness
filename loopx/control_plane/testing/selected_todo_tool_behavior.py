@@ -277,7 +277,7 @@ def _read_plan(
     for segment in segments:
         executable = Path(segment[0]).name
         if executable == "echo" and len(segment) == 2:
-            plan.append(_ReadStep("separator", tuple(segment)))
+            plan.append(_ReadStep("separator", (executable, *segment[1:])))
             continue
         if executable == "ls":
             paths = [token for token in segment[1:] if not token.startswith("-")]
@@ -291,7 +291,7 @@ def _read_plan(
                 )
             ):
                 return None
-            plan.append(_ReadStep("metadata", tuple(segment)))
+            plan.append(_ReadStep("metadata", (executable, *segment[1:])))
             continue
         content_shape = bool(
             (executable == "cat" and len(segment) == 2)
@@ -322,7 +322,7 @@ def _read_plan(
         target = _resolve_project_path(segment[-1], fixture=fixture)
         if target is None:
             return None
-        plan.append(_ReadStep("content", tuple(segment), target))
+        plan.append(_ReadStep("content", (executable, *segment[1:]), target))
     return plan
 
 
@@ -347,7 +347,7 @@ def _discovery_argv(
             tokens[2], fixture=fixture
         ) is None:
             return None
-        return tokens
+        return [executable, *tokens[1:]]
     if executable != "find" or len(tokens) < 2:
         return None
     if _resolve_project_path(tokens[1], fixture=fixture) is None:
@@ -370,7 +370,7 @@ def _discovery_argv(
             index += 2
             continue
         return None
-    return tokens
+    return [executable, *tokens[1:]]
 
 
 def _execute_selected_read(

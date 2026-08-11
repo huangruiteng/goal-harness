@@ -184,6 +184,37 @@ def test_tool_loop_rejects_action_for_deferred_decoy(tmp_path: Path) -> None:
     assert receipt["selected_action_matched_todo"] is False
 
 
+def test_tool_loop_never_executes_a_model_supplied_program_path(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        "/untrusted/bin/cat fixture/selected-lane.json",
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-normalized-executable",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "selected_action",
+    ]
+
+
 def test_tool_loop_fails_when_model_only_describes_the_action(
     tmp_path: Path,
 ) -> None:
