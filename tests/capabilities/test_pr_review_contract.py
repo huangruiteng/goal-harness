@@ -41,6 +41,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "problem_context",
         "architecture_flow",
         "changed_line_classification",
+        "scope_fit",
         "symbol_map",
         "walkthroughs",
         "validation_matrix",
@@ -70,8 +71,10 @@ def test_runtime_plan_requires_symbol_map_and_negative_walkthrough() -> None:
     }
     assert plan["applicability"]["code_change"] is True
     assert plan["applicability"]["symbol_map_required"] is True
+    assert plan["applicability"]["scope_fit_required"] is True
     assert plan["applicability"]["negative_walkthrough_required"] is True
     assert "symbol_map" in plan["required_evidence_ids"]
+    assert "scope_fit" in plan["required_evidence_ids"]
     assert set(plan["result_template"]["evidence"]) == set(
         plan["required_evidence_ids"]
     )
@@ -90,7 +93,9 @@ def test_docs_plan_does_not_invent_code_symbols() -> None:
 
     assert plan["applicability"]["docs_only"] is True
     assert plan["applicability"]["symbol_map_required"] is False
+    assert plan["applicability"]["scope_fit_required"] is False
     assert "symbol_map" not in plan["required_evidence_ids"]
+    assert "scope_fit" not in plan["required_evidence_ids"]
     concrete = next(
         section for section in template["sections"] if section["label"] == "具体改动"
     )
