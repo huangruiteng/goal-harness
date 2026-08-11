@@ -102,12 +102,20 @@ def test_unconnected_agent_onboard(project: Path) -> None:
         payload = {}
     check("agent-onboard returns valid JSON", bool(payload))
 
-    # The JSON should indicate the project is not connected, not crash.
+    # The JSON should be a typed gate or structured packet, not a crash.
+    # Before the fix (#3093): FileNotFoundError traceback.
+    # After the fix: an identity_selection_gate packet with
+    # activation_allowed: false (the project needs bootstrap/registration).
+    identity_gate = payload.get("identity_selection_gate")
     check(
-        "response indicates unconnected project (gate or error, not crash)",
+        "response is a typed gate or structured packet (not a crash)",
         payload.get("gate") == "project_not_connected"
         or payload.get("ok") is False
-        or payload.get("connection_state") == "not_connected",
+        or payload.get("connection_state") == "not_connected"
+        or (
+            isinstance(identity_gate, dict)
+            and identity_gate.get("activation_allowed") is False
+        ),
     )
 
 
@@ -261,6 +269,21 @@ def test_clean_second_run() -> None:
         check(
             "second-run: agent-onboard on bare project has no traceback",
             "FileNotFoundError" not in (result.stderr + result.stdout),
+        )
+        try:
+            second_payload = json.loads(result.stdout)
+        except (json.JSONDecodeError, ValueError):
+            second_payload = {}
+        second_identity_gate = second_payload.get("identity_selection_gate")
+        check(
+            "second-run: agent-onboard returns typed response (not crash)",
+            second_payload.get("gate") == "project_not_connected"
+            or second_payload.get("ok") is False
+            or second_payload.get("connection_state") == "not_connected"
+            or (
+                isinstance(second_identity_gate, dict)
+                and second_identity_gate.get("activation_allowed") is False
+            ),
         )
 
         # Bootstrap + register + guided template check.
