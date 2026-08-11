@@ -15,7 +15,7 @@ not need these documents to start LoopX.
    learning path from control-plane foundations to project onboarding and
    developer contributions.
 3. Follow the [control-plane developer course](control-plane-course/README.md)
-   for a nine-lecture, code-led path through the real CLI, state machine, and
+   for an eleven-lecture, code-led path through the real CLI, state machine, and
    layered quality gates.
 4. Read [Testing and quality](testing-and-quality.md) before changing agent-facing
    output, scheduler decisions, todo/gate semantics, onboarding, or release
@@ -32,7 +32,7 @@ not need these documents to start LoopX.
 
 1. 先阅读[贡献指南](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTING.md)，了解仓库边界和 PR 检查项。
 2. 按顺序阅读[开发者手册](/loopx/docs/book/)，从控制面基础到项目接入和开发者贡献。
-3. 按顺序学习[控制面开发者 9 讲](control-plane-course/README.md)，沿真实 CLI、
+3. 按顺序学习[控制面开发者 11 讲](control-plane-course/README.md)，沿真实 CLI、
    状态机、核心函数和分层质量门禁建立代码心智模型。
 4. 修改 agent-facing 输出、调度决策、todo/gate 语义、新用户接入或发布流程前，
    阅读[测试与质量体系](testing-and-quality.md)。
@@ -51,7 +51,7 @@ not need these documents to start LoopX.
 | Area / 领域 | Reference / 文档 |
 | --- | --- |
 | Curated learning path / 开发者学习路径 | [Developer Book](/loopx/docs/book/) |
-| Control-plane code reading / 控制面代码领读 | [Nine-lecture developer course](control-plane-course/README.md) |
+| Control-plane code reading / 控制面代码领读 | [Eleven-lecture developer course](control-plane-course/README.md) |
 | Quality layers and commands / 质量分层与命令 | [Testing and quality](testing-and-quality.md) |
 | Durable smoke design and cleanup / 稳定 Smoke 的设计与清理 | [What counts as a good smoke](good-smokes.md) |
 | Agent-facing size budgets / Agent 输出体积预算 | [Interface budget contract](../reference/contracts/interface-budget-contract.md) |

@@ -45,7 +45,7 @@ LoopX 的职责是中间两步：它接收来自 agent 或 host 的 effect reque
 | M7.1 因果刻画 | 已合并/完成（#2994、#2998、#3009、#3022、#3026） |
 | M7.2 Typed settlement runtime | 已合并/完成（#3016、#3020、#3023、#3024、#3033-#3036） |
 | M7.3 共享 executor 决策 | 以 no-follow-up 关闭：两个 adapter 共享 algebra，但不共享执行所有权 |
-| M7.4 有界核心路径采用 | 仅在 typed effect 能删除重复 runtime truth 时继续 |
+| M7.4 有界核心路径采用 | 首个非 Turn 路径 task lease 已落地（#3091、#3095）；仅在 typed effect 能删除重复 runtime truth 时继续 |
 
 ## 为什么这很重要
 
@@ -176,7 +176,7 @@ A => F[C]
 - replay：durable receipt 跳过已经提交的 effect；以及
 - non-commutativity：writeback、spend 与 host handoff 不允许重排。
 
-runtime 合同有两个一等调用方。默认 Codex App 路径通过跨 agent/host 边界的 data-encoded CLI effects 结算普通 LoopX turn。隔离 turn driver 通过 in-process callbacks 执行同一 settlement 形状。它们应共享 plan、receipt、effect identity 和 failure algebra，但不需要共享同一个 executor，因为它们的 authority boundary 不同。在共享执行所有权被证明之前，通用 `Kleisli`、middleware stack、executor registry 或通用 `Effect` monad 仍为时过早。
+runtime algebra 目前有三个一等 adapter。默认 Codex App 路径通过跨 agent/host 边界的 data-encoded CLI effects 结算普通 LoopX turn。隔离 turn driver 通过 in-process callbacks 执行同一 settlement 形状。Task-lease acquire 也组合相同 algebra 来连接 validation 与 durable lease write，但 owner eligibility、conflict、file lock 和 CAS 仍归自己的 bounded context。三个 adapter 共享 plan、receipt、effect identity 和 failure 语义，不共享同一个 executor，因为它们的 authority boundary 不同。在共享执行所有权被证明之前，通用 `Kleisli`、middleware stack、executor registry 或通用 `Effect` monad 仍为时过早。
 
 共享 settlement algebra 由核心 `effect_program` 模块拥有。Quota 只提供 Codex App/CLI plan builder 与兼容 re-export；各 runtime adapter 组合核心 algebra，而不是继承领域 program，也不会把自己的执行权上移到通用基类。
 
@@ -280,6 +280,7 @@ M7 只有在至少产生一个下列最终 effect 时才有理由存在：
 - 核心层已经拥有 settlement algebra：`SettlementIdentity`、`SettlementPlan`、`SettlementReceipt`、typed failure kinds，以及保留 receipt 的 `SettlementResult.bind`。
 - 默认 Codex App / CLI quota 路径构建一份 typed settlement plan，把 validation、可选 Todo completion、durable writeback 和 quota spend 绑定到原始 turn effect identity（#3016、#3033、#3034）。
 - 隔离 turn driver 通过自己的 callback executor 消费同一套 plan、identity、receipt、failure、replay 和 short-circuit algebra（#3020、#3023）；loop controller 从已提交 receipt chain 派生 continuation，不再维护第二份 settlement truth（#3024）。
+- Task-lease acquire 是第一个有界采用该 algebra 的非 Turn 核心路径。adapter 把 validation 绑定到现有原子 lease write；纯 eligibility、conflict、file-lock 和 CAS 规则仍由 task-lease bounded context 持有（#3091、#3095）。
 - Scheduler apply、ACK、failure writeback 和 cadence 仍是 agent-owned settlement 之外的数据化 host handoff。
 - `interpret_quota_should_run_packet` 与 `interpret_turn_result_packet` 继续作为 packet lens；`EffectProgram` 和 `effect_program_from_ordered_steps` 继续为 bootstrap 与本地 scheduler construction 提供兼容的 ordered-step reader。
 - Outcome-continuity wait 已按因果关系判断。没有 material trigger 和 fresh evidence-linked path decision 的 `unchanged_with_reason` checkpoint，不能清除更早的 material checkpoint 或五条 Todo 完成长链 gap。这是有意的 qualification 行为，不是 watch-ACK 集成回归（#2998、#3009、#3022）。
@@ -293,7 +294,7 @@ M7 只有在至少产生一个下列最终 effect 时才有理由存在：
 
 ### 还缺什么
 
-- 通用共享 executor 被有意保留为空。当前两个 adapter 共享 plan/receipt algebra，却拥有不同的执行边界，因此 M7.3 应以 no-follow-up 关闭，而不是用推测性 framework 填充。
+- 通用共享 executor 被有意保留为空。当前 adapter 共享 plan/receipt algebra，却拥有不同的执行边界，因此 M7.3 应以 no-follow-up 关闭，而不是用推测性 framework 填充。
 - 常规 LoopX 核心路径仍需逐条做有界采用判断。只有当路径包含多步 external effect、单一稳定 identity、durable receipt、replay 要求，并且变更能删除重复 settlement truth 时，才应该使用这套 algebra。
 - Race/CAS qualification 推迟到真实并发执行入口出现后；同步 adapter 本身不足以证明需要并发基础设施或测试。
 - M7.4 仍是 evidence-driven replacement gate，而不是把每个 Todo、gate、monitor、scheduler 或 replan rule 都改成 Kleisli arrow 的要求。
@@ -304,6 +305,7 @@ M7 只有在至少产生一个下列最终 effect 时才有理由存在：
 |---|---|---|
 | Codex App / CLI 常规 turn closeout | 已采用 | core plan/receipt algebra；quota adapter 拥有 CLI binding 和 durable settlement check |
 | 隔离 turn-driver closeout | 已采用 | 共享同一 algebra；local callback executor 与 journal 仍归 turn driver 所有 |
+| Task-lease acquire | 有界采用 | validation 与 durable write 共享 core algebra；eligibility、conflict、locking、CAS 和 persistence 仍归 task lease 所有 |
 | Turn continuation | 作为 consumer 采用 | pure controller 读取已提交 receipt chain，不执行 host effect |
 | Todo completion、`refresh-state`、quota spend | 仅作为 settlement step 采用 | 各自的 domain lifecycle 与 persistence reducer 保留在 bounded context |
 | Goal vision 与 replan checkpoint | 选择性 typed qualification | causal evidence 与完成链 checkpoint 是共享 invariant；vision policy 不进入 settlement executor |
@@ -314,7 +316,7 @@ M7 只有在至少产生一个下列最终 effect 时才有理由存在：
 
 ### 何时泛化
 
-只有至少两个真实 runtime path 同时共享 plan/receipt 语义和执行所有权时，才泛化执行层。当前 adapter 证明了共享 algebra，却反证了共享 executor：一条路径跨越 CLI/host boundary，另一条拥有 in-process callback。Packet 相似或共同的 `bind` 方法不能覆盖这个边界。
+只有至少两个真实 runtime path 同时共享 plan/receipt 语义和执行所有权时，才泛化执行层。当前 adapter 证明了共享 algebra，却反证了共享 executor：一条路径跨越 CLI/host boundary，一条拥有 in-process callback，另一条把原子 persistence 委托给 task-lease bounded context。Packet 相似或共同的 `bind` 方法不能覆盖这些边界。
 
 在此之前，把抽象保持为文档化视角，并增加证明每个 packet 无损映射的测试。这可以避免构建一个没有 runtime 使用的通用 `Effect` 框架。
 

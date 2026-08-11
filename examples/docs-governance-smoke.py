@@ -167,15 +167,16 @@ def assert_contributor_task_board_is_current() -> None:
     for required in (
         "/loopx-global-todos` (all implemented)",
         "Implement `/loopx-global-risks` next",
-        "A shared typed Effect Program now drives quota and Turn settlement",
+        "A shared typed Effect Program now drives quota, Turn, and task-lease settlement",
         "The scheduler remains outside settlement",
         "do not force pure decision logic into Kleisli form",
-        "Do not add a generic executor until a second real caller proves the abstraction",
+        "do not force pure decision logic into Kleisli form or extract a shared executor without shared execution ownership",
     ):
         assert required in tasks, required
     for stale in (
         "Implement `/loopx-global-todos` or `/loopx-global-risks` next",
         "Add one negative fixture proving fail-closed legacy upgrade",
+        "| GH-C82 |",
     ):
         assert stale not in tasks, stale
 

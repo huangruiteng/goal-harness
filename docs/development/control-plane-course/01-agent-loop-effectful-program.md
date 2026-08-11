@@ -143,6 +143,107 @@ ACK 和 writeback 都编码进同一个 request。模型仍然只提出 effect r
 - `effect_request -> interpretation -> observation -> next_effect` 仍然稳定；
 - `next_effect` 从一条 CLI 命令变成一段有序 effect program。
 
+## 当前实现：先区分 read lens 与 settlement algebra
+
+`loopx.control_plane.effect_program` 目前承载两组相关但不同的抽象。
+
+第一组是 packet read lens：
+
+- `EffectRequest`、`EffectInterpretation`、`EffectObservation`、`EffectNext`
+  和 `EffectTurn` 把现有 packet 映射到稳定语义槽；
+- `EffectProgram` / `EffectStep` 读取 bootstrap 和本地 scheduler 已有的
+  `ordered_steps`；
+- 这组对象不自动获得执行权。读取一组命令，不等于 LoopX core 有权执行并结算它们。
+
+第二组是 typed settlement algebra：
+
+- `SettlementIdentity` 把 `goal_id + agent_id + todo_id + turn_instance_id`
+  压成同一条 effect identity；
+- `SettlementPlan` / `SettlementStep` 声明步骤顺序、owner、precondition、
+  idempotency key 和 expected receipt；
+- `SettlementReceipt` 证明一个步骤已经提交；
+- `SettlementFailure` 保留失败发生在哪一步，以及它是 identity、permission、
+  budget、writeback 还是 spend 问题；
+- `SettlementResult.bind` 只在前一步成功时进入下一步，并把此前 receipt 链带过去。
+
+最小组合可以写成：
+
+```python
+result = (
+    validate(identity)
+    .bind(writeback)
+    .bind(spend)
+)
+```
+
+这里的 `F[B]` 就是 `SettlementResult[B]`。它不只是“可能失败”的返回值，还携带
+已经提交的 receipts。前一步失败后，`bind` 原样保留 failure 和已有 receipts，后续
+effect 不再执行。
+
+## 三类真实 adapter 怎样复用核心 algebra
+
+当前 `main` 有三类真实采用者。它们共享 identity、plan、receipt、failure 和
+`bind` 语义，不共享一个万能 executor。
+
+| Adapter | 有序链 | 执行与结算边界 |
+|---|---|---|
+| Codex App / CLI quota | validation -> optional Todo completion -> durable writeback -> quota spend | quota 构建 data-encoded CLI plan，并从 event/run receipt 复核原始 turn identity；host scheduler 留在 settlement 外 |
+| Isolated turn driver | validation -> durable writeback -> quota spend | turn driver 拥有 in-process callbacks 和 journal checkpoint；重放从合法 phase prefix 继续 |
+| Task-lease acquire | validation -> durable lease write | task-lease 模块继续拥有 owner eligibility、conflict、file lock 和 CAS；adapter 只负责 typed orchestration |
+
+这也是“quota 的 Effect Program 是否继承 core”的准确答案：它复用并 re-export
+core-owned algebra，再提供自己的 plan builder 和 durable receipt 查询；它不继承一个
+领域基类。Task lease 也只组合 core algebra，纯 decision 仍留在自己的 bounded
+context。
+
+三个 adapter 的 authority boundary 不同：CLI 路径跨 agent/host，turn driver
+拥有 callback，task lease 调用自己的原子 persistence API。把它们塞进一个 shared
+executor 会隐藏 owner，而不是减少重复知识。当前共享层只统一语义，不统一执行权。
+
+## 四条不变量比类名更重要
+
+Effect Program 的价值落在四条可复核不变量上：
+
+1. **同一 identity**：一条 settlement 的所有 receipts 使用同一个 `effect_id`。
+2. **有序提交**：没有 durable writeback receipt，就不能进入 spend。
+3. **失败短路**：某一步失败后，不允许出现后续外部 effect。
+4. **可重放、至多一次**：已提交 prefix 可以恢复，但同一 identity 不重复结算。
+
+测试不是从当前输出生成 golden，而是用独立语义 oracle 检查三类 adapter：
+
+- `test_effect_program_adapter_conformance.py` 统一验证 identity、receipt 顺序、failure、
+  short-circuit 和 scheduler-outside-settlement，并用 step reorder、failure 丢失、
+  effect-id 漂移、重复 side effect mutation 证明 oracle 能抓住错误；
+- `test_effect_program_fault_replay_matrix.py` 穷举合法 phase prefix 与失败点，并覆盖
+  task-lease 的 idempotent replay、参数漂移和 writeback failure；
+- `test_effect_program_incident_replay.py` 用 public-safe 事故 fixture 回放真实 adapter；
+- adapter 自己的 focused tests 继续保护领域规则。共享 algebra 不接管领域 truth。
+
+## 哪些路径不应该 Kleisli 化
+
+Effect Program 是有界采用规则，不是代码风格运动。只有一条路径同时具备多步外部
+effect、稳定 identity、durable receipt、replay 要求，并且能删除重复 settlement
+truth 时，才值得接入。
+
+read model、projection、quota decision、vision/replan policy、gate selection 和 monitor
+routing 仍然适合普通纯函数或领域状态机。scheduler apply / ACK 是 host handoff，也不应
+为了“统一”被搬进 agent settlement。共享抽象要减少重复知识，不能只减少看起来相似的
+代码。
+
+## 代码领读顺序
+
+按下面的顺序读，比从一个大型 executor 文件开头向下读更容易建立边界：
+
+1. `loopx/control_plane/effect_program.py`：先读 `SettlementResult.bind`、identity、
+   plan 与 receipt；
+2. `loopx/control_plane/quota/effect_program.py` 和 `quota/settlement.py`：看 CLI plan
+   与 durable receipt 怎样绑定原始 turn；
+3. `loopx/control_plane/turn_driver/settlement.py`：看 callback adapter 怎样从合法
+   journal prefix 恢复；
+4. `loopx/control_plane/work_items/task_lease_settlement.py`：看普通核心路径怎样只把
+   orchestration 接到 algebra，仍保留领域 owner；
+5. 三个 conformance / fault-replay / incident-replay 测试：从不变量反向检查实现。
+
 ## 读代码前先问五个问题
 
 1. 这个 effect request 是谁提出的？
@@ -172,8 +273,23 @@ loopx --format json quota should-run \
 - `work_lane_contract`：路由解释；
 - `recommended_action`：observation 指向的下一 effect。
 
+再运行 typed settlement 的最小验证集：
+
+```bash
+python -m pytest -q \
+  tests/control_plane/test_effect_program_adapter_conformance.py \
+  tests/control_plane/test_effect_program_fault_replay_matrix.py \
+  tests/control_plane/test_effect_program_incident_replay.py \
+  tests/control_plane/test_task_lease_cli_settlement.py
+```
+
+阅读失败用例时，先定位 failure step，再检查后续 effect 是否为零；不要只看最终
+`ok=false`。
+
 ## Review 问题
 
 - 如果把状态机文档写成 interpretation table，哪个状态维度最容易被讲清楚？
 - 为什么 `quota should-run` 是解释器而不是另一个状态机？
 - 一个新的 capability 应该解释哪一类 effect request，输出什么 observation？
+- 新路径真的有稳定 identity、durable receipt 和 replay 要求，还是只有几段相似代码？
+- 接入 core algebra 后删除了哪份重复 settlement truth？如果没有删除，抽象是否过早？

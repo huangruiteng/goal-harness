@@ -129,7 +129,7 @@ receipt、projection、replan 与 self-repair；随后再进入下面的代码�
 | 导读 | [先把 LoopX 放进一张图](00-concept-primer.md) | 有限上下文为何需要外置状态，原生 Goal 与 LoopX 如何递进，核心概念怎样组成一条生命周期？ |
 | 心智模型 | [Goal、Control State、Kernel 与 Packet](goal-control-state-kernel-packet-mental-model.md) | Goal 是否等于全部状态，Kernel 怎样从当前局面生成本轮 Packet，并在 Turn 后验证和写回状态？ |
 | 专题 | [长程任务如何收敛：不跑偏、不陷入局部循环](topic-long-horizon-convergence.md) | 如何用方向、权限、证据、Delta、活性与终局不变量，让复杂任务持续接力而不把忙碌误判为进展？ |
-| [第 1 讲](01-agent-loop-effectful-program.md) | Harness 是 effectful program | Harness 为什么是 agent loop 的 effect interpreter，状态机为什么只是 interpretation table？ |
+| [第 1 讲](01-agent-loop-effectful-program.md) | Harness 是 effectful program | Harness 为什么是 effect interpreter，三类 adapter 如何共享 typed settlement algebra 而不共享万能 executor？ |
 | [第 2 讲](02-goal-control-plane-architecture.md) | 从三个 Showcase 理解 LoopX 架构 | Issue-Fix、Single-Agent Auto ML 与 Auto Research 如何按 Agent / Provider / Capability / Kernel 分工并复用同一控制面？ |
 | [第 3 讲](03-first-real-loop.md) | 从 Showcase 到第一次真实 Loop | 用户只说一句目标后，guided start、todo、heartbeat、quota、refresh 和 spend 如何串起来？ |
 | [第 4 讲](04-state-substrate.md) | 状态底座与可重放事实 | registry、event、active state、run history 和 projection 分别拥有什么事实？ |

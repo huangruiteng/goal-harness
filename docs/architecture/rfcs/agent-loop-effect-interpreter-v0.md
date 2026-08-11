@@ -56,7 +56,7 @@ that model over time.
 | M7.1 Causal characterization | Merged/Complete (#2994, #2998, #3009, #3022, #3026) |
 | M7.2 Typed settlement runtime | Merged/Complete (#3016, #3020, #3023, #3024, #3033-#3036) |
 | M7.3 Shared executor decision | Closed with no follow-up: the adapters share algebra, not execution ownership |
-| M7.4 Bounded core-path adoption | Active only where a typed effect removes duplicate runtime truth |
+| M7.4 Bounded core-path adoption | First non-Turn adoption landed for task lease (#3091, #3095); continue only where a typed effect removes duplicate runtime truth |
 
 ## Why This Matters
 
@@ -207,12 +207,14 @@ method name. Its focused tests must cover:
 - replay: a durable receipt skips an already committed effect; and
 - non-commutativity: writeback, spend, and host handoff may not be reordered.
 
-The runtime contract has two first-class callers. The default Codex App path
+The runtime algebra now has three first-class adapters. The default Codex App path
 settles a normal LoopX turn through data-encoded CLI effects across agent and
 host boundaries. The isolated turn driver executes the same settlement shape
-through in-process callbacks. They should share the plan, receipt, effect
-identity, and failure algebra, but they need not share one executor because
-their authority boundaries differ. A generic `Kleisli`, middleware stack,
+through in-process callbacks. Task-lease acquisition composes validation and
+durable lease write through the same algebra while its bounded context retains
+owner eligibility, conflict, lock, and CAS rules. The adapters share plan,
+receipt, effect identity, and failure semantics, but they do not share one
+executor because their authority boundaries differ. A generic `Kleisli`, middleware stack,
 executor registry, or general `Effect` monad remains premature until shared
 execution ownership, not just similar packet fields, is proven.
 
@@ -374,6 +376,10 @@ Stop or narrow M7 when any kill criterion holds:
   replay, and short-circuit algebra through its local callback executor
   (#3020, #3023). Its loop controller derives continuation from the committed
   receipt chain rather than a second settlement truth (#3024).
+- Task-lease acquisition is the first bounded non-Turn core adoption. Its
+  adapter binds validation to the existing atomic lease write while pure
+  eligibility, conflict, file-lock, and CAS rules remain task-lease-owned
+  (#3091, #3095).
 - Scheduler apply, ACK, failure writeback, and cadence remain data-encoded host
   handoffs outside agent-owned settlement.
 - `interpret_quota_should_run_packet` and `interpret_turn_result_packet` remain
@@ -402,8 +408,8 @@ Stop or narrow M7 when any kill criterion holds:
 
 ### What Is Missing
 
-- A generic shared executor is deliberately absent. The two current adapters
-  share plan/receipt algebra but have different execution ownership, so M7.3
+- A generic shared executor is deliberately absent. The current adapters share
+  plan/receipt algebra but have different execution ownership, so M7.3
   is closed with no follow-up rather than filled with a speculative framework.
 - Regular LoopX paths still need bounded adoption decisions. A path should use
   the algebra only when it has multi-step external effects, one stable
@@ -422,6 +428,7 @@ Stop or narrow M7 when any kill criterion holds:
 |---|---|---|
 | Codex App / CLI normal-turn closeout | Adopted | Core plan/receipt algebra; quota adapter owns CLI binding and durable settlement checks |
 | Isolated turn-driver closeout | Adopted | Same algebra; local callback executor and journal remain turn-driver-owned |
+| Task-lease acquire | Bounded adoption | Validation and durable write share the core algebra; eligibility, conflicts, locking, CAS, and persistence remain task-lease-owned |
 | Turn continuation | Adopted as a consumer | Pure controller reads the committed receipt chain; it does not execute host effects |
 | Todo completion, `refresh-state`, quota spend | Adopted only as settlement steps | Their domain lifecycle and persistence reducers remain in their bounded contexts |
 | Goal vision and replan checkpoints | Selective typed qualification | Causal evidence and completion-chain checkpoints are shared invariants; vision policy is not moved into the settlement executor |
@@ -434,9 +441,10 @@ Stop or narrow M7 when any kill criterion holds:
 
 Generalize execution only when at least two real runtime paths share both
 plan/receipt semantics and execution ownership. The current adapters prove the
-algebra but refute a shared executor: one crosses CLI/host boundaries and one
-owns in-process callbacks. Packet similarity or a common `bind` method does
-not override that boundary.
+algebra but refute a shared executor: one crosses CLI/host boundaries, one owns
+in-process callbacks, and one delegates atomic persistence to the task-lease
+bounded context. Packet similarity or a common `bind` method does not override
+those boundaries.
 
 Before then, keep the abstraction as a documented lens and add tests that
 prove each packet maps losslessly. This avoids building a generic `Effect`
