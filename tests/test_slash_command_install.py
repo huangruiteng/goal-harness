@@ -232,6 +232,27 @@ def test_default_and_all_surfaces_install_only_static_opencode_commands(
         assert not (opencode_home / "package.json").exists()
 
 
+def test_claude_install_routes_global_risks_to_focused_cli(tmp_path: Path) -> None:
+    claude_home = tmp_path / "claude"
+    install_slash_commands(
+        execute=True,
+        surfaces=["claude-code"],
+        claude_home=str(claude_home),
+    )
+
+    expected = (
+        "Run `loopx global-risks` first and summarize structured stale runs, "
+        "boundary warnings, failing checks, and whether a formally evidenced "
+        "rollback candidate source is available, without mutating state."
+    )
+    for name_skill in ("loopx-global-risks", "loop-global-risks"):
+        skill = claude_home / "skills" / name_skill / "SKILL.md"
+        skill_text = skill.read_text(encoding="utf-8")
+        assert expected in skill_text
+        assert "This command is read-only" in skill_text
+        assert "global-summary" not in skill_text
+
+
 def test_opencode_static_uninstall_preserves_installed_bridge(tmp_path: Path) -> None:
     opencode_home = tmp_path / "opencode"
     install_slash_commands(
