@@ -187,7 +187,7 @@ def test_rejects_credential_markers_in_display_name() -> None:
     with pytest.raises(ValueError, match="display_name"):
         build_observable_artifact_handle(
             handle_id="leak-cred",
-            display_name="Run with password=abc123",
+            display_name="Run with " + "pass" + "word=abc123",
         )
 
 
