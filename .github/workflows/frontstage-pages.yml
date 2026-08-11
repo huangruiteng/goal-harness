@@ -79,13 +79,19 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: apps/presentation/dashboard/package-lock.json
+          cache-dependency-path: |
+            apps/presentation/dashboard/package-lock.json
+            apps/presentation/site/package-lock.json
 
       - name: Use stable npm
         run: npm install -g npm@11
 
       - name: Install dashboard dependencies
         working-directory: apps/presentation/dashboard
+        run: npm ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+
+      - name: Install homepage dependencies
+        working-directory: apps/presentation/site
         run: npm ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
 
       - name: Set up Python

@@ -2,9 +2,9 @@
 // Build a public-safe static frontstage bundle for demos and future Pages hosting.
 
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, dirname, relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -87,19 +87,25 @@ async function copyIndexForFrontstage(siteDir) {
 }
 
 async function copyHomepage(siteDir, base) {
-  const sourceHtml = await readFile(resolve(homepageDir, "index.html"), "utf8");
-  const html = sourceHtml.replaceAll("__LOOPX_BASE__", base);
-  const assetDir = resolve(siteDir, "site-assets");
-  await mkdir(assetDir, { recursive: true });
-  await writeFile(resolve(siteDir, "index.html"), html);
-  await copyFile(resolve(homepageDir, "home.css"), resolve(assetDir, "home.css"));
-  await copyFile(resolve(homepageDir, "home.js"), resolve(assetDir, "home.js"));
-  await copyFile(resolve(repoRoot, installerScriptPath), resolve(siteDir, "install.sh"));
-  const evidenceDir = resolve(assetDir, "evidence");
-  await mkdir(evidenceDir, { recursive: true });
-  for (const assetPath of homepageEvidenceAssets) {
-    await copyFile(resolve(repoRoot, assetPath), resolve(evidenceDir, basename(assetPath)));
+  if (!existsSync(resolve(homepageDir, "node_modules"))) {
+    throw new Error("apps/presentation/site/node_modules is missing; run `npm ci` in apps/presentation/site first");
   }
+  const buildDir = resolve(siteDir, ".homepage-build");
+  run(process.execPath, [resolve(homepageDir, "node_modules/typescript/bin/tsc"), "--noEmit"], {
+    cwd: homepageDir,
+  });
+  run(process.execPath, [
+    resolve(homepageDir, "node_modules/vite/bin/vite.js"),
+    "build",
+    "--base",
+    base,
+    "--outDir",
+    buildDir,
+    "--emptyOutDir",
+  ], { cwd: homepageDir });
+  await cp(buildDir, siteDir, { force: true, recursive: true });
+  await rm(buildDir, { force: true, recursive: true });
+  await copyFile(resolve(repoRoot, installerScriptPath), resolve(siteDir, "install.sh"));
 }
 
 function validateShowcaseHtmlPath(path) {
