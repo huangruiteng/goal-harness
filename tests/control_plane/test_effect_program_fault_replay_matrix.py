@@ -509,6 +509,80 @@ def test_task_lease_acquire_failure_short_circuits(
     assert SettlementStepKind.DURABLE_WRITEBACK not in receipt_kinds
 
 
+def test_task_lease_same_key_different_params_rejected(
+    tmp_path: Path,
+) -> None:
+    """Same idempotency key with different write_scopes or ttl must be rejected.
+
+    This is the regression test for the maintainer-requested idempotency-key
+    parameter-matching check inside ``acquire_task_lease``.  The adapter must
+    route through the real acquire path so the check is enforced atomically
+    under the per-goal exclusive_file_lock.
+    """
+    registry_path = tmp_path / "registry.json"
+    _write_task_lease_fault_registry(registry_path)
+    runtime_root = tmp_path / "runtime"
+
+    common = dict(
+        registry_path=registry_path,
+        runtime_root=runtime_root,
+        goal_id=TASK_LEASE_FAULT_GOAL,
+        owner=TASK_LEASE_FAULT_AGENT,
+        todo_id=TASK_LEASE_FAULT_TODO,
+        idempotency_key=TASK_LEASE_FAULT_KEY,
+    )
+
+    with (
+        patch(
+            "loopx.control_plane.work_items.task_lease_settlement.require_task_lease_owner_allowed",
+            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
+            return_value=[],
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
+            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.active_conflicts",
+            return_value=[],
+        ),
+    ):
+        # First acquire succeeds with docs/** scopes and 600s ttl
+        first = execute_task_lease_settlement(
+            **common,
+            write_scopes=["docs/**"],
+            ttl_seconds=600,
+            acquire=True,
+        )
+        assert first.failure is None
+
+        # Same key, different write_scopes — must be rejected
+        second = execute_task_lease_settlement(
+            **common,
+            write_scopes=["src/**"],
+            ttl_seconds=600,
+            acquire=True,
+        )
+        assert second.failure is not None
+        assert second.failure.step_kind is SettlementStepKind.DURABLE_WRITEBACK
+        assert second.failure.kind is SettlementFailureKind.INVALID_IDENTITY
+        assert "idempotency" in str(second.failure.reason).lower()
+
+        # Same key, different ttl — must be rejected
+        third = execute_task_lease_settlement(
+            **common,
+            write_scopes=["docs/**"],
+            ttl_seconds=300,
+            acquire=True,
+        )
+        assert third.failure is not None
+        assert third.failure.step_kind is SettlementStepKind.DURABLE_WRITEBACK
+        assert "idempotency" in str(third.failure.reason).lower()
+
+
 def test_task_lease_effect_id_consistency(
     tmp_path: Path,
 ) -> None:
