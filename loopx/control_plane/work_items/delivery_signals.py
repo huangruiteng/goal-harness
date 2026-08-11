@@ -9,6 +9,9 @@ from .delivery_outcome import (
     DELIVERY_OUTCOME_UNKNOWN,
     PROGRESS_DELIVERY_OUTCOMES,
     DeliveryOutcome,
+    delivery_run_has_material_evidence,
+    delivery_run_is_surface_only,
+    evidence_bounded_delivery_outcome,
     normalize_delivery_outcome,
 )
 
@@ -51,17 +54,32 @@ def delivery_outcome_for_run(
 ) -> str:
     explicit = normalize_delivery_outcome(run.get("delivery_outcome"))
     if explicit:
-        return explicit.value
+        floor = execution_profile_outcome_floor(profile)
+        outcome_markers = floor.get("outcome_markers") if isinstance(floor.get("outcome_markers"), list) else []
+        surface_hints = floor.get("surface_only_hints") if isinstance(floor.get("surface_only_hints"), list) else []
+        classification = str(run.get("classification") or "")
+        if classification_contains_any(classification, surface_hints):
+            return DeliveryOutcome.SURFACE_ONLY.value
+        if (
+            explicit in PROGRESS_DELIVERY_OUTCOMES
+            and classification_contains_any(classification, outcome_markers)
+            and not delivery_run_is_surface_only(run)
+        ):
+            return explicit.value
+        bounded = evidence_bounded_delivery_outcome(run, explicit)
+        return bounded.value if bounded else DELIVERY_OUTCOME_UNKNOWN
     if str(run.get("delivery_outcome") or "").strip():
         return DELIVERY_OUTCOME_UNKNOWN
+    if delivery_run_is_surface_only(run):
+        return DeliveryOutcome.SURFACE_ONLY.value
+    if delivery_run_has_material_evidence(run):
+        return DeliveryOutcome.OUTCOME_PROGRESS.value
     classification = str(run.get("classification") or "")
     if not classification:
         return DELIVERY_OUTCOME_UNKNOWN
     floor = execution_profile_outcome_floor(profile)
     outcome_markers = floor.get("outcome_markers") if isinstance(floor.get("outcome_markers"), list) else []
     surface_hints = floor.get("surface_only_hints") if isinstance(floor.get("surface_only_hints"), list) else []
-    if not outcome_markers and not surface_hints:
-        return DELIVERY_OUTCOME_NOT_CONFIGURED
     marker_hit = classification_contains_any(classification, outcome_markers)
     surface_hit = classification_contains_any(classification, surface_hints)
     if surface_hit:

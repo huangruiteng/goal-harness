@@ -10,6 +10,7 @@ WORK_LANE_CURRENT_AGENT_MONITOR_REPAIR_OBLIGATIONS = {
     "attempt_due_monitor",
     "repair_monitor_schedule_metadata",
     "repair_resume_gate_or_close_standing_monitor",
+    "report_product_advancement_blocker",
 }
 WORK_LANE_EXTERNAL_EVIDENCE_OBSERVATION_OBLIGATION = (
     "observe_external_evidence_or_blocker"
@@ -77,8 +78,8 @@ def work_lane_contract_requires_current_agent_attempt(
 ) -> bool:
     """Return true when the work-lane contract is itself an actionable lane.
 
-    This intentionally covers monitor-derived repair/attempt obligations, not
-    every `advancement_task` contract. A generic advancement contract may still
+    This covers monitor-derived repair/attempt obligations and the explicit
+    no-product-advancement blocker. A generic `advancement_task` contract may still
     describe goal-level work claimed by another agent; monitor-derived contracts
     are built from current-agent/unclaimed monitor projections and must not be
     collapsed into agent-scope wait just because no ordinary advancement todo
@@ -258,6 +259,7 @@ def build_work_lane_contract(
     resume_blocked_by_monitor_items: list[dict[str, Any]] | None = None,
     monitor_attempt_already_recorded: bool = False,
     monitor_debt_backoff_active: bool = False,
+    outcome_advancement_missing: bool = False,
 ) -> dict[str, Any] | None:
     """Return the work-lane execution contract from precomputed quota facts.
 
@@ -314,6 +316,33 @@ def build_work_lane_contract(
         }
 
     if progress_scope != "dependency_observation":
+        if outcome_followthrough and not has_advancement_todos and (
+            outcome_advancement_missing
+            or not has_agent_todos
+        ):
+            reason_codes = [
+                "outcome_followthrough_required",
+                (
+                    "surface_only_advancement_todos"
+                    if has_agent_todos
+                    else "no_open_product_advancement_todo"
+                ),
+            ]
+            return {
+                "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
+                "lane": "advancement_task",
+                "next_lane": "advancement_task",
+                "obligation": "report_product_advancement_blocker",
+                "must_attempt_work": True,
+                "reason_codes": reason_codes,
+                "monitor_policy": "material_transition_only",
+                "outcome_followthrough": outcome_followthrough,
+                "action": (
+                    "write one precise blocker naming the missing executable product "
+                    "advancement Todo, then stop; do not add another planning, binding, "
+                    "checkpoint, or preparation layer"
+                ),
+            }
         if has_advancement_todos and effective_due_monitor_preemption:
             return due_monitor_contract(
                 reason_codes=["monitor_due", "due_monitor_priority_preempts_advancement"]

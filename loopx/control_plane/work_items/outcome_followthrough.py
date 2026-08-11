@@ -7,6 +7,7 @@ from .delivery_outcome import (
     DeliveryTurnKind,
     FOLLOWTHROUGH_REQUIRED_DELIVERY_OUTCOMES,
     delivery_turn_kind_for_run,
+    evidence_bounded_delivery_outcome,
     normalize_delivery_outcome,
 )
 
@@ -25,7 +26,11 @@ def build_outcome_followthrough_hint(
         return None
 
     explicit_required = latest_run.get("outcome_followthrough_required") is True
-    delivery_outcome = normalize_delivery_outcome(latest_run.get("delivery_outcome"))
+    claimed_outcome = normalize_delivery_outcome(latest_run.get("delivery_outcome"))
+    delivery_outcome = evidence_bounded_delivery_outcome(
+        latest_run,
+        claimed_outcome,
+    )
     delivery_turn_kind = delivery_turn_kind_for_run(
         latest_run,
         delivery_outcome=delivery_outcome,
