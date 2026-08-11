@@ -658,6 +658,7 @@ def bootstrap_project(
     execution_surface_only_hints: list[str] | None = None,
     execution_surface_streak_threshold: int | None = None,
     execution_outcome_must_advance: list[str] | None = None,
+    execution_turn_granularity: str | None = None,
     onboarding_scan_enabled: bool = True,
     accept_onboarding_agent_todos: bool = False,
     begin_autonomous_advance: bool = False,
@@ -692,6 +693,7 @@ def bootstrap_project(
         surface_only_hints=execution_surface_only_hints,
         surface_streak_threshold=execution_surface_streak_threshold,
         outcome_must_advance=execution_outcome_must_advance,
+        turn_granularity=execution_turn_granularity,
     )
     onboarding_scan = (
         build_onboarding_scan(

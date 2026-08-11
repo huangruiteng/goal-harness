@@ -7,9 +7,11 @@ from pathlib import Path
 
 from ..agent_registry import (
     agent_profile_from_registry,
+    load_goal_from_registry,
     registered_agent_ids_from_registry,
     require_registered_agent_id,
 )
+from ..execution_profile import execution_profile_turn_granularity
 from ..heartbeat_prompt import (
     build_heartbeat_prompt,
     build_heartbeat_prompt_error_payload,
@@ -516,6 +518,15 @@ def handle_support_control_command(
             if active_state_source.startswith("registry:"):
                 agent_registry_path = Path(active_state_source.removeprefix("registry:"))
             registered_agents = registered_agent_ids_from_registry(agent_registry_path, args.goal_id)
+            registry_goal = load_goal_from_registry(
+                agent_registry_path,
+                args.goal_id,
+            )
+            turn_granularity = execution_profile_turn_granularity(
+                registry_goal.get("execution_profile")
+                if isinstance(registry_goal, dict)
+                else None
+            )
             agent_profile = None
             if args.agent_id:
                 effective_agent_id = require_registered_agent_id(
@@ -575,6 +586,7 @@ def handle_support_control_command(
                     else None
                 ),
                 visible_goal_host=args.visible_goal_host,
+                turn_granularity=turn_granularity,
             )
         except Exception as exc:
             fallback_active_state = active_state

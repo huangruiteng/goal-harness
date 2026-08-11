@@ -4,6 +4,7 @@ from typing import Any
 
 from ...execution_profile import (
     compact_execution_profile,
+    execution_profile_is_fine_grained,
     execution_profile_outcome_floor,
     execution_profile_threshold,
     outcome_floor_threshold,
@@ -51,7 +52,11 @@ def handoff_delivery_contract(item: dict[str, Any] | None) -> dict[str, Any] | N
     outcome_floor = execution_profile_outcome_floor(profile)
     outcome_threshold = outcome_floor_threshold(profile)
     outcome_gap_streak = readiness.get("post_handoff_outcome_gap_streak")
-    small_degraded = isinstance(streak, int) and streak >= threshold
+    small_degraded = (
+        not execution_profile_is_fine_grained(profile)
+        and isinstance(streak, int)
+        and streak >= threshold
+    )
     outcome_degraded = (
         isinstance(outcome_gap_streak, int)
         and outcome_gap_streak >= outcome_threshold

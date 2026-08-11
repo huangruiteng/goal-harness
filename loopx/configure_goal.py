@@ -38,6 +38,11 @@ from .control_plane.todos.contract import normalize_todo_claimed_by
 from .control_plane.todos.mutation_authority import (
     normalize_todo_lifecycle_authority,
 )
+from .execution_profile import (
+    compact_execution_profile,
+    execution_profile_with_turn_granularity,
+    normalize_turn_granularity,
+)
 from .control_plane.agents.legacy_migration import (
     completed_peer_agent_runtime_migration,
     legacy_agent_hierarchy_present,
@@ -219,6 +224,7 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         coordination.get("registered_agents")
     )
     summary = {
+        "execution_profile": compact_execution_profile(goal.get("execution_profile")),
         "quota": {
             "compute": quota.get("compute"),
             "window_hours": quota.get("window_hours"),
@@ -396,6 +402,7 @@ def configure_goal(
     goal_id: str,
     quota_compute: float | None = None,
     quota_window_hours: float | None = None,
+    execution_turn_granularity: str | None = None,
     self_repair_enabled: bool | None = None,
     self_repair_health: bool | None = None,
     self_repair_waiting_projection: bool | None = None,
@@ -448,6 +455,10 @@ def configure_goal(
 ) -> dict[str, Any]:
     if not registry_path.exists():
         raise FileNotFoundError(f"registry file does not exist: {registry_path}")
+    if execution_turn_granularity is not None:
+        execution_turn_granularity = normalize_turn_granularity(
+            execution_turn_granularity
+        )
     if clear_allowed_domains and allowed_domains:
         raise ValueError("--clear-allowed-domains cannot be combined with --allowed-domain")
     if clear_explore_harness_profile and explore_harness_profile:
@@ -668,6 +679,11 @@ def configure_goal(
 
     before_goal = deepcopy(goal)
     before = _settings_summary(before_goal)
+    if execution_turn_granularity is not None:
+        goal["execution_profile"] = execution_profile_with_turn_granularity(
+            goal.get("execution_profile"),
+            execution_turn_granularity,
+        )
     legacy_hierarchy_before = legacy_agent_hierarchy_present(before_goal)
     expected_migration_id = peer_agent_runtime_migration_id(goal_id, before_goal)
     completed_migration_before = completed_peer_agent_runtime_migration(before_goal)

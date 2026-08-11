@@ -8,6 +8,10 @@ from typing import Any
 
 from ...agent_registry import normalize_registered_agents
 from ...ark_managed_agent_host import build_ark_managed_agent_host_contract
+from ...execution_profile import (
+    TURN_GRANULARITY_FINE,
+    execution_profile_turn_granularity,
+)
 from ..agents.runtime_model import AgentRuntimeModel
 from ..quota.spend_sources import (
     DEFAULT_SLOT_SPEND_SOURCE,
@@ -63,6 +67,15 @@ from ...project_prompt import (
     render_refresh_state_command,
 )
 
+FINE_GRAINED_TURN_RULE = (
+    "Fine-grained turn contract: the selected Todo must be one small verifiable "
+    "checkpoint; if it is broader, split/replan before delivery. Complete only that "
+    "Todo in this turn. After validation, durable Todo evidence/writeback, accountable "
+    "refresh, and one spend, end the turn without claiming or executing a successor. "
+    "On the next continuation, read the fresh completion evidence and satisfy the "
+    "existing replan obligation/ACK by retaining, replacing, or splitting the successor."
+)
+
 
 def _select_task_body_renderer(
     *,
@@ -109,9 +122,14 @@ def build_heartbeat_prompt(
     runtime_profile: str | None = None,
     scheduler_execution_context: dict[str, Any] | None = None,
     visible_goal_host: str | None = None,
+    turn_granularity: str | None = None,
 ) -> dict[str, Any]:
     if not (full or compact or brief or thin):
         thin = True
+    normalized_turn_granularity = execution_profile_turn_granularity(
+        {"turn_granularity": turn_granularity} if turn_granularity is not None else None
+    )
+    fine_grained = normalized_turn_granularity == TURN_GRANULARITY_FINE
     if visible_goal_host not in {None, "traex-cli"}:
         raise ValueError(f"unsupported visible goal host: {visible_goal_host}")
     if visible_goal_host == "traex-cli" and (
@@ -309,6 +327,8 @@ def build_heartbeat_prompt(
         brief_prompt_command=brief_prompt_command,
         thin_prompt_command=thin_prompt_command,
     )
+    if fine_grained:
+        task_body = f"{task_body}\n\n{FINE_GRAINED_TURN_RULE}"
     if native_goal_host and len(task_body) > NATIVE_GOAL_HOST_MAX_CHARS:
         host_limit = (
             "Ark Managed Agent goal prompt"
@@ -384,6 +404,9 @@ def build_heartbeat_prompt(
         ),
         "task_body": task_body,
     }
+    if fine_grained:
+        payload["turn_granularity"] = TURN_GRANULARITY_FINE
+        payload["turn_mode"] = "fine_grained"
     payload["agent_model"] = AgentRuntimeModel.PEER_V1.value
     if thin:
         payload.pop("compact_prompt_command", None)

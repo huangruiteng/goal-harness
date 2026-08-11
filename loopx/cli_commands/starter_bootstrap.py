@@ -105,6 +105,7 @@ def handle_loopx_bootstrap_command_pack_command(
         goal_text=args.goal_text,
         available_capabilities=args.available_capabilities,
         capability_route=args.capability_route,
+        fine_grained=bool(args.fine_grained),
     )
     if bool(getattr(args, "message_only", False)):
         print(str(payload.get("message") or ""))

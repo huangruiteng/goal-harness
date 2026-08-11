@@ -14,6 +14,10 @@ from .capabilities.issue_fix.workflow_plan import (
     build_issue_fix_goal_command_templates,
 )
 from .control_plane.effect_program import effect_program_from_ordered_steps
+from .control_plane.goals.start_contract import (
+    build_goal_start_contract,
+    build_goal_start_prompt,
+)
 from .host_loop_activation import (
     agent_type_for_host_surface,
     build_host_loop_activation_packet,
@@ -35,7 +39,6 @@ from .thread_agent_binding import normalize_thread_id, resolve_thread_agent_bind
 
 SCHEMA_VERSION = "loopx_bootstrap_command_pack_v0"
 CANONICAL_SLASH_COMMAND = "/loopx"
-GOAL_START_SCHEMA_VERSION = "loopx_goal_start_command_v0"
 GUIDED_START_SCHEMA_VERSION = "loopx_start_goal_guided_v0"
 PACKET_SUMMARY_SCHEMA_VERSION = "loopx_start_goal_packet_summary_v0"
 PACKET_MEASUREMENT_SCHEMA_VERSION = "loopx_packet_duplication_measurement_v0"
@@ -195,6 +198,7 @@ def _start_goal_command(
     goal_text: str,
     available_capabilities: list[str] | None,
     capability_route: str | None,
+    fine_grained: bool,
     include_command_pack_detail: bool,
 ) -> str:
     return (
@@ -206,6 +210,7 @@ def _start_goal_command(
         + (" --new-peer" if new_peer else "")
         + f" --host-surface {shell_arg(host_surface)}"
         + render_available_capability_args(available_capabilities)
+        + (" --fine-grained" if fine_grained else "")
         + (
             f" --capability-route {shell_arg(capability_route)}"
             if capability_route
@@ -228,6 +233,7 @@ def _start_goal_detail_command(
     goal_text: str,
     available_capabilities: list[str] | None,
     capability_route: str | None,
+    fine_grained: bool,
 ) -> str:
     return _start_goal_command(
         project=project,
@@ -240,6 +246,7 @@ def _start_goal_detail_command(
         goal_text=goal_text,
         available_capabilities=available_capabilities,
         capability_route=capability_route,
+        fine_grained=fine_grained,
         include_command_pack_detail=True,
     )
 
@@ -295,6 +302,7 @@ def build_start_goal_host_surface_selection_packet(
     new_peer: bool = False,
     available_capabilities: list[str] | None = None,
     capability_route: str | None = None,
+    fine_grained: bool = False,
     include_command_pack_detail: bool = False,
 ) -> dict[str, Any]:
     """Fail closed when the caller has not identified the current Codex host."""
@@ -327,6 +335,7 @@ def build_start_goal_host_surface_selection_packet(
             + (" --new-peer" if new_peer else "")
             + f" --host-surface {shell_arg(host_surface)}"
             + render_available_capability_args(available_capabilities)
+            + (" --fine-grained" if fine_grained else "")
             + (
                 f" --capability-route {shell_arg(capability_route)}"
                 if capability_route
@@ -587,6 +596,7 @@ def _bootstrap_command(
     goal_id: str,
     cli_bin: str,
     dry_run: bool,
+    fine_grained: bool = False,
 ) -> str:
     lines = [
         f"cd {shell_arg(project)}",
@@ -597,6 +607,9 @@ def _bootstrap_command(
         f"  --adapter-status {shell_arg(DEFAULT_HANDOFF_ADAPTER_STATUS)} \\",
         "  --codex-app-heartbeat ask",
     ]
+    if fine_grained:
+        lines[-1] += " \\"
+        lines.append("  --fine-grained")
     if dry_run:
         lines[-1] += " \\"
         lines.append("  --dry-run")
@@ -613,6 +626,7 @@ def _goal_start_bootstrap_command(
     goal_id: str,
     goal_text: str | None,
     cli_bin: str,
+    fine_grained: bool,
 ) -> str:
     objective = goal_text or "<exact /loopx goal text>"
     lines = [
@@ -626,6 +640,9 @@ def _goal_start_bootstrap_command(
         "  --no-onboarding-scan \\",
         "  --codex-app-heartbeat ask",
     ]
+    if fine_grained:
+        lines[-1] += " \\"
+        lines.append("  --fine-grained")
     return "\n".join(lines)
 
 
@@ -677,159 +694,6 @@ def _selected_goal_capability_route(
     }
 
 
-def _goal_start_contract(
-    *,
-    goal_text: str | None,
-    selected_capability_route: dict[str, Any] | None,
-    connected: bool,
-    agent_type: str,
-    issue_fix_commands: dict[str, str],
-) -> dict[str, Any]:
-    return {
-        "schema_version": GOAL_START_SCHEMA_VERSION,
-        "behavior_authority": (
-            "ordered_steps + goal_start_contract; skill passes raw arguments after host "
-            "detection, executes packet"
-        ),
-        "slash_syntax": "/loopx <goal text>",
-        "goal_text": goal_text,
-        "selected_capability_route": selected_capability_route,
-        "explicit_invocation_confirms_project_local_state_writes": True,
-        "connect_if_needed": True,
-        "bootstrap_policy": "create project-local LoopX state only when no matching registry goal exists",
-        "planner": {
-            "required_before_todo_write": True,
-            "default_profile": "open_ended_product_direction",
-            "profile_selection": (
-                "Use open_ended_product_direction when the user's goal is a broad, "
-                "fuzzy product direction or new initiative. Use clear_bounded_problem "
-                "when the target is a concrete task with a clear success condition. "
-                "In both cases, let the model produce a real ordered plan before writes."
-            ),
-            "profiles": {
-                "open_ended_product_direction": {
-                    "suggested_items_min": 2,
-                    "suggested_items_max": 5,
-                    "intent": (
-                        "turn an ambiguous product direction into public-safe, ranked "
-                        "todo options before execution"
-                    ),
-                },
-                "clear_bounded_problem": {
-                    "item_count_policy": "planner_sized",
-                    "may_reuse_current_todo_when_it_already_represents_the_plan": True,
-                    "intent": (
-                        "make the approach explicit with enough concise ordered todos, "
-                        "without arbitrary caps or management-only filler"
-                    ),
-                },
-            },
-            "allowed_priorities": ["P0", "P1", "P2"],
-            "default_role": "agent",
-            "default_task_class": "advancement_task",
-            "required_fields": ["priority", "text", "task_class", "action_kind"],
-            "public_safe_only": True,
-            "budget_policy": "minimum sufficient plan; no fixed-count filler",
-        },
-        "priority_ordering": {
-            "bucket_order": ["P0", "P1", "P2"],
-            "same_priority_tie_breaker": "planner_order_then_todo_write_order",
-            "prompt_constraint": "priority then exact write order",
-            "storage_contract": "Todo index is same-priority rank; no extra field",
-        },
-        "execution_invariants": (
-            "identity: fresh public-safe agent after verified/active; explicit takeover; "
-            "bind/readback before Todo; no peer inference; unknown: "
-            "loopx agent-onboard --list-agent-types | route: selected_capability_route only; "
-            "never infer from text/URLs; #/activation+#/stop_conditions; review/pasteable "
-            "gates | Todo/writeback: Agent advancement_task; User owner/private; business Todo "
-            "before work; current evidence + next Todo; refresh/quota; chat not durable | "
-            "returned typed quota_guard; one bounded validation+writeback or exact blocker; "
-            "optional need/preview/explicit apply"
-        ),
-        "activation": {
-            "after_write": ["refresh-state", "host_loop_activation", "quota should-run"],
-            "host_loop_required_after_todo_writeback": True,
-            "agent_type": agent_type,
-            "agent_type_discovery": "loopx agent-onboard --list-agent-types",
-            "host_surfaces": {
-                "codex-app": "Codex App heartbeat automation",
-                "codex-cli": "visible Codex CLI `/goal <task_body>`",
-                "claude-code": "Claude Code native `/loop` after `/loopx <task>` arms LoopX",
-                "opencode": "OpenCode `loopx_goal_activate`",
-                "pi": "Pi `loopx_goal_activate`",
-                "gemini-cli": "agent-driven Gemini CLI loop; every turn enters through quota should-run",
-                "cursor-agent": "agent-driven cursor-agent loop; every turn enters through quota should-run",
-                "ark-managed-agent": "one-shot Goal",
-                "manual": "external scheduler or manual quota/status loop",
-                "other-agent": "custom host loop driver using the returned task body and quota guard",
-            },
-            "missing_host_loop_policy": (
-                "Do not claim autonomous setup complete from registry/quota identity alone. "
-                "If the host cannot mutate its loop surface, report the exact pasteable gate."
-            ),
-            "low_cost_recheck_policy": "missing/unknown/stale/type-changed only",
-            "begin_automation_when_quota_allows": True,
-            "spend_quota_after_writeback": True,
-        },
-        "domain_route_hints": {
-            "issue_fix_workflow": {
-                "when": (
-                    "selected_capability_route.capability_id is explicitly "
-                    "set to issue-fix"
-                ),
-                "preview_command": issue_fix_commands[
-                    "issue_fix_workflow_plan_template"
-                ],
-                "decision_command": issue_fix_commands[
-                    "issue_fix_feasibility_template"
-                ],
-                "post_pr_reviewer_request_command": issue_fix_commands[
-                    "issue_fix_reviewer_request_template"
-                ],
-                "post_pr_monitor_command": issue_fix_commands[
-                    "issue_fix_pr_lifecycle_template"
-                ],
-                "writeback": (
-                    "persist candidate preflight; only proceed enters feasibility and writes "
-                    "its successor; keep private/external/publish/destructive/production gates; "
-                    "after PR creation verify reviewer-request, then monitor one PR state bucket"
-                ),
-            }
-        },
-        "connected_at_preview_time": connected,
-        "stop_conditions": [
-            "private material requested before a public-safe todo can be written",
-            "credentials or secrets are required",
-            "destructive git or production operation would be needed",
-            "the host cannot execute shell/CLI/tool calls or persist LoopX state",
-            "the host cannot activate or expose the required host loop and no concrete pasteable gate can be shown",
-        ],
-    }
-
-
-def _goal_start_prompt(*, goal_text: str | None, goal_id: str, agent_id: str | None) -> str:
-    goal_clause = (
-        f"Goal text: {goal_text}"
-        if goal_text
-        else "Goal text: use the text after `/loopx`; if it is empty, handle bare `/loopx` instead."
-    )
-    agent_clause = f" Use agent id `{agent_id}` for quota/claim commands." if agent_id else ""
-    return f"""Plan; returned `ordered_steps` + `goal_start_contract` are authoritative.
-
-{goal_clause}
-Goal id: {goal_id}.{agent_clause}
-
-Rules:
-1. Identity: use verified binding/active contract; a stable unbound host gets a fresh public-safe agent. Existing lanes require explicit takeover plus bind/readback before Todo; never infer peers from Todo/worktree/arguments. Unknown host: `loopx agent-onboard --list-agent-types`.
-2. Capability: only `selected_capability_route`; run entry/admission and its later `capability show`; never infer from text/URLs. Capability state owns facts; generic Todos schedule.
-3. Todos: broad goal 2-5 public-safe items, bounded goal minimum sufficient plan; `[P0]`/`[P1]`/`[P2]`, no `--priority`, preserve order, prefer Agent `advancement_task`, User Todo only for owner/private gates. Write one business Todo before work.
-4. Writeback: current Todo evidence + next executable Todo, then `loopx refresh-state --goal-id {goal_id}` and quota readback. Chat/model summaries are not durable state.
-5. Host loop: after Todo write, activate missing/unknown/stale/type-changed Codex App heartbeat automation, CLI/TraeX `/goal`, Claude `/loop`, OpenCode bridge, Ark one-shot, or custom gate. Else surface the exact pasteable gate; never claim autonomy.
-6. Run the returned typed `quota_guard`; finish one bounded segment with validation + LoopX writeback or an exact blocker. Setup/planning/claim is not delivery.
-7. Optional features: need, preview, explicit apply. Respect private data, credentials, destructive git, production authority, and review rules.
-"""
-
 
 def build_loopx_bootstrap_command_pack(
     *,
@@ -843,6 +707,7 @@ def build_loopx_bootstrap_command_pack(
     new_peer: bool = False,
     available_capabilities: list[str] | None = None,
     capability_route: str | None = None,
+    fine_grained: bool = False,
     resolve_linked_worktree_alias: bool = True,
 ) -> dict[str, Any]:
     inspection = inspect_bootstrap_connection(
@@ -905,12 +770,14 @@ def build_loopx_bootstrap_command_pack(
         goal_id=resolved_goal_id,
         cli_bin=cli_bin,
         dry_run=True,
+        fine_grained=fine_grained,
     )
     bootstrap_after_confirmation_command = _bootstrap_command(
         project=resolved_project,
         goal_id=resolved_goal_id,
         cli_bin=cli_bin,
         dry_run=False,
+        fine_grained=fine_grained,
     )
     host_loop_activation = build_host_loop_activation_packet(
         agent_type=agent_type,
@@ -969,11 +836,13 @@ def build_loopx_bootstrap_command_pack(
         goal_id=resolved_goal_id,
         goal_text=normalized_goal_text,
         cli_bin=cli_bin,
+        fine_grained=fine_grained,
     )
-    goal_start_plan_prompt = _goal_start_prompt(
+    goal_start_plan_prompt = build_goal_start_prompt(
         goal_text=normalized_goal_text,
         goal_id=resolved_goal_id,
         agent_id=str(selected_agent_id) if selected_agent_id else None,
+        fine_grained=fine_grained,
     )
     slash_command_catalog = build_slash_command_catalog(cli_bin=cli_bin)
 
@@ -1037,6 +906,7 @@ def build_loopx_bootstrap_command_pack(
             + (" --new-peer" if new_peer else "")
             + f" --host-surface {shell_arg(host_surface)}"
             + render_available_capability_args(available_capabilities)
+            + (" --fine-grained" if fine_grained else "")
             + (
                 f" --capability-route {shell_arg(capability_route)}"
                 if capability_route
@@ -1061,7 +931,7 @@ def build_loopx_bootstrap_command_pack(
         "available_slash_commands": slash_command_catalog,
         "onboarding_hint": slash_command_catalog["onboarding"],
         "recommended_next_step": recommended_next_step,
-        "goal_start_contract": _goal_start_contract(
+        "goal_start_contract": build_goal_start_contract(
             goal_text=normalized_goal_text,
             selected_capability_route=_selected_goal_capability_route(
                 capability_route
@@ -1069,6 +939,7 @@ def build_loopx_bootstrap_command_pack(
             connected=connected,
             agent_type=agent_type,
             issue_fix_commands=issue_fix_hint_commands,
+            fine_grained=fine_grained,
         ),
         "commands": {
             "doctor": f"{shell_arg(cli_bin)} doctor",
@@ -1079,6 +950,18 @@ def build_loopx_bootstrap_command_pack(
             "bootstrap_dry_run_preview": bootstrap_preview_command,
             "bootstrap_after_user_confirmation": bootstrap_after_confirmation_command,
             "goal_start_connect_if_needed": goal_start_bootstrap_command,
+            **(
+                {
+                    "goal_start_configure_turn_granularity": _project_command(
+                        resolved_project,
+                        f"{shell_arg(cli_bin)} configure-goal --goal-id "
+                        f"{shell_arg(resolved_goal_id)} "
+                        "--execution-turn-granularity fine --execute",
+                    )
+                }
+                if fine_grained
+                else {}
+            ),
             "goal_start_plan_prompt": goal_start_plan_prompt,
             "goal_start_bind_thread": (
                 f"{shell_arg(cli_bin)} bind-agent-thread --goal-id {shell_arg(resolved_goal_id)} "
@@ -1170,6 +1053,7 @@ def _build_multi_goal_start_selection_packet(
     goal_text: str,
     available_capabilities: list[str] | None,
     capability_route: str | None,
+    fine_grained: bool,
     include_command_pack_detail: bool,
 ) -> dict[str, Any] | None:
     inspection = inspect_bootstrap_connection(
@@ -1209,6 +1093,7 @@ def _build_multi_goal_start_selection_packet(
             + (" --new-peer" if new_peer else "")
             + f" --host-surface {shell_arg(host_surface)}"
             + render_available_capability_args(available_capabilities)
+            + (" --fine-grained" if fine_grained else "")
             + (
                 f" --capability-route {shell_arg(capability_route)}"
                 if capability_route
@@ -1284,7 +1169,7 @@ def _build_multi_goal_start_selection_packet(
         "available_slash_commands": slash_command_catalog,
         "onboarding_hint": slash_command_catalog["onboarding"],
         "recommended_next_step": recommended_next_step,
-        "goal_start_contract": _goal_start_contract(
+        "goal_start_contract": build_goal_start_contract(
             goal_text=normalized_goal_text,
             selected_capability_route=_selected_goal_capability_route(
                 capability_route
@@ -1292,6 +1177,7 @@ def _build_multi_goal_start_selection_packet(
             connected=True,
             agent_type=agent_type_for_host_surface(host_surface),
             issue_fix_commands=issue_fix_commands,
+            fine_grained=fine_grained,
         ),
         "commands": {
             "doctor": f"{shell_arg(cli_bin)} doctor",
@@ -1368,6 +1254,7 @@ def _build_multi_goal_start_selection_packet(
         goal_text=normalized_goal_text,
         available_capabilities=available_capabilities,
         capability_route=capability_route,
+        fine_grained=fine_grained,
     )
     selected_command_pack = (
         command_pack
@@ -1434,6 +1321,7 @@ def build_start_goal_guided_packet(
     new_peer: bool = False,
     available_capabilities: list[str] | None = None,
     capability_route: str | None = None,
+    fine_grained: bool = False,
     include_command_pack_detail: bool = False,
 ) -> dict[str, Any]:
     if goal_id is None:
@@ -1447,6 +1335,7 @@ def build_start_goal_guided_packet(
             goal_text=goal_text,
             available_capabilities=available_capabilities,
             capability_route=capability_route,
+            fine_grained=fine_grained,
             include_command_pack_detail=include_command_pack_detail,
         )
         if selection_packet is not None:
@@ -1462,6 +1351,7 @@ def build_start_goal_guided_packet(
         goal_text=goal_text,
         available_capabilities=available_capabilities,
         capability_route=capability_route,
+        fine_grained=fine_grained,
         resolve_linked_worktree_alias=False,
     )
     commands = command_pack.get("commands")
@@ -1482,6 +1372,7 @@ def build_start_goal_guided_packet(
                 goal_text=str(command_pack.get("goal_text") or goal_text),
                 available_capabilities=available_capabilities,
                 capability_route=capability_route,
+                fine_grained=fine_grained,
                 include_command_pack_detail=False,
             )
 
@@ -1545,6 +1436,21 @@ def build_start_goal_guided_packet(
         if commands.get("goal_start_bind_thread")
         else []
     )
+    fine_mode_steps = (
+        [
+            {
+                "id": "configure_fine_grained_turn_mode",
+                "kind": "conditional_mutation",
+                "command": commands.get("goal_start_configure_turn_granularity"),
+                "purpose": (
+                    "persist fine turn granularity for new or already-connected goals "
+                    "before planning and heartbeat activation"
+                ),
+            }
+        ]
+        if fine_grained
+        else []
+    )
     guided_transaction = {
         "schema_version": GUIDED_START_SCHEMA_VERSION,
         "mode": "dry_run_preview",
@@ -1565,11 +1471,17 @@ def build_start_goal_guided_packet(
                 "purpose": "create or reuse project-local LoopX state only when no matching goal exists",
             },
             *bind_thread_steps,
+            *fine_mode_steps,
             {
                 "id": "plan_ranked_todos",
                 "kind": "model_checkpoint",
                 "prompt": commands.get("goal_start_plan_prompt"),
-                "purpose": "produce concise public-safe P0/P1/P2 todos before todo writeback",
+                "purpose": (
+                    "produce one public-safe, small, verifiable checkpoint Todo; keep "
+                    "later options as evidence-linked planning notes"
+                    if fine_grained
+                    else "produce concise public-safe P0/P1/P2 todos before todo writeback"
+                ),
             },
             {
                 "id": "write_ordered_todos",
@@ -1588,7 +1500,10 @@ def build_start_goal_guided_packet(
                     "[--target-key <target_key>] --text '<[P0/P1/P2] ...>'"
                 ),
                 "purpose": (
-                    "write todos in planner order; capability successors preserve "
+                    "write only the current checkpoint Todo; the existing replan path "
+                    "qualifies any successor after completion evidence"
+                    if fine_grained
+                    else "write todos in planner order; capability successors preserve "
                     "the admitted action_kind and target_key for later quota re-entry"
                 ),
             },
@@ -1708,6 +1623,7 @@ def build_start_goal_guided_packet(
         goal_text=str(command_pack.get("goal_text") or goal_text),
         available_capabilities=available_capabilities,
         capability_route=capability_route,
+        fine_grained=fine_grained,
     )
     selected_command_pack = (
         command_pack
