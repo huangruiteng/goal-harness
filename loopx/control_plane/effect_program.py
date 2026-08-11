@@ -139,13 +139,17 @@ class SettlementFailure:
     kind: SettlementFailureKind
     step_kind: SettlementStepKind
     reason: str
+    details: Mapping[str, Any] | None = None
 
-    def as_dict(self) -> dict[str, str]:
-        return {
+    def as_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "kind": self.kind.value,
             "step_kind": self.step_kind.value,
             "reason": self.reason,
         }
+        if self.details:
+            result["details"] = dict(self.details)
+        return result
 
 
 T = TypeVar("T")
@@ -175,6 +179,7 @@ class SettlementResult(Generic[T]):
         step_kind: SettlementStepKind,
         reason: str,
         receipts: tuple[SettlementReceipt, ...] = (),
+        details: Mapping[str, Any] | None = None,
     ) -> SettlementResult[T]:
         return cls(
             value=None,
@@ -183,6 +188,7 @@ class SettlementResult(Generic[T]):
                 kind=kind,
                 step_kind=step_kind,
                 reason=reason,
+                details=details,
             ),
         )
 

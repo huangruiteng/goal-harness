@@ -51,6 +51,25 @@ def _now_utc() -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
+def _typed_failure(
+    *,
+    kind: SettlementFailureKind,
+    step_kind: SettlementStepKind,
+    reason: str,
+    code: str | None = None,
+) -> SettlementResult[Any]:
+    return SettlementResult.failed(
+        kind=kind,
+        step_kind=step_kind,
+        reason=reason,
+        details=(
+            {"task_lease_error_code": code}
+            if code
+            else None
+        ),
+    )
+
+
 
 def _settlement_identity(
     *,
@@ -146,14 +165,39 @@ def resolve_task_lease_validation(
     """
     try:
         normalized_goal_id = normalize_goal_id(goal_id)
-        normalized_owner = normalize_owner(owner)
-        normalized_todo_id = normalize_lease_todo_id(todo_id)
-        normalized_key = normalize_idempotency_key(idempotency_key)
     except ValueError as exc:
-        return SettlementResult.failed(
+        return _typed_failure(
             kind=SettlementFailureKind.INVALID_IDENTITY,
             step_kind=SettlementStepKind.VALIDATION,
             reason=str(exc),
+            code="invalid_goal_id",
+        )
+    try:
+        normalized_owner = normalize_owner(owner)
+    except ValueError as exc:
+        return _typed_failure(
+            kind=SettlementFailureKind.INVALID_IDENTITY,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason=str(exc),
+            code="invalid_owner",
+        )
+    try:
+        normalized_todo_id = normalize_lease_todo_id(todo_id)
+    except ValueError as exc:
+        return _typed_failure(
+            kind=SettlementFailureKind.INVALID_IDENTITY,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason=str(exc),
+            code="invalid_todo_id",
+        )
+    try:
+        normalized_key = normalize_idempotency_key(idempotency_key)
+    except ValueError as exc:
+        return _typed_failure(
+            kind=SettlementFailureKind.INVALID_IDENTITY,
+            step_kind=SettlementStepKind.VALIDATION,
+            reason=str(exc),
+            code="invalid_idempotency_key",
         )
 
     identity = SettlementIdentity(
@@ -172,10 +216,11 @@ def resolve_task_lease_validation(
             owner=normalized_owner,
         )
     except ValueError as exc:
-        return SettlementResult.failed(
+        return _typed_failure(
             kind=SettlementFailureKind.PERMISSION_DENIED,
             step_kind=SettlementStepKind.VALIDATION,
             reason=str(exc),
+            code=getattr(exc, "code", None),
         )
 
     # --- existing active lease check ---
@@ -205,6 +250,11 @@ def resolve_task_lease_validation(
             kind=SettlementFailureKind.WRITEBACK_REJECTED,
             step_kind=SettlementStepKind.VALIDATION,
             reason="todo already has an active lease with a different owner or key",
+            details={
+                "task_lease_error_code": "todo_lease_conflict",
+                "lease": existing,
+                "lease_path": str(lease_path),
+            },
         )
 
     # --- write-scope conflict check ---
@@ -223,6 +273,10 @@ def resolve_task_lease_validation(
                 kind=SettlementFailureKind.WRITEBACK_REJECTED,
                 step_kind=SettlementStepKind.VALIDATION,
                 reason=f"write scopes overlap {len(conflicts)} active lease(s)",
+                details={
+                    "task_lease_error_code": "write_scope_conflict",
+                    "conflicts": conflicts,
+                },
             )
 
     return SettlementResult.pure(
@@ -260,10 +314,11 @@ def _map_task_lease_error(exc: TaskLeaseError) -> SettlementResult[dict[str, Any
         kind = SettlementFailureKind.PERMISSION_DENIED
     else:
         kind = SettlementFailureKind.WRITEBACK_REJECTED
-    return SettlementResult.failed(
+    return _typed_failure(
         kind=kind,
         step_kind=SettlementStepKind.DURABLE_WRITEBACK,
         reason=str(exc),
+        code=exc.code,
     )
 
 

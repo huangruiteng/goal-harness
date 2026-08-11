@@ -101,10 +101,12 @@ def test_cli_acquire_typed_failure_payload(monkeypatch) -> None:
         kind=SettlementFailureKind.INVALID_IDENTITY,
         step_kind=SettlementStepKind.DURABLE_WRITEBACK,
         reason="idempotency key was reused with different acquire parameters",
+        details={"task_lease_error_code": "idempotency_key_reuse"},
     )
     payload = _run_acquire(monkeypatch, result)
     assert payload["ok"] is False
-    assert payload["error_code"] == "invalid_identity"
+    assert payload["error_code"] == "idempotency_key_reuse"
     assert payload["settlement"]["failure"]["step"] == "durable_writeback"
     assert payload["settlement"]["failure"]["kind"] == "invalid_identity"
+    assert payload["settlement"]["failure"]["code"] == "idempotency_key_reuse"
     assert "idempotency" in payload["error"]
