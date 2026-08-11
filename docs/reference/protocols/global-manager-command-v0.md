@@ -10,11 +10,12 @@ lanes, and choose the next safe action without reading every thread.
 
 This protocol is not a general chat-command router yet. It defines the
 request, allowed sources, response shape, privacy boundary, and action ladder
-for Codex hosts, CLI wrappers, or dashboard command palettes. The implemented
-CLI wrappers are `loopx global-summary`, which returns the broad compact
-`/loopx-global-summary` digest, and `loopx global-gates`, which returns the
-focused current-state `/loopx-global-gates` inbox, and `loopx global-todos`,
-which returns the focused current-state `/loopx-global-todos` work inbox.
+for Codex hosts, CLI wrappers, or dashboard command palettes. The four
+implemented global-manager CLI wrappers are `loopx global-summary`, for the
+broad compact `/loopx-global-summary` digest; `loopx global-gates`, for the
+focused current-state gate inbox; `loopx global-todos`, for the focused
+current-state work inbox; and `loopx global-risks`, for the focused
+current-state risk inbox.
 
 ## Command Set
 
@@ -29,8 +30,8 @@ Recommended first commands:
 | `/loopx-pr-review` | Walk the current project's or explicit repository's open and merged GitHub PRs one by one with motivation, scope, checks, risks, and review prompts. | current open + merged PRs, optionally bounded by `--since` |
 | `/loop-goal-summary <goal id>` | Drill into one goal without scanning unrelated projects. | 24 hours |
 
-`/loopx-global-risks` and `/loop-goal-summary` remain host-only manager commands
-under this protocol; they do not yet have dedicated CLI wrappers.
+Only `/loop-goal-summary` remains host-only under this protocol;
+`/loopx-global-risks` uses the canonical `loopx global-risks` CLI wrapper.
 
 Commands are read-only by default. They can propose follow-up actions, but
 they do not approve gates, promote suggested todos, spend quota, merge PRs,
@@ -87,6 +88,9 @@ Request rules:
   read and applied before the global limit. The successful quota packet must
   confirm an exact `agent_identity.agent_id` match; a default-lane packet or a
   failed quota read cannot satisfy the filter.
+- For `loopx global-risks`, `--agent-id` uses exact compact-history goal
+  membership. Global risks remain visible, and any unresolved candidate goal
+  fails closed instead of being silently excluded.
 - `dry_run=true` is the default because the first implementation should be a
   report, not an executor.
 - Unknown commands must fail closed with a help packet, not a broad status
@@ -115,6 +119,12 @@ each inspected goal. Status may consume the compact run-history projection,
 but the todos builder does not issue a second history or store read. It derives
 todo candidates only from the selected lane and structured quota/todo
 projections; it does not parse active-state prose.
+
+`loopx global-risks` reads status exactly once. It accepts structured contract
+diagnostics, global registry findings, attention-queue stale-run warnings, and,
+only for an explicit agent filter, compact run-history coordination. It performs
+no quota fan-out and does not use the display-limited
+`agent_management_projection` to decide goal membership.
 
 They must not include raw transcripts, raw benchmark logs, raw connector
 payloads, credentials, local absolute paths, or private source bodies.
@@ -252,6 +262,138 @@ goal's quota read raises or returns `ok=false`, the command skips that
 unverifiable goal, records one bounded redacted warning, and retains results
 from healthy goals.
 
+### Focused Global Risks Response
+
+`loopx global-risks` keeps `global_manager_command_response_v0` and returns
+`ok=true` when it successfully reports unhealthy state. In particular,
+`status.ok=false` remains reportable risk data, while
+`summary.source_health_ok` preserves source health separately from command
+success. Both successful and error responses carry top-level `generated_at`.
+
+The canonical request uses `/loopx-global-risks`, the `/loop-global-risks`
+slash alias, `loopx global-risks`, a normalized positive `Nh` or `Nd`
+`time_range`, the four risk includes, `privacy_mode=public_safe_summary`, and
+`dry_run=true`. Each retained row has this occurrence-aware public-safe shape:
+
+```json
+{
+  "goal_id": "goal-123",
+  "category": "boundary_warning",
+  "kind": "public_boundary_violation",
+  "severity": "high",
+  "summary": "A public boundary check failed.",
+  "occurrence_id": "f42d9c9f6d497b35",
+  "occurrence_count": 1,
+  "evidence_refs": [
+    "status.contract.error_diagnostics:public_boundary_violation:f42d9c9f6d497b35"
+  ],
+  "next_safe_action": "Inspect and remove the boundary violation before delivery.",
+  "requires_user_approval": false
+}
+```
+
+The response contains:
+
+- the normalized request and top-level generation time;
+- `summary.source_health_ok`, full-match and returned risk and occurrence
+  counts, category counts, bounded-read and truncation facts, and warning count;
+- the authoritative flat `risks` list;
+- `groups.stale_runs`, `groups.boundary_warnings`, and
+  `groups.failing_checks`, which partition the flat `risks` list;
+- the overlapping `groups.rollback_candidates` facet, currently empty, plus
+  `summary.rollback_candidates_overlap_risks=false`;
+- a capped `source_warnings` list, its uncapped count, and
+  `source_warnings_truncated`; and
+- structured omissions and the standard public-safe boundary.
+
+#### Structured risk sources and classification
+
+| Output category | Accepted source | Rule |
+| --- | --- | --- |
+| `stale_run` | `attention_queue.items[].stale_latest_run_warning` | Require exact `kind=stale_latest_run_projection`; retain its structured reason and valid timestamps. |
+| `boundary_warning` | `contract.error_diagnostics[]` | Accept exact codes `public_boundary_violation` and `registry_boundary_risk`. |
+| `failing_check` | remaining `contract.error_diagnostics[]` | Preserve structured scope, exact goal ids, code, and a redacted message. |
+| `failing_check` | `global_registry.findings[]` | Accept exact `severity=high` or `severity=action`; informational findings stay out of this focused inbox. |
+| agent scope only | `run_history.goals[].coordination.registered_agents` | Verify exact candidate goal membership for an explicit `--agent-id`; this source never creates a risk row. |
+| `rollback_candidates` | no current accepted source | Keep the facet empty and record the missing formal producer as an omission. |
+
+Structured `code` values, not prose, determine classification. Contract
+diagnostics map source `severity=error` to risk `severity=high`; other supported
+severities keep their stable ordering. Contract diagnostics scoped to goals
+expand into one row for each exact `goal_ids` member, while global rows have no
+`goal_id` and affect the whole control plane.
+
+Stable next actions also follow structured kind rather than source prose:
+
+- `public_boundary_violation`: inspect and remove the violation before delivery;
+- `registry_boundary_risk`: inspect and repair the registry boundary projection;
+- other contract diagnostics: inspect and resolve the named contract check;
+- registry findings: use the redacted structured recommendation or the stable
+  inspect-and-resolve fallback; and
+- `stale_latest_run_projection`: run `refresh-state` before trusting latest-run
+  routing.
+
+An occurrence identity is the first 16 lowercase hexadecimal characters of a
+SHA-256 digest over a canonical JSON object containing only the public source
+surface, original source-list index, structured kind, scope, and exact goal id.
+It never hashes source prose, paths, credentials, or other text removed by
+redaction. Aggregation merges only identical category, kind, goal id, and
+occurrence id rows; it retains the highest severity and increments
+`occurrence_count`. Distinct source positions therefore remain distinct even
+when their redacted summaries match.
+
+Ordering and reads are hard-bounded. The caller can receive at most 100 results,
+and `source_scan_limit` caps inspection at 400 rows per accepted source.
+`source_rows_truncated` and count-only warnings expose any bounded source scan;
+matched row and occurrence counts are calculated before the result limit, and
+groups derive only from the retained flat list. Source warnings are capped at
+eight while their summary count remains uncapped.
+
+The default `24h` request window is retained for protocol compatibility, but
+the first accepted sources describe current state. An active stale-state
+mismatch is never aged out by `time_range`, even when its valid latest-run
+timestamp predates the requested window. Missing or invalid timestamps produce
+a bounded warning and omit only that display field; they do not hide the active
+risk or cause an age guess.
+
+#### Exact agent scope and failure behavior
+
+Without `--agent-id`, the command does not inspect coordination. With a filter,
+it indexes at most `source_scan_limit` compact history goal rows by exact id and
+reads only `run_history.goals[].coordination.registered_agents`. A global row
+remains visible. A goal-scoped row is excluded only after its exact, well-formed
+history row confirms the requested agent is absent; an empty registered-agent
+list is a valid verified absence.
+
+If a candidate has no exact inspected history row, lies beyond the scan bound,
+or has malformed coordination or registered-agent data, the command must fail
+closed with `agent_scope_unavailable`. It must not rescue or suppress the row
+through quota health, a second history read, a per-goal read, or
+`agent_management_projection`.
+
+Command failure is narrower than unhealthy state. Status collection exceptions,
+a non-object status payload, any missing or malformed required projection
+container, and unverifiable explicit agent scope return `ok=false` with a
+compact, redacted error and a non-zero CLI exit. Omitted empty source-list fields
+are valid empty sources; the same field present with a non-list value is
+malformed. A present, well-formed `global_registry` with
+`global_registry.available=false` is a valid empty source and contributes one
+bounded availability warning, not a command failure.
+
+#### Rollback omission and authority
+
+No current accepted source proves a rollback candidate. Boundary warnings and
+failed checks are never guessed into that facet. Until a formal producer
+supplies an allowed rollback trigger, affected durable scope, and causal
+todo/event/commit/PR/external-resource linkage, the group remains empty and the
+response records `rollback_candidate_source_unavailable`.
+
+A global-risks response is a read-only report. It does not authorize rollback,
+history rewrite, external cleanup, or merge. Any future candidate must still use
+`rollback_packet_v0` and obtain every approval required for protected or
+destructive action; this command never sets `requires_user_approval=true` on a
+first-version risk row merely to imply that authority.
+
 ## Action Ladder
 
 Responses may include actions, but each action must declare its authority:
@@ -292,12 +434,21 @@ or omission, not the material itself.
 A first implementation is acceptable when:
 
 - command responses are read-only by default;
-- `loopx global-summary`, `loopx global-gates`, and `loopx global-todos` emit
-  their matching canonical command responses, while global risks and goal
-  summary stay host-only;
+- `loopx global-summary`, `loopx global-gates`, `loopx global-todos`, and
+  `loopx global-risks` emit their matching canonical command responses, while
+  only goal summary stays host-only;
 - each command names its compact LoopX source surfaces;
 - gates name owner, formally related blocked todo or goal scope, question, and
   next safe action;
+- global-risks source health stays separate from successful reporting, accepts
+  omitted empty source lists and an unavailable global registry, and fails on
+  malformed required projections;
+- global-risks category groups partition its bounded occurrence-aware flat
+  list, and current stale-state mismatches remain visible across time windows;
+- global-risks agent filtering verifies exact compact-history membership and
+  fails closed when any candidate goal cannot be verified;
+- global-risks exposes no guessed rollback candidates and grants no rollback or
+  other protected authority;
 - agent filtering excludes goals where the selected agent is not registered;
 - unknown commands and legacy CLI aliases fail closed with help;
 - actions declare approval and ownership requirements;
