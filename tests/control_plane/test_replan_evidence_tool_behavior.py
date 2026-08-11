@@ -174,6 +174,158 @@ def test_tool_loop_rejects_evidence_log_before_quota(tmp_path: Path) -> None:
     assert receipt["observed_tool_sequence"] == ["evidence_log_before_quota"]
 
 
+def test_tool_loop_accepts_a_bounded_evidence_read_plan(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        "\n".join(
+            (
+                "echo '=== evidence log ==='",
+                fixture.required_evidence_command,
+                "echo '=== registry goal ==='",
+                (
+                    "loopx --format json registry show-goal "
+                    "--goal-id replan-evidence-live-fixture 2>/dev/null || "
+                    "loopx --format json --registry "
+                    '"$HOME/.codex/loopx/registry.global.json" registry show-goal '
+                    "--goal-id replan-evidence-live-fixture"
+                ),
+                "echo '=== todos ==='",
+                (
+                    "loopx --format json todo list "
+                    "--goal-id replan-evidence-live-fixture 2>/dev/null"
+                ),
+            )
+        ),
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoReplanEvidenceToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-bounded-read-plan",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "evidence_log",
+    ]
+
+
+def test_tool_loop_accepts_supplemental_replan_observation_intent(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        (
+            f"{fixture.required_evidence_command}\n"
+            "loopx --format json registry get-goal "
+            "--goal-id replan-evidence-live-fixture 2>/dev/null || "
+            "echo 'goal read unavailable'\n"
+            "loopx --format json project status "
+            "--goal-id replan-evidence-live-fixture 2>/dev/null || "
+            "echo 'project read unavailable'\n"
+            "loopx --format json todo list "
+            "--goal-id replan-evidence-live-fixture 2>/dev/null"
+        ),
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoReplanEvidenceToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-supplemental-observation-intent",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "evidence_log",
+    ]
+
+
+def test_tool_loop_rejects_state_change_bundled_with_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        (
+            f"{fixture.required_evidence_command}\n"
+            "loopx --format json todo complete "
+            "--goal-id replan-evidence-live-fixture --todo-id todo-unsafe"
+        ),
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoReplanEvidenceToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-state-change-plan",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "unexpected_command"
+
+
+def test_tool_loop_rejects_unsafe_command_bundled_with_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        fixture.required_evidence_command + "\nrm -rf temporary-fixture",
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoReplanEvidenceToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-unsafe-read-plan",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "unexpected_command"
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "unexpected_command",
+    ]
+
+
 def test_tool_loop_accepts_the_real_host_utc_clock_shape(tmp_path: Path) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
     commands = [

@@ -46,6 +46,22 @@ _READ_ONLY_PREFLIGHT_COMMANDS = {
     "git branch --show-current",
     "git rev-parse --show-toplevel",
 }
+_EVIDENCE_PLAN_BOUNDARIES = {";", "&&", "||"}
+_EVIDENCE_PLAN_VALUE_OPTIONS = {
+    "--agent-id",
+    "--format",
+    "--goal-id",
+    "--limit",
+    "--registry",
+    "--runtime-root",
+}
+_REPLAN_SUPPLEMENTAL_OBSERVATION_PATHS = {
+    ("project", "status"),
+    ("registry", "get-goal"),
+    ("registry", "show-goal"),
+    ("status",),
+    ("todo", "list"),
+}
 
 @dataclass(frozen=True)
 class _ReplanEvidenceToolFixture:
@@ -266,6 +282,142 @@ def _required_evidence_command_from_packet(packet: Mapping[str, Any]) -> str:
     return command
 
 
+def _evidence_plan_segments(command: str) -> list[list[str]] | None:
+    if "$(" in command or "`" in command or "\x00" in command:
+        return None
+    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token == "|" or token.startswith("|") and token != "||":
+            return None
+        if token in _EVIDENCE_PLAN_BOUNDARIES:
+            if segments[-1]:
+                segments.append([])
+            continue
+        segments[-1].append(token)
+    return [segment for segment in segments if segment]
+
+
+def _loopx_read_tail(segment: list[str]) -> list[str] | None:
+    cleaned: list[str] = []
+    for token in segment:
+        if token == "2>/dev/null":
+            continue
+        if any(marker in token for marker in (">", "<")):
+            return None
+        cleaned.append(token)
+    try:
+        loopx_index = next(
+            index for index, token in enumerate(cleaned) if Path(token).name == "loopx"
+        )
+    except StopIteration:
+        return None
+    if loopx_index:
+        return None
+    argv = cleaned[1:]
+    index = 0
+    while index < len(argv) and argv[index] in {
+        "--format",
+        "--registry",
+        "--runtime-root",
+    }:
+        if index + 1 >= len(argv):
+            return None
+        index += 2
+    return argv[index:]
+
+
+def _read_options(
+    tokens: list[str],
+    *,
+    flags: set[str],
+) -> tuple[dict[str, str], set[str]] | None:
+    values: dict[str, str] = {}
+    seen_flags: set[str] = set()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in flags:
+            if token in seen_flags:
+                return None
+            seen_flags.add(token)
+            index += 1
+            continue
+        if token not in _EVIDENCE_PLAN_VALUE_OPTIONS or index + 1 >= len(tokens):
+            return None
+        if token in values:
+            return None
+        values[token] = tokens[index + 1]
+        index += 2
+    return values, seen_flags
+
+
+def _evidence_plan_classification(
+    command: str,
+    *,
+    required_evidence_command: str,
+) -> str | None:
+    required_tokens = _loopx_command_tokens(required_evidence_command)
+    if not required_tokens:
+        raise ValueError("required evidence command is not a bounded LoopX read")
+    expected_goal_id = _argument_value(required_tokens, "--goal-id")
+    expected_agent_id = _argument_value(required_tokens, "--agent-id")
+    expected_limit = _argument_value(required_tokens, "--limit")
+    if not expected_goal_id or not expected_agent_id or not expected_limit:
+        raise ValueError("required evidence command is missing its scoped identity")
+    segments = _evidence_plan_segments(command)
+    if not segments:
+        return "wrong_evidence_log" if "evidence-log" in command else None
+    evidence_count = 0
+    for segment in segments:
+        if segment[0] == "export":
+            if len(segment) != 2 or not segment[1].startswith("LOOPX_TURN="):
+                return "unexpected_command"
+            continue
+        if segment[0] == "echo":
+            if any(marker in token for token in segment[1:] for marker in (">", "<")):
+                return "unexpected_command"
+            continue
+        tail = _loopx_read_tail(segment)
+        if not tail:
+            return "unexpected_command"
+        if tail[0] == "evidence-log":
+            parsed = _read_options(tail[1:], flags={"--thin"})
+            if parsed is None:
+                return "wrong_evidence_log"
+            values, flags = parsed
+            if (
+                values
+                != {
+                    "--goal-id": expected_goal_id,
+                    "--agent-id": expected_agent_id,
+                    "--limit": expected_limit,
+                }
+                or flags != {"--thin"}
+            ):
+                return "wrong_evidence_log"
+            evidence_count += 1
+            continue
+        for path in _REPLAN_SUPPLEMENTAL_OBSERVATION_PATHS:
+            if tuple(tail[: len(path)]) != path:
+                continue
+            parsed = _read_options(tail[len(path) :], flags=set())
+            if parsed != ({"--goal-id": expected_goal_id}, set()):
+                return "unexpected_command"
+            break
+        else:
+            return "unexpected_command"
+        continue
+    if evidence_count == 1:
+        return "evidence_log"
+    return "wrong_evidence_log" if "evidence-log" in command else None
+
+
 def _quota_behavior_observation(packet: Mapping[str, Any]) -> dict[str, Any]:
     signature = quota_action_signature_document(packet)
     action = dict(signature.get("action") or {})
@@ -352,10 +504,6 @@ def _classify_tool_command(
     quota_observed: bool,
     required_evidence_command: str | None,
 ) -> tuple[str, str | None]:
-    if command == (required_evidence_command or fixture.required_evidence_command):
-        if not quota_observed:
-            return "evidence_log_before_quota", None
-        return "evidence_log", None
     if _is_quota_guard(command):
         return "quota_should_run", None
     clock_output = _clock_output(command)
@@ -363,8 +511,18 @@ def _classify_tool_command(
         return "clock", clock_output
     if command in _READ_ONLY_PREFLIGHT_COMMANDS:
         return "workspace_read", None
-    if " evidence-log " in f" {command} ":
-        return "wrong_evidence_log", None
+    evidence_plan = _evidence_plan_classification(
+        command,
+        required_evidence_command=(
+            required_evidence_command or fixture.required_evidence_command
+        ),
+    )
+    if evidence_plan == "evidence_log":
+        if not quota_observed:
+            return "evidence_log_before_quota", None
+        return "evidence_log", None
+    if evidence_plan in {"wrong_evidence_log", "unexpected_command"}:
+        return evidence_plan, None
     return "unexpected_command", None
 
 
@@ -514,7 +672,7 @@ class DoubaoReplanEvidenceToolBehaviorActor:
             if kind == "evidence_log":
                 try:
                     evidence_output = _execute_loopx_read(
-                        tool_call.command,
+                        required_evidence_command or fixture.required_evidence_command,
                         fixture=fixture,
                         turn_instance_id=turn_instance_id,
                         quota_guard=False,
