@@ -4,6 +4,9 @@ from loopx.control_plane.goals.goal_frontier import (
     align_autonomous_replan_guidance_with_acceptance_policy,
     compact_replan_obligation,
 )
+from loopx.control_plane.work_items.autonomous_replan_obligation import (
+    build_autonomous_replan_obligation_payload,
+)
 from loopx.status import (
     DEAD_MONITOR_REPEAT_THRESHOLD,
     build_autonomous_replan_obligation,
@@ -125,3 +128,49 @@ def test_compact_replan_obligation_preserves_novelty_policy() -> None:
     )
     compact = compact_replan_obligation(obligation)
     assert compact["replan_novelty_policy"] == obligation["replan_novelty_policy"]
+
+
+def test_payload_builder_defaults_to_novelty_guidance_and_policy() -> None:
+    payload = build_autonomous_replan_obligation_payload(
+        schema_version="autonomous_replan_obligation_v0",
+        stall_threshold=1,
+        trigger_count=1,
+        triggers=[],
+        guidance_actions=["create_successor"],
+        todo_actions=[],
+        stop_condition="stop on owner-only authority",
+        recommended_action="run a bounded frontier replan",
+    )
+
+    assert "evidence log" in payload["recommended_action"]
+    assert "prefer a direction not already covered" in payload["recommended_action"]
+    policy = payload["replan_novelty_policy"]
+    assert policy["review_evidence_log"] is True
+    assert policy["repeated_blocker_restatement_rejected"] is False
+
+
+def test_payload_builder_extra_fields_override_novelty_policy() -> None:
+    payload = build_autonomous_replan_obligation_payload(
+        schema_version="autonomous_replan_obligation_v0",
+        stall_threshold=1,
+        trigger_count=1,
+        triggers=[],
+        guidance_actions=[],
+        todo_actions=[],
+        stop_condition="stop on owner-only authority",
+        recommended_action="run a bounded replan",
+        extra_fields={
+            "replan_novelty_policy": {
+                "schema_version": "replan_novelty_policy_v0",
+                "review_evidence_log": True,
+                "prefer_unattempted_direction": True,
+                "repeated_blocker_restatement_rejected": True,
+                "no_new_direction_closure": ["watch_lane_expiry"],
+            }
+        },
+    )
+
+    assert payload["replan_novelty_policy"]["repeated_blocker_restatement_rejected"]
+    assert payload["replan_novelty_policy"]["no_new_direction_closure"] == [
+        "watch_lane_expiry"
+    ]

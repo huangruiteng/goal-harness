@@ -588,26 +588,22 @@ def build_autonomous_replan_obligation(
             "run a bounded autonomous replan for the exact blocked successor: "
             "promote one safe in-scope evidence-backed successor when available; "
             "otherwise record a no-spend wait continuation for this frontier"
-            + REPLAN_NOVELTY_GUIDANCE
         )
     elif dead_monitor_evidence:
         recommended_action = (
             "resolve a dead monitor loop: record watch-lane continuation with expiry, "
             "a concrete blocker, todo supersede, or successor runnable todo before "
             "another quiet monitor poll"
-            + REPLAN_NOVELTY_GUIDANCE
         )
     elif any(item.get("kind") in {"periodic_review", "periodic_review_due"} for item in evidence):
         recommended_action = (
             "run a bounded autonomous periodic review: keep, split, add, retire, or ask for "
             "a decision; then update todos and select the next validated slice"
-            + REPLAN_NOVELTY_GUIDANCE
         )
     else:
         recommended_action = (
             "run an autonomous replan after two consecutive stalled turns before another "
             "monitor-only or repeated action consumes the eligible turn"
-            + REPLAN_NOVELTY_GUIDANCE
         )
 
     extra_fields: dict[str, Any] = {}
@@ -706,7 +702,10 @@ def build_autonomous_replan_obligation_payload(
     agent_id: str | None = None,
     include_agent_id: bool = False,
     extra_fields: dict[str, Any] | None = None,
+    include_novelty_guidance: bool = True,
 ) -> dict[str, Any]:
+    if include_novelty_guidance:
+        recommended_action = recommended_action + REPLAN_NOVELTY_GUIDANCE
     payload: dict[str, Any] = {
         "schema_version": schema_version,
         "required": True,
@@ -717,6 +716,16 @@ def build_autonomous_replan_obligation_payload(
         "todo_actions": todo_actions,
         "stop_condition": stop_condition,
         "recommended_action": recommended_action,
+    }
+    payload["replan_novelty_policy"] = {
+        "schema_version": REPLAN_NOVELTY_POLICY_SCHEMA_VERSION,
+        "review_evidence_log": True,
+        "prefer_unattempted_direction": True,
+        "repeated_blocker_restatement_rejected": False,
+        "no_new_direction_closure": [
+            "exploration_exhausted_with_coverage_evidence",
+            "explicit_terminal_blocker_or_no_followup",
+        ],
     }
     if include_agent_id or agent_id is not None:
         payload["agent_id"] = agent_id
