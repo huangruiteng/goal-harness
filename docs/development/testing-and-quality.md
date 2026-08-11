@@ -310,6 +310,19 @@ repository write is allowed. The receipt retains only action kinds and command
 digests. Fake transports validate the tool protocol, real CLI execution seam,
 and negative cases; only a real provider run qualifies model behavior.
 
+The selected-Todo scenario has its own focused real-action entrypoint for
+changes to quota selection, heartbeat instructions, or the shared tool seam:
+
+```bash
+python3 scripts/qualify-doubao-selected-todo-tool-live.py \
+  --qualification-id <public-safe-run-id>
+```
+
+It starts from the same production heartbeat contract, executes real quota,
+and passes only after the model reads the target named by the selected Todo.
+Reading the target before quota, choosing a deferred decoy, describing the
+action without calling the tool, or issuing an unallowlisted command fails.
+
 真实 Doubao 调用是低频本地/手动门，不进入普通 CI。`ARK_API_KEY` 只通过进程环境
 注入；packet、prompt、原始响应、凭证和对话都不能成为仓库证据，只保留有界 receipt
 与 mismatch code。fake transport 只能验证 adapter 的序列化、脱敏与 fail-closed，不能
@@ -327,8 +340,11 @@ evidence-log 命令才算通过。模型看不到测试专用 decision schema、
 receipt 只保留 action kind 与 command digest。
 
 The regular live suite is
-`actual_default_model_behavior_portfolio_v0`: fifteen one-arm scenarios, two
-attempts each, and at most 30 provider calls. Nine core scenarios check normal
+`actual_default_model_behavior_portfolio_v0`: fifteen one-arm scenarios and two
+attempts each. Its selected-Todo case starts from a production thin heartbeat,
+executes real quota, and requires the model to perform the selected Todo's
+read-only target action. The other turn cases remain bounded packet-interpretation
+checks. Nine core scenarios check normal
 onboarding, agent identity and goal selection, selected todo, peer identity
 routing, same-agent continuation, final human gate, healthy continuation, and
 projection repair. Three composition scenarios check vision/monitor/peer replan
@@ -341,16 +357,17 @@ blocking gate versus non-blocking notice and selected work versus required
 vision replan remain distinguishable. Each
 scenario has an independent deterministic source oracle derived before CLI
 projection; every repeat must pass and hard actor errors are not retried. The
-live turn actor consumes the default CLI hot-path
-`quota should-run` projection used by Codex App automation and returns
+remaining live turn actor cases consume the default CLI hot-path
+`quota should-run` projection used by Codex App automation and return
 runtime-facing decisions rather than echoing the testing-only nine-field
-semantic contract.
+semantic contract. The suite has 30 bounded scenario attempts and, after
+accounting for the selected-Todo tool loop, at most 40 provider turns.
 Exact scheduler, vision, writeback, and warning fields stay in deterministic
 action-signature coverage; pair mode keeps TurnEnvelope semantic extraction for
 explicit packet differentials or outcome claims.
 
 常规 live suite 是 `actual_default_model_behavior_portfolio_v0`：15 个 one-arm
-场景，每个重复 2 次，最多 30 次模型调用。9 个核心场景覆盖正常接入、agent 身份与
+场景，每个重复 2 次。9 个核心场景覆盖正常接入、agent 身份与
 goal 选择、selected todo、peer 身份路由、same-agent 续接、最终 human gate、健康继续
 和 projection repair；3 个组合场景覆盖 vision/monitor/peer replan 优先级、非阻塞
 user notice 与 ready successor 并存，以及 capability fallback 转入 monitor schedule
@@ -359,10 +376,13 @@ selected work 和阻塞 gate 在超预算省略诊断下重复运行。4 个 con
 clean/noisy 场景保持不变，同时要求 blocking gate 与 non-blocking notice、selected
 work 与 required vision replan 仍然可区分。每个
 场景都有在 CLI projection 前推导的独立确定性 source oracle，所有重复都必须通过；
-actor 硬错误不自动重试。live turn actor 直接读取 Codex App automation 使用的默认 CLI hot-path
-`quota should-run` projection 并返回运行时决策，不再回显测试专用的九字段 semantic
-contract。scheduler、vision、writeback 与 warning 的精确字段继续由 action-signature
-确定性覆盖；pair 中的 TurnEnvelope 只用于明确的 packet 差分或结果提升声明。
+actor 硬错误不自动重试。selected-Todo 场景从正式 thin heartbeat 开始，执行真实 quota，
+并要求模型实际读取 selected Todo 指向的目标；其他 turn 场景仍直接读取 Codex App
+automation 使用的默认 CLI hot-path `quota should-run` projection 并返回运行时决策，
+因此属于 packet interpretation，而不是工具行为证明。scheduler、vision、writeback 与
+warning 的精确字段继续由 action-signature 确定性覆盖；pair 中的 TurnEnvelope 只用于
+明确的 packet 差分或结果提升声明。全套仍是 30 个有界 scenario attempt；考虑
+selected-Todo 每次最多 6 个 provider turn，最坏上限为 40 个 provider turn。
 
 For onboarding packets, the suite uses the shipped guided packet builder and
 redacts only local absolute path surfaces before provider transport. The
