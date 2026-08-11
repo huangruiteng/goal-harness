@@ -236,25 +236,32 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
         assert profiles["clear_bounded_problem"][
             "may_reuse_current_todo_when_it_already_represents_the_plan"
         ] is True
-        assert "minimum sufficient ordered todo plan" in goal_start["planner"]["budget_policy"]
+        assert "minimum sufficient plan" in goal_start["planner"]["budget_policy"]
         ordering = goal_start["priority_ordering"]
         assert ordering["bucket_order"] == ["P0", "P1", "P2"]
         assert ordering["same_priority_tie_breaker"] == "planner_order_then_todo_write_order"
-        assert "todo index" in ordering["storage_contract"]
+        assert "Todo index is same-priority rank" in ordering["storage_contract"]
 
         commands = payload["commands"]
         assert isinstance(commands, dict)
         plan_prompt = str(commands["goal_start_plan_prompt"])
-        assert "broad or fuzzy product direction uses 2-5" in plan_prompt
-        assert "clear bounded problems use a planner-sized ordered todo plan" in plan_prompt
-        assert "avoid management-only filler" in plan_prompt
-        assert "Every new todo starts with `[P0]`, `[P1]`, or `[P2]`" in plan_prompt
-        assert "Preserve that exact order" in plan_prompt
-        assert "selected_capability_route.capability_id=issue-fix" in plan_prompt
-        assert "never infer it from goal text or URLs" in plan_prompt
-        assert "Run workflow-plan and feasibility before implementation" in plan_prompt
-        assert "admitted successor or no-follow-up" in plan_prompt
-        assert "reconcile PR lifecycle one PR per message" in plan_prompt
+        assert "returned `ordered_steps` + `goal_start_contract` are authoritative" in plan_prompt
+        assert "stable unbound host gets a fresh public-safe agent" in plan_prompt
+        assert "`loopx agent-onboard --list-agent-types`" in plan_prompt
+        assert "only `selected_capability_route`" in plan_prompt
+        assert "`capability show`" in plan_prompt
+        assert "never infer from text/URLs" in plan_prompt
+        assert "broad goal 2-5 public-safe items" in plan_prompt
+        assert "minimum sufficient plan" in plan_prompt
+        assert "no `--priority`" in plan_prompt
+        assert "prefer Agent `advancement_task`" in plan_prompt
+        assert "Write one business Todo before work" in plan_prompt
+        assert "current Todo evidence + next executable Todo" in plan_prompt
+        assert "Chat/model summaries are not durable state" in plan_prompt
+        assert "surface the exact pasteable gate" in plan_prompt
+        assert "typed `quota_guard`" in plan_prompt
+        assert "validation + LoopX writeback or an exact blocker" in plan_prompt
+        assert "need, preview, explicit apply" in plan_prompt
         assert "issue_fix_workflow_plan_template" in commands
         issue_fix_template = str(commands["issue_fix_workflow_plan_template"])
         assert "issue-fix workflow-plan" in issue_fix_template
@@ -303,11 +310,16 @@ def test_goal_text_invocation_plans_ranked_todos_before_activation() -> None:
             "post_pr_reviewer_request_command"
         ]
         assert "pr-lifecycle" in domain_routes["issue_fix_workflow"]["post_pr_monitor_command"]
-        assert "explicit gates" in domain_routes["issue_fix_workflow"]["writeback"]
-        assert "permission-only reviewer comment fallback" in domain_routes[
-            "issue_fix_workflow"
-        ]["writeback"]
-        assert "domain-state" in domain_routes["issue_fix_workflow"]["writeback"]
+        assert (
+            "keep private/external/publish/destructive/production gates"
+            in domain_routes["issue_fix_workflow"]["writeback"]
+        )
+        assert "verify reviewer-request" in domain_routes["issue_fix_workflow"][
+            "writeback"
+        ]
+        assert "monitor one PR state bucket" in domain_routes["issue_fix_workflow"][
+            "writeback"
+        ]
         assert_fixture_unchanged(snapshot)
 
 
