@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = resolve("/tmp", "loopx-frontstage-share-bundle-smoke");
 const privateTrapFixturePath = resolve(repoRoot, "examples/fixtures/frontstage-private-status-trap.public.json");
+const homepagePackagePath = resolve(repoRoot, "apps/presentation/site/package.json");
+const homepageLockfilePath = resolve(repoRoot, "apps/presentation/site/package-lock.json");
 
 function run(command, args, cwd = repoRoot) {
   const result = spawnSync(command, args, {
@@ -74,6 +76,20 @@ async function collectGeneratedTextFiles(rootDir) {
 }
 
 await rm(outDir, { force: true, recursive: true });
+const homepagePackage = JSON.parse(await readFile(homepagePackagePath, "utf8"));
+if (homepagePackage.dependencies?.["@vitejs/plugin-react"]) {
+  throw new Error("@vitejs/plugin-react must stay in homepage devDependencies");
+}
+if (!homepagePackage.devDependencies?.["@vitejs/plugin-react"]) {
+  throw new Error("homepage devDependencies must include @vitejs/plugin-react");
+}
+const homepageLockfile = JSON.parse(await readFile(homepageLockfilePath, "utf8"));
+const nonPublicResolvedUrls = Object.values(homepageLockfile.packages ?? {})
+  .map((entry) => entry?.resolved)
+  .filter((resolved) => typeof resolved === "string" && !resolved.startsWith("https://registry.npmjs.org/"));
+if (nonPublicResolvedUrls.length) {
+  throw new Error(`homepage lockfile contains non-public resolved URLs: ${nonPublicResolvedUrls.join(", ")}`);
+}
 run(process.execPath, [
   resolve(repoRoot, "examples/export-frontstage-share-bundle.mjs"),
   "--out-dir",
