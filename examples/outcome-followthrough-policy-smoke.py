@@ -45,7 +45,14 @@ def assert_hint(
 def main() -> None:
     assert_none(None)
     assert_none({})
-    assert_none({"delivery_outcome": "primary_goal_outcome", "classification": "done"})
+    assert_none(
+        {
+            "delivery_outcome": "primary_goal_outcome",
+            "classification": "done",
+            "todo_task_class": "advancement_task",
+            "todo_action_kind": "deliver_release_candidate",
+        }
+    )
     assert_none(
         {
             "classification": "blocked by owner gate",

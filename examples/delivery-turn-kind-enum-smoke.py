@@ -61,8 +61,31 @@ def assert_inference_still_works_when_kind_is_absent() -> None:
         == DeliveryTurnKind.CONTRACT_ONLY_PREPARATION.value
     )
     assert (
-        delivery_turn_kind_for_run({"delivery_outcome": DeliveryOutcome.PRIMARY_GOAL_OUTCOME.value})
+        delivery_turn_kind_for_run(
+            {
+                "delivery_outcome": DeliveryOutcome.PRIMARY_GOAL_OUTCOME.value,
+                "todo_task_class": "advancement_task",
+                "todo_action_kind": "deliver_release_candidate",
+            }
+        )
         == DeliveryTurnKind.PRODUCT_PATH_EXECUTION.value
+    )
+    assert (
+        delivery_turn_kind_for_run(
+            {
+                "delivery_outcome": DeliveryOutcome.OUTCOME_PROGRESS.value,
+                "classification": "planner_binding_checkpoint",
+                "todo_task_class": "advancement_task",
+                "todo_action_kind": "planner_binding_checkpoint",
+            }
+        )
+        == DeliveryTurnKind.CONTRACT_ONLY_PREPARATION.value
+    )
+    assert (
+        delivery_turn_kind_for_run(
+            {"delivery_outcome": DeliveryOutcome.PRIMARY_GOAL_OUTCOME.value}
+        )
+        == DeliveryTurnKind.OUTCOME_GAP.value
     )
 
 

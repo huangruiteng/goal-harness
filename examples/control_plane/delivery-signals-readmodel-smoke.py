@@ -76,6 +76,24 @@ def assert_delivery_signal_wrapper_parity() -> None:
         assert status_module.delivery_batch_scale_for_run(run) == _projection_scale(run), run
 
     outcome_cases = [
+        (
+            {
+                "delivery_outcome": "outcome_progress",
+                "classification": "implementation_complete",
+                "todo_task_class": "advancement_task",
+                "todo_action_kind": "deliver_player_story",
+            },
+            PROFILE,
+        ),
+        (
+            {
+                "delivery_outcome": "outcome_progress",
+                "classification": "planning_checkpoint",
+                "todo_task_class": "advancement_task",
+                "todo_action_kind": "planning_checkpoint",
+            },
+            PROFILE,
+        ),
         ({"delivery_outcome": "outcome_progress", "classification": "ignored"}, PROFILE),
         ({"delivery_outcome": "future_outcome", "classification": "ignored"}, PROFILE),
         ({"classification": "adapter_validated"}, PROFILE),
@@ -87,8 +105,24 @@ def assert_delivery_signal_wrapper_parity() -> None:
     for run, profile in outcome_cases:
         assert status_module.delivery_outcome_for_run(run, profile) == _projection_outcome(run, profile), run
 
+    assert _projection_outcome(outcome_cases[0][0], PROFILE) == "outcome_progress"
+    assert _projection_outcome(outcome_cases[1][0], PROFILE) == "surface_only"
+    assert _projection_outcome(outcome_cases[2][0], PROFILE) == "outcome_gap"
+    assert (
+        _projection_outcome(
+            {
+                "classification": "implementation_complete",
+                "todo_task_class": "advancement_task",
+                "todo_action_kind": "deliver_player_story",
+            },
+            None,
+        )
+        == "outcome_progress"
+    )
+
     assert status_module.outcome_floor_configured(PROFILE) == _projection_outcome_floor_configured(PROFILE)
     assert status_module.outcome_floor_configured(None) == _projection_outcome_floor_configured(None)
+    assert _projection_outcome_floor_configured(None) is False
 
     runs = [
         {"classification": "needs_real_outcome"},

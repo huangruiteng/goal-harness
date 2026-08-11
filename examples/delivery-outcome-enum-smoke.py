@@ -112,7 +112,7 @@ def assert_refresh_state_enforces_enum(registry_path: Path) -> None:
         dry_run=True,
         sync_global=False,
     )
-    assert payload["delivery_outcome"] == DeliveryOutcome.OUTCOME_PROGRESS.value, payload
+    assert payload["delivery_outcome"] == DeliveryOutcome.OUTCOME_GAP.value, payload
 
     try:
         refresh_state_run(
@@ -192,11 +192,22 @@ def assert_status_uses_enum_not_classification() -> None:
     assert (
         delivery_outcome_for_run(
             {
+                "classification": "implementation_complete",
+                "delivery_outcome": DeliveryOutcome.OUTCOME_PROGRESS.value,
+                "todo_task_class": "advancement_task",
+                "todo_action_kind": "deliver_player_story",
+            }
+        )
+        == DeliveryOutcome.OUTCOME_PROGRESS.value
+    )
+    assert (
+        delivery_outcome_for_run(
+            {
                 "classification": "runner_contract_v0_delivered",
                 "delivery_outcome": DeliveryOutcome.OUTCOME_PROGRESS.value,
             }
         )
-        == DeliveryOutcome.OUTCOME_PROGRESS.value
+        == DeliveryOutcome.SURFACE_ONLY.value
     )
     assert (
         delivery_outcome_for_run(
