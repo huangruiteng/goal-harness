@@ -61,11 +61,15 @@ permissions:
 
 concurrency:
   group: frontstage-pages
-  cancel-in-progress: false
+  # A stalled Pages deployment previously occupied this group for two days and
+  # starved every later run (all queued runs were cancelled). Pages deploys are
+  # quick and idempotent, so a newer run may safely supersede a stale one.
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -167,6 +171,25 @@ jobs:
             --expected-count "$(cat "$RUNNER_TEMP/loopx-stargazers-count")" \
             --output output/frontstage-pages/site/site-assets/star-history.svg
 
+      - name: Verify star history freshness
+        if: github.event_name != 'pull_request'
+        run: |
+          python3 - <<'PY'
+          import datetime as dt
+          from pathlib import Path
+
+          svg_path = Path(
+              "output/frontstage-pages/site/site-assets/star-history.svg"
+          )
+          svg = svg_path.read_text(encoding="utf-8")
+          today = dt.datetime.now(dt.timezone.utc).date()
+          expected = f"updated {today:%b} {today.day}, {today.year}"
+          if expected not in svg:
+              raise SystemExit(
+                  f"stale star history: expected {expected!r} in generated SVG"
+              )
+          PY
+
       - name: Build documentation site
         run: mkdocs build --strict --site-dir output/frontstage-pages/site/docs
 
@@ -195,6 +218,7 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
