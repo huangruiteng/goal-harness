@@ -37,44 +37,41 @@ into a mirror of maintainer scratch state.
 5. If a task is `Maintainer-owned`, do not duplicate the work. Ask whether
    there is a public helper slice instead.
 
-## Current Bottlenecks
+## Project Development Direction
 
-These are the constraints that shape the queue today. Pick work that removes a
-bottleneck or makes it measurable; avoid adding parallel abstractions or a
-second source of truth.
+LoopX is becoming a management surface for long-running agent work: the control
+plane owns verified state transitions, typed settlement, and public evidence,
+while operators and contributors interact through compact read models and
+bounded commands. Pick work that advances one of the directions below; avoid
+parallel abstractions or a second source of truth.
 
-1. **Merge queue is the gating constraint.** Several exact-head PRs are already
-   approved and waiting for maintainer batch merges. Keep PRs small, rebased,
-   and exact-head; contribute review evidence (scope-fit, causal/execution
-   chains, typed receipts) instead of stacking new behavior on top of the queue.
-2. **Turn settlement convergence (#3074).** Fencing remote execution and
-   terminal writeback is under changes-requested review. The convergence asks
-   are: one idempotency identity for journal and settlement, phase vocabulary
-   derived from the typed settlement plan, a read-only replay lens, and
-   lease/fencing behind a handler seam. Contributor slices are the parity
-   fixtures and lens tests below; do not build a competing controller.
-3. **Verified completions (#3082).** A "done" todo can still be a self-reported
-   claim unless someone manually runs the issue-fix validation path. The fix is
-   to make caller-approved `validation_command` a first-class optional field
-   and require a validation receipt before completion writeback commits.
-4. **Output ergonomics and budgets (#2881).** Hot-path CLI payloads run at
-   headroom 0 (`quota_should_run_json` is 12549/12550 chars) and heartbeat
-   prompt differential allowances are tight. Every new field must be
-   budget-aware; make output shorter and more readable without dropping typed
-   machine fields.
-5. **Operator observability (#3085).** The dashboard lacks per-goal
-   token/cost/duration. Build it from existing compact quota/run-history
-   projections; do not create a second ledger.
-6. **Fresh-project onboarding (#3092).** The first `/loopx` run on a fresh
-   project breaks on the guided todo template and `agent-onboard`. The fix is
-   approved; a durable regression fixture is still needed.
-7. **Docs/release timeline.** v0.4.4 is the latest public tag, but
-   `docs/product/release-readiness.md` still stops at v0.2.6. Close the gap
-   from tagged release evidence without duplicating the release checklist.
-8. **Maintainability debt.** The control-plane ratchet tracks
-   `compatibility_facade=2`; hot modules `loopx/quota.py` (1049 lines) and
-   `loopx/status.py` (1392 lines) keep growing. Extract cohesive rule groups
-   into bounded modules, never into generic helper layers.
+1. **From control-plane library to management surface.** Make kernel objects
+   (work items, owners, decisions, evidence, budgets, risk, next actions)
+   legible through dashboards, global manager commands, and showcase
+   walkthroughs. Prefer synthetic, provider-neutral surfaces; public first
+   viewports stay maintainer-preview work.
+2. **Effect Program runtime maturity.** A shared typed Effect Program now
+   drives quota, Turn, and task-lease settlement; the scheduler remains outside
+   settlement. The next milestone (RFC M7) is a verified vertical slice:
+   parity fixtures for partial execution, retry, cancellation, permission
+   denial, budget rejection, and replay mismatch; a read-only replay lens; and
+   a second adapter consuming the same plan/receipt algebra. Only then may a
+   shared executor be extracted, and only if two adapters share execution
+   ownership.
+3. **Verified state transitions.** "done" must mean verified, not claimed:
+   wire caller-approved `validation_command` into self-reported completion
+   (#3082), keep typed receipts for writeback and spend, and make replay
+   safe under lease fencing (#3074).
+4. **Operator observability.** Give operators per-goal token/cost/duration and
+   legible governance (who can act, who must approve, what was spent) from
+   existing compact projections (#3085); do not create a second ledger.
+5. **Contributor and operator experience.** Make first-run onboarding durable
+   (#3092), complete the canonical read-only global command set, keep CLI
+   output budget-aware and readable (#2881), and close the release docs
+   timeline gap.
+6. **Maintainability.** Keep hot modules bounded, ratchet debt low, and smokes
+   deterministic (no wall-clock oracles). Extract cohesive rule groups into
+   bounded modules; never into generic helper layers.
 
 ## Priority Queue
 
@@ -221,7 +218,6 @@ instead of launching private runs or broad product changes.
 
 | ID | Area | Task | Validation |
 | --- | --- | --- | --- |
-| GH-C91 | pr queue | Batch review and merge of the approved exact-head PR queue. Re-verify exact head, scope-fit evidence, causal/execution chains, and CI before each merge; keep agent merges on the owner-authorized cadence. | Per-PR exact-head review packet, CI status, and public/private boundary scan |
 | GH-C72 | workflow runtime | The pure Turn Loop Controller and its fail-closed repair remain maintainer-owned even though host-loop activation, the external worker, Pi, TraeX, and typed settlement are shipped. Do not duplicate the controller. Public helpers may independently review decision-table semantics or propose synthetic malformed-receipt/cross-host fixtures; do not launch hosts, alter scheduler ownership, or weaken validation to make a candidate pass. | Maintainer-run focused controller pytest, LoopX Turn transaction tests, autonomous-replan and bounded monitor no-change smokes, and risk-based premerge canary |
 | GH-C67 | issue-fix | The first operator rendering of `issue_fix_outcome_projection_v0` is an active coordination lane. Do not build a competing case ledger or operator surface. Ask for a synthetic fixture, accessibility, or projection-parity helper slice that keeps provider, sink, and private notification state out. | `python3 examples/issue-fix-outcome-projection-smoke.py`, the selected public surface smoke, and `loopx check --scan-path docs/capabilities/issue-fix --scan-path CONTRIBUTOR_TASKS.md` |
 | GH-C18 | benchmark | Long-horizon benchmark evidence program, including live local no-upload cases, runner contracts, trace retention, score accounting, and good/bad case attribution. Do not duplicate live runs or inspect private artifacts unless maintainers split out a public helper issue. | Maintainer-run benchmark ledger and public/private scan |
