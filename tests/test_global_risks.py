@@ -604,8 +604,8 @@ def test_counts_and_groups_are_computed_before_and_after_limit(
 	assert payload["summary"]["truncated"] is True
 	assert len(payload["risks"]) == 2
 	assert payload["groups"]["stale_runs"] == []
-	assert payload["groups"]["boundary_warnings"] == [payload["risks"][0]]
-	assert payload["groups"]["failing_checks"] == [payload["risks"][1]]
+	assert payload["groups"]["failing_checks"] == [payload["risks"][0]]
+	assert payload["groups"]["boundary_warnings"] == [payload["risks"][1]]
 
 
 @pytest.mark.parametrize("limit", [0, -10])
