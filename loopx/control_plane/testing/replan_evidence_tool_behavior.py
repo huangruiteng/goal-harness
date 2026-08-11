@@ -29,7 +29,6 @@ from .model_tool_behavior import (
     loopx_command_tokens,
 )
 
-
 REPLAN_EVIDENCE_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION = (
     "replan_evidence_tool_behavior_receipt_v0"
 )

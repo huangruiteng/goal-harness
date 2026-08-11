@@ -27,7 +27,6 @@ from .model_tool_behavior import (
     loopx_command_tokens,
 )
 
-
 SELECTED_TODO_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION = (
     "selected_todo_tool_behavior_receipt_v0"
 )

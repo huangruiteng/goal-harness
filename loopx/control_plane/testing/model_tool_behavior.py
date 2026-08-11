@@ -19,7 +19,6 @@ from .doubao_model_behavior_actor import (
     DoubaoActorTransportError,
 )
 
-
 EXEC_COMMAND_TOOL = {
     "type": "function",
     "function": {
@@ -113,7 +112,7 @@ class DoubaoExecToolClient:
             return provider_exec_tool_call(response)
         except DoubaoActorTransportError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 - custom transports may raise any error.
             raise DoubaoActorTransportError(
                 "Doubao tool behavior provider transport failed",
                 error_code="provider_transport_failed",

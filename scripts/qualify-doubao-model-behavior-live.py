@@ -8,7 +8,6 @@ from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 repo_root_text = str(REPO_ROOT)
 if sys.path[0] != repo_root_text:
