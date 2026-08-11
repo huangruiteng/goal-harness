@@ -134,7 +134,7 @@ _SCENARIOS = (
     ),
     _ScenarioSpec(
         "turn_capability_monitor_repair",
-        "turn",
+        "capability_repair_tool",
         None,
         "execute",
         "control_plane_composition",
@@ -755,6 +755,7 @@ def _scenario_contract(
         "turn_tool",
         "replan_tool",
         "scoped_gate_tool",
+        "capability_repair_tool",
     }:
         build_model_behavior_actor_request(
             actor_packet,
@@ -930,7 +931,7 @@ def _scenario_contract(
             raise ValueError(
                 "capability bridge repair must name the missing capability"
             )
-        if "repair or materialize the missing bridge capability" not in str(
+        if "next_cli_actions[0]" not in str(
             action.get("primary_action")
         ):
             raise ValueError(
@@ -1010,6 +1011,7 @@ def _receipt_alignment(
         "turn_tool",
         "replan_tool",
         "scoped_gate_tool",
+        "capability_repair_tool",
     }:
         fields = tuple(expected)
         mismatches = [
@@ -1039,6 +1041,7 @@ def _scenario_result(
     selected_todo_actor: Callable[[str], Mapping[str, Any]],
     replan_evidence_actor: Callable[[str], Mapping[str, Any]],
     scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
+    capability_monitor_repair_actor: Callable[[str], Mapping[str, Any]],
 ) -> tuple[dict[str, Any], bool, list[dict[str, Any]]]:
     receipt_digests: list[str] = []
     observed_routes: list[str] = []
@@ -1064,6 +1067,13 @@ def _scenario_result(
                 observed_route = str(receipt.get("decision") or "")
             elif spec.actor_kind == "scoped_gate_tool":
                 receipt = dict(scoped_gate_successor_actor(run_id))
+                if receipt.get("qualification_passed") is not True:
+                    failure_codes.append(
+                        str(receipt.get("failure_code") or "tool_behavior_failed")
+                    )
+                observed_route = str(receipt.get("decision") or "")
+            elif spec.actor_kind == "capability_repair_tool":
+                receipt = dict(capability_monitor_repair_actor(run_id))
                 if receipt.get("qualification_passed") is not True:
                     failure_codes.append(
                         str(receipt.get("failure_code") or "tool_behavior_failed")
@@ -1178,6 +1188,7 @@ def run_actual_default_model_behavior_portfolio(
     selected_todo_actor: Callable[[str], Mapping[str, Any]],
     replan_evidence_actor: Callable[[str], Mapping[str, Any]],
     scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
+    capability_monitor_repair_actor: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Run the fixed low-frequency one-arm portfolio with bounded receipts."""
     expected_ids = {spec.scenario_id for spec in _SCENARIOS}
@@ -1238,6 +1249,7 @@ def run_actual_default_model_behavior_portfolio(
             selected_todo_actor=selected_todo_actor,
             replan_evidence_actor=replan_evidence_actor,
             scoped_gate_successor_actor=scoped_gate_successor_actor,
+            capability_monitor_repair_actor=capability_monitor_repair_actor,
         )
         actor_call_count += int(result["repeats_completed"])
         if actor_error:

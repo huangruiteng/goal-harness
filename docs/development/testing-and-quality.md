@@ -259,15 +259,17 @@ continues after a healthy onboarding transition, or repairs a known projection
 gap. The composition group also checks decisions where several individually
 reasonable signals conflict: a monitor lane says wait while a vision contract
 requires replan; a user notice remains open while an independent successor must
-run; or capability-blocked advancement yields to monitor-schedule repair. Keep
+run; or capability-blocked advancement requires an agent-owned capability-
+bridge repair before any monitor fallback. Keep
 schema validity, cold-path restoration, exact field presence, and the underlying
 state transition table in deterministic tests.
 
 它适合验证模型是否识别 selected todo、尊重人类门禁、在健康 onboarding transition
 后继续、或识别已知 projection gap。组合场景还会验证多个单独看来都合理、合在一起
 却存在优先级冲突的信号：monitor lane 要求等待但 vision 合同要求 replan；user notice
-仍打开但独立 successor 必须运行；advancement 被 capability 阻塞时应转而修复 monitor
-schedule。schema、冷路径恢复、精确字段存在性和底层状态转移表仍由确定性测试负责。
+仍打开但独立 successor 必须运行；advancement 被 capability 阻塞时，agent 必须先
+执行 capability-bridge repair，不能退回 monitor wait。schema、冷路径恢复、精确字段
+存在性和底层状态转移表仍由确定性测试负责。
 
 Live Doubao calls are a low-frequency local/manual gate, not ordinary CI.
 `ARK_API_KEY` is injected only through the process environment. Packets,
@@ -351,6 +353,24 @@ python3 scripts/qualify-doubao-scoped-gate-successor-tool-live.py \
   --qualification-id <public-safe-run-id>
 ```
 
+Capability-bridge repair is the fourth real tool loop. Its hermetic Goal has a
+capability-blocked advancement Todo and an incomplete monitor fallback. Real
+quota must project `capability_bridge_repair`. The actor sends the shipped task
+body inside the same heartbeat trigger envelope, including its trigger time,
+that the Codex App model normally receives. The default CLI projection keeps
+`interaction_contract` in the action-first prefix rather than after diagnostic
+lanes; the model must then execute the
+projected `todo add --target-capability ... --unblocks-todo-id ...` action, and
+the host reads the new repair Todo back before passing. Waiting on or updating
+the monitor, repairing before quota, or materializing the wrong capability
+fails. Bounded workspace inspection remains available before quota; any
+workspace read after quota is classified as backtracking and fails immediately.
+
+```bash
+python3 scripts/qualify-doubao-capability-monitor-repair-tool-live.py \
+  --qualification-id <public-safe-run-id>
+```
+
 The regular live suite is
 `actual_default_model_behavior_portfolio_v0`: fifteen one-arm scenarios and two
 attempts each. Its selected-Todo case starts from a production thin heartbeat,
@@ -363,7 +383,7 @@ onboarding, agent identity and goal selection, selected todo, peer identity
 routing, same-agent continuation, final human gate, healthy continuation, and
 projection repair. Three composition scenarios check vision/monitor/peer replan
 precedence, non-blocking user notice plus ready-successor execution, and
-capability fallback into monitor-schedule repair. Three compaction scenarios
+capability-bridge repair before monitor fallback. Three compaction scenarios
 check the JSON budget and source-derived semantic parity, then repeat clean
 selected-work and blocking-gate contracts under over-budget omitted diagnostics.
 Four contrast groups require the clean/noisy cases to remain invariant while
@@ -375,7 +395,7 @@ remaining live turn actor cases consume the default CLI hot-path
 `quota should-run` projection used by Codex App automation and return
 runtime-facing decisions rather than echoing the testing-only nine-field
 semantic contract. The suite has 30 bounded scenario attempts and, after
-accounting for all three tool loops, at most 60 provider turns.
+accounting for all four tool loops, at most 70 provider turns.
 Exact scheduler, vision, writeback, and warning fields stay in deterministic
 action-signature coverage; pair mode keeps TurnEnvelope semantic extraction for
 explicit packet differentials or outcome claims.
@@ -384,8 +404,8 @@ explicit packet differentials or outcome claims.
 场景，每个重复 2 次。9 个核心场景覆盖正常接入、agent 身份与
 goal 选择、selected todo、peer 身份路由、same-agent 续接、最终 human gate、健康继续
 和 projection repair；3 个组合场景覆盖 vision/monitor/peer replan 优先级、非阻塞
-user notice 与 ready successor 并存，以及 capability fallback 转入 monitor schedule
-修复；3 个 compaction 场景覆盖 JSON 预算与 source-derived 语义一致，并分别让正常
+user notice 与 ready successor 并存，以及 capability-bridge repair 必须先于 monitor
+fallback；3 个 compaction 场景覆盖 JSON 预算与 source-derived 语义一致，并分别让正常
 selected work 和阻塞 gate 在超预算省略诊断下重复运行。4 个 contrast group 要求
 clean/noisy 场景保持不变，同时要求 blocking gate 与 non-blocking notice、selected
 work 与 required vision replan 仍然可区分。每个
@@ -397,10 +417,12 @@ evidence-log；其他 turn 场景仍直接读取 Codex App
 automation 使用的默认 CLI hot-path `quota should-run` projection 并返回运行时决策，
 scoped-gate successor 场景也从 hermetic Goal 与正式 heartbeat 开始：真实 quota 必须
 同时投影非阻塞 user notice 和 ready deferred successor，模型随后既要呈现提醒，也要
-实际执行被选中的 successor；其他 turn 场景仍属于 packet interpretation。scheduler、vision、writeback 与
+实际执行被选中的 successor；capability repair 场景则要求模型执行 quota 投影的
+repair Todo 写入，host 再读回新 Todo，而非等待 monitor fallback。其他 turn 场景仍属于
+packet interpretation。scheduler、vision、writeback 与
 warning 的精确字段继续由 action-signature 确定性覆盖；pair 中的 TurnEnvelope 只用于
-明确的 packet 差分或结果提升声明。全套仍是 30 个有界 scenario attempt；考虑三个
-工具场景各自每次最多 6 个 provider turn，最坏上限为 60 个 provider turn。
+明确的 packet 差分或结果提升声明。全套仍是 30 个有界 scenario attempt；考虑四个
+真实工具场景各自每次最多 6 个 provider turn，最坏上限为 70 个 provider turn。
 
 For onboarding packets, the suite uses the shipped guided packet builder and
 redacts only local absolute path surfaces before provider transport. The

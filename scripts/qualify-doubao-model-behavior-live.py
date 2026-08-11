@@ -18,6 +18,9 @@ from loopx.control_plane.testing.actual_default_model_behavior_portfolio import 
     build_actual_default_model_behavior_scenario_inputs,
     run_actual_default_model_behavior_portfolio,
 )
+from loopx.control_plane.testing.capability_monitor_repair_tool_behavior import (
+    DoubaoCapabilityMonitorRepairToolBehaviorActor,
+)
 from loopx.control_plane.testing.doubao_model_behavior_actor import (
     DoubaoModelBehaviorActor,
     DoubaoOnboardingModelBehaviorActor,
@@ -73,6 +76,11 @@ def main() -> int:
             timeout_seconds=args.timeout_seconds
         )
     )
+    capability_monitor_repair_actor = (
+        DoubaoCapabilityMonitorRepairToolBehaviorActor.from_environment(
+            timeout_seconds=args.timeout_seconds
+        )
+    )
     with TemporaryDirectory(prefix="loopx-doubao-live-") as temp_dir:
         temp_root = Path(temp_dir)
 
@@ -97,6 +105,13 @@ def main() -> int:
                 fixture_root=temp_root / "scoped-gate-successor" / run_digest,
             )
 
+        def qualify_capability_monitor_repair(run_id: str) -> dict[str, object]:
+            run_digest = sha256(run_id.encode("utf-8")).hexdigest()[:16]
+            return capability_monitor_repair_actor.qualify(
+                qualification_id=run_id,
+                fixture_root=temp_root / "capability-monitor-repair" / run_digest,
+            )
+
         sources, packets = build_actual_default_model_behavior_scenario_inputs(
             temp_root / "portfolio"
         )
@@ -109,6 +124,7 @@ def main() -> int:
             selected_todo_actor=qualify_selected_todo,
             replan_evidence_actor=qualify_replan_evidence,
             scoped_gate_successor_actor=qualify_scoped_gate_successor,
+            capability_monitor_repair_actor=qualify_capability_monitor_repair,
         )
     result["source"] = source
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))

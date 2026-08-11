@@ -246,14 +246,18 @@ stochastic output.
 ## Actual-Default Scenario Portfolio
 
 `actual_default_model_behavior_portfolio_v0` is the regular low-frequency live
-suite. Its selected-Todo, required-vision replan, and scoped-gate successor
-scenarios start from the
-shipped thin Codex App heartbeat task and let the model call the real
-`quota should-run` CLI. The first requires a real read-only action against the
+suite. Its selected-Todo, required-vision replan, scoped-gate successor, and
+capability-bridge repair scenarios start from the shipped thin Codex App
+heartbeat task and let the model call the real `quota should-run` CLI. The
+capability scenario also wraps that task body in the trigger envelope carrying
+the heartbeat time, matching the Codex App input that makes `LOOPX_TURN`
+reusable. The first requires a real read-only action against the
 selected Todo target; the second requires the exact agent-scoped evidence-log
 read projected by a hermetic missing-vision replan state; the third requires a
 post-quota non-blocking user notice followed by the exact ready-successor
-action. The other turn
+action. The fourth requires the quota-projected agent-owned capability-repair
+Todo to be created and read back before the incomplete monitor fallback can
+delay work; any post-quota workspace read fails as action backtracking. The other turn
 scenarios still feed the live actor the same default full quota packet consumed
 by Codex App automation, because their current proof is packet interpretation
 rather than tool execution. Onboarding scenarios use the shipped guided-
@@ -283,8 +287,9 @@ and scheduler paths and deliberately contains competing signals:
     must surface the notice and execute the successor replan rather than treat
     every `user_action_required` value as a blocking gate;
 12. unavailable capability blocks the visible advancement, while an incomplete
-    monitor schedule remains repairable, so the selected and primary action is
-    monitor-schedule repair rather than wait or the blocked task.
+    monitor schedule remains as a fallback, so the agent must execute the
+    quota-projected capability-repair Todo rather than wait on or update the
+    monitor or attempt the blocked task.
 
 Three compaction scenarios exercise the actual default CLI projection:
 
@@ -305,9 +310,10 @@ contracts before projection or provider spend.
 
 Every scenario declares its own deterministic source oracle and runs exactly
 twice. The oracle validates exact source semantics before provider spend. The
-selected-Todo scenario then proves the complete state-to-action path: hermetic
-Goal state, production heartbeat prompt, real quota output, model-selected tool
-action, real readback, and a bounded semantic receipt. The remaining live turn
+four real-tool scenarios then prove their complete state-to-action paths:
+hermetic Goal state, production heartbeat prompt, real quota output, model-
+selected tool action, real readback, and a bounded semantic receipt. The
+remaining live turn
 actor cases read the default full quota packet directly and must preserve the
 runtime-facing decision, selected todo, user gate, execution obligation,
 delivery boundary, quiet-wait rule, and ordered action kinds. They are not asked
@@ -318,17 +324,18 @@ action-signature tests; explicit pair/corpus mode retains TurnEnvelope and
 semantic-contract extraction when a packet differential is the thing under
 test. All attempts must align. Actor or transport errors are not retried
 automatically; the portfolio fails closed and stops further calls. The catalog
-still has 30 bounded scenario attempts. Because each selected-Todo attempt may
-need up to six provider turns, the maximum regular run is 60 provider turns.
+still has 30 bounded scenario attempts. Because each of the four real-tool
+scenario attempts may need up to six provider turns, the maximum regular run
+is 70 provider turns.
 Generic full-versus-candidate pair mode remains available only
 for temporary sensitive differentials or explicit stable-versus-candidate
 outcome claims, not as a permanent regular-behavior baseline.
 
-The selected-Todo, replan evidence-log, and scoped-gate successor gates share
-only proven mechanics:
+The selected-Todo, replan evidence-log, scoped-gate successor, and capability-
+bridge repair gates share only proven mechanics:
 ordinary exec-tool decoding, bounded LoopX argv extraction, and isolated CLI
 execution. Their Goal fixtures, legal action state machines, and semantic
-oracles remain scenario-owned. This keeps three real call sites from copying
+oracles remain scenario-owned. This keeps four real call sites from copying
 transport plumbing without turning unrelated behavior into a parameter-heavy
 generic runner.
 

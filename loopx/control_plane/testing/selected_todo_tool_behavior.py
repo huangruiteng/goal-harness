@@ -257,9 +257,33 @@ def _resolve_metadata_path(
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> Path | None:
-    runtime_marker = "~/.codex/loopx"
     normalized = value.rstrip("/")
-    if normalized == runtime_marker or normalized.startswith(runtime_marker + "/"):
+    candidate = Path(normalized)
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+        fixture_roots = (
+            fixture.project_root.resolve(),
+            fixture.runtime_root.resolve(),
+            fixture.global_registry_path.parents[2].resolve(),
+        )
+        if any(
+            resolved == root or root in resolved.parents for root in fixture_roots
+        ):
+            return resolved
+        return None
+    runtime_marker = next(
+        (
+            marker
+            for marker in (
+                "~/.codex/loopx",
+                "$HOME/.codex/loopx",
+                "${HOME}/.codex/loopx",
+            )
+            if normalized == marker or normalized.startswith(marker + "/")
+        ),
+        None,
+    )
+    if runtime_marker is not None:
         suffix = normalized[len(runtime_marker) :].lstrip("/")
         runtime_root = fixture.global_registry_path.parent.resolve()
         resolved = (runtime_root / suffix).resolve()
@@ -297,13 +321,23 @@ def _metadata_pipeline_step(
     fixture: _SelectedTodoToolFixture,
     operator: str,
 ) -> _ReadStep | None:
-    if segment.count("|") != 1:
+    pipe_indices = [index for index, token in enumerate(segment) if token == "|"]
+    if len(pipe_indices) not in {1, 2}:
         return None
-    pipe_index = segment.index("|")
-    left = segment[:pipe_index]
-    right = segment[pipe_index + 1 :]
+    left = segment[: pipe_indices[0]]
+    right = segment[pipe_indices[-1] + 1 :]
     if len(left) >= 3 and left[-3:] == ["2", ">", "/dev/null"]:
         left = left[:-3]
+    if len(pipe_indices) == 2:
+        middle = segment[pipe_indices[0] + 1 : pipe_indices[1]]
+        if len(middle) >= 3 and middle[-3:] == ["2", ">", "/dev/null"]:
+            middle = middle[:-3]
+        if not (
+            len(middle) == 3
+            and Path(middle[0]).name in {"python", "python3"}
+            and middle[1:] == ["-m", "json.tool"]
+        ):
+            return None
     if len(right) == 2 and Path(right[0]).name == "head":
         limit_token = right[1]
         if not limit_token.startswith("-") or not limit_token[1:].isdigit():
@@ -345,7 +379,8 @@ def _metadata_pipeline_step(
 
 
 def _read_plan_tokens(command: str) -> list[str] | None:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>\n")
+    lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)
@@ -365,11 +400,11 @@ def _read_plan(
     segments: list[list[str]] = [[]]
     operators = [";"]
     for token in tokens:
-        if token in {"&&", "||", ";"}:
+        if token in {"&&", "||", ";", "\n"}:
             if not segments[-1]:
                 return None
             segments.append([])
-            operators.append(token)
+            operators.append(";" if token == "\n" else token)
         elif token == "|":
             segments[-1].append(token)
         elif token in {"&", "<", "<<", ">>", "<<<"}:
@@ -400,6 +435,20 @@ def _read_plan(
         ):
             return None
         executable = Path(segment[0]).name
+        if (
+            executable == "export"
+            and len(segment) == 2
+            and segment[1].startswith("LOOPX_TURN=")
+            and len(segment[1]) <= 160
+        ):
+            plan.append(_ReadStep("metadata", ("true",), operator=operator))
+            continue
+        if executable == "cd" and len(segment) == 2:
+            target = _resolve_metadata_path(segment[1], fixture=fixture)
+            if target != fixture.project_root.resolve():
+                return None
+            plan.append(_ReadStep("metadata", ("true",), operator=operator))
+            continue
         if executable == "pwd" and len(segment) == 1:
             plan.append(_ReadStep("metadata", (executable,), operator=operator))
             continue

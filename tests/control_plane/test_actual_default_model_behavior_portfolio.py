@@ -421,6 +421,24 @@ def _scoped_gate_successor_actor(_: str) -> dict[str, Any]:
     }
 
 
+def _capability_monitor_repair_actor(_: str) -> dict[str, Any]:
+    return {
+        "schema_version": "capability_monitor_repair_tool_behavior_receipt_v0",
+        "qualification_passed": True,
+        "failure_code": None,
+        "decision": "execute",
+        "selected_todo_id": None,
+        "user_action_required": False,
+        "must_attempt_work": True,
+        "delivery_allowed": False,
+        "quiet_noop_allowed": False,
+        "external_write_requested": False,
+        "capability_repair_executed": True,
+        "monitor_fallback_avoided": True,
+        "repair_missing": ["private_read"],
+    }
+
+
 def run_actual_default_model_behavior_portfolio(
     *args: Any,
     **kwargs: Any,
@@ -428,6 +446,10 @@ def run_actual_default_model_behavior_portfolio(
     kwargs.setdefault(
         "scoped_gate_successor_actor",
         _scoped_gate_successor_actor,
+    )
+    kwargs.setdefault(
+        "capability_monitor_repair_actor",
+        _capability_monitor_repair_actor,
     )
     return _run_actual_default_model_behavior_portfolio(*args, **kwargs)
 
@@ -537,7 +559,7 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
     assert capability["interaction_contract"]["mode"] == "capability_bridge_repair"
     assert capability["capability_gate"]["action"] == "repair_bridge"
     assert "private_read" in capability["capability_gate"]["repair_missing"]
-    assert "repair or materialize the missing bridge capability" in (
+    assert "next_cli_actions[0]" in (
         capability_signature["action"]["primary_action"]
     )
     regression_source = build_quota_hot_path_compaction_regression_source()
@@ -1231,27 +1253,24 @@ def test_portfolio_oracle_rejects_treating_non_blocking_notice_as_gate(
 def test_portfolio_oracle_rejects_waiting_on_capability_monitor_repair(
     tmp_path: Path,
 ) -> None:
-    def waiting_actor(request: Mapping[str, Any]) -> dict[str, Any]:
-        result = _turn_actor(request)
-        packet = request["packet"]
-        gate = packet.get("capability_gate") if isinstance(packet, Mapping) else None
-        if isinstance(gate, Mapping) and gate.get("action") == "repair_bridge":
-            result["decision"] = {
-                **result["decision"],
-                "decision": "wait",
-                "intended_action_kinds": ["wait"],
-            }
-        return result
+    def waiting_actor(run_id: str) -> dict[str, Any]:
+        return {
+            **_capability_monitor_repair_actor(run_id),
+            "decision": "wait",
+            "capability_repair_executed": False,
+            "monitor_fallback_avoided": False,
+        }
 
     sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
         packets,
         scenario_sources=sources,
         qualification_id="actual-default-portfolio-capability-monitor-repair",
-        turn_actor=waiting_actor,
+        turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
         replan_evidence_actor=_replan_evidence_actor,
+        capability_monitor_repair_actor=waiting_actor,
     )
 
     scenario = next(
