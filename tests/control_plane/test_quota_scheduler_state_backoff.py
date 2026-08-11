@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Decision-table tests for scheduler stateful-backoff progression rules.
 
 These tests extract the pure, independently verifiable rules from
@@ -9,6 +7,8 @@ implementation output cannot become the oracle.
 Each parametrized table row is a (input, expected_output) pair derived
 from the smoke's documented progression contracts.
 """
+
+from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
