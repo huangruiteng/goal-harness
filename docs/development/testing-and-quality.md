@@ -289,11 +289,12 @@ for the actor and promotion contract.
 
 Replan evidence preflight has a separate function-tool qualification because a
 no-tool JSON decision cannot prove that the model would perform a shell read.
-It gives the live model the shipped thin Codex App heartbeat task body and one
-ordinary `exec_command` function tool. The bounded host loop returns the
-production `quota should-run` fixture only after the model requests that command
-and passes only when the model subsequently calls the exact evidence-log
-command projected by `required_reads[0]`:
+It creates a hermetic public-safe Goal, gives the live model the shipped thin
+Codex App heartbeat task body and one ordinary `exec_command` function tool,
+and runs the model's accepted quota and evidence commands through the real
+LoopX CLI. The bounded host loop passes only when the real `quota should-run`
+result projects one evidence-log read and the model subsequently selects and
+successfully executes that exact command:
 
 ```bash
 python3 scripts/qualify-doubao-replan-evidence-tool-live.py \
@@ -301,11 +302,13 @@ python3 scripts/qualify-doubao-replan-evidence-tool-live.py \
 ```
 
 The model does not receive a testing-only decision schema, required-read index,
-or expected command. Clock and a small set of workspace reads are supported so
-the model can follow the normal heartbeat preflight. No shell command is
-executed, the loop stops at the matching evidence-log intent, and the receipt
-retains only action kinds and command digests. Fake transports validate the
-tool protocol and negative cases; only a real provider run qualifies behavior.
+expected command, or prebuilt quota packet. Clock and a small set of workspace
+reads are supported so the model can follow the normal heartbeat preflight.
+Commands are parsed into a strict allowlist without invoking a shell; quota may
+write only its normal receipt inside the temporary fixture, and no external or
+repository write is allowed. The receipt retains only action kinds and command
+digests. Fake transports validate the tool protocol, real CLI execution seam,
+and negative cases; only a real provider run qualifies model behavior.
 
 真实 Doubao 调用是低频本地/手动门，不进入普通 CI。`ARK_API_KEY` 只通过进程环境
 注入；packet、prompt、原始响应、凭证和对话都不能成为仓库证据，只保留有界 receipt
@@ -314,12 +317,14 @@ tool protocol and negative cases; only a real provider run qualifies behavior.
 非零状态退出。
 
 replan evidence preflight 另有一条 function-tool 行为资格门，因为 no-tool JSON 决策
-不能证明模型真的会发起 shell read。真实模型只看到正式的 thin Codex App heartbeat
-task body 和普通 `exec_command` tool；它先自行请求生产 `quota should-run`，宿主再回送
-正式 fixture，随后只有模型实际调用 `required_reads[0]` 投影的精确 evidence-log 命令
-才算通过。模型看不到测试专用 decision schema、required-read index 或预期命令。
-clock 与少量 workspace read 允许正常 preflight；宿主不执行任何 shell 命令，在匹配
-evidence-log 意图时立即停止，只在 receipt 中保留 action kind 与 command digest。
+不能证明模型真的会发起 shell read。资格门创建一个隔离、public-safe 的临时 Goal；
+真实模型只看到正式的 thin Codex App heartbeat task body 和普通 `exec_command` tool。
+模型选中的 quota 与 evidence 命令会经过严格 allowlist 后进入真实 LoopX CLI；只有真实
+`quota should-run` 投影出一条 required read，且模型随后选中并成功执行该精确
+evidence-log 命令才算通过。模型看不到测试专用 decision schema、required-read index、
+预期命令或预制 quota packet。clock 与少量 workspace read 允许正常 preflight；
+不调用 shell，quota 的正常 receipt 只写入临时 fixture，仓库与外部系统均不写入，最终
+receipt 只保留 action kind 与 command digest。
 
 The regular live suite is
 `actual_default_model_behavior_portfolio_v0`: fifteen one-arm scenarios, two

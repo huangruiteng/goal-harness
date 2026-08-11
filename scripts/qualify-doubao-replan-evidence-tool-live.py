@@ -24,8 +24,9 @@ from loopx.control_plane.testing.replan_evidence_tool_behavior import (  # noqa:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run one production-prompt Doubao function-tool loop and verify "
-            "that replan selects the projected evidence-log read."
+            "Run one production-prompt Doubao function-tool loop against a "
+            "hermetic real LoopX goal and verify that replan selects and "
+            "executes the projected evidence-log read."
         )
     )
     parser.add_argument("--qualification-id", required=True)

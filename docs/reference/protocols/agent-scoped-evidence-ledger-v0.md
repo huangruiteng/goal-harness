@@ -184,12 +184,15 @@ as an unused packet field.
 
 The live behavior qualification tests that causal handoff through an actual
 function-tool conversation rather than a testing-only output field. A Doubao
-actor receives the shipped Codex App heartbeat body, chooses the quota command,
-receives the production replan packet, and must then call the exact evidence-log
-command from that packet. Prose such as "read the log next", a generic read
-action, a command for another agent, or an evidence-log call made before quota
-does not pass. The harness stops before executing the evidence command and
-stores only bounded command digests.
+actor receives the shipped Codex App heartbeat body and chooses the quota
+command against a hermetic public-safe Goal. The harness runs that command
+through the real LoopX CLI, returns its actual replan packet, and requires the
+actor to call the exact evidence-log command from that packet. The evidence
+command is also executed through the real read-only CLI and its goal/agent
+readback is checked before the run passes. Prose such as "read the log next", a
+generic read action, a command for another agent, or an evidence-log call made
+before quota does not pass. Only temporary fixture state may change, and the
+receipt stores bounded command digests rather than prompts, packets, or output.
 
 ## Privacy Boundary
 

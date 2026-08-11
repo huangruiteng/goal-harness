@@ -42,14 +42,8 @@ def test_real_tool_loop_observes_production_evidence_log_intent(
     requests: list[dict[str, Any]] = []
     commands = [
         "date -Iseconds",
-        (
-            "export LOOPX_TURN=2026-08-12T00:00:00+08:00 && "
-            'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" '
-            "quota should-run --goal-id portfolio-goal --agent-id codex-portfolio "
-            "--available-capability shell --available-capability filesystem_read "
-            "--available-capability filesystem_write --codex-app "
-            '--turn-instance-id "${LOOPX_TURN:?}"'
-        ),
+        "export LOOPX_TURN=2026-08-12T00:00:00+08:00 && "
+        + fixture.quota_guard_command,
         fixture.required_evidence_command,
     ]
 
@@ -84,9 +78,11 @@ def test_real_tool_loop_observes_production_evidence_log_intent(
         "raw_prompt_persisted": False,
         "raw_provider_response_persisted": False,
         "raw_command_persisted": False,
-        "filesystem_writes_executed": False,
+        "filesystem_writes_executed": True,
+        "writes_limited_to_temporary_fixture": True,
         "external_writes_executed": False,
         "shell_commands_executed": False,
+        "read_only_host_commands_executed": True,
     }
     assert fixture.required_evidence_command not in json.dumps(receipt, sort_keys=True)
 
@@ -113,7 +109,29 @@ def test_real_tool_loop_observes_production_evidence_log_intent(
         "content": "2026-08-12T00:00:00+08:00\n",
     }
     quota_result = json.loads(requests[2]["messages"][-1]["content"])
-    assert quota_result == fixture.quota_packet
+    assert quota_result["decision"] == "autonomous_replan_required"
+    assert quota_result["effective_action"] == "autonomous_replan_required"
+    assert quota_result["required_reads"] == [
+        quota_result["interaction_contract"]["agent_channel"]["required_reads"][0]
+    ]
+    assert quota_result["required_reads"][0]["command"] == (
+        fixture.required_evidence_command
+    )
+    rollout_path = (
+        tmp_path
+        / "actor"
+        / "runtime"
+        / "goals"
+        / "replan-evidence-live-fixture"
+        / "rollout-event-log.jsonl"
+    )
+    rollout_events = [
+        json.loads(line)
+        for line in rollout_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert rollout_events[-1]["event_kind"] == "quota_should_run"
+    assert rollout_events[-1]["agent_id"] == "codex-replan-evidence"
 
 
 def test_tool_loop_rejects_evidence_log_before_quota(tmp_path: Path) -> None:
@@ -139,11 +157,7 @@ def test_tool_loop_accepts_the_real_host_utc_clock_shape(tmp_path: Path) -> None
     fixture = _build_fixture(tmp_path / "oracle")
     commands = [
         'date -u +"%Y-%m-%dT%H:%M:%SZ"',
-        (
-            "loopx quota should-run --goal-id portfolio-goal "
-            "--agent-id codex-portfolio --codex-app "
-            "--turn-instance-id turn-001"
-        ),
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
         fixture.required_evidence_command,
     ]
     requests: list[dict[str, Any]] = []
@@ -171,11 +185,7 @@ def test_tool_loop_allows_distinct_normal_workspace_preflight_reads(
     commands = [
         "pwd",
         "git status --short --branch",
-        (
-            "loopx quota should-run --goal-id portfolio-goal "
-            "--agent-id codex-portfolio --codex-app "
-            "--turn-instance-id turn-001"
-        ),
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
         fixture.required_evidence_command,
     ]
     call_count = 0
@@ -208,16 +218,14 @@ def test_tool_loop_rejects_generic_or_wrong_evidence_read(tmp_path: Path) -> Non
     responses = [
         _tool_response(
             "call-1",
-            (
-                "loopx quota should-run --goal-id portfolio-goal "
-                "--agent-id codex-portfolio --codex-app "
-                "--turn-instance-id turn-001"
+            fixture.quota_guard_command.replace(
+                '"${LOOPX_TURN:?}"', "turn-001"
             ),
         ),
         _tool_response(
             "call-2",
             (
-                "loopx --format json evidence-log --goal-id portfolio-goal "
+                "loopx --format json evidence-log --goal-id replan-evidence-live-fixture "
                 "--agent-id another-agent --thin --limit 24"
             ),
         ),
