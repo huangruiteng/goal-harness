@@ -260,11 +260,11 @@ def _read_plan(
         tokens = shlex.split(command)
     except ValueError:
         return None
-    if not tokens or any(token in {";", "||", "|", ">", ">>"} for token in tokens):
+    if not tokens or any(token in {"||", "|", ">", ">>"} for token in tokens):
         return None
     segments: list[list[str]] = [[]]
     for token in tokens:
-        if token == "&&":
+        if token in {"&&", ";"}:
             if not segments[-1]:
                 return None
             segments.append([])
@@ -326,6 +326,53 @@ def _read_plan(
     return plan
 
 
+def _discovery_argv(
+    command: str,
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> list[str] | None:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    if not tokens or any(
+        token in {";", "&&", "||", "|", ">", ">>"} for token in tokens
+    ):
+        return None
+    executable = Path(tokens[0]).name
+    if executable == "rg":
+        if len(tokens) not in {2, 3} or tokens[1] != "--files":
+            return None
+        if len(tokens) == 3 and _resolve_project_path(
+            tokens[2], fixture=fixture
+        ) is None:
+            return None
+        return tokens
+    if executable != "find" or len(tokens) < 2:
+        return None
+    if _resolve_project_path(tokens[1], fixture=fixture) is None:
+        return None
+    index = 2
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "-print":
+            index += 1
+            continue
+        if token == "-maxdepth" and index + 1 < len(tokens):
+            depth = tokens[index + 1]
+            if not depth.isdigit() or int(depth) > 4:
+                return None
+            index += 2
+            continue
+        if token == "-type" and index + 1 < len(tokens):
+            if tokens[index + 1] not in {"d", "f"}:
+                return None
+            index += 2
+            continue
+        return None
+    return tokens
+
+
 def _execute_selected_read(
     command: str,
     *,
@@ -372,8 +419,9 @@ def _execute_workspace_read(
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> str:
+    argv = _discovery_argv(command, fixture=fixture) or shlex.split(command)
     completed = subprocess.run(
-        shlex.split(command),
+        argv,
         cwd=fixture.project_root,
         check=False,
         capture_output=True,
@@ -399,6 +447,8 @@ def _classify_tool_command(
     if clock_output is not None:
         return "clock", clock_output
     if command in _READ_ONLY_PREFLIGHT_COMMANDS:
+        return "workspace_read", None
+    if _discovery_argv(command, fixture=fixture) is not None:
         return "workspace_read", None
     plan = _read_plan(command, fixture=fixture)
     if plan is not None:

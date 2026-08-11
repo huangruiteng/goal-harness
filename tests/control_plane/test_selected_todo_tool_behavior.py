@@ -124,6 +124,39 @@ def test_tool_loop_rejects_selected_action_before_quota(tmp_path: Path) -> None:
     assert receipt["observed_tool_sequence"] == ["selected_action_before_quota"]
 
 
+def test_tool_loop_allows_bounded_file_discovery_before_selected_action(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        "find fixture -maxdepth 2 -type f -print",
+        "cat fixture/selected-lane.json",
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-bounded-discovery",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "workspace_read",
+        "selected_action",
+    ]
+
+
 def test_tool_loop_rejects_action_for_deferred_decoy(tmp_path: Path) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
     commands = [
