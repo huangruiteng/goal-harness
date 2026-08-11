@@ -6,7 +6,6 @@ GOAL_TERMINAL_STATE_SCHEMA_VERSION = "goal_terminal_state_v0"
 GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION = "goal_terminal_source_completeness_v0"
 VISION_CHECKPOINT_NO_FOLLOWUP_RESOLUTION = "record_no_followup"
 
-
 def _strict_zero(value: Any) -> bool:
     return type(value) is int and value == 0
 
@@ -31,17 +30,18 @@ def _terminal_todo_source_state(
     total = summary.get("total_count")
     done = summary.get("done_count")
     deferred = summary.get("deferred_count")
+    watch_only = summary.get("watch_only_monitor_count", 0)
     if not (
         type(total) is int
         and total >= 0
         and type(done) is int
-        and done == total
-        and _strict_zero(summary.get("open_count"))
+        and type(watch_only) is int
+        and watch_only >= 0
+        and done + watch_only == total
+        and _strict_zero(summary.get("convergence_open_count", summary.get("open_count")))
         and _strict_zero(deferred)
-        and _strict_zero(summary.get("monitor_due_count"))
-        and _strict_zero(summary.get("monitor_schedule_gap_count"))
         and isinstance(summary.get("monitor_open_items"), list)
-        and not summary.get("monitor_open_items")
+        and len(summary.get("monitor_open_items")) == watch_only
     ):
         return "invalid", False
     intent = summary.get("closure_intent")

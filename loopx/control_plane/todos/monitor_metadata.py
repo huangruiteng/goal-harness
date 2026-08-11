@@ -4,7 +4,11 @@ import re
 from typing import Any
 
 from ..runtime.time import parse_timestamp
-from .contract import TODO_MONITOR_METADATA_FIELDS
+from .contract import (
+    TODO_MONITOR_METADATA_FIELDS,
+    TODO_TASK_CLASS_MONITOR,
+    normalize_todo_watch_only,
+)
 
 
 MONITOR_CADENCE_PATTERN = re.compile(
@@ -37,7 +41,32 @@ def normalize_monitor_metadata(metadata: dict[str, Any] | None) -> dict[str, str
             raise ValueError("--consecutive-no-change must be an integer") from exc
     if "material_change" in normalized and normalized["material_change"] not in {"true", "false"}:
         raise ValueError("--material-change metadata must be true or false")
+    if "watch_only" in normalized and normalize_todo_watch_only(
+        normalized["watch_only"]
+    ) is None:
+        raise ValueError("--watch-only metadata must be true or false")
     return normalized
+
+
+def require_continuous_monitor_boundedness(
+    *,
+    task_class: str | None,
+    resume_when: str | None,
+    monitor_metadata: dict[str, Any] | None,
+) -> None:
+    if task_class != TODO_TASK_CLASS_MONITOR:
+        return
+    metadata = monitor_metadata or {}
+    if (
+        str(metadata.get("expires_at") or "").strip()
+        or str(resume_when or "").strip()
+        or normalize_todo_watch_only(metadata.get("watch_only")) is True
+    ):
+        return
+    raise ValueError(
+        "continuous_monitor requires one of: --expires-at, --resume-when, "
+        "or --watch-only"
+    )
 
 
 def require_monitor_metadata_scope(

@@ -11,6 +11,8 @@ from ...agents.agent_scope import (
 )
 from ...agents.profile import agent_profile_requires_vision
 from ...agents.runtime_model import peer_work_key, select_peer_for_work
+from ...runtime.time import parse_timestamp
+from ...todos.projection import todo_item_is_watch_only_monitor
 from ...work_items.autonomous_replan_ack import (
     autonomous_replan_ack_matches_agent,
     autonomous_replan_ack_matches_frontier,
@@ -45,6 +47,7 @@ from .semantic_history import (
     latest_agent_vision_from_status_payload,
     latest_autonomous_replan_ack_from_status_payload,
     latest_missing_vision_checkpoint_from_status_payload,
+    latest_replan_ack_feedback_from_status_payload,
 )
 from .terminal import (
     GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION,  # noqa: F401
@@ -853,6 +856,20 @@ def _summary_task_counts(summary: dict[str, Any] | None) -> dict[str, int]:
         return {"open": open_count, "advancement": 0, "monitor": 0, "monitor_due": 0}
     executable = summary.get("executable_backlog_items")
     monitor_open = summary.get("monitor_open_items")
+    watch_only_count = (
+        len(
+            [
+                item
+                for item in monitor_open
+                if isinstance(item, dict)
+                and _todo_item_is_actionable_open(item)
+                and todo_item_is_watch_only_monitor(item)
+            ]
+        )
+        if isinstance(monitor_open, list)
+        else safe_non_negative_int(summary.get("watch_only_monitor_count"))
+    )
+    open_count = max(0, open_count - watch_only_count)
     advancement_count = (
         _count_advancement_items(executable)
         if isinstance(executable, list)
@@ -874,6 +891,7 @@ def _summary_task_counts(summary: dict[str, Any] | None) -> dict[str, int]:
                 if isinstance(item, dict)
                 and _todo_item_is_actionable_open(item)
                 and _todo_task_class(item) == TODO_TASK_CLASS_MONITOR
+                and not todo_item_is_watch_only_monitor(item)
             ]
         )
         if isinstance(monitor_open, list)
@@ -883,7 +901,11 @@ def _summary_task_counts(summary: dict[str, Any] | None) -> dict[str, int]:
         "open": open_count,
         "advancement": advancement_count,
         "monitor": monitor_count,
-        "monitor_due": safe_non_negative_int(summary.get("monitor_due_count")),
+        "monitor_due": max(
+            0,
+            safe_non_negative_int(summary.get("monitor_due_count"))
+            - safe_non_negative_int(summary.get("watch_only_monitor_due_count")),
+        ),
     }
 
 
@@ -905,6 +927,8 @@ def _monitor_no_change_streak_trigger(
         if not _todo_item_is_actionable_open(item):
             continue
         if _todo_task_class(item) != TODO_TASK_CLASS_MONITOR:
+            continue
+        if todo_item_is_watch_only_monitor(item):
             continue
         claimed_by = agent_scope_item_claimed_by(item)
         if agent_id and claimed_by != agent_id:
@@ -1679,6 +1703,17 @@ def build_goal_frontier_projection_context_from_status(
         agent_id=agent_id,
         neutral_classifications=neutral_replan_ack_classifications,
     )
+    latest_replan_ack_feedback = latest_replan_ack_feedback_from_status_payload(
+        status_payload,
+        goal_id=goal_id,
+        agent_id=agent_id,
+    )
+    ack_time = parse_timestamp((latest_agent_replan_ack or {}).get("generated_at"))
+    feedback_time = parse_timestamp(
+        (latest_replan_ack_feedback or {}).get("generated_at")
+    )
+    if ack_time is not None and feedback_time is not None and ack_time >= feedback_time:
+        latest_replan_ack_feedback = None
     latest_agent_vision = latest_agent_vision_from_status_payload(
         status_payload,
         goal_id=goal_id,
@@ -1822,6 +1857,21 @@ def build_goal_frontier_projection_context_from_status(
             registered_agent_ids=registered_agent_ids,
         )
 
+    if replan_obligation and latest_replan_ack_feedback:
+        replan_obligation = dict(replan_obligation)
+        replan_obligation["replan_ack_feedback"] = latest_replan_ack_feedback
+        claims = latest_replan_ack_feedback.get("rejected_claims") or []
+        first_claim = next(
+            (item for item in claims if isinstance(item, dict)),
+            None,
+        )
+        if first_claim:
+            replan_obligation["recommended_action"] = (
+                "previous replan ACK was rejected: "
+                f"{first_claim.get('kind')}: {first_claim.get('reason')}; "
+                + str(replan_obligation.get("recommended_action") or "replan again")
+            )
+
     goal_frontier_projection = build_goal_frontier_projection_from_summaries(
         goal_id=goal_id,
         agent_id=agent_id,
@@ -1856,6 +1906,9 @@ def compact_replan_obligation(replan_obligation: dict[str, Any]) -> dict[str, An
         compact["agent_todo_writeback_required"] = True
     if replan_obligation.get("frontier_identity"):
         compact["frontier_identity"] = replan_obligation.get("frontier_identity")
+    if isinstance(replan_obligation.get("replan_ack_feedback"), dict):
+        compact["replan_ack_feedback"] = replan_obligation["replan_ack_feedback"]
+        compact["recommended_action"] = replan_obligation.get("recommended_action")
     return compact
 
 

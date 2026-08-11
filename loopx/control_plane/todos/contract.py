@@ -49,7 +49,16 @@ TODO_MONITOR_METADATA_FIELDS = (
     "consecutive_no_change",
     "material_change",
     "max_no_change_before_replan",
+    "watch_only",
 )
+
+
+def normalize_todo_watch_only(value: Any) -> bool | None:
+    if value is True or str(value or "").strip().lower() == "true":
+        return True
+    if value is False or str(value or "").strip().lower() == "false":
+        return False
+    return None
 
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
 TODO_TASK_CLASS_MONITOR = "continuous_monitor"
@@ -1212,6 +1221,7 @@ def format_todo_metadata_line(
     consecutive_no_change: str | None = None,
     material_change: str | None = None,
     max_no_change_before_replan: str | None = None,
+    watch_only: str | None = None,
     note: str | None = None,
     evidence: str | None = None,
     completion_turn_key: str | None = None,

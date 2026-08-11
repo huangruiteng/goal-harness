@@ -65,6 +65,33 @@ def compact_autonomous_replan_ack(run: dict[str, Any] | None) -> dict[str, Any] 
         )
     if watch_evidence:
         compact_delta["auto_evidence"] = watch_evidence
+    stall_evidence = next(
+        (
+            item
+            for item in (delta_contract.get("auto_evidence") or [])
+            if isinstance(item, dict)
+            and item.get("kind") == "blocker"
+            and str(item.get("stall_fingerprint") or "").strip()
+        ),
+        None,
+    )
+    if stall_evidence:
+        compact_delta.setdefault("auto_evidence", []).append(
+            {
+                key: stall_evidence[key]
+                for key in (
+                    "kind",
+                    "todo_ids",
+                    "stall_fingerprint",
+                    "selected_todo_id",
+                    "blocker_todo_id",
+                    "evidence_hash",
+                    "runnable_todo_ids",
+                    "direction_signatures",
+                )
+                if key in stall_evidence
+            }
+        )
     result = {
         "schema_version": ack.get("schema_version"),
         "recorded": True,

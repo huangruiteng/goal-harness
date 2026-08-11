@@ -21,7 +21,6 @@ from .control_plane.todos.contract import (
     TODO_STATUS_DEFERRED,
     TODO_STATUS_DONE,
     TODO_STATUS_OPEN,
-    TODO_TASK_CLASS_MONITOR,
     TODO_TASK_CLASS_USER_GATE,
     build_todo_id,
     format_todo_metadata_line,
@@ -86,7 +85,7 @@ from .control_plane.todos.list_projection import (
     compact_todo_projection_overlay,
     todo_list_projection_contract,
 )
-from .control_plane.todos.monitor_metadata import require_monitor_metadata_scope
+from .control_plane.todos import monitor_metadata as todo_monitor_metadata
 from .control_plane.todos.mutation_authority import authorize_todo_lifecycle_mutation, todo_update_authority_action
 from .control_plane.todos.todo_summary import compact_todo_group, normalize_todo_text
 from .control_plane.todos.succession_warning import build_open_parent_successor_advisory
@@ -647,7 +646,7 @@ def add_todo_to_lines(
     if status and not normalized_status:
         raise ValueError("todo status must be one of: open, done, blocked, deferred")
     normalized_resume_when = require_supported_todo_resume_when(resume_when)
-    normalized_monitor_metadata = require_monitor_metadata_scope(
+    normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
         monitor_metadata=monitor_metadata,
         role=role,
         task_class=task_class,
@@ -844,6 +843,7 @@ def add_todo_to_lines(
         "cadence": effective_metadata.get("cadence"),
         "next_due_at": effective_metadata.get("next_due_at"),
         "expires_at": effective_metadata.get("expires_at"),
+        "watch_only": effective_metadata.get("watch_only"),
         "evidence": effective_metadata.get("evidence") or evidence,
         "updated_at": effective_metadata.get("updated_at") or updated_at,
     }
@@ -1015,17 +1015,17 @@ def add_goal_todo(
         if unblocks_todo_id and not normalized_unblocks_todo_id:
             raise ValueError("unblocks_todo_id must use the public token shape todo_<letters-digits-underscore-hyphen>")
         normalized_resume_when = require_supported_todo_resume_when(resume_when)
-        if task_class == TODO_TASK_CLASS_MONITOR and normalized_resume_when:
-            raise ValueError(
-                "continuous_monitor todos cannot use resume_when; use target_key, "
-                "cadence, and next_due_at so the monitor can observe the transition"
-            )
         if normalized_status == TODO_STATUS_DEFERRED and not normalized_resume_when:
             raise ValueError("deferred todo add requires --resume-when with a supported condition")
-        normalized_monitor_metadata = require_monitor_metadata_scope(
+        normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
             monitor_metadata=monitor_metadata,
             role=role,
             task_class=task_class,
+        )
+        todo_monitor_metadata.require_continuous_monitor_boundedness(
+            task_class=task_class,
+            resume_when=normalized_resume_when,
+            monitor_metadata=normalized_monitor_metadata,
         )
         add_result = add_todo_to_lines(
             lines,
@@ -1104,6 +1104,7 @@ def add_goal_todo(
         "cadence": add_result.get("cadence"),
         "next_due_at": add_result.get("next_due_at"),
         "expires_at": add_result.get("expires_at"),
+        "watch_only": add_result.get("watch_only"),
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
@@ -1170,6 +1171,7 @@ def update_goal_todo(
     clear_resume_when: bool = False,
     no_followup: bool | None = None,
     monitor_metadata: dict[str, Any] | None = None,
+    enforce_monitor_boundedness: bool = True,
     clear_claim: bool = False,
     claim_only: bool = False,
     project: Path | None = None,
@@ -1399,26 +1401,28 @@ def update_goal_todo(
             else normalized_resume_when
             or normalize_supported_todo_resume_when(existing_block.get("resume_when"))
         )
-        if target_task_class == TODO_TASK_CLASS_MONITOR and normalized_resume_when:
-            raise ValueError(
-                "continuous_monitor todos cannot use resume_when; use target_key, "
-                "cadence, and next_due_at so the monitor can observe the transition"
-            )
-        if (
-            task_class == TODO_TASK_CLASS_MONITOR
-            and effective_resume_when
-            and not clear_resume_when
-        ):
-            raise ValueError(
-                "moving a todo to continuous_monitor requires --clear-resume-when"
-            )
         if target_status == TODO_STATUS_DEFERRED and not effective_resume_when:
             raise ValueError("transition to deferred requires --resume-when with a supported condition")
-        normalized_monitor_metadata = require_monitor_metadata_scope(
+        normalized_monitor_metadata = todo_monitor_metadata.require_monitor_metadata_scope(
             monitor_metadata=monitor_metadata,
             role=target_role,
             task_class=target_task_class,
         )
+        effective_monitor_metadata = {
+            key: existing_block.get(key)
+            for key in (
+                "expires_at",
+                "watch_only",
+            )
+            if existing_block.get(key) is not None
+        }
+        effective_monitor_metadata.update(normalized_monitor_metadata)
+        if enforce_monitor_boundedness:
+            todo_monitor_metadata.require_continuous_monitor_boundedness(
+                task_class=target_task_class,
+                resume_when=effective_resume_when,
+                monitor_metadata=effective_monitor_metadata,
+            )
         update_result = apply_todo_update_to_lines(
             lines,
             todo_id=todo_id,

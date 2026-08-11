@@ -26,11 +26,11 @@ from .control_plane.quota.settlement import (
     settlement_result_payload,
 )
 from .control_plane.work_items.repair_delta import (
+    REPAIR_DELTA_CONTRACT_SCHEMA_VERSION as REPAIR_DELTA_CONTRACT_SCHEMA_VERSION,
     REPAIR_DELTA_KIND_CHOICES as REPAIR_DELTA_KIND_CHOICES,
+    build_repair_delta_contract,
     normalize_repair_delta_kinds,
     repair_delta_kinds_have_accountable_progress,
-    repair_delta_kinds_have_frontier_delta,
-    validate_repair_delta_claims,
 )
 from .control_plane.work_items.autonomous_replan_ack import (
     latest_monitor_replan_frontier_identity,
@@ -60,7 +60,6 @@ from .control_plane.goals.goal_frontier import latest_agent_vision_from_runs
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
 from .state_projection import state_projection_gap_warning
-from .control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from .control_plane.todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
@@ -68,6 +67,7 @@ from .control_plane.todos.contract import (
     TODO_TASK_CLASS_USER_GATE,
     normalize_todo_claimed_by,
 )
+from .control_plane.todos.active_state_todo_parser import parse_active_state_todos
 
 DEFAULT_REFRESH_CLASSIFICATION = "state_refreshed"
 DEFAULT_REFRESH_ACTION = "inspect refreshed active goal state and continue the next bounded progress segment"
@@ -82,7 +82,6 @@ RECOMMENDED_ACTION_SECTION_LINE_LIMIT = 16
 BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 CHECKBOX_PREFIX_RE = re.compile(r"^\[(?P<mark>[ xX])\]\s+")
 ACTIVE_STATE_NEXT_ACTION_UPDATE_SCHEMA_VERSION = "active_state_next_action_update_v0"
-REPAIR_DELTA_CONTRACT_SCHEMA_VERSION = "repair_delta_contract_v0"
 REPAIR_NOOP_SCHEMA_VERSION = "repair_noop_v0"
 VISION_CHECKPOINT_SCHEMA_VERSION = "vision_checkpoint_v0"
 VISION_CHECKPOINT_MATERIAL_OUTCOMES = {
@@ -196,85 +195,6 @@ def _noop_classification_for(classification: str) -> str:
     if "repair" in normalized and "replan" not in normalized:
         return "repair_noop"
     return "replan_noop"
-
-
-def build_repair_delta_contract(
-    *,
-    requested_delta_kinds: list[str],
-    active_state_next_action_update: dict[str, Any] | None,
-    agent_vision: dict[str, Any] | None,
-    existing_agent_vision: dict[str, Any] | None,
-    state_text: str,
-    agent_id: str | None,
-    dry_run: bool,
-) -> dict[str, Any]:
-    update = active_state_next_action_update or {}
-    todo_fields = parse_active_state_todos(state_text, item_limit=None)
-    effective_vision = agent_vision or existing_agent_vision or {}
-    vision_patch = (
-        effective_vision.get("vision_patch")
-        if isinstance(effective_vision.get("vision_patch"), dict)
-        else {}
-    )
-    delta_kinds, evidence, rejected_claims = validate_repair_delta_claims(
-        requested_delta_kinds,
-        agent_todo_summary=(
-            todo_fields.get("agent_todos")
-            if isinstance(todo_fields.get("agent_todos"), dict)
-            else None
-        ),
-        agent_id=agent_id,
-        advancement_policy=str(vision_patch.get("advancement_policy") or "").strip(),
-        next_action_changed=bool(update.get("would_update")),
-        vision_patch_written=agent_vision is not None,
-    )
-    if update.get("updated") is True:
-        if "active_state_next_action" not in delta_kinds:
-            delta_kinds.append("active_state_next_action")
-        evidence.append(
-            {
-                "kind": "active_state_next_action",
-                "source": "refresh_state_next_action_update",
-                "updated": True,
-            }
-        )
-    elif update.get("would_update") is True:
-        evidence.append(
-            {
-                "kind": "active_state_next_action",
-                "source": "refresh_state_next_action_update",
-                "would_update": True,
-                "dry_run": bool(dry_run),
-            }
-        )
-    if agent_vision:
-        if "goal_vision_patch" not in delta_kinds:
-            delta_kinds.append("goal_vision_patch")
-        evidence.append(
-            {
-                "kind": "goal_vision_patch",
-                "source": "refresh_state_agent_vision",
-                "state": agent_vision.get("state"),
-                "agent_id": agent_vision.get("agent_id"),
-                "budget_status": (
-                    agent_vision.get("vision_budget", {}).get("status")
-                    if isinstance(agent_vision.get("vision_budget"), dict)
-                    else None
-                ),
-            }
-        )
-
-    contract = {
-        "schema_version": REPAIR_DELTA_CONTRACT_SCHEMA_VERSION,
-        "required": True,
-        "delta_present": repair_delta_kinds_have_frontier_delta(delta_kinds),
-        "delta_kinds": delta_kinds,
-        "auto_evidence": evidence,
-        "accepted_without_delta": False,
-    }
-    if rejected_claims:
-        contract["rejected_claims"] = rejected_claims
-    return contract
 
 
 def build_vision_checkpoint(
@@ -1216,9 +1136,15 @@ def refresh_state_run(
             active_state_next_action_update=active_state_next_action_update,
             agent_vision=agent_vision,
             existing_agent_vision=existing_agent_vision,
-            state_text=state_text,
+            agent_todo_summary=parse_active_state_todos(
+                state_text, item_limit=None
+            ).get("agent_todos"),
             agent_id=normalized_agent_id or None,
             dry_run=dry_run,
+            selected_todo_id=(
+                settlement_identity.todo_id if settlement_identity else None
+            ),
+            newest_first_runs=newest_first_runs,
         )
         validated_repair_delta_kinds = list(
             repair_delta_contract.get("delta_kinds") or []

@@ -9,6 +9,7 @@ SEMANTIC_CONTEXT_RUN_FIELDS = (
     "latest_vision_checkpoint_run",
     "latest_outcome_vision_checkpoint_run",
     "latest_autonomous_replan_ack_run",
+    "latest_replan_ack_feedback_run",
     "latest_material_milestone_run",
 )
 SEMANTIC_CONTEXT_RUN_PAYLOAD_FIELDS = {
@@ -32,6 +33,11 @@ SEMANTIC_CONTEXT_RUN_PAYLOAD_FIELDS = {
         "generated_at",
         "agent_id",
         "autonomous_replan_ack",
+    ),
+    "latest_replan_ack_feedback_run": (
+        "generated_at",
+        "agent_id",
+        "replan_ack_feedback",
     ),
     "latest_material_milestone_run": (
         "generated_at",
@@ -146,6 +152,11 @@ def goal_semantic_history_from_runs(
             run.get("autonomous_replan_ack"), dict
         ):
             context["latest_autonomous_replan_ack_run"] = run
+
+        if "latest_replan_ack_feedback_run" not in context and isinstance(
+            run.get("replan_ack_feedback"), dict
+        ):
+            context["latest_replan_ack_feedback_run"] = run
 
         if (
             "latest_material_milestone_run" not in context

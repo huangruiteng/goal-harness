@@ -31,6 +31,7 @@ from .handoff_gate import build_todo_handoff_gate_lanes
 from .projection import (
     todo_item_is_actionable_open,
     todo_item_is_due_monitor,
+    todo_item_is_watch_only_monitor,
     todo_item_task_class,
     todo_projection_sort_key,
     todo_summary_monitor_schedule_gap_items,
@@ -91,6 +92,7 @@ QUOTA_PAYLOAD_ITEM_FIELDS = (
     "cadence",
     "next_due_at",
     "expires_at",
+    "watch_only",
     "last_checked_at",
     "result_hash",
     "consecutive_no_change",
@@ -227,16 +229,25 @@ def _terminal_closure_proof_is_valid(
         and displayed_items_cover_source
         and all(
             isinstance(item, dict)
-            and item.get("status") == "done"
-            and item.get("done") is True
+            and (
+                (item.get("status") == "done" and item.get("done") is True)
+                or (
+                    todo_item_is_watch_only_monitor(item)
+                )
+            )
             and item.get("route_continuation_replan_required") is not True
             for item in items
         )
-        and value.get("monitor_open_items") == []
+        and all(
+            isinstance(item, dict)
+            and todo_item_is_watch_only_monitor(item)
+            for item in (value.get("monitor_open_items") or [])
+        )
         and value.get("deferred_items") == []
         and value.get("deferred_resume_candidates") == []
-        and _strict_non_negative_int(value.get("monitor_due_count")) == 0
-        and _strict_non_negative_int(value.get("monitor_schedule_gap_count")) == 0
+        and _strict_non_negative_int(
+            value.get("convergence_open_count", value.get("open_count"))
+        ) == 0
         and _strict_non_negative_int(value.get("completed_without_successor_count", 0)) == 0
         and _strict_non_negative_int(value.get("route_continuation_replan_count", 0)) == 0
         and isinstance(proof, dict)
@@ -244,8 +255,12 @@ def _terminal_closure_proof_is_valid(
         and proof.get("role") == source_proof.get("role")
         and proof.get("source_section") == value.get("source_section")
         and proof.get("item_count") == total_count
-        and proof.get("all_todos_done") is True
-        and _strict_non_negative_int(proof.get("monitor_open_count")) == 0
+        and (
+            proof.get("all_todos_done") is True
+            or proof.get("all_convergent_todos_done") is True
+        )
+        and _strict_non_negative_int(proof.get("monitor_open_count"))
+        == _strict_non_negative_int(proof.get("watch_only_monitor_count", 0))
         and _strict_non_negative_int(proof.get("successor_gap_count")) == 0
         and _strict_non_negative_int(proof.get("route_replan_count")) == 0
         and _strict_non_negative_int(proof.get("no_followup_count")) is not None
@@ -521,6 +536,12 @@ def summarize_user_todos_for_quota(
         "backlog_items": lanes.display_open_items[:TODO_BACKLOG_ITEM_LIMIT],
         "executable_backlog_items": lanes.executable_items[:TODO_BACKLOG_ITEM_LIMIT],
     }
+    if value.get("watch_only_monitor_count"):
+        summary["watch_only_monitor_count"] = value["watch_only_monitor_count"]
+        summary["watch_only_monitor_due_count"] = value.get(
+            "watch_only_monitor_due_count", 0
+        )
+        summary["convergence_open_count"] = value.get("convergence_open_count")
     if recent_completed_advancement_items:
         summary["recent_completed_advancement_items"] = recent_completed_advancement_items
     if blocker_items:

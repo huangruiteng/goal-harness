@@ -151,6 +151,106 @@ def test_peer_advancement_does_not_suppress_current_monitor_streak_replan() -> N
     }
 
 
+def test_watch_only_monitor_streak_does_not_create_replan_obligation() -> None:
+    monitor = quota_todo_item(
+        todo_id="todo_watch_only_monitor",
+        index=1,
+        title="Observe public release liveness.",
+        task_class="continuous_monitor",
+        claimed_by=AGENT_ID,
+        target_key="github-pr-123",
+        consecutive_no_change="50",
+        cadence="30m",
+        next_due_at="2099-01-01T00:00:00+00:00",
+        watch_only="true",
+    )
+    payload = quota_status_payload(
+        goal_id=GOAL_ID,
+        status="active",
+        recommended_action="Observe liveness quietly.",
+        agent_todos=quota_todo_summary([monitor]),
+        coordination={
+            "agent_model": "peer_v1",
+            "registered_agents": [AGENT_ID],
+        },
+    )
+
+    guard = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        scheduler_execution_context=(
+            GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT
+        ),
+    )
+
+    assert guard["decision"] != "autonomous_replan_required"
+    assert guard.get("autonomous_replan_obligation") is None
+    assert guard["goal_frontier_projection"]["monitor_only_lanes"]["present"] is False
+
+
+def test_rejected_replan_ack_reason_is_visible_in_quota_feedback() -> None:
+    monitor = quota_todo_item(
+        todo_id="todo_stalled_monitor",
+        index=1,
+        title="Watch bounded qualification evidence.",
+        task_class="continuous_monitor",
+        claimed_by=AGENT_ID,
+        target_key="qualification",
+        consecutive_no_change="5",
+        cadence="30m",
+        next_due_at="2099-01-01T00:00:00+00:00",
+        expires_at="2099-01-02T00:00:00+00:00",
+    )
+    payload = quota_status_payload(
+        goal_id=GOAL_ID,
+        status="active",
+        recommended_action="Replan the stalled qualification lane.",
+        agent_todos=quota_todo_summary([monitor]),
+        coordination={
+            "agent_model": "peer_v1",
+            "registered_agents": [AGENT_ID],
+        },
+        latest_runs=[
+            {
+                "generated_at": "2026-08-11T00:00:00Z",
+                "agent_id": AGENT_ID,
+                "classification": "replan_noop",
+                "replan_ack_feedback": {
+                    "schema_version": "replan_ack_feedback_v0",
+                    "generated_at": "2026-08-11T00:00:00Z",
+                    "agent_id": AGENT_ID,
+                    "classification": "replan_noop",
+                    "rejected_claims": [
+                        {
+                            "kind": "watch_lane_continuation",
+                            "reason": "monitor is missing expires_at or resume_when",
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    guard = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        scheduler_execution_context=(
+            GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT
+        ),
+    )
+
+    obligation = guard["autonomous_replan_obligation"]
+    assert obligation["replan_ack_feedback"]["rejected_claims"][0]["kind"] == (
+        "watch_lane_continuation"
+    )
+    assert "previous replan ACK was rejected" in obligation["recommended_action"]
+    assert guard["heartbeat_recommendation"]["replan_obligation"][
+        "replan_ack_feedback"
+    ] == obligation["replan_ack_feedback"]
+
+
 def test_current_agent_advancement_still_preempts_monitor_streak_replan() -> None:
     guard = _guard(current_agent_advancement=True)
 

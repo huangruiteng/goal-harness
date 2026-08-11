@@ -6,6 +6,7 @@ import pytest
 
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     resolve_monitor_todo_item,
+    write_monitor_poll_todo_state,
 )
 from loopx.control_plane.scheduler.monitor_todo import (
     monitor_todo_is_actionable_open,
@@ -66,6 +67,7 @@ def _add_monitor(
             "target_key": target_key,
             "cadence": "1h",
             "next_due_at": next_due_at,
+            "watch_only": "true",
         },
     )
 
@@ -92,36 +94,36 @@ def test_exact_todo_id_precedes_ambiguous_target_key(tmp_path: Path) -> None:
     assert first["todo_id"] != second["todo_id"]
 
 
-def test_monitor_resume_when_is_rejected_without_legacy_bypass(
+def test_monitor_resume_when_is_a_supported_bounded_policy(
     tmp_path: Path,
 ) -> None:
     registry, _runtime, _state = _write_fixture(tmp_path)
 
-    with pytest.raises(ValueError, match="continuous_monitor todos cannot use resume_when"):
-        add_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            role="agent",
-            text="Poll a merge target.",
-            task_class="continuous_monitor",
-            claimed_by=AGENT_ID,
-            resume_when="pr_merged:owner/repo#42",
-            monitor_metadata={"target_key": "public-pr:42", "cadence": "1h"},
-        )
+    bounded = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Poll a merge target.",
+        task_class="continuous_monitor",
+        claimed_by=AGENT_ID,
+        resume_when="pr_merged:owner/repo#42",
+        monitor_metadata={"target_key": "public-pr:42", "cadence": "1h"},
+    )
+    assert bounded["resume_when"] == "pr_merged:owner/repo#42"
 
     monitor = _add_monitor(
         registry,
         text="Poll a legacy merge target.",
         target_key="legacy-pr:42",
     )
-    with pytest.raises(ValueError, match="continuous_monitor todos cannot use resume_when"):
-        update_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            todo_id=monitor["todo_id"],
-            agent_id=AGENT_ID,
-            resume_when="pr_merged:owner/repo#42",
-        )
+    updated = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=monitor["todo_id"],
+        agent_id=AGENT_ID,
+        resume_when="pr_merged:owner/repo#42",
+    )
+    assert updated["resume_when"] == "pr_merged:owner/repo#42"
 
     assert monitor_todo_is_actionable_open(
         {
@@ -131,6 +133,31 @@ def test_monitor_resume_when_is_rejected_without_legacy_bypass(
             "resume_ready": False,
         }
     ) is False
+
+
+def test_runtime_writeback_can_read_legacy_unbounded_monitor(tmp_path: Path) -> None:
+    registry, _runtime, state = _write_fixture(tmp_path)
+    state.write_text(
+        state.read_text(encoding="utf-8")
+        + "\n- [ ] [P2] Legacy public monitor.\n"
+        + "  <!-- loopx:todo todo_id=todo_legacy_monitor status=open "
+        + "task_class=continuous_monitor claimed_by=codex-quality-qualification "
+        + "target_key=legacy-public cadence=1h -->\n",
+        encoding="utf-8",
+    )
+
+    result = write_monitor_poll_todo_state(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        generated_at="2026-08-11T00:00:00Z",
+        execute=False,
+        todo_id="todo_legacy_monitor",
+        result_hash="unchanged",
+        agent_id=AGENT_ID,
+    )
+
+    assert result is not None
+    assert result["todo_update"]["changed"] is True
 
 
 def test_material_poll_reloads_status_and_projects_declared_successor(

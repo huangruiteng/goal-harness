@@ -158,6 +158,7 @@ def materialize_issue_fix_grouped_monitors(
                 "0" if material_change else str(previous_no_change + 1)
             ),
             "material_change": "true" if material_change else "false",
+            "watch_only": "true",
         }
         reason = (
             f"Issue-fix PR lifecycle bucket {group['state_bucket']} contains "

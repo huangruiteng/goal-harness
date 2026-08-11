@@ -297,3 +297,34 @@ def latest_autonomous_replan_ack_from_status_payload(
         latest_runs,
         neutral_classifications=neutral_classifications,
     )
+
+
+def latest_replan_ack_feedback_from_status_payload(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+    agent_id: str | None,
+) -> dict[str, Any] | None:
+    """Return the newest rejected replan ACK reason for one agent lane."""
+
+    semantic_history_present, context = _semantic_agent_context_for_goal(
+        status_payload,
+        goal_id=goal_id,
+        agent_id=agent_id,
+    )
+    if semantic_history_present:
+        run = (
+            context.get("latest_replan_ack_feedback_run")
+            if isinstance(context, dict)
+            else None
+        )
+        candidates = [run] if isinstance(run, dict) else []
+    else:
+        candidates = _latest_runs_for_goal(status_payload, goal_id=goal_id)
+    for run in candidates:
+        if not _run_agent_id_matches(run, agent_id=agent_id):
+            continue
+        feedback = run.get("replan_ack_feedback")
+        if isinstance(feedback, dict):
+            return feedback
+    return None
