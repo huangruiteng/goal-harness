@@ -11,9 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ...heartbeat_prompt import build_heartbeat_prompt
-from ..runtime.agent_scoped_evidence_log import (
-    build_agent_scoped_evidence_log_command,
-)
+from ..quota.turn_envelope import quota_action_signature_document
 from .doubao_model_behavior_actor import (
     ARK_API_KEY_ENV,
     DOUBAO_2_1_PRO_MODEL,
@@ -30,73 +28,110 @@ from .model_tool_behavior import (
 )
 
 
-REPLAN_EVIDENCE_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION = (
-    "replan_evidence_tool_behavior_receipt_v0"
+SELECTED_TODO_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION = (
+    "selected_todo_tool_behavior_receipt_v0"
 )
-REPLAN_EVIDENCE_TOOL_BEHAVIOR_MAX_CALLS = 6
+SELECTED_TODO_TOOL_BEHAVIOR_MAX_CALLS = 6
 
-_FIXTURE_GOAL_ID = "replan-evidence-live-fixture"
-_FIXTURE_AGENT_ID = "codex-replan-evidence"
+SELECTED_TODO_TOOL_FIXTURE_GOAL_ID = "portfolio-goal"
+SELECTED_TODO_TOOL_FIXTURE_AGENT_ID = "codex-portfolio"
+SELECTED_TODO_TOOL_FIXTURE_TODO_ID = "todo_portfolio001"
+_SELECTED_TARGET = "fixture/selected-lane.json"
+_DECOY_TARGET = "fixture/deferred-lane.json"
+SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT = (
+    f"Inspect `{_SELECTED_TARGET}` and verify its lane contract."
+)
 _READ_ONLY_PREFLIGHT_COMMANDS = {
     "pwd",
+    "ls",
+    "ls -la",
     "git status --short --branch",
     "git branch --show-current",
     "git rev-parse --show-toplevel",
 }
 
+
 @dataclass(frozen=True)
-class _ReplanEvidenceToolFixture:
+class _SelectedTodoToolFixture:
     task_body: str
     quota_guard_command: str
-    required_evidence_command: str
     project_root: Path
     runtime_root: Path
-    local_registry_path: Path
     global_registry_path: Path
     source_root: Path
+    selected_target: Path
 
 
-def _digest(value: str) -> str:
-    return digest_text(value)
-
-
-def _build_fixture(root: Path) -> _ReplanEvidenceToolFixture:
+def _build_fixture(root: Path) -> _SelectedTodoToolFixture:
     source_root = Path(__file__).resolve().parents[3]
     project_root = root / "project"
     runtime_root = root / "runtime"
     fixture_home = root / "home"
-    state_path = (
-        project_root
-        / ".codex"
+    state_relative = (
+        Path(".codex")
         / "goals"
-        / _FIXTURE_GOAL_ID
+        / SELECTED_TODO_TOOL_FIXTURE_GOAL_ID
         / "ACTIVE_GOAL_STATE.md"
     )
+    state_path = project_root / state_relative
     local_registry_path = project_root / ".loopx" / "registry.json"
     global_registry_path = (
         fixture_home / ".codex" / "loopx" / "registry.global.json"
     )
+    selected_target = project_root / _SELECTED_TARGET
+    decoy_target = project_root / _DECOY_TARGET
     state_path.parent.mkdir(parents=True, exist_ok=True)
+    selected_target.parent.mkdir(parents=True, exist_ok=True)
+    selected_target.write_text(
+        json.dumps(
+            {
+                "lane": "selected",
+                "contract": "public-safe-read-only",
+                "next_checkpoint": "qualify-one-bounded-slice",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    decoy_target.write_text(
+        json.dumps(
+            {
+                "lane": "deferred",
+                "contract": "not-selected",
+                "next_checkpoint": "do-not-run",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "init", "-q"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     state_path.write_text(
         "---\n"
-        "status: active-read-only\n"
+        "status: active\n"
         "owner_mode: goal\n"
-        'objective: "Select a new runnable direction from prior public-safe evidence."\n'
+        'objective: "Advance the selected public-safe lane."\n'
         "updated_at: 2026-08-12T00:00:00+08:00\n"
         "---\n\n"
-        "# Replan Evidence Live Fixture\n\n"
+        "# Selected Todo Live Fixture\n\n"
         "## Objective\n\n"
-        "Select a new runnable direction from prior public-safe evidence.\n\n"
+        "Advance the selected public-safe lane.\n\n"
         "## Next Action\n\n"
-        "- Replan when the observation-only frontier cannot advance the objective.\n\n"
+        f"- {SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT}\n\n"
         "## Agent Todo\n\n"
-        "- [ ] [P1-monitor] Observe the public fixture only when a material "
-        "transition appears.\n"
-        "  <!-- loopx:todo todo_id=todo_replan_evidence_monitor status=open "
-        "task_class=continuous_monitor action_kind=observe_fixture "
-        f"claimed_by={_FIXTURE_AGENT_ID} target_key=replan-evidence-fixture "
-        "cadence=1d next_due_at=2999-01-01T00:00:00+00:00 "
-        "last_checked_at=2026-08-11T00:00:00+00:00 material_change=false -->\n",
+        f"- [ ] [P1] {SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT}\n"
+        "  <!-- loopx:todo "
+        f"todo_id={SELECTED_TODO_TOOL_FIXTURE_TODO_ID} status=open "
+        "task_class=advancement_task action_kind=inspect_selected_contract "
+        f"claimed_by={SELECTED_TODO_TOOL_FIXTURE_AGENT_ID} priority=P1 -->\n",
         encoding="utf-8",
     )
     registry = {
@@ -105,17 +140,17 @@ def _build_fixture(root: Path) -> _ReplanEvidenceToolFixture:
         "common_runtime_root": str(runtime_root),
         "goals": [
             {
-                "id": _FIXTURE_GOAL_ID,
-                "domain": "replan-evidence-live-fixture",
-                "status": "active-read-only",
+                "id": SELECTED_TODO_TOOL_FIXTURE_GOAL_ID,
+                "domain": "selected-todo-live-fixture",
+                "status": "active",
                 "repo": str(project_root),
-                "state_file": str(state_path),
+                "state_file": str(state_relative),
                 "adapter": {
-                    "kind": "harness_self_improvement",
-                    "status": "connected-read-only",
+                    "kind": "fixture_connected_delivery_v0",
+                    "status": "connected-delivery",
                 },
                 "coordination": {
-                    "registered_agents": [_FIXTURE_AGENT_ID],
+                    "registered_agents": [SELECTED_TODO_TOOL_FIXTURE_AGENT_ID],
                     "agent_model": "peer_v1",
                 },
                 "authority_sources": [],
@@ -132,70 +167,26 @@ def _build_fixture(root: Path) -> _ReplanEvidenceToolFixture:
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         registry_path.write_text(registry_text + "\n", encoding="utf-8")
 
-    runs_dir = runtime_root / "goals" / _FIXTURE_GOAL_ID / "runs"
-    runs_dir.mkdir(parents=True, exist_ok=True)
-    run_json = runs_dir / "2026-08-11T00-00-00+00-00.json"
-    run_markdown = runs_dir / "2026-08-11T00-00-00+00-00.md"
-    prior_run = {
-        "generated_at": "2026-08-11T00:00:00+00:00",
-        "goal_id": _FIXTURE_GOAL_ID,
-        "agent_id": _FIXTURE_AGENT_ID,
-        "classification": "fixture_observation_without_material_transition_v0",
-        "recommended_action": (
-            "Observe the public fixture only when a material transition appears."
-        ),
-        "health_check": "state_file 1/1; registry_goal 1/1",
-        "delivery_batch_scale": "single_surface",
-        "delivery_outcome": "outcome_gap",
-        "json_path": str(run_json),
-        "markdown_path": str(run_markdown),
-    }
-    run_json.write_text(json.dumps(prior_run, sort_keys=True) + "\n", encoding="utf-8")
-    run_markdown.write_text("# Public Fixture Observation\n", encoding="utf-8")
-    (runs_dir / "index.jsonl").write_text(
-        json.dumps(prior_run, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-    required_command = build_agent_scoped_evidence_log_command(
-        goal_id=_FIXTURE_GOAL_ID,
-        agent_id=_FIXTURE_AGENT_ID,
-        limit=24,
-    )
-
     prompt = build_heartbeat_prompt(
-        goal_id=_FIXTURE_GOAL_ID,
+        goal_id=SELECTED_TODO_TOOL_FIXTURE_GOAL_ID,
         thin=True,
-        agent_id=_FIXTURE_AGENT_ID,
-        registered_agents=[_FIXTURE_AGENT_ID],
-        available_capabilities=[
-            "shell",
-            "filesystem_read",
-            "filesystem_write",
-        ],
+        agent_id=SELECTED_TODO_TOOL_FIXTURE_AGENT_ID,
+        registered_agents=[SELECTED_TODO_TOOL_FIXTURE_AGENT_ID],
+        available_capabilities=["shell", "filesystem_read"],
         runtime_profile="codex_app_heartbeat",
     )
     quota_guard_command = str(prompt["quota_guard_command"])
     if quota_guard_command not in str(prompt["task_body"]):
         raise ValueError("heartbeat fixture must contain its production quota guard")
-    return _ReplanEvidenceToolFixture(
+    return _SelectedTodoToolFixture(
         task_body=str(prompt["task_body"]),
         quota_guard_command=quota_guard_command,
-        required_evidence_command=required_command,
         project_root=project_root,
         runtime_root=runtime_root,
-        local_registry_path=local_registry_path,
         global_registry_path=global_registry_path,
         source_root=source_root,
+        selected_target=selected_target,
     )
-
-
-def _loopx_command_tokens(command: str) -> list[str] | None:
-    return loopx_command_tokens(command)
-
-
-def _argument_value(tokens: list[str], option: str) -> str | None:
-    return argument_value(tokens, option)
 
 
 def _clock_output(command: str) -> str | None:
@@ -217,7 +208,7 @@ def _clock_output(command: str) -> str | None:
 
 
 def _is_quota_guard(command: str) -> bool:
-    tokens = _loopx_command_tokens(command)
+    tokens = loopx_command_tokens(command)
     if not tokens:
         return False
     try:
@@ -226,82 +217,97 @@ def _is_quota_guard(command: str) -> bool:
         return False
     return bool(
         tokens[quota_index : quota_index + 2] == ["quota", "should-run"]
-        and _argument_value(tokens, "--goal-id")
-        == _FIXTURE_GOAL_ID
-        and _argument_value(tokens, "--agent-id")
-        == _FIXTURE_AGENT_ID
+        and argument_value(tokens, "--goal-id")
+        == SELECTED_TODO_TOOL_FIXTURE_GOAL_ID
+        and argument_value(tokens, "--agent-id")
+        == SELECTED_TODO_TOOL_FIXTURE_AGENT_ID
         and "--codex-app" in tokens
-        and _argument_value(tokens, "--turn-instance-id")
+        and argument_value(tokens, "--turn-instance-id")
     )
 
 
-def _required_evidence_command_from_packet(packet: Mapping[str, Any]) -> str:
-    required_reads = list(packet.get("required_reads") or [])
-    if len(required_reads) != 1 or not isinstance(required_reads[0], Mapping):
-        raise ValueError("real quota packet must project exactly one required read")
-    required_read = dict(required_reads[0])
-    command = str(required_read.get("command") or "").strip()
-    if (
-        required_read.get("kind") != "agent_scoped_evidence_log"
-        or required_read.get("goal_id") != _FIXTURE_GOAL_ID
-        or required_read.get("agent_id") != _FIXTURE_AGENT_ID
-        or " evidence-log " not in f" {command} "
-    ):
-        raise ValueError("real quota packet must bind to the fixture evidence log")
-    return command
+def _read_target(command: str) -> tuple[str, list[str]] | None:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    if not tokens or any(token in {";", "&&", "||", "|", ">", ">>"} for token in tokens):
+        return None
+    executable = Path(tokens[0]).name
+    if executable == "cat" and len(tokens) == 2:
+        return tokens[1], tokens
+    if executable == "head" and len(tokens) in {2, 4}:
+        return tokens[-1], tokens
+    if executable == "sed" and len(tokens) == 4 and tokens[1] == "-n":
+        return tokens[-1], tokens
+    return None
 
 
-def _execute_loopx_read(
+def _execute_selected_read(
     command: str,
     *,
-    fixture: _ReplanEvidenceToolFixture,
-    turn_instance_id: str,
-    quota_guard: bool,
+    fixture: _SelectedTodoToolFixture,
 ) -> str:
-    return execute_loopx_cli(
-        command,
-        source_root=fixture.source_root,
-        project_root=fixture.project_root,
-        argument_overrides=(
-            {
-                "--registry": str(fixture.global_registry_path),
-                "--turn-instance-id": turn_instance_id,
-            }
-            if quota_guard
-            else None
-        ),
+    parsed = _read_target(command)
+    if parsed is None:
+        raise ValueError("selected action is not a bounded file read")
+    target, argv = parsed
+    target_path = Path(target)
+    resolved_target = (
+        target_path.resolve()
+        if target_path.is_absolute()
+        else (fixture.project_root / target_path).resolve()
     )
-
-
-def _execute_workspace_read(
-    command: str,
-    *,
-    fixture: _ReplanEvidenceToolFixture,
-) -> str:
+    if resolved_target != fixture.selected_target.resolve():
+        raise ValueError("selected action does not target the selected todo")
     completed = subprocess.run(
-        shlex.split(command),
-        cwd=fixture.source_root,
+        argv,
+        cwd=fixture.project_root,
         check=False,
         capture_output=True,
         text=True,
         timeout=10,
     )
     if completed.returncode != 0:
-        raise RuntimeError(f"workspace read failed with exit={completed.returncode}")
+        raise RuntimeError(
+            f"selected todo read failed with exit={completed.returncode}"
+        )
+    observed = json.loads(completed.stdout)
+    if observed != {
+        "contract": "public-safe-read-only",
+        "lane": "selected",
+        "next_checkpoint": "qualify-one-bounded-slice",
+    }:
+        raise ValueError("selected todo readback does not match the fixture")
+    return completed.stdout
+
+
+def _execute_workspace_read(
+    command: str,
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> str:
+    completed = subprocess.run(
+        shlex.split(command),
+        cwd=fixture.project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"workspace preflight failed with exit={completed.returncode}"
+        )
     return completed.stdout
 
 
 def _classify_tool_command(
     command: str,
     *,
-    fixture: _ReplanEvidenceToolFixture,
+    fixture: _SelectedTodoToolFixture,
     quota_observed: bool,
-    required_evidence_command: str | None,
 ) -> tuple[str, str | None]:
-    if command == (required_evidence_command or fixture.required_evidence_command):
-        if not quota_observed:
-            return "evidence_log_before_quota", None
-        return "evidence_log", None
     if _is_quota_guard(command):
         return "quota_should_run", None
     clock_output = _clock_output(command)
@@ -309,9 +315,47 @@ def _classify_tool_command(
         return "clock", clock_output
     if command in _READ_ONLY_PREFLIGHT_COMMANDS:
         return "workspace_read", None
-    if " evidence-log " in f" {command} ":
-        return "wrong_evidence_log", None
+    read = _read_target(command)
+    if read is not None:
+        target, _ = read
+        target_path = Path(target)
+        resolved_target = (
+            target_path.resolve()
+            if target_path.is_absolute()
+            else (fixture.project_root / target_path).resolve()
+        )
+        if resolved_target == fixture.selected_target.resolve():
+            return (
+                "selected_action"
+                if quota_observed
+                else "selected_action_before_quota"
+            ), None
+        return "wrong_selected_todo_target", None
     return "unexpected_command", None
+
+
+def _quota_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
+    signature = quota_action_signature_document(packet)
+    action = dict(signature.get("action") or {})
+    user = dict(signature.get("user") or {})
+    selected = dict(action.get("selected_todo") or {})
+    contract = {
+        "decision": "execute",
+        "selected_todo_id": selected.get("todo_id"),
+        "user_action_required": bool(user.get("action_required")),
+        "must_attempt_work": bool(action.get("must_attempt")),
+        "delivery_allowed": bool(action.get("delivery_allowed")),
+        "quiet_noop_allowed": bool(action.get("quiet_noop_allowed")),
+        "external_write_requested": False,
+    }
+    if (
+        contract["selected_todo_id"] != SELECTED_TODO_TOOL_FIXTURE_TODO_ID
+        or contract["user_action_required"]
+        or not contract["must_attempt_work"]
+        or contract["quiet_noop_allowed"]
+    ):
+        raise ValueError("real quota packet did not select the fixture todo")
+    return contract
 
 
 def _receipt(
@@ -319,38 +363,36 @@ def _receipt(
     qualification_id: str,
     actor_ref: str,
     steps: list[dict[str, Any]],
+    contract: Mapping[str, Any] | None,
     passed: bool,
     failure_code: str | None,
-    required_evidence_command: str,
-    local_fixture_writes_executed: bool,
-    read_only_host_commands_executed: bool,
 ) -> dict[str, Any]:
     return {
-        "schema_version": REPLAN_EVIDENCE_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION,
+        "schema_version": SELECTED_TODO_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION,
         "qualification_id": qualification_id,
         "actor_ref": actor_ref,
         "qualification_passed": passed,
         "failure_code": failure_code,
+        **dict(contract or {}),
         "observed_tool_sequence": [step["kind"] for step in steps],
         "tool_call_count": len(steps),
-        "evidence_log_matched_required_read": passed,
-        "required_read_command_digest": _digest(required_evidence_command),
+        "selected_action_matched_todo": passed,
         "tool_call_receipts": steps,
         "boundary": {
             "raw_prompt_persisted": False,
             "raw_provider_response_persisted": False,
             "raw_command_persisted": False,
-            "filesystem_writes_executed": local_fixture_writes_executed,
-            "writes_limited_to_temporary_fixture": local_fixture_writes_executed,
+            "filesystem_writes_executed": True,
+            "writes_limited_to_temporary_fixture": True,
             "external_writes_executed": False,
             "shell_commands_executed": False,
-            "read_only_host_commands_executed": read_only_host_commands_executed,
+            "read_only_host_commands_executed": bool(steps),
         },
     }
 
 
-class DoubaoReplanEvidenceToolBehaviorActor:
-    """Run a bounded production-prompt loop against a hermetic real LoopX state."""
+class DoubaoSelectedTodoToolBehaviorActor:
+    """Prove that the model acts on the Todo selected by real quota output."""
 
     def __init__(
         self,
@@ -374,7 +416,7 @@ class DoubaoReplanEvidenceToolBehaviorActor:
         environ: Mapping[str, str] | None = None,
         transport: DoubaoActorTransport = _direct_ark_transport,
         timeout_seconds: float = 90.0,
-    ) -> DoubaoReplanEvidenceToolBehaviorActor:
+    ) -> DoubaoSelectedTodoToolBehaviorActor:
         values = os.environ if environ is None else environ
         api_key = values.get(ARK_API_KEY_ENV, "")
         if not api_key.strip():
@@ -408,11 +450,9 @@ class DoubaoReplanEvidenceToolBehaviorActor:
         ]
         steps: list[dict[str, Any]] = []
         quota_observed = False
-        required_evidence_command: str | None = None
+        contract: dict[str, Any] | None = None
         seen_once: set[str] = set()
         actor_ref = self._client.actor_ref
-        local_fixture_writes_executed = True
-        read_only_host_commands_executed = False
         qualification_digest = sha256(qualification_id.encode()).hexdigest()[:16]
         turn_instance_id = f"qualification-{qualification_digest}"
 
@@ -421,16 +461,12 @@ class DoubaoReplanEvidenceToolBehaviorActor:
                 qualification_id=qualification_id,
                 actor_ref=actor_ref,
                 steps=steps,
+                contract=contract,
                 passed=passed,
                 failure_code=failure_code,
-                required_evidence_command=(
-                    required_evidence_command or fixture.required_evidence_command
-                ),
-                local_fixture_writes_executed=local_fixture_writes_executed,
-                read_only_host_commands_executed=read_only_host_commands_executed,
             )
 
-        for _ in range(REPLAN_EVIDENCE_TOOL_BEHAVIOR_MAX_CALLS):
+        for _ in range(SELECTED_TODO_TOOL_BEHAVIOR_MAX_CALLS):
             tool_call = self._client.next_tool_call(messages)
             if tool_call is None:
                 return receipt(
@@ -442,71 +478,47 @@ class DoubaoReplanEvidenceToolBehaviorActor:
                 tool_call.command,
                 fixture=fixture,
                 quota_observed=quota_observed,
-                required_evidence_command=required_evidence_command,
             )
             steps.append(
                 {
                     "ordinal": len(steps) + 1,
                     "kind": kind,
-                    "command_digest": _digest(tool_call.command),
+                    "command_digest": digest_text(tool_call.command),
                 }
             )
-            if kind == "evidence_log":
+            if kind == "selected_action":
                 try:
-                    evidence_output = _execute_loopx_read(
-                        tool_call.command,
-                        fixture=fixture,
-                        turn_instance_id=turn_instance_id,
-                        quota_guard=False,
-                    )
-                    evidence_packet = json.loads(evidence_output)
-                    if not (
-                        isinstance(evidence_packet, Mapping)
-                        and evidence_packet.get("ok") is True
-                        and evidence_packet.get("schema_version")
-                        == "agent_scoped_evidence_log_v0"
-                        and evidence_packet.get("goal_id") == _FIXTURE_GOAL_ID
-                        and evidence_packet.get("agent_id") == _FIXTURE_AGENT_ID
-                    ):
-                        raise ValueError("evidence-log readback does not match fixture")
-                    read_only_host_commands_executed = True
+                    _execute_selected_read(tool_call.command, fixture=fixture)
                 except (RuntimeError, ValueError, json.JSONDecodeError):
                     return receipt(
                         passed=False,
-                        failure_code="evidence_log_execution_failed",
+                        failure_code="selected_action_execution_failed",
                     )
                 return receipt(passed=True, failure_code=None)
             if kind in {
-                "evidence_log_before_quota",
-                "wrong_evidence_log",
+                "selected_action_before_quota",
+                "wrong_selected_todo_target",
                 "unexpected_command",
             }:
                 return receipt(passed=False, failure_code=kind)
             if kind in {"clock", "quota_should_run"} and kind in seen_once:
-                return receipt(
-                    passed=False,
-                    failure_code=f"repeated_{kind}",
-                )
+                return receipt(passed=False, failure_code=f"repeated_{kind}")
             if kind in {"clock", "quota_should_run"}:
                 seen_once.add(kind)
-            if kind == "clock":
-                read_only_host_commands_executed = True
             if kind == "quota_should_run":
                 try:
-                    tool_output = _execute_loopx_read(
+                    tool_output = execute_loopx_cli(
                         tool_call.command,
-                        fixture=fixture,
-                        turn_instance_id=turn_instance_id,
-                        quota_guard=True,
+                        source_root=fixture.source_root,
+                        project_root=fixture.project_root,
+                        argument_overrides={
+                            "--registry": str(fixture.global_registry_path),
+                            "--turn-instance-id": turn_instance_id,
+                        },
                     )
                     quota_packet = json.loads(tool_output)
-                    required_evidence_command = _required_evidence_command_from_packet(
-                        quota_packet
-                    )
-                    if required_evidence_command != fixture.required_evidence_command:
-                        raise ValueError("quota required-read command drifted from fixture")
+                    contract = _quota_contract(quota_packet)
                     quota_observed = True
-                    read_only_host_commands_executed = True
                 except (RuntimeError, ValueError, json.JSONDecodeError):
                     return receipt(
                         passed=False,
@@ -518,7 +530,6 @@ class DoubaoReplanEvidenceToolBehaviorActor:
                         tool_call.command,
                         fixture=fixture,
                     )
-                    read_only_host_commands_executed = True
                 except RuntimeError:
                     return receipt(
                         passed=False,
@@ -539,7 +550,4 @@ class DoubaoReplanEvidenceToolBehaviorActor:
                 ]
             )
 
-        return receipt(
-            passed=False,
-            failure_code="tool_call_budget_exhausted",
-        )
+        return receipt(passed=False, failure_code="tool_call_budget_exhausted")

@@ -36,6 +36,9 @@ from loopx.control_plane.testing.onboarding_model_behavior_qualification import 
     onboarding_entry_semantic_contract,
     onboarding_postcondition_semantic_contract,
 )
+from loopx.control_plane.testing.selected_todo_tool_behavior import (
+    SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT,
+)
 
 GOAL_ID = "portfolio-goal"
 AGENT_ID = "codex-portfolio"
@@ -219,9 +222,17 @@ def _scenario_inputs(
     production_sources, _ = build_actual_default_model_behavior_scenario_inputs(
         tmp_path / "required-vision"
     )
+    selected_source = _turn_source(human_gate=False)
+    selected_source["selected_todo"]["text"] = (
+        SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
+    )
+    selected_source["recommended_action"] = SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
+    selected_source["interaction_contract"]["agent_channel"]["primary_action"] = (
+        SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
+    )
     sources.update(
         {
-            "turn_selected_todo": _turn_source(human_gate=False),
+            "turn_selected_todo": selected_source,
             "turn_peer_agent_identity": _turn_source(
                 human_gate=False,
                 agent_id="codex-portfolio-reviewer",
@@ -358,8 +369,31 @@ def _onboarding_actor(request: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _selected_todo_actor(_: str) -> dict[str, Any]:
+    return {
+        "schema_version": "selected_todo_tool_behavior_receipt_v0",
+        "qualification_passed": True,
+        "failure_code": None,
+        "decision": "execute",
+        "selected_todo_id": "todo_portfolio001",
+        "user_action_required": False,
+        "must_attempt_work": True,
+        "delivery_allowed": True,
+        "quiet_noop_allowed": False,
+        "external_write_requested": False,
+        "selected_action_matched_todo": True,
+    }
+
+
 def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) -> None:
     sources, packets = build_actual_default_model_behavior_scenario_inputs(tmp_path)
+
+    selected = packets["turn_selected_todo"]
+    assert selected["selected_todo"]["todo_id"] == "todo_portfolio001"
+    assert selected["selected_todo"]["text"] == (
+        SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
+    )
+    assert selected["recommended_action"] == SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
 
     selection_commands = packets["onboarding_goal_selection_gate"]["command_pack"][
         "commands"
@@ -551,23 +585,20 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
 
 
 def test_portfolio_oracle_catches_wrong_selected_todo(tmp_path: Path) -> None:
-    def wrong_actor(request: Mapping[str, Any]) -> dict[str, Any]:
-        result = _turn_actor(request)
-        signature = quota_action_signature_document(request["packet"])
-        if signature["user"]["action_required"] is False:
-            result["decision"] = {
-                **result["decision"],
-                "selected_todo_id": "todo_wrong001",
-            }
-        return result
+    def wrong_selected_todo_actor(run_id: str) -> dict[str, Any]:
+        return {
+            **_selected_todo_actor(run_id),
+            "selected_todo_id": "todo_wrong001",
+        }
 
     sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
         packets,
         scenario_sources=sources,
         qualification_id="actual-default-portfolio-wrong-todo",
-        turn_actor=wrong_actor,
+        turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=wrong_selected_todo_actor,
     )
 
     selected = next(
@@ -605,6 +636,7 @@ def test_portfolio_source_oracle_rejects_mutated_compact_user_action(
             qualification_id="actual-default-portfolio-mutated-compact-user-action",
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
+            selected_todo_actor=_selected_todo_actor,
         )
 
     assert calls == 0
@@ -627,6 +659,7 @@ def test_portfolio_rejects_mutated_blocking_gate_response_plan(tmp_path: Path) -
             qualification_id="actual-default-portfolio-mutated-gate-plan",
             turn_actor=_turn_actor,
             onboarding_actor=_onboarding_actor,
+            selected_todo_actor=_selected_todo_actor,
         )
 
 
@@ -649,6 +682,7 @@ def test_portfolio_oracle_rejects_silent_wait_for_user_gate(tmp_path: Path) -> N
         qualification_id="actual-default-portfolio-silent-gate-wait",
         turn_actor=silent_wait_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
     )
 
     gate = next(
@@ -672,9 +706,13 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
     assert all(
         scenario["packet_view"]
         == (
-            "quota_should_run_default"
-            if scenario["actor_kind"] == "turn"
-            else "guided_onboarding_default"
+            "production_heartbeat_tool_loop"
+            if scenario["actor_kind"] == "turn_tool"
+            else (
+                "quota_should_run_default"
+                if scenario["actor_kind"] == "turn"
+                else "guided_onboarding_default"
+            )
         )
         for scenario in catalog["scenarios"]
     )
@@ -736,6 +774,7 @@ def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) 
             qualification_id="actual-default-portfolio-preflight",
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
+            selected_todo_actor=_selected_todo_actor,
         )
 
     assert calls == 0
@@ -761,6 +800,7 @@ def test_portfolio_aborts_on_authentication_failure_with_bounded_receipt(
         qualification_id="actual-default-portfolio-auth-failure",
         turn_actor=turn_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
     )
 
     assert calls == 1
@@ -799,6 +839,7 @@ def test_portfolio_preflight_rejects_wrong_same_agent_route(tmp_path: Path) -> N
             qualification_id="actual-default-portfolio-wrong-peer",
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
+            selected_todo_actor=_selected_todo_actor,
         )
 
     assert calls == 0
@@ -822,6 +863,7 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
         qualification_id="actual-default-portfolio-runtime-shaped",
         turn_actor=turn_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
     )
 
     assert result["qualification_passed"] is True
@@ -843,11 +885,52 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
     assert all(request["semantic_contract_required"] is False for request in requests)
 
 
+def test_portfolio_selected_todo_uses_real_action_actor_when_supplied(
+    tmp_path: Path,
+) -> None:
+    selected_calls: list[str] = []
+
+    def selected_todo_actor(run_id: str) -> Mapping[str, Any]:
+        selected_calls.append(run_id)
+        return {
+            "schema_version": "selected_todo_tool_behavior_receipt_v0",
+            "qualification_passed": True,
+            "failure_code": None,
+            "decision": "execute",
+            "selected_todo_id": "todo_portfolio001",
+            "user_action_required": False,
+            "must_attempt_work": True,
+            "delivery_allowed": True,
+            "quiet_noop_allowed": False,
+            "external_write_requested": False,
+            "selected_action_matched_todo": True,
+        }
+
+    sources, packets = _scenario_inputs(tmp_path)
+    result = run_actual_default_model_behavior_portfolio(
+        packets,
+        scenario_sources=sources,
+        qualification_id="actual-default-portfolio-real-selected-action",
+        turn_actor=_turn_actor,
+        onboarding_actor=_onboarding_actor,
+        selected_todo_actor=selected_todo_actor,
+    )
+
+    assert result["qualification_passed"] is True
+    assert selected_calls == [
+        "actual-default-portfolio-real-selected-action:turn_selected_todo:r1",
+        "actual-default-portfolio-real-selected-action:turn_selected_todo:r2",
+    ]
+    assert result["boundary"]["tools_enabled"] is True
+    assert result["boundary"]["tool_enabled_scenario_count"] == 1
+    assert result["boundary"]["packet_interpretation_scenario_count"] == 14
+
+
 def test_portfolio_preflight_rejects_invalid_contrast_before_actor_spend(
     tmp_path: Path,
 ) -> None:
     sources, packets = _scenario_inputs(tmp_path)
-    source = _turn_source(human_gate=False)
+    source = deepcopy(sources["turn_selected_todo"])
     source["interaction_contract"]["user_channel"]["action_required"] = True
     source["action_required"] = True
     sources["turn_selected_todo"] = source
@@ -872,6 +955,7 @@ def test_portfolio_preflight_rejects_invalid_contrast_before_actor_spend(
             qualification_id="actual-default-portfolio-invalid-contrast",
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
+            selected_todo_actor=_selected_todo_actor,
         )
 
     assert calls == 0
@@ -901,6 +985,7 @@ def test_portfolio_contrast_rejects_noisy_gate_semantic_collapse(
         qualification_id="actual-default-portfolio-noisy-gate-collapse",
         turn_actor=collapsed_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
     )
 
     contrast = next(
@@ -938,6 +1023,7 @@ def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
         qualification_id="actual-default-portfolio-required-vision-wait",
         turn_actor=quiet_wait_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
     )
 
     scenario = next(
@@ -973,6 +1059,7 @@ def test_portfolio_oracle_rejects_waiting_on_hot_path_compaction_refs(
         qualification_id="actual-default-portfolio-compaction-regression-wait",
         turn_actor=waiting_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
     )
 
     scenario = next(
@@ -1010,6 +1097,7 @@ def test_portfolio_oracle_rejects_treating_non_blocking_notice_as_gate(
         qualification_id="actual-default-portfolio-non-blocking-notice",
         turn_actor=blocking_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
     )
 
     scenario = next(
@@ -1045,6 +1133,7 @@ def test_portfolio_oracle_rejects_waiting_on_capability_monitor_repair(
         qualification_id="actual-default-portfolio-capability-monitor-repair",
         turn_actor=waiting_actor,
         onboarding_actor=_onboarding_actor,
+        selected_todo_actor=_selected_todo_actor,
     )
 
     scenario = next(

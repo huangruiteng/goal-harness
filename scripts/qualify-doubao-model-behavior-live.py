@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -24,6 +25,9 @@ from loopx.control_plane.testing.doubao_model_behavior_actor import (  # noqa: E
 )
 from loopx.control_plane.testing.release_commit_qualification import (  # noqa: E402
     collect_release_source_identity,
+)
+from loopx.control_plane.testing.selected_todo_tool_behavior import (  # noqa: E402
+    DoubaoSelectedTodoToolBehaviorActor,
 )
 
 
@@ -53,9 +57,21 @@ def main() -> int:
     onboarding_actor = DoubaoOnboardingModelBehaviorActor.from_environment(
         timeout_seconds=args.timeout_seconds
     )
+    selected_todo_actor = DoubaoSelectedTodoToolBehaviorActor.from_environment(
+        timeout_seconds=args.timeout_seconds
+    )
     with TemporaryDirectory(prefix="loopx-doubao-live-") as temp_dir:
+        temp_root = Path(temp_dir)
+
+        def qualify_selected_todo(run_id: str) -> dict[str, object]:
+            run_digest = sha256(run_id.encode("utf-8")).hexdigest()[:16]
+            return selected_todo_actor.qualify(
+                qualification_id=run_id,
+                fixture_root=temp_root / "selected-todo" / run_digest,
+            )
+
         sources, packets = build_actual_default_model_behavior_scenario_inputs(
-            Path(temp_dir)
+            temp_root / "portfolio"
         )
         result = run_actual_default_model_behavior_portfolio(
             packets,
@@ -63,6 +79,7 @@ def main() -> int:
             qualification_id=args.qualification_id,
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
+            selected_todo_actor=qualify_selected_todo,
         )
     result["source"] = source
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))

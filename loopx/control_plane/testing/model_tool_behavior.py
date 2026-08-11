@@ -1,0 +1,290 @@
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import subprocess
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import Any
+
+from .doubao_model_behavior_actor import (
+    DOUBAO_2_1_PRO_MODEL,
+    DOUBAO_2_1_TURBO_MODEL,
+    DOUBAO_CHAT_COMPLETIONS_ENDPOINT,
+    DoubaoActorTransport,
+    DoubaoActorTransportError,
+)
+
+
+EXEC_COMMAND_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "exec_command",
+        "description": (
+            "Run a shell command in the current workspace and return its output."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "cmd": {
+                    "type": "string",
+                    "description": "The shell command to run.",
+                }
+            },
+            "required": ["cmd"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+MAX_TOOL_ARGUMENT_BYTES = 8_192
+MAX_PROVIDER_TOKENS = 2_048
+ALLOWED_MODELS = {DOUBAO_2_1_PRO_MODEL, DOUBAO_2_1_TURBO_MODEL}
+
+
+@dataclass(frozen=True)
+class ExecToolCall:
+    call_id: str
+    command: str
+    provider_value: dict[str, Any]
+
+
+class DoubaoExecToolClient:
+    """One bounded Ark function-tool transport shared by real behavior gates."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        timeout_seconds: float,
+        transport: DoubaoActorTransport,
+    ) -> None:
+        if not api_key.strip():
+            raise RuntimeError("Doubao actor requires a runtime-injected API key")
+        if model not in ALLOWED_MODELS:
+            raise ValueError(
+                "Doubao actor model must be an allowlisted Doubao 2.1 model"
+            )
+        if timeout_seconds <= 0 or timeout_seconds > 300:
+            raise ValueError("Doubao actor timeout must be between 0 and 300 seconds")
+        self._api_key = api_key
+        self._model = model
+        self._timeout_seconds = timeout_seconds
+        self._transport = transport
+
+    @property
+    def actor_ref(self) -> str:
+        return f"ark:{self._model}"
+
+    def next_tool_call(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> ExecToolCall | None:
+        body = {
+            "model": self._model,
+            "messages": messages,
+            "tools": [EXEC_COMMAND_TOOL],
+            "tool_choice": "auto",
+            "thinking": {"type": "disabled"},
+            "temperature": 0,
+            "max_tokens": MAX_PROVIDER_TOKENS,
+            "stream": False,
+        }
+        try:
+            response = self._transport(
+                endpoint=DOUBAO_CHAT_COMPLETIONS_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                body=json.dumps(
+                    body,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8"),
+                timeout_seconds=self._timeout_seconds,
+            )
+            return provider_exec_tool_call(response)
+        except DoubaoActorTransportError:
+            raise
+        except Exception:
+            raise DoubaoActorTransportError(
+                "Doubao tool behavior provider transport failed",
+                error_code="provider_transport_failed",
+            ) from None
+
+
+def digest_text(value: str) -> str:
+    return f"sha256:{sha256(value.encode('utf-8')).hexdigest()}"
+
+
+def provider_exec_tool_call(response: Mapping[str, Any]) -> ExecToolCall | None:
+    """Decode one ordinary exec tool call without interpreting its semantics."""
+
+    choices = response.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior response must contain exactly one choice",
+            error_code="provider_invalid_shape",
+        )
+    choice = choices[0]
+    if not isinstance(choice, Mapping):
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior choice must be an object",
+            error_code="provider_invalid_shape",
+        )
+    message = choice.get("message")
+    if not isinstance(message, Mapping):
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior choice is missing its message",
+            error_code="provider_invalid_shape",
+        )
+    tool_calls = message.get("tool_calls")
+    if tool_calls in (None, []):
+        return None
+    if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior must choose exactly one tool per step",
+            error_code="provider_invalid_tool_call",
+        )
+    raw_call = tool_calls[0]
+    if not isinstance(raw_call, Mapping):
+        raise DoubaoActorTransportError(
+            "Doubao tool call must be an object",
+            error_code="provider_invalid_tool_call",
+        )
+    function = raw_call.get("function")
+    if (
+        raw_call.get("type") != "function"
+        or not isinstance(function, Mapping)
+        or function.get("name") != "exec_command"
+    ):
+        raise DoubaoActorTransportError(
+            "Doubao tool behavior selected an unsupported tool",
+            error_code="provider_invalid_tool_call",
+        )
+    arguments_text = function.get("arguments")
+    if (
+        not isinstance(arguments_text, str)
+        or len(arguments_text.encode("utf-8")) > MAX_TOOL_ARGUMENT_BYTES
+    ):
+        raise DoubaoActorTransportError(
+            "Doubao tool arguments are missing or too large",
+            error_code="provider_invalid_tool_call",
+        )
+    try:
+        arguments = json.loads(arguments_text)
+    except json.JSONDecodeError:
+        raise DoubaoActorTransportError(
+            "Doubao tool arguments are not valid JSON",
+            error_code="provider_invalid_tool_call",
+        ) from None
+    if not isinstance(arguments, Mapping) or set(arguments) != {"cmd"}:
+        raise DoubaoActorTransportError(
+            "Doubao exec_command arguments must contain only cmd",
+            error_code="provider_invalid_tool_call",
+        )
+    command = arguments.get("cmd")
+    if not isinstance(command, str) or not command.strip():
+        raise DoubaoActorTransportError(
+            "Doubao exec_command cmd must be non-empty text",
+            error_code="provider_invalid_tool_call",
+        )
+    call_id = str(raw_call.get("id") or "").strip()
+    if not call_id:
+        raise DoubaoActorTransportError(
+            "Doubao tool call is missing its id",
+            error_code="provider_invalid_tool_call",
+        )
+    return ExecToolCall(
+        call_id=call_id,
+        command=command.strip(),
+        provider_value={
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": arguments_text,
+            },
+        },
+    )
+
+
+def loopx_command_tokens(command: str) -> list[str] | None:
+    """Return one bounded LoopX argv suffix, never a shell program."""
+
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    for index, token in enumerate(tokens):
+        if Path(token).name == "loopx":
+            command_tokens = tokens[index:]
+            if any(token in {";", "&&", "||", "|"} for token in command_tokens):
+                return None
+            return command_tokens
+    return None
+
+
+def argument_value(tokens: list[str], option: str) -> str | None:
+    try:
+        index = tokens.index(option)
+    except ValueError:
+        return None
+    return tokens[index + 1] if index + 1 < len(tokens) else None
+
+
+def replace_argument(tokens: list[str], option: str, value: str) -> None:
+    try:
+        index = tokens.index(option)
+    except ValueError:
+        return
+    if index + 1 >= len(tokens):
+        raise ValueError(f"missing value for {option}")
+    tokens[index + 1] = value
+
+
+def execute_loopx_cli(
+    command: str,
+    *,
+    source_root: Path,
+    project_root: Path,
+    argument_overrides: Mapping[str, str] | None = None,
+    timeout_seconds: float = 60,
+) -> str:
+    """Execute only the parsed LoopX argv against an isolated project."""
+
+    tokens = loopx_command_tokens(command)
+    if not tokens:
+        raise ValueError("command does not contain one bounded loopx invocation")
+    argv = list(tokens[1:])
+    for option, value in (argument_overrides or {}).items():
+        replace_argument(argv, option, value)
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(source_root)
+        if not existing_pythonpath
+        else os.pathsep.join((str(source_root), existing_pythonpath))
+    )
+    completed = subprocess.run(
+        [sys.executable, "-m", "loopx.cli", *argv],
+        cwd=project_root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "LoopX read command failed with "
+            f"exit={completed.returncode}: {completed.stderr[-500:]}"
+        )
+    return completed.stdout
