@@ -351,6 +351,7 @@ def _run_task_lease_adapter(runtime_root: Path, scenario: str) -> AdapterObserva
         calls.append(SettlementStepKind.DURABLE_WRITEBACK)
         return commit_task_lease_acquire(
             identity,
+            registry_path=registry_path,
             runtime_root=runtime_root,
             write_scopes=["docs/**"],
             ttl_seconds=600,
@@ -364,6 +365,14 @@ def _run_task_lease_adapter(runtime_root: Path, scenario: str) -> AdapterObserva
         ),
         patch(
             "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
+            return_value=[],
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
+            return_value={"status": "open", "claimed_by": TASK_LEASE_AGENT_ID},
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.active_conflicts",
             return_value=[],
         ),
     ):

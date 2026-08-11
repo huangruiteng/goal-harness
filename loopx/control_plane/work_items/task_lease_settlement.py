@@ -11,7 +11,7 @@ orchestration as a typed settlement chain.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +25,9 @@ from loopx.control_plane.effect_program import (
     SettlementStepKind,
 )
 from loopx.control_plane.work_items.task_lease import (
+    TaskLeaseError,
+    acquire_task_lease,
     active_conflicts,
-    build_lease,
     lease_is_active,
     normalize_goal_id,
     normalize_idempotency_key,
@@ -36,7 +37,6 @@ from loopx.control_plane.work_items.task_lease import (
     read_lease,
     require_task_lease_owner_allowed,
     task_lease_path,
-    write_lease,
 )
 
 __all__ = [
@@ -50,9 +50,6 @@ __all__ = [
 def _now_utc() -> datetime:
     return datetime.now(tz=timezone.utc)
 
-
-def _isoformat(value: datetime) -> str:
-    return value.isoformat()
 
 
 def _settlement_identity(
@@ -241,15 +238,51 @@ def resolve_task_lease_validation(
     )
 
 
+def _map_task_lease_error(exc: TaskLeaseError) -> SettlementResult[dict[str, Any]]:
+    """Map a ``TaskLeaseError`` raised by ``acquire_task_lease`` onto a typed failure."""
+    code = exc.code
+    if code in (
+        "invalid_goal_id",
+        "invalid_todo_id",
+        "invalid_owner",
+        "invalid_idempotency_key",
+        "invalid_ttl",
+        "idempotency_key_reuse",
+    ):
+        kind = SettlementFailureKind.INVALID_IDENTITY
+    elif code in (
+        "owner_not_registered",
+        "todo_not_found",
+        "todo_not_open",
+        "owner_excluded_from_todo",
+        "owner_conflicts_with_claim",
+    ):
+        kind = SettlementFailureKind.PERMISSION_DENIED
+    else:
+        kind = SettlementFailureKind.WRITEBACK_REJECTED
+    return SettlementResult.failed(
+        kind=kind,
+        step_kind=SettlementStepKind.DURABLE_WRITEBACK,
+        reason=str(exc),
+    )
+
+
 def commit_task_lease_acquire(
     identity: SettlementIdentity,
     *,
+    registry_path: Path,
     runtime_root: Path,
     write_scopes: list[str] | None = None,
     ttl_seconds: int | None = None,
+    expected_version: int | None = None,
     acquire: bool = True,
 ) -> SettlementResult[dict[str, Any]]:
-    """Commit the task-lease file, producing a typed acquire receipt.
+    """Commit the task-lease file via ``acquire_task_lease``, producing a typed receipt.
+
+    Routes through the owning module's ``acquire_task_lease`` so that the
+    per-goal ``exclusive_file_lock``, ``expected_version`` CAS, idempotency-key
+    parameter matching, and write-scope/ttl consistency checks are enforced
+    atomically — the same path every other caller takes.
 
     When *acquire* is ``False`` the step is skipped (no-op receipt).  That
     path is used by the semantic oracle to test failure short-circuiting.
@@ -260,44 +293,29 @@ def commit_task_lease_acquire(
             step_kind=SettlementStepKind.DURABLE_WRITEBACK,
             reason="task lease acquire rejected by settlement oracle",
         )
-    normalized_scopes = sorted(set(write_scopes or []))
-    normalized_ttl = normalize_ttl_seconds(ttl_seconds)
-    lease_path = task_lease_path(
-        runtime_root=runtime_root,
-        goal_id=identity.goal_id,
-        todo_id=identity.todo_id,
-    )
-    at = _now_utc()
-    updated_at = _isoformat(at)
-    expires_at = _isoformat(at + timedelta(seconds=normalized_ttl))
-    lease = build_lease(
-        goal_id=identity.goal_id,
-        todo_id=identity.todo_id,
-        owner=identity.agent_id,
-        idempotency_key=identity.turn_instance_id,
-        write_scopes=normalized_scopes,
-        acquire_ttl_seconds=normalized_ttl,
-        version=1,
-        acquired_at=updated_at,
-        updated_at=updated_at,
-        expires_at=expires_at,
-    )
     try:
-        write_lease(lease_path, lease)
-    except OSError as exc:
-        return SettlementResult.failed(
-            kind=SettlementFailureKind.WRITEBACK_REJECTED,
-            step_kind=SettlementStepKind.DURABLE_WRITEBACK,
-            reason=str(exc),
+        result = acquire_task_lease(
+            registry_path=registry_path,
+            runtime_root=runtime_root,
+            goal_id=identity.goal_id,
+            todo_id=identity.todo_id,
+            owner=identity.agent_id,
+            idempotency_key=identity.turn_instance_id,
+            ttl_seconds=ttl_seconds,
+            write_scopes=write_scopes,
+            expected_version=expected_version,
         )
+    except TaskLeaseError as exc:
+        return _map_task_lease_error(exc)
+    lease_path = str(result.get("lease_path", ""))
     return SettlementResult.pure(
-        lease,
+        result["lease"],
         receipts=(
             SettlementReceipt(
                 step_kind=SettlementStepKind.DURABLE_WRITEBACK,
-                status="committed",
+                status="committed" if result.get("acquired") else "idempotent",
                 effect_id=identity.effect_id,
-                source_ref=str(lease_path),
+                source_ref=lease_path,
             ),
         ),
     )
@@ -313,6 +331,7 @@ def execute_task_lease_settlement(
     idempotency_key: str,
     write_scopes: list[str] | None = None,
     ttl_seconds: int | None = None,
+    expected_version: int | None = None,
     acquire: bool = True,
 ) -> SettlementResult[dict[str, Any]]:
     """Bind validation → acquire for the task-lease settlement adapter.
@@ -334,9 +353,11 @@ def execute_task_lease_settlement(
         .bind(
             lambda identity: commit_task_lease_acquire(
                 identity,
+                registry_path=registry_path,
                 runtime_root=runtime_root,
                 write_scopes=write_scopes,
                 ttl_seconds=ttl_seconds,
+                expected_version=expected_version,
                 acquire=acquire,
             )
         )

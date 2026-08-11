@@ -393,6 +393,14 @@ def test_task_lease_acquire_idempotent_replay(
             "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
             return_value=[],
         ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
+            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.active_conflicts",
+            return_value=[],
+        ),
     ):
         first = execute_task_lease_settlement(**common, acquire=acquire_first)
         second = execute_task_lease_settlement(**common, acquire=True)
@@ -426,6 +434,14 @@ def test_task_lease_validation_fails_before_acquire(
         ),
         patch(
             "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
+            return_value=[],
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
+            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.active_conflicts",
             return_value=[],
         ),
     ):
@@ -464,6 +480,14 @@ def test_task_lease_acquire_failure_short_circuits(
             "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
             return_value=[],
         ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
+            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.active_conflicts",
+            return_value=[],
+        ),
     ):
         result = execute_task_lease_settlement(
             registry_path=registry_path,
@@ -500,6 +524,14 @@ def test_task_lease_effect_id_consistency(
         ),
         patch(
             "loopx.control_plane.work_items.task_lease_settlement.active_conflicts",
+            return_value=[],
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.require_task_lease_owner_allowed",
+            return_value={"status": "open", "claimed_by": TASK_LEASE_FAULT_AGENT},
+        ),
+        patch(
+            "loopx.control_plane.work_items.task_lease.active_conflicts",
             return_value=[],
         ),
     ):
