@@ -6,12 +6,15 @@ from pathlib import Path
 
 from ..control_plane.work_items.task_lease import (
     TaskLeaseError,
-    acquire_task_lease,
     inspect_task_lease,
     release_task_lease,
     renew_task_lease,
     runtime_root_from_registry,
+    task_lease_path,
     transfer_task_lease,
+)
+from ..control_plane.work_items.task_lease_settlement import (
+    execute_task_lease_settlement,
 )
 from ..file_lock import LockAcquireTimeoutError
 from ..presentation.markdown import append_operator_action_markdown
@@ -122,17 +125,76 @@ def handle_task_lease_command(
             raise ValueError("task-lease action requires --idempotency-key")
         runtime_root = runtime_root_from_registry(registry_path, runtime_root_arg)
         if args.task_lease_command == "acquire":
-            payload = acquire_task_lease(
+            result = execute_task_lease_settlement(
                 registry_path=registry_path,
                 runtime_root=runtime_root,
                 goal_id=args.goal_id,
-                todo_id=args.todo_id,
                 owner=args.owner,
+                todo_id=args.todo_id,
                 idempotency_key=args.idempotency_key,
-                ttl_seconds=args.ttl_seconds,
                 write_scopes=args.write_scopes,
+                ttl_seconds=args.ttl_seconds,
                 expected_version=args.expected_version,
+                acquire=True,
             )
+            lease_path = task_lease_path(
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+                todo_id=args.todo_id,
+            )
+            if result.failure is not None:
+                payload = {
+                    "ok": False,
+                    "schema_version": "task_lease_v0",
+                    "action": "acquire",
+                    "error": str(result.failure.reason),
+                    "error_code": result.failure.kind.value,
+                    "lease_path": str(lease_path),
+                    "settlement": {
+                        "effect_id": (
+                            result.receipts[-1].effect_id if result.receipts else None
+                        ),
+                        "receipts": [
+                            {
+                                "step": receipt.step_kind.value,
+                                "status": receipt.status,
+                                "effect_id": receipt.effect_id,
+                            }
+                            for receipt in result.receipts
+                        ],
+                        "failure": {
+                            "step": result.failure.step_kind.value,
+                            "kind": result.failure.kind.value,
+                        },
+                    },
+                }
+            else:
+                lease = result.value if isinstance(result.value, dict) else {}
+                idempotent = any(
+                    receipt.status == "idempotent" for receipt in result.receipts
+                )
+                payload = {
+                    "ok": True,
+                    "schema_version": "task_lease_v0",
+                    "action": "acquire",
+                    "acquired": not idempotent,
+                    "idempotent": idempotent,
+                    "lease": lease,
+                    "lease_path": str(lease_path),
+                    "settlement": {
+                        "effect_id": (
+                            result.receipts[-1].effect_id if result.receipts else None
+                        ),
+                        "receipts": [
+                            {
+                                "step": receipt.step_kind.value,
+                                "status": receipt.status,
+                                "effect_id": receipt.effect_id,
+                            }
+                            for receipt in result.receipts
+                        ],
+                    },
+                }
         elif args.task_lease_command == "renew":
             if args.write_scopes:
                 raise ValueError("task-lease renew does not accept --write-scope")
