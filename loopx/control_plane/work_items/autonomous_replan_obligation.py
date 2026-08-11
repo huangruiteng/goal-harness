@@ -25,21 +25,48 @@ SectionEntries = Callable[[list[str]], list[str]]
 MAX_AUTONOMOUS_REPLAN_TRIGGERS = 3
 AUTONOMOUS_REPLAN_STALL_THRESHOLD = 2
 REPLAN_NOVELTY_POLICY_SCHEMA_VERSION = "replan_novelty_policy_v0"
-# Generic agent-facing guidance appended to every autonomous replan
-# recommended_action. It is deliberately surface-neutral: it tells the agent
-# to consult its own evidence ledger, prefer an untried direction, and only
-# close on an explicit coverage-backed terminal state instead of restating an
-# already-tried action or blocker.
+# Keep the effective rule prompt-visible. The novelty policy owns the evidence
+# source, quota binds that source to the executable required_reads projection,
+# and repair_delta remains the only writeback/enforcement truth.
 REPLAN_NOVELTY_GUIDANCE = (
-    " Review the agent-scoped evidence log first (required_reads carries the "
-    "exact `loopx evidence-log` command), then keep proposing new approaches: "
-    "prefer a direction not already covered by recent runs, such as a new "
-    "surface, method, parameter combination, validation command, or hypothesis. "
-    "Do not repeat an already-tried action or restate the same blocker. If no "
-    "new direction remains, list which surfaces and combinations are already "
-    "covered and record an explicit exploration_exhausted blocker with that "
-    "coverage evidence."
+    " Run required_reads[0] (evidence-log); choose an untried direction. "
+    "Reject repeats; exploration_exhausted needs coverage."
 )
+
+
+def build_replan_novelty_policy() -> dict[str, str]:
+    """Bind replan preflight to the existing repair-delta settlement truth."""
+
+    return {
+        "schema_version": REPLAN_NOVELTY_POLICY_SCHEMA_VERSION,
+        "evidence_source": "agent_scoped_evidence_log",
+        "writeback": "repair_delta",
+    }
+
+
+def with_replan_novelty_guidance(action: str) -> str:
+    """Make the policy visible once on every replan primary action."""
+
+    marker = "required_reads[0] (evidence-log)"
+    normalized = str(action or "").strip()
+    if marker in normalized:
+        return normalized
+    return normalized + REPLAN_NOVELTY_GUIDANCE
+
+
+def ensure_replan_novelty_policy(
+    obligation: dict[str, Any],
+) -> dict[str, Any]:
+    """Upgrade any legacy obligation onto the policy-owned evidence path."""
+
+    normalized = dict(obligation)
+    normalized["recommended_action"] = with_replan_novelty_guidance(
+        str(normalized.get("recommended_action") or "run a bounded autonomous replan")
+    )
+    normalized["replan_novelty_policy"] = build_replan_novelty_policy()
+    return normalized
+
+
 # Unchanged-poll streak before a monitor-only lane is forced to replan. Kept
 # deliberately above the 2-turn run-history stall threshold: quiet monitors
 # legitimately wait several cadence cycles for external evidence, and forcing
@@ -624,30 +651,6 @@ def build_autonomous_replan_obligation(
         extra_fields["frontier_identity"] = dead_monitor_evidence.get(
             "monitor_target_id"
         )
-    repeated_stall = bool(
-        blocked_successor_evidence
-        or dead_monitor_evidence
-        or any(
-            item.get("kind")
-            in {"run_history_no_progress_repeat", "no_progress_streak", "repeated_action_loop"}
-            for item in evidence
-        )
-    )
-    extra_fields["replan_novelty_policy"] = {
-        "schema_version": REPLAN_NOVELTY_POLICY_SCHEMA_VERSION,
-        "review_evidence_log": True,
-        "prefer_unattempted_direction": True,
-        "repeated_blocker_restatement_rejected": repeated_stall,
-        "no_new_direction_closure": (
-            ["watch_lane_expiry", "exploration_exhausted_with_coverage_evidence"]
-            if dead_monitor_evidence
-            else [
-                "exploration_exhausted_with_coverage_evidence",
-                "explicit_terminal_blocker_or_no_followup",
-            ]
-        ),
-    }
-
     result = build_autonomous_replan_obligation_payload(
         schema_version=autonomous_replan_schema_version,
         stall_threshold=(
@@ -702,10 +705,7 @@ def build_autonomous_replan_obligation_payload(
     agent_id: str | None = None,
     include_agent_id: bool = False,
     extra_fields: dict[str, Any] | None = None,
-    include_novelty_guidance: bool = True,
 ) -> dict[str, Any]:
-    if include_novelty_guidance:
-        recommended_action = recommended_action + REPLAN_NOVELTY_GUIDANCE
     payload: dict[str, Any] = {
         "schema_version": schema_version,
         "required": True,
@@ -717,21 +717,11 @@ def build_autonomous_replan_obligation_payload(
         "stop_condition": stop_condition,
         "recommended_action": recommended_action,
     }
-    payload["replan_novelty_policy"] = {
-        "schema_version": REPLAN_NOVELTY_POLICY_SCHEMA_VERSION,
-        "review_evidence_log": True,
-        "prefer_unattempted_direction": True,
-        "repeated_blocker_restatement_rejected": False,
-        "no_new_direction_closure": [
-            "exploration_exhausted_with_coverage_evidence",
-            "explicit_terminal_blocker_or_no_followup",
-        ],
-    }
     if include_agent_id or agent_id is not None:
         payload["agent_id"] = agent_id
     if extra_fields:
         payload.update(extra_fields)
-    return payload
+    return ensure_replan_novelty_policy(payload)
 
 
 def autonomous_replan_obligation_from_runs(

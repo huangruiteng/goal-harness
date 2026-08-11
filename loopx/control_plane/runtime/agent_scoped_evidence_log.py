@@ -1,27 +1,19 @@
 from __future__ import annotations
 
-import re
 import shlex
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
+from .public_safety import public_safe_compact_text
 from .time import parse_timestamp
 
 
 SCHEMA_VERSION = "agent_scoped_evidence_log_v0"
 REQUIRED_READ_SCHEMA_VERSION = "loopx_agent_required_read_v0"
 
-_AK_SK_PATTERN = re.compile(r"(?i)\b(?:ak|sk|access[_-]?key|secret[_-]?key)\b\s*[:=]\s*\S+")
-
-
 def _compact_text(value: Any, *, limit: int = 220) -> str | None:
-    text = " ".join(str(value or "").split())
-    if not text:
-        return None
-    if _AK_SK_PATTERN.search(text):
-        return None
-    return text[:limit]
+    return public_safe_compact_text(value, limit=limit)
 
 
 def _normalize_event_kind(value: str) -> str:

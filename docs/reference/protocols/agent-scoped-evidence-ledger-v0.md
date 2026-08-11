@@ -19,10 +19,10 @@ jobs:
 | `loopx status` | Projects current state, todo index, attention queues, agent lanes, run history, and event summaries. | It answers "what is true now", not "what sequence should this agent review before replanning". |
 | `loopx review-packet` | Packages status and attention items for review or handoff. | It is packet-shaped, not a general scoped event ledger. |
 | `loopx history` | Reads compact run history and run indexes. | It is run-centric and not equivalent to rollout events. |
-| `loopx quota should-run --agent-id ...` | Decides whether a specific agent lane should act. | It can route work by agent, but does not expose a standard per-agent evidence read. |
+| `loopx quota should-run --agent-id ...` | Decides whether a specific agent lane should act and materializes the evidence source requested by `replan_novelty_policy`. | A standalone required-read hint has insufficient prompt salience and is not a replan control mechanism. |
 
-The missing surface is a public-safe, bounded, agent-scoped ledger that an agent
-can read before replanning.
+The resulting surface is a public-safe, bounded, agent-scoped ledger that an
+agent can read before replanning.
 
 ## Ownership Boundary
 
@@ -31,35 +31,34 @@ can read before replanning.
 | Event sources | Durable append-only events, compact run records, ids, timestamps, and public-safe refs. | Prompt-ready planning summaries or cross-agent privacy policy. |
 | Status and review packets | Current projections, attention queues, frontier summaries, and operator packets. | Raw chronological replay or write authority. |
 | Quota | Lane routing, spend policy, scheduler hints, and required read hints. | Reconstructing history itself or storing replan rationale. |
-| Agent-scoped evidence ledger | Thin chronological rows for the current agent plus compressed frontier for other agents. | Canonical writes, raw logs, raw trajectories, private documents, or full other-agent traces. |
-| Acting agent | Reads its scoped ledger before replan or handoff and cites the digest in writeback. | Inferring hidden context from another agent's private lane. |
+| Agent-scoped evidence ledger | Thin chronological rows for the current agent plus compressed frontier for other agents. | Replan selection policy, repair-delta validation, canonical writes, raw logs, raw trajectories, private documents, or full other-agent traces. |
+| Replan novelty policy | Makes evidence preflight and uncovered-direction selection prompt-visible. | Reimplementing blocker fingerprints, successor validation, or terminal-closure truth. |
+| Repair delta | Validates the durable replan writeback, including repeated-blocker rejection and coverage-backed `exploration_exhausted`. | Reconstructing the evidence ledger. |
+| Acting agent | Executes projected required reads, selects an uncovered direction, and submits the resulting repair delta. | Treating a read receipt alone as progress or inferring hidden context from another agent's private lane. |
 
 ## Read Model Shape
 
-The first implementation should return JSON and may render Markdown later:
+The CLI payload uses the shipped `agent_scoped_evidence_log_v0` schema (the
+protocol name describes the ledger concept rather than a second wire schema):
 
 ```json
 {
-  "schema_version": "agent_scoped_evidence_ledger_v0",
+  "schema_version": "agent_scoped_evidence_log_v0",
   "goal_id": "example-goal",
   "agent_id": "codex-evidence-peer",
-  "generated_at": "2026-07-05T00:00:00Z",
-  "source": {
-    "rollout_event_log": true,
-    "run_history": true,
-    "todo_projection": true
-  },
-  "scope": {
-    "current_agent_detail": true,
-    "other_agent_detail": "compressed_frontier"
-  },
-  "filters": {
-    "todo_id": null,
-    "event_kind": null,
-    "since": null,
-    "limit": 30
-  },
-  "events": [
+  "mode": "thin",
+  "todo_id": null,
+  "since": null,
+  "event_kinds": [],
+  "limit": 30,
+  "matched_count": 1,
+  "ledger_count": 1,
+  "truncated": false,
+  "source_refs": [
+    "rollout_event_log.public_safe_view",
+    "compact_run_history.public_refs"
+  ],
+  "ledger": [
     {
       "event_id": "evt_123",
       "recorded_at": "2026-07-05T00:00:00Z",
@@ -69,30 +68,27 @@ The first implementation should return JSON and may render Markdown later:
       "todo_id": "todo_123",
       "classification": "implementation_batch",
       "status": "open",
-      "summary": "P0 implementation frontier was split into a design contract and a CLI read model.",
-      "evidence_refs": ["docs/reference/protocols/agent-scoped-evidence-ledger-v0.md"],
-      "boundary": {
-        "raw_logs_recorded": false,
-        "raw_trajectory_recorded": false,
-        "credential_values_recorded": false,
-        "absolute_paths_recorded": false
+      "summary": "P0 implementation frontier was split into a design contract and a CLI read model."
+    }
+  ],
+  "other_agent_frontier": {
+    "schema_version": "other_agent_frontier_v0",
+    "policy": "goal_frontier_only",
+    "item_count": 1,
+    "items": [
+      {
+        "agent_id": "codex-main-control",
+        "source": "run_history",
+        "classification": "validated_progress"
       }
-    }
-  ],
-  "other_agent_frontier": [
-    {
-      "agent_id": "codex-main-control",
-      "vision_summary": "Owns the currently claimed runtime validation slice.",
-      "top_todo": "Validate the next control-plane PR batch.",
-      "handoff_state": "no_handoff_required",
-      "latest_material_at": "2026-07-05T00:00:00Z"
-    }
-  ],
-  "reader_hints": {
-    "required_before": ["autonomous_replan", "successor_replan", "handoff"],
-    "next_required_reads": [
-      "loopx evidence-log --goal-id example-goal --agent-id codex-evidence-peer --thin --limit 30"
     ]
+  },
+  "boundary": {
+    "raw_logs_recorded": false,
+    "raw_trajectory_recorded": false,
+    "credential_values_recorded": false,
+    "absolute_paths_recorded": false,
+    "other_agent_event_stream_expanded": false
   }
 }
 ```
@@ -102,22 +98,24 @@ in a prompt, and stable enough for quota/replan tests.
 
 ## CLI Contract
 
-The first public CLI can be read-only:
+The public CLI is read-only:
 
 ```bash
-loopx evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin --limit 30
+loopx --format json evidence-log --goal-id <goal-id> --agent-id <agent-id> --thin --limit 30
 ```
 
 Supported filters:
 
 | Option | Meaning |
 | --- | --- |
-| `--todo-id <todo-id>` | Return rows tied to one todo plus goal-level rows that block it. |
+| `--todo-id <todo-id>` | Filter rollout events by exact todo id and compact runs by bounded todo mention. |
 | `--since <iso8601>` | Return rows recorded after a timestamp. |
 | `--event-kind <kind>` | Filter rollout event kinds such as `todo_update`, `quota_should_run`, or `validation`. |
-| `--include-other-agent-frontier` | Include compressed other-agent frontier rows. This should be on by default for replan packets, but not expand other-agent detail. |
 | `--limit <n>` | Bound rows after filtering. Default should be small enough for an agent prompt. |
-| `--format json` | Emit the schema above. Markdown can be a later convenience view. |
+| `--history-limit <n>` | Bound compact run-history rows scanned before filtering. |
+| `--rollout-limit <n>` | Bound rollout-event rows scanned from the tail before filtering. |
+| `--thin` | Select the only current public-safe mode; accepted explicitly for readable generated commands. |
+| global `--format json\|markdown` | Select JSON or the compact Markdown rendering. |
 
 The command must fail closed on missing `goal_id` or `agent_id`. A vague
 surface value such as `codex` should not silently fall into `other-agent`
@@ -126,22 +124,20 @@ separate host surface such as `codex-app`, `codex-cli`, `opencode`, or `claude-c
 
 ## Scoping Rules
 
-The current agent gets detailed rows when any of these are true:
+The current implementation returns detailed rows under these deterministic
+rules:
 
 - the event has `agent_id` equal to the requested agent id;
-- the event references a todo claimed by that agent;
-- the event references an unclaimed todo currently selected for that agent lane;
-- the event is a gate, blocker, validation, or state projection that directly
-  changes that agent's next action;
-- the event records a handoff to or from that agent.
-
-Goal-level rows may appear only when they change route, acceptance, global gate,
-active next action, or replan obligation.
+- when `--todo-id` is present, the event has that exact todo id;
+- compact run-history rows have the requested agent id and, when filtered by
+  todo, mention that todo in one of the bounded run fields;
+- `--since` and normalized `--event-kind` filters are applied before the final
+  newest-first limit.
 
 Other agents should not be shown row by row by default. They should be compressed
-into `other_agent_frontier` with bounded `vision_summary`, `top_todo`,
-`handoff_state`, and latest material timestamp. This lets an agent understand the
-shared direction without inheriting another lane's private scratchpad.
+into `other_agent_frontier` from the latest compact run-history row per agent,
+with a maximum of three rows. This lets an agent understand the shared direction
+without inheriting another lane's private scratchpad.
 
 ## Replan Integration
 
@@ -153,13 +149,24 @@ contract should include required reads:
   "effective_action": "autonomous_replan",
   "required_reads": [
     {
-      "kind": "agent_scoped_evidence_ledger",
-      "command": "loopx evidence-log --goal-id loopx-meta --agent-id codex-evidence-peer --thin --limit 30",
+      "kind": "agent_scoped_evidence_log",
+      "command": "loopx --format json evidence-log --goal-id loopx-meta --agent-id codex-evidence-peer --thin --limit 24",
       "reason": "Read this agent's own material chronology before writing a replan delta."
     }
   ]
 }
 ```
+
+The control-plane responsibilities are deliberately split and causally bound:
+
+- `replan_novelty_policy` is the baseline: it names
+  `agent_scoped_evidence_log` as its evidence source and makes uncovered-
+  direction selection visible in the primary recommended action;
+- quota materializes that requested source as `required_reads[0]`, which carries
+  the exact command. A generic replan without the novelty policy does not
+  recreate the old standalone hint;
+- `repair_delta` remains the only writeback truth for repeated blockers,
+  successor novelty, and coverage-backed exhaustion.
 
 The agent should then write back one of:
 
@@ -169,8 +176,20 @@ The agent should then write back one of:
 - a no-follow-up rationale when the ledger proves the lane is intentionally
   closed.
 
-An acknowledgement without reading the ledger or writing a bounded delta should
-not clear the replan obligation.
+LoopX cannot infer from an acknowledgement alone that a shell read happened.
+Accordingly, the evidence-log read is not a second settlement mechanism: the
+obligation clears only through a valid bounded repair delta, while the
+prompt-visible novelty policy prevents the preflight command from being buried
+as an unused packet field.
+
+The live behavior qualification tests that causal handoff through an actual
+function-tool conversation rather than a testing-only output field. A Doubao
+actor receives the shipped Codex App heartbeat body, chooses the quota command,
+receives the production replan packet, and must then call the exact evidence-log
+command from that packet. Prose such as "read the log next", a generic read
+action, a command for another agent, or an evidence-log call made before quota
+does not pass. The harness stops before executing the evidence command and
+stores only bounded command digests.
 
 ## Privacy Boundary
 
@@ -187,19 +206,15 @@ Rows may contain compact ids, relative public artifact refs, redacted summaries,
 omission notes, and private source counts. If a source is private, the row should
 say that only a compact pointer or count was recorded.
 
-## Rollout Plan
+## Current Implementation Status
 
-1. Add this public contract and keep it separate from runtime changes.
-2. Implement a read-only builder over rollout events with agent-id, todo-id,
-   kind, since, and limit filters.
-3. Merge compact run-history references into the same row shape without changing
-   existing `loopx history` semantics.
-4. Add other-agent frontier compression from todo/vision/handoff projections.
-5. Wire `required_reads` into quota, status, review packets, and autonomous
-   replan writeback.
-6. Add focused smokes for agent filtering, other-agent compression, privacy
-   redaction, and replan required-read stability.
-7. Expose discoverability in docs and help text once the CLI path is stable.
+The read-only CLI, rollout-event/run-history merge, bounded other-agent
+frontier, policy-owned quota/review-packet required reads, and public boundary
+smokes are implemented. Todo and material projections remain separate current-
+state surfaces; they are not copied into this chronological ledger. Replan
+novelty selection is owned by `replan_novelty_policy`, while durable acceptance
+is owned by the repair-delta control path rather than expanded inside the ledger
+builder.
 
 ## Acceptance
 
@@ -213,6 +228,9 @@ A change satisfies this contract only when:
   prompts;
 - replan-capable quota/status payloads can point agents to the required ledger
   read;
+- the live function-tool qualification proves that the default model selects
+  that exact read from a production heartbeat/quota exchange rather than merely
+  echoing a test field;
 - the existing status, history, review-packet, and rollout-event-log surfaces
   keep their current responsibilities; and
 - public tests prove the privacy boundary without committing private state,

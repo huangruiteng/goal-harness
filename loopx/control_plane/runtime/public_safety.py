@@ -12,6 +12,8 @@ LOCAL_PATH_SURFACE_PATTERN = re.compile(
 )
 SECRET_LIKE_SURFACE_PATTERN = re.compile(
     r"(?i)(?:\bbearer\s+[a-z0-9._~+/=-]{16,}|"
+    r"\b(?:access|secret)[_-]?key\s*[=:]\s*[^\s`'\"<>]+|"
+    r"\b(?:ak|sk)\s*[=:]\s*[^\s`'\"<>]+|"
     r"(?<![a-z0-9_])(?:ak|sk)[-_=:][a-z0-9_=-]{10,}|"
     r"\btoken\s*[=:]\s*[^\s`'\"<>]{12,})"
 )

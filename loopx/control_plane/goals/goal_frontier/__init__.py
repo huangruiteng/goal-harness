@@ -19,8 +19,9 @@ from ...work_items.autonomous_replan_ack import (
 )
 from ...work_items.autonomous_replan_obligation import (
     MONITOR_NO_CHANGE_STREAK_THRESHOLD,
-    REPLAN_NOVELTY_GUIDANCE,
     build_autonomous_replan_obligation_payload,
+    ensure_replan_novelty_policy,
+    with_replan_novelty_guidance,
 )
 from ...work_items.repair_delta import (
     repair_delta_kinds_have_frontier_delta,
@@ -218,12 +219,11 @@ def align_autonomous_replan_guidance_with_acceptance_policy(
         else action
         for action in (replan_obligation.get("todo_actions") or [])
     ]
-    aligned["recommended_action"] = (
+    aligned["recommended_action"] = with_replan_novelty_guidance(
         "run a bounded autonomous replan for the exact blocked successor: "
         "create or claim one safe in-scope runnable advancement todo, or record "
         "an explicit successor/supersede transition; watch-lane continuation "
         "alone does not satisfy a repeat-until-closed vision"
-        + REPLAN_NOVELTY_GUIDANCE
     )
     aligned["satisfying_repair_delta_kinds"] = list(
         REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
@@ -1691,6 +1691,8 @@ def build_goal_frontier_projection_context_from_status(
         project_asset,
         agent_id=agent_id,
     )
+    if replan_obligation:
+        replan_obligation = ensure_replan_novelty_policy(replan_obligation)
     replan_scope = autonomous_replan_scope_decision(
         replan_obligation,
         agent_id=agent_id,
@@ -1852,7 +1854,9 @@ def build_goal_frontier_projection_context_from_status(
         acceptance_gaps=acceptance_gaps,
     )
     if frontier_replan_obligation:
-        replan_obligation = frontier_replan_obligation
+        replan_obligation = ensure_replan_novelty_policy(
+            frontier_replan_obligation
+        )
         replan_scope = autonomous_replan_scope_decision(
             replan_obligation,
             agent_id=agent_id,
@@ -1909,7 +1913,11 @@ def compact_replan_obligation(replan_obligation: dict[str, Any]) -> dict[str, An
     if replan_obligation.get("frontier_identity"):
         compact["frontier_identity"] = replan_obligation.get("frontier_identity")
     if isinstance(replan_obligation.get("replan_novelty_policy"), dict):
-        compact["replan_novelty_policy"] = replan_obligation["replan_novelty_policy"]
+        # Keep hot quota/status packets on the two authoritative seams. The
+        # detailed selection hint remains available on the full obligation.
+        compact["replan_novelty_policy"] = {
+            "evidence": "agent_scoped_evidence_log",
+        }
     if isinstance(replan_obligation.get("replan_ack_feedback"), dict):
         compact["replan_ack_feedback"] = replan_obligation["replan_ack_feedback"]
         compact["recommended_action"] = replan_obligation.get("recommended_action")
