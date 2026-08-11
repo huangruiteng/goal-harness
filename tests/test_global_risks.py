@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -7,7 +8,9 @@ from typing import Any
 
 import pytest
 
+import loopx.cli_commands.summary_all as manager_cli
 import loopx.global_risks as global_risks
+from loopx.cli import build_parser
 
 
 FROZEN_TIME = "2026-08-11T12:00:00Z"
@@ -871,3 +874,173 @@ def test_error_markdown_stays_public_safe(tmp_path, monkeypatch) -> None:
 	assert "Global Risks Unavailable" in markdown
 	assert private_path not in markdown
 	assert "<local-path-redacted>" in markdown
+
+
+def test_global_risks_cli_registers_only_the_canonical_command(
+	capsys,
+	tmp_path,
+) -> None:
+	args = build_parser().parse_args(
+		[
+			"global-risks",
+			"--time-range",
+			"1h",
+			"--agent-id",
+			"agent-a",
+			"--limit",
+			"5",
+			"--scan-root",
+			str(tmp_path),
+			"--scan-path",
+			"first.md",
+			"--scan-path",
+			"second.md",
+		]
+	)
+
+	assert args.command == "global-risks"
+	assert args.time_range == "1h"
+	assert args.agent_id == "agent-a"
+	assert args.limit == 5
+	assert args.scan_root == str(tmp_path)
+	assert args.scan_path == ["first.md", "second.md"]
+
+	with pytest.raises(SystemExit) as help_exit:
+		build_parser().parse_args(["global-risks", "--help"])
+	assert help_exit.value.code == 0
+	help_text = capsys.readouterr().out
+	for flag in ("--time-range", "--agent-id", "--limit", "--scan-root", "--scan-path"):
+		assert flag in help_text
+
+	with pytest.raises(SystemExit) as alias_exit:
+		build_parser().parse_args(["/loop-global-risks"])
+	assert alias_exit.value.code != 0
+
+
+def test_global_risks_cli_reports_unhealthy_status_with_zero_exit(
+	monkeypatch,
+	tmp_path,
+) -> None:
+	printed: list[tuple[dict[str, object], str, object]] = []
+	payload: dict[str, object] = {
+		"ok": True,
+		"summary": {"source_health_ok": False},
+	}
+	build_calls: list[dict[str, object]] = []
+
+	def build_global_risks(**kwargs: object) -> dict[str, object]:
+		build_calls.append(kwargs)
+		return payload
+
+	def print_payload(
+		value: dict[str, object],
+		format_name: str,
+		renderer: object,
+	) -> None:
+		printed.append((value, format_name, renderer))
+
+	monkeypatch.setattr(manager_cli, "build_global_risks", build_global_risks)
+	args = argparse.Namespace(
+		command="global-risks",
+		agent_id="agent-a",
+		limit=5,
+		scan_root=str(tmp_path),
+		scan_path=[str(tmp_path / "risk.md")],
+		time_range="1h",
+		format="json",
+	)
+
+	exit_code = manager_cli.handle_summary_all_command(
+		args,
+		registry_path=tmp_path / "registry.json",
+		runtime_root_arg=None,
+		output_format=lambda value: value.format,
+		print_payload=print_payload,
+	)
+
+	assert exit_code == 0
+	assert build_calls == [
+		{
+			"registry_path": tmp_path / "registry.json",
+			"runtime_root_override": None,
+			"scan_roots": [tmp_path / "risk.md"],
+			"agent_id": "agent-a",
+			"time_range": "1h",
+			"limit": 5,
+		}
+	]
+	assert printed == [(payload, "json", global_risks.render_global_risks_markdown)]
+	assert not hasattr(manager_cli, "build_quota_should_run")
+	assert not hasattr(manager_cli, "collect_history")
+
+
+@pytest.mark.parametrize("format_name", ["json", "markdown"])
+def test_global_risks_cli_returns_nonzero_for_compact_errors(
+	monkeypatch,
+	tmp_path,
+	format_name,
+) -> None:
+	payload: dict[str, object] = {
+		"ok": False,
+		"error_code": "agent_scope_unavailable",
+	}
+	printed: list[tuple[dict[str, object], str, object]] = []
+	monkeypatch.setattr(manager_cli, "build_global_risks", lambda **_kwargs: payload)
+	args = argparse.Namespace(
+		command="global-risks",
+		agent_id="agent-a",
+		limit=5,
+		scan_root=str(tmp_path),
+		scan_path=[],
+		time_range="24h",
+		format=format_name,
+	)
+
+	exit_code = manager_cli.handle_summary_all_command(
+		args,
+		registry_path=tmp_path / "registry.json",
+		runtime_root_arg=None,
+		output_format=lambda value: value.format,
+		print_payload=lambda value, selected, renderer: printed.append(
+			(value, selected, renderer)
+		),
+	)
+
+	assert exit_code == 1
+	assert printed == [
+		(payload, format_name, global_risks.render_global_risks_markdown)
+	]
+
+
+def test_global_risks_cli_wraps_only_outer_exceptions(monkeypatch, tmp_path) -> None:
+	private_path = str(tmp_path / "private" / "registry.json")
+	printed: list[dict[str, object]] = []
+	monkeypatch.setattr(global_risks, "now_utc_iso", lambda: FROZEN_TIME)
+
+	def raise_builder(**_kwargs: object) -> dict[str, object]:
+		raise RuntimeError(f"cannot read {private_path}")
+
+	monkeypatch.setattr(manager_cli, "build_global_risks", raise_builder)
+	args = argparse.Namespace(
+		command="global-risks",
+		agent_id=None,
+		limit=5,
+		scan_root=str(tmp_path),
+		scan_path=[],
+		time_range="7d",
+		format="json",
+	)
+
+	exit_code = manager_cli.handle_summary_all_command(
+		args,
+		registry_path=tmp_path / "registry.json",
+		runtime_root_arg=None,
+		output_format=lambda value: value.format,
+		print_payload=lambda value, _selected, _renderer: printed.append(value),
+	)
+
+	assert exit_code == 1
+	assert printed[0]["ok"] is False
+	assert printed[0]["request"]["time_range"] == "7d"
+	assert private_path not in str(printed[0])
+	assert "<local-path-redacted>" in str(printed[0]["error"])

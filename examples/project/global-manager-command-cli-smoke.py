@@ -29,6 +29,16 @@ PRIVATE_PATTERNS = [
 ]
 
 
+def synthetic_private_markers() -> dict[str, str]:
+    return {
+        "first_path": "/" + "Users" + "/fixture/Documents/private-first.txt",
+        "second_path": "/" + "Users" + "/fixture/Documents/private-second.txt",
+        "credential": "tok" + "en=" + "abcdefghijklmnop",
+        "log": "raw-" + "log-private-marker",
+        "transcript": "raw-" + "transcript-private-marker",
+    }
+
+
 def assert_public_safe(payload: dict[str, object]) -> None:
     text = json.dumps(payload, ensure_ascii=False)
     for pattern in PRIVATE_PATTERNS:
@@ -70,7 +80,7 @@ def run_cli(
     )
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, list[Path]]:
+def write_fixture(root: Path) -> tuple[Path, Path, Path, Path, list[Path]]:
     runtime = root / "runtime"
     registry = root / "registry.global.json"
     projects = {
@@ -87,7 +97,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, list[Path]]:
         "---\n"
         "status: active\n"
         f"goal_id: {GOAL_ID}\n"
-        "updated_at: 2026-08-10T00:00:00+00:00\n"
+        "updated_at: 2026-08-11T01:00:00+00:00\n"
         "---\n\n"
         "# Global Manager CLI Smoke\n\n"
         "## User Todo\n\n"
@@ -191,7 +201,20 @@ def write_fixture(root: Path) -> tuple[Path, Path, list[Path]]:
         + "\n",
         encoding="utf-8",
     )
-    return registry, runtime, [*states.values(), run_index]
+    risk_input = root / "public-risk-input.md"
+    risk_input.write_text(
+        "\n".join(synthetic_private_markers().values()) + "\n",
+        encoding="utf-8",
+    )
+    safe_input = root / "public-safe-input.md"
+    safe_input.write_text("# Public-safe manager fixture\n", encoding="utf-8")
+    return (
+        registry,
+        runtime,
+        risk_input,
+        safe_input,
+        [*states.values(), run_index, risk_input, safe_input],
+    )
 
 
 def snapshot_files(paths: list[Path]) -> dict[Path, tuple[bytes, int]]:
@@ -268,6 +291,63 @@ def assert_todos_markdown(markdown: str, *, private_root: Path) -> None:
     assert str(private_root) not in markdown, markdown
 
 
+def assert_risks_payload(payload: dict[str, object]) -> None:
+    assert payload["ok"] is True, payload
+    request = payload["request"]
+    assert request["command"] == "/loopx-global-risks", request
+    assert request["legacy_aliases"] == ["/loop-global-risks"], request
+    assert request["cli_command"] == "loopx global-risks", request
+    assert request["time_range"] == "1h", request
+    assert request["dry_run"] is True, request
+
+    risks = payload["risks"]
+    boundary_rows = [
+        row for row in risks if row["kind"] == "public_boundary_violation"
+    ]
+    assert len(boundary_rows) >= 2, payload
+    assert len({row["occurrence_id"] for row in boundary_rows}) == len(boundary_rows)
+    assert all(row["category"] == "boundary_warning" for row in boundary_rows)
+    assert payload["groups"]["rollback_candidates"] == [], payload
+    assert payload["summary"]["rollback_candidate_count"] == 0, payload
+    assert payload["summary"]["rollback_candidates_overlap_risks"] is False, payload
+    assert payload["omissions"] == [
+        {
+            "kind": "rollback_candidate_source_unavailable",
+            "reason": (
+                "Current projections do not carry rollback trigger and causal linkage."
+            ),
+        }
+    ], payload
+
+    stale_rows = payload["groups"]["stale_runs"]
+    assert stale_rows, payload
+    assert stale_rows[0]["kind"] == "stale_latest_run_projection", stale_rows
+    assert stale_rows[0]["goal_id"] == GOAL_ID, stale_rows
+    assert any(
+        warning["reason_code"] == "global_registry_unavailable"
+        for warning in payload["source_warnings"]
+    ), payload
+    text = json.dumps(payload, ensure_ascii=False)
+    for marker in synthetic_private_markers().values():
+        assert marker not in text, marker
+    assert_public_safe(payload)
+
+
+def assert_risks_markdown(markdown: str, *, private_root: Path) -> None:
+    assert "# LoopX Global Risks" in markdown, markdown
+    assert "`/loopx-global-risks`" in markdown, markdown
+    assert "`1h`" in markdown, markdown
+    assert "## Stale Runs" in markdown, markdown
+    assert "## Boundary Warnings" in markdown, markdown
+    assert "## Failing Checks" in markdown, markdown
+    assert "## Rollback Candidates" in markdown, markdown
+    assert "No current accepted source proves a rollback candidate" in markdown, markdown
+    assert "does not authorize rollback" in markdown, markdown
+    assert str(private_root) not in markdown, markdown
+    for marker in synthetic_private_markers().values():
+        assert marker not in markdown, marker
+
+
 def assert_error_envelope(root: Path, *, runtime: Path) -> None:
     error_registry = root / "private" / "error-registry"
     error_registry.mkdir(parents=True)
@@ -302,9 +382,34 @@ def assert_error_envelope(root: Path, *, runtime: Path) -> None:
     assert "<local-path-redacted>" in todos_error_proc.stdout, todos_error_proc.stdout
     assert_public_safe(todos_payload)
 
+    for output_format in ("json", "markdown"):
+        risks_error_proc = run_cli(
+            registry=error_registry,
+            runtime=runtime,
+            command="global-risks",
+            output_format=output_format,
+            check=False,
+        )
+        assert risks_error_proc.returncode != 0, risks_error_proc
+        assert str(error_registry) not in risks_error_proc.stdout, risks_error_proc.stdout
+        assert "<local-path-redacted>" in risks_error_proc.stdout, risks_error_proc.stdout
+        if output_format == "json":
+            risks_payload = json.loads(risks_error_proc.stdout)
+            assert risks_payload["ok"] is False, risks_payload
+            assert risks_payload["error_code"] == "status_collection_unavailable", risks_payload
+            assert "risks" not in risks_payload, risks_payload
+            assert "groups" not in risks_payload, risks_payload
+            assert_public_safe(risks_payload)
+        else:
+            assert "# LoopX Global Risks Unavailable" in risks_error_proc.stdout
+
 
 def assert_unhealthy_status_envelope(
-    root: Path, *, registry: Path, runtime: Path
+    root: Path,
+    *,
+    registry: Path,
+    runtime: Path,
+    safe_input: Path,
 ) -> None:
     unhealthy_registry = root / "unhealthy-registry.json"
     unhealthy_payload = json.loads(registry.read_text(encoding="utf-8"))
@@ -319,6 +424,7 @@ def assert_unhealthy_status_envelope(
         runtime=runtime,
         command="status",
         output_format="json",
+        command_args=["--scan-path", str(safe_input)],
         check=False,
     )
     status_payload = json.loads(status_proc.stdout)
@@ -331,6 +437,7 @@ def assert_unhealthy_status_envelope(
         runtime=runtime,
         command="global-gates",
         output_format="json",
+        command_args=["--scan-path", str(safe_input)],
         check=False,
     )
     assert gates_proc.returncode != 0, gates_proc
@@ -348,6 +455,7 @@ def assert_unhealthy_status_envelope(
         runtime=runtime,
         command="global-todos",
         output_format="json",
+        command_args=["--scan-path", str(safe_input)],
         check=False,
     )
     assert todos_proc.returncode != 0, todos_proc
@@ -359,11 +467,26 @@ def assert_unhealthy_status_envelope(
     assert str(root) not in todos_proc.stdout, todos_proc.stdout
     assert_public_safe(todos_payload)
 
+    risks_proc = run_cli(
+        registry=unhealthy_registry,
+        runtime=runtime,
+        command="global-risks",
+        output_format="json",
+        command_args=["--scan-path", str(safe_input)],
+        check=False,
+    )
+    assert risks_proc.returncode == 0, risks_proc
+    risks_payload = json.loads(risks_proc.stdout)
+    assert risks_payload["ok"] is True, risks_payload
+    assert risks_payload["summary"]["source_health_ok"] is False, risks_payload
+    assert risks_payload["groups"]["failing_checks"], risks_payload
+    assert_public_safe(risks_payload)
+
 
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-global-manager-smoke-") as tmp:
         root = Path(tmp)
-        registry, runtime, fixture_files = write_fixture(root)
+        registry, runtime, risk_input, safe_input, fixture_files = write_fixture(root)
         files = [registry, *fixture_files]
         before = snapshot_files(files)
 
@@ -372,35 +495,94 @@ def main() -> int:
             runtime=runtime,
             command="global-summary",
             output_format="json",
-            command_args=["--agent-id", AGENT_ID, "--limit", "5"],
+            command_args=[
+                "--agent-id",
+                AGENT_ID,
+                "--limit",
+                "5",
+                "--scan-path",
+                str(safe_input),
+            ],
         )
         gates_proc = run_cli(
             registry=registry,
             runtime=runtime,
             command="global-gates",
             output_format="json",
-            command_args=["--agent-id", AGENT_ID, "--limit", "5"],
+            command_args=[
+                "--agent-id",
+                AGENT_ID,
+                "--limit",
+                "5",
+                "--scan-path",
+                str(safe_input),
+            ],
         )
         markdown_proc = run_cli(
             registry=registry,
             runtime=runtime,
             command="global-gates",
             output_format="markdown",
-            command_args=["--agent-id", AGENT_ID, "--limit", "5"],
+            command_args=[
+                "--agent-id",
+                AGENT_ID,
+                "--limit",
+                "5",
+                "--scan-path",
+                str(safe_input),
+            ],
         )
         todos_proc = run_cli(
             registry=registry,
             runtime=runtime,
             command="global-todos",
             output_format="json",
-            command_args=["--agent-id", AGENT_ID, "--limit", "5"],
+            command_args=[
+                "--agent-id",
+                AGENT_ID,
+                "--limit",
+                "5",
+                "--scan-path",
+                str(safe_input),
+            ],
         )
         todos_markdown_proc = run_cli(
             registry=registry,
             runtime=runtime,
             command="global-todos",
             output_format="markdown",
-            command_args=["--agent-id", AGENT_ID, "--limit", "5"],
+            command_args=[
+                "--agent-id",
+                AGENT_ID,
+                "--limit",
+                "5",
+                "--scan-path",
+                str(safe_input),
+            ],
+        )
+        risks_args = [
+            "--agent-id",
+            AGENT_ID,
+            "--time-range",
+            "1h",
+            "--limit",
+            "8",
+            "--scan-path",
+            str(risk_input),
+        ]
+        risks_proc = run_cli(
+            registry=registry,
+            runtime=runtime,
+            command="global-risks",
+            output_format="json",
+            command_args=risks_args,
+        )
+        risks_markdown_proc = run_cli(
+            registry=registry,
+            runtime=runtime,
+            command="global-risks",
+            output_format="markdown",
+            command_args=risks_args,
         )
 
         assert_summary_payload(json.loads(summary_proc.stdout))
@@ -408,12 +590,15 @@ def main() -> int:
         assert_gates_markdown(markdown_proc.stdout, private_root=root)
         assert_todos_payload(json.loads(todos_proc.stdout))
         assert_todos_markdown(todos_markdown_proc.stdout, private_root=root)
+        assert_risks_payload(json.loads(risks_proc.stdout))
+        assert_risks_markdown(risks_markdown_proc.stdout, private_root=root)
         assert snapshot_files(files) == before
         assert_error_envelope(root, runtime=runtime)
         assert_unhealthy_status_envelope(
             root,
             registry=registry,
             runtime=runtime,
+            safe_input=safe_input,
         )
 
     print("global-manager-command-cli-smoke ok")
