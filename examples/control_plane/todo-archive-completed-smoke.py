@@ -195,8 +195,105 @@ def main() -> int:
         assert status_after["ok"] is True, status_after
         assert status_after["contract_errors"] == [], status_after
 
+        done_before_completion = parsed_after["agent_todos"]["done_count"]
+        lineage_source_text = "Complete work whose successor lineage must survive archiving."
+        lineage_successor_text = "Continue the public archive interplay validation."
+        lineage_source = run_cli(
+            registry_path,
+            runtime,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            lineage_source_text,
+            "--claimed-by",
+            "codex-reviewer",
+            "--task-class",
+            "advancement_task",
+            "--action-kind",
+            "archive_interplay",
+        )
+        completed_with_successor = run_cli(
+            registry_path,
+            runtime,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            lineage_source["todo_id"],
+            "--claimed-by",
+            "codex-reviewer",
+            "--agent-id",
+            "codex-reviewer",
+            "--evidence",
+            "focused archive interplay smoke passed",
+            "--next-agent-todo",
+            lineage_successor_text,
+            "--next-claimed-by",
+            "codex-reviewer",
+        )
+        successor_id = completed_with_successor["next_todos"][0]["todo_id"]
+        assert completed_with_successor["successor_todo_ids"] == [successor_id], (
+            completed_with_successor
+        )
+
+        completed_projection = parse_active_state_todos(state_path.read_text(encoding="utf-8"))
+        completion_warning = completed_todo_archive_warning(
+            completed_projection["agent_todos"]
+        )
+        assert completion_warning is not None, completed_projection
+        assert completion_warning["active_done_count"] == done_before_completion + 1, (
+            completion_warning
+        )
+
+        archive_completed = run_cli(
+            registry_path,
+            runtime,
+            "todo",
+            "archive-completed",
+            "--goal-id",
+            GOAL_ID,
+            "--max-active-done",
+            "0",
+            "--execute",
+        )
+        assert archive_completed["active_done_before"] == completion_warning["active_done_count"], (
+            archive_completed
+        )
+        assert archive_completed["active_done_after"] == 0, archive_completed
+        assert archive_completed["moved_count"] == completion_warning["active_done_count"], (
+            archive_completed
+        )
+
+        archived_lineage = state_path.read_text(encoding="utf-8")
+        assert archived_lineage.index("## Completed Work Archive") < archived_lineage.index(
+            lineage_source_text
+        )
+        assert archived_lineage.count(lineage_source_text) == 1, archived_lineage
+        assert archived_lineage.count(lineage_successor_text) == 1, archived_lineage
+        assert f"successor_todo_ids={successor_id}" in archived_lineage, archived_lineage
+        active_after_archive = parse_active_state_todos(archived_lineage)["agent_todos"]
+        assert all(
+            item["todo_id"] != lineage_source["todo_id"]
+            for item in active_after_archive["items"]
+        ), active_after_archive
+        successor_item = next(
+            item for item in active_after_archive["items"] if item["todo_id"] == successor_id
+        )
+        assert successor_item["status"] == "open", successor_item
+        assert successor_item["claimed_by"] == "codex-reviewer", successor_item
+        assert completed_todo_archive_warning(active_after_archive) is None, active_after_archive
+
+        lineage_status = run_cli(registry_path, runtime, "status")
+        assert lineage_status["ok"] is True, lineage_status
+        assert lineage_status["contract_errors"] == [], lineage_status
+
         state_path.write_text(
-            updated
+            archived_lineage
             + "- [ ] [P1] Contradictory archived work item.\n"
             + "  <!-- loopx:todo todo_id=todo_archived_open status=done "
             + "task_class=advancement_task excluded_agents=codex-reviewer -->\n"
