@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -1044,3 +1045,88 @@ def test_global_risks_cli_wraps_only_outer_exceptions(monkeypatch, tmp_path) -> 
 	assert printed[0]["request"]["time_range"] == "7d"
 	assert private_path not in str(printed[0])
 	assert "<local-path-redacted>" in str(printed[0]["error"])
+
+
+def test_stale_host_poll_receipt_surfaces_as_a_stale_run_risk(
+	monkeypatch,
+	tmp_path,
+) -> None:
+	registry = {
+		"goals": [
+			{
+				"id": "goal-poll-quiet",
+				"state_file": "goals/goal-poll-quiet.md",
+				"repo": str(tmp_path),
+			}
+		]
+	}
+	(tmp_path / "registry.json").write_text(
+		json.dumps(registry), encoding="utf-8"
+	)
+	receipt_dir = tmp_path / "goals" / ".loopx-host-poll-receipts"
+	receipt_dir.mkdir(parents=True)
+	(receipt_dir / "goal-poll-quiet.json").write_text(
+		json.dumps(
+			{
+				"schema_version": "loopx_host_poll_receipt_v0",
+				"goal_id": "goal-poll-quiet",
+				"agent_id": "agent-1",
+				"poll_count": 4,
+				"last_poll_at": "2026-08-01T00:00:00Z",
+				"expected_continuation": True,
+				"last_decision_action": "wait",
+			}
+		),
+		encoding="utf-8",
+	)
+	patch_status(monkeypatch, status_payload())
+
+	payload = build_payload(tmp_path)
+	rows = [
+		row for row in payload["risks"] if row.get("kind") == "stale_host_poll"
+	]
+	assert len(rows) == 1
+	assert rows[0]["category"] == "stale_run"
+	assert rows[0]["goal_id"] == "goal-poll-quiet"
+	assert "died mid-wait" in str(rows[0].get("reason") or "")
+	assert payload["summary"]["source_warning_count"] == 0
+
+
+def test_terminal_host_poll_receipt_never_surfaces(
+	monkeypatch,
+	tmp_path,
+) -> None:
+	registry = {
+		"goals": [
+			{
+				"id": "goal-poll-done",
+				"state_file": "goals/goal-poll-done.md",
+				"repo": str(tmp_path),
+			}
+		]
+	}
+	(tmp_path / "registry.json").write_text(
+		json.dumps(registry), encoding="utf-8"
+	)
+	receipt_dir = tmp_path / "goals" / ".loopx-host-poll-receipts"
+	receipt_dir.mkdir(parents=True)
+	(receipt_dir / "goal-poll-done.json").write_text(
+		json.dumps(
+			{
+				"schema_version": "loopx_host_poll_receipt_v0",
+				"goal_id": "goal-poll-done",
+				"agent_id": "",
+				"poll_count": 2,
+				"last_poll_at": "2026-08-01T00:00:00Z",
+				"expected_continuation": False,
+				"last_decision_action": "terminal_no_followup",
+			}
+		),
+		encoding="utf-8",
+	)
+	patch_status(monkeypatch, status_payload())
+
+	payload = build_payload(tmp_path)
+	assert all(
+		row.get("kind") != "stale_host_poll" for row in payload["risks"]
+	)

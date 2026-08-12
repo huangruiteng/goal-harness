@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping
+from typing import Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,11 +13,16 @@ from ..control_plane.quota.cli_projection import (
     compact_quota_monitor_poll_cli_payload,
     compact_quota_should_run_cli_payload,
 )
+from ..control_plane.goals.path_resolution import resolve_goal_local_path
+from ..control_plane.quota.goal_boundary import registry_goal_by_id
 from ..control_plane.quota.error_codes import quota_error_code
 from ..control_plane.quota.heartbeat_receipt import (
     fail_heartbeat_receipt,
     find_heartbeat_receipt,
     heartbeat_receipt_view,
+)
+from ..control_plane.quota.host_poll_receipts import (
+    record_host_poll_receipt,
 )
 from ..control_plane.quota.live_decision import build_live_quota_should_run_decision
 from ..control_plane.quota.monitor_poll import find_quota_monitor_poll_turn
@@ -183,6 +189,8 @@ def _prepare_quota_command_context(
         raise ValueError(
             "--include-scheduler-detail is only valid with `quota should-run`"
         )
+    if bool(getattr(args, "record_host_poll", False)) and command != "should-run":
+        raise ValueError("--record-host-poll is only valid with `quota should-run`")
 
     heartbeat_turn_id = normalize_turn_instance_id(
         getattr(args, "turn_instance_id", None)
@@ -392,6 +400,7 @@ def handle_quota_command(
     heartbeat_receipt_ready = False
     heartbeat_stall_observation = "not_evaluated"
     detail_sections: frozenset[str] = frozenset()
+    context: _QuotaCommandContext | None = None
     try:
         context = _prepare_quota_command_context(
             args,
@@ -788,5 +797,63 @@ def handle_quota_command(
             payload,
             include_decision_detail="decisions" in detail_sections,
         )
+    if args.quota_command == "should-run" and context is not None:
+        _attach_host_poll_receipt(context, args, payload, registry_path=registry_path)
     print_payload(payload, args.format, _quota_renderer(args))
     return 0 if payload.get("ok") else 1
+
+
+def _attach_host_poll_receipt(
+    ctx: _QuotaCommandContext,
+    args: argparse.Namespace,
+    payload: dict[str, Any],
+    *,
+    registry_path: Path,
+) -> None:
+    if not bool(getattr(args, "record_host_poll", False)) or not bool(payload.get("ok")):
+        return
+    try:
+        receipt_view = _record_host_poll_for_should_run(
+            ctx,
+            args,
+            payload,
+            registry_path=registry_path,
+        )
+        if receipt_view is not None:
+            payload["host_poll_receipt"] = receipt_view
+    except Exception as exc:  # noqa: BLE001 - receipt must never break the quota decision.
+        payload["host_poll_receipt"] = {
+            "recorded": False,
+            "error": str(exc)[:200],
+        }
+
+
+def _record_host_poll_for_should_run(
+    ctx: _QuotaCommandContext,
+    args: argparse.Namespace,
+    payload: dict[str, Any],
+    *,
+    registry_path: Path,
+) -> dict[str, Any] | None:
+    goal = registry_goal_by_id(ctx.status_payload).get(str(args.goal_id or ""))
+    if not goal:
+        return None
+    state_path = resolve_goal_local_path(
+        goal.get("state_file"),
+        goal,
+        fallback_base=registry_path.parent,
+    )
+    receipt = record_host_poll_receipt(
+        goal,
+        state_path,
+        agent_id=args.agent_id,
+        decision=payload,
+    )
+    if receipt is None:
+        return None
+    return {
+        "recorded": True,
+        "poll_count": receipt.get("poll_count"),
+        "last_poll_at": receipt.get("last_poll_at"),
+        "expected_continuation": receipt.get("expected_continuation"),
+    }

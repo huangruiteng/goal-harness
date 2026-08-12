@@ -199,6 +199,15 @@ def register_quota_command(
     quota_parser.add_argument("--dry-run", action="store_true", help="Keep quota accounting or scheduler-state writes as preview-only. This is the default.")
     quota_parser.add_argument("--execute", action="store_true", help="Execute the quota accounting write or no-spend scheduler-state ack.")
     quota_parser.add_argument(
+        "--record-host-poll",
+        action="store_true",
+        help=(
+            "For `quota should-run`, record a compact host poll receipt beside "
+            "the goal state file so stale-loop projections can distinguish a "
+            "live polling driver from one that died mid-wait."
+        ),
+    )
+    quota_parser.add_argument(
         "--scan-root",
         default=_default_public_scan_root(),
         help="Public files to scan for obvious private material. Defaults to the LoopX install root.",

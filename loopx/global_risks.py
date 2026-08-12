@@ -45,6 +45,34 @@ collect_status = cast(
 	_CollectStatus,
 	getattr(import_module("loopx.status"), "collect_status"),
 )
+resolve_goal_local_path = cast(
+	Callable[..., Path | None],
+	getattr(
+		import_module("loopx.control_plane.goals.path_resolution"),
+		"resolve_goal_local_path",
+	),
+)
+receipt_path_for_goal = cast(
+	Callable[[dict[str, Any], Path | None], Path | None],
+	getattr(
+		import_module("loopx.control_plane.quota.host_poll_receipts"),
+		"receipt_path_for_goal",
+	),
+)
+read_host_poll_receipt = cast(
+	Callable[[Path | None], dict[str, Any] | None],
+	getattr(
+		import_module("loopx.control_plane.quota.host_poll_receipts"),
+		"read_host_poll_receipt",
+	),
+)
+stale_host_poll_risk = cast(
+	Callable[..., dict[str, Any] | None],
+	getattr(
+		import_module("loopx.control_plane.quota.host_poll_receipts"),
+		"stale_host_poll_risk",
+	),
+)
 
 
 def as_dict(value: object) -> dict[str, Any]:
@@ -73,6 +101,7 @@ SOURCE_SURFACES = [
 _CONTRACT_SOURCE = "status.contract.error_diagnostics"
 _REGISTRY_SOURCE = "status.global_registry.findings"
 _STALE_SOURCE = "status.attention_queue.items.stale_latest_run_warning"
+_HOST_POLL_SOURCE = "project.host_poll_receipts"
 _ROLLBACK_OMISSION = {
 	"kind": "rollback_candidate_source_unavailable",
 	"reason": "Current projections do not carry rollback trigger and causal linkage.",
@@ -350,6 +379,84 @@ def _valid_timestamp(value: object) -> str | None:
 	except ValueError:
 		return None
 	return text
+
+
+def _collect_stale_host_poll_risks(
+	*,
+	registry_path: Path,
+	scan_limit: int,
+	warnings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+	"""Scan project-local host poll receipts for loops that died mid-wait."""
+
+	risks: list[dict[str, Any]] = []
+	try:
+		registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
+	except FileNotFoundError:
+		return risks
+	except (OSError, json.JSONDecodeError) as exc:
+		warnings.append(
+			_warning(
+				"host_poll_registry_unreadable",
+				source=_HOST_POLL_SOURCE,
+				detail=str(exc)[:200],
+			)
+		)
+		return risks
+	goals = registry_payload.get("goals") if isinstance(registry_payload, dict) else None
+	if not isinstance(goals, list):
+		return risks
+	for source_index, goal in enumerate(goals):
+		if len(risks) >= scan_limit:
+			break
+		if not isinstance(goal, dict) or not goal.get("id"):
+			continue
+		state_path = resolve_goal_local_path(
+			goal.get("state_file"),
+			goal,
+			fallback_base=registry_path.parent,
+		)
+		receipt_path = receipt_path_for_goal(goal, state_path)
+		receipt = read_host_poll_receipt(receipt_path)
+		if receipt is None:
+			continue
+		raw_risk = stale_host_poll_risk(receipt)
+		if raw_risk is None:
+			continue
+		kind = "stale_host_poll"
+		goal_id = _redact_text(str(goal.get("id") or ""), limit=120) or None
+		reason = _redact_text(str(raw_risk.get("reason") or ""), limit=200)
+		risks.append(
+			{
+				"goal_id": goal_id,
+				"scope": "goal",
+				"category": "stale_run",
+				"kind": kind,
+				"severity": _severity("warning"),
+				"summary": (
+					reason
+					or "Host polling went quiet while the loop expected continuation."
+				),
+				"reason": reason or None,
+				"occurrence_id": _occurrence_id(
+					source_surface=_HOST_POLL_SOURCE,
+					source_index=source_index,
+					kind=kind,
+					scope="goal",
+					goal_id=goal_id,
+				),
+				"occurrence_count": 1,
+				"evidence_refs": [
+					f"{_HOST_POLL_SOURCE}:{kind}:{str(raw_risk.get('last_poll_at') or '')}"
+				],
+				"next_safe_action": (
+					"Check the host session and LoopX gates; restart the goal "
+					"worker or resume the bridge when the loop should continue."
+				),
+				"requires_user_approval": True,
+			}
+		)
+	return risks
 
 
 def _normalize_stale_warning(
@@ -688,6 +795,13 @@ def build_global_risks(
 				warnings=warnings,
 			)
 		)
+
+	host_poll_risks = _collect_stale_host_poll_risks(
+		registry_path=registry_path,
+		scan_limit=scan_limit,
+		warnings=warnings,
+	)
+	risks.extend(host_poll_risks)
 
 	try:
 		risks, history_truncated = _filter_for_agent(
