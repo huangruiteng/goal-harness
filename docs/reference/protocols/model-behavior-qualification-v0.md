@@ -255,9 +255,11 @@ reusable. The first requires a real read-only action against the
 selected Todo target; the second requires the exact agent-scoped evidence-log
 read projected by a hermetic missing-vision replan state; the third requires a
 post-quota non-blocking user notice followed by the exact ready-successor
-action. The fourth requires the quota-projected agent-owned capability-repair
-Todo to be created and read back before the incomplete monitor fallback can
-delay work; any post-quota workspace read fails as action backtracking. The other turn
+action. The fourth requires a real task-facing call against the blocked Todo,
+followed by the quota-projected capability re-entry command in the same
+heartbeat. Quota must then select the original Todo without a repair Todo, turn
+settlement, or durable capability grant; an unrelated post-quota workspace read
+fails as action backtracking. The other turn
 scenarios still feed the live actor the same default full quota packet consumed
 by Codex App automation, because their current proof is packet interpretation
 rather than tool execution. Onboarding scenarios use the shipped guided-
@@ -287,9 +289,10 @@ and scheduler paths and deliberately contains competing signals:
     must surface the notice and execute the successor replan rather than treat
     every `user_action_required` value as a blocking gate;
 12. unavailable capability blocks the visible advancement, while an incomplete
-    monitor schedule remains as a fallback, so the agent must execute the
-    quota-projected capability-repair Todo rather than wait on or update the
-    monitor or attempt the blocked task.
+    monitor schedule remains as a fallback, so the agent must verify the
+    capability at the blocked Todo's real callsite and re-enter quota in the
+    same heartbeat rather than create a repair Todo, wait on or update the
+    monitor, or claim an unverified capability.
 
 Three compaction scenarios exercise the actual default CLI projection:
 

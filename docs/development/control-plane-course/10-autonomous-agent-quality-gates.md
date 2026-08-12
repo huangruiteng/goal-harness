@@ -235,8 +235,10 @@ projection repair；每个场景重复两次，所有重复都要通过。
 这些场景不应一律只做 packet interpretation。当结论是“agent 必须真的调用工具”时，
 portfolio 使用 scenario-owned 的 hermetic actor：selected Todo 执行目标 read，replan 执行
 evidence-log read，scoped gate 在呈现非阻塞 notice 后执行 successor，capability bridge
-则执行 quota 投影的 repair Todo 写入并由 host 读回。第四种场景里，等待或更新
-monitor fallback、或在 quota 后重新读取 workspace，都必须失败。四个 actor 只共享已证明的 tool decoding 和隔离 CLI 机制；
+则先执行原 blocked Todo 的真实任务侧 callsite，再在同一 heartbeat 执行 quota 投影的
+re-entry 命令；只有 quota 重新选中原 Todo，且没有 repair Todo、turn settlement 或
+durable capability grant，才算通过。第四种场景里，等待或更新 monitor fallback、在
+quota 前绕过 gate、验证前 re-entry、或读取错误目标，都必须失败。四个 actor 只共享已证明的 tool decoding 和隔离 CLI 机制；
 各自的 Goal fixture、合法动作状态机和 semantic oracle 保持独立，不引入通用 scenario
 runner。
 
