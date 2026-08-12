@@ -12,8 +12,8 @@ The goal's ACTIVE_GOAL_STATE.md YAML front-matter may declare ``handoff_mode``:
 * ``hard_lease``: ownership changes on an existing todo require the acting
   agent to hold that todo's time-active task lease, and the completion fence
   becomes mandatory for both user-role and agent-role todos. An exact linked
-  user-gate decision-scope override changes lifecycle actor attribution only;
-  it does not bypass the fence. The delegated
+  user-gate decision-scope override authorizes only the exact linked decision
+  transition; it does not bypass the completion fence. The delegated
   ``coordination.todo_lifecycle_authority`` override is the one audited door
   through the gate.
 

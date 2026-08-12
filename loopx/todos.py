@@ -84,6 +84,7 @@ from .control_plane.todos.line_update import (
 from .control_plane.todos.list_projection import (
     compact_agent_lane_todo_summary,
     compact_todo_projection_overlay,
+    todo_item_relations,
     todo_list_projection_contract,
 )
 from .control_plane.todos import monitor_metadata as todo_monitor_metadata
@@ -264,40 +265,6 @@ def filtered_todo_summary(
         )
         or empty_todo_summary(role=role)
     )
-
-
-def todo_item_relations(item: dict[str, Any]) -> dict[str, Any]:
-    relations: dict[str, Any] = {}
-    for key in (
-        "claimed_by",
-        "bound_agent",
-        "goal_bound",
-        "blocks_agent",
-        "excluded_agents",
-        "global_gate",
-        "unblocks_todo_id",
-        "successor_todo_ids",
-        "superseded_by",
-        "resume_when",
-        "resume_condition",
-        "resume_ready",
-        "decision_scope",
-        "required_decision_scopes",
-        "required_write_scopes",
-        "required_capabilities",
-        "target_capabilities",
-        "task_class",
-        "action_kind",
-        "continuation_policy",
-        "target_key",
-        "cadence",
-        "next_due_at",
-        "expires_at",
-    ):
-        value = item.get(key)
-        if value is not None and value != []:
-            relations[key] = value
-    return relations
 
 
 def _summary_items(fields: dict[str, Any], role: str) -> list[dict[str, Any]]:
