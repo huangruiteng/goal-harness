@@ -668,15 +668,19 @@ def interaction_next_cli_actions(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
         )
-    capability_reentry_actions = (
-        [
-            "after real-callsite verification of "
-            f"{candidate['capability']}: {candidate['command']}"
-            for candidate in capability_reentry["candidates"]
-        ]
-        if capability_reentry is not None
-        else []
-    )
+    capability_reentry_actions: list[str] = []
+    if capability_reentry is not None:
+        for candidate in capability_reentry["candidates"]:
+            target = candidate["verification_target"]
+            capability_reentry_actions.extend(
+                [
+                    "first verify "
+                    f"{candidate['capability']} at Todo {target['todo_id']} by "
+                    f"executing its task-facing instruction: {target['instruction']}",
+                    "only after that real-callsite succeeds, rerun quota in this "
+                    f"same turn: {candidate['command']}",
+                ]
+            )
     if mode == "terminal_no_followup":
         return ["no quota spend until explicit goal resume or newly projected work"]
     if mode == "agent_monitor_only":

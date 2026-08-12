@@ -247,7 +247,7 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         and contract["must_attempt_work"] is True
         and contract["delivery_allowed"] is False
         and contract["quiet_noop_allowed"] is False
-        and "real task-facing callsite"
+        and "next_cli_actions[0]"
         in str((interaction.get("agent_channel") or {}).get("primary_action") or "")
         and capability_gate.get("action") == "repair_bridge"
         and capability_gate.get("decision_owner") == "agent"
@@ -256,6 +256,8 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         and verification.get("settles_turn") is False
         and target.get("todo_id") == CAPABILITY_REPAIR_BLOCKED_TODO_ID
         and "fixture/private-source.json" in str(target.get("instruction") or "")
+        and next_cli_actions
+        and str(target.get("instruction") or "") in next_cli_actions[0]
         and len(reentry_actions) == 1
         and all("todo add" not in action for action in next_cli_actions)
     ):
@@ -391,8 +393,10 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                     "You are Codex running one LoopX heartbeat. Follow the task and "
                     "choose each next action from the latest tool result. When real "
                     "quota projects an agent-owned capability bridge repair, verify it "
-                    "with the blocked Todo's real task-facing callsite. After success, "
-                    "run the projected quota re-entry command in this same heartbeat. "
+                    "by directly executing next_cli_actions[0]; it already contains the "
+                    "blocked Todo's task-facing instruction, so do not inspect state or "
+                    "workspace again. After success, run the projected quota re-entry "
+                    "command in this same heartbeat. "
                     "Do not create a repair Todo, wait on, poll, or rewrite a monitor "
                     "fallback. Stop when quota makes the blocked Todo runnable."
                 ),

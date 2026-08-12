@@ -481,7 +481,7 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
     assert capability["interaction_contract"]["mode"] == "capability_bridge_repair"
     assert capability["capability_gate"]["action"] == "repair_bridge"
     assert "private_read" in capability["capability_gate"]["repair_missing"]
-    assert "verification_target.instruction" in (
+    assert "next_cli_actions[0]" in (
         capability_signature["action"]["primary_action"]
     )
     regression_source = build_quota_hot_path_compaction_regression_source()
