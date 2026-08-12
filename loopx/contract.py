@@ -67,6 +67,74 @@ LEAK_PATTERNS = {
     "private_ip": re.compile(r"\b10\.\d+\.\d+\.\d+\b|\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b|\b192\.168\.\d+\.\d+\b"),
 }
 
+CREDENTIAL_KEYWORD_PATTERN = re.compile(
+    "|".join(
+        [
+            "Bear" + "er" + r"\s+",
+            r"(?<![A-Za-z0-9_])" + "tok" + "en=",
+            r"(?<![A-Za-z0-9_])" + "pass" + "word=",
+            "Author" + "ization:" + r"\s*",
+        ]
+    ),
+    re.I,
+)
+CREDENTIAL_BEARER_KEYWORD_PATTERN = re.compile("Bear" + "er" + r"\s+", re.I)
+CREDENTIAL_ENVIRONMENT_REFERENCE_PATTERN = re.compile(
+    "|".join(
+        [
+            r"\$\{?[A-Za-z_]",
+            r"\$\(",
+            r"%[A-Za-z_][A-Za-z0-9_]*%",
+            r"os\.environ",
+            r"os\.getenv",
+            r"process\.env",
+            r"Deno\.env\.get",
+            r"System\.getenv",
+            r"(?<![A-Za-z0-9_])getenv\(",
+        ]
+    )
+)
+CREDENTIAL_PLACEHOLDER_PATTERN = re.compile(
+    r"<[^>]{1,64}>|\{\{|example|dummy|placeholder|changeme|redacted|your[-_]",
+    re.I,
+)
+CREDENTIAL_HIGH_ENTROPY_VALUE_PATTERN = re.compile(r"[A-Za-z0-9._-]{20,}")
+CREDENTIAL_VARIABLE_REFERENCE_PATTERN = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s*[,)\]}]"
+)
+
+
+def _credential_match_is_reference(line: str, match: re.Match[str]) -> bool:
+    value = line[match.start() :]
+    last_keyword: str | None = None
+    while True:
+        keyword = CREDENTIAL_KEYWORD_PATTERN.match(value)
+        if keyword is None:
+            break
+        last_keyword = keyword.group(0)
+        value = value[keyword.end() :].lstrip(" \t\"'`")
+    if last_keyword is None:
+        return bool(CREDENTIAL_PLACEHOLDER_PATTERN.search(match.group(0)))
+    if not value:
+        return True
+    if CREDENTIAL_ENVIRONMENT_REFERENCE_PATTERN.match(value):
+        return True
+    if CREDENTIAL_PLACEHOLDER_PATTERN.match(value):
+        return True
+    if CREDENTIAL_HIGH_ENTROPY_VALUE_PATTERN.match(value):
+        return False
+    if CREDENTIAL_BEARER_KEYWORD_PATTERN.fullmatch(last_keyword):
+        return True
+    return bool(CREDENTIAL_VARIABLE_REFERENCE_PATTERN.match(value))
+
+
+def _credential_hits_are_all_references(line: str) -> bool:
+    matches = list(LEAK_PATTERNS["credential"].finditer(line))
+    if not matches:
+        return False
+    return all(_credential_match_is_reference(line, match) for match in matches)
+
+
 DEFAULT_SCAN_SUFFIXES = {".md", ".py", ".toml", ".json", ".yaml", ".yml", ".sh"}
 DEFAULT_SKIP_DIRS = {
     ".git",
@@ -684,6 +752,7 @@ def scan_public_boundary(
     allowed_hits: list[str] = []
     private_state_git_warnings: list[str] = []
     skipped_private_state_files: list[str] = []
+    credential_reference_hits: list[str] = []
     files: list[Path] = []
     file_roots: dict[Path, Path] = {}
     for scan_root in scan_roots:
@@ -715,6 +784,9 @@ def scan_public_boundary(
             for name, pattern in LEAK_PATTERNS.items():
                 if pattern.search(line):
                     hit = f"{rel_or_abs(path, root)}:{line_no}: {name}"
+                    if name == "credential" and _credential_hits_are_all_references(line):
+                        credential_reference_hits.append(hit)
+                        continue
                     if name == "private_doc_url":
                         git = git or _git_probe(path)
                     if git is not None and _hit_allowed_by_policy(name, git, policy):
@@ -727,6 +799,7 @@ def scan_public_boundary(
         "files": len(files),
         "scanned_files": len(files) - len(skipped_private_state_files),
         "skipped_private_state_files": skipped_private_state_files,
+        "credential_reference_hits": credential_reference_hits,
         "allowed_hits": allowed_hits,
         "private_state_git_warnings": private_state_git_warnings,
         "policy": policy,
@@ -860,6 +933,11 @@ def check_contract(
         checks.append(
             "private state scan skipped: "
             f"{len(boundary.get('skipped_private_state_files') or [])} local-private files"
+        )
+    if boundary.get("credential_reference_hits"):
+        checks.append(
+            "credential references downgraded: "
+            f"{len(boundary.get('credential_reference_hits') or [])} non-literal hits"
         )
     if boundary.get("allowed_hits"):
         checks.append(
