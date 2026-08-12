@@ -251,6 +251,10 @@ def _redacted_command_shape(
         "mentions_fixture_dir": "fixture/" in command,
         "mentions_selected_target": str(fixture.selected_target.name) in command,
         "multiline": "\n" in command,
+        "has_pipe": "|" in command,
+        "has_stderr_redirect": "2>" in command,
+        "has_conditional": "&&" in command or "||" in command,
+        "has_option_terminator": " -- " in command,
     }
 
 
