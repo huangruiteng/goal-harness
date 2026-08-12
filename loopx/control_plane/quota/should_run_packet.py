@@ -924,6 +924,7 @@ def _build_quota_should_run_payload(
         "autonomous_replan_decision",
         "vision_continuation_audit",
         "vision_wait_state",
+        "replan_ack_feedback",
     ):
         if isinstance(value := prepared.goal_frontier_projection.get(key), dict):
             payload[key] = value
@@ -1130,6 +1131,7 @@ def _quota_required_reads(decision: dict[str, Any]) -> list[dict[str, Any]]:
     read = build_agent_scoped_required_read(
         goal_id=str(decision.get("goal_id") or ""),
         agent_id=quota_decision_agent_id(decision),
+        required_read_id=str(obligation.get("obligation_id") or "") or None,
         reason=(
             "novelty policy evidence source; execute before selecting the "
             "replan repair delta"

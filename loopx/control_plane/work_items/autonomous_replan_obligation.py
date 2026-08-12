@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any, Callable, Optional, Pattern
 
@@ -64,6 +66,26 @@ def ensure_replan_novelty_policy(
         str(normalized.get("recommended_action") or "run a bounded autonomous replan")
     )
     normalized["replan_novelty_policy"] = build_replan_novelty_policy()
+    identity_payload = {
+        key: normalized.get(key)
+        for key in (
+            "schema_version",
+            "agent_id",
+            "frontier_identity",
+            "stall_threshold",
+            "trigger_count",
+            "triggers",
+        )
+        if normalized.get(key) is not None
+    }
+    normalized["obligation_id"] = "replan-" + hashlib.sha256(
+        json.dumps(
+            identity_payload,
+            sort_keys=True,
+            ensure_ascii=True,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
     return normalized
 
 

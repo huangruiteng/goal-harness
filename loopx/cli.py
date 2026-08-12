@@ -737,6 +737,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_root_arg=args.runtime_root,
         output_format=output_format,
         print_payload=print_payload,
+        append_cli_rollout_event=append_cli_rollout_event,
     )
     if evidence_log_result is not None:
         return evidence_log_result

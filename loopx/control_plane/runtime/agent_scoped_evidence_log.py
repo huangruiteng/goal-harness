@@ -11,6 +11,8 @@ from .time import parse_timestamp
 
 SCHEMA_VERSION = "agent_scoped_evidence_log_v0"
 REQUIRED_READ_SCHEMA_VERSION = "loopx_agent_required_read_v0"
+READ_RECEIPT_SCHEMA_VERSION = "evidence_log_read_receipt_v0"
+MAX_PROJECTED_READ_RECEIPTS = 12
 
 def _compact_text(value: Any, *, limit: int = 220) -> str | None:
     return public_safe_compact_text(value, limit=limit)
@@ -87,13 +89,85 @@ def _event_matches(
         return False
     if todo_id and str(event.get("todo_id") or "") != todo_id:
         return False
-    if event_kinds and _normalize_event_kind(str(event.get("event_kind") or "")) not in event_kinds:
+    normalized_event_kind = _normalize_event_kind(str(event.get("event_kind") or ""))
+    if not event_kinds and normalized_event_kind == "evidence_log_read":
+        return False
+    if event_kinds and normalized_event_kind not in event_kinds:
         return False
     if since is not None:
         recorded_at = parse_timestamp(event.get("recorded_at"))
         if recorded_at is None or recorded_at < since:
             return False
     return True
+
+
+def evidence_log_read_receipt(
+    event: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Project one durable public-safe evidence-log read receipt."""
+
+    if _normalize_event_kind(str(event.get("event_kind") or "")) != (
+        "evidence_log_read"
+    ):
+        return None
+    if str(event.get("status") or "") != "completed":
+        return None
+    goal_id = _compact_text(event.get("goal_id"), limit=180)
+    agent_id = _compact_text(event.get("agent_id"), limit=180)
+    event_id = _compact_text(event.get("event_id"), limit=180)
+    recorded_at = _compact_text(event.get("recorded_at"), limit=80)
+    details = event.get("details") if isinstance(event.get("details"), Mapping) else {}
+    command = _compact_text(details.get("command"), limit=500)
+    if not all((goal_id, agent_id, event_id, recorded_at, command)):
+        return None
+    read_window: dict[str, Any] = {
+        "mode": _compact_text(details.get("mode"), limit=40) or "thin",
+    }
+    for key in ("limit", "history_limit", "rollout_limit"):
+        value = details.get(key)
+        if isinstance(value, int) and value >= 0:
+            read_window[key] = value
+    since = _compact_text(details.get("since"), limit=80)
+    if since:
+        read_window["since"] = since
+    event_kinds = _compact_text(details.get("event_kinds"), limit=240)
+    if event_kinds:
+        read_window["event_kinds"] = [
+            item for item in event_kinds.split(",") if item
+        ]
+    receipt: dict[str, Any] = {
+        "schema_version": READ_RECEIPT_SCHEMA_VERSION,
+        "event_id": event_id,
+        "goal_id": goal_id,
+        "agent_id": agent_id,
+        "recorded_at": recorded_at,
+        "command": command,
+        "read_window": read_window,
+    }
+    required_read_id = _compact_text(details.get("required_read_id"), limit=180)
+    if required_read_id:
+        receipt["required_read_id"] = required_read_id
+    todo_id = _compact_text(event.get("todo_id"), limit=180)
+    if todo_id:
+        receipt["todo_id"] = todo_id
+    return receipt
+
+
+def project_evidence_log_read_receipts(
+    events: Iterable[Mapping[str, Any]],
+    *,
+    limit: int = MAX_PROJECTED_READ_RECEIPTS,
+) -> list[dict[str, Any]]:
+    receipts = [
+        receipt
+        for event in events
+        if (receipt := evidence_log_read_receipt(event)) is not None
+    ]
+    return sorted(
+        receipts,
+        key=lambda item: str(item.get("recorded_at") or ""),
+        reverse=True,
+    )[: max(0, int(limit))]
 
 
 def _run_mentions_todo(run: Mapping[str, Any], todo_id: str) -> bool:
@@ -161,6 +235,7 @@ def build_agent_scoped_evidence_log_command(
     cli_bin: str = "loopx",
     output_format: str = "json",
     limit: int = 24,
+    required_read_id: str | None = None,
 ) -> str:
     safe_goal_id = _compact_text(goal_id, limit=180)
     safe_agent_id = _compact_text(agent_id, limit=180)
@@ -184,6 +259,11 @@ def build_agent_scoped_evidence_log_command(
     ]
     if safe_todo_id:
         parts.extend(["--todo-id", safe_todo_id])
+    safe_required_read_id = (
+        _compact_text(required_read_id, limit=180) if required_read_id else None
+    )
+    if safe_required_read_id:
+        parts.extend(["--required-read-id", safe_required_read_id])
     return " ".join(shlex.quote(part) for part in parts)
 
 
@@ -195,6 +275,7 @@ def build_agent_scoped_required_read(
     reason: str = "read this agent's thin public-safe evidence ledger before replan",
     cli_bin: str = "loopx",
     limit: int = 24,
+    required_read_id: str | None = None,
 ) -> dict[str, Any] | None:
     safe_agent_id = _compact_text(agent_id, limit=180) if agent_id else None
     if not safe_agent_id:
@@ -205,8 +286,9 @@ def build_agent_scoped_required_read(
         todo_id=todo_id,
         cli_bin=cli_bin,
         limit=limit,
+        required_read_id=required_read_id,
     )
-    return {
+    required_read = {
         "schema_version": REQUIRED_READ_SCHEMA_VERSION,
         "kind": "agent_scoped_evidence_log",
         "goal_id": _compact_text(goal_id, limit=180),
@@ -217,6 +299,12 @@ def build_agent_scoped_required_read(
         "reason": _compact_text(reason, limit=180),
         "other_agent_policy": "frontier_only",
     }
+    if required_read_id:
+        required_read["required_read_id"] = _compact_text(
+            required_read_id,
+            limit=180,
+        )
+    return required_read
 
 
 def _other_agent_frontier(

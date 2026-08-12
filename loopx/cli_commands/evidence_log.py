@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 from collections.abc import Callable
 from pathlib import Path
 
 from ..control_plane.runtime.agent_scoped_evidence_log import (
     build_agent_scoped_evidence_log,
+    build_agent_scoped_evidence_log_command,
+    evidence_log_read_receipt,
     goal_history_runs,
 )
 from ..history import collect_history, load_registry
@@ -18,6 +21,49 @@ PrintPayload = Callable[
     None,
 ]
 FormatSelector = Callable[..., str]
+RolloutEventAppender = Callable[..., dict[str, object]]
+
+
+def _evidence_log_receipt_command(args: argparse.Namespace) -> str:
+    parts = shlex.split(
+        build_agent_scoped_evidence_log_command(
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+            todo_id=args.todo_id,
+            limit=max(0, int(args.limit)),
+            required_read_id=args.required_read_id,
+        )
+    )
+    if int(args.history_limit) != 80:
+        parts.extend(["--history-limit", str(max(0, int(args.history_limit)))])
+    if int(args.rollout_limit) != 400:
+        parts.extend(["--rollout-limit", str(max(0, int(args.rollout_limit)))])
+    if args.since:
+        parts.extend(["--since", str(args.since)])
+    for event_kind in args.event_kind:
+        parts.extend(["--event-kind", str(event_kind)])
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _evidence_log_receipt_details(
+    args: argparse.Namespace,
+    *,
+    command: str,
+) -> dict[str, object]:
+    return {
+        "command": command,
+        "mode": "thin",
+        "limit": max(0, int(args.limit)),
+        "history_limit": max(0, int(args.history_limit)),
+        "rollout_limit": max(0, int(args.rollout_limit)),
+        "since": str(args.since or ""),
+        "event_kinds": ",".join(
+            str(kind).strip().lower().replace("-", "_")
+            for kind in args.event_kind
+            if str(kind).strip()
+        ),
+        "required_read_id": str(args.required_read_id or ""),
+    }
 
 
 def register_evidence_log_command(
@@ -37,6 +83,10 @@ def register_evidence_log_command(
     )
     parser.add_argument("--todo-id", help="Optional todo id filter for the current replan/work slice.")
     parser.add_argument("--since", help="Optional ISO timestamp lower bound.")
+    parser.add_argument(
+        "--required-read-id",
+        help="Opaque projected required-read identity recorded on the durable receipt.",
+    )
     parser.add_argument(
         "--event-kind",
         action="append",
@@ -132,6 +182,7 @@ def handle_evidence_log_command(
     runtime_root_arg: str | None,
     output_format: FormatSelector,
     print_payload: PrintPayload,
+    append_cli_rollout_event: RolloutEventAppender,
 ) -> int | None:
     if args.command != "evidence-log":
         return None
@@ -158,6 +209,38 @@ def handle_evidence_log_command(
             rollout_events=rollout_events,
             history_runs=goal_history_runs(history_payload, args.goal_id),
         )
+        command = _evidence_log_receipt_command(args)
+        receipt_details = _evidence_log_receipt_details(args, command=command)
+        append_cli_rollout_event(
+            payload,
+            registry_path=registry_path,
+            runtime_root_arg=runtime_root_arg,
+            event_kind="evidence_log_read",
+            agent_id=args.agent_id,
+            todo_id=args.todo_id,
+            status="completed",
+            summary="read the bounded agent-scoped evidence ledger",
+            details=receipt_details,
+        )
+        event_view = payload.get("rollout_event")
+        if isinstance(event_view, dict):
+            receipt = evidence_log_read_receipt(
+                {
+                    **event_view,
+                    "goal_id": args.goal_id,
+                    "agent_id": args.agent_id,
+                    "todo_id": args.todo_id,
+                    "details": receipt_details,
+                }
+            )
+            if receipt:
+                payload["read_receipt"] = receipt
+                payload.pop("rollout_event", None)
+        if "read_receipt" not in payload:
+            payload["ok"] = False
+            payload["error"] = (
+                "evidence log was read but its durable read receipt could not be recorded"
+            )
     except Exception as exc:
         payload = {
             "ok": False,

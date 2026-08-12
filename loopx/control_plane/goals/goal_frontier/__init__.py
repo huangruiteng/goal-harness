@@ -16,6 +16,7 @@ from ...todos.projection import todo_item_is_watch_only_monitor
 from ...work_items.autonomous_replan_ack import (
     autonomous_replan_ack_matches_agent,
     autonomous_replan_ack_matches_frontier,
+    validate_replan_required_read_receipt,
 )
 from ...work_items.autonomous_replan_obligation import (
     MONITOR_NO_CHANGE_STREAK_THRESHOLD,
@@ -24,7 +25,6 @@ from ...work_items.autonomous_replan_obligation import (
     with_replan_novelty_guidance,
 )
 from ...work_items.repair_delta import (
-    repair_delta_kinds_have_frontier_delta,
     validate_repair_delta_claims,
 )
 from ..goal_vision_policy import (
@@ -37,6 +37,12 @@ from ..goal_vision_state import (
 )
 from ..goal_vision_wait import build_goal_vision_wait_state
 from . import outcome_continuity
+from .ack_policy import (
+    REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS,
+    autonomous_replan_ack_has_frontier_delta,
+    autonomous_replan_ack_satisfies_obligation,
+    blocked_successor_repeat_vision_open,
+)
 from .replan_rules import (
     GoalFrontierReplanFacts,
     GoalFrontierReplanRule,
@@ -66,9 +72,6 @@ VISION_GAP_JUDGE_SCHEMA_VERSION = "vision_gap_judge_v0"
 AUTONOMOUS_REPLAN_DECISION_SCHEMA_VERSION = "autonomous_replan_decision_v0"
 AUTONOMOUS_REPLAN_SCOPE_SCHEMA_VERSION = "autonomous_replan_scope_v0"
 AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION = "autonomous_replan_obligation_v0"
-REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
-    outcome_continuity.REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
-)
 AUTONOMOUS_REPLAN_REQUIRED_MODE = "autonomous_replan_required"
 FRONTIER_EXHAUSTED_MONITOR_TRIGGER = "frontier_exhausted_monitor_lane"
 MONITOR_NO_CHANGE_STREAK_TRIGGER = "monitor_no_change_streak"
@@ -126,63 +129,6 @@ def autonomous_replan_is_required(replan_obligation: dict[str, Any] | None) -> b
     return bool(replan_obligation and replan_obligation.get("required"))
 
 
-def autonomous_replan_ack_has_frontier_delta(ack: dict[str, Any] | None) -> bool:
-    if not isinstance(ack, dict) or ack.get("recorded") is not True:
-        return False
-    delta_contract = ack.get("delta_contract")
-    if not isinstance(delta_contract, dict) or delta_contract.get("delta_present") is not True:
-        return False
-    return repair_delta_kinds_have_frontier_delta(delta_contract.get("delta_kinds"))
-
-
-def _blocked_successor_repeat_vision_open(
-    replan_obligation: dict[str, Any] | None,
-    acceptance_gaps: list[dict[str, Any]] | None,
-) -> bool:
-    trigger_kinds = {
-        str(trigger.get("kind") or "").strip()
-        for trigger in (
-            replan_obligation.get("triggers") or []
-            if isinstance(replan_obligation, dict)
-            else []
-        )
-        if isinstance(trigger, dict)
-    }
-    return "blocked_successor_no_progress_repeat" in trigger_kinds and any(
-        goal_vision_repeats_advancement_until_closed(gap.get("advancement_policy"))
-        for gap in (acceptance_gaps or [])
-        if isinstance(gap, dict)
-    )
-
-
-def autonomous_replan_ack_satisfies_obligation(
-    ack: dict[str, Any] | None,
-    *,
-    replan_obligation: dict[str, Any] | None,
-    acceptance_gaps: list[dict[str, Any]] | None,
-) -> bool:
-    """Reject wait-only ACKs for repeat-until-closed blocked successors."""
-
-    if not autonomous_replan_ack_has_frontier_delta(ack):
-        return False
-    if not _blocked_successor_repeat_vision_open(
-        replan_obligation,
-        acceptance_gaps,
-    ):
-        return True
-    delta_contract = ack.get("delta_contract") if isinstance(ack, dict) else {}
-    delta_kinds = {
-        str(item or "").strip()
-        for item in (
-            delta_contract.get("delta_kinds") or []
-            if isinstance(delta_contract, dict)
-            else []
-        )
-        if str(item or "").strip()
-    }
-    return bool(delta_kinds & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS))
-
-
 def align_autonomous_replan_guidance_with_acceptance_policy(
     replan_obligation: dict[str, Any] | None,
     *,
@@ -192,7 +138,7 @@ def align_autonomous_replan_guidance_with_acceptance_policy(
 
     if not isinstance(replan_obligation, dict):
         return replan_obligation
-    if not _blocked_successor_repeat_vision_open(
+    if not blocked_successor_repeat_vision_open(
         replan_obligation,
         acceptance_gaps,
     ):
@@ -1678,6 +1624,8 @@ def build_goal_frontier_projection_context_from_status(
     registered_agent_ids: list[str] | None = None,
     goal_status: str | None = None,
     agent_profile: dict[str, Any] | None = None,
+    evidence_log_read_receipts: list[dict[str, Any]] | None = None,
+    required_read_enforcement: str = "soft",
 ) -> dict[str, Any]:
     """Build the quota-facing goal-frontier read model.
 
@@ -1802,6 +1750,14 @@ def build_goal_frontier_projection_context_from_status(
         agent_id=agent_id,
     )
     effective_replan_ack = latest_agent_replan_ack or projected_replan_ack
+    required_read_validation = validate_replan_required_read_receipt(
+        effective_replan_ack,
+        replan_obligation=replan_obligation,
+        receipts=evidence_log_read_receipts,
+        goal_id=goal_id,
+        agent_id=agent_id,
+        enforcement=required_read_enforcement,
+    )
     watch_lane_ack_covers_dead_monitor_repeat = (
         _watch_lane_ack_covers_dead_monitor_repeat(
             effective_replan_ack,
@@ -1824,6 +1780,7 @@ def build_goal_frontier_projection_context_from_status(
             effective_replan_ack,
             replan_obligation=replan_obligation,
             acceptance_gaps=source_acceptance_gaps,
+            required_read_validation=required_read_validation,
         )
         and (
             autonomous_replan_ack_matches_frontier(
@@ -1863,6 +1820,24 @@ def build_goal_frontier_projection_context_from_status(
             registered_agent_ids=registered_agent_ids,
         )
 
+    if required_read_validation and not required_read_validation.get(
+        "required_read_satisfied"
+    ):
+        feedback = {
+            "schema_version": "replan_ack_feedback_v0",
+            "generated_at": required_read_validation.get("acknowledged_at"),
+            "agent_id": agent_id,
+            "classification": "required_read_not_executed",
+            "enforcement": required_read_validation.get("enforcement"),
+            "accepted": required_read_validation.get("accepted"),
+            "warnings": required_read_validation.get("warnings") or [],
+            "rejected_claims": required_read_validation.get("rejected_claims")
+            or [],
+            "required_read": required_read_validation.get("required_read"),
+            "triggered_at": required_read_validation.get("triggered_at"),
+        }
+        latest_replan_ack_feedback = feedback
+
     if replan_obligation and latest_replan_ack_feedback:
         replan_obligation = dict(replan_obligation)
         replan_obligation["replan_ack_feedback"] = latest_replan_ack_feedback
@@ -1888,6 +1863,10 @@ def build_goal_frontier_projection_context_from_status(
         acceptance_gaps=acceptance_gaps,
         vision_wait_state=vision_wait_state,
     )
+    if latest_replan_ack_feedback:
+        goal_frontier_projection["replan_ack_feedback"] = (
+            latest_replan_ack_feedback
+        )
     return {
         "schema_version": "goal_frontier_projection_context_v0",
         "replan_obligation": replan_obligation,
@@ -1897,12 +1876,14 @@ def build_goal_frontier_projection_context_from_status(
         "vision_wait_state": vision_wait_state,
         "latest_replan_ack": latest_agent_replan_ack,
         "projected_replan_ack": projected_replan_ack,
+        "required_read_validation": required_read_validation,
     }
 
 
 def compact_replan_obligation(replan_obligation: dict[str, Any]) -> dict[str, Any]:
     compact = {
         "schema_version": replan_obligation.get("schema_version"),
+        "obligation_id": replan_obligation.get("obligation_id"),
         "stall_threshold": replan_obligation.get("stall_threshold"),
         "trigger_count": replan_obligation.get("trigger_count"),
         "triggers": replan_obligation.get("triggers") or [],

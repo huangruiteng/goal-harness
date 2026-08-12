@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..runtime.agent_scoped_evidence_log import (
+    build_agent_scoped_evidence_log_command,
+)
 from ..runtime.time import parse_timestamp
 
-
 AUTONOMOUS_REPLAN_ACK_MATERIAL_RUN_WINDOW = 20
+REPLAN_REQUIRED_READ_VALIDATION_SCHEMA_VERSION = (
+    "replan_required_read_validation_v0"
+)
+REPLAN_REQUIRED_READ_LIMIT = 24
 
 
 def autonomous_replan_ack_recorded(run: dict[str, Any]) -> bool:
@@ -249,6 +255,140 @@ def autonomous_replan_ack_matches_agent(
         return True
     ack_agent_id = str(ack.get("agent_id") or "").strip()
     return bool(ack_agent_id and ack_agent_id == normalized_agent_id)
+
+
+def _replan_obligation_triggered_at(
+    obligation: dict[str, Any],
+) -> str | None:
+    candidates = [
+        parse_timestamp(obligation.get("triggered_at")),
+        *[
+            parsed
+            for trigger in obligation.get("triggers") or []
+            if isinstance(trigger, dict)
+            if (
+                parsed := parse_timestamp(
+                    trigger.get("latest_generated_at")
+                    or trigger.get("generated_at")
+                    or trigger.get("triggered_at")
+                )
+            )
+            is not None
+        ],
+    ]
+    timestamps = [item for item in candidates if item is not None]
+    if not timestamps:
+        return None
+    return max(timestamps).isoformat().replace("+00:00", "Z")
+
+
+def _replan_requires_agent_evidence_log(
+    obligation: dict[str, Any],
+) -> bool:
+    policy = obligation.get("replan_novelty_policy")
+    if not isinstance(policy, dict):
+        return False
+    return str(
+        policy.get("evidence_source") or policy.get("evidence") or ""
+    ).strip() == "agent_scoped_evidence_log"
+
+
+def validate_replan_required_read_receipt(
+    ack: dict[str, Any] | None,
+    *,
+    replan_obligation: dict[str, Any] | None,
+    receipts: list[dict[str, Any]] | None,
+    goal_id: str,
+    agent_id: str | None,
+    enforcement: str = "soft",
+) -> dict[str, Any] | None:
+    """Validate one ACK against the fresh evidence-log read it requires."""
+
+    if not isinstance(replan_obligation, dict) or not (
+        _replan_requires_agent_evidence_log(replan_obligation)
+    ):
+        return None
+    safe_agent_id = str(agent_id or "").strip()
+    if not isinstance(ack, dict) or not safe_agent_id:
+        return None
+    enforcement_mode = "hard" if enforcement == "hard" else "soft"
+    acked_at = parse_timestamp(ack.get("generated_at") or ack.get("recorded_at"))
+    triggered_at_text = _replan_obligation_triggered_at(replan_obligation)
+    triggered_at = parse_timestamp(triggered_at_text)
+    required_read_id = str(replan_obligation.get("obligation_id") or "").strip()
+    command = build_agent_scoped_evidence_log_command(
+        goal_id=goal_id,
+        agent_id=safe_agent_id,
+        limit=REPLAN_REQUIRED_READ_LIMIT,
+        required_read_id=required_read_id or None,
+    )
+    matched_receipt: dict[str, Any] | None = None
+    if acked_at is not None and (triggered_at is not None or required_read_id):
+        matched_receipt = next(
+            (
+                receipt
+                for receipt in receipts or []
+                if isinstance(receipt, dict)
+                and receipt.get("schema_version")
+                == "evidence_log_read_receipt_v0"
+                and str(receipt.get("goal_id") or "") == str(goal_id)
+                and str(receipt.get("agent_id") or "") == safe_agent_id
+                and str(receipt.get("command") or "") == command
+                and isinstance(
+                    read_window := receipt.get("read_window"),
+                    dict,
+                )
+                and read_window.get("mode") == "thin"
+                and read_window.get("limit") == REPLAN_REQUIRED_READ_LIMIT
+                and (
+                    not required_read_id
+                    or str(receipt.get("required_read_id") or "")
+                    == required_read_id
+                )
+                and (
+                    recorded_at := parse_timestamp(receipt.get("recorded_at"))
+                )
+                is not None
+                and (triggered_at is None or triggered_at <= recorded_at)
+                and recorded_at <= acked_at
+            ),
+            None,
+        )
+    satisfied = matched_receipt is not None
+    reason = (
+        "required evidence-log read receipt is missing or stale; run "
+        f"`{command}` after this obligation trigger before ACK writeback"
+    )
+    result: dict[str, Any] = {
+        "schema_version": REPLAN_REQUIRED_READ_VALIDATION_SCHEMA_VERSION,
+        "enforcement": enforcement_mode,
+        "accepted": satisfied or enforcement_mode == "soft",
+        "required_read_satisfied": satisfied,
+        "triggered_at": triggered_at_text,
+        "acknowledged_at": (
+            acked_at.isoformat().replace("+00:00", "Z")
+            if acked_at is not None
+            else None
+        ),
+        "required_read": {
+            "kind": "agent_scoped_evidence_log",
+            "goal_id": goal_id,
+            "agent_id": safe_agent_id,
+            "command": command,
+            "required_read_id": required_read_id or None,
+        },
+    }
+    if matched_receipt:
+        result["matched_receipt"] = matched_receipt
+        return result
+    claim = {
+        "kind": "required_read_not_executed",
+        "reason": reason,
+    }
+    result["warnings"] = [claim]
+    if enforcement_mode == "hard":
+        result["rejected_claims"] = [claim]
+    return result
 
 
 def latest_autonomous_replan_ack_for_projection(
