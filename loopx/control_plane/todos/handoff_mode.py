@@ -11,8 +11,11 @@ The goal's ACTIVE_GOAL_STATE.md YAML front-matter may declare ``handoff_mode``:
   for cleanup and observability of legacy leftovers.
 * ``hard_lease``: ownership changes on an existing todo require the acting
   agent to hold that todo's time-active task lease, and the completion fence
-  becomes mandatory. The delegated ``coordination.todo_lifecycle_authority``
-  override is the one audited door through the gate.
+  becomes mandatory for both user-role and agent-role todos. An exact linked
+  user-gate decision-scope override changes lifecycle actor attribution only;
+  it does not bypass the fence. The delegated
+  ``coordination.todo_lifecycle_authority`` override is the one audited door
+  through the gate.
 
 The mode lives in the front-matter (not the registry) because the markdown
 file is the artifact that travels across endpoints; lease JSON and registry

@@ -51,6 +51,7 @@ GOAL_ID = "handoff-mode-gate"
 AGENT_A = "agent-a"
 AGENT_B = "agent-b"
 ORCHESTRATOR = "agent-orchestrator"
+DECISION_SCOPE = "direction:action:approve_handoff"
 
 
 def _write_workspace(
@@ -135,6 +136,40 @@ def _agent_todo(state: Path, todo_id: str) -> dict[str, Any]:
         for item in todos["agent_todos"]["items"]
         if item["todo_id"] == todo_id
     )
+
+
+def _user_todo(state: Path, todo_id: str) -> dict[str, Any]:
+    todos = parse_active_state_todos(state.read_text(encoding="utf-8"))
+    return next(
+        item
+        for item in todos["user_todos"]["items"]
+        if item["todo_id"] == todo_id
+    )
+
+
+def _add_exact_user_gate_pair(
+    registry: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    target = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Continue after the exact owner decision.",
+        task_class="advancement_task",
+        claimed_by=AGENT_A,
+        required_decision_scopes=[DECISION_SCOPE],
+    )
+    gate = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="user",
+        text="Approve the exact handoff decision.",
+        task_class="user_gate",
+        blocks_agent=AGENT_A,
+        decision_scope=DECISION_SCOPE,
+        unblocks_todo_id=target["todo_id"],
+    )
+    return target, gate
 
 
 def _acquire(
@@ -621,6 +656,131 @@ def test_hard_lease_completion_with_verified_key_succeeds(tmp_path: Path) -> Non
     assert result["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
     assert result["task_lease_fence"]["required"] is True
     assert result["task_lease_fence"]["execution_instance_verified"] is True
+
+
+def test_hard_lease_exact_user_gate_completion_without_lease_is_typed_rejected(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_workspace(
+        tmp_path,
+        handoff_mode=HANDOFF_MODE_HARD_LEASE,
+    )
+    _target, gate = _add_exact_user_gate_pair(registry)
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(TaskLeaseError) as error:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=gate["todo_id"],
+            role="user",
+            decision_outcome="approve",
+            agent_id=AGENT_A,
+            evidence="exact owner decision without a task lease",
+        )
+
+    assert error.value.code == "handoff_mode_requires_lease"
+    assert error.value.payload["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert state.read_text(encoding="utf-8") == before
+
+
+def test_hard_lease_exact_user_gate_completion_uses_fence_and_releases_lease(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_workspace(
+        tmp_path,
+        handoff_mode=HANDOFF_MODE_HARD_LEASE,
+    )
+    target, gate = _add_exact_user_gate_pair(registry)
+    _acquire(registry, tmp_path, gate["todo_id"], owner=AGENT_A)
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+    )
+
+    result = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+        role="user",
+        decision_outcome="approve",
+        agent_id=AGENT_A,
+        task_lease_idempotency_key="turn-lease-1",
+        task_lease_expected_version=1,
+        evidence="lease holder approved the exact decision scope",
+    )
+
+    assert result["ok"] is True
+    assert result["mutation_authority"]["mode"] == (
+        "exact_user_gate_decision_scope_override"
+    )
+    assert "handoff_gate_overridden" not in result
+    assert result["task_lease_fence"] == {
+        "schema_version": "task_lease_v0",
+        "required": True,
+        "active": True,
+        "owner": AGENT_A,
+        "version": 1,
+        "execution_instance_verified": True,
+        "released": True,
+    }
+    assert not lease_file.exists()
+    assert _user_todo(state, gate["todo_id"])["status"] == "done"
+    target_after = _agent_todo(state, target["todo_id"])
+    assert target_after["status"] == "open"
+    assert not target_after.get("required_decision_scopes")
+    assert result["decision_scope_resolution"]["state"] == "resolved"
+    assert result["decision_scope_resolution"][
+        "remaining_required_decision_scopes"
+    ] == []
+
+
+@pytest.mark.parametrize(
+    ("lease_owner", "actor_agent_id", "completion_key"),
+    [
+        (AGENT_A, AGENT_A, "wrong-turn-key"),
+        (AGENT_B, AGENT_A, "turn-lease-1"),
+    ],
+    ids=("wrong-key", "foreign-holder"),
+)
+def test_hard_lease_exact_user_gate_rejects_invalid_lease_fence_without_state_change(
+    tmp_path: Path,
+    lease_owner: str,
+    actor_agent_id: str,
+    completion_key: str,
+) -> None:
+    registry, state = _write_workspace(
+        tmp_path,
+        handoff_mode=HANDOFF_MODE_HARD_LEASE,
+    )
+    _target, gate = _add_exact_user_gate_pair(registry)
+    _acquire(registry, tmp_path, gate["todo_id"], owner=lease_owner)
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=gate["todo_id"],
+    )
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(TaskLeaseError) as error:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=gate["todo_id"],
+            role="user",
+            decision_outcome="approve",
+            agent_id=actor_agent_id,
+            task_lease_idempotency_key=completion_key,
+            task_lease_expected_version=1,
+            evidence="invalid execution instance must not consume the gate",
+        )
+
+    assert error.value.code == "lease_cas_mismatch"
+    assert state.read_text(encoding="utf-8") == before
+    persisted_lease = json.loads(lease_file.read_text(encoding="utf-8"))
+    assert persisted_lease["status"] == "active"
+    assert persisted_lease["owner"] == lease_owner
 
 
 def test_hard_lease_self_disarm_state_becomes_loud_typed_error(
