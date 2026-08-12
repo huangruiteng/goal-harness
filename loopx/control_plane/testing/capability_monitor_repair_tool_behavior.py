@@ -225,11 +225,23 @@ def _redacted_command_shape(
     except ValueError:
         tokens = []
     executable = Path(tokens[0]).name if tokens else ""
+    family = (
+        "content_read"
+        if executable in {"cat", "head", "sed", "jq", "python", "python3"}
+        else "discovery"
+        if executable in {"find", "grep", "rg"}
+        else "metadata"
+        if executable in {"ls", "pwd", "stat", "test"}
+        else "control_plane"
+        if executable == "loopx"
+        else "shell_wrapper"
+        if executable in {"bash", "sh", "zsh"}
+        else "other"
+    )
     return {
         "parseable": bool(tokens),
         "token_count_bucket": min(len(tokens), 8),
-        "read_executable": executable in {"cat", "head", "sed", "jq", "python", "python3"},
-        "shell_wrapper": executable in {"bash", "sh", "zsh"},
+        "command_family": family,
         "mentions_fixture_dir": "fixture/" in command,
         "mentions_selected_target": str(fixture.selected_target.name) in command,
         "multiline": "\n" in command,
@@ -420,8 +432,11 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                 "role": "system",
                 "content": (
                     "You are Codex running one LoopX heartbeat. Follow the task and "
-                    "choose each next action from the latest tool result. When real "
-                    "quota projects an agent-owned capability bridge repair, verify it "
+                    "choose each next action from the latest tool result. "
+                    "The exec tool's current workspace is the goal project root, so "
+                    "project-relative task paths are directly addressable. "
+                    "When real quota projects an agent-owned capability bridge repair, "
+                    "verify it "
                     "by executing agent_channel.next_task_action.instruction with the "
                     "appropriate task-facing tool; do not run that instruction as CLI "
                     "text or inspect state/workspace again. After success, run "
