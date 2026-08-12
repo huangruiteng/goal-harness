@@ -200,11 +200,14 @@ def _scoped_gate_successor_actor(_: str) -> dict[str, Any]:
 
 def _capability_monitor_repair_actor(_: str) -> dict[str, Any]:
     return _passing_tool_receipt(
-        "capability_monitor_repair_tool_behavior_receipt_v0",
+        "capability_monitor_repair_tool_behavior_receipt_v1",
         selected_todo_id=None,
         user_action_required=False,
         delivery_allowed=False,
-        capability_repair_executed=True,
+        capability_callsite_verified=True,
+        same_turn_quota_reentry_completed=True,
+        blocked_todo_reentered=True,
+        same_turn_delivery_allowed=True,
         monitor_fallback_avoided=True,
         repair_missing=["private_read"],
     )
@@ -261,12 +264,23 @@ def _required_evidence_action(
     return ScriptedExecToolAction(str(command))
 
 
-def _capability_repair_action(
+def _capability_callsite_action(
     request: Mapping[str, Any],
 ) -> ScriptedExecToolAction:
     payload = _latest_tool_payload(request)
-    cli_channel = payload["interaction_contract"]["cli_channel"]
-    return ScriptedExecToolAction(str(cli_channel["next_cli_actions"][0]))
+    summary = payload.get("agent_todo_summary") or {}
+    match = re.search(r"fixture/[a-z0-9_-]+\.json", json.dumps(summary))
+    if match is None:
+        raise AssertionError("blocked capability Todo does not identify its callsite")
+    return ScriptedExecToolAction(f"cat {shlex.quote(match.group(0))}")
+
+
+def _capability_reentry_action(
+    request: Mapping[str, Any],
+) -> ScriptedExecToolAction:
+    payload = _latest_tool_payload(request)
+    reentry = payload["runtime_capability_reentry"]
+    return ScriptedExecToolAction(str(reentry["candidates"][0]["command"]))
 
 
 def _scoped_gate_final_action(
@@ -342,7 +356,8 @@ def _real_tool_actors(root: Path) -> dict[str, Any]:
         transport = ScriptedDoubaoExecTransport(
             [
                 ScriptedExecToolAction(fixture.quota_guard_command),
-                _capability_repair_action,
+                _capability_callsite_action,
+                _capability_reentry_action,
             ]
         )
         return DoubaoCapabilityMonitorRepairToolBehaviorActor(
@@ -466,7 +481,7 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
     assert capability["interaction_contract"]["mode"] == "capability_bridge_repair"
     assert capability["capability_gate"]["action"] == "repair_bridge"
     assert "private_read" in capability["capability_gate"]["repair_missing"]
-    assert "next_cli_actions[0]" in (
+    assert "real task-facing callsite" in (
         capability_signature["action"]["primary_action"]
     )
     regression_source = build_quota_hot_path_compaction_regression_source()
@@ -1105,7 +1120,8 @@ def test_portfolio_oracle_rejects_waiting_on_capability_monitor_repair(
         return {
             **_capability_monitor_repair_actor(run_id),
             "decision": "wait",
-            "capability_repair_executed": False,
+            "capability_callsite_verified": False,
+            "same_turn_quota_reentry_completed": False,
             "monitor_fallback_avoided": False,
         }
 

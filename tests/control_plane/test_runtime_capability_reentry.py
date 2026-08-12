@@ -65,12 +65,20 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
 
     reentry = contract["cli_channel"]["runtime_capability_reentry"]
     assert contract["agent_channel"]["primary_action"] == (
-        "execute interaction_contract.cli_channel.next_cli_actions[0] to "
-        "materialize the missing capability; do not backtrack to generic "
-        "inspection or a monitor fallback"
+        "perform one real task-facing callsite check for the blocked Todo; on "
+        "success rerun quota with the observed capability in this same turn and "
+        "continue only when quota allows"
     )
     assert reentry["schema_version"] == "runtime_capability_reentry_v0"
     assert reentry["state"] == "verification_required"
+    assert reentry["verification_contract"] == {
+        "scope": "real_task_facing_callsite_for_blocked_todo",
+        "ordinary_delivery_allowed": False,
+        "advancement_checkpoint": False,
+        "settles_turn": False,
+        "on_success": "rerun_quota_in_same_turn_then_continue_if_allowed",
+        "on_failure": "record_exact_blocker_without_capability_flag",
+    }
     assert reentry["inheritance_contract"] == {
         "source_invocation": "verified quota should-run reentry",
         "propagates_to": [
@@ -105,6 +113,17 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
     ]
     assert any(
         action.startswith("after real-callsite verification of network:")
+        for action in contract["cli_channel"]["next_cli_actions"]
+    )
+    assert contract["cli_channel"]["spend_after_validation"] is False
+    assert contract["cli_channel"]["spend_policy"] == (
+        "no spend or advancement checkpoint for capability verification; rerun "
+        "quota in the same turn"
+    )
+    assert all(
+        "todo add" not in action
+        and "refresh-state" not in action
+        and "spend-slot" not in action
         for action in contract["cli_channel"]["next_cli_actions"]
     )
 

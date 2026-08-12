@@ -10,14 +10,16 @@ from loopx.bootstrap_command_pack import build_start_goal_guided_packet
 from loopx.cli_commands.start_goal import _resolve_start_goal_input
 from loopx.configure_goal import configure_goal
 from loopx.control_plane.goals.goal_frontier import (
-    derive_goal_frontier_replan_obligation_from_summaries,
-)
-from loopx.control_plane.goals.goal_frontier.outcome_continuity import (
-    acceptance_gaps_from_todo_completion_checkpoint,
+    build_goal_frontier_projection_context_from_status,
 )
 from loopx.control_plane.heartbeat.builder import (
     FINE_GRAINED_TURN_RULE,
     build_heartbeat_prompt,
+)
+from loopx.control_plane.testing.quota_fixtures import (
+    quota_status_payload,
+    quota_todo_item,
+    quota_todo_summary,
 )
 from loopx.execution_profile import (
     build_execution_profile,
@@ -140,7 +142,7 @@ def test_public_cli_accepts_direct_fine_start_and_bootstrap_flags(
     assert bootstrap_payload["execution_profile"]["minimum_scale"] == "single_surface"
 
 
-def test_fine_profile_expects_small_checkpoints_without_widening() -> None:
+def test_fine_profile_keeps_small_checkpoints_inside_a_coherent_slice() -> None:
     standard = build_execution_profile()
     fine = build_execution_profile(turn_granularity="fine")
 
@@ -148,9 +150,12 @@ def test_fine_profile_expects_small_checkpoints_without_widening() -> None:
     assert execution_profile_is_fine_grained(standard) is False
     assert execution_profile_is_fine_grained(compact_execution_profile(fine)) is True
     assert fine["minimum_scale"] == "single_surface"
+    assert fine["planning_granularity"] == "fine_checkpoint"
+    assert fine["turn_work_budget"] == "coherent_slice"
+    assert fine["checkpoint_accounting"] == "advancement_only"
     assert fine["degradation_policy"] == {
-        "small_scale_streak_threshold": 1,
-        "on_degradation": "replan_after_checkpoint",
+        "small_scale_streak_threshold": 5,
+        "on_degradation": "review_direction_after_bounded_chain",
     }
     cadence = build_long_task_cadence_hint(
         execution_profile=fine,
@@ -161,11 +166,26 @@ def test_fine_profile_expects_small_checkpoints_without_widening() -> None:
             }
         ],
     )
-    assert cadence["recommendation"] == "replan"
-    assert cadence["reason_codes"] == ["fine_checkpoint_complete"]
+    assert cadence["recommendation"] == "keep"
+    assert cadence["reason_codes"] == ["fine_checkpoint_within_slice"]
+
+    bounded_chain = build_long_task_cadence_hint(
+        execution_profile=fine,
+        latest_runs=[
+            {
+                "delivery_batch_scale": "single_surface",
+                "delivery_outcome": "validated_progress",
+            }
+            for _ in range(5)
+        ],
+    )
+    assert bounded_chain["recommendation"] == "replan"
+    assert bounded_chain["reason_codes"] == ["fine_direction_review_due"]
 
 
-def test_fine_packet_writes_one_checkpoint_and_persists_mode(tmp_path: Path) -> None:
+def test_fine_packet_plans_one_checkpoint_but_budgets_a_coherent_slice(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     project.mkdir()
 
@@ -186,8 +206,10 @@ def test_fine_packet_writes_one_checkpoint_and_persists_mode(tmp_path: Path) -> 
     assert contract["turn_mode"] == "fine_grained"
     assert contract["fine_grained"] == {
         "todo_granularity": "small_checkpoint",
-        "turn_boundary": "one_todo_per_turn",
-        "replan": "after_each_todo",
+        "turn_work_budget": "coherent_slice",
+        "turn_boundary": "settle_after_coherent_slice",
+        "replan": "direction_change_or_bounded_chain",
+        "checkpoint_accounting": "advancement_only",
     }
     assert contract["planner"]["maximum_runnable_todos_written_ahead"] == 1
     assert "--fine-grained" in commands["goal_start_connect_if_needed"]
@@ -197,8 +219,16 @@ def test_fine_packet_writes_one_checkpoint_and_persists_mode(tmp_path: Path) -> 
     )
     assert any(step["id"] == "configure_fine_grained_turn_mode" for step in steps)
     assert "existing replan obligation/ACK path" in commands["goal_start_plan_prompt"]
-    assert "write exactly one" in commands["goal_start_plan_prompt"]
+    assert "write exactly one current" in commands["goal_start_plan_prompt"]
+    assert "one or more causally related" in commands["goal_start_plan_prompt"]
     assert "broad goal 2-5" not in commands["goal_start_plan_prompt"]
+    assert fine["guided_transaction"]["checkpoint_policy"] == {
+        "task_frontier": "agent_advancement_todos_only",
+        "protocol_step_todo_projection": "forbidden",
+        "protocol_step_advancement_checkpoint": False,
+        "protocol_step_turn_settlement": False,
+        "settlement": "once_after_task_facing_slice",
+    }
 
     standard = build_start_goal_guided_packet(
         project=project,
@@ -237,7 +267,9 @@ def test_fine_heartbeat_rule_is_opt_in_only() -> None:
     assert fine["turn_mode"] == "fine_grained"
     assert fine["turn_granularity"] == "fine"
     assert FINE_GRAINED_TURN_RULE in fine["task_body"]
-    assert "end the turn without claiming or executing a successor" in fine["task_body"]
+    assert "one or more causally related" in fine["task_body"]
+    assert "settle the turn once" in fine["task_body"]
+    assert "Protocol/setup and capability re-entry" in fine["task_body"]
 
 
 def test_heartbeat_cli_reads_sticky_fine_mode_from_registry(tmp_path: Path) -> None:
@@ -292,64 +324,76 @@ def test_heartbeat_cli_reads_sticky_fine_mode_from_registry(tmp_path: Path) -> N
     assert FINE_GRAINED_TURN_RULE in payload["task_body"]
 
 
-def test_one_fine_completion_reuses_existing_frontier_replan_path() -> None:
-    vision = {
-        "schema_version": "agent_vision_v0",
-        "agent_id": AGENT_ID,
-        "state": "active",
-        "vision_patch": {
-            "acceptance_summary": "Keep the next checkpoint aligned with evidence.",
-            "advancement_policy": "repeat_until_closed",
+def _fine_frontier_context_after_completions(completion_count: int) -> dict:
+    successor_id = "todo_checkpoint_successor"
+    completed = [
+        quota_todo_item(
+            todo_id=f"todo_checkpoint_{index}",
+            index=index,
+            text=f"[P0] Complete checkpoint {index}.",
+            status="done",
+            claimed_by=AGENT_ID,
+            completed_at=f"2026-08-11T09:0{index}:00+08:00",
+            successor_todo_ids=[successor_id],
+        )
+        for index in range(1, completion_count + 1)
+    ]
+    successor = quota_todo_item(
+        todo_id=successor_id,
+        index=completion_count + 1,
+        text="[P0] Continue the current evidence direction.",
+        claimed_by=AGENT_ID,
+    )
+    summary = quota_todo_summary([*completed, successor], role="agent")
+    status = quota_status_payload(
+        goal_id=GOAL_ID,
+        status="active",
+        recommended_action="Continue the current evidence direction.",
+        agent_todos=summary,
+        project_asset_extra={
+            "execution_profile": build_execution_profile(turn_granularity="fine")
         },
-    }
-    completed = {
-        "todo_id": "todo_checkpoint_1",
-        "claimed_by": AGENT_ID,
-        "completed_at": "2026-08-11T09:00:00+08:00",
-    }
-    summary = {
-        "recent_completed_advancement_items": [completed],
-        "current_agent_claimed_advancement_count": 1,
-        "executable_backlog_items": [
+        latest_runs=[
             {
-                "todo_id": "todo_preplanned_successor",
-                "claimed_by": AGENT_ID,
-                "task_class": "advancement_task",
-                "status": "open",
+                "generated_at": "2026-08-11T08:00:00+08:00",
+                "agent_id": AGENT_ID,
+                "agent_vision": {
+                    "schema_version": "agent_vision_v0",
+                    "agent_id": AGENT_ID,
+                    "state": "active",
+                    "vision_patch": {},
+                },
             }
         ],
-    }
-
-    assert (
-        acceptance_gaps_from_todo_completion_checkpoint(
-            vision,
-            None,
-            agent_todo_summary=summary,
-            agent_id=AGENT_ID,
-        )
-        == []
     )
-    gaps = acceptance_gaps_from_todo_completion_checkpoint(
-        vision,
-        None,
-        agent_todo_summary=summary,
+    item = status["attention_queue"]["items"][0]
+    return build_goal_frontier_projection_context_from_status(
+        goal_id=GOAL_ID,
         agent_id=AGENT_ID,
-        completed_todo_threshold=1,
-    )
-    assert gaps[0]["replan_cadence"] == "fine_grained_after_each_todo"
-
-    obligation = derive_goal_frontier_replan_obligation_from_summaries(
-        user_todo_summary=None,
+        status_payload=status,
+        item=item,
+        project_asset=item["project_asset"],
+        user_todo_summary=item["user_todos"],
         agent_todo_summary=summary,
-        work_lane_contract=None,
-        agent_id=AGENT_ID,
-        existing_replan_obligation=None,
-        acceptance_gaps=gaps,
+        work_lane_contract={"lane": "advancement_task", "must_attempt_work": True},
+        neutral_replan_ack_classifications=set(),
+        registered_agent_ids=[AGENT_ID],
+        goal_status="active",
     )
-    assert obligation is not None
-    assert obligation["required"] is True
-    assert "retain_replace_or_split_successor" in obligation["guidance_actions"]
-    assert "existing bounded replan path" in obligation["recommended_action"]
+
+
+def test_fine_completion_replans_after_a_bounded_chain_not_each_todo() -> None:
+    first = _fine_frontier_context_after_completions(1)
+    assert first["acceptance_gaps"] == []
+    assert first["replan_obligation"] is None
+
+    bounded_chain = _fine_frontier_context_after_completions(5)
+    gaps = bounded_chain["acceptance_gaps"]
+    assert len(gaps) == 1
+    assert gaps[0]["kind"] == "vision_outcome_checkpoint_required"
+    assert gaps[0]["completed_todo_threshold"] == 5
+    assert "replan_cadence" not in gaps[0]
+    assert bounded_chain["replan_obligation"]["required"] is True
 
 
 def test_configure_goal_persists_and_can_revert_fine_mode(tmp_path: Path) -> None:
@@ -388,3 +432,6 @@ def test_configure_goal_persists_and_can_revert_fine_mode(tmp_path: Path) -> Non
     assert reverted["changed_fields"] == ["execution_profile"]
     persisted = json.loads(registry.read_text(encoding="utf-8"))["goals"][0]
     assert "turn_granularity" not in persisted["execution_profile"]
+    assert "planning_granularity" not in persisted["execution_profile"]
+    assert "turn_work_budget" not in persisted["execution_profile"]
+    assert "checkpoint_accounting" not in persisted["execution_profile"]

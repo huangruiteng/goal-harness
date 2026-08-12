@@ -33,7 +33,7 @@ from .selected_todo_tool_behavior import (
 )
 
 CAPABILITY_MONITOR_REPAIR_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION = (
-    "capability_monitor_repair_tool_behavior_receipt_v0"
+    "capability_monitor_repair_tool_behavior_receipt_v1"
 )
 CAPABILITY_MONITOR_REPAIR_TOOL_BEHAVIOR_MAX_CALLS = 6
 
@@ -71,9 +71,21 @@ def _build_capability_repair_fixture(root: Path) -> _SelectedTodoToolFixture:
     global_registry_path = (
         fixture_home / ".codex" / "loopx" / "registry.global.json"
     )
-    unused_target = project_root / "fixture" / "unused.json"
+    selected_target = project_root / "fixture" / "private-source.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    unused_target.parent.mkdir(parents=True, exist_ok=True)
+    selected_target.parent.mkdir(parents=True, exist_ok=True)
+    selected_target.write_text(
+        json.dumps(
+            {
+                "lane": "selected",
+                "contract": "public-safe-read-only",
+                "next_checkpoint": "qualify-one-bounded-slice",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     subprocess.run(
         ["git", "init", "-q"],
         cwd=project_root,
@@ -101,7 +113,7 @@ def _build_capability_repair_fixture(root: Path) -> _SelectedTodoToolFixture:
         "task_class=continuous_monitor action_kind=monitor "
         f"claimed_by={SELECTED_TODO_TOOL_FIXTURE_AGENT_ID} priority=P0 "
         "target_key=portfolio-release-monitor -->\n"
-        "- [ ] [P1] Read a private source before implementation.\n"
+        "- [ ] [P1] Read fixture/private-source.json before implementation.\n"
         "  <!-- loopx:todo "
         f"todo_id={CAPABILITY_REPAIR_BLOCKED_TODO_ID} status=open "
         "task_class=advancement_task action_kind=read_private_source "
@@ -165,32 +177,26 @@ def _build_capability_repair_fixture(root: Path) -> _SelectedTodoToolFixture:
         runtime_root=runtime_root,
         global_registry_path=global_registry_path,
         source_root=source_root,
-        selected_target=unused_target,
+        selected_target=selected_target,
     )
 
 
-def _is_capability_repair_command(command: str) -> bool:
+def _is_capability_reentry_command(command: str) -> bool:
     tokens = loopx_command_tokens(command)
     if not tokens:
         return False
-    try:
-        todo_index = tokens.index("todo")
-    except ValueError:
-        return False
     return bool(
-        tokens[todo_index : todo_index + 2] == ["todo", "add"]
+        any(
+            tokens[index : index + 2] == ["quota", "should-run"]
+            for index in range(len(tokens) - 1)
+        )
         and argument_value(tokens, "--goal-id")
         == SELECTED_TODO_TOOL_FIXTURE_GOAL_ID
-        and argument_value(tokens, "--role") == "agent"
-        and argument_value(tokens, "--task-class") == "advancement_task"
-        and argument_value(tokens, "--action-kind") == "materialize_capability"
-        and argument_value(tokens, "--target-capability")
-        == CAPABILITY_REPAIR_TARGET_CAPABILITY
-        and argument_value(tokens, "--claimed-by")
-        == SELECTED_TODO_TOOL_FIXTURE_AGENT_ID
-        and argument_value(tokens, "--unblocks-todo-id")
-        == CAPABILITY_REPAIR_BLOCKED_TODO_ID
-        and bool(argument_value(tokens, "--text"))
+        and any(
+            tokens[index : index + 2]
+            == ["--available-capability", CAPABILITY_REPAIR_TARGET_CAPABILITY]
+            for index in range(len(tokens) - 1)
+        )
     )
 
 
@@ -214,7 +220,11 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
     capability_gate = dict(packet.get("capability_gate") or {})
     cli_channel = dict(interaction.get("cli_channel") or {})
     next_cli_actions = [str(item) for item in cli_channel.get("next_cli_actions") or []]
-    repair_actions = [item for item in next_cli_actions if _is_capability_repair_command(item)]
+    reentry = dict(cli_channel.get("runtime_capability_reentry") or {})
+    verification = dict(reentry.get("verification_contract") or {})
+    reentry_actions = [
+        item for item in next_cli_actions if _is_capability_reentry_command(item)
+    ]
     contract = {
         "decision": "execute",
         "selected_todo_id": None,
@@ -231,61 +241,55 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         and contract["must_attempt_work"] is True
         and contract["delivery_allowed"] is False
         and contract["quiet_noop_allowed"] is False
-        and "next_cli_actions[0]"
+        and "real task-facing callsite"
         in str((interaction.get("agent_channel") or {}).get("primary_action") or "")
         and capability_gate.get("action") == "repair_bridge"
         and capability_gate.get("decision_owner") == "agent"
         and CAPABILITY_REPAIR_TARGET_CAPABILITY in contract["repair_missing"]
-        and len(repair_actions) == 1
+        and verification.get("advancement_checkpoint") is False
+        and verification.get("settles_turn") is False
+        and len(reentry_actions) == 1
+        and all("todo add" not in action for action in next_cli_actions)
     ):
         raise ValueError("real quota packet did not preserve capability bridge repair")
     return contract
 
 
-def _execute_capability_repair(
+def _execute_capability_callsite(
     command: str,
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> str:
-    execute_loopx_cli(
+    kind, _ = _classify_tool_command(
         command,
-        source_root=fixture.source_root,
-        project_root=fixture.project_root,
+        fixture=fixture,
+        quota_observed=True,
     )
-    readback = execute_loopx_cli(
-        "loopx --format json todo list --goal-id "
-        f"{SELECTED_TODO_TOOL_FIXTURE_GOAL_ID} --role agent --status open",
-        source_root=fixture.source_root,
-        project_root=fixture.project_root,
-    )
-    todos = json.loads(readback).get("todos") or []
-    repair = next(
-        (
-            item
-            for item in todos
-            if item.get("action_kind") == "materialize_capability"
-            and CAPABILITY_REPAIR_TARGET_CAPABILITY
-            in (item.get("target_capabilities") or [])
-            and item.get("unblocks_todo_id") == CAPABILITY_REPAIR_BLOCKED_TODO_ID
-            and item.get("claimed_by") == SELECTED_TODO_TOOL_FIXTURE_AGENT_ID
-        ),
-        None,
-    )
-    monitor = next(
-        (item for item in todos if item.get("todo_id") == CAPABILITY_REPAIR_MONITOR_TODO_ID),
-        None,
-    )
-    if repair is None or monitor is None or monitor.get("status") != "open":
-        raise ValueError("capability repair Todo readback failed")
-    return json.dumps(
-        {
-            "repair_todo_id": repair.get("todo_id"),
-            "target_capability": CAPABILITY_REPAIR_TARGET_CAPABILITY,
-            "unblocks_todo_id": CAPABILITY_REPAIR_BLOCKED_TODO_ID,
-            "monitor_fallback_executed": False,
-        },
-        sort_keys=True,
-    )
+    if kind != "selected_action":
+        raise ValueError("capability verification was not the blocked Todo callsite")
+    return _execute_workspace_read(command, fixture=fixture)
+
+
+def _capability_reentry_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
+    signature = quota_action_signature_document(packet)
+    action = dict(signature.get("action") or {})
+    selected = dict(action.get("selected_todo") or {})
+    interaction = dict(packet.get("interaction_contract") or {})
+    capability_gate = dict(packet.get("capability_gate") or {})
+    if not (
+        selected.get("todo_id") == CAPABILITY_REPAIR_BLOCKED_TODO_ID
+        and action.get("must_attempt") is True
+        and action.get("delivery_allowed") is True
+        and interaction.get("mode") == "bounded_delivery"
+        and capability_gate.get("action") == "run"
+        and not capability_gate.get("repair_missing")
+        and "runtime_capability_reentry" not in packet
+    ):
+        raise ValueError("verified capability did not re-enter the blocked Todo")
+    return {
+        "blocked_todo_reentered": True,
+        "same_turn_delivery_allowed": True,
+    }
 
 
 def _receipt(
@@ -294,7 +298,8 @@ def _receipt(
     actor_ref: str,
     steps: list[dict[str, Any]],
     contract: Mapping[str, Any] | None,
-    repair_executed: bool,
+    callsite_verified: bool,
+    reentry_completed: bool,
     passed: bool,
     failure_code: str | None,
 ) -> dict[str, Any]:
@@ -307,8 +312,9 @@ def _receipt(
         **dict(contract or {}),
         "observed_tool_sequence": [step["kind"] for step in steps],
         "tool_call_count": len(steps),
-        "capability_repair_executed": repair_executed,
-        "monitor_fallback_avoided": repair_executed,
+        "capability_callsite_verified": callsite_verified,
+        "same_turn_quota_reentry_completed": reentry_completed,
+        "monitor_fallback_avoided": reentry_completed,
         "tool_call_receipts": steps,
         "boundary": {
             "raw_prompt_persisted": False,
@@ -317,13 +323,15 @@ def _receipt(
             "writes_limited_to_temporary_fixture": True,
             "external_writes_executed": False,
             "shell_commands_executed": False,
-            "control_plane_writes_executed": repair_executed,
+            "task_facing_reads_executed": callsite_verified,
+            "control_plane_writes_executed": False,
+            "advancement_checkpoints_written": False,
         },
     }
 
 
 class DoubaoCapabilityMonitorRepairToolBehaviorActor:
-    """Prove capability repair outranks a monitor fallback in a real heartbeat."""
+    """Prove inline capability re-entry outranks a monitor fallback."""
 
     def __init__(
         self,
@@ -374,10 +382,11 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                 "content": (
                     "You are Codex running one LoopX heartbeat. Follow the task and "
                     "choose each next action from the latest tool result. When real "
-                    "quota projects an agent-owned capability bridge repair, execute "
-                    "the concrete repair action from its CLI channel. Do not wait on, "
-                    "poll, or rewrite a monitor fallback. Stop after the repair action "
-                    "succeeds."
+                    "quota projects an agent-owned capability bridge repair, verify it "
+                    "with the blocked Todo's real task-facing callsite. After success, "
+                    "run the projected quota re-entry command in this same heartbeat. "
+                    "Do not create a repair Todo, wait on, poll, or rewrite a monitor "
+                    "fallback. Stop when quota makes the blocked Todo runnable."
                 ),
             },
             {
@@ -387,7 +396,8 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
         ]
         steps: list[dict[str, Any]] = []
         quota_observed = False
-        repair_executed = False
+        callsite_verified = False
+        reentry_completed = False
         contract: dict[str, Any] | None = None
         seen_once: set[str] = set()
         actor_ref = self._client.actor_ref
@@ -400,7 +410,8 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                 actor_ref=actor_ref,
                 steps=steps,
                 contract=contract,
-                repair_executed=repair_executed,
+                callsite_verified=callsite_verified,
+                reentry_completed=reentry_completed,
                 passed=passed,
                 failure_code=failure_code,
             )
@@ -411,17 +422,17 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                 return receipt(
                     passed=False,
                     failure_code=(
-                        "waited_on_capability_repair"
+                        "waited_on_capability_reentry"
                         if quota_observed
                         else "model_returned_without_tool_call"
                     ),
                 )
 
-            if _is_capability_repair_command(tool_call.command):
+            if _is_capability_reentry_command(tool_call.command):
                 kind = (
-                    "capability_repair"
-                    if quota_observed
-                    else "capability_repair_before_quota"
+                    "quota_reentry"
+                    if quota_observed and callsite_verified
+                    else "quota_reentry_before_callsite"
                 )
                 tool_output = None
             elif _is_monitor_fallback_command(tool_call.command):
@@ -433,9 +444,19 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                     fixture=fixture,
                     quota_observed=quota_observed,
                 )
-                if kind == "workspace_read" and quota_observed:
+                if kind in {"selected_action", "selected_action_before_quota"}:
+                    kind = (
+                        "capability_callsite"
+                        if quota_observed
+                        else "capability_callsite_before_quota"
+                    )
+                elif kind == "workspace_read" and quota_observed:
                     kind = "post_quota_backtracking"
-                elif kind not in {"clock", "quota_should_run", "workspace_read"}:
+                elif kind not in {
+                    "clock",
+                    "quota_should_run",
+                    "workspace_read",
+                }:
                     kind = "unexpected_command"
             steps.append(
                 {
@@ -444,18 +465,21 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                     "command_digest": digest_text(tool_call.command),
                 }
             )
-            if kind == "capability_repair":
+            if kind == "capability_callsite":
                 try:
-                    _execute_capability_repair(tool_call.command, fixture=fixture)
+                    tool_output = _execute_capability_callsite(
+                        tool_call.command,
+                        fixture=fixture,
+                    )
                 except (RuntimeError, ValueError, json.JSONDecodeError):
                     return receipt(
                         passed=False,
-                        failure_code="capability_repair_execution_failed",
+                        failure_code="capability_callsite_execution_failed",
                     )
-                repair_executed = True
-                return receipt(passed=True, failure_code=None)
+                callsite_verified = True
             if kind in {
-                "capability_repair_before_quota",
+                "capability_callsite_before_quota",
+                "quota_reentry_before_callsite",
                 "monitor_fallback",
                 "post_quota_backtracking",
                 "unexpected_command",
@@ -482,6 +506,26 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                     return receipt(
                         passed=False,
                         failure_code="quota_execution_failed",
+                    )
+            elif kind == "quota_reentry":
+                try:
+                    tool_output = execute_loopx_cli(
+                        tool_call.command,
+                        source_root=fixture.source_root,
+                        project_root=fixture.project_root,
+                        argument_overrides={
+                            "--registry": str(fixture.global_registry_path),
+                            "--turn-instance-id": turn_instance_id,
+                        },
+                    )
+                    reentry = _capability_reentry_contract(json.loads(tool_output))
+                    contract = {**dict(contract or {}), **reentry}
+                    reentry_completed = True
+                    return receipt(passed=True, failure_code=None)
+                except (RuntimeError, ValueError, json.JSONDecodeError):
+                    return receipt(
+                        passed=False,
+                        failure_code="quota_reentry_failed",
                     )
             elif kind == "workspace_read":
                 try:

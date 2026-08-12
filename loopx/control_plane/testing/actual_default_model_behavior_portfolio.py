@@ -933,11 +933,9 @@ def _scenario_contract(
             raise ValueError(
                 "capability bridge repair must name the missing capability"
             )
-        if "next_cli_actions[0]" not in str(
-            action.get("primary_action")
-        ):
+        if "real task-facing callsite" not in str(action.get("primary_action")):
             raise ValueError(
-                "primary action must direct the agent to repair the bridge"
+                "primary action must direct the agent to verify the bridge inline"
             )
     compaction_selected_todos = {
         "turn_quota_hot_path_compaction_regression": "todo_c0ffee123456",
