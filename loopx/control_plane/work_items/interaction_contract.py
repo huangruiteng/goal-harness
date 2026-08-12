@@ -668,19 +668,11 @@ def interaction_next_cli_actions(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
         )
-    capability_reentry_actions: list[str] = []
-    if capability_reentry is not None:
-        for candidate in capability_reentry["candidates"]:
-            target = candidate["verification_target"]
-            capability_reentry_actions.extend(
-                [
-                    "first verify "
-                    f"{candidate['capability']} at Todo {target['todo_id']} by "
-                    f"executing its task-facing instruction: {target['instruction']}",
-                    "only after that real-callsite succeeds, rerun quota in this "
-                    f"same turn: {candidate['command']}",
-                ]
-            )
+    capability_reentry_actions = (
+        [str(candidate["command"]) for candidate in capability_reentry["candidates"]]
+        if capability_reentry is not None
+        else []
+    )
     if mode == "terminal_no_followup":
         return ["no quota spend until explicit goal resume or newly projected work"]
     if mode == "agent_monitor_only":
@@ -1128,6 +1120,7 @@ def _build_interaction_agent_channel(
     must_attempt: bool,
     delivery_allowed: bool,
     quiet_noop_allowed: bool,
+    capability_reentry: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     channel: dict[str, Any] = {
         "must_attempt": must_attempt,
@@ -1135,6 +1128,17 @@ def _build_interaction_agent_channel(
         "quiet_noop_allowed": quiet_noop_allowed,
     }
     channel.update(build_primary_action_projection(payload, mode=mode))
+    if capability_reentry is not None:
+        candidate = capability_reentry["candidates"][0]
+        target = candidate["verification_target"]
+        channel["next_task_action"] = {
+            "kind": "capability_verification",
+            "capability": candidate["capability"],
+            "todo_id": target["todo_id"],
+            "action_kind": target["action_kind"],
+            "instruction": target["instruction"],
+            "continuation_cli_action_index": 0,
+        }
     if _blocked_successor_wait_observation_required(payload):
         channel["primary_action"] = (
             "record one no-spend blocked-successor wait observation, rerun quota, "
@@ -1211,12 +1215,14 @@ def _build_interaction_cli_channel(
     scheduler_execution_context: (
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
+    capability_reentry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    capability_reentry = build_runtime_capability_reentry_packet(
-        payload,
-        available_capabilities=available_capabilities,
-        scheduler_execution_context=scheduler_execution_context,
-    )
+    if capability_reentry is None:
+        capability_reentry = build_runtime_capability_reentry_packet(
+            payload,
+            available_capabilities=available_capabilities,
+            scheduler_execution_context=scheduler_execution_context,
+        )
     settlement_plan = _codex_app_settlement_plan(
         payload,
         available_capabilities=available_capabilities,
@@ -1406,6 +1412,11 @@ def build_interaction_contract(
     )
     spend_after_validation = _interaction_spend_after_validation(mode)
     required_reads = _interaction_required_reads(payload)
+    capability_reentry = build_runtime_capability_reentry_packet(
+        payload,
+        available_capabilities=available_capabilities,
+        scheduler_execution_context=scheduler_execution_context,
+    )
 
     user_channel = _build_interaction_user_channel(
         payload,
@@ -1424,6 +1435,7 @@ def build_interaction_contract(
         must_attempt=must_attempt,
         delivery_allowed=delivery_allowed,
         quiet_noop_allowed=quiet_noop_allowed,
+        capability_reentry=capability_reentry,
     )
     contract: dict[str, Any] = {
         "schema_version": INTERACTION_CONTRACT_SCHEMA_VERSION,
@@ -1438,6 +1450,7 @@ def build_interaction_contract(
             spend_after_validation=spend_after_validation,
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
+            capability_reentry=capability_reentry,
         ),
     }
     response_plan = _build_interaction_response_plan(

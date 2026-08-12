@@ -290,10 +290,10 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
         return "produce the required outcome-floor evidence artifact or write the concrete blocker"
     if mode == "capability_bridge_repair":
         return (
-            "execute interaction_contract.cli_channel.next_cli_actions[0], derived "
-            "from runtime_capability_reentry.candidates[0].verification_target."
-            "instruction, without another workspace/state preflight; then follow the "
-            "same-turn quota reentry action and continue only when quota allows"
+            "execute interaction_contract.agent_channel.next_task_action.instruction "
+            "with its real task-facing tool, not as CLI text and without another "
+            "workspace/state preflight; on success execute cli_channel."
+            "next_cli_actions[0] in the same turn and continue only when quota allows"
         )
     if mode == "agent_workspace_repair":
         return "create or switch to an independent worktree/branch, then rerun quota guard before file edits"

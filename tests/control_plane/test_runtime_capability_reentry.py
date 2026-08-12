@@ -73,11 +73,19 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
 
     reentry = contract["cli_channel"]["runtime_capability_reentry"]
     assert contract["agent_channel"]["primary_action"] == (
-        "execute interaction_contract.cli_channel.next_cli_actions[0], derived "
-        "from runtime_capability_reentry.candidates[0].verification_target."
-        "instruction, without another workspace/state preflight; then follow the "
-        "same-turn quota reentry action and continue only when quota allows"
+        "execute interaction_contract.agent_channel.next_task_action.instruction "
+        "with its real task-facing tool, not as CLI text and without another "
+        "workspace/state preflight; on success execute cli_channel."
+        "next_cli_actions[0] in the same turn and continue only when quota allows"
     )
+    assert contract["agent_channel"]["next_task_action"] == {
+        "kind": "capability_verification",
+        "capability": "network",
+        "todo_id": "todo_blocked",
+        "action_kind": "inspect_target",
+        "instruction": "[P0] Inspect fixture/target.json.",
+        "continuation_cli_action_index": 0,
+    }
     assert reentry["schema_version"] == "runtime_capability_reentry_v0"
     assert reentry["state"] == "verification_required"
     assert reentry["verification_contract"] == {
@@ -113,14 +121,7 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
         f"{GOAL_ID} --agent-id {AGENT_ID} --available-capability shell "
         "--available-capability network --runtime-profile ark_managed_agent_goal"
     )
-    assert any(
-        action.startswith("only after that real-callsite succeeds")
-        for action in contract["cli_channel"]["next_cli_actions"]
-    )
-    assert contract["cli_channel"]["next_cli_actions"][0] == (
-        "first verify network at Todo todo_blocked by executing its task-facing "
-        "instruction: [P0] Inspect fixture/target.json."
-    )
+    assert contract["cli_channel"]["next_cli_actions"] == [candidate["command"]]
     assert contract["cli_channel"]["spend_after_validation"] is False
     assert contract["cli_channel"]["spend_policy"] == (
         "no spend or advancement checkpoint for capability verification; rerun "
