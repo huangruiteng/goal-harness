@@ -775,6 +775,12 @@ def test_portfolio_oracle_rejects_silent_wait_for_user_gate(tmp_path: Path) -> N
 
 def test_catalog_declares_independent_bounded_repeat_policy() -> None:
     catalog = actual_default_model_behavior_scenario_catalog()
+    tool_actor_kinds = {
+        "turn_tool",
+        "replan_tool",
+        "scoped_gate_tool",
+        "capability_repair_tool",
+    }
 
     assert catalog["topology"] == "actual_default_one_arm"
     assert len(catalog["scenarios"]) == 15
@@ -782,8 +788,7 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
         scenario["packet_view"]
         == (
             "production_heartbeat_tool_loop"
-            if scenario["actor_kind"]
-            in {"turn_tool", "replan_tool", "scoped_gate_tool"}
+            if scenario["actor_kind"] in tool_actor_kinds
             else (
                 "quota_should_run_default"
                 if scenario["actor_kind"] == "turn"
@@ -792,6 +797,16 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
         )
         for scenario in catalog["scenarios"]
     )
+    assert {
+        scenario["scenario_id"]
+        for scenario in catalog["scenarios"]
+        if scenario["actor_kind"] in tool_actor_kinds
+    } == {
+        "turn_selected_todo",
+        "turn_required_vision_replan",
+        "turn_scoped_gate_successor_replan",
+        "turn_capability_monitor_repair",
+    }
     assert {
         contrast["contrast_id"] for contrast in catalog["contrasts"]
     } == {
@@ -1003,8 +1018,8 @@ def test_portfolio_selected_todo_uses_real_action_actor_when_supplied(
         "actual-default-portfolio-real-selected-action:turn_selected_todo:r2",
     ]
     assert result["boundary"]["tools_enabled"] is True
-    assert result["boundary"]["tool_enabled_scenario_count"] == 3
-    assert result["boundary"]["packet_interpretation_scenario_count"] == 12
+    assert result["boundary"]["tool_enabled_scenario_count"] == 4
+    assert result["boundary"]["packet_interpretation_scenario_count"] == 11
 
 
 def test_portfolio_required_vision_replan_uses_real_action_actor_when_supplied(
