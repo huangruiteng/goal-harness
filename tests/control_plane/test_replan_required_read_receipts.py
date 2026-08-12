@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from loopx.control_plane import compact_control_plane_policy
 from loopx.control_plane.goals.goal_frontier import (
     autonomous_replan_ack_satisfies_obligation,
 )
@@ -64,12 +63,15 @@ def _receipt(
     *,
     required_read_id: str | None = None,
     limit: int = 24,
+    status: str = "completed",
+    error: str | None = None,
 ) -> dict[str, object]:
-    return {
+    receipt: dict[str, object] = {
         "schema_version": "evidence_log_read_receipt_v0",
         "event_id": f"receipt-{recorded_at}",
         "goal_id": GOAL_ID,
         "agent_id": AGENT_ID,
+        "status": status,
         "recorded_at": recorded_at,
         "command": build_agent_scoped_evidence_log_command(
             goal_id=GOAL_ID,
@@ -82,6 +84,9 @@ def _receipt(
             "limit": limit,
         },
     }
+    if error:
+        receipt["error"] = error
+    return receipt
 
 
 def test_evidence_log_rollout_event_projects_a_machine_readable_receipt() -> None:
@@ -108,6 +113,7 @@ def test_evidence_log_rollout_event_projects_a_machine_readable_receipt() -> Non
             "event_id": event["event_id"],
             "goal_id": GOAL_ID,
             "agent_id": AGENT_ID,
+            "status": "completed",
             "recorded_at": "2026-08-12T01:05:00Z",
             "command": COMMAND,
             "read_window": {
@@ -120,49 +126,70 @@ def test_evidence_log_rollout_event_projects_a_machine_readable_receipt() -> Non
     ]
 
 
-def test_soft_mode_accepts_ack_but_warns_when_required_read_is_missing() -> None:
+def test_failed_read_event_projects_a_failure_receipt() -> None:
+    event = build_rollout_event(
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        event_kind="evidence_log_read",
+        status="failed",
+        recorded_at="2026-08-12T01:05:00Z",
+        details={
+            "command": COMMAND,
+            "mode": "thin",
+            "limit": 24,
+            "error": "registry unavailable",
+        },
+    )
+
+    receipts = project_evidence_log_read_receipts([event])
+
+    assert receipts[0]["status"] == "failed"
+    assert receipts[0]["error"] == "registry unavailable"
+
+
+def test_missing_required_read_rejects_ack() -> None:
     validation = validate_replan_required_read_receipt(
         _ack(),
         replan_obligation=_obligation(),
         receipts=[],
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
-        enforcement="soft",
-    )
-
-    assert validation is not None
-    assert validation["accepted"] is True
-    assert validation["required_read_satisfied"] is False
-    assert validation["warnings"][0]["kind"] == "required_read_not_executed"
-    assert COMMAND in validation["warnings"][0]["reason"]
-    assert autonomous_replan_ack_satisfies_obligation(
-        _ack(),
-        replan_obligation=_obligation(),
-        acceptance_gaps=None,
-        required_read_validation=validation,
-    )
-
-
-def test_hard_mode_rejects_ack_when_required_read_is_missing() -> None:
-    validation = validate_replan_required_read_receipt(
-        _ack(),
-        replan_obligation=_obligation(),
-        receipts=[],
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        enforcement="hard",
     )
 
     assert validation is not None
     assert validation["accepted"] is False
     assert validation["required_read_satisfied"] is False
-    assert validation["rejected_claims"][0]["kind"] == ("required_read_not_executed")
+    assert validation["enforcement"] == "hard"
+    assert validation["rejected_claims"][0]["kind"] == "required_read_not_executed"
+    assert COMMAND in validation["rejected_claims"][0]["reason"]
     assert not autonomous_replan_ack_satisfies_obligation(
         _ack(),
         replan_obligation=_obligation(),
         acceptance_gaps=None,
         required_read_validation=validation,
     )
+
+
+def test_failed_read_within_window_escapes_hard_rejection() -> None:
+    failed = _receipt(
+        "2026-08-12T01:05:00Z",
+        status="failed",
+        error="registry unavailable",
+    )
+
+    validation = validate_replan_required_read_receipt(
+        _ack(),
+        replan_obligation=_obligation(),
+        receipts=[failed],
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    assert validation is not None
+    assert validation["accepted"] is True
+    assert validation["required_read_satisfied"] is True
+    assert validation["warnings"][0]["kind"] == "evidence_log_read_failed"
+    assert validation["warnings"][0]["reason"] == "registry unavailable"
 
 
 def test_receipt_must_be_after_trigger_and_no_later_than_ack() -> None:
@@ -176,7 +203,6 @@ def test_receipt_must_be_after_trigger_and_no_later_than_ack() -> None:
         receipts=[stale, after_ack],
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
-        enforcement="hard",
     )
     fresh_validation = validate_replan_required_read_receipt(
         _ack(),
@@ -184,7 +210,6 @@ def test_receipt_must_be_after_trigger_and_no_later_than_ack() -> None:
         receipts=[stale, fresh, after_ack],
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
-        enforcement="hard",
     )
 
     assert stale_validation is not None
@@ -208,7 +233,6 @@ def test_repeated_obligation_requires_a_receipt_after_its_new_trigger() -> None:
         receipts=[first_receipt],
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
-        enforcement="hard",
     )
 
     assert repeated_validation is not None
@@ -225,24 +249,11 @@ def test_receipt_must_match_the_projected_read_window() -> None:
         receipts=[narrow_receipt],
         goal_id=GOAL_ID,
         agent_id=AGENT_ID,
-        enforcement="hard",
     )
 
     assert validation is not None
     assert validation["accepted"] is False
     assert validation["required_read_satisfied"] is False
-
-
-def test_control_plane_policy_defaults_soft_and_preserves_hard_opt_in() -> None:
-    assert compact_control_plane_policy(
-        {"replan_required_reads": {"enforcement": "soft"}}
-    )["replan_required_reads"] == {"enforcement": "soft"}
-    assert compact_control_plane_policy(
-        {"replan_required_reads": {"enforcement": "hard"}}
-    )["replan_required_reads"] == {"enforcement": "hard"}
-    assert compact_control_plane_policy(
-        {"replan_required_reads": {"enforcement": "unexpected"}}
-    )["replan_required_reads"] == {"enforcement": "soft"}
 
 
 def _quota_obligation() -> dict[str, object]:
@@ -267,7 +278,6 @@ def _quota_obligation() -> dict[str, object]:
 
 def _quota_payload(
     *,
-    enforcement: str,
     receipts: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     obligation = _quota_obligation()
@@ -300,13 +310,9 @@ def _quota_payload(
         item_extra={
             "autonomous_replan_obligation": obligation,
             "evidence_log_read_receipts": receipts or [],
-            "control_plane": {"replan_required_reads": {"enforcement": enforcement}},
         },
         project_asset_extra={
             "autonomous_replan_obligation": obligation,
-        },
-        goal_extra={
-            "control_plane": {"replan_required_reads": {"enforcement": enforcement}}
         },
     )
     return build_quota_should_run(
@@ -317,35 +323,45 @@ def _quota_payload(
     )
 
 
-def test_quota_hard_mode_keeps_obligation_and_projects_actionable_feedback() -> None:
-    payload = _quota_payload(enforcement="hard")
+def test_quota_keeps_obligation_and_projects_actionable_feedback_when_read_missing() -> None:
+    payload = _quota_payload()
 
     assert payload["decision"] == "autonomous_replan_required"
     feedback = payload["replan_ack_feedback"]
     assert feedback["accepted"] is False
-    assert feedback["rejected_claims"][0]["kind"] == ("required_read_not_executed")
+    assert feedback["enforcement"] == "hard"
+    assert feedback["rejected_claims"][0]["kind"] == "required_read_not_executed"
     assert "--required-read-id" in feedback["required_read"]["command"]
-    assert payload["autonomous_replan_obligation"]["replan_ack_feedback"] == (feedback)
+    assert payload["autonomous_replan_obligation"]["replan_ack_feedback"] == (
+        feedback
+    )
 
 
-def test_quota_hard_mode_accepts_matching_obligation_receipt() -> None:
+def test_quota_accepts_matching_obligation_receipt() -> None:
     obligation = _quota_obligation()
     receipt = _receipt(
         "2026-08-12T01:05:00Z",
         required_read_id=str(obligation["obligation_id"]),
     )
     receipt["required_read_id"] = obligation["obligation_id"]
-    payload = _quota_payload(enforcement="hard", receipts=[receipt])
+    payload = _quota_payload(receipts=[receipt])
 
     assert payload.get("autonomous_replan_obligation") is None
     assert payload.get("replan_ack_feedback") is None
 
 
-def test_quota_soft_mode_closes_ack_but_keeps_warning_feedback() -> None:
-    payload = _quota_payload(enforcement="soft")
+def test_quota_accepts_failed_read_attempt_but_surfaces_warning() -> None:
+    obligation = _quota_obligation()
+    receipt = _receipt(
+        "2026-08-12T01:05:00Z",
+        required_read_id=str(obligation["obligation_id"]),
+        status="failed",
+        error="registry unavailable",
+    )
+    receipt["required_read_id"] = obligation["obligation_id"]
+    payload = _quota_payload(receipts=[receipt])
 
     assert payload.get("autonomous_replan_obligation") is None
-    assert payload["replan_ack_feedback"]["accepted"] is True
-    assert payload["replan_ack_feedback"]["warnings"][0]["kind"] == (
-        "required_read_not_executed"
-    )
+    feedback = payload["replan_ack_feedback"]
+    assert feedback["accepted"] is True
+    assert feedback["warnings"][0]["kind"] == "evidence_log_read_failed"

@@ -1625,7 +1625,6 @@ def build_goal_frontier_projection_context_from_status(
     goal_status: str | None = None,
     agent_profile: dict[str, Any] | None = None,
     evidence_log_read_receipts: list[dict[str, Any]] | None = None,
-    required_read_enforcement: str = "soft",
 ) -> dict[str, Any]:
     """Build the quota-facing goal-frontier read model.
 
@@ -1756,7 +1755,6 @@ def build_goal_frontier_projection_context_from_status(
         receipts=evidence_log_read_receipts,
         goal_id=goal_id,
         agent_id=agent_id,
-        enforcement=required_read_enforcement,
     )
     watch_lane_ack_covers_dead_monitor_repeat = (
         _watch_lane_ack_covers_dead_monitor_repeat(
@@ -1820,17 +1818,25 @@ def build_goal_frontier_projection_context_from_status(
             registered_agent_ids=registered_agent_ids,
         )
 
-    if required_read_validation and not required_read_validation.get(
-        "required_read_satisfied"
+    if required_read_validation and (
+        not required_read_validation.get("required_read_satisfied")
+        or required_read_validation.get("warnings")
     ):
+        warnings = required_read_validation.get("warnings") or []
+        first_warning = next(iter(warnings), {})
+        classification = (
+            str(first_warning.get("kind") or "").strip()
+            if isinstance(first_warning, dict)
+            else ""
+        ) or "required_read_not_executed"
         feedback = {
             "schema_version": "replan_ack_feedback_v0",
             "generated_at": required_read_validation.get("acknowledged_at"),
             "agent_id": agent_id,
-            "classification": "required_read_not_executed",
+            "classification": classification,
             "enforcement": required_read_validation.get("enforcement"),
             "accepted": required_read_validation.get("accepted"),
-            "warnings": required_read_validation.get("warnings") or [],
+            "warnings": warnings,
             "rejected_claims": required_read_validation.get("rejected_claims")
             or [],
             "required_read": required_read_validation.get("required_read"),

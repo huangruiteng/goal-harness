@@ -192,24 +192,20 @@ later than the ACK. The opaque required-read id binds obligations without a
 source timestamp and changes when their trigger payload changes, so a later
 obligation instance cannot silently reuse an earlier instance's receipt.
 
-The default enforcement is `soft`: a valid repair delta may still close the
-obligation, but quota projects `required_read_not_executed` through
-`replan_ack_feedback`. A goal can opt into rejection:
+Enforcement is always `hard`: the ACK cannot clear the obligation until a
+matching fresh receipt exists. Missing or stale receipts keep the obligation
+open and project `required_read_not_executed` through
+`replan_ack_feedback`, with the exact command and agent id needed to repair
+the ACK. Receipt enforcement validates the required preflight read; the repair
+delta remains the authoritative replan writeback.
 
-```json
-{
-  "control_plane": {
-    "replan_required_reads": {
-      "enforcement": "hard"
-    }
-  }
-}
-```
-
-In `hard` mode the ACK cannot clear the obligation until a matching fresh
-receipt exists. The feedback includes the exact command and agent id needed to
-repair the ACK. Receipt enforcement validates the required preflight read; the
-repair delta remains the authoritative replan writeback.
+Failure escape hatch: if `loopx evidence-log` itself fails (for example the
+registry or runtime is unavailable), the CLI appends an `evidence_log_read`
+event with `status=failed` and records a matching receipt. A fresh failed
+receipt satisfies the read-attempt requirement so a broken read path cannot
+deadlock the obligation, and `replan_ack_feedback` surfaces
+`evidence_log_read_failed` with the failure reason so the operator can repair
+the environment.
 
 ### Effect-program boundary
 

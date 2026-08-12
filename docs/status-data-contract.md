@@ -200,9 +200,10 @@ rollout event and returns `read_receipt` with schema
 agent, required-read identity, read window, and timestamp. Missing or stale
 receipts produce
 `replan_ack_feedback.classification=required_read_not_executed`; the per-goal
-`control_plane.replan_required_reads.enforcement` setting defaults to `soft`
-and accepts `hard` to keep the obligation open until a matching fresh receipt
-exists.
+enforcement is always `hard`, so the obligation stays open until a matching
+fresh receipt exists. A fresh `status=failed` read receipt counts as an
+attempted read (escape hatch) and projects `evidence_log_read_failed` instead
+of deadlocking the obligation.
 The same guard may include `work_lane_contract`. Schema
 `work_lane_contract_v1` is the compatibility drill-down for monitor versus
 advancement routing under the guard's first-class `interaction_contract`. It

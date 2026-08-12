@@ -14,6 +14,9 @@ from loopx.control_plane.goals.goal_frontier import (
     build_goal_frontier_projection_context_from_status,
     select_autonomous_replan_obligation,
 )
+from loopx.control_plane.runtime.agent_scoped_evidence_log import (
+    build_agent_scoped_evidence_log_command,
+)
 from loopx.control_plane.quota.monitor_poll import build_quota_monitor_poll_event
 from loopx.control_plane.scheduler.execution_context import (
     GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
@@ -26,6 +29,9 @@ from loopx.control_plane.testing.quota_fixtures import (
 from loopx.control_plane.work_items.autonomous_replan_ack import (
     latest_blocked_successor_frontier_identity,
     latest_monitor_replan_frontier_identity,
+)
+from loopx.control_plane.work_items.autonomous_replan_obligation import (
+    ensure_replan_novelty_policy,
 )
 from loopx.presentation.renderers.status_markdown import render_status_markdown
 from loopx.quota import build_quota_should_run, render_quota_should_run_markdown
@@ -191,6 +197,46 @@ def _cross_domain_wait_status_payload() -> dict:
 
 
 def _quota(payload: dict) -> dict:
+    item = payload["attention_queue"]["items"][0]
+    obligation = item.get("autonomous_replan_obligation") or {}
+    normalized_obligation = (
+        ensure_replan_novelty_policy(obligation) if obligation else {}
+    )
+    obligation_id = (
+        str(normalized_obligation.get("obligation_id") or "").strip() or None
+    )
+    run_history = payload.get("run_history") or {}
+    goals = run_history.get("goals") if isinstance(run_history, dict) else None
+    latest_runs = payload.get("latest_runs")
+    if latest_runs is None and isinstance(goals, list) and goals:
+        latest_runs = goals[0].get("latest_runs")
+    acked_at = None
+    for run in latest_runs or []:
+        if run.get("autonomous_replan_ack") is not None:
+            acked_at = run.get("generated_at")
+            break
+    if acked_at:
+        item["evidence_log_read_receipts"] = [
+            {
+                "schema_version": "evidence_log_read_receipt_v0",
+                "event_id": f"fixture-receipt-{acked_at}",
+                "goal_id": GOAL_ID,
+                "agent_id": AGENT_ID,
+                "status": "completed",
+                "recorded_at": acked_at,
+                "command": build_agent_scoped_evidence_log_command(
+                    goal_id=GOAL_ID,
+                    agent_id=AGENT_ID,
+                    required_read_id=obligation_id,
+                ),
+                "read_window": {"mode": "thin", "limit": 24},
+                **(
+                    {"required_read_id": obligation_id}
+                    if obligation_id
+                    else {}
+                ),
+            }
+        ]
     return build_quota_should_run(
         payload,
         goal_id=GOAL_ID,

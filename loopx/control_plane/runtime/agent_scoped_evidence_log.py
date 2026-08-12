@@ -110,7 +110,8 @@ def evidence_log_read_receipt(
         "evidence_log_read"
     ):
         return None
-    if str(event.get("status") or "") != "completed":
+    status = str(event.get("status") or "").strip()
+    if status not in {"completed", "failed"}:
         return None
     goal_id = _compact_text(event.get("goal_id"), limit=180)
     agent_id = _compact_text(event.get("agent_id"), limit=180)
@@ -140,10 +141,15 @@ def evidence_log_read_receipt(
         "event_id": event_id,
         "goal_id": goal_id,
         "agent_id": agent_id,
+        "status": status,
         "recorded_at": recorded_at,
         "command": command,
         "read_window": read_window,
     }
+    if status == "failed":
+        error = _compact_text(details.get("error"), limit=240)
+        if error:
+            receipt["error"] = error
     required_read_id = _compact_text(details.get("required_read_id"), limit=180)
     if required_read_id:
         receipt["required_read_id"] = required_read_id

@@ -242,6 +242,27 @@ def handle_evidence_log_command(
                 "evidence log was read but its durable read receipt could not be recorded"
             )
     except Exception as exc:
+        try:
+            registry = load_registry(registry_path)
+            runtime_root = resolve_runtime_root(registry, runtime_root_arg)
+            command = _evidence_log_receipt_command(args)
+            details = _evidence_log_receipt_details(args, command=command)
+            details["error"] = str(exc)
+            append_cli_rollout_event(
+                {"ok": False},
+                registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg,
+                event_kind="evidence_log_read",
+                agent_id=args.agent_id,
+                todo_id=args.todo_id,
+                status="failed",
+                summary="evidence log read failed",
+                details=details,
+            )
+        except Exception:
+            # The failure receipt is a best-effort escape hatch; never mask the
+            # original read error.
+            pass
         payload = {
             "ok": False,
             "schema_version": "agent_scoped_evidence_log_v0",

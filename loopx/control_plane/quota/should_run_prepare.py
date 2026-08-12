@@ -86,23 +86,6 @@ from ..work_items.work_lane import (
 )
 
 
-def _replan_required_read_enforcement(
-    *policy_sources: Any,
-) -> str:
-    for source in policy_sources:
-        if not isinstance(source, Mapping):
-            continue
-        control_plane = source.get("control_plane")
-        if not isinstance(control_plane, Mapping):
-            continue
-        policy = control_plane.get("replan_required_reads")
-        if not isinstance(policy, Mapping):
-            continue
-        if str(policy.get("enforcement") or "").strip() == "hard":
-            return "hard"
-    return "soft"
-
-
 def _status_evidence_log_read_receipts(
     status_payload: Mapping[str, Any],
     *,
@@ -621,11 +604,6 @@ def _prepare_quota_should_run_item(
         evidence_log_read_receipts=_status_evidence_log_read_receipts(
             status_payload,
             goal_id=safe_goal_id,
-        ),
-        required_read_enforcement=_replan_required_read_enforcement(
-            registry_goal,
-            item,
-            project_asset,
         ),
     )
     replan_obligation = goal_frontier_context.get("replan_obligation")

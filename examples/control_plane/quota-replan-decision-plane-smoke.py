@@ -25,6 +25,12 @@ from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
 from loopx.control_plane.todos.quota_summary import (  # noqa: E402
     select_quota_todo_summary,
 )
+from loopx.control_plane.runtime.agent_scoped_evidence_log import (  # noqa: E402
+    build_agent_scoped_evidence_log_command,
+)
+from loopx.control_plane.work_items.autonomous_replan_obligation import (  # noqa: E402
+    ensure_replan_novelty_policy,
+)
 from loopx.status import build_autonomous_replan_obligation, compact_todo_group  # noqa: E402
 
 
@@ -242,6 +248,40 @@ def status_payload(
     }
     if replan_obligation is not None:
         project_asset["autonomous_replan_obligation"] = replan_obligation
+    normalized_obligation = (
+        ensure_replan_novelty_policy(replan_obligation)
+        if replan_obligation is not None
+        else {}
+    )
+    obligation_id = str(normalized_obligation.get("obligation_id") or "").strip()
+    evidence_log_read_receipts: list[dict[str, Any]] = []
+    for run in latest_runs or []:
+        if not isinstance(run, dict) or run.get("autonomous_replan_ack") is None:
+            continue
+        acked_at = str(run.get("generated_at") or "").strip()
+        if not acked_at:
+            continue
+        evidence_log_read_receipts.append(
+            {
+                "schema_version": "evidence_log_read_receipt_v0",
+                "event_id": f"fixture-receipt-{acked_at}",
+                "goal_id": GOAL_ID,
+                "agent_id": SIDE_AGENT,
+                "status": "completed",
+                "recorded_at": acked_at,
+                "command": build_agent_scoped_evidence_log_command(
+                    goal_id=GOAL_ID,
+                    agent_id=SIDE_AGENT,
+                    required_read_id=obligation_id or None,
+                ),
+                "read_window": {"mode": "thin", "limit": 24},
+                **(
+                    {"required_read_id": obligation_id}
+                    if obligation_id
+                    else {}
+                ),
+            }
+        )
     return {
         "ok": True,
         "attention_queue": {
@@ -267,6 +307,7 @@ def status_payload(
                         "agent_model": "peer_v1",
                         "registered_agents": [PRIMARY_AGENT, SIDE_AGENT],
                     },
+                    "evidence_log_read_receipts": evidence_log_read_receipts,
                 }
             ]
         },
@@ -383,6 +424,7 @@ def watch_lane_continuation_ack_run(
     run: dict[str, Any] = {
         "classification": "monitor_poll_autonomous_replan_recorded_v0",
         "agent_id": SIDE_AGENT,
+        "generated_at": "2026-07-04T00:10:00+00:00",
         "progress_scope": "agent_lane",
         "autonomous_replan_ack": {
             "schema_version": "autonomous_replan_ack_v0",
@@ -527,6 +569,7 @@ def assert_frontier_delta_ack_clears_existing_replan_obligation() -> None:
             {
                 "classification": "autonomous_replan_recorded",
                 "agent_id": SIDE_AGENT,
+                "generated_at": "2026-07-04T00:15:00+00:00",
                 "progress_scope": "goal",
                 "delivery_outcome": "outcome_progress",
                 "autonomous_replan_ack": projected_autonomous_replan_ack(

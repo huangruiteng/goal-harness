@@ -7,7 +7,6 @@ SELF_REPAIR_MODES = {
     "health_blocker_repair": "allow_health_blocker_repair",
     "waiting_projection_repair": "allow_waiting_projection_repair",
 }
-REPLAN_REQUIRED_READ_ENFORCEMENTS = {"soft", "hard"}
 
 
 def _flag(value: Any, *, default: bool = False) -> bool:
@@ -34,16 +33,6 @@ def compact_control_plane_policy(value: Any) -> dict[str, Any]:
                 self_repair.get("allow_waiting_projection_repair"),
                 default=enabled,
             ),
-        }
-    raw_required_reads = value.get("replan_required_reads")
-    if isinstance(raw_required_reads, dict):
-        enforcement = str(raw_required_reads.get("enforcement") or "soft").strip()
-        compact["replan_required_reads"] = {
-            "enforcement": (
-                enforcement
-                if enforcement in REPLAN_REQUIRED_READ_ENFORCEMENTS
-                else "soft"
-            )
         }
     return compact
 
@@ -79,10 +68,4 @@ def control_plane_policy_summary(policy: Any) -> str:
             else "no-waiting"
         )
         summary = f"self_repair={enabled}:{health},{waiting}"
-    required_reads = compact.get("replan_required_reads")
-    if isinstance(required_reads, dict):
-        summary += (
-            ";replan_required_reads="
-            + str(required_reads.get("enforcement") or "soft")
-        )
     return summary

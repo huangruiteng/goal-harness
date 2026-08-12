@@ -300,7 +300,6 @@ def validate_replan_required_read_receipt(
     receipts: list[dict[str, Any]] | None,
     goal_id: str,
     agent_id: str | None,
-    enforcement: str = "soft",
 ) -> dict[str, Any] | None:
     """Validate one ACK against the fresh evidence-log read it requires."""
 
@@ -311,10 +310,19 @@ def validate_replan_required_read_receipt(
     safe_agent_id = str(agent_id or "").strip()
     if not isinstance(ack, dict) or not safe_agent_id:
         return None
-    enforcement_mode = "hard" if enforcement == "hard" else "soft"
     acked_at = parse_timestamp(ack.get("generated_at") or ack.get("recorded_at"))
     triggered_at_text = _replan_obligation_triggered_at(replan_obligation)
     triggered_at = parse_timestamp(triggered_at_text)
+    if (
+        acked_at is not None
+        and triggered_at is not None
+        and acked_at < triggered_at
+    ):
+        # A standing continuation ACK that predates this obligation instance is
+        # not a response to it; watch-lane/frontier continuation semantics
+        # decide applicability, and a fresh read cannot be required for a
+        # pre-existing ACK.
+        return None
     required_read_id = str(replan_obligation.get("obligation_id") or "").strip()
     command = build_agent_scoped_evidence_log_command(
         goal_id=goal_id,
@@ -361,8 +369,8 @@ def validate_replan_required_read_receipt(
     )
     result: dict[str, Any] = {
         "schema_version": REPLAN_REQUIRED_READ_VALIDATION_SCHEMA_VERSION,
-        "enforcement": enforcement_mode,
-        "accepted": satisfied or enforcement_mode == "soft",
+        "enforcement": "hard",
+        "accepted": satisfied,
         "required_read_satisfied": satisfied,
         "triggered_at": triggered_at_text,
         "acknowledged_at": (
@@ -380,14 +388,23 @@ def validate_replan_required_read_receipt(
     }
     if matched_receipt:
         result["matched_receipt"] = matched_receipt
+        if str(matched_receipt.get("status") or "").strip() == "failed":
+            result["warnings"] = [
+                {
+                    "kind": "evidence_log_read_failed",
+                    "reason": str(
+                        matched_receipt.get("error")
+                        or "evidence log read attempted but failed"
+                    ).strip(),
+                }
+            ]
         return result
     claim = {
         "kind": "required_read_not_executed",
         "reason": reason,
     }
     result["warnings"] = [claim]
-    if enforcement_mode == "hard":
-        result["rejected_claims"] = [claim]
+    result["rejected_claims"] = [claim]
     return result
 
 
