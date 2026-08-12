@@ -587,6 +587,56 @@ def _quota_spend_action(
     )
 
 
+def _terminal_cli_actions(
+    *,
+    mode: str,
+    goal_id: str,
+    scoped_cli_args: str,
+    payload: dict[str, Any],
+    settlement_plan: Mapping[str, Any] | None,
+    capability_resolution_actions: list[str],
+    capability_reentry_actions: list[str],
+) -> list[str]:
+    if mode == "capability_bridge_repair":
+        return capability_reentry_actions or [
+            "perform the projected real task-facing capability check, then rerun "
+            "quota in this same turn"
+        ]
+    resolution_actions = [
+        *capability_resolution_actions,
+        *capability_reentry_actions,
+    ]
+    if mode in {
+        "bounded_delivery",
+        "outcome_floor_recovery",
+        "control_plane_self_repair",
+        "boundary_projection_repair",
+        "scoped_user_gate_fallback",
+        "bounded_delivery_with_user_notice",
+    }:
+        typed_writeback = settlement_step_command(
+            settlement_plan,
+            SettlementStepKind.DURABLE_WRITEBACK,
+        )
+        return [
+            *resolution_actions,
+            typed_writeback
+            or f"loopx refresh-state --goal-id {goal_id} --classification <validated_progress>{scoped_cli_args}",
+            _quota_spend_action(
+                goal_id,
+                scoped_cli_args=scoped_cli_args,
+                payload=payload,
+                settlement_plan=settlement_plan,
+            ),
+        ]
+    if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
+        return [
+            *resolution_actions,
+            "no quota spend for blocker-push/gate-notification",
+        ]
+    return ["no quota spend without validated transition/blocker writeback"]
+
+
 def interaction_next_cli_actions(
     payload: dict[str, Any],
     *,
@@ -873,41 +923,15 @@ def interaction_next_cli_actions(
             ),
         ])
         return actions
-    if mode == "capability_bridge_repair":
-        return capability_reentry_actions or [
-            "perform the projected real task-facing capability check, then rerun "
-            "quota in this same turn"
-        ]
-    capability_resolution_actions.extend(capability_reentry_actions)
-    if mode in {
-        "bounded_delivery",
-        "outcome_floor_recovery",
-        "control_plane_self_repair",
-        "boundary_projection_repair",
-        "scoped_user_gate_fallback",
-        "bounded_delivery_with_user_notice",
-    }:
-        typed_writeback = settlement_step_command(
-            settlement_plan,
-            SettlementStepKind.DURABLE_WRITEBACK,
-        )
-        return [
-            *capability_resolution_actions,
-            typed_writeback
-            or f"loopx refresh-state --goal-id {goal_id} --classification <validated_progress>{scoped_cli_args}",
-            _quota_spend_action(
-                goal_id,
-                scoped_cli_args=scoped_cli_args,
-                payload=payload,
-                settlement_plan=settlement_plan,
-            ),
-        ]
-    if mode in {"user_gate", "user_todo_blocker_push", "user_action_required"}:
-        return [
-            *capability_resolution_actions,
-            "no quota spend for blocker-push/gate-notification",
-        ]
-    return ["no quota spend without validated transition/blocker writeback"]
+    return _terminal_cli_actions(
+        mode=mode,
+        goal_id=goal_id,
+        scoped_cli_args=scoped_cli_args,
+        payload=payload,
+        settlement_plan=settlement_plan,
+        capability_resolution_actions=capability_resolution_actions,
+        capability_reentry_actions=capability_reentry_actions,
+    )
 
 
 def _interaction_required_reads(payload: dict[str, Any]) -> list[dict[str, Any]]:
