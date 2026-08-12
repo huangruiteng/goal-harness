@@ -3,6 +3,9 @@ from __future__ import annotations
 from loopx.control_plane.effect_program import (
     interpret_quota_should_run_packet,
 )
+from loopx.control_plane.scheduler.execution_context import (
+    scheduler_execution_context_for_runtime_profile,
+)
 from loopx.control_plane.testing.quota_fixtures import quota_status_payload
 from loopx.quota import build_quota_should_run
 
@@ -75,12 +78,21 @@ def test_quota_should_run_capability_gate_is_structured_around_decision() -> Non
                 "priority": "P1",
                 "task_class": "advancement_task",
                 "required_capabilities": ["network"],
+                "action_kind": "inspect_target",
+                "target_key": "fixture/target.json",
             }
         ],
         recommended_action=todo_text,
         next_action=todo_text,
     )
-    packet = build_quota_should_run(payload, goal_id=GOAL_ID)
+    packet = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        available_capabilities=["shell"],
+        scheduler_execution_context=scheduler_execution_context_for_runtime_profile(
+            "ark_managed_agent_goal"
+        ),
+    )
     turn = interpret_quota_should_run_packet(
         packet,
         goal_id=GOAL_ID,
@@ -95,11 +107,20 @@ def test_quota_should_run_capability_gate_is_structured_around_decision() -> Non
     assert turn.observation.effective_action == "capability_bridge_repair"
     assert packet.get("capability_gate", {}).get("action") == "repair_bridge"
     assert packet.get("capability_gate", {}).get("owner_missing") == []
-    assert turn.next_effect.cli_actions
-    assert any(
-        "--target-capability network" in action
-        for action in turn.next_effect.cli_actions
-    )
+    contract = packet["interaction_contract"]
+    task_action = contract["agent_channel"]["next_task_action"]
+    assert task_action["operation"] == "inspect_target"
+    assert task_action["target_ref"] == "fixture/target.json"
+    assert task_action["preflight_allowed"] is False
+    assert task_action["advancement_checkpoint"] is False
+    assert task_action["settles_turn"] is False
+
+    reentry = contract["cli_channel"]["runtime_capability_reentry"]
+    reentry_command = reentry["candidates"][0]["command"]
+    assert contract["cli_channel"]["next_cli_actions"] == [reentry_command]
+    assert turn.next_effect.cli_actions == (reentry_command,)
+    assert "--available-capability network" in reentry_command
+    assert contract["cli_channel"]["spend_after_validation"] is False
 
 
 def test_effect_turn_keeps_monitor_quiet_around_decision_data_visible() -> None:
