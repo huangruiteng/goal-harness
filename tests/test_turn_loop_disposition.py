@@ -11,8 +11,6 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
-
 from loopx.control_plane.quota.turn_envelope import build_turn_envelope
 from loopx.control_plane.turn_driver import (
     BoundedTurnBudget,

@@ -6,6 +6,7 @@ Covers GH-C81 core assertions.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
@@ -13,7 +14,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Load diff_snapshot module from skills
-import importlib.util
 SCRIPT_PATH = REPO_ROOT / "skills" / "loopx-pr-program" / "scripts" / "diff_snapshot.py"
 spec = importlib.util.spec_from_file_location("loopx_pr_program_diff", SCRIPT_PATH)
 _module = importlib.util.module_from_spec(spec)
