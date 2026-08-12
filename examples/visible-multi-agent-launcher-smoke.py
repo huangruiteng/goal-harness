@@ -302,7 +302,7 @@ def main() -> int:
                     "agent_id": "codex-side-bypass",
                     "role_id": "planner",
                     "scope": "plan one state-backed handoff",
-                    "worker_turn_command": "printf 'turn streamed\\n'",
+                    "worker_turn_command": "printf turn-streamed",
                 }
             ],
         }
@@ -505,7 +505,7 @@ def main() -> int:
                     "LOOPX_GOAL_ID": "loopx-meta",
                     "LOOPX_AGENT_ID": "codex-side-bypass",
                     "LOOPX_ROLE_ID": "planner",
-                    "LOOPX_PANE_WORKER_TURN": "printf 'worker turn streamed\\n'",
+                    "LOOPX_PANE_WORKER_TURN": "printf worker-turn-streamed",
                 },
                 check=True,
                 capture_output=True,
@@ -532,7 +532,7 @@ def main() -> int:
             assert "round 1/2" not in tick.stdout and "round 2/2" not in tick.stdout, tick.stdout
             assert "quota should-run" in tick.stdout, tick.stdout
             assert "--format markdown" in tick.stdout, tick.stdout
-            assert "worker turn streamed" in tick.stdout, tick.stdout
+            assert "worker-turn-streamed" in tick.stdout, tick.stdout
             status_artifact = (
                 workspace
                 / ".local"

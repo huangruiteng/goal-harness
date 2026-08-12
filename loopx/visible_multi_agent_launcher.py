@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -46,6 +47,29 @@ from .visible_multi_agent_tmux import (
 
 def _q(value: object) -> str:
     return shlex.quote(str(value))
+
+
+_WORKER_COMMAND_RE = re.compile(r"^[A-Za-z0-9_./:+-]+(?: [A-Za-z0-9_./:+-]+)*$")
+
+
+def validate_worker_command(command: str, *, field: str) -> str:
+    """Return a worker command that is safe to pass through a shell env var.
+
+    The command is executed by the pane worker through a shell, so it must be
+    a plain executable plus space-separated safe arguments: no quotes, command
+    substitution, pipes, redirects, or other shell metacharacters.
+    """
+
+    if command is None:
+        return ""
+    text = str(command or "").strip()
+    if not text:
+        return ""
+    if not _WORKER_COMMAND_RE.match(text):
+        raise ValueError(
+            f"{field} contains unsafe shell metacharacters: {text!r}"
+        )
+    return text
 
 
 AUTO_WAKE_LOOP_SCHEMA_VERSION = "multi_agent_auto_wake_loop_v0"
@@ -457,8 +481,14 @@ def build_visible_multi_agent_payload_from_spec(
         )
         skill_profile = _role_skill_profile(raw_role.get("skill"))
         reasoning_effort = str(raw_role.get("reasoning_effort") or default_reasoning_effort)
-        worker_turn_command = str(raw_role.get("worker_turn_command") or "").strip()
-        worker_loop_command = str(raw_role.get("worker_loop_command") or "").strip()
+        worker_turn_command = validate_worker_command(
+            raw_role.get("worker_turn_command"),
+            field="worker_turn_command",
+        )
+        worker_loop_command = validate_worker_command(
+            raw_role.get("worker_loop_command"),
+            field="worker_loop_command",
+        )
         output_language = str(
             raw_role.get("output_language")
             or (
