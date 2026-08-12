@@ -672,6 +672,8 @@ def iter_scan_files(scan_root: Path) -> list[Path]:
             path = (current_dir / file_name).resolve()
             if path.name.endswith(".local.json"):
                 continue
+            if not path.is_file():
+                continue
             if path.suffix in DEFAULT_SCAN_SUFFIXES:
                 files.append(path)
     return sorted(set(files + tracked_files))
@@ -684,6 +686,7 @@ def scan_public_boundary(
     allowed_hits: list[str] = []
     private_state_git_warnings: list[str] = []
     skipped_private_state_files: list[str] = []
+    unreadable_files: list[str] = []
     files: list[Path] = []
     file_roots: dict[Path, Path] = {}
     for scan_root in scan_roots:
@@ -711,6 +714,9 @@ def scan_public_boundary(
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
+        except OSError as exc:
+            unreadable_files.append(f"{rel_or_abs(path, root)}: {exc.strerror or exc}")
+            continue
         for line_no, line in enumerate(text.splitlines(), start=1):
             for name, pattern in LEAK_PATTERNS.items():
                 if pattern.search(line):
@@ -727,6 +733,7 @@ def scan_public_boundary(
         "files": len(files),
         "scanned_files": len(files) - len(skipped_private_state_files),
         "skipped_private_state_files": skipped_private_state_files,
+        "unreadable_files": unreadable_files,
         "allowed_hits": allowed_hits,
         "private_state_git_warnings": private_state_git_warnings,
         "policy": policy,
@@ -867,6 +874,9 @@ def check_contract(
             f"{len(boundary.get('allowed_hits') or [])} private_doc_url hits"
         )
     warnings.extend(str(item) for item in boundary.get("private_state_git_warnings") or [])
+    warnings.extend(
+        f"unreadable file skipped: {item}" for item in boundary.get("unreadable_files") or []
+    )
     error_views = contract_error_views(error_diagnostics)
     errors = error_views["errors"]
 
