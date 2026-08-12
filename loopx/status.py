@@ -180,6 +180,10 @@ from .control_plane.agents.subagent_activity import (
 from .control_plane.agents.management_projection import (
     build_agent_management_projection as _build_agent_management_projection_read_model,
 )
+from .control_plane.runtime.agent_scoped_evidence_log import (
+    MAX_PROJECTED_READ_RECEIPTS,
+    project_evidence_log_read_receipts,
+)
 from .control_plane.runtime.stale_latest_run import (
     stale_latest_run_projection_warning as _stale_latest_run_projection_warning_read_model,
 )
@@ -1186,7 +1190,7 @@ def build_attention_queue(
     include_task_graph: bool = False,
     goal_id_filter: str | None = None,
 ) -> dict[str, Any]:
-    return _build_attention_queue_read_model(
+    queue = _build_attention_queue_read_model(
         contract=contract,
         history=history,
         global_registry=global_registry,
@@ -1227,6 +1231,23 @@ def build_attention_queue(
         include_task_graph=include_task_graph,
         goal_id_filter=goal_id_filter,
     )
+    if runtime_root is not None:
+        for item in queue.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            goal_id = str(item.get("goal_id") or "").strip()
+            if not goal_id:
+                continue
+            receipts = project_evidence_log_read_receipts(
+                load_rollout_events(
+                    rollout_event_log_path(runtime_root, goal_id),
+                    limit=MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL,
+                ),
+                limit=MAX_PROJECTED_READ_RECEIPTS,
+            )
+            if receipts:
+                item["evidence_log_read_receipts"] = receipts
+    return queue
 
 
 def _compact_benchmark_post_launch_materialization(value: Any) -> dict[str, Any] | None:

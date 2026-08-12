@@ -16,6 +16,8 @@ def _validate(
     items: tuple[dict, ...],
     advancement_policy: str = "as_needed",
     summary: dict | None = None,
+    selected_todo_id: str | None = None,
+    newest_first_runs: list[dict] | None = None,
 ) -> tuple[list[str], list[dict], list[dict]]:
     return validate_repair_delta_claims(
         [kind],
@@ -25,7 +27,23 @@ def _validate(
         next_action_changed=False,
         vision_patch_written=False,
         observed_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        selected_todo_id=selected_todo_id,
+        newest_first_runs=newest_first_runs,
     )
+
+
+def _blocker_ack(evidence: dict) -> dict:
+    return {
+        "agent_id": "quality-agent",
+        "autonomous_replan_ack": {
+            "recorded": True,
+            "delta_contract": {
+                "delta_present": True,
+                "delta_kinds": ["blocker"],
+                "auto_evidence": [evidence],
+            },
+        },
+    }
 
 
 def test_watch_only_replan_delta_is_not_accountable_progress() -> None:
@@ -135,7 +153,29 @@ def test_watch_claim_requires_bounded_schedule() -> None:
 
     assert accepted == []
     assert evidence == []
-    assert "expiry or unresolved resume condition" in rejected[0]["reason"]
+    assert "watch_only monitors are liveness-only" in rejected[0]["reason"]
+
+
+def test_watch_only_monitor_cannot_ack_replan() -> None:
+    accepted, evidence, rejected = _validate(
+        "watch_lane_continuation",
+        items=(
+            {
+                "todo_id": "todo_watch_only123",
+                "status": "open",
+                "task_class": "continuous_monitor",
+                "claimed_by": "quality-agent",
+                "target_key": "review",
+                "cadence": "30m",
+                "next_due_at": "2026-08-01T13:00:00Z",
+                "watch_only": "true",
+            },
+        ),
+    )
+
+    assert accepted == []
+    assert evidence == []
+    assert "liveness-only" in rejected[0]["reason"]
 
 
 def test_watch_claim_requires_non_repeating_vision_and_records_evidence() -> None:
@@ -224,6 +264,29 @@ def test_watch_claim_rejects_satisfied_resume_condition() -> None:
     assert rejected
 
 
+def test_watch_claim_accepts_unresolved_resume_condition() -> None:
+    accepted, evidence, rejected = _validate(
+        "watch_lane_continuation",
+        items=(
+            {
+                "todo_id": "todo_resume_bound123",
+                "status": "open",
+                "task_class": "continuous_monitor",
+                "claimed_by": "quality-agent",
+                "target_key": "review",
+                "cadence": "30m",
+                "next_due_at": "2026-08-01T13:00:00Z",
+                "resume_when": "todo_done:todo_dependency123",
+                "resume_ready": False,
+            },
+        ),
+    )
+
+    assert accepted == ["watch_lane_continuation"]
+    assert evidence[0]["todo_ids"] == ["todo_resume_bound123"]
+    assert rejected == []
+
+
 def test_successor_claim_requires_real_scoped_transition() -> None:
     source = {
         "todo_id": "todo_source123456",
@@ -256,6 +319,139 @@ def test_successor_claim_requires_real_scoped_transition() -> None:
 
     assert accepted == ["successor_or_supersede"]
     assert evidence[0]["todo_ids"] == [source["todo_id"], successor["todo_id"]]
+    assert rejected == []
+
+
+def test_repeated_blocker_fingerprint_is_rejected() -> None:
+    blocker = {
+        "todo_id": "todo_blocker1234",
+        "status": "open",
+        "task_class": "blocker",
+        "claimed_by": "quality-agent",
+        "reason": "same dependency is still unavailable",
+        "evidence": "probe-result-v1",
+    }
+    accepted, evidence, rejected = _validate(
+        "blocker",
+        items=(blocker,),
+        selected_todo_id="todo_selected123",
+    )
+    assert accepted == ["blocker"]
+    assert rejected == []
+    assert evidence[0]["stall_fingerprint"]
+
+    accepted, _, rejected = _validate(
+        "blocker",
+        items=(blocker,),
+        selected_todo_id="todo_selected123",
+        newest_first_runs=[_blocker_ack(evidence[0])],
+    )
+    assert accepted == []
+    assert "repeated stall fingerprint" in rejected[0]["reason"]
+
+
+def test_stall_fingerprint_prefers_the_selected_todo_causal_blocker() -> None:
+    unrelated = {
+        "todo_id": "todo_aaa_unrelated",
+        "status": "blocked",
+        "task_class": "blocker",
+        "claimed_by": "quality-agent",
+        "reason": "unrelated dependency remains unavailable",
+        "evidence": "unrelated-probe",
+    }
+    selected = {
+        "todo_id": "todo_selected123",
+        "status": "blocked",
+        "task_class": "blocker",
+        "claimed_by": "quality-agent",
+        "reason": "selected dependency remains unavailable",
+        "evidence": "selected-probe",
+    }
+    accepted, evidence, rejected = _validate(
+        "blocker",
+        items=(unrelated, selected),
+        selected_todo_id=selected["todo_id"],
+    )
+
+    assert accepted == ["blocker"]
+    assert rejected == []
+    assert evidence[0]["blocker_todo_id"] == selected["todo_id"]
+
+
+def test_repeated_stall_requires_a_new_runnable_direction() -> None:
+    blocker = {
+        "todo_id": "todo_blocker1234",
+        "status": "open",
+        "task_class": "blocker",
+        "claimed_by": "quality-agent",
+        "reason": "same dependency is still unavailable",
+        "evidence": "probe-result-v1",
+    }
+    old_direction = {
+        "todo_id": "todo_old_direction",
+        "status": "open",
+        "task_class": "advancement_task",
+        "claimed_by": "quality-agent",
+        "action_kind": "probe",
+        "text": "Retry the same dependency probe.",
+    }
+    _, evidence, _ = _validate(
+        "blocker",
+        items=(blocker, old_direction),
+        selected_todo_id="todo_selected123",
+    )
+    previous = _blocker_ack(evidence[0])
+
+    accepted, _, rejected = _validate(
+        "runnable_todo_set",
+        items=(blocker, old_direction),
+        selected_todo_id="todo_selected123",
+        newest_first_runs=[previous],
+    )
+    assert accepted == []
+    assert "different direction" in rejected[0]["reason"]
+
+    new_direction = {
+        "todo_id": "todo_new_direction",
+        "status": "open",
+        "task_class": "advancement_task",
+        "claimed_by": "quality-agent",
+        "action_kind": "local_fallback",
+        "text": "Validate a local fallback path.",
+    }
+    accepted, evidence, rejected = _validate(
+        "runnable_todo_set",
+        items=(blocker, old_direction, new_direction),
+        selected_todo_id="todo_selected123",
+        newest_first_runs=[previous],
+    )
+    assert accepted == ["runnable_todo_set"]
+    assert evidence[0]["todo_ids"] == ["todo_new_direction"]
+    assert rejected == []
+
+
+def test_exploration_exhausted_requires_coverage_evidence() -> None:
+    blocker = {
+        "todo_id": "todo_exhausted123",
+        "status": "open",
+        "task_class": "blocker",
+        "claimed_by": "quality-agent",
+        "action_kind": "exploration_exhausted",
+        "reason": "all public fallback routes exhausted",
+    }
+    accepted, _, rejected = _validate(
+        "exploration_exhausted",
+        items=(blocker,),
+    )
+    assert accepted == []
+    assert "coverage evidence" in rejected[0]["reason"]
+
+    blocker["evidence"] = "coverage: routes-a-b-c"
+    accepted, _, rejected = _validate(
+        "exploration_exhausted",
+        items=(blocker,),
+    )
+    assert accepted == ["exploration_exhausted"]
     assert rejected == []
 
 

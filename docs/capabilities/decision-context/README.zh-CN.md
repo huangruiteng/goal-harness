@@ -31,15 +31,19 @@ flowchart LR
     READ["有界扫描 + exact read<br/>freshness · revision · conflict"]
     EVIDENCE["Evidence packet<br/>采纳 · 拒绝 · 过期 · 冲突"]
     PROPOSAL["Decision proposal<br/>建议 · 备选 · stop list"]
-    CORE["LoopX lifecycle<br/>todo · gate · event · outcome"]
+    REVIEW["Review settlement<br/>approve · reject · defer · no change"]
+    CORE["LoopX lifecycle<br/>todo · user gate · event"]
+    OUTCOME["Outcome receipt<br/>后续真实结果"]
     MEMORY["Reward Memory<br/>经评审的可复用经验"]
 
     SOURCES --> READ
     RECALL --> READ
     READ --> EVIDENCE
     EVIDENCE --> PROPOSAL
-    PROPOSAL --> CORE
-    CORE -. "仅 verified outcome" .-> MEMORY
+    PROPOSAL --> REVIEW
+    REVIEW --> CORE
+    CORE --> OUTCOME
+    OUTCOME -. "仅 verified outcome" .-> MEMORY
 ```
 
 ## 它负责什么
@@ -51,9 +55,11 @@ Decision Context 负责“决策质量层”：
 3. **证据 rebase**：提升当前事实，并明确记录过期、拒绝或冲突的 claim。
 4. **决策建议**：把 recommendation、alternatives、next actions 和 stop list
    与事实证据分开。
-5. **结果回执**：把接受的决策与真实结果、失效假设关联起来。
-6. **cursor commit**：只有完整 packet 链和 lifecycle writeback 验证通过后，
-   才推进私有信源 cursor。
+5. **评审回执**：复用现有 user gate 记录 owner 的 `approve`、`reject`、`defer`，
+   或者在没有实质变化时记录一条无需 gate 的语义 `no_change`。
+6. **cursor commit**：review settlement 与 lifecycle writeback 验证通过后推进
+   私有信源 cursor，不等待未来的真实结果。
+7. **结果回执**：在后续把接受的决策与真实结果、失效假设关联起来。
 
 ## 它不负责什么
 
@@ -74,17 +80,19 @@ exact-read 完整度和未覆盖的 P0 source 投影为公开安全的回执。`
 不阻断安全的 LoopX lifecycle，但调用方必须显式标记结论为部分覆盖，或者先通过
 其他 authority 路径补齐 exact read；不能把 fail-open 误写成“所有关键上下文已检查”。
 
-## 三类可审计产物
+## 四类可审计产物
 
 | 产物 | 回答的问题 | 典型内容 |
 |---|---|---|
 | `decision_evidence_packet_v0` | 这次决策现在应该相信什么？ | changed facts、采纳的召回、过期/拒绝 claim、冲突、revision、provider health |
 | `decision_proposal_v0` | 下一步建议做什么？ | objective score、推荐决策、备选方案、行动、stop list |
+| `decision_review_receipt_v0` | Owner 如何处理这次建议？ | approve/reject/defer 的 gate 证据，或显式 quiet no-change settlement |
 | `decision_outcome_receipt_v0` | 决策之后实际发生了什么？ | 接受的决策、状态迁移、真实结果、失效假设、复核时间 |
 
-Evidence packet 尽量确定性和可审计；proposal 明确只是建议；outcome receipt
-是追加式证据。只有经过验证的 outcome 才可能生成 Reward Memory candidate，
-而 candidate 仍需走 Reward Memory 自己的 review 和 activation。
+Evidence packet 尽量确定性和可审计；proposal 明确只是建议；review receipt
+只结算“这批材料是否已经处理”，不是未来 outcome 的证明。Outcome receipt 是
+追加式证据。只有经过验证的 outcome 才可能生成 Reward Memory candidate，而
+candidate 仍需走 Reward Memory 自己的 review 和 activation。
 
 ## 典型场景
 
@@ -134,8 +142,46 @@ loopx decision-context prepare-evidence \
   --format json
 ```
 
-`prepare-evidence` 刻意保持只读。语义 rebase、proposal、经验证的 LoopX
-writeback 和 cursor commit 是彼此独立的验收边界。
+`prepare-evidence` 刻意保持只读。领域 adapter 可以提交严格的语义 rebase，并把
+尚未应用的 cursor proposal 写入私有 pending checkpoint：
+
+```bash
+loopx decision-context prepare-review \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --profile <ignored-private-profile.json> \
+  --decision-id <stable-decision-id> \
+  --rebase-json <ignored-private-rebase.json> \
+  --pending-settlement <ignored-private-pending.json> \
+  --execute \
+  --format json
+```
+
+Proposal 经现有 `user_gate` 决定后，用精确 gate event 结算；该 gate 必须使用
+`decision_scope=direction:action:<proposal-packet-ref>`：
+
+```bash
+loopx decision-context settle-review \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --profile <ignored-private-profile.json> \
+  --cursor-state <ignored-private-cursors.json> \
+  --pending-settlement <ignored-private-pending.json> \
+  --event-log <ignored-private-rollout-events.jsonl> \
+  --proposal-json <public-safe-proposal.json> \
+  --source-event-id <exact-user-gate-event-id> \
+  --actor-ref <owner-ref> \
+  --reason-code <reason-code> \
+  --summary <compact-public-safe-summary> \
+  --execute \
+  --format json
+```
+
+显式语义 `no_change` 不传 `--proposal-json` 和 `--source-event-id`，也不会创建
+user gate。去掉 `--execute` 即为预览。这些命令只写调用方指定的私有 pending/
+cursor 状态和现有本地 rollout event log，不授予交易、外部动作或其他不可逆权限。
+移除私有 profile 即关闭入口；删除尚未结算的 pending checkpoint 不会改变 active
+cursor。
 
 ## 与其他能力的关系
 
@@ -150,7 +196,8 @@ writeback 和 cursor commit 是彼此独立的验收边界。
 
 公开能力已经具备 packet 契约、默认关闭的 activation profile、
 provider-neutral source contract、有界 evidence assembly、公开安全投影、
-经验证的 outcome feedback 和私有 cursor commit 边界。
+owner-gated 或 quiet review settlement、私有 cursor commit，以及后续经验证的
+outcome feedback。
 
 它目前仍标记为 **experimental**。生产接入方需要提供自己的私有 source adapter、
 profile、authority policy、proposal logic 和经过验证的 lifecycle writeback。

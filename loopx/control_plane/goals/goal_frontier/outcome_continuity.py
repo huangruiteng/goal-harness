@@ -406,12 +406,14 @@ def acceptance_gaps_from_todo_completion_checkpoint(
     *,
     agent_todo_summary: dict[str, Any] | None,
     agent_id: str | None,
+    completed_todo_threshold: int = COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD,
 ) -> list[dict[str, Any]]:
     """Require a checkpoint after a bounded chain of scoped completions."""
 
-    if not isinstance(agent_vision, dict):
-        return []
-    if goal_vision_state_is_closed(str(agent_vision.get("state") or "")):
+    vision_present = isinstance(agent_vision, dict)
+    if vision_present and goal_vision_state_is_closed(
+        str(agent_vision.get("state") or "")
+    ):
         return []
     if not agent_id:
         return []
@@ -444,7 +446,7 @@ def acceptance_gaps_from_todo_completion_checkpoint(
         isinstance(checkpoint, dict)
         and checkpoint_generated_at is not None
         and checkpoint_generated_at >= completed_at
-        and _checkpoint_covers_completed_todo(agent_vision, checkpoint)
+        and _checkpoint_covers_completed_todo(agent_vision or {}, checkpoint)
     ):
         return []
 
@@ -452,7 +454,7 @@ def acceptance_gaps_from_todo_completion_checkpoint(
         checkpoint_generated_at
         if isinstance(checkpoint, dict)
         and checkpoint_generated_at is not None
-        and _checkpoint_covers_completed_todo(agent_vision, checkpoint)
+        and _checkpoint_covers_completed_todo(agent_vision or {}, checkpoint)
         else None
     )
     uncheckpointed_items = [
@@ -462,10 +464,11 @@ def acceptance_gaps_from_todo_completion_checkpoint(
         or (_iso_timestamp(item.get("completed_at")) or 0.0)
         > qualified_checkpoint_at
     ]
-    if len(uncheckpointed_items) < COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD:
+    threshold = max(1, int(completed_todo_threshold))
+    if len(uncheckpointed_items) < threshold:
         return []
 
-    patch = _dict_field(agent_vision, "vision_patch")
+    patch = _dict_field(agent_vision, "vision_patch") if vision_present else {}
     return [
         {
             "kind": VISION_OUTCOME_CHECKPOINT_REQUIRED_TRIGGER,
@@ -477,17 +480,23 @@ def acceptance_gaps_from_todo_completion_checkpoint(
             ),
             "acceptance_summary": (
                 _compact_text(patch.get("acceptance_summary"), limit=420)
-                or "Name the active final-outcome claim and its authoritative evidence."
+                or (
+                    "Write a bounded agent vision patch, then name the active "
+                    "final-outcome claim and its authoritative evidence."
+                    if not vision_present
+                    else "Name the active final-outcome claim and its "
+                    "authoritative evidence."
+                )
             ),
             "advancement_policy": patch.get("advancement_policy"),
             "completed_todo_id": latest_item.get("todo_id"),
             "completed_at": latest_item.get("completed_at"),
             "completed_todo_count": len(uncheckpointed_items),
-            "completed_todo_threshold": COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD,
+            "completed_todo_threshold": threshold,
             "completed_todo_ids": [
                 item.get("todo_id")
                 for item in uncheckpointed_items[
-                    :COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD
+                    :threshold
                 ]
                 if item.get("todo_id")
             ],
@@ -497,5 +506,10 @@ def acceptance_gaps_from_todo_completion_checkpoint(
                 else None
             ),
             "required_path_outcomes": ["continue", "no_change", "replan"],
+            **(
+                {"replan_cadence": "fine_grained_after_each_todo"}
+                if threshold == 1
+                else {}
+            ),
         }
     ]

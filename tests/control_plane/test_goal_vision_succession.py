@@ -317,6 +317,32 @@ def test_completed_todo_chain_requires_a_later_outcome_checkpoint(
         assert gaps[0]["completed_todo_threshold"] == 5
 
 
+def test_completed_todo_chain_without_vision_baseline_still_requires_checkpoint() -> None:
+    summary = {
+        "recent_completed_advancement_items": [
+            {
+                "todo_id": f"todo_completed_no_vision_{index}",
+                "claimed_by": AGENT_ID,
+                "completed_at": f"2026-07-12T00:02:0{index}Z",
+            }
+            for index in range(5)
+        ]
+    }
+
+    gaps = acceptance_gaps_from_todo_completion_checkpoint(
+        None,
+        None,
+        agent_todo_summary=summary,
+        agent_id=AGENT_ID,
+    )
+
+    assert len(gaps) == 1
+    assert gaps[0]["kind"] == "vision_outcome_checkpoint_required"
+    assert gaps[0]["completed_todo_count"] == 5
+    assert gaps[0]["completed_todo_threshold"] == 5
+    assert "Write a bounded agent vision patch" in gaps[0]["acceptance_summary"]
+
+
 @pytest.mark.parametrize(
     ("advancement_policy", "repair_delta_kinds", "expects_gap"),
     [

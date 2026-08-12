@@ -610,6 +610,22 @@ def _promote_runtime_capability_reentry(
     return promoted
 
 
+def _promote_interaction_contract(payload: dict[str, Any]) -> dict[str, Any]:
+    interaction = payload.get("interaction_contract")
+    if not isinstance(interaction, dict):
+        return payload
+    promoted = {
+        key: payload[key]
+        for key in (*_RUNTIME_CAPABILITY_PREFIX_FIELDS, "runtime_capability_reentry")
+        if key in payload
+    }
+    promoted["interaction_contract"] = interaction
+    promoted.update(
+        (key, value) for key, value in payload.items() if key not in promoted
+    )
+    return promoted
+
+
 def compact_quota_should_run_cli_payload(
     payload: dict[str, Any],
     *,
@@ -683,4 +699,6 @@ def compact_quota_should_run_cli_payload(
             compact = dict(compact)
             compact["goal_route_hint"] = _compact_goal_route_hint(goal_route_hint)
         compact = _compact_shadowed_action_projections(compact)
-    return _promote_runtime_capability_reentry(compact)
+    return _promote_interaction_contract(
+        _promote_runtime_capability_reentry(compact)
+    )

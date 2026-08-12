@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = resolve("/tmp", "loopx-frontstage-share-bundle-smoke");
 const privateTrapFixturePath = resolve(repoRoot, "examples/fixtures/frontstage-private-status-trap.public.json");
+const homepagePackagePath = resolve(repoRoot, "apps/presentation/site/package.json");
+const homepageLockfilePath = resolve(repoRoot, "apps/presentation/site/package-lock.json");
 
 function run(command, args, cwd = repoRoot) {
   const result = spawnSync(command, args, {
@@ -74,6 +76,20 @@ async function collectGeneratedTextFiles(rootDir) {
 }
 
 await rm(outDir, { force: true, recursive: true });
+const homepagePackage = JSON.parse(await readFile(homepagePackagePath, "utf8"));
+if (homepagePackage.dependencies?.["@vitejs/plugin-react"]) {
+  throw new Error("@vitejs/plugin-react must stay in homepage devDependencies");
+}
+if (!homepagePackage.devDependencies?.["@vitejs/plugin-react"]) {
+  throw new Error("homepage devDependencies must include @vitejs/plugin-react");
+}
+const homepageLockfile = JSON.parse(await readFile(homepageLockfilePath, "utf8"));
+const nonPublicResolvedUrls = Object.values(homepageLockfile.packages ?? {})
+  .map((entry) => entry?.resolved)
+  .filter((resolved) => typeof resolved === "string" && !resolved.startsWith("https://registry.npmjs.org/"));
+if (nonPublicResolvedUrls.length) {
+  throw new Error(`homepage lockfile contains non-public resolved URLs: ${nonPublicResolvedUrls.join(", ")}`);
+}
 run(process.execPath, [
   resolve(repoRoot, "examples/export-frontstage-share-bundle.mjs"),
   "--out-dir",
@@ -85,11 +101,7 @@ run(process.execPath, [
 const siteDir = resolve(outDir, "site");
 assertExists(resolve(siteDir, "index.html"));
 assertExists(resolve(siteDir, "frontstage/index.html"));
-assertExists(resolve(siteDir, "site-assets/home.css"));
-assertExists(resolve(siteDir, "site-assets/home.js"));
 assertExists(resolve(siteDir, "install.sh"));
-assertExists(resolve(siteDir, "site-assets/evidence/long-running-loop-openviking-trajectory.png"));
-assertExists(resolve(siteDir, "site-assets/evidence/long-running-loop-ml-experiment-trajectory.png"));
 assertExists(resolve(siteDir, "status.frontstage-share.json"));
 assertExists(resolve(outDir, "README.md"));
 assertExists(resolve(outDir, "frontstage-share-manifest.json"));
@@ -100,87 +112,87 @@ if (!routerSource.includes("basepath:") || !routerSource.includes("import.meta.e
 }
 
 const homepageHtml = await readFile(resolve(siteDir, "index.html"), "utf8");
-if (!homepageHtml.includes("Your agents keep") || !homepageHtml.includes('class="button button-secondary" href="#showcases"')) {
-  throw new Error("homepage root is missing the LoopX hero or curated evidence CTA");
+if (!homepageHtml.includes('<div id="root"></div>')) {
+  throw new Error("homepage root must be the compiled React entry");
 }
-if (!homepageHtml.includes('data-hero-wave="progress"') || !homepageHtml.includes('data-hero-wave="judgment"')) {
-  throw new Error("homepage hero must retain the finite semantic keyword wave");
+if (!homepageHtml.includes('src="/loopx/site-assets/') || !homepageHtml.includes('href="/loopx/site-assets/')) {
+  throw new Error("homepage compiled assets did not resolve against the GitHub Pages base");
 }
-if (!homepageHtml.includes('class="hero-phrase"')) {
-  throw new Error("homepage hero must keep sentence punctuation with the animated phrase");
+if (homepageHtml.includes("__LOOPX_BASE__") || homepageHtml.includes("home.js") || homepageHtml.includes("home.css")) {
+  throw new Error("homepage must not publish legacy static assets or unresolved base placeholders");
 }
-if (!homepageHtml.includes('href="/loopx/frontstage/"')) {
-  throw new Error("homepage footer must retain the Frontstage entry");
-}
-if (!homepageHtml.includes('href="/loopx/docs/"')) {
-  throw new Error("homepage navigation must link to the hosted docs portal");
-}
-for (const developerBookContract of [
-  'href="/loopx/docs/book/en/"',
-  'data-devbook-base="/loopx/docs/book"',
-  'data-devbook-path="/"',
-  'data-devbook-path="/chapters/01-from-session-to-loop"',
-  'data-devbook-path="/chapters/05-connect-existing-project"',
-  'data-devbook-path="/chapters/source-protocol-map"',
+const homepageAssetNames = await readdir(resolve(siteDir, "site-assets"));
+const homepageScriptName = homepageAssetNames.find((name) => /^index-.*\.js$/.test(name));
+const homepageStyleName = homepageAssetNames.find((name) => /^index-.*\.css$/.test(name));
+const issueEvidenceName = homepageAssetNames.find((name) => /^long-running-loop-openviking-trajectory-.*\.png$/.test(name));
+const mlEvidenceName = homepageAssetNames.find((name) => /^long-running-loop-ml-experiment-trajectory-.*\.png$/.test(name));
+for (const [label, name] of [
+  ["homepage JavaScript", homepageScriptName],
+  ["homepage CSS", homepageStyleName],
+  ["issue evidence", issueEvidenceName],
+  ["ML evidence", mlEvidenceName],
 ]) {
-  if (!homepageHtml.includes(developerBookContract)) {
-    throw new Error(`homepage is missing the monorepo Developer Book contract: ${developerBookContract}`);
-  }
-}
-if (homepageHtml.includes("cocolord.github.io/loopx-book")) {
-  throw new Error("homepage must not depend on the retired external Developer Book publication");
-}
-if (homepageHtml.includes('https://github.com/huangruiteng/loopx/tree/main/docs')) {
-  throw new Error("homepage Docs links must not bypass the hosted docs portal");
-}
-if (!homepageHtml.includes('data-copy-key="agentSetup"') || !homepageHtml.includes("One message to your current agent") || !homepageHtml.includes('href="#quickstart"')) {
-  throw new Error("homepage must make the localized agent setup prompt the primary first-run path");
-}
-if (!homepageHtml.includes("huangruiteng.github.io/loopx/install.sh | bash") || !homepageHtml.includes("loopx connect") || !homepageHtml.includes("Inspect installer")) {
-  throw new Error("homepage must retain the official manual setup fallback");
+  if (!name) throw new Error(`missing compiled ${label} asset`);
+  assertExists(resolve(siteDir, "site-assets", name));
 }
 const publishedInstaller = await readFile(resolve(siteDir, "install.sh"), "utf8");
 const canonicalInstaller = await readFile(resolve(repoRoot, "scripts/install-from-github.sh"), "utf8");
 if (publishedInstaller !== canonicalInstaller) {
   throw new Error("published installer must be byte-identical to scripts/install-from-github.sh");
 }
-if (!homepageHtml.includes("provider-neutral") || !homepageHtml.includes("stateful control plane") || !homepageHtml.includes("data-language-toggle")) {
-  throw new Error("homepage must publish the official provider-neutral stateful positioning and language switch");
-}
-if (!homepageHtml.includes("Evidence from real loops") || !homepageHtml.includes("data-evidence-dialog")) {
-  throw new Error("homepage must publish the curated evidence terminal and full-screen evidence viewer");
-}
-for (const terminalContract of [
-  "data-terminal-showcase",
-  'data-terminal-tab="issue"',
-  'data-terminal-tab="ml"',
-  "data-terminal-control",
-  "data-terminal-last",
-  "Curated replay from public evidence",
-  "Redacted owner-run showcase",
-  "not a production result, company or employer endorsement, or independently reproducible evidence",
+const homepageSource = await readFile(resolve(repoRoot, "apps/presentation/site/src/App.tsx"), "utf8");
+const homepageStyles = await readFile(resolve(repoRoot, "apps/presentation/site/src/styles.css"), "utf8");
+for (const sourceContract of [
+  "Your agents keep",
+  'secondPrefix: "the "',
+  'secondAccent: "night shift"',
+  'thirdPrefix: "You keep the "',
+  'thirdAccent: "judgment"',
+  'secondPrefix: "Agent "',
+  'secondAccent: "持续推进"',
+  'thirdPrefix: "判断始终"',
+  'thirdAccent: "由你掌握"',
+  "Provider-neutral",
+  "Get started",
+  "开始使用",
+  "See in action",
+  "查看实战",
+  "showTerminalReplay",
+  'url.hash = "showcases"',
+  'setActiveTerminal("issue")',
+  "setTerminalReplayToken",
+  "scrollIntoView",
+  "SetupDialog",
+  "EvidenceViewer",
+  "TerminalReplay",
+  "200+ hours, still legible.",
+  "跨越 200+ 小时，依然清晰可读。",
+  "Prefer the shell? Install LoopX manually.",
+  "Developer book",
+  "Iowan Old Style",
+  "Pi",
 ]) {
-  if (!homepageHtml.includes(terminalContract)) {
-    throw new Error(`homepage evidence terminal is missing contract: ${terminalContract}`);
+  if (!homepageSource.includes(sourceContract) && !homepageStyles.includes(sourceContract)) {
+    throw new Error(`React homepage is missing contract: ${sourceContract}`);
   }
 }
-for (const assetName of [
-  "long-running-loop-openviking-trajectory.png",
-  "long-running-loop-ml-experiment-trajectory.png",
+for (const developerBookPath of [
+  "docs/book/",
+  "chapters/01-from-session-to-loop/",
+  "chapters/05-connect-existing-project/",
+  "chapters/source-protocol-map/",
 ]) {
-  if (!homepageHtml.includes(`/loopx/site-assets/evidence/${assetName}`)) {
-    throw new Error(`homepage evidence asset did not resolve against the GitHub Pages base: ${assetName}`);
+  if (!homepageSource.includes(developerBookPath)) {
+    throw new Error(`React homepage is missing Developer Book route: ${developerBookPath}`);
   }
 }
-const homepageScript = await readFile(resolve(siteDir, "site-assets/home.js"), "utf8");
-if (!homepageScript.includes('"hero.eyebrow": "开放 · 有状态 · Provider-neutral"') || !homepageScript.includes('requestedLanguage === "zh" ? "zh" : "en"')) {
-  throw new Error("homepage language switch must include the public-safe Chinese locale and default to English");
-}
-if (
-  !homepageScript.includes("developerBookTargets")
-  || !homepageScript.includes('language === "zh" ? "" : "/en"')
-) {
-  throw new Error("homepage language switch must route the Developer Book to the matching locale");
+for (const forbidden of [
+  "cocolord.github.io/loopx-book",
+  "https://github.com/huangruiteng/loopx/tree/main/docs",
+]) {
+  if (homepageSource.includes(forbidden)) {
+    throw new Error(`React homepage retained forbidden external publication: ${forbidden}`);
+  }
 }
 for (const promptContract of [
   "Connect the current project to LoopX",
@@ -198,11 +210,11 @@ for (const promptContract of [
   "把当前项目接入 LoopX",
   "下一步安全动作是什么",
 ]) {
-  if (!homepageScript.includes(promptContract)) {
+  if (!homepageSource.includes(promptContract)) {
     throw new Error(`homepage agent setup prompt is missing contract: ${promptContract}`);
   }
 }
-const setupPromptMatch = homepageScript.match(/const setupPrompts = \{\s+en: `([\s\S]*?)`,\s+zh: `([\s\S]*?)`,\s+\};/);
+const setupPromptMatch = homepageSource.match(/const setupPrompts: Record<Language, string> = \{\s+en: `([\s\S]*?)`,\s+zh: `([\s\S]*?)`,\s+\};/);
 if (!setupPromptMatch) {
   throw new Error("homepage must expose concise English and Chinese setup prompts");
 }
@@ -211,40 +223,17 @@ for (const [language, prompt] of [["English", setupPromptMatch[1]], ["Chinese", 
     throw new Error(`${language} homepage setup prompt must stay concise and complete; received ${prompt.length} characters`);
   }
 }
-if (!homepageScript.includes('document.createElement("textarea")') || !homepageScript.includes('document.execCommand("copy")')) {
+if (!homepageSource.includes('document.createElement("textarea")') || !homepageSource.includes('document.execCommand("copy")')) {
   throw new Error("homepage setup prompt must keep a clipboard fallback for non-secure preview origins");
 }
-if (!homepageScript.includes("Math.min(200, Math.max(50, nextZoom))") || !homepageScript.includes('addEventListener("pointerdown"')) {
-  throw new Error("homepage evidence viewer must retain bounded zoom and drag-to-pan controls");
+if (!homepageSource.includes("Math.min(200, zoom + 25)") || !homepageSource.includes("Math.max(50, zoom - 25)")) {
+  throw new Error("homepage evidence viewer must retain bounded zoom controls");
 }
-if (!homepageScript.includes("trigger.dataset.evidenceTitle") || !homepageHtml.includes("data-evidence-title=")) {
-  throw new Error("homepage evidence viewer must retain localized, evidence-specific dialog titles");
-}
-for (const terminalMotionContract of [
-  "playTerminalPanel",
-  'addEventListener("animationend"',
-  'event.key !== "ArrowLeft"',
-  'window.matchMedia("(prefers-reduced-motion: reduce)")',
-]) {
-  if (!homepageScript.includes(terminalMotionContract)) {
-    throw new Error(`homepage evidence terminal motion is missing contract: ${terminalMotionContract}`);
-  }
-}
-if (!homepageScript.includes("prepareHeroWaves") || !homepageScript.includes('span.style.setProperty("--char-delay"')) {
-  throw new Error("homepage hero must split localized keywords into accessible staggered characters");
-}
-const homepageCss = await readFile(resolve(siteDir, "site-assets/home.css"), "utf8");
-if (!homepageCss.includes("@media (prefers-reduced-motion: reduce)") || !homepageCss.includes("animation-iteration-count: 1 !important")) {
+if (!homepageStyles.includes("@media (prefers-reduced-motion: reduce)") || !homepageStyles.includes("animation-iteration-count: 1 !important")) {
   throw new Error("homepage motion must expose a static reduced-motion state");
 }
-if (!homepageCss.includes("@keyframes terminal-line-in") || !homepageCss.includes(".terminal-demo-panel.is-paused") || !homepageCss.includes(".terminal-playback { display: none; }")) {
+if (!homepageStyles.includes("@keyframes terminal-line-enter") || !homepageStyles.includes(".terminal-paused") || !homepageStyles.includes(".terminal-playback")) {
   throw new Error("homepage evidence terminal must support finite replay, pause, and a static reduced-motion state");
-}
-if (!homepageCss.includes("@keyframes hero-word-wave") || !homepageCss.includes("var(--char-delay, 0ms)") || !homepageCss.includes("animation: none !important; color: inherit")) {
-  throw new Error("homepage hero keyword wave must be staggered, finite, and reduced-motion safe");
-}
-if (!homepageHtml.includes('href="/loopx/site-assets/home.css"') || homepageHtml.includes("__LOOPX_BASE__")) {
-  throw new Error("homepage assets did not resolve against the GitHub Pages base");
 }
 const frontstageHtml = await readFile(resolve(siteDir, "frontstage/index.html"), "utf8");
 if (!frontstageHtml.includes('/loopx/assets/')) {

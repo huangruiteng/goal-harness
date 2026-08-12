@@ -33,15 +33,19 @@ flowchart LR
     READ["Bounded scan + exact read<br/>freshness · revision · conflicts"]
     EVIDENCE["Evidence packet<br/>accepted · rejected · stale · conflicting"]
     PROPOSAL["Decision proposal<br/>recommendation · alternatives · stop list"]
-    CORE["LoopX lifecycle<br/>todo · gate · event · outcome"]
+    REVIEW["Review settlement<br/>approve · reject · defer · no change"]
+    CORE["LoopX lifecycle<br/>todo · user gate · event"]
+    OUTCOME["Outcome receipt<br/>later observed result"]
     MEMORY["Reward Memory<br/>reviewed reusable experience"]
 
     SOURCES --> READ
     RECALL --> READ
     READ --> EVIDENCE
     EVIDENCE --> PROPOSAL
-    PROPOSAL --> CORE
-    CORE -. "verified outcome only" .-> MEMORY
+    PROPOSAL --> REVIEW
+    REVIEW --> CORE
+    CORE --> OUTCOME
+    OUTCOME -. "verified outcome only" .-> MEMORY
 ```
 
 ## What It Owns
@@ -56,10 +60,14 @@ Decision Context owns the decision-quality layer:
    rejected, or conflicting claims.
 4. **Decision proposals** keep recommendations, alternatives, next actions,
    and stop lists separate from evidence.
-5. **Outcome receipts** link an accepted decision to observed outcomes and
-   invalidated assumptions.
-6. **Cursor commit** advances private source cursors only after the complete
-   packet chain and lifecycle writeback have been validated.
+5. **Review receipts** record owner `approve`, `reject`, or `defer` through the
+   existing user gate, or one explicit semantic `no_change` result without a
+   gate.
+6. **Cursor commit** advances private source cursors after the review settlement
+   and lifecycle writeback have been validated. It does not wait for a future
+   real-world outcome.
+7. **Outcome receipts** later link an accepted decision to observed outcomes
+   and invalidated assumptions.
 
 ## What It Does Not Own
 
@@ -84,18 +92,21 @@ the caller must label the conclusion as partial or exact-read the missing
 authority through another path. Fail-open must not masquerade as complete
 context coverage.
 
-## Three Auditable Outputs
+## Four Auditable Outputs
 
 | Output | Answers | Typical contents |
 |---|---|---|
 | `decision_evidence_packet_v0` | What should the decision trust now? | Changed facts, accepted recall, stale/rejected claims, conflicts, revisions, provider health |
 | `decision_proposal_v0` | What should happen next? | Objective scores, recommendation, alternatives, actions, stop list |
+| `decision_review_receipt_v0` | What did the owner decide about the proposal? | Approve/reject/defer gate evidence, or an explicit quiet no-change settlement |
 | `decision_outcome_receipt_v0` | What happened after the decision? | Accepted decision, transitions, outcomes, invalidated assumptions, review time |
 
 The evidence packet is intended to be deterministic and auditable. The
-proposal is explicitly advisory. The outcome receipt is append-only evidence;
-only a verified outcome may later become a Reward Memory candidate, and that
-candidate still follows Reward Memory review and activation.
+proposal is explicitly advisory. The review receipt settles whether the source
+material has been consumed; it is not proof of a future outcome. The outcome
+receipt is append-only evidence; only a verified outcome may later become a
+Reward Memory candidate, and that candidate still follows Reward Memory review
+and activation.
 
 ## Typical Uses
 
@@ -149,9 +160,49 @@ loopx decision-context prepare-evidence \
   --format json
 ```
 
-`prepare-evidence` is deliberately read only. Semantic rebase, proposal,
-validated LoopX writeback, and cursor commit remain separate acceptance
-boundaries.
+`prepare-evidence` is deliberately read only. A domain adapter can provide a
+strict semantic rebase and persist an unapplied private checkpoint:
+
+```bash
+loopx decision-context prepare-review \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --profile <ignored-private-profile.json> \
+  --decision-id <stable-decision-id> \
+  --rebase-json <ignored-private-rebase.json> \
+  --pending-settlement <ignored-private-pending.json> \
+  --execute \
+  --format json
+```
+
+After a proposal is decided through an existing `user_gate`, settle it with
+the exact gate event. The gate must use
+`decision_scope=direction:action:<proposal-packet-ref>`:
+
+```bash
+loopx decision-context settle-review \
+  --goal-id <goal-id> \
+  --agent-id <agent-id> \
+  --profile <ignored-private-profile.json> \
+  --cursor-state <ignored-private-cursors.json> \
+  --pending-settlement <ignored-private-pending.json> \
+  --event-log <ignored-private-rollout-events.jsonl> \
+  --proposal-json <public-safe-proposal.json> \
+  --source-event-id <exact-user-gate-event-id> \
+  --actor-ref <owner-ref> \
+  --reason-code <reason-code> \
+  --summary <compact-public-safe-summary> \
+  --execute \
+  --format json
+```
+
+For an explicit semantic `no_change`, omit `--proposal-json` and
+`--source-event-id`; no user gate is created. Preview by omitting `--execute`.
+These commands write only the caller-selected private pending/cursor state and
+the existing local rollout event log. They grant no trading, external action,
+or other irreversible authority. Removing the private profile disables the
+route; removing the pending checkpoint abandons an unsettled review without
+changing active cursors.
 
 ## Relationship To Other Capabilities
 
@@ -166,8 +217,8 @@ boundaries.
 
 The public capability currently ships its packet contracts, default-off
 activation profile, provider-neutral source contract, bounded evidence
-assembly, public-safe projections, validated outcome feedback, and private
-cursor-commit boundary.
+assembly, public-safe projections, owner-gated or quiet review settlement,
+private cursor commit, and later validated outcome feedback.
 
 It is still marked **experimental**. A production integration must provide its
 own private source adapters, profile, authority policy, proposal logic, and

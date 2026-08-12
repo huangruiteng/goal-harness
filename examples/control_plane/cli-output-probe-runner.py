@@ -263,11 +263,12 @@ def main() -> int:
     if args.fixture_root.exists():
         shutil.rmtree(args.fixture_root)
     args.fixture_root.mkdir(parents=True)
-    rows = [
-        *_default_rows(probe, semantics, args.fixture_root),
-        *_variant_rows(probe, semantics, args.fixture_root),
-        *_blocking_gate_rows(probe, semantics, args.fixture_root),
-    ]
+    with probe._stable_budget_fixture_root(args.fixture_root) as stable_root:
+        rows = [
+            *_default_rows(probe, semantics, stable_root),
+            *_variant_rows(probe, semantics, stable_root),
+            *_blocking_gate_rows(probe, semantics, stable_root),
+        ]
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
     args.receipt.write_text(
         json.dumps(

@@ -232,6 +232,14 @@ candidate checkout 的正式 packet builder
 todo、peer routing、same-agent continuation、final human gate、healthy continuation 和
 projection repair；每个场景重复两次，所有重复都要通过。
 
+这些场景不应一律只做 packet interpretation。当结论是“agent 必须真的调用工具”时，
+portfolio 使用 scenario-owned 的 hermetic actor：selected Todo 执行目标 read，replan 执行
+evidence-log read，scoped gate 在呈现非阻塞 notice 后执行 successor，capability bridge
+则执行 quota 投影的 repair Todo 写入并由 host 读回。第四种场景里，等待或更新
+monitor fallback、或在 quota 后重新读取 workspace，都必须失败。四个 actor 只共享已证明的 tool decoding 和隔离 CLI 机制；
+各自的 Goal fixture、合法动作状态机和 semantic oracle 保持独立，不引入通用 scenario
+runner。
+
 双臂只在两类问题中合理：
 
 1. 临时验证一个敏感改动是否与明确 baseline 语义等价；
@@ -475,11 +483,18 @@ guided_transaction = {
 `loopx/control_plane/testing/actual_default_model_behavior_portfolio.py::_scenario_contract`：
 
 ```python
-if spec.actor_kind == "turn":
-    action_signature = dict(packet.get("action_signature") or {})
-    if action_signature.get("matches") is not True:
-        raise ValueError("turn scenario action signature parity is not verified")
-    build_model_behavior_actor_request(packet, semantic_contract_required=True, ...)
+if spec.actor_kind in {
+    "turn", "turn_tool", "replan_tool", "scoped_gate_tool",
+    "capability_repair_tool"
+}:
+    build_model_behavior_actor_request(
+        packet,
+        semantic_contract_required=False,
+        ...,
+    )
+    contract = _turn_expected_contract(source_packet)
+    if _turn_expected_contract(packet) != contract:
+        raise ValueError("actor packet diverges from source action contract")
 else:
     if spec.phase == "entry":
         _validate_actual_default_projection(packet)

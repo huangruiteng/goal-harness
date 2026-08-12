@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ..extensions.runtime import extension_catalog_entries
+from .decision_context.catalog_entry import DECISION_CONTEXT_CATALOG_ENTRY
 from .issue_fix.workflow_plan import build_issue_fix_pr_lifecycle_command
 from .registry import CapabilityRegistry
 
@@ -544,145 +545,7 @@ BUILTIN_CAPABILITIES: tuple[dict[str, Any], ...] = (
             "while keeping external PR/comment actions explicit."
         ),
     },
-    {
-        "id": "decision-context",
-        "origin": "builtin",
-        "visibility": "public",
-        "provider_id": "loopx-core",
-        "title": "Goal-scoped decision evidence and outcome contract",
-        "status": "experimental",
-        "default_enabled": False,
-        "real_world_anchor": (
-            "incremental authority rebase before long-running agent decisions"
-        ),
-        "user_value": (
-            "Separate current evidence, advisory proposals, and verified outcomes "
-            "while keeping source providers replaceable and Core authority unchanged."
-        ),
-        "entry_command": (
-            "loopx decision-context inspect-profile "
-            "--goal-id <goal-id> --agent-id <agent-id> --format json"
-        ),
-        "commands": [
-            {
-                "command": "loopx decision-context architecture --format json",
-                "purpose": "Render the default-off Stage-0 packet, source, provider, and lifecycle boundaries.",
-                "write_boundary": "stateless contract output only; no provider, source, goal state, or external write",
-            },
-            {
-                "command": (
-                    "loopx decision-context inspect-profile "
-                    "--goal-id <goal-id> --agent-id <agent-id> "
-                    "[--profile <private-local-profile>] --format json"
-                ),
-                "purpose": (
-                    "Resolve the default-off goal and agent route while projecting "
-                    "only public-safe provider availability."
-                ),
-                "write_boundary": (
-                    "reads an optional private local profile; never emits source "
-                    "locators, provider config, raw content, cursors, or credentials"
-                ),
-            },
-            {
-                "command": (
-                    "loopx decision-context source-manifest "
-                    "--goal-id <goal-id> --agent-id <agent-id> "
-                    "--profile <private-local-profile> --format json"
-                ),
-                "purpose": (
-                    "Project an enabled source profile into a public-safe manifest "
-                    "before any provider access."
-                ),
-                "write_boundary": (
-                    "read-only local projection; no provider access, cursor write, "
-                    "goal mutation, or external action"
-                ),
-            },
-            {
-                "command": (
-                    "loopx decision-context prepare-evidence "
-                    "--goal-id <goal-id> --agent-id <agent-id> "
-                    "--profile <private-local-profile> "
-                    "--decision-id <decision-id> "
-                    "[--cursor-state <private-cursor-json>] "
-                    "[--source-id <on-demand-source>] --format json"
-                ),
-                "purpose": (
-                    "Resolve enabled profile providers, run bounded scans and "
-                    "exact reads, and emit a public-safe evidence preparation "
-                    "packet for domain rebase."
-                ),
-                "write_boundary": (
-                    "read-only provider access; changed-source cursors remain "
-                    "preserved until semantic rebase and validated lifecycle "
-                    "writeback"
-                ),
-            },
-        ],
-        "implemented_protocols": [
-            {
-                "schema_version": "decision_context_architecture_v0",
-                "module": "loopx.capabilities.decision_context.architecture",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-            {
-                "schema_version": "decision_evidence_packet_v0",
-                "module": "loopx.capabilities.decision_context.packets",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-            {
-                "schema_version": "decision_proposal_v0",
-                "module": "loopx.capabilities.decision_context.packets",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-            {
-                "schema_version": "decision_outcome_receipt_v0",
-                "module": "loopx.capabilities.decision_context.packets",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-            {
-                "schema_version": "decision_source_manifest_v0",
-                "module": "loopx.capabilities.decision_context.sources",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-            {
-                "schema_version": "decision_source_scan_receipt_v0",
-                "module": "loopx.capabilities.decision_context.sources",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-            {
-                "schema_version": "decision_context_profile_v0",
-                "module": "loopx.capabilities.decision_context.profile",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-            {
-                "schema_version": "decision_context_activation_status_v0",
-                "module": "loopx.capabilities.decision_context.profile",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-            {
-                "schema_version": "decision_cursor_commit_receipt_v0",
-                "module": "loopx.capabilities.decision_context.cursor_commit",
-                "doc": "docs/reference/protocols/decision-context-architecture-v0.md",
-            },
-        ],
-        "smokes": ["python3 examples/decision-context-contract-smoke.py"],
-        "docs": [
-            "docs/reference/protocols/decision-context-architecture-v0.md",
-            "docs/reference/protocols/decision-context-architecture-v0.zh-CN.md",
-        ],
-        "boundaries": [
-            "The capability is default-off and cannot create action authority or mutate Core state.",
-            "Private source locators, cursors, raw content, provider payloads, tool output, and credentials stay outside public packets.",
-            "DecisionSourceProvider rebases current authority; ContextProvider supplies advisory recall only.",
-            "The built-in local-file adapter and prepare-evidence route are read-only; cursor commit requires packet-chain validation, exact lifecycle-event readback, private-state CAS, and atomic verified write.",
-        ],
-        "next_real_step": (
-            "Exercise the first private incremental source profile and produce "
-            "an outcome receipt that changes or stops a real decision."
-        ),
-    },
+    DECISION_CONTEXT_CATALOG_ENTRY,
     {
         "id": "project-skill-delivery",
         "origin": "builtin",

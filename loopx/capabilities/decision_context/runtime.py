@@ -12,6 +12,7 @@ from ..context_providers.base import ContextProvider
 from .assembler import (
     DecisionContextAssembly,
     DecisionEvidenceRebaser,
+    DecisionEvidenceRecords,
     assemble_decision_evidence,
 )
 from .private_state import load_private_decision_cursors, private_file_digest
@@ -21,6 +22,49 @@ from .profile import (
 )
 from .providers import build_decision_source_provider
 from .sources import DecisionSourceProvider, DecisionSourceScan, DecisionSourceSpec
+
+
+_DECISION_EVIDENCE_RECORD_FIELDS = {
+    "changed_facts",
+    "recalled_claims",
+    "stale_or_rejected_claims",
+    "conflicts",
+    "semantic_no_change",
+}
+
+
+def decision_evidence_records_from_mapping(
+    value: Mapping[str, Any],
+) -> DecisionEvidenceRecords:
+    """Load a strict domain rebase result without trusting private raw content."""
+
+    if not isinstance(value, Mapping):
+        raise TypeError("decision evidence records must be an object")
+    unexpected = sorted(set(value) - _DECISION_EVIDENCE_RECORD_FIELDS)
+    if unexpected:
+        raise ValueError(
+            "decision evidence records contain unsupported fields: "
+            + ", ".join(unexpected)
+        )
+
+    def records(field: str) -> tuple[Mapping[str, Any], ...]:
+        raw = value.get(field, [])
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, list):
+            raise TypeError(f"{field} must be a list of objects")
+        if any(not isinstance(item, Mapping) for item in raw):
+            raise TypeError(f"{field} must be a list of objects")
+        return tuple(dict(item) for item in raw)
+
+    semantic_no_change = value.get("semantic_no_change", False)
+    if not isinstance(semantic_no_change, bool):
+        raise TypeError("semantic_no_change must be a boolean")
+    return DecisionEvidenceRecords(
+        changed_facts=records("changed_facts"),
+        recalled_claims=records("recalled_claims"),
+        stale_or_rejected_claims=records("stale_or_rejected_claims"),
+        conflicts=records("conflicts"),
+        semantic_no_change=semantic_no_change,
+    )
 
 
 class _UnavailableContextProvider:
@@ -161,8 +205,9 @@ def assemble_profile_decision_evidence(
 
     The caller owns domain reasoning through ``rebase``. Raw exact reads and
     advisory recall stay in-process, while the returned public packet contains
-    only opaque refs and compact evidence. ``proposed_cursors`` remain private
-    and must not be persisted until the caller validates lifecycle writeback.
+    only opaque refs and compact evidence. ``proposed_cursors`` remain private;
+    a caller may keep them in the dedicated pending-settlement store, but must
+    not apply them to active cursor state before validated lifecycle writeback.
     """
 
     try:

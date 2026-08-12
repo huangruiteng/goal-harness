@@ -64,6 +64,11 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
     )
 
     reentry = contract["cli_channel"]["runtime_capability_reentry"]
+    assert contract["agent_channel"]["primary_action"] == (
+        "execute interaction_contract.cli_channel.next_cli_actions[0] to "
+        "materialize the missing capability; do not backtrack to generic "
+        "inspection or a monitor fallback"
+    )
     assert reentry["schema_version"] == "runtime_capability_reentry_v0"
     assert reentry["state"] == "verification_required"
     assert reentry["inheritance_contract"] == {
@@ -174,6 +179,10 @@ def test_quota_cli_promotes_reentry_before_large_diagnostics() -> None:
 
     assert projected["runtime_capability_reentry"] == packet
     assert rendered.index('"runtime_capability_reentry"') < 512
+    assert rendered.index('"interaction_contract"') < 2_048
+    assert rendered.index('"interaction_contract"') < rendered.index(
+        '"large_diagnostic"'
+    )
     assert rendered.index('"schema_version": "runtime_capability_reentry_v0"') < 1_024
     assert rendered.index('"large_diagnostic"') > rendered.index(
         '"runtime_capability_reentry"'

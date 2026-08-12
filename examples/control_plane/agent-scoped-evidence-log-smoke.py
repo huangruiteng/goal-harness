@@ -14,6 +14,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from loopx.control_plane.runtime.agent_scoped_evidence_log import (  # noqa: E402
+    project_evidence_log_read_receipts,
+)
+from loopx.rollout_event_log import load_rollout_events  # noqa: E402
+
 
 GOAL_ID = "agent-evidence-fixture"
 AGENT_ID = "agent-a"
@@ -214,16 +219,59 @@ def run_cli(registry_path: Path, *, limit: int = 10) -> dict:
     return json.loads(result.stdout)
 
 
+def run_status(registry_path: Path) -> dict:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "loopx.cli",
+            "--registry",
+            str(registry_path),
+            "--format",
+            "json",
+            "status",
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout)
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         registry_path = write_fixture(Path(tmp))
         payload = run_cli(registry_path)
         limited = run_cli(registry_path, limit=2)
+        status_payload = run_status(registry_path)
+        durable_receipts = project_evidence_log_read_receipts(
+            load_rollout_events(
+                Path(tmp)
+                / "runtime"
+                / "goals"
+                / GOAL_ID
+                / "rollout-event-log.jsonl"
+            )
+        )
     assert payload["ok"] is True
     assert payload["schema_version"] == "agent_scoped_evidence_log_v0"
     assert payload["goal_id"] == GOAL_ID
     assert payload["agent_id"] == AGENT_ID
     assert payload["todo_id"] == TODO_ID
+    assert payload["read_receipt"]["goal_id"] == GOAL_ID
+    assert payload["read_receipt"]["agent_id"] == AGENT_ID
+    assert payload["read_receipt"]["todo_id"] == TODO_ID
+    assert payload["read_receipt"]["read_window"]["limit"] == 10
+    assert len(durable_receipts) == 2
+    assert durable_receipts[0]["read_window"]["limit"] == 2
+    assert durable_receipts[1]["event_id"] == payload["read_receipt"]["event_id"]
+    status_item = next(
+        item
+        for item in status_payload["attention_queue"]["items"]
+        if item.get("goal_id") == GOAL_ID
+    )
+    assert status_item["evidence_log_read_receipts"] == durable_receipts
     assert payload["rollout_event_count"] == 3
     assert payload["run_history_ref_count"] == 1
     assert payload["matched_count"] == 4

@@ -339,4 +339,6 @@ def test_catalog_routes_to_default_off_profile_inspection() -> None:
     assert {
         "decision_context_profile_v0",
         "decision_context_activation_status_v0",
+        "decision_review_receipt_v0",
+        "decision_review_settlement_v0",
     } <= schema_versions

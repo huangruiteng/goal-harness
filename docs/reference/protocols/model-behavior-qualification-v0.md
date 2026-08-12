@@ -246,16 +246,29 @@ stochastic output.
 ## Actual-Default Scenario Portfolio
 
 `actual_default_model_behavior_portfolio_v0` is the regular low-frequency live
-suite. Its turn scenarios feed the live actor the same default full
-`quota should-run` packet consumed by Codex App automation. Onboarding scenarios
-use the shipped guided-onboarding packet. The suite does not introduce a third
-model protocol or retain a retired product arm. Its fixed catalog covers nine
-core decisions:
+suite. Its selected-Todo, required-vision replan, scoped-gate successor, and
+capability-bridge repair scenarios start from the shipped thin Codex App
+heartbeat task and let the model call the real `quota should-run` CLI. The
+capability scenario also wraps that task body in the trigger envelope carrying
+the heartbeat time, matching the Codex App input that makes `LOOPX_TURN`
+reusable. The first requires a real read-only action against the
+selected Todo target; the second requires the exact agent-scoped evidence-log
+read projected by a hermetic missing-vision replan state; the third requires a
+post-quota non-blocking user notice followed by the exact ready-successor
+action. The fourth requires the quota-projected agent-owned capability-repair
+Todo to be created and read back before the incomplete monitor fallback can
+delay work; any post-quota workspace read fails as action backtracking. The other turn
+scenarios still feed the live actor the same default full quota packet consumed
+by Codex App automation, because their current proof is packet interpretation
+rather than tool execution. Onboarding scenarios use the shipped guided-
+onboarding packet. The suite does not introduce a third model protocol or
+retain a retired product arm. Its fixed catalog covers nine core decisions:
 
 1. the normal guided onboarding packet selects `connect_if_needed`;
 2. an unresolved agent identity selects `select_agent_identity`;
 3. multiple goals select `select_goal` before any mutation;
-4. the default quota packet preserves the exact selected todo;
+4. real quota selects the exact Todo and the model executes its bounded target
+   action instead of merely repeating its id;
 5. the selected peer identity matches the todo claim in the model-facing route;
 6. `same_agent_non_delivery` keeps the successor with the completing peer;
 7. a final human gate selects `ask_user` and forbids normal delivery;
@@ -268,13 +281,15 @@ snapshots; each packet is generated through the production quota, interaction,
 and scheduler paths and deliberately contains competing signals:
 
 10. a monitor lane and peer-owned advancement both look non-runnable, but a
-    missing required per-agent vision still selects autonomous replan;
+    missing required per-agent vision still selects autonomous replan and the
+    model executes the projected evidence-log read before choosing a delta;
 11. an open user notice coexists with a ready deferred successor, so the model
     must surface the notice and execute the successor replan rather than treat
     every `user_action_required` value as a blocking gate;
 12. unavailable capability blocks the visible advancement, while an incomplete
-    monitor schedule remains repairable, so the selected and primary action is
-    monitor-schedule repair rather than wait or the blocked task.
+    monitor schedule remains as a fallback, so the agent must execute the
+    quota-projected capability-repair Todo rather than wait on or update the
+    monitor or attempt the blocked task.
 
 Three compaction scenarios exercise the actual default CLI projection:
 
@@ -294,20 +309,35 @@ hard behavior dimensions. Contrast expectations are derived from source
 contracts before projection or provider spend.
 
 Every scenario declares its own deterministic source oracle and runs exactly
-twice. The oracle validates exact packet fields before provider spend. The live
-turn actor then reads the default full `quota should-run` packet directly and
-must preserve the runtime-facing decision, selected todo, user gate, execution
-obligation, delivery boundary, quiet-wait rule, and ordered action kinds. It is
-not asked to echo the testing-only nine-field semantic contract. Exact
+twice. The oracle validates exact source semantics before provider spend. The
+four real-tool scenarios then prove their complete state-to-action paths:
+hermetic Goal state, production heartbeat prompt, real quota output, model-
+selected tool action, real readback, and a bounded semantic receipt. The
+remaining live turn
+actor cases read the default full quota packet directly and must preserve the
+runtime-facing decision, selected todo, user gate, execution obligation,
+delivery boundary, quiet-wait rule, and ordered action kinds. They are not asked
+to echo the testing-only nine-field semantic contract, but they also must not be
+described as tool-behavior proof. Exact
 scheduler, vision, writeback, and warning projections remain deterministic
 action-signature tests; explicit pair/corpus mode retains TurnEnvelope and
 semantic-contract extraction when a packet differential is the thing under
 test. All attempts must align. Actor or transport errors are not retried
-automatically; the portfolio fails closed and stops further calls. The maximum
-regular run is therefore 30 provider calls. Generic full-versus-candidate pair
-mode remains available only
+automatically; the portfolio fails closed and stops further calls. The catalog
+still has 30 bounded scenario attempts. Because each of the four real-tool
+scenario attempts may need up to six provider turns, the maximum regular run
+is 70 provider turns.
+Generic full-versus-candidate pair mode remains available only
 for temporary sensitive differentials or explicit stable-versus-candidate
 outcome claims, not as a permanent regular-behavior baseline.
+
+The selected-Todo, replan evidence-log, scoped-gate successor, and capability-
+bridge repair gates share only proven mechanics:
+ordinary exec-tool decoding, bounded LoopX argv extraction, and isolated CLI
+execution. Their Goal fixtures, legal action state machines, and semantic
+oracles remain scenario-owned. This keeps four real call sites from copying
+transport plumbing without turning unrelated behavior into a parameter-heavy
+generic runner.
 
 The complete catalog is preflighted before the first provider call. Schema,
 public-safety, action-signature, actual-default, and scenario-oracle failures

@@ -20,7 +20,11 @@ from loopx.capabilities.issue_fix.candidate_preflight import (
     build_issue_fix_candidate_preflight_packet,
     candidate_preflight_input_contract,
 )
-from loopx.cli import main as cli_main
+from loopx.cli import build_parser, main as cli_main
+from loopx.cli_commands.todo_argument_validation import (
+    validate_shared_todo_options,
+    validate_todo_add_options,
+)
 
 GOAL_ID = "guided-projection-goal"
 AGENT_ID = "codex-guided-projection"
@@ -707,7 +711,7 @@ def test_start_goal_reuses_bound_thread_agent_and_scopes_commands(tmp_path: Path
     assert "bind_thread_identity" not in {
         step["id"] for step in payload["guided_transaction"]["ordered_steps"]
     }
-    assert f"--agent-id {AGENT_ID}" in payload["guided_transaction"]["ordered_steps"][3]["command_template"]
+    assert f"--claimed-by {AGENT_ID}" in payload["guided_transaction"]["ordered_steps"][3]["command_template"]
 
     explicit_override = build_start_goal_guided_packet(
         project=project,
@@ -1335,3 +1339,45 @@ def test_codex_ide_plugin_uses_visible_goal_and_preserves_compact_parity(
     assert legacy["command_pack"]["host_loop_activation"]["host_surface"] == (
         "codex_ide_visible_goal_mode"
     )
+
+
+def _runnable_todo_add_argv(command_template: str) -> list[str]:
+    """Drop the documented optional span so the template can be parsed as argv."""
+    tokens = shlex.split(command_template)
+    assert tokens[0] == "loopx"
+    argv: list[str] = []
+    inside_optional = False
+    for token in tokens[1:]:
+        if inside_optional:
+            inside_optional = not token.endswith("]")
+            continue
+        if token.startswith("["):
+            inside_optional = not token.endswith("]")
+            continue
+        argv.append(token)
+    return argv
+
+
+@pytest.mark.parametrize("agent_id", [AGENT_ID, None])
+def test_guided_write_ordered_todos_template_is_accepted_by_todo_add(
+    tmp_path: Path,
+    agent_id: str | None,
+) -> None:
+    project = _write_connected_project(tmp_path)
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=agent_id,
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+        available_capabilities=["network"],
+    )
+    template = next(
+        step["command_template"]
+        for step in payload["guided_transaction"]["ordered_steps"]
+        if step["id"] == "write_ordered_todos"
+    )
+    args = build_parser().parse_args(_runnable_todo_add_argv(template))
+    validate_shared_todo_options(args)
+    validate_todo_add_options(args)

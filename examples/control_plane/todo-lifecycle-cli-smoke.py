@@ -69,6 +69,8 @@ def assert_peer_monitor_no_followup() -> None:
             "1d",
             "--next-due-at",
             "2026-07-11T00:00:00Z",
+            "--expires-at",
+            "2026-07-12T00:00:00Z",
         )
         side_monitor_id = side_monitor_added["todo_id"]
         monitor_update_bypass = run_cli_error(
@@ -144,6 +146,8 @@ def assert_peer_monitor_no_followup() -> None:
             "1d",
             "--next-due-at",
             "2026-07-11T00:00:00Z",
+            "--expires-at",
+            "2026-07-12T00:00:00Z",
         )
         write_monitor_completed = run_cli(
             registry_path,

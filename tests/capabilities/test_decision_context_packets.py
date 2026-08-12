@@ -6,6 +6,7 @@ from loopx.capabilities.decision_context import (
     build_decision_evidence_packet,
     build_decision_outcome_receipt,
     build_decision_proposal,
+    build_decision_review_receipt,
 )
 
 OBSERVED_AT = "2026-07-25T13:30:00+00:00"
@@ -301,6 +302,66 @@ def test_proposal_requires_at_least_one_objective_score() -> None:
                 "rationale": "A has evidence.",
                 "confidence": 0.7,
             },
+        )
+
+
+@pytest.mark.parametrize("disposition", ["approve", "reject", "defer"])
+def test_gated_review_receipt_binds_exact_proposal_and_gate(
+    disposition: str,
+) -> None:
+    evidence = evidence_packet()
+    proposal = proposal_packet(str(evidence["packet_ref"]))
+    receipt = build_decision_review_receipt(
+        goal_id="goal:decision-advisor",
+        decision_id="decision:20260725:priority",
+        evidence_packet_ref=str(evidence["packet_ref"]),
+        proposal_packet_ref=str(proposal["packet_ref"]),
+        gate_todo_id="todo:owner-review",
+        source_event_id="event:owner-review",
+        recorded_at=REVIEW_AT,
+        disposition=disposition,
+        actor_ref="owner:goal",
+        reason_code=f"owner_{disposition}",
+        summary=f"The owner recorded {disposition}.",
+    )
+
+    assert receipt["disposition"] == disposition
+    assert receipt["authority_confirmed"] is True
+    assert receipt["quiet_noop"] is False
+    assert receipt["outcome_observation_required"] is (disposition == "approve")
+
+
+def test_no_change_review_receipt_is_quiet_and_has_no_gate() -> None:
+    evidence = evidence_packet()
+    receipt = build_decision_review_receipt(
+        goal_id="goal:decision-advisor",
+        decision_id="decision:20260725:priority",
+        evidence_packet_ref=str(evidence["packet_ref"]),
+        recorded_at=REVIEW_AT,
+        disposition="no_change",
+        actor_ref="agent:decision-advisor",
+        reason_code="no_material_thesis_change",
+        summary="Changed source material does not alter the current decision.",
+    )
+
+    assert receipt["proposal_packet_ref"] is None
+    assert receipt["gate_todo_id"] is None
+    assert receipt["authority_confirmed"] is False
+    assert receipt["quiet_noop"] is True
+
+
+def test_no_change_review_receipt_rejects_user_gate_refs() -> None:
+    with pytest.raises(ValueError, match="must not reference"):
+        build_decision_review_receipt(
+            goal_id="goal:example",
+            decision_id="decision:example",
+            evidence_packet_ref="decision-evidence-example",
+            proposal_packet_ref="decision-proposal-example",
+            recorded_at=REVIEW_AT,
+            disposition="no_change",
+            actor_ref="agent:decision-advisor",
+            reason_code="no_material_change",
+            summary="No material change.",
         )
 
 

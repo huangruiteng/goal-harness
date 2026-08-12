@@ -4,6 +4,8 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from ..control_plane.todos.contract import decision_scope_metadata_value
+
 
 RolloutEventAppender = Callable[..., dict[str, object]]
 
@@ -16,7 +18,6 @@ TODO_EVENT_KINDS = {
     "archive-completed": "todo_archive_completed",
     "capture-followups": "todo_capture_followups",
 }
-
 
 def append_todo_rollout_event(
     payload: dict[str, object],
@@ -50,6 +51,15 @@ def append_todo_rollout_event(
             "command": "todo",
             "todo_command": args.todo_command,
             "role": payload.get("role") or args.role or "",
+            "task_class": (
+                payload.get("task_class")
+                or getattr(args, "task_class", None)
+                or ""
+            ),
+            "decision_scope": decision_scope_metadata_value(
+                payload.get("decision_scope")
+            ),
+            "decision_outcome": payload.get("decision_outcome"),
             "changed": bool(payload.get("changed")),
             "added": bool(payload.get("added")),
             "already_exists": bool(payload.get("already_exists")),

@@ -491,6 +491,9 @@ def test_codex_app_thin_prompt_embeds_profile_only_in_quota_command() -> None:
     assert "--codex-app" in prompt["task_body"]
     assert "host_surface" not in prompt["task_body"]
     assert "scheduler_owner" not in prompt["task_body"]
+    assert "Run quota; execute `interaction_contract` next—no detours." in prompt[
+        "task_body"
+    ]
     assert "compact_prompt_command" not in prompt
     assert "brief_prompt_command" not in prompt
     assert prompt["interface_budget"]["within_budget"] is True

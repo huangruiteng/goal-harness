@@ -16,12 +16,15 @@ from ...rollout_event_log import (
 from .assembler import (
     DECISION_CONTEXT_ASSEMBLY_SCHEMA_VERSION,
     DECISION_CURSOR_CHECKPOINT_SCHEMA_VERSION,
+    DECISION_SEMANTIC_REBASE_RECEIPT_SCHEMA_VERSION,
     DecisionContextAssembly,
 )
 from .packets import (
     DECISION_EVIDENCE_PACKET_SCHEMA_VERSION,
     DECISION_OUTCOME_RECEIPT_SCHEMA_VERSION,
     DECISION_PROPOSAL_SCHEMA_VERSION,
+    DECISION_REVIEW_RECEIPT_SCHEMA_VERSION,
+    build_decision_review_receipt,
 )
 from .private_state import (
     load_private_decision_cursors,
@@ -90,12 +93,9 @@ def _load_current_cursors(
     )
 
 
-def _validate_decision_packet_chain(
-    *,
+def _validate_assembly_evidence_checkpoint(
     assembly: DecisionContextAssembly,
-    proposal: Mapping[str, Any],
-    outcome_receipt: Mapping[str, Any],
-) -> tuple[str, str, str, Mapping[str, Any]]:
+) -> tuple[Mapping[str, Any], str, Mapping[str, Any]]:
     packet = assembly.public_packet()
     if packet.get("schema_version") != DECISION_CONTEXT_ASSEMBLY_SCHEMA_VERSION:
         raise ValueError("decision-context assembly schema is invalid")
@@ -134,6 +134,18 @@ def _validate_decision_packet_chain(
         or checkpoint.get("applied") is not False
     ):
         raise ValueError("decision-context cursor checkpoint is not committable")
+    return packet, evidence_ref, checkpoint
+
+
+def _validate_decision_packet_chain(
+    *,
+    assembly: DecisionContextAssembly,
+    proposal: Mapping[str, Any],
+    outcome_receipt: Mapping[str, Any],
+) -> tuple[str, str, str, Mapping[str, Any]]:
+    packet, evidence_ref, checkpoint = _validate_assembly_evidence_checkpoint(
+        assembly
+    )
 
     if proposal.get("schema_version") != DECISION_PROPOSAL_SCHEMA_VERSION:
         raise ValueError("decision-context proposal schema is invalid")
@@ -163,6 +175,140 @@ def _validate_decision_packet_chain(
     ):
         raise ValueError("decision-context outcome receipt does not match proposal")
     return evidence_ref, proposal_ref, outcome_ref, checkpoint
+
+
+def _validate_review_packet_chain(
+    *,
+    assembly: DecisionContextAssembly,
+    proposal: Mapping[str, Any] | None,
+    review_receipt: Mapping[str, Any],
+    event_log_path: Path,
+) -> tuple[str, str | None, str, Mapping[str, Any]]:
+    packet, evidence_ref, checkpoint = _validate_assembly_evidence_checkpoint(
+        assembly
+    )
+
+    if review_receipt.get("schema_version") != DECISION_REVIEW_RECEIPT_SCHEMA_VERSION:
+        raise ValueError("decision-context review receipt schema is invalid")
+    review_ref = _validated_packet_ref(
+        "decision-review",
+        review_receipt,
+        field="packet_ref",
+    )
+    try:
+        canonical_review = build_decision_review_receipt(
+            goal_id=review_receipt.get("goal_id"),
+            decision_id=review_receipt.get("decision_id"),
+            evidence_packet_ref=review_receipt.get("evidence_packet_ref"),
+            recorded_at=review_receipt.get("recorded_at"),
+            disposition=review_receipt.get("disposition"),
+            actor_ref=review_receipt.get("actor_ref"),
+            reason_code=review_receipt.get("reason_code"),
+            summary=review_receipt.get("summary"),
+            proposal_packet_ref=review_receipt.get("proposal_packet_ref"),
+            gate_todo_id=review_receipt.get("gate_todo_id"),
+            source_event_id=review_receipt.get("source_event_id"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("decision-context review receipt is invalid") from exc
+    if dict(review_receipt) != canonical_review:
+        raise ValueError("decision-context review receipt is not canonical")
+    if (
+        review_receipt.get("goal_id") != packet.get("goal_id")
+        or review_receipt.get("decision_id") != packet.get("decision_id")
+        or review_receipt.get("evidence_packet_ref") != evidence_ref
+    ):
+        raise ValueError("decision-context review receipt does not match evidence")
+
+    disposition = str(review_receipt.get("disposition") or "")
+    proposal_ref: str | None = None
+    if disposition == "no_change":
+        semantic_rebase = packet.get("semantic_rebase")
+        if (
+            not isinstance(semantic_rebase, Mapping)
+            or semantic_rebase.get("schema_version")
+            != DECISION_SEMANTIC_REBASE_RECEIPT_SCHEMA_VERSION
+            or semantic_rebase.get("status") != "no_material_change"
+            or semantic_rebase.get("quiet_noop_allowed") is not True
+            or proposal is not None
+        ):
+            raise ValueError(
+                "decision-context no_change settlement lacks semantic proof"
+            )
+    else:
+        if (
+            proposal is None
+            or proposal.get("schema_version") != DECISION_PROPOSAL_SCHEMA_VERSION
+        ):
+            raise ValueError("decision-context proposal schema is invalid")
+        proposal_ref = _validated_packet_ref(
+            "decision-proposal",
+            proposal,
+            field="packet_ref",
+        )
+        if (
+            proposal.get("goal_id") != packet.get("goal_id")
+            or proposal.get("decision_id") != packet.get("decision_id")
+            or proposal.get("evidence_packet_ref") != evidence_ref
+            or review_receipt.get("proposal_packet_ref") != proposal_ref
+        ):
+            raise ValueError("decision-context proposal does not match review")
+        source_event, resolved_disposition = resolve_decision_review_source_event(
+            event_log_path=event_log_path,
+            source_event_id=str(review_receipt.get("source_event_id") or ""),
+            proposal_packet_ref=proposal_ref,
+            gate_todo_id=str(review_receipt.get("gate_todo_id") or ""),
+        )
+        if resolved_disposition != disposition:
+            raise ValueError("decision-context gate disposition does not match review")
+        if source_event.get("recorded_at") != review_receipt.get("recorded_at"):
+            raise ValueError("decision-context review time does not match gate event")
+    return evidence_ref, proposal_ref, review_ref, checkpoint
+
+
+def resolve_decision_review_source_event(
+    *,
+    event_log_path: Path,
+    source_event_id: str,
+    proposal_packet_ref: str,
+    gate_todo_id: str | None = None,
+) -> tuple[Mapping[str, Any], str]:
+    """Exact-read one user-gate event and infer its review disposition."""
+
+    matches = [
+        event
+        for event in load_rollout_events(
+            event_log_path.expanduser(),
+            limit=_LIFECYCLE_WRITEBACK_READ_LIMIT,
+        )
+        if event.get("event_id") == source_event_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("decision-context user-gate event was not found")
+    event = matches[0]
+    details = event.get("details")
+    expected_scope = f"direction:action:{proposal_packet_ref}"
+    if (
+        event.get("schema_version") != ROLLOUT_EVENT_SCHEMA_VERSION
+        or _event_id(event) != source_event_id
+        or not isinstance(details, Mapping)
+        or details.get("task_class") != "user_gate"
+        or details.get("decision_scope") != expected_scope
+        or (gate_todo_id and event.get("todo_id") != gate_todo_id)
+    ):
+        raise ValueError("decision-context user-gate event does not match proposal")
+
+    event_kind = event.get("event_kind")
+    status = event.get("status")
+    outcome = details.get("decision_outcome")
+    if event_kind == "todo_complete" and status == "done" and outcome in {
+        "approve",
+        "reject",
+    }:
+        return event, str(outcome)
+    if event_kind == "todo_update" and status == "deferred" and outcome is None:
+        return event, "defer"
+    raise ValueError("decision-context user-gate event has no review disposition")
 
 
 def _validate_lifecycle_writeback(
@@ -216,10 +362,11 @@ def commit_profile_decision_cursors(
     profile_path: Path,
     cursor_path: Path,
     assembly: DecisionContextAssembly,
-    proposal: Mapping[str, Any],
-    outcome_receipt: Mapping[str, Any],
     lifecycle_event_log_path: Path,
     lifecycle_event_id: str,
+    proposal: Mapping[str, Any] | None = None,
+    review_receipt: Mapping[str, Any] | None = None,
+    outcome_receipt: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """CAS-commit private cursors after exact-read lifecycle writeback validation."""
 
@@ -239,13 +386,32 @@ def commit_profile_decision_cursors(
     ):
         raise ValueError("decision-context profile changed since evidence assembly")
 
-    evidence_ref, proposal_ref, outcome_ref, checkpoint = (
-        _validate_decision_packet_chain(
+    review_ref: str | None = None
+    outcome_ref: str | None = None
+    if review_receipt is not None:
+        evidence_ref, proposal_ref, review_ref, checkpoint = (
+            _validate_review_packet_chain(
+                assembly=assembly,
+                proposal=proposal,
+                review_receipt=review_receipt,
+                event_log_path=lifecycle_event_log_path,
+            )
+        )
+        required_artifact_refs = {evidence_ref, review_ref}
+        if proposal_ref is not None:
+            required_artifact_refs.add(proposal_ref)
+    elif proposal is not None and outcome_receipt is not None:
+        evidence_ref, proposal_ref, outcome_ref, checkpoint = _validate_decision_packet_chain(
             assembly=assembly,
             proposal=proposal,
             outcome_receipt=outcome_receipt,
         )
-    )
+        required_artifact_refs = {evidence_ref, proposal_ref, outcome_ref}
+    else:
+        raise ValueError(
+            "decision-context cursor commit requires review_receipt or the "
+            "legacy proposal/outcome chain"
+        )
     packet = assembly.public_packet()
     if packet.get("goal_id") != goal_id:
         raise ValueError("decision-context assembly goal does not match profile")
@@ -255,7 +421,7 @@ def commit_profile_decision_cursors(
         event_id=lifecycle_event_id,
         goal_id=goal_id,
         decision_id=decision_id,
-        required_artifact_refs={evidence_ref, proposal_ref, outcome_ref},
+        required_artifact_refs=required_artifact_refs,
     )
 
     proposals = dict(assembly.proposed_cursors)
@@ -344,7 +510,13 @@ def commit_profile_decision_cursors(
         "checkpoint_ref": checkpoint["checkpoint_ref"],
         "evidence_packet_ref": evidence_ref,
         "proposal_packet_ref": proposal_ref,
+        "review_receipt_ref": review_ref,
         "outcome_receipt_ref": outcome_ref,
+        "settlement_disposition": (
+            review_receipt.get("disposition")
+            if review_receipt is not None
+            else "legacy_outcome_chain"
+        ),
         "lifecycle_event_id": event["event_id"],
         "status": "committed" if cursor_state_mutated else "replayed",
         "source_count": len(commit_rows),

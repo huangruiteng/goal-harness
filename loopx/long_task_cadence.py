@@ -9,7 +9,11 @@ from .control_plane.work_items.delivery_outcome import (
     normalize_delivery_outcome,
     normalize_delivery_turn_kind,
 )
-from .execution_profile import compact_execution_profile, execution_profile_threshold
+from .execution_profile import (
+    compact_execution_profile,
+    execution_profile_is_fine_grained,
+    execution_profile_threshold,
+)
 
 
 LONG_TASK_CADENCE_HINT_SCHEMA_VERSION = "cadence_hint_v0"
@@ -138,8 +142,22 @@ def build_long_task_cadence_hint(
 
     granularity = _progress_granularity(latest_run)
     if granularity in SMALL_PROGRESS_GRANULARITIES:
-        recommendation = "widen" if small_step_streak >= threshold else "keep"
-        reason = "repeated_surface_only" if recommendation == "widen" else _reason_from_granularity(granularity)
+        threshold_reached = small_step_streak >= threshold
+        fine_grained = execution_profile_is_fine_grained(profile)
+        recommendation = (
+            "replan"
+            if fine_grained and threshold_reached
+            else "widen"
+            if threshold_reached
+            else "keep"
+        )
+        reason = (
+            "fine_checkpoint_complete"
+            if recommendation == "replan"
+            else "repeated_surface_only"
+            if recommendation == "widen"
+            else _reason_from_granularity(granularity)
+        )
         return {
             "schema_version": LONG_TASK_CADENCE_HINT_SCHEMA_VERSION,
             "signal": "thin_progress",

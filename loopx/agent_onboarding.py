@@ -339,7 +339,7 @@ def build_agent_onboarding_packet(
     resolved_project = str(inspection["project"])
     resolved_goal_id = str(inspection["goal_id"])
     registry_path = Path(str(inspection["registry"]))
-    registry = read_json(registry_path)
+    registry = read_json(registry_path) if registry_path.exists() else {}
     goal = next(
         (
             item

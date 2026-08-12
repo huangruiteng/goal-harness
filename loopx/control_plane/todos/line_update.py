@@ -357,4 +357,5 @@ def apply_todo_update_to_lines(
         "cadence": effective_metadata.get("cadence"),
         "next_due_at": effective_metadata.get("next_due_at"),
         "expires_at": effective_metadata.get("expires_at"),
+        "watch_only": effective_metadata.get("watch_only"),
     }

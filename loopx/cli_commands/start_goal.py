@@ -20,10 +20,12 @@ PrintPayload = Callable[
 ]
 
 _CAPABILITY_ROUTE_SWITCH = "--capability-route"
+_FINE_GRAINED_SWITCH = "--fine-grained"
 _CAPABILITY_ROUTE_PREFIX = re.compile(
     r"\A--capability-route(?:=(?P<equals>\S+)|\s+(?P<spaced>\S+))"
     r"(?P<remainder>[\s\S]*)\Z"
 )
+_FINE_GRAINED_PREFIX = re.compile(r"\A--fine-grained(?P<remainder>(?:\s[\s\S]*)?)\Z")
 
 
 def add_capability_route_argument(parser: argparse.ArgumentParser) -> None:
@@ -89,6 +91,14 @@ def register_start_goal_command(subparsers: argparse._SubParsersAction) -> None:
         help="Capability available in this host loop. Repeat for multiple capabilities.",
     )
     add_capability_route_argument(start_goal_parser)
+    start_goal_parser.add_argument(
+        "--fine-grained",
+        action="store_true",
+        help=(
+            "Persist fine-grained execution for this goal: one small checkpoint "
+            "todo per turn, followed by evidence-driven replanning."
+        ),
+    )
     goal_input_group = start_goal_parser.add_mutually_exclusive_group(required=True)
     goal_input_group.add_argument(
         "--goal-text",
@@ -98,7 +108,8 @@ def register_start_goal_command(subparsers: argparse._SubParsersAction) -> None:
         "--slash-command-arguments",
         help=(
             "Complete visible /loopx arguments. The CLI consumes only an optional "
-            "leading --capability-route switch and treats the remainder as goal text. "
+            "leading --fine-grained and --capability-route switches and treats the "
+            "remainder as goal text. "
             "Use --slash-command-arguments='<arguments>' when the value begins with --."
         ),
     )
@@ -112,40 +123,71 @@ def register_start_goal_command(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def _resolve_start_goal_input(args: argparse.Namespace) -> tuple[str, str | None]:
+def _resolve_start_goal_input(args: argparse.Namespace) -> tuple[str, str | None, bool]:
     raw_arguments = getattr(args, "slash_command_arguments", None)
     capability_route = getattr(args, "capability_route", None)
+    fine_grained = bool(getattr(args, "fine_grained", False))
     if raw_arguments is None:
-        return str(args.goal_text), capability_route
+        return str(args.goal_text), capability_route, fine_grained
     if capability_route is not None:
         raise ValueError(
             "--slash-command-arguments cannot be combined with --capability-route; "
             "the raw argument string already owns the optional route switch"
         )
+    if fine_grained:
+        raise ValueError(
+            "--slash-command-arguments cannot be combined with --fine-grained; "
+            "the raw argument string already owns leading switches"
+        )
 
     normalized = str(raw_arguments).strip()
     if not normalized:
         raise ValueError("--slash-command-arguments must contain goal text")
-    if not normalized.startswith(_CAPABILITY_ROUTE_SWITCH):
-        return normalized, None
-
-    match = _CAPABILITY_ROUTE_PREFIX.fullmatch(normalized)
-    if match is None:
-        raise ValueError(
-            "malformed leading --capability-route in --slash-command-arguments"
-        )
-    route = str(match.group("equals") or match.group("spaced") or "")
-    if route not in START_GOAL_CAPABILITY_ROUTES:
-        raise ValueError(
-            "unsupported --capability-route; expected one of: "
-            + ", ".join(START_GOAL_CAPABILITY_ROUTES)
-        )
-    goal_text = str(match.group("remainder") or "").strip()
+    route = None
+    parsed_fine_grained = False
+    last_switch = None
+    remainder = normalized
+    while True:
+        if remainder.startswith(_FINE_GRAINED_SWITCH):
+            match = _FINE_GRAINED_PREFIX.fullmatch(remainder)
+            if match is None:
+                raise ValueError(
+                    "malformed leading --fine-grained in --slash-command-arguments"
+                )
+            if parsed_fine_grained:
+                raise ValueError("duplicate leading --fine-grained switch")
+            parsed_fine_grained = True
+            last_switch = _FINE_GRAINED_SWITCH
+            remainder = str(match.group("remainder") or "").strip()
+            continue
+        if remainder.startswith(_CAPABILITY_ROUTE_SWITCH):
+            match = _CAPABILITY_ROUTE_PREFIX.fullmatch(remainder)
+            if match is None:
+                raise ValueError(
+                    "malformed leading --capability-route in --slash-command-arguments"
+                )
+            if route is not None:
+                raise ValueError("duplicate leading --capability-route switch")
+            route = str(match.group("equals") or match.group("spaced") or "")
+            last_switch = _CAPABILITY_ROUTE_SWITCH
+            if route not in START_GOAL_CAPABILITY_ROUTES:
+                raise ValueError(
+                    "unsupported --capability-route; expected one of: "
+                    + ", ".join(START_GOAL_CAPABILITY_ROUTES)
+                )
+            remainder = str(match.group("remainder") or "").strip()
+            continue
+        break
+    goal_text = remainder
     if not goal_text:
+        if last_switch == _CAPABILITY_ROUTE_SWITCH:
+            raise ValueError(
+                "--slash-command-arguments must contain goal text after --capability-route"
+            )
         raise ValueError(
-            "--slash-command-arguments must contain goal text after --capability-route"
+            "--slash-command-arguments must contain goal text after --fine-grained"
         )
-    return goal_text, route
+    return goal_text, route, parsed_fine_grained
 
 
 def handle_start_goal_command(
@@ -162,7 +204,7 @@ def handle_start_goal_command(
         print_payload(payload, args.format, render_start_goal_guided_markdown)
         return 2
     try:
-        goal_text, capability_route = _resolve_start_goal_input(args)
+        goal_text, capability_route, fine_grained = _resolve_start_goal_input(args)
     except ValueError as exc:
         payload = {
             "ok": False,
@@ -186,6 +228,7 @@ def handle_start_goal_command(
             goal_text=goal_text,
             available_capabilities=args.available_capabilities,
             capability_route=capability_route,
+            fine_grained=fine_grained,
             include_command_pack_detail=bool(args.include_command_pack_detail),
         )
         print_payload(payload, args.format, render_start_goal_guided_markdown)
@@ -201,6 +244,7 @@ def handle_start_goal_command(
         goal_text=goal_text,
         available_capabilities=args.available_capabilities,
         capability_route=capability_route,
+        fine_grained=fine_grained,
         include_command_pack_detail=bool(args.include_command_pack_detail),
     )
     print_payload(payload, args.format, render_start_goal_guided_markdown)

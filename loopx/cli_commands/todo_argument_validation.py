@@ -50,6 +50,7 @@ TODO_OPTION_FIELDS = (
     ("--cadence", "cadence"),
     ("--next-due-at", "next_due_at"),
     ("--expires-at", "expires_at"),
+    ("--watch-only", "watch_only"),
     ("--clear-claim", "clear_claim"),
     ("--no-follow-up", "no_follow_up"),
     ("--next-agent-todo", "next_agent_todo"),
@@ -80,7 +81,7 @@ _TODO_UPDATE_MUTABLE_FIELDS = (
     "blocks_agent", "clear_blocks_agent", "excluded_agents", "clear_excluded_agents",
     "global_gate", "clear_global_gate", "unblocks_todo_id", "successor_todo_ids",
     "resume_when", "clear_resume_when", "no_follow_up", "monitor_target_key",
-    "cadence", "next_due_at", "expires_at", "clear_claim",
+    "cadence", "next_due_at", "expires_at", "watch_only", "clear_claim",
 )
 
 _TODO_UPDATE_UNSUPPORTED_FIELDS = (

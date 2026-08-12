@@ -61,13 +61,13 @@ goal owner 可以显式选择场景、provider 和 agent lane。
 | | Reward Memory | Decision Context |
 |---|---|---|
 | 核心问题 | 过去学到了什么可复用经验？ | 此刻决策需要相信哪些事实？ |
-| 生命周期 | candidate → review → activate → apply/retire | recall → exact read → rebase → propose → outcome |
+| 生命周期 | candidate → review → activate → apply/retire | recall → exact read → rebase → propose → review settlement → cursor commit → 后续 outcome |
 | 主要对象 | policy、preference、procedural experience | fact、judgment、assumption、conflict、decision、outcome |
 | 写入条件 | 经过验证和 authority review | 决策与结果作为可审计记录追加 |
 | 动作权限 | 不创造 authority | 不创造 authority |
 | 连接方式 | 可作为 Decision Context 的可选经验来源 | verified outcome 可产生 Reward Memory candidate |
 
-## 三层 packet
+## 四层 packet
 
 ### `decision_evidence_packet_v0`
 
@@ -96,6 +96,17 @@ goal owner 可以显式选择场景、provider 和 agent lane。
 
 proposal 必须引用 evidence packet 的稳定指纹，并显式标记
 `authority_confirmation_required=true`。它不能写成 Core truth。
+
+### `decision_review_receipt_v0`
+
+结算层记录四种 disposition：
+
+- `approve`、`reject`、`defer` 必须精确回读现有 `user_gate` event，且 gate scope
+  必须是 `direction:action:<proposal-packet-ref>`；
+- `no_change` 必须有显式 semantic rebase 证明，不创建 gate。
+
+该 receipt 只证明“这批证据已评审或没有实质影响”，允许在 lifecycle writeback
+验证后推进私有 source cursor；它不是 outcome，也不创造动作权限。
 
 ### `decision_outcome_receipt_v0`
 
@@ -146,7 +157,9 @@ flowchart LR
     RECALL["ContextProvider<br/>advisory recall"]
     EVIDENCE["Decision evidence packet"]
     AGENT["Agent proposal"]
-    OUTCOME["Outcome receipt"]
+    REVIEW["Review receipt<br/>gate 或 semantic no change"]
+    CURSOR["私有 cursor commit"]
+    OUTCOME["后续 outcome receipt"]
 
     THIN --> REG
     REG --> SOURCE
@@ -154,7 +167,9 @@ flowchart LR
     RECEIPT --> EVIDENCE
     RECALL --> EVIDENCE
     EVIDENCE --> AGENT
-    AGENT --> OUTCOME
+    AGENT --> REVIEW
+    REVIEW --> CURSOR
+    REVIEW --> OUTCOME
 ```
 
 这样 steady-state automation prompt 可以退化为通用唤醒：启动 goal、遵循 active
@@ -163,20 +178,22 @@ capability 与 goal 配置承担。
 
 ## 不变量
 
-1. 三类 packet 都是 goal-scoped、public-safe、稳定指纹化的结构化记录。
+1. 四类公开 packet 都是 goal-scoped、public-safe、稳定指纹化的结构化记录。
 2. evidence 与 proposal 分离，模型建议不能伪装成事实。
 3. provider 不创造 authority；provider payload、raw chat、tool output、credentials
    不进入 packet。
 4. recall 必须有界；accepted claim 必须保留 exact-read、revision 与 conflict receipt。
 5. proposal 只能建议，真实迁移继续经现有 todo、gate、quota 和 writeback。
 6. provider 不可用时 fail open，不阻断 Core lifecycle。
-7. verified outcome 先进入可审计 receipt，再决定是否提炼为 Reward Memory。
+7. cursor commit 的边界是 review settlement，而不是未来 outcome。
+8. `no_change` 必须有显式语义证明，且不创建 user gate。
+9. verified outcome 先进入可审计 receipt，再决定是否提炼为 Reward Memory。
 
 ## 分阶段交付
 
 ### P0：contract
 
-- 固化三类 packet、稳定指纹、公共安全字段白名单和 provider-neutral
+- 固化四类 packet、稳定指纹、公共安全字段白名单和 provider-neutral
   增量信源契约；
 - 建立能力边界文档与聚焦测试；
 - 不接具体 provider、CLI 或 control-plane writeback。
@@ -209,18 +226,28 @@ health、evidence 和 cursor checkpoint 记录。host API 通过领域 rebase ca
 `preserve`，避免把“扫描/读过”误记成“已吸收”。`on_demand` source 不进入自动
 扫描，只有显式选择后才会读取。
 
-私有 cursor commit 仍是独立验收边界。host API
+私有 cursor commit 仍是独立验收边界。Review 可能跨 Agent turn，所以
+`prepare-review --execute` 会保存一份私有 pending settlement：其中包含公开安全的
+assembly 和私有 cursor proposal，但绝不修改 active cursor。随后
+`settle-review` 精确回读匹配的既有 user-gate event，或核验 assembly 中显式的
+semantic `no_change`，追加 validation event，再执行 cursor CAS。
+
+host API
 `commit_profile_decision_cursors(...)` 现在显式执行这条边界：
 
-- 验证 assembly、evidence、proposal、outcome 与 cursor checkpoint 的完整引用链；
+- 验证 assembly、evidence、review 与 cursor checkpoint 的完整引用链；gated
+  disposition 还必须验证 proposal；
+- 保留原 proposal/outcome 链作为兼容读取路径；
 - 精确回读既有 LoopX rollout event，并校验其 `decision_id` 与 artifact refs
   绑定同一组 packet；
 - profile 已变化或当前 cursor 不再等于 assembly 快照时拒绝提交；
 - 通过文件锁、原子替换、fsync 与回读校验写入私有 cursor 文件；
 - public receipt 只包含不透明 cursor ref，不包含原始 cursor 或私有路径。
 
-source scan、evidence preparation 和 proposal 构建仍不会写 cursor；调用方只传
-一个“writeback 成功”的布尔值，不足以触发提交。
+source scan、evidence preparation、proposal 构建和 pending settlement 创建仍不会
+写 active cursor；调用方只传一个“writeback 成功”的布尔值，不足以触发提交。
+被 approve 的决策仍需在未来单独记录真实 outcome，但这不阻塞把已经评审的信源
+材料标记为已消费。
 
 私有宿主可以通过 `source_provider_overrides` 在运行时绑定 provider 实例。provider
 id 必须先由私有 goal profile 声明，实例身份也必须与声明一致。这样 MCP、收件箱、
@@ -231,9 +258,11 @@ provider 缺失或身份不匹配时 fail open，且不会推进 cursor。
 
 ### P1：首个 dogfood
 
-- 在一个私有、脱敏的决策助手场景生成 evidence/proposal；
-- 通过既有 event/run history 写入 outcome receipt；
-- 以“决策改变、真实结果、失效假设”而非召回条数验收。
+- 在一个私有、脱敏的决策助手场景，由领域 adapter 把新事实映射到稳定私有论点；
+- 只有实质 proposal 进入现有 user gate，显式 semantic no-change 保持 quiet；
+- approve/reject/defer/no-change 后结算 source cursor，后续再通过既有 event/run
+  history 写入 outcome receipt；
+- 以“判断修正、过时证据拒绝、人工阅读量下降、真实结果、失效假设”而非召回条数验收。
 
 ### P2：跨域验证与下沉门槛
 

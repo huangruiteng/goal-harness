@@ -12,6 +12,7 @@ from typing import Any
 
 DECISION_EVIDENCE_PACKET_SCHEMA_VERSION = "decision_evidence_packet_v0"
 DECISION_PROPOSAL_SCHEMA_VERSION = "decision_proposal_v0"
+DECISION_REVIEW_RECEIPT_SCHEMA_VERSION = "decision_review_receipt_v0"
 DECISION_OUTCOME_RECEIPT_SCHEMA_VERSION = "decision_outcome_receipt_v0"
 
 DECISION_CONTEXT_CAPABILITY_ID = "decision_context"
@@ -20,6 +21,12 @@ DECISION_OUTCOME_VERIFICATION_STATUSES = {
     "verified",
     "refuted",
     "inconclusive",
+}
+DECISION_REVIEW_DISPOSITIONS = {
+    "approve",
+    "reject",
+    "defer",
+    "no_change",
 }
 
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -446,6 +453,97 @@ def build_decision_proposal(
         "raw_context_captured": False,
     }
     packet["packet_ref"] = _packet_ref("decision-proposal", packet)
+    return packet
+
+
+def build_decision_review_receipt(
+    *,
+    goal_id: str,
+    decision_id: str,
+    evidence_packet_ref: str,
+    recorded_at: str,
+    disposition: str,
+    actor_ref: str,
+    reason_code: str,
+    summary: str,
+    proposal_packet_ref: str | None = None,
+    gate_todo_id: str | None = None,
+    source_event_id: str | None = None,
+) -> dict[str, Any]:
+    """Record one reviewed proposal or an explicit semantic no-change result.
+
+    Review settlement is deliberately separate from outcome observation. A
+    user may approve, reject, or defer a proposal before its real-world outcome
+    exists, while a semantic no-change result needs no user authority at all.
+    """
+
+    normalized_disposition = _compact_token(
+        disposition,
+        field="disposition",
+    )
+    if normalized_disposition not in DECISION_REVIEW_DISPOSITIONS:
+        raise ValueError(
+            "disposition must be approve, reject, defer, or no_change"
+        )
+    gated = normalized_disposition != "no_change"
+    gated_values = {
+        "proposal_packet_ref": proposal_packet_ref,
+        "gate_todo_id": gate_todo_id,
+        "source_event_id": source_event_id,
+    }
+    if gated:
+        missing = sorted(
+            field for field, value in gated_values.items() if value is None
+        )
+        if missing:
+            raise ValueError(
+                "gated review receipt is missing required fields: "
+                + ", ".join(missing)
+            )
+    elif any(value is not None for value in gated_values.values()):
+        raise ValueError(
+            "no_change review receipt must not reference a proposal or user gate"
+        )
+
+    packet: dict[str, Any] = {
+        "schema_version": DECISION_REVIEW_RECEIPT_SCHEMA_VERSION,
+        "goal_id": _compact_token(goal_id, field="goal_id"),
+        "decision_id": _compact_token(decision_id, field="decision_id"),
+        "evidence_packet_ref": _compact_token(
+            evidence_packet_ref,
+            field="evidence_packet_ref",
+        ),
+        "recorded_at": _iso_timestamp(recorded_at, field="recorded_at"),
+        "disposition": normalized_disposition,
+        "actor_ref": _compact_token(actor_ref, field="actor_ref"),
+        "reason_code": _compact_token(reason_code, field="reason_code"),
+        "summary": _compact_text(summary, field="summary"),
+        "proposal_packet_ref": (
+            _compact_token(proposal_packet_ref, field="proposal_packet_ref")
+            if proposal_packet_ref is not None
+            else None
+        ),
+        "gate_todo_id": (
+            _compact_token(gate_todo_id, field="gate_todo_id")
+            if gate_todo_id is not None
+            else None
+        ),
+        "source_event_id": (
+            _compact_token(source_event_id, field="source_event_id")
+            if source_event_id is not None
+            else None
+        ),
+        "visibility": "public_safe",
+        "capability": _capability_contract(packet_role="review_receipt"),
+        "authority_confirmation_required": gated,
+        "authority_confirmed": gated,
+        "quiet_noop": normalized_disposition == "no_change",
+        "outcome_observation_required": normalized_disposition == "approve",
+        "cursor_commit_allowed": True,
+        "external_writes_performed": False,
+        "raw_context_captured": False,
+    }
+    packet["packet_ref"] = _packet_ref("decision-review", packet)
     return packet
 
 

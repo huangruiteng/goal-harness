@@ -130,6 +130,84 @@ def _add_agent_todo(
     )
 
 
+def test_continuous_monitor_requires_explicit_boundedness(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    common = {
+        "registry_path": registry,
+        "goal_id": GOAL_ID,
+        "role": "agent",
+        "text": "Watch one public dependency.",
+        "task_class": "continuous_monitor",
+        "action_kind": "monitor",
+        "claimed_by": AUTHOR_AGENT,
+        "monitor_metadata": {
+            "target_key": "public-dependency",
+            "cadence": "30m",
+            "next_due_at": "2026-08-12T00:00:00Z",
+        },
+    }
+
+    with pytest.raises(ValueError, match="requires one of: --expires-at"):
+        add_goal_todo(**common)
+
+    result = add_goal_todo(
+        **{
+            **common,
+            "monitor_metadata": {
+                **common["monitor_metadata"],
+                "watch_only": "true",
+            },
+        }
+    )
+    item = _agent_todo(state, str(result["todo_id"]))
+    assert item["watch_only"] == "true"
+
+
+def test_update_to_continuous_monitor_requires_explicit_boundedness(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    todo = _add_agent_todo(registry)
+    before = state.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="requires one of: --expires-at"):
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=str(todo["todo_id"]),
+            agent_id=AUTHOR_AGENT,
+            task_class="continuous_monitor",
+            monitor_metadata={
+                "target_key": "public-dependency",
+                "cadence": "30m",
+                "next_due_at": "2026-08-12T00:00:00Z",
+            },
+        )
+
+    assert state.read_text(encoding="utf-8") == before
+
+
+def test_continuous_monitor_accepts_resume_condition_bound(tmp_path: Path) -> None:
+    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    result = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Watch until the prerequisite PR merges.",
+        task_class="continuous_monitor",
+        action_kind="monitor",
+        claimed_by=AUTHOR_AGENT,
+        resume_when="pr_merged:#3083",
+        monitor_metadata={
+            "target_key": "pr-3083",
+            "cadence": "30m",
+            "next_due_at": "2026-08-12T00:00:00Z",
+        },
+    )
+    item = _agent_todo(state, str(result["todo_id"]))
+    assert item["resume_when"] == "pr_merged:#3083"
+
+
 def test_multi_agent_update_requires_actor_and_is_atomic(tmp_path: Path) -> None:
     registry, state = _write_fixture(tmp_path)
     todo = _add_agent_todo(registry)
@@ -1175,7 +1253,11 @@ def test_monitor_writeback_propagates_multi_agent_actor(tmp_path: Path) -> None:
         text="Poll one public monitor target.",
         task_class="continuous_monitor",
         claimed_by=AUTHOR_AGENT,
-        monitor_metadata={"target_key": "public-pr:42", "cadence": "15m"},
+        monitor_metadata={
+            "target_key": "public-pr:42",
+            "cadence": "15m",
+            "watch_only": "true",
+        },
     )
 
     result = write_monitor_poll_todo_state(

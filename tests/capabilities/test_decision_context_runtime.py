@@ -13,6 +13,9 @@ from loopx.capabilities.decision_context import (
     build_decision_outcome_receipt,
     build_decision_proposal,
     commit_profile_decision_cursors,
+    load_private_pending_decision_settlement,
+    settle_profile_decision_review,
+    write_private_pending_decision_settlement,
 )
 from loopx.cli import main
 from loopx.rollout_event_log import append_rollout_event, build_rollout_event
@@ -143,6 +146,30 @@ def append_decision_writeback(
             proposal["packet_ref"],
             outcome["packet_ref"],
         ],
+        recorded_at=OBSERVED_AT,
+    )
+    return append_rollout_event(path, event)
+
+
+def append_review_gate_event(
+    path: Path,
+    proposal: dict[str, Any],
+    disposition: str,
+) -> dict[str, Any]:
+    deferred = disposition == "defer"
+    event = build_rollout_event(
+        goal_id="example-decision-goal",
+        event_kind="todo_update" if deferred else "todo_complete",
+        todo_id="todo:decision-review",
+        status="deferred" if deferred else "done",
+        summary="Owner review state changed.",
+        details={
+            "task_class": "user_gate",
+            "decision_scope": (
+                f"direction:action:{proposal['packet_ref']}"
+            ),
+            "decision_outcome": None if deferred else disposition,
+        },
         recorded_at=OBSERVED_AT,
     )
     return append_rollout_event(path, event)
@@ -725,3 +752,235 @@ def test_cursor_commit_rejects_writeback_without_full_packet_chain(
         )
 
     assert not cursors.exists()
+
+
+@pytest.mark.parametrize("disposition", ["approve", "reject", "defer"])
+def test_review_settlement_commits_consumed_cursor_without_future_outcome(
+    tmp_path: Path,
+    disposition: str,
+) -> None:
+    authority = tmp_path / "authority.md"
+    authority.write_text(PRIVATE_CONTENT, encoding="utf-8")
+    profile = write_profile(tmp_path / "profile.json", authority)
+    cursors = tmp_path / "cursors.json"
+    pending = tmp_path / "pending.json"
+    event_log = tmp_path / "rollout-events.jsonl"
+    _activation, assembly = assemble_profile_decision_evidence(
+        goal_id="example-decision-goal",
+        agent_id="example-agent",
+        profile_path=profile,
+        decision_id="decision:adoption",
+        observed_at=OBSERVED_AT,
+        before=BEFORE,
+        cursor_path=cursors,
+        rebase=semantic_rebase,
+    )
+    assert assembly is not None
+    proposal, _legacy_outcome = decision_chain(assembly)
+    write_private_pending_decision_settlement(pending, assembly)
+    reloaded = load_private_pending_decision_settlement(pending)
+    gate_event = append_review_gate_event(event_log, proposal, disposition)
+
+    result = settle_profile_decision_review(
+        goal_id="example-decision-goal",
+        agent_id="example-agent",
+        profile_path=profile,
+        cursor_path=cursors,
+        assembly=reloaded,
+        lifecycle_event_log_path=event_log,
+        actor_ref="owner:goal",
+        reason_code=f"owner_{disposition}",
+        summary=f"Owner recorded {disposition}.",
+        proposal=proposal,
+        source_event_id=str(gate_event["event_id"]),
+        execute=True,
+    )
+
+    assert result["disposition"] == disposition
+    assert result["review_receipt"]["outcome_observation_required"] is (
+        disposition == "approve"
+    )
+    assert result["cursor_commit"]["settlement_disposition"] == disposition
+    assert result["cursor_commit"]["outcome_receipt_ref"] is None
+    assert json.loads(cursors.read_text(encoding="utf-8")) == dict(
+        assembly.proposed_cursors
+    )
+
+
+def test_semantic_no_change_settlement_is_quiet_and_commits_cursor(
+    tmp_path: Path,
+) -> None:
+    authority = tmp_path / "authority.md"
+    authority.write_text(PRIVATE_CONTENT, encoding="utf-8")
+    profile = write_profile(tmp_path / "profile.json", authority)
+    cursors = tmp_path / "cursors.json"
+    event_log = tmp_path / "rollout-events.jsonl"
+    _activation, assembly = assemble_profile_decision_evidence(
+        goal_id="example-decision-goal",
+        agent_id="example-agent",
+        profile_path=profile,
+        decision_id="decision:adoption",
+        observed_at=OBSERVED_AT,
+        before=BEFORE,
+        cursor_path=cursors,
+        rebase=lambda _collection: DecisionEvidenceRecords(
+            semantic_no_change=True
+        ),
+    )
+    assert assembly is not None
+    assert assembly.public_packet()["semantic_rebase"]["status"] == (
+        "no_material_change"
+    )
+
+    result = settle_profile_decision_review(
+        goal_id="example-decision-goal",
+        agent_id="example-agent",
+        profile_path=profile,
+        cursor_path=cursors,
+        assembly=assembly,
+        lifecycle_event_log_path=event_log,
+        actor_ref="agent:decision-advisor",
+        reason_code="no_material_thesis_change",
+        summary="Changed material does not alter the current decision.",
+        execute=True,
+    )
+
+    assert result["disposition"] == "no_change"
+    assert result["quiet_noop"] is True
+    assert result["review_receipt"]["gate_todo_id"] is None
+    assert result["cursor_commit"]["settlement_disposition"] == "no_change"
+    assert json.loads(cursors.read_text(encoding="utf-8")) == dict(
+        assembly.proposed_cursors
+    )
+
+
+def test_review_settlement_rejects_gate_bound_to_another_proposal(
+    tmp_path: Path,
+) -> None:
+    authority = tmp_path / "authority.md"
+    authority.write_text(PRIVATE_CONTENT, encoding="utf-8")
+    profile = write_profile(tmp_path / "profile.json", authority)
+    cursors = tmp_path / "cursors.json"
+    event_log = tmp_path / "rollout-events.jsonl"
+    _activation, assembly = assemble_profile_decision_evidence(
+        goal_id="example-decision-goal",
+        agent_id="example-agent",
+        profile_path=profile,
+        decision_id="decision:adoption",
+        observed_at=OBSERVED_AT,
+        before=BEFORE,
+        cursor_path=cursors,
+        rebase=semantic_rebase,
+    )
+    assert assembly is not None
+    proposal, _legacy_outcome = decision_chain(assembly)
+    wrong = dict(proposal)
+    wrong["packet_ref"] = "decision-proposal-another"
+    gate_event = append_review_gate_event(event_log, wrong, "approve")
+
+    with pytest.raises(ValueError, match="does not match proposal"):
+        settle_profile_decision_review(
+            goal_id="example-decision-goal",
+            agent_id="example-agent",
+            profile_path=profile,
+            cursor_path=cursors,
+            assembly=assembly,
+            lifecycle_event_log_path=event_log,
+            actor_ref="owner:goal",
+            reason_code="owner_approve",
+            summary="Owner approved another proposal.",
+            proposal=proposal,
+            source_event_id=str(gate_event["event_id"]),
+            execute=True,
+        )
+
+    assert not cursors.exists()
+
+
+def test_prepare_and_settle_no_change_cli_crosses_turns_without_private_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    authority = tmp_path / "authority.md"
+    authority.write_text(PRIVATE_CONTENT, encoding="utf-8")
+    profile = write_profile(tmp_path / "profile.json", authority)
+    cursors = tmp_path / "cursors.json"
+    pending = tmp_path / "pending.json"
+    event_log = tmp_path / "rollout-events.jsonl"
+    rebase = tmp_path / "rebase.json"
+    rebase.write_text(
+        json.dumps({"semantic_no_change": True}),
+        encoding="utf-8",
+    )
+
+    assert main(
+        [
+            "--format",
+            "json",
+            "decision-context",
+            "prepare-review",
+            "--goal-id",
+            "example-decision-goal",
+            "--agent-id",
+            "example-agent",
+            "--profile",
+            str(profile),
+            "--decision-id",
+            "decision:adoption",
+            "--rebase-json",
+            str(rebase),
+            "--pending-settlement",
+            str(pending),
+            "--cursor-state",
+            str(cursors),
+            "--observed-at",
+            OBSERVED_AT,
+            "--before",
+            BEFORE,
+            "--execute",
+        ]
+    ) == 0
+    prepared = json.loads(capsys.readouterr().out)
+    assert prepared["pending_settlement_written"] is True
+    assert not cursors.exists()
+
+    assert main(
+        [
+            "--format",
+            "json",
+            "decision-context",
+            "settle-review",
+            "--goal-id",
+            "example-decision-goal",
+            "--agent-id",
+            "example-agent",
+            "--profile",
+            str(profile),
+            "--cursor-state",
+            str(cursors),
+            "--pending-settlement",
+            str(pending),
+            "--event-log",
+            str(event_log),
+            "--actor-ref",
+            "agent:decision-advisor",
+            "--reason-code",
+            "no_material_thesis_change",
+            "--summary",
+            "Changed material does not alter the current decision.",
+            "--execute",
+        ]
+    ) == 0
+    settled = json.loads(capsys.readouterr().out)
+    serialized = json.dumps(settled, sort_keys=True)
+    assert settled["disposition"] == "no_change"
+    assert settled["cursor_commit"]["readback_verified"] is True
+    for private_value in (
+        PRIVATE_CONTENT,
+        str(authority),
+        str(profile),
+        str(cursors),
+        str(pending),
+        str(event_log),
+    ):
+        assert private_value not in serialized

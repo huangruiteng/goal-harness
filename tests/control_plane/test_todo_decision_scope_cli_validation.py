@@ -10,6 +10,7 @@ from loopx.control_plane.testing.canary_harness import (
     run_json_cli_result,
     write_fixture_registry,
 )
+from loopx.rollout_event_log import load_rollout_events, rollout_event_log_path
 
 
 GOAL_ID = "decision-scope-cli-validation"
@@ -360,6 +361,20 @@ def test_todo_complete_cli_applies_explicit_user_gate_outcome(
     )
 
     assert completed["decision_outcome"] == decision_outcome
+    events = load_rollout_events(
+        rollout_event_log_path(tmp_path / "runtime", GOAL_ID)
+    )
+    completion_event = next(
+        event
+        for event in reversed(events)
+        if event.get("event_kind") == "todo_complete"
+        and event.get("todo_id") == gate["todo_id"]
+    )
+    assert completion_event["details"]["task_class"] == "user_gate"
+    assert completion_event["details"]["decision_scope"] == (
+        "private_read:project:restricted_material"
+    )
+    assert completion_event["details"]["decision_outcome"] == decision_outcome
     target_readback = run_json_cli(
         "todo",
         "list",

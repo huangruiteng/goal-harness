@@ -8,6 +8,7 @@ Lark event stream
   -> host-managed collector
   -> .loopx/inbox/<channel>/*.json
   -> loopx lark-inbox drain
+  -> loopx lark-inbox processing (optional reaction lifecycle)
   -> domain agent writes a todo, vision correction, artifact update, or rationale
   -> direct bot question: loopx lark-inbox reply (optional, configured sender only)
   -> loopx lark-inbox ack --message-id ... --execute
@@ -103,7 +104,8 @@ bot profile to the same local-private chat:
     "sender_identity": "bot",
     "bot_display_name": "Project Review Bot",
     "chat_id": "oc_<local-private-chat-id>",
-    "received_reaction_emoji": "Get"
+    "received_reaction_emoji": "Get",
+    "processing_reaction_emoji": "OnIt"
   }
 }
 ```
@@ -115,6 +117,22 @@ a direct mention, direct question, or verified reply to the configured bot.
 The reaction is a best-effort receipt: provider failure increments compact
 failure accounting but does not discard the inbox event or grant execution
 authority. Ordinary group conversation does not receive the reaction.
+
+`reply.processing_reaction_emoji` is optional and requires a distinct
+`received_reaction_emoji`. When both are configured, the host should run
+`lark-inbox processing` immediately before interpreting an actionable item.
+LoopX first adds the processing reaction and then removes the received
+reaction. A verified source-thread reply removes any remaining lifecycle
+reaction. If the provider cannot delete a reaction, the operation fails with a
+retryable cleanup status instead of claiming completion.
+
+Reaction ids are stored only in an owner-private receipt ledger under the
+configured inbox. Each message transition is serialized with a private
+per-message lock. LoopX deletes only reaction ids returned by writes made
+through the configured bot profile; it never deletes another participant's
+reaction by emoji type. The receipt ledger is fail-closed: malformed state is
+not ignored, and a provider reaction that cannot be recorded is rolled back
+best-effort.
 
 The reply path never uses the machine default profile. Before any send it
 verifies that the named profile resolves to the expected bot and that the bot
@@ -234,6 +252,18 @@ loopx lark-inbox drain \
   --project . \
   --config .loopx/config/lark/event-inbox.json
 
+loopx lark-inbox processing \
+  --project . \
+  --config .loopx/config/lark/event-inbox.json \
+  --message-id om_xxx
+
+# Execute only after reviewing the preview.
+loopx lark-inbox processing \
+  --project . \
+  --config .loopx/config/lark/event-inbox.json \
+  --message-id om_xxx \
+  --execute
+
 loopx lark-inbox ack \
   --project . \
   --config .loopx/config/lark/event-inbox.json \
@@ -244,6 +274,9 @@ loopx lark-inbox ack \
 Drain is read-only and returns bounded local-private message content. A message
 must be acknowledged only after its effect is written back. Duplicate event
 files collapse by `message_id`; repeated acknowledgement is idempotent.
+`processing` is also idempotent: retries reuse the recorded processing
+reaction and finish any pending received-reaction cleanup without creating
+another processing reaction.
 
 Urgency classification stays local: explicit `@` mentions of the configured
 bot/LoopX, bounded question signals on addressed events, and provider-verified
@@ -273,7 +306,20 @@ loopx lark-inbox reply \
 
 The command uses an idempotency key derived from the source message and reply
 text, sends with `--reply-in-thread`, and reads the created message back through
-the same configured profile. Ordinary chatter remains a no-reply path;
+the same configured profile. Lifecycle reactions are removed only after that
+readback succeeds. A sent reply whose reaction cleanup fails returns
+`sent_verified_cleanup_pending`; retry `lark-inbox reaction-complete` before
+acknowledging the source:
+
+```bash
+loopx lark-inbox reaction-complete \
+  --project . \
+  --config .loopx/config/lark/event-inbox.json \
+  --message-id om_xxx \
+  --execute
+```
+
+Ordinary chatter remains a no-reply path;
 enabling this capability does not grant reviewer-notification or other
 outbound authority.
 

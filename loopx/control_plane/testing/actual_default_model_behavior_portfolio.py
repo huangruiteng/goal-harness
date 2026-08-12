@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
@@ -33,6 +33,10 @@ from .onboarding_model_behavior_qualification import (
     build_onboarding_postcondition_observation,
     run_onboarding_model_behavior_phase,
 )
+from .selected_todo_tool_behavior import (
+    SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT,
+    SELECTED_TODO_TOOL_FIXTURE_TODO_ID,
+)
 
 ACTUAL_DEFAULT_MODEL_BEHAVIOR_PORTFOLIO_SCHEMA_VERSION = (
     "actual_default_model_behavior_portfolio_v0"
@@ -47,6 +51,15 @@ ACTUAL_DEFAULT_MODEL_BEHAVIOR_HOT_PATH_JSON_BUDGET = 40_000
 ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_SCHEMA_VERSION = (
     "actual_default_model_behavior_contrast_v0"
 )
+_TOOL_ACTOR_KINDS = frozenset(
+    {
+        "turn_tool",
+        "replan_tool",
+        "scoped_gate_tool",
+        "capability_repair_tool",
+    }
+)
+_TURN_ACTOR_KINDS = frozenset({"turn", *_TOOL_ACTOR_KINDS})
 
 
 @dataclass(frozen=True)
@@ -90,7 +103,7 @@ _SCENARIOS = (
     ),
     _ScenarioSpec(
         "turn_selected_todo",
-        "turn",
+        "turn_tool",
         None,
         "execute",
     ),
@@ -114,7 +127,7 @@ _SCENARIOS = (
     ),
     _ScenarioSpec(
         "turn_required_vision_replan",
-        "turn",
+        "replan_tool",
         None,
         "execute",
         "control_plane_composition",
@@ -122,7 +135,7 @@ _SCENARIOS = (
     ),
     _ScenarioSpec(
         "turn_scoped_gate_successor_replan",
-        "turn",
+        "scoped_gate_tool",
         None,
         "execute",
         "control_plane_composition",
@@ -130,7 +143,7 @@ _SCENARIOS = (
     ),
     _ScenarioSpec(
         "turn_capability_monitor_repair",
-        "turn",
+        "capability_repair_tool",
         None,
         "execute",
         "control_plane_composition",
@@ -258,9 +271,13 @@ def actual_default_model_behavior_scenario_catalog() -> dict[str, Any]:
                 "scenario_family": spec.scenario_family,
                 "composition_dimensions": list(spec.composition_dimensions),
                 "packet_view": (
-                    "quota_should_run_default"
-                    if spec.actor_kind == "turn"
-                    else "guided_onboarding_default"
+                    "production_heartbeat_tool_loop"
+                    if spec.actor_kind in _TOOL_ACTOR_KINDS
+                    else (
+                        "quota_should_run_default"
+                        if spec.actor_kind == "turn"
+                        else "guided_onboarding_default"
+                    )
                 ),
                 "repeat_policy": {
                     "attempts": ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS,
@@ -442,6 +459,20 @@ def _turn_scenario_source(
     return payload
 
 
+def _selected_todo_scenario_source() -> dict[str, Any]:
+    payload = _turn_scenario_source(human_gate=False)
+    payload["selected_todo"] = {
+        **dict(payload["selected_todo"]),
+        "text": SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT,
+    }
+    payload["recommended_action"] = SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        available_capabilities=["shell", "filesystem_read"],
+    )
+    return payload
+
+
 def build_quota_hot_path_compaction_regression_source() -> dict[str, Any]:
     """Build a coherent over-budget turn whose cold diagnostics are removable."""
 
@@ -586,7 +617,7 @@ def _build_actual_default_model_behavior_scenario_sources(
     packets = _entry_scenario_packets(root)
     packets.update(
         {
-            "turn_selected_todo": _turn_scenario_source(human_gate=False),
+            "turn_selected_todo": _selected_todo_scenario_source(),
             "turn_peer_agent_identity": _turn_scenario_source(
                 human_gate=False,
                 agent_id="codex-portfolio-reviewer",
@@ -727,7 +758,7 @@ def _scenario_contract(
     source_packet: Mapping[str, Any],
     actor_packet: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if spec.actor_kind == "turn":
+    if spec.actor_kind in _TURN_ACTOR_KINDS:
         build_model_behavior_actor_request(
             actor_packet,
             qualification_id=f"portfolio-preflight-{spec.scenario_id}",
@@ -784,6 +815,16 @@ def _scenario_contract(
         "selected_todo_id"
     ):
         raise ValueError("selected-todo scenario requires selected work")
+    if spec.scenario_id == "turn_selected_todo" and (
+        contract.get("selected_todo_id") != SELECTED_TODO_TOOL_FIXTURE_TODO_ID
+        or source_packet.get("recommended_action")
+        != SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
+        or dict(source_packet.get("selected_todo") or {}).get("text")
+        != SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
+    ):
+        raise ValueError(
+            "selected-todo source must match the real-action fixture contract"
+        )
     if spec.scenario_id in {
         "turn_peer_agent_identity",
         "turn_same_agent_continuation",
@@ -892,7 +933,7 @@ def _scenario_contract(
             raise ValueError(
                 "capability bridge repair must name the missing capability"
             )
-        if "repair or materialize the missing bridge capability" not in str(
+        if "next_cli_actions[0]" not in str(
             action.get("primary_action")
         ):
             raise ValueError(
@@ -967,7 +1008,7 @@ def _receipt_alignment(
     receipt: Mapping[str, Any],
     expected: Mapping[str, Any],
 ) -> tuple[bool, list[str]]:
-    if spec.actor_kind == "turn":
+    if spec.actor_kind in _TURN_ACTOR_KINDS:
         fields = tuple(expected)
         mismatches = [
             f"source_mismatch:{field}"
@@ -993,6 +1034,10 @@ def _scenario_result(
     qualification_id: str,
     turn_actor: ModelBehaviorActor,
     onboarding_actor: OnboardingModelBehaviorActor,
+    selected_todo_actor: Callable[[str], Mapping[str, Any]],
+    replan_evidence_actor: Callable[[str], Mapping[str, Any]],
+    scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
+    capability_monitor_repair_actor: Callable[[str], Mapping[str, Any]],
 ) -> tuple[dict[str, Any], bool, list[dict[str, Any]]]:
     receipt_digests: list[str] = []
     observed_routes: list[str] = []
@@ -1002,7 +1047,35 @@ def _scenario_result(
     for repeat_index in range(ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS):
         run_id = f"{qualification_id}:{spec.scenario_id}:r{repeat_index + 1}"
         try:
-            if spec.actor_kind == "turn":
+            if spec.actor_kind == "turn_tool":
+                receipt = dict(selected_todo_actor(run_id))
+                if receipt.get("qualification_passed") is not True:
+                    failure_codes.append(
+                        str(receipt.get("failure_code") or "tool_behavior_failed")
+                    )
+                observed_route = str(receipt.get("decision") or "")
+            elif spec.actor_kind == "replan_tool":
+                receipt = dict(replan_evidence_actor(run_id))
+                if receipt.get("qualification_passed") is not True:
+                    failure_codes.append(
+                        str(receipt.get("failure_code") or "tool_behavior_failed")
+                    )
+                observed_route = str(receipt.get("decision") or "")
+            elif spec.actor_kind == "scoped_gate_tool":
+                receipt = dict(scoped_gate_successor_actor(run_id))
+                if receipt.get("qualification_passed") is not True:
+                    failure_codes.append(
+                        str(receipt.get("failure_code") or "tool_behavior_failed")
+                    )
+                observed_route = str(receipt.get("decision") or "")
+            elif spec.actor_kind == "capability_repair_tool":
+                receipt = dict(capability_monitor_repair_actor(run_id))
+                if receipt.get("qualification_passed") is not True:
+                    failure_codes.append(
+                        str(receipt.get("failure_code") or "tool_behavior_failed")
+                    )
+                observed_route = str(receipt.get("decision") or "")
+            elif spec.actor_kind == "turn":
                 receipt = run_model_behavior_qualification_arm(
                     packet,
                     qualification_id=run_id,
@@ -1108,6 +1181,10 @@ def run_actual_default_model_behavior_portfolio(
     qualification_id: str,
     turn_actor: ModelBehaviorActor,
     onboarding_actor: OnboardingModelBehaviorActor,
+    selected_todo_actor: Callable[[str], Mapping[str, Any]],
+    replan_evidence_actor: Callable[[str], Mapping[str, Any]],
+    scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
+    capability_monitor_repair_actor: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Run the fixed low-frequency one-arm portfolio with bounded receipts."""
     expected_ids = {spec.scenario_id for spec in _SCENARIOS}
@@ -1165,6 +1242,10 @@ def run_actual_default_model_behavior_portfolio(
             qualification_id=qualification_id,
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
+            selected_todo_actor=selected_todo_actor,
+            replan_evidence_actor=replan_evidence_actor,
+            scoped_gate_successor_actor=scoped_gate_successor_actor,
+            capability_monitor_repair_actor=capability_monitor_repair_actor,
         )
         actor_call_count += int(result["repeats_completed"])
         if actor_error:
@@ -1187,6 +1268,9 @@ def run_actual_default_model_behavior_portfolio(
         result["status"] == "failed" for result in contrast_results
     )
     skip_count = sum(result["status"] == "not_run" for result in results)
+    tool_enabled_scenario_count = sum(
+        spec.actor_kind in _TOOL_ACTOR_KINDS for spec in _SCENARIOS
+    )
     return {
         "schema_version": ACTUAL_DEFAULT_MODEL_BEHAVIOR_PORTFOLIO_SCHEMA_VERSION,
         "qualification_id": qualification_id,
@@ -1207,7 +1291,12 @@ def run_actual_default_model_behavior_portfolio(
         "scenarios": results,
         "contrasts": contrast_results,
         "boundary": {
-            "tools_enabled": False,
+            "tools_enabled": True,
+            "tool_enabled_scenario_count": tool_enabled_scenario_count,
+            "packet_interpretation_scenario_count": (
+                ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT
+                - tool_enabled_scenario_count
+            ),
             "raw_packets_persisted": False,
             "raw_model_responses_persisted": False,
             "automatic_retries": False,

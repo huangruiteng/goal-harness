@@ -48,6 +48,7 @@ from .projection import (
     todo_item_is_actionable_open as projection_todo_item_is_actionable_open,
     todo_item_is_deferred as projection_todo_item_is_deferred,
     todo_item_is_due_monitor as projection_todo_item_is_due_monitor,
+    todo_item_is_watch_only_monitor as projection_todo_item_is_watch_only_monitor,
     todo_item_missing_monitor_schedule as projection_todo_item_missing_monitor_schedule,
     todo_item_task_class as projection_todo_item_task_class,
     todo_item_next_due_at as projection_todo_item_next_due_at,
@@ -472,6 +473,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "cadence",
         "next_due_at",
         "expires_at",
+        "watch_only",
         "last_checked_at",
         "result_hash",
         "consecutive_no_change",
@@ -1257,6 +1259,25 @@ def compact_todo_group(
         item.get("route_continuation_replan_required") is True
         for item in [*items, *handoff_gates]
     )
+    watch_only_monitor_items = [
+        item
+        for item in lanes.monitor_items
+        if projection_todo_item_is_watch_only_monitor(item)
+    ]
+    watch_only_ids = {
+        normalize_todo_id(item.get("todo_id"))
+        for item in watch_only_monitor_items
+    }
+    watch_only_monitor_due_items = [
+        item
+        for item in lanes.monitor_due_items
+        if normalize_todo_id(item.get("todo_id")) in watch_only_ids
+    ]
+    convergent_open_items = [
+        item
+        for item in lanes.open_items
+        if normalize_todo_id(item.get("todo_id")) not in watch_only_ids
+    ]
     summary = {
         "schema_version": "todo_summary_v0",
         "source_section": source_section,
@@ -1327,6 +1348,10 @@ def compact_todo_group(
         ][:MAX_DEFERRED_TODO_VISIBILITY_ITEMS],
         "items": lanes.budgeted_items if item_limit is None else lanes.budgeted_items[:item_limit],
     }
+    if watch_only_monitor_items:
+        summary["watch_only_monitor_count"] = len(watch_only_monitor_items)
+        summary["watch_only_monitor_due_count"] = len(watch_only_monitor_due_items)
+        summary["convergence_open_count"] = len(convergent_open_items)
     if recent_completed_advancement_items:
         summary["recent_completed_advancement_items"] = recent_completed_advancement_items
     if include_task_orchestration_authority:
@@ -1339,7 +1364,7 @@ def compact_todo_group(
         summary["blocker_items"] = [
             compact_todo_item(item) for item in lanes.blocker_items
         ]
-    if not lanes.open_items and not lanes.deferred_items:
+    if not convergent_open_items and not lanes.deferred_items:
         summary["source_proof"] = {
             "schema_version": TODO_SOURCE_PROOF_SCHEMA_VERSION,
             "role": role,
@@ -1348,8 +1373,8 @@ def compact_todo_group(
         }
     if (
         source_valid
-        and len(lanes.done_items) == len(items)
-        and not lanes.monitor_items
+        and len(lanes.done_items) + len(watch_only_monitor_items) == len(items)
+        and not convergent_open_items
         and not successor_gap_items
         and not route_replan_required
     ):
@@ -1358,13 +1383,20 @@ def compact_todo_group(
             "role": role,
             "source_section": source_section,
             "item_count": len(items),
-            "all_todos_done": True,
-            "monitor_open_count": 0,
+            "all_todos_done": not watch_only_monitor_items,
+            "monitor_open_count": len(watch_only_monitor_items),
             "successor_gap_count": 0,
             "route_replan_count": 0,
             "no_followup_count": len(no_followup_items),
             "derived": True,
         }
+        if watch_only_monitor_items:
+            summary["terminal_closure_proof"].update(
+                {
+                    "all_convergent_todos_done": True,
+                    "watch_only_monitor_count": len(watch_only_monitor_items),
+                }
+            )
     if no_followup_items:
         summary["closure_intent"] = {
             "schema_version": TODO_CLOSURE_INTENT_SCHEMA_VERSION,

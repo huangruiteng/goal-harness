@@ -50,13 +50,14 @@ Reward Memory asks what reusable experience was learned in the past. Decision
 Context asks which facts should be trusted for the current decision.
 
 - Reward Memory follows candidate → review → activate → apply/retire.
-- Decision Context follows recall → exact read → rebase → propose → outcome.
+- Decision Context follows recall → exact read → rebase → propose → review
+  settlement → cursor commit → later outcome observation.
 - Reward Memory may be one optional input to Decision Context.
 - A verified Decision Context outcome may create a Reward Memory candidate, but
   the candidate still follows Reward Memory review and activation.
 - Neither capability creates action authority.
 
-## Three packets
+## Four packets
 
 ### `decision_evidence_packet_v0`
 
@@ -71,6 +72,18 @@ a health receipt and fails open to authority sources.
 The advisory reasoning layer contains objective scores, a recommended decision,
 alternatives, next actions, and a stop list. It references the stable evidence
 packet fingerprint and requires authority confirmation. It is not Core truth.
+
+### `decision_review_receipt_v0`
+
+The settlement layer records one of four dispositions:
+
+- `approve`, `reject`, and `defer` exact-read an existing `user_gate` event whose
+  scope is `direction:action:<proposal-packet-ref>`;
+- `no_change` requires an explicit semantic rebase receipt and creates no gate.
+
+The receipt proves that the evidence batch was reviewed or found immaterial. It
+allows private source cursors to advance after validated lifecycle writeback,
+but it is not an observed outcome and creates no action authority.
 
 ### `decision_outcome_receipt_v0`
 
@@ -118,7 +131,9 @@ flowchart LR
     RECALL["ContextProvider<br/>advisory recall"]
     EVIDENCE["Decision evidence packet"]
     AGENT["Agent proposal"]
-    OUTCOME["Outcome receipt"]
+    REVIEW["Review receipt<br/>gate or semantic no change"]
+    CURSOR["Private cursor commit"]
+    OUTCOME["Later outcome receipt"]
 
     THIN --> REG
     REG --> SOURCE
@@ -126,7 +141,9 @@ flowchart LR
     RECEIPT --> EVIDENCE
     RECALL --> EVIDENCE
     EVIDENCE --> AGENT
-    AGENT --> OUTCOME
+    AGENT --> REVIEW
+    REVIEW --> CURSOR
+    REVIEW --> OUTCOME
 ```
 
 This lets the steady-state automation prompt become generic: wake the goal,
@@ -136,7 +153,7 @@ and goal configuration.
 
 ## Invariants
 
-1. Every packet is goal-scoped, public-safe, structured, and fingerprinted.
+1. Every public packet is goal-scoped, public-safe, structured, and fingerprinted.
 2. Evidence and proposal remain separate.
 3. Providers never create authority.
 4. Raw provider payloads, raw chat, tool output, and credentials never enter a
@@ -146,13 +163,15 @@ and goal configuration.
 6. Proposals remain advisory; transitions use existing todo, gate, quota, and
    writeback.
 7. Provider failure is fail-open and does not block the Core lifecycle.
-8. Verified outcomes are recorded before any Reward Memory distillation.
+8. Review settlement, not a future outcome, is the cursor-commit boundary.
+9. `no_change` requires explicit semantic proof and does not create a user gate.
+10. Verified outcomes are recorded before any Reward Memory distillation.
 
 ## Delivery stages
 
 ### P0: contract
 
-Define the three packets, stable fingerprints, public-safe field allowlists,
+Define the four packets, stable fingerprints, public-safe field allowlists,
 the provider-neutral incremental source contract, focused tests, and this
 boundary document. Do not wire a concrete provider, CLI, or Core writeback.
 
@@ -186,11 +205,19 @@ semantic rebase: changed-source cursors remain at `preserve`, so merely scanning
 or reading a source can never mark it absorbed. Sources marked `on_demand` are
 excluded from automatic collection and require explicit source selection.
 
-Private cursor commit remains a separate acceptance boundary. The host API
+Private cursor commit remains a separate acceptance boundary. A review may
+cross agent turns, so `prepare-review --execute` stores one private pending
+settlement containing the public-safe assembly plus private cursor proposals;
+it never mutates active cursor state. `settle-review` then exact-reads either a
+matching existing user-gate event or the assembly's explicit semantic
+`no_change` proof, appends a validation event, and performs cursor CAS.
+
+The host API
 `commit_profile_decision_cursors(...)` now performs that boundary explicitly:
 
-- it verifies the assembly, evidence, proposal, outcome, and cursor-checkpoint
-  packet chain;
+- it verifies the assembly, evidence, review, and cursor-checkpoint packet
+  chain, plus the proposal for gated dispositions;
+- it supports the previous proposal/outcome chain as a compatibility read path;
 - it exact-reads an existing LoopX rollout event whose `decision_id` and
   artifact refs bind the same packet chain;
 - it rejects a changed private profile or a cursor value that no longer matches
@@ -199,9 +226,11 @@ Private cursor commit remains a separate acceptance boundary. The host API
   readback verification;
 - it returns only opaque cursor refs in a public-safe commit receipt.
 
-Scanning, evidence preparation, and proposal construction still perform no
-cursor write. A missing or generic boolean "writeback succeeded" assertion is
-not sufficient to commit.
+Scanning, evidence preparation, proposal construction, and pending-settlement
+creation still perform no active cursor write. A missing or generic boolean
+"writeback succeeded" assertion is not sufficient to commit. An approved
+decision's real-world outcome remains a later append-only observation and does
+not block marking already reviewed source material as consumed.
 
 Private hosts may bind a provider instance at runtime through
 `source_provider_overrides`. The provider id must already be declared by the
@@ -215,9 +244,13 @@ cursor.
 
 ### P1: first dogfood
 
-Use one private, redacted decision-assistant scenario. Write an outcome receipt
-through existing event/run history. Measure decision changes, observed
-outcomes, and invalidated assumptions rather than retrieval volume.
+Use one private, redacted decision-assistant scenario. Let a domain adapter map
+new facts to stable private theses; send only material proposals through the
+existing user gate and keep explicit semantic no-change runs quiet. Settle the
+source cursor after approve/reject/defer/no-change, then write later outcomes
+through existing event/run history. Measure decision changes, rejected stale
+evidence, reading saved, observed outcomes, and invalidated assumptions rather
+than retrieval volume.
 
 ### P2: cross-domain validation and Core promotion gate
 

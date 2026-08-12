@@ -58,6 +58,7 @@ TODO_SUMMARY_COMPACT_FIELDS = (
     "cadence",
     "next_due_at",
     "expires_at",
+    "watch_only",
     "last_checked_at",
     "result_hash",
     "consecutive_no_change",

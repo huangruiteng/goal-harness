@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any, Callable, Optional, Pattern
 
@@ -24,6 +26,69 @@ SectionEntries = Callable[[list[str]], list[str]]
 
 MAX_AUTONOMOUS_REPLAN_TRIGGERS = 3
 AUTONOMOUS_REPLAN_STALL_THRESHOLD = 2
+REPLAN_NOVELTY_POLICY_SCHEMA_VERSION = "replan_novelty_policy_v0"
+# Keep the effective rule prompt-visible. The novelty policy owns the evidence
+# source, quota binds that source to the executable required_reads projection,
+# and repair_delta remains the only writeback/enforcement truth.
+REPLAN_NOVELTY_GUIDANCE = (
+    " Run required_reads[0] (evidence-log); choose an untried direction. "
+    "Reject repeats; exploration_exhausted needs coverage."
+)
+
+
+def build_replan_novelty_policy() -> dict[str, str]:
+    """Bind replan preflight to the existing repair-delta settlement truth."""
+
+    return {
+        "schema_version": REPLAN_NOVELTY_POLICY_SCHEMA_VERSION,
+        "evidence_source": "agent_scoped_evidence_log",
+        "writeback": "repair_delta",
+    }
+
+
+def with_replan_novelty_guidance(action: str) -> str:
+    """Make the policy visible once on every replan primary action."""
+
+    marker = "required_reads[0] (evidence-log)"
+    normalized = str(action or "").strip()
+    if marker in normalized:
+        return normalized
+    return normalized + REPLAN_NOVELTY_GUIDANCE
+
+
+def ensure_replan_novelty_policy(
+    obligation: dict[str, Any],
+) -> dict[str, Any]:
+    """Upgrade any legacy obligation onto the policy-owned evidence path."""
+
+    normalized = dict(obligation)
+    normalized["recommended_action"] = with_replan_novelty_guidance(
+        str(normalized.get("recommended_action") or "run a bounded autonomous replan")
+    )
+    normalized["replan_novelty_policy"] = build_replan_novelty_policy()
+    identity_payload = {
+        key: normalized.get(key)
+        for key in (
+            "schema_version",
+            "agent_id",
+            "frontier_identity",
+            "stall_threshold",
+            "trigger_count",
+            "triggers",
+        )
+        if normalized.get(key) is not None
+    }
+    normalized["obligation_id"] = "replan-" + hashlib.sha256(
+        json.dumps(
+            identity_payload,
+            sort_keys=True,
+            ensure_ascii=True,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    return normalized
+
+
 # Unchanged-poll streak before a monitor-only lane is forced to replan. Kept
 # deliberately above the 2-turn run-history stall threshold: quiet monitors
 # legitimately wait several cadence cycles for external evidence, and forcing
@@ -608,7 +673,6 @@ def build_autonomous_replan_obligation(
         extra_fields["frontier_identity"] = dead_monitor_evidence.get(
             "monitor_target_id"
         )
-
     result = build_autonomous_replan_obligation_payload(
         schema_version=autonomous_replan_schema_version,
         stall_threshold=(
@@ -679,7 +743,7 @@ def build_autonomous_replan_obligation_payload(
         payload["agent_id"] = agent_id
     if extra_fields:
         payload.update(extra_fields)
-    return payload
+    return ensure_replan_novelty_policy(payload)
 
 
 def autonomous_replan_obligation_from_runs(

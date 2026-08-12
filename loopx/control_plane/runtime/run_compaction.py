@@ -225,6 +225,34 @@ def compact_quota_monitor_target(run: dict[str, Any]) -> dict[str, Any] | None:
     return compact or None
 
 
+def compact_replan_ack_feedback(run: dict[str, Any]) -> dict[str, Any] | None:
+    noop = run.get("autonomous_replan_noop")
+    ack = run.get("autonomous_replan_ack")
+    delta = ack.get("delta_contract") if isinstance(ack, dict) else None
+    rejected = delta.get("rejected_claims") if isinstance(delta, dict) else None
+    if not isinstance(noop, dict) or not isinstance(rejected, list) or not rejected:
+        return None
+    claims = [
+        {
+            "kind": str(item.get("kind") or "").strip(),
+            "reason": str(item.get("reason") or "").strip(),
+        }
+        for item in rejected[:5]
+        if isinstance(item, dict)
+        and str(item.get("kind") or "").strip()
+        and str(item.get("reason") or "").strip()
+    ]
+    if not claims:
+        return None
+    return {
+        "schema_version": "replan_ack_feedback_v0",
+        "generated_at": run.get("generated_at"),
+        "agent_id": run.get("agent_id"),
+        "classification": noop.get("classification"),
+        "rejected_claims": claims,
+    }
+
+
 def compact_run_base(
     run: dict[str, Any],
     *,
@@ -269,6 +297,10 @@ def compact_run_base(
     replan_ack = compact_autonomous_replan_ack(run)
     if replan_ack:
         compact["autonomous_replan_ack"] = replan_ack
+
+    replan_feedback = compact_replan_ack_feedback(run)
+    if replan_feedback:
+        compact["replan_ack_feedback"] = replan_feedback
 
     resume_contract = compact_operator_gate_resume_contract(run.get("operator_gate_resume_contract"))
     if resume_contract:

@@ -95,15 +95,29 @@ def load_lark_event_inbox_config(
     received_reaction_emoji = str(
         reply_payload.get("received_reaction_emoji") or ""
     ).strip()
-    if received_reaction_emoji and not REACTION_EMOJI_PATTERN.fullmatch(
-        received_reaction_emoji
+    processing_reaction_emoji = str(
+        reply_payload.get("processing_reaction_emoji") or ""
+    ).strip()
+    for field, emoji_type in (
+        ("received_reaction_emoji", received_reaction_emoji),
+        ("processing_reaction_emoji", processing_reaction_emoji),
+    ):
+        if emoji_type and not REACTION_EMOJI_PATTERN.fullmatch(emoji_type):
+            raise ValueError(f"lark inbox {field} must be a valid emoji type")
+        if emoji_type and not reply_enabled:
+            raise ValueError(f"lark inbox {field} requires enabled reply")
+    if processing_reaction_emoji and not received_reaction_emoji:
+        raise ValueError(
+            "lark inbox processing_reaction_emoji requires "
+            "received_reaction_emoji"
+        )
+    if (
+        processing_reaction_emoji
+        and processing_reaction_emoji == received_reaction_emoji
     ):
         raise ValueError(
-            "lark inbox received_reaction_emoji must be a valid emoji type"
-        )
-    if received_reaction_emoji and not reply_enabled:
-        raise ValueError(
-            "lark inbox received_reaction_emoji requires enabled reply"
+            "lark inbox processing_reaction_emoji must differ from "
+            "received_reaction_emoji"
         )
     if reply_enabled and (
         capture_scope != "configured_chat_all"
@@ -130,6 +144,7 @@ def load_lark_event_inbox_config(
             "bot_display_name": bot_display_name,
             "chat_id": chat_id,
             "received_reaction_emoji": received_reaction_emoji,
+            "processing_reaction_emoji": processing_reaction_emoji,
         },
     }
 
@@ -359,8 +374,11 @@ def inspect_lark_event_inbox(
         "local_private_content_returned": bool(bounded),
         "external_reads_performed": False,
         "instruction": (
-            "Translate each actionable item into a todo, vision correction, PR update, "
-            "or no-follow-up rationale, then acknowledge its message_id."
+            "For an actionable item, first run `loopx lark-inbox processing` for "
+            "its message_id, then translate it into a todo, vision correction, PR "
+            "update, or no-follow-up rationale. Send and verify any required reply "
+            "before acknowledging the message_id. If no reply is required, run "
+            "`loopx lark-inbox reaction-complete` before acknowledging it."
         ),
     }
 

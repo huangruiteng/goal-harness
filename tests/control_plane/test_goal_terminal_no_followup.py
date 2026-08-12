@@ -197,6 +197,25 @@ def test_agent_only_no_followup_closes_explicit_empty_user_source() -> None:
     assert goal_frontier_is_terminal_no_followup(projection=projection) is True
 
 
+def test_watch_only_monitor_does_not_block_terminal_convergence() -> None:
+    state_text = """\
+## User Todo / Owner Review Reading Queue
+
+## Agent Todo
+
+- [x] [P0] Complete the bounded delivery.
+  <!-- loopx:todo todo_id=todo_delivery status=done task_class=advancement_task no_followup=true evidence=validated -->
+- [ ] [P2] Observe public release liveness.
+  <!-- loopx:todo todo_id=todo_liveness status=open task_class=continuous_monitor action_kind=monitor target_key=release cadence=1h next_due_at=2026-08-12T00%3A00%3A00Z watch_only=true -->
+"""
+
+    projection = _terminal_projection(state_text)
+
+    assert projection["normalized_progress"]["agent_open_count"] == 0
+    assert projection["normalized_progress"]["agent_monitor_open_count"] == 0
+    assert goal_frontier_is_terminal_no_followup(projection=projection) is True
+
+
 def test_agent_only_no_followup_fails_closed_when_user_source_is_missing() -> None:
     state_text = """\
 ## Agent Todo

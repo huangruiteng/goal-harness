@@ -15,8 +15,7 @@ MKDOCS = REPO_ROOT / "mkdocs.yaml"
 MKDOCS_ZH = REPO_ROOT / "mkdocs.book.zh.yaml"
 MKDOCS_EN = REPO_ROOT / "mkdocs.book.en.yaml"
 BRAND_STYLES = REPO_ROOT / "docs" / "stylesheets" / "loopx.css"
-HOMEPAGE = REPO_ROOT / "apps" / "presentation" / "site" / "index.html"
-HOMEPAGE_SCRIPT = REPO_ROOT / "apps" / "presentation" / "site" / "home.js"
+HOMEPAGE = REPO_ROOT / "apps" / "presentation" / "site" / "src" / "App.tsx"
 
 CHAPTERS = (
     "00-reading-guide",
@@ -194,17 +193,14 @@ def main() -> int:
         assert marker in styles, marker
 
     homepage = read(HOMEPAGE)
-    script = read(HOMEPAGE_SCRIPT)
-    assert 'data-devbook-base="__LOOPX_BASE__docs/book"' in homepage
     for path in (
-        "/",
-        "/chapters/01-from-session-to-loop",
-        "/chapters/05-connect-existing-project",
-        "/chapters/source-protocol-map",
+        "docs/book/",
+        "chapters/01-from-session-to-loop/",
+        "chapters/05-connect-existing-project/",
+        "chapters/source-protocol-map/",
     ):
-        assert f'data-devbook-path="{path}"' in homepage
-    assert 'language === "zh" ? "" : "/en"' in script
-    assert "developerBookBase" in script
+        assert path in homepage
+    assert 'language === "en" ? "en/" : ""' in homepage
 
     for locale_root in (BOOK / "index.md", BOOK / "en" / "index.md"):
         text = read(locale_root)

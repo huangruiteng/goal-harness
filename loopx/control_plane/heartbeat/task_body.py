@@ -644,7 +644,7 @@ def render_thin_heartbeat_task_body(
 {RUNTIME_EXECUTION_ROUTING_RULE}
 {scope_sentence}
 
-Inspect state/status/repo.
+Run quota; execute `interaction_contract` next—no detours.
 `LOOPX_TURN=<current_time_iso>`; reuse.
 {pr_review_pre_quota_instruction}{quota_guard_instruction}.
 {HEARTBEAT_NOTIFICATION_RULE_SHORT}

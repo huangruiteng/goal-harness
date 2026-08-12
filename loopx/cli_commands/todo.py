@@ -361,6 +361,15 @@ def register_todo_command(
         ),
     )
     todo_parser.add_argument(
+        "--watch-only",
+        action="store_true",
+        help=(
+            "For agent continuous_monitor add/update, declare an intentionally "
+            "unbounded liveness watch. Watch-only monitors remain schedulable but "
+            "do not drive autonomous replan or block goal convergence."
+        ),
+    )
+    todo_parser.add_argument(
         "--clear-claim",
         action="store_true",
         help="For todo update, remove the soft claimed_by owner from the todo.",
@@ -498,6 +507,7 @@ def handle_todo_command(
                     "cadence": args.cadence,
                     "next_due_at": args.next_due_at,
                     "expires_at": args.expires_at,
+                    "watch_only": "true" if args.watch_only else None,
                 },
                 **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
@@ -563,6 +573,7 @@ def handle_todo_command(
                     "cadence": args.cadence,
                     "next_due_at": args.next_due_at,
                     "expires_at": args.expires_at,
+                    "watch_only": "true" if args.watch_only else None,
                 },
                 clear_claim=bool(args.clear_claim),
                 **_todo_path_args(args),

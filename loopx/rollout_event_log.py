@@ -21,6 +21,7 @@ ROLLOUT_EVENT_KINDS = {
     "capability_gap",
     "compact_blocker",
     "compact_case_result",
+    "evidence_log_read",
     "failure_attribution",
     "pr_merge",
     "pr_review_ack",

@@ -57,6 +57,7 @@ _ITEM_FIELDS = (
     "cadence",
     "next_due_at",
     "expires_at",
+    "watch_only",
 )
 
 

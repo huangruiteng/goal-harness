@@ -61,11 +61,15 @@ permissions:
 
 concurrency:
   group: frontstage-pages
-  cancel-in-progress: false
+  # A stalled Pages deployment previously occupied this group for two days and
+  # starved every later run (all queued runs were cancelled). Pages deploys are
+  # quick and idempotent, so a newer run may safely supersede a stale one.
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -75,13 +79,19 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: apps/presentation/dashboard/package-lock.json
+          cache-dependency-path: |
+            apps/presentation/dashboard/package-lock.json
+            apps/presentation/site/package-lock.json
 
       - name: Use stable npm
         run: npm install -g npm@11
 
       - name: Install dashboard dependencies
         working-directory: apps/presentation/dashboard
+        run: npm ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+
+      - name: Install homepage dependencies
+        working-directory: apps/presentation/site
         run: npm ci --include=dev --no-audit --no-fund --registry=https://registry.npmjs.org
 
       - name: Set up Python
@@ -125,7 +135,9 @@ jobs:
           owner="${GITHUB_REPOSITORY%%/*}"
           repo="${GITHUB_REPOSITORY#*/}"
           count_query='query($owner: String!, $repo: String!) {
-            repository(owner: $owner, name: $repo) { stargazerCount }
+            repository(owner: $owner, name: $repo) {
+              stargazers { totalCount }
+            }
           }'
           history_query='query($owner: String!, $repo: String!, $endCursor: String) {
             repository(owner: $owner, name: $repo) {
@@ -136,7 +148,7 @@ jobs:
             }
           }'
           for attempt in 1 2 3; do
-            count_before="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazerCount)"
+            count_before="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazers.totalCount)"
             gh api graphql --paginate --slurp \
               -f query="$history_query" \
               -F owner="$owner" \
@@ -145,14 +157,18 @@ jobs:
             jq '[.[].data.repository.stargazers.edges[] | {starred_at: .starredAt}]' \
               "$RUNNER_TEMP/loopx-stargazer-pages.json" \
               > "$RUNNER_TEMP/loopx-stargazers.json"
-            count_after="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazerCount)"
+            count_after="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazers.totalCount)"
             fetched_count="$(jq 'length' "$RUNNER_TEMP/loopx-stargazers.json")"
-            if [[ "$count_before" == "$count_after" && "$fetched_count" == "$count_after" ]]; then
-              printf '%s\n' "$count_after" > "$RUNNER_TEMP/loopx-stargazers-count"
+            has_next_page="$(jq -r 'last.data.repository.stargazers.pageInfo.hasNextPage' "$RUNNER_TEMP/loopx-stargazer-pages.json")"
+            if [[ "$count_before" == "$count_after" && "$has_next_page" == "false" && "$fetched_count" -le "$count_after" ]]; then
+              printf '%s\n' "$fetched_count" > "$RUNNER_TEMP/loopx-stargazers-count"
+              if [[ "$fetched_count" != "$count_after" ]]; then
+                echo "::warning title=Aggregate-only stargazers omitted::Fetched all $fetched_count enumerable stargazer events; GitHub reports $count_after aggregate stars." >&2
+              fi
               break
             fi
             if [[ "$attempt" == 3 ]]; then
-              echo "stargazer snapshot changed or was incomplete: before=$count_before fetched=$fetched_count after=$count_after" >&2
+              echo "stargazer snapshot changed or pagination was incomplete: before=$count_before fetched=$fetched_count after=$count_after has_next_page=$has_next_page" >&2
               exit 1
             fi
             sleep 5
@@ -166,6 +182,25 @@ jobs:
             --input-json "$RUNNER_TEMP/loopx-stargazers.json" \
             --expected-count "$(cat "$RUNNER_TEMP/loopx-stargazers-count")" \
             --output output/frontstage-pages/site/site-assets/star-history.svg
+
+      - name: Verify star history freshness
+        if: github.event_name != 'pull_request'
+        run: |
+          python3 - <<'PY'
+          import datetime as dt
+          from pathlib import Path
+
+          svg_path = Path(
+              "output/frontstage-pages/site/site-assets/star-history.svg"
+          )
+          svg = svg_path.read_text(encoding="utf-8")
+          today = dt.datetime.now(dt.timezone.utc).date()
+          expected = f"updated {today:%b} {today.day}, {today.year}"
+          if expected not in svg:
+              raise SystemExit(
+                  f"stale star history: expected {expected!r} in generated SVG"
+              )
+          PY
 
       - name: Build documentation site
         run: mkdocs build --strict --site-dir output/frontstage-pages/site/docs
@@ -195,6 +230,7 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -216,7 +216,7 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
             "multi_agent": {"json": 480, "markdown": 72},
         },
         scale_axis="todo_count",
-        max_json_growth_chars_per_unit=360,
+        max_json_growth_chars_per_unit=520,
     ),
     CliOutputBudgetSpec(
         surface_id="review_packet_handoff_only",

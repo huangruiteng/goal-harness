@@ -46,6 +46,11 @@ GLOBAL_REPLAN_OBLIGATION = {
     "stall_threshold": 2,
     "trigger_count": 1,
     "triggers": [{"kind": "periodic_review_due", "source": "fixture"}],
+    "replan_novelty_policy": {
+        "schema_version": "replan_novelty_policy_v0",
+        "evidence_source": "agent_scoped_evidence_log",
+        "writeback": "repair_delta",
+    },
     "stop_condition": "stop after one bounded replan slice writes back a concrete frontier delta",
 }
 
@@ -569,8 +574,14 @@ def assert_replan_beats_monitor_quiet_skip() -> None:
     assert "evidence-log" in required_reads[0]["command"], required_reads
     assert " --agent-id codex-side-bypass " in f" {required_reads[0]['command']} ", required_reads
     assert "--todo-id" not in required_reads[0]["command"], required_reads
-    assert "across this agent lane" in required_reads[0]["reason"], required_reads
-    assert "public-safe search" in required_reads[0]["reason"], required_reads
+    assert "novelty policy evidence source" in required_reads[0]["reason"], required_reads
+    novelty_policy = guard["autonomous_replan_obligation"][
+        "replan_novelty_policy"
+    ]
+    assert (
+        novelty_policy.get("evidence_source") or novelty_policy.get("evidence")
+    ) == "agent_scoped_evidence_log", guard
+    assert novelty_policy["writeback"] == "repair_delta", guard
     assert guard["autonomous_replan_obligation"]["required_reads"] == required_reads, guard
     assert (
         guard["interaction_contract"]["agent_channel"]["required_reads"] == required_reads

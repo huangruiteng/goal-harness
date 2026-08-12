@@ -29,6 +29,9 @@ from .sources import (
 DECISION_CONTEXT_ASSEMBLY_SCHEMA_VERSION = "decision_context_assembly_v0"
 DECISION_CURSOR_CHECKPOINT_SCHEMA_VERSION = "decision_cursor_checkpoint_v0"
 DECISION_SOURCE_COVERAGE_SCHEMA_VERSION = "decision_source_coverage_v0"
+DECISION_SEMANTIC_REBASE_RECEIPT_SCHEMA_VERSION = (
+    "decision_semantic_rebase_receipt_v0"
+)
 
 
 def _packet_ref(prefix: str, packet: Mapping[str, Any]) -> str:
@@ -96,6 +99,7 @@ class DecisionEvidenceRecords:
     recalled_claims: tuple[Mapping[str, Any], ...] = ()
     stale_or_rejected_claims: tuple[Mapping[str, Any], ...] = ()
     conflicts: tuple[Mapping[str, Any], ...] = ()
+    semantic_no_change: bool = False
 
 
 @dataclass(frozen=True)
@@ -472,6 +476,7 @@ def _checkpoint_disposition(
     collected: _CollectedSource,
     accounted_pairs: set[tuple[str, str]],
     conflict_refs: set[str],
+    semantic_no_change: bool,
 ) -> tuple[bool, str]:
     scan = collected.scan
     if scan.cursor_after is None:
@@ -486,6 +491,8 @@ def _checkpoint_disposition(
         return False, "exact_read_disabled"
     if collected.exact_read_failed or len(collected.exact_reads) != len(scan.items):
         return False, "exact_read_incomplete"
+    if semantic_no_change:
+        return True, "semantic_no_change"
 
     changed_refs = []
     for item in scan.items:
@@ -552,7 +559,8 @@ def assemble_decision_evidence(
     """Collect, rebase, and assemble one public-safe decision evidence packet.
 
     Cursor values are returned only as private proposals. A caller may persist
-    them after the decision ledger and outcome receipt have been validated.
+    them after a reviewed proposal or explicit semantic no-change result has
+    been written back and validated. Later outcome observation is separate.
     """
 
     assembly_time = _timestamp(observed_at, field_name="observed_at")
@@ -726,6 +734,19 @@ def assemble_decision_evidence(
     records = rebase(collection)
     if not isinstance(records, DecisionEvidenceRecords):
         raise TypeError("rebase must return DecisionEvidenceRecords")
+    if not isinstance(records.semantic_no_change, bool):
+        raise TypeError("semantic_no_change must be a boolean")
+    if records.semantic_no_change and any(
+        (
+            records.changed_facts,
+            records.recalled_claims,
+            records.stale_or_rejected_claims,
+            records.conflicts,
+        )
+    ):
+        raise ValueError(
+            "semantic_no_change cannot accompany material evidence records"
+        )
 
     verified_facts = _verified_changed_facts(
         facts=records.changed_facts,
@@ -755,6 +776,7 @@ def assemble_decision_evidence(
             collected=collected,
             accounted_pairs=accounted_pairs,
             conflict_refs=conflict_refs,
+            semantic_no_change=records.semantic_no_change,
         )
         if checkpoint_ready and collected.scan.cursor_after is not None:
             proposed_cursors[collected.source.source_id] = collected.scan.cursor_after
@@ -789,6 +811,25 @@ def assemble_decision_evidence(
         "source_coverage": _source_coverage(collected_sources),
         "context_retrieval_receipt": retrieval_receipt,
         "evidence_packet": evidence,
+        "semantic_rebase": {
+            "schema_version": DECISION_SEMANTIC_REBASE_RECEIPT_SCHEMA_VERSION,
+            "status": (
+                "no_material_change"
+                if records.semantic_no_change
+                else "material_change"
+                if any(
+                    (
+                        records.changed_facts,
+                        records.recalled_claims,
+                        records.stale_or_rejected_claims,
+                        records.conflicts,
+                    )
+                )
+                else "incomplete"
+            ),
+            "quiet_noop_allowed": records.semantic_no_change,
+            "raw_context_captured": False,
+        },
         "cursor_checkpoint": checkpoint,
         "provider_fail_open": True,
         "raw_context_captured": False,

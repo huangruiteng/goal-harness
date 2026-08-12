@@ -194,7 +194,15 @@ For replan and handoff, the guard and review packet may also carry
 that command as the cold-path chronology for the selected agent lane: it expands
 the current agent's public-safe events, keeps other agents compressed to
 frontier context, and does not replace status, quota, review packets, or the
-append-only event sources.
+append-only event sources. A successful read appends an `evidence_log_read`
+rollout event and returns `read_receipt` with schema
+`evidence_log_read_receipt_v0`. Replan ACK validation uses the receipt's goal,
+agent, required-read identity, read window, and timestamp. Missing or stale
+receipts produce
+`replan_ack_feedback.classification=required_read_not_executed`; the per-goal
+`control_plane.replan_required_reads.enforcement` setting defaults to `soft`
+and accepts `hard` to keep the obligation open until a matching fresh receipt
+exists.
 The same guard may include `work_lane_contract`. Schema
 `work_lane_contract_v1` is the compatibility drill-down for monitor versus
 advancement routing under the guard's first-class `interaction_contract`. It

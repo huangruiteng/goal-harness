@@ -23,6 +23,7 @@ from .contract import (
     normalize_removed_todo_continuation_policy,
     normalize_todo_id,
     normalize_todo_status,
+    normalize_todo_watch_only,
 )
 
 
@@ -33,6 +34,13 @@ TODO_PRIORITY_PREFIX_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TODO_PRIORITY_LABEL_PATTERN = re.compile(r"\bP([0-4])\b", re.IGNORECASE)
+
+
+def todo_item_is_watch_only_monitor(item: dict[str, Any]) -> bool:
+    return bool(
+        todo_item_task_class(item) == TODO_TASK_CLASS_MONITOR
+        and normalize_todo_watch_only(item.get("watch_only")) is True
+    )
 
 
 def todo_priority_parts(text: str) -> tuple[str | None, str]:

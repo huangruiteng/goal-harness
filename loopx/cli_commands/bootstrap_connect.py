@@ -10,9 +10,6 @@ from ..bootstrap import (
     bootstrap_project,
     render_bootstrap_markdown,
 )
-from ..execution_profile import DEFAULT_EXECUTION_PROFILE
-
-
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
     None,
@@ -65,8 +62,16 @@ def register_bootstrap_connect_command(subparsers: argparse._SubParsersAction) -
         help=argparse.SUPPRESS,
     )
     bootstrap_parser.add_argument(
+        "--fine-grained",
+        action="store_true",
+        help=(
+            "Persist one-small-checkpoint-per-turn execution with evidence-driven "
+            "replanning after each completed Todo."
+        ),
+    )
+    bootstrap_parser.add_argument(
         "--execution-minimum-scale",
-        default=str(DEFAULT_EXECUTION_PROFILE["minimum_scale"]),
+        default=None,
         help="Minimum delivery scale after repeated small follow-through.",
     )
     bootstrap_parser.add_argument(
@@ -78,7 +83,7 @@ def register_bootstrap_connect_command(subparsers: argparse._SubParsersAction) -
     bootstrap_parser.add_argument(
         "--execution-small-streak-threshold",
         type=int,
-        default=int(DEFAULT_EXECUTION_PROFILE["degradation_policy"]["small_scale_streak_threshold"]),
+        default=None,
         help="Repeated small-scale streak that triggers the delivery contract.",
     )
     bootstrap_parser.add_argument(
@@ -96,7 +101,7 @@ def register_bootstrap_connect_command(subparsers: argparse._SubParsersAction) -
     bootstrap_parser.add_argument(
         "--execution-surface-streak-threshold",
         type=int,
-        default=int(DEFAULT_EXECUTION_PROFILE["outcome_floor"]["surface_streak_threshold"]),
+        default=None,
         help="Surface-progress streak that triggers the outcome-floor contract.",
     )
     bootstrap_parser.add_argument(
@@ -209,6 +214,7 @@ def handle_bootstrap_connect_command(
             execution_surface_only_hints=args.execution_surface_only_hint or None,
             execution_surface_streak_threshold=args.execution_surface_streak_threshold,
             execution_outcome_must_advance=args.execution_outcome_must_advance or None,
+            execution_turn_granularity=("fine" if bool(args.fine_grained) else None),
             onboarding_scan_enabled=not bool(args.no_onboarding_scan),
             accept_onboarding_agent_todos=bool(args.accept_onboarding_agent_todos),
             begin_autonomous_advance=bool(args.begin_autonomous_advance),

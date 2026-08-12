@@ -269,6 +269,7 @@ def write_monitor_poll_todo_state(
         role="agent",
         reason=reason_summary,
         monitor_metadata=monitor_metadata,
+        enforce_monitor_boundedness=False,
         agent_id=agent_id,
         dry_run=not execute,
     )

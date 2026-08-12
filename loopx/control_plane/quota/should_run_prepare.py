@@ -85,6 +85,45 @@ from ..work_items.work_lane import (
     work_lane_contract_is_lark_inbox_reply_due,
 )
 
+
+def _replan_required_read_enforcement(
+    *policy_sources: Any,
+) -> str:
+    for source in policy_sources:
+        if not isinstance(source, Mapping):
+            continue
+        control_plane = source.get("control_plane")
+        if not isinstance(control_plane, Mapping):
+            continue
+        policy = control_plane.get("replan_required_reads")
+        if not isinstance(policy, Mapping):
+            continue
+        if str(policy.get("enforcement") or "").strip() == "hard":
+            return "hard"
+    return "soft"
+
+
+def _status_evidence_log_read_receipts(
+    status_payload: Mapping[str, Any],
+    *,
+    goal_id: str,
+) -> list[dict[str, Any]]:
+    attention_queue = status_payload.get("attention_queue")
+    items = (
+        attention_queue.get("items")
+        if isinstance(attention_queue, Mapping)
+        else []
+    )
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("goal_id") or "") != goal_id:
+            continue
+        receipts = item.get("evidence_log_read_receipts")
+        if isinstance(receipts, list):
+            return [item for item in receipts if isinstance(item, dict)]
+    return []
+
 @dataclass(slots=True)
 class _QuotaDecisionPreparation:
     status_payload: dict[str, Any]
@@ -579,6 +618,15 @@ def _prepare_quota_should_run_item(
         registered_agent_ids=registered_agent_ids,
         goal_status=str(registry_goal.get("status") or ""),
         agent_profile=_quota_agent_profile(agent_identity),
+        evidence_log_read_receipts=_status_evidence_log_read_receipts(
+            status_payload,
+            goal_id=safe_goal_id,
+        ),
+        required_read_enforcement=_replan_required_read_enforcement(
+            registry_goal,
+            item,
+            project_asset,
+        ),
     )
     replan_obligation = goal_frontier_context.get("replan_obligation")
     replan_scope = goal_frontier_context.get("replan_scope") or {}

@@ -13,6 +13,7 @@ from .event_inbox import (
     _event_from_file,
     load_lark_event_inbox_config,
 )
+from .inbox_reactions import complete_lark_event_inbox_reactions
 
 
 CommandRunner = Callable[[Sequence[str]], Mapping[str, Any]]
@@ -187,6 +188,7 @@ def _result(
     write_performed: bool = False,
     readback_performed: bool = False,
     reply_verified: bool = False,
+    reaction_cleanup_verified: bool = False,
     blocker: str | None = None,
 ) -> dict[str, Any]:
     packet: dict[str, Any] = {
@@ -199,6 +201,7 @@ def _result(
         "external_write_performed": write_performed,
         "verification_performed": readback_performed,
         "reply_verified": reply_verified,
+        "reaction_cleanup_verified": reaction_cleanup_verified,
         "sender_identity_verified": identity_verified,
         "sender_chat_membership_verified": membership_verified,
         "private_sender_profile_captured": False,
@@ -385,9 +388,30 @@ def reply_lark_event_inbox(
             message=readback_message,
         )
     )
+    reaction_cleanup = (
+        complete_lark_event_inbox_reactions(
+            project=project,
+            config_path=config_path,
+            message_id=source_message_id,
+            execute=True,
+            runner=runner,
+        )
+        if verified
+        else None
+    )
+    reaction_cleanup_verified = bool(
+        reaction_cleanup is not None and reaction_cleanup.get("ok") is True
+    )
+    completed = bool(verified and reaction_cleanup_verified)
     return _result(
-        status="sent_verified" if verified else "sent_unverified",
-        ok=verified,
+        status=(
+            "sent_verified"
+            if completed
+            else "sent_verified_cleanup_pending"
+            if verified
+            else "sent_unverified"
+        ),
+        ok=completed,
         execute=True,
         receipt=receipt,
         identity_verified=True,
@@ -395,5 +419,12 @@ def reply_lark_event_inbox(
         write_performed=True,
         readback_performed=True,
         reply_verified=verified,
-        blocker=None if verified else "lark_inbox_reply_not_verified",
+        reaction_cleanup_verified=reaction_cleanup_verified,
+        blocker=(
+            None
+            if completed
+            else "lark_inbox_reply_reaction_cleanup_pending"
+            if verified
+            else "lark_inbox_reply_not_verified"
+        ),
     )

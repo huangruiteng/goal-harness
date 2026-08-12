@@ -19,7 +19,7 @@ context 或新增一条控制面规则的开发者。
 |---|---|---|
 | [概念导读：先把 LoopX 放进一张图](/loopx/docs/development/control-plane-course/00-concept-primer/) | 有限上下文、外置状态与核心概念总图 | 第 1、2 章后 |
 | [长程任务如何收敛](/loopx/docs/development/control-plane-course/topic-long-horizon-convergence/) | 方向、证据、Delta、活性与终局不变量 | 第 6 章后 |
-| [第 1 讲：Harness 是 effectful program](/loopx/docs/development/control-plane-course/01-agent-loop-effectful-program/) | harness 是 agent loop 的 effect interpreter | 第 1 至 6 章后 |
+| [第 1 讲：Harness 是 effectful program](/loopx/docs/development/control-plane-course/01-agent-loop-effectful-program/) | effect interpreter 心智模型，以及三类 adapter 如何复用 typed settlement algebra | 第 1 至 6 章后 |
 | [第 2 讲：从三个 Showcase 理解 LoopX 架构](/loopx/docs/development/control-plane-course/02-goal-control-plane-architecture/) | Agent / Provider / Capability / Kernel 分工 | 第 2 章后 |
 | [第 3 讲：从 Showcase 到第一次真实 Loop](/loopx/docs/development/control-plane-course/03-first-real-loop/) | guided start、todo、quota、refresh、spend | 第 1 至 6 章后 |
 | [第 4 讲：状态底座与可重放事实](/loopx/docs/development/control-plane-course/04-state-substrate/) | registry、event、active state、run history、projection | 第 3 章后 |

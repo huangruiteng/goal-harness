@@ -289,7 +289,11 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
     if mode == "outcome_floor_recovery":
         return "produce the required outcome-floor evidence artifact or write the concrete blocker"
     if mode == "capability_bridge_repair":
-        return "repair or materialize the missing bridge capability, rewrite the todo, or write a compact blocker"
+        return (
+            "execute interaction_contract.cli_channel.next_cli_actions[0] to "
+            "materialize the missing capability; do not backtrack to generic "
+            "inspection or a monitor fallback"
+        )
     if mode == "agent_workspace_repair":
         return "create or switch to an independent worktree/branch, then rerun quota guard before file edits"
     if mode == "automation_prompt_upgrade":

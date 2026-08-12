@@ -924,6 +924,7 @@ def _build_quota_should_run_payload(
         "autonomous_replan_decision",
         "vision_continuation_audit",
         "vision_wait_state",
+        "replan_ack_feedback",
     ):
         if isinstance(value := prepared.goal_frontier_projection.get(key), dict):
             payload[key] = value
@@ -1109,19 +1110,31 @@ def _build_quota_should_run_payload(
 
 
 def _quota_required_reads(decision: dict[str, Any]) -> list[dict[str, Any]]:
-    effective_action = str(decision.get("effective_action") or "")
-    replan_required = effective_action in {
-        AUTONOMOUS_REPLAN_REQUIRED_MODE,
-        AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
-    } or isinstance(decision.get("autonomous_replan_obligation"), dict)
-    if not replan_required:
+    """Materialize only evidence reads requested by the novelty policy.
+
+    A generic replan action is not enough: that was the old, low-salience hint
+    path. The prompt-visible novelty policy is now the causal owner and the
+    required-read packet is its executable evidence provider.
+    """
+
+    obligation = decision.get("autonomous_replan_obligation")
+    if not isinstance(obligation, dict):
+        return []
+    policy = obligation.get("replan_novelty_policy")
+    if not isinstance(policy, dict):
+        return []
+    evidence_source = str(
+        policy.get("evidence_source") or policy.get("evidence") or ""
+    ).strip()
+    if evidence_source != "agent_scoped_evidence_log":
         return []
     read = build_agent_scoped_required_read(
         goal_id=str(decision.get("goal_id") or ""),
         agent_id=quota_decision_agent_id(decision),
+        required_read_id=str(obligation.get("obligation_id") or "") or None,
         reason=(
-            "read recent public-safe evidence across this agent lane before "
-            "replan; if local evidence is thin, use bounded public-safe search"
+            "novelty policy evidence source; execute before selecting the "
+            "replan repair delta"
         ),
     )
     return [read] if read else []

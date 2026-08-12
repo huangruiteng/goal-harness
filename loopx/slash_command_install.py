@@ -140,7 +140,7 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "command": "/loopx",
             "name": "loopx",
             "description": "Inspect LoopX state, or start concrete project work when arguments are provided.",
-            "argument_hint": "[--capability-route issue-fix] [task text]",
+            "argument_hint": "[--fine-grained] [--capability-route issue-fix] [task text]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
                 "Identify the exact current host surface (codex-app, codex-app-ssh, codex-ide-plugin, codex-cli-tui, opencode, traex-cli, pi, gemini-cli, cursor-agent, or ark-managed-agent).",

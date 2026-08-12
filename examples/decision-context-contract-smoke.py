@@ -12,12 +12,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.capabilities.decision_context import (
+from loopx.capabilities.decision_context import (  # noqa: E402
     DecisionSourceSpec,
     build_decision_context_architecture_packet,
     build_decision_evidence_packet,
     build_decision_outcome_receipt,
     build_decision_proposal,
+    build_decision_review_receipt,
     build_decision_source_manifest,
 )
 
@@ -108,6 +109,36 @@ def main() -> int:
             "confidence": 0.8,
         },
     )
+    review_receipts = {
+        disposition: build_decision_review_receipt(
+            goal_id="goal:example",
+            decision_id="decision:priority",
+            evidence_packet_ref=str(evidence["packet_ref"]),
+            proposal_packet_ref=str(proposal["packet_ref"]),
+            gate_todo_id=f"todo:review:{disposition}",
+            source_event_id=f"event:review:{disposition}",
+            recorded_at=REVIEW_AT,
+            disposition=disposition,
+            actor_ref="owner:goal",
+            reason_code=f"owner_{disposition}",
+            summary=f"The owner recorded {disposition} through the existing gate.",
+        )
+        for disposition in ("approve", "reject", "defer")
+    }
+    review_receipts["no_change"] = build_decision_review_receipt(
+        goal_id="goal:example",
+        decision_id="decision:priority",
+        evidence_packet_ref=str(evidence["packet_ref"]),
+        recorded_at=REVIEW_AT,
+        disposition="no_change",
+        actor_ref="agent:decision-advisor",
+        reason_code="no_material_change",
+        summary="The source update does not alter the current decision.",
+    )
+    assert review_receipts["approve"]["outcome_observation_required"] is True
+    assert review_receipts["reject"]["outcome_observation_required"] is False
+    assert review_receipts["defer"]["outcome_observation_required"] is False
+    assert review_receipts["no_change"]["quiet_noop"] is True
     outcome = build_decision_outcome_receipt(
         goal_id="goal:example",
         decision_id="decision:priority",
@@ -142,6 +173,10 @@ def main() -> int:
                 "manifest_ref": manifest["manifest_ref"],
                 "evidence_ref": evidence["packet_ref"],
                 "proposal_ref": proposal["packet_ref"],
+                "review_refs": {
+                    disposition: receipt["packet_ref"]
+                    for disposition, receipt in sorted(review_receipts.items())
+                },
                 "outcome_ref": outcome["packet_ref"],
             },
             sort_keys=True,

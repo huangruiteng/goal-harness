@@ -82,6 +82,7 @@ def main() -> int:
         "Motivation Causal Chain",
         "Implementation Execution Chain",
         "Code Volume And Simplification Review",
+        "Scope-Fit And Active Call-Site Gate",
     ):
         assert duplicated_contract_heading not in skill_source, duplicated_contract_heading
 
@@ -229,6 +230,47 @@ def main() -> int:
     assert main_risk["post_merge_review"] is False, main_risk
     assert main_risk["potential_regressions"], main_risk
     assert main_risk["bug_risks"], main_risk
+    contract = payload.get("agent_response_contract", {}).get(
+        "review_execution_contract", {}
+    )
+    scope_fit_reqs = [
+        req
+        for req in contract.get("evidence_requirements", [])
+        if req.get("evidence_id") == "scope_fit"
+    ]
+    assert scope_fit_reqs, "scope_fit evidence requirement missing from contract"
+    assert scope_fit_reqs[0]["required_when"] == "code_change", scope_fit_reqs
+    code_pr = next(
+        (
+            p
+            for p in payload.get("pull_requests", [])
+            if p.get("review_plan", {}).get("applicability", {}).get("code_change")
+        ),
+        None,
+    )
+    assert code_pr is not None, "fixture must include a code-change PR"
+    assert "scope_fit" in code_pr["review_plan"]["required_evidence_ids"], code_pr[
+        "review_plan"
+    ]
+    assert (
+        code_pr["review_plan"]["applicability"]["scope_fit_required"] is True
+    ), code_pr["review_plan"]
+    docs_pr = next(
+        (
+            p
+            for p in payload.get("pull_requests", [])
+            if not p.get("review_plan", {}).get("applicability", {}).get("code_change")
+        ),
+        None,
+    )
+    assert docs_pr is not None, "fixture must include a docs-only PR"
+    assert docs_pr["review_plan"]["applicability"]["scope_fit_required"] is False
+    risk_section = next(
+        section
+        for section in template["sections"]
+        if section["label"] == "对主干的风险"
+    )
+    assert "scope_fit" in risk_section["agent_instruction"], risk_section
 
     default_payload = json.loads(
         run_cli("--format", "json", "pr-review", "--fixture", str(FIXTURE)).stdout
@@ -427,11 +469,16 @@ def main() -> int:
         "problem_context",
         "architecture_flow",
         "changed_line_classification",
+        "scope_fit",
         "symbol_map",
         "walkthroughs",
         "validation_matrix",
         "failure_analysis",
         "code_volume",
+        "typed_state_rule",
+        "domain_neutrality",
+        "behavior_change_disclosure",
+        "guidance_vs_obligation",
     }, requirements
     assert requirements["symbol_map"]["item_count"] == {"minimum": 2, "maximum": 5}
     assert "caller_evidence" in requirements["symbol_map"]["item_fields"]
@@ -449,6 +496,12 @@ def main() -> int:
         "partly_avoidable",
         "not_yet_proven",
     ]
+    assert "substring denylists" in requirements["typed_state_rule"]["rule"]
+    assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
+    assert "silent behavior changes" in requirements["behavior_change_disclosure"][
+        "rule"
+    ]
+    assert "must_attempt_work" in requirements["guidance_vs_obligation"]["rule"]
     assert execution["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert execution["completion_gate"]["stale_head_verdict_allowed"] is False
     assert execution["finding_contract"]["findings_first"] is True
@@ -456,6 +509,14 @@ def main() -> int:
     assert first_plan["schema_version"] == "pull_request_review_plan_v1", first_plan
     assert first_plan["applicability"]["docs_only"] is True, first_plan
     assert first_plan["applicability"]["symbol_map_required"] is False, first_plan
+    assert first_plan["applicability"]["typed_state_rule_required"] is False, first_plan
+    assert (
+        first_plan["applicability"]["behavior_change_disclosure_required"] is False
+    ), first_plan
+    assert first_plan["applicability"]["domain_neutrality_required"] is False, first_plan
+    assert (
+        first_plan["applicability"]["guidance_vs_obligation_required"] is False
+    ), first_plan
     assert "symbol_map" not in first_plan["required_evidence_ids"], first_plan
     assert first_plan["result_template"]["target_exact_head"] == (
         "773@7730000000000000000000000000000000000000"
@@ -465,6 +526,12 @@ def main() -> int:
     assert merged_plan["applicability"]["code_change"] is True, merged_plan
     assert merged_plan["applicability"]["symbol_map_required"] is True, merged_plan
     assert merged_plan["applicability"]["negative_walkthrough_required"] is True, merged_plan
+    assert merged_plan["applicability"]["typed_state_rule_required"] is True, merged_plan
+    assert (
+        merged_plan["applicability"]["behavior_change_disclosure_required"] is True
+    ), merged_plan
+    assert "typed_state_rule" in merged_plan["required_evidence_ids"], merged_plan
+    assert "behavior_change_disclosure" in merged_plan["required_evidence_ids"], merged_plan
     assert "symbol_map" in merged_plan["required_evidence_ids"], merged_plan
     merged_risk_hint = merged["metadata_risk_hint"]
     assert merged_risk_hint["level"] == "medium", merged_risk_hint

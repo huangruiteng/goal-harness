@@ -5,11 +5,13 @@ from __future__ import annotations
 from .assembler import (
     DECISION_CONTEXT_ASSEMBLY_SCHEMA_VERSION,
     DECISION_CURSOR_CHECKPOINT_SCHEMA_VERSION,
+    DECISION_SEMANTIC_REBASE_RECEIPT_SCHEMA_VERSION,
 )
 from .packets import (
     DECISION_EVIDENCE_PACKET_SCHEMA_VERSION,
     DECISION_OUTCOME_RECEIPT_SCHEMA_VERSION,
     DECISION_PROPOSAL_SCHEMA_VERSION,
+    DECISION_REVIEW_RECEIPT_SCHEMA_VERSION,
 )
 from .cursor_commit import DECISION_CURSOR_COMMIT_RECEIPT_SCHEMA_VERSION
 from .sources import (
@@ -36,6 +38,7 @@ def build_decision_context_architecture_packet() -> dict[str, object]:
         "packet_schemas": [
             DECISION_EVIDENCE_PACKET_SCHEMA_VERSION,
             DECISION_PROPOSAL_SCHEMA_VERSION,
+            DECISION_REVIEW_RECEIPT_SCHEMA_VERSION,
             DECISION_OUTCOME_RECEIPT_SCHEMA_VERSION,
         ],
         "source_schemas": [
@@ -44,6 +47,7 @@ def build_decision_context_architecture_packet() -> dict[str, object]:
         ],
         "assembly_schemas": [
             DECISION_CONTEXT_ASSEMBLY_SCHEMA_VERSION,
+            DECISION_SEMANTIC_REBASE_RECEIPT_SCHEMA_VERSION,
             DECISION_CURSOR_CHECKPOINT_SCHEMA_VERSION,
             DECISION_CURSOR_COMMIT_RECEIPT_SCHEMA_VERSION,
         ],
@@ -59,8 +63,9 @@ def build_decision_context_architecture_packet() -> dict[str, object]:
             "exact_read",
             "rebase",
             "propose",
-            "outcome",
+            "review_or_quiet_settlement",
             "commit_cursor",
+            "observe_outcome",
         ],
         "invariants": [
             "evidence_and_proposal_remain_separate",
@@ -70,6 +75,8 @@ def build_decision_context_architecture_packet() -> dict[str, object]:
             "cursor_commit_exact_reads_a_matching_lifecycle_event",
             "raw_provider_content_never_enters_public_packets",
             "proposals_require_existing_authority_confirmation",
+            "review_settlement_precedes_cursor_commit",
+            "outcome_observation_does_not_block_consumed_source_cursors",
             "verified_outcomes_precede_reward_memory_candidates",
         ],
         "next_stage": "private_incremental_source_profile_then_dogfood",

@@ -27,6 +27,9 @@ from loopx.extensions.lark.event_collector_runtime import (  # noqa: E402
 from loopx.extensions.lark.event_inbox import (  # noqa: E402
     project_lark_event_inbox_urgency,
 )
+from loopx.extensions.lark.inbox_reactions import (  # noqa: E402
+    lark_inbox_reaction_receipts,
+)
 from loopx.cli_commands.lark_inbox import (  # noqa: E402
     _collector_permissions,
 )
@@ -74,6 +77,7 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
                     "bot_display_name": "Project Review Bot",
                     "chat_id": "oc_private_fixture_chat",
                     "received_reaction_emoji": "Get",
+                    "processing_reaction_emoji": "OnIt",
                 },
             }
         ),
@@ -274,12 +278,14 @@ with tempfile.TemporaryDirectory(prefix="loopx-lark-collector-") as raw:
             )
         invalid_inbox["reply"]["enabled"] = True
         invalid_inbox["reply"].pop("received_reaction_emoji")
+        invalid_inbox["reply"].pop("processing_reaction_emoji")
         inbox_config.write_text(json.dumps(invalid_inbox), encoding="utf-8")
         assert _collector_permissions(
             project=project,
             config_path=collector_config,
         ) == (LARK_COLLECTOR_PERMISSION,)
         invalid_inbox["reply"]["received_reaction_emoji"] = "Get"
+        invalid_inbox["reply"]["processing_reaction_emoji"] = "OnIt"
         inbox_config.write_text(json.dumps(invalid_inbox), encoding="utf-8")
 
         messages = {
@@ -456,6 +462,15 @@ else:
         assert runtime_result["received_reaction_count"] == 1, runtime_result
         assert runtime_result["received_reaction_failure_count"] == 1, runtime_result
         assert runtime_result["external_writes_performed"] is True, runtime_result
+        assert lark_inbox_reaction_receipts(
+            inbox=project / ".loopx" / "inbox" / "team-feedback",
+            message_id="om_runtime_reply",
+        ) == {
+            "received": {
+                "reaction_id": "reaction_runtime",
+                "emoji_type": "Get",
+            }
+        }
         runtime_urgency = project_lark_event_inbox_urgency(
             project=project,
             config_path=inbox_config,

@@ -93,6 +93,11 @@ def register_starter_bootstrap_commands(subparsers: argparse._SubParsersAction) 
     )
     add_capability_route_argument(bootstrap_command_pack_parser)
     bootstrap_command_pack_parser.add_argument(
+        "--fine-grained",
+        action="store_true",
+        help="Preview sticky one-checkpoint-per-turn goal execution.",
+    )
+    bootstrap_command_pack_parser.add_argument(
         "--goal-text",
         help=(
             "Optional text after /loopx. When present, preview the explicit goal-start flow: "

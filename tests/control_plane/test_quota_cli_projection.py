@@ -83,6 +83,10 @@ def test_compact_quota_should_run_cli_payload_keeps_decision_lanes_and_counts() 
 
     compact = compact_quota_should_run_cli_payload(payload)
 
+    assert list(compact).index("interaction_contract") <= len(
+        ("ok", "status_health_ok", "mode", "goal_id", "decision", "should_run")
+    )
+
     assert compact["interaction_contract"] == payload["interaction_contract"]
     assert compact["selected_todo"] == payload["selected_todo"]
     assert compact["scheduler_hint"] == payload["scheduler_hint"]

@@ -11,6 +11,7 @@ from loopx.control_plane.runtime.run_context_retention import (
 from loopx.control_plane.status.agent_lane_projection import (
     compact_agent_lane_status_payload_for_display,
 )
+from loopx.status import compact_run
 
 AGENT_ID = "quality-agent"
 OTHER_AGENT_ID = "other-agent"
@@ -121,6 +122,37 @@ def test_semantic_history_uses_independent_agent_slots() -> None:
         _agent_context(semantic_history, OTHER_AGENT_ID)["latest_agent_vision_run"]
         is runs[5]
     )
+
+
+def test_rejected_replan_feedback_survives_compaction_and_semantic_history() -> None:
+    run = _run(
+        "2026-08-09T00:06:00Z",
+        classification="replan_noop",
+        autonomous_replan_noop={
+            "classification": "replan_noop",
+            "requested_classification": "successor_replan_recorded",
+        },
+        autonomous_replan_ack={
+            "recorded": False,
+            "delta_contract": {
+                "rejected_claims": [
+                    {
+                        "kind": "watch_lane_continuation",
+                        "reason": "monitor is missing expires_at, resume_when, or watch_only",
+                    }
+                ]
+            },
+        },
+    )
+
+    compacted = compact_run(run)
+    history = goal_semantic_history_from_runs([compacted])
+    context = _agent_context(history, AGENT_ID)
+
+    assert compacted["replan_ack_feedback"]["rejected_claims"][0]["kind"] == (
+        "watch_lane_continuation"
+    )
+    assert context["latest_replan_ack_feedback_run"] is compacted
 
 
 def test_retirement_prevents_stale_vision_selection() -> None:

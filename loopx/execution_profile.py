@@ -34,6 +34,13 @@ DEFAULT_EXECUTION_PROFILE: dict[str, Any] = {
     },
 }
 
+TURN_GRANULARITY_STANDARD = "standard"
+TURN_GRANULARITY_FINE = "fine"
+TURN_GRANULARITY_CHOICES = (
+    TURN_GRANULARITY_STANDARD,
+    TURN_GRANULARITY_FINE,
+)
+
 _LABEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,79}$")
 
 
@@ -72,6 +79,7 @@ def build_execution_profile(
     surface_only_hints: list[str] | None = None,
     surface_streak_threshold: int | None = None,
     outcome_must_advance: list[str] | None = None,
+    turn_granularity: str | None = None,
 ) -> dict[str, Any]:
     profile = compact_execution_profile(None)
     if minimum_scale:
@@ -98,6 +106,15 @@ def build_execution_profile(
     if outcome_must_advance:
         floor["must_advance"] = _label_list(outcome_must_advance, list(floor["must_advance"]))
     profile["outcome_floor"] = floor
+    if turn_granularity is not None:
+        normalized_turn_granularity = normalize_turn_granularity(turn_granularity)
+        if normalized_turn_granularity == TURN_GRANULARITY_FINE:
+            profile["turn_granularity"] = TURN_GRANULARITY_FINE
+            profile["minimum_scale"] = "single_surface"
+            profile["degradation_policy"] = {
+                "small_scale_streak_threshold": 1,
+                "on_degradation": "replan_after_checkpoint",
+            }
     return profile
 
 
@@ -121,6 +138,11 @@ def compact_execution_profile(value: Any) -> dict[str, Any]:
     }
     if not isinstance(value, dict):
         return profile
+
+    if "turn_granularity" in value:
+        turn_granularity = normalize_turn_granularity(value.get("turn_granularity"))
+        if turn_granularity == TURN_GRANULARITY_FINE:
+            profile["turn_granularity"] = turn_granularity
 
     profile["cadence"] = _label(value.get("cadence"), str(profile["cadence"]))
     profile["minimum_scale"] = _label(value.get("minimum_scale"), str(profile["minimum_scale"]))
@@ -152,7 +174,57 @@ def compact_execution_profile(value: Any) -> dict[str, Any]:
     floor["avoid"] = _label_list(raw_floor.get("avoid"), list(floor["avoid"]))
     floor["if_unavailable"] = _label(raw_floor.get("if_unavailable"), str(floor["if_unavailable"]))
     profile["outcome_floor"] = floor
+    if execution_profile_is_fine_grained(profile):
+        profile["minimum_scale"] = "single_surface"
+        profile["degradation_policy"] = {
+            "small_scale_streak_threshold": 1,
+            "on_degradation": "replan_after_checkpoint",
+        }
     return profile
+
+
+def normalize_turn_granularity(value: Any) -> str:
+    candidate = str(value or TURN_GRANULARITY_STANDARD).strip().lower().replace("-", "_")
+    if candidate not in TURN_GRANULARITY_CHOICES:
+        raise ValueError(
+            "turn_granularity must be one of: "
+            + ", ".join(TURN_GRANULARITY_CHOICES)
+        )
+    return candidate
+
+
+def execution_profile_turn_granularity(profile: dict[str, Any] | None) -> str:
+    if not isinstance(profile, dict) or "turn_granularity" not in profile:
+        return TURN_GRANULARITY_STANDARD
+    return normalize_turn_granularity(profile.get("turn_granularity"))
+
+
+def execution_profile_is_fine_grained(profile: dict[str, Any] | None) -> bool:
+    return execution_profile_turn_granularity(profile) == TURN_GRANULARITY_FINE
+
+
+def execution_profile_with_turn_granularity(
+    profile: dict[str, Any] | None,
+    turn_granularity: str,
+) -> dict[str, Any]:
+    normalized = compact_execution_profile(profile)
+    mode = normalize_turn_granularity(turn_granularity)
+    if mode == TURN_GRANULARITY_FINE:
+        normalized["turn_granularity"] = TURN_GRANULARITY_FINE
+        normalized["minimum_scale"] = "single_surface"
+        normalized["degradation_policy"] = {
+            "small_scale_streak_threshold": 1,
+            "on_degradation": "replan_after_checkpoint",
+        }
+        return normalized
+    was_fine = execution_profile_is_fine_grained(normalized)
+    normalized.pop("turn_granularity", None)
+    if was_fine:
+        normalized["minimum_scale"] = DEFAULT_EXECUTION_PROFILE["minimum_scale"]
+        normalized["degradation_policy"] = dict(
+            DEFAULT_EXECUTION_PROFILE["degradation_policy"]
+        )
+    return normalized
 
 
 def execution_profile_threshold(profile: dict[str, Any] | None) -> int:
@@ -192,6 +264,11 @@ def execution_profile_summary(profile: dict[str, Any] | None) -> str:
             f"markers:{','.join(outcome_markers)},"
             f"surface:{','.join(surface_hints)}"
         )
+    turn_suffix = (
+        " turn_granularity=fine"
+        if execution_profile_is_fine_grained(normalized)
+        else ""
+    )
     return (
         f"cadence={normalized.get('cadence')} "
         f"minimum={normalized.get('minimum_scale')} "
@@ -199,4 +276,5 @@ def execution_profile_summary(profile: dict[str, Any] | None) -> str:
         f"spend_rule={normalized.get('spend_rule')} "
         f"small_streak_threshold={policy.get('small_scale_streak_threshold')}"
         f"{floor_suffix}"
+        f"{turn_suffix}"
     )
