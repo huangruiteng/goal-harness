@@ -89,6 +89,11 @@ can discover user-installed skills:
   `--with-goal-bridge` install. The wrapped goal runtime keeps private restart
   state under each project's `.opencode/goals/`; add that directory to project
   ignore rules before using the persistent bridge.
+- OpenCode 2: the same static command files serve OpenCode 2, and the goal
+  loop runs through the persistent `loopx opencode2-goal-worker` process,
+  which drives the session over the OpenCode 2 HTTP API and owns the loop
+  timers, so long runs survive TUI close. OpenCode 1 plugins do not run under
+  OpenCode 2; see `loopx/opencode2_goal_mode/README.md`.
 - Pi: the self-contained goal extension under `.pi/extensions/loopx-goal.ts`
   (with its loop core in `.pi/extensions/pi-goal-loop-runtime.mjs`) exposes
   `/loopx` after restart and runs the quota-gated goal loop through
@@ -140,11 +145,12 @@ integrations that need the lower-level handoff packet can use
 manager or PR review commands, use `loopx slash-commands` to print the current
 canonical command list and fallback CLI shapes.
 
-Use `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli-tui`, or
-`opencode` for the corresponding host. Use `codex-app-ssh` when the desktop app
-is attached to a remote workspace over SSH and its automation tools are
-unavailable; LoopX will generate a visible `/goal` task instead. Select
-`codex-ide-plugin` only when LoopX is running through the installed IDE plugin;
+Use `codex-app`, `codex-app-ssh`, `codex-ide-plugin`, `codex-cli-tui`,
+`opencode`, or `opencode2` for the corresponding host. Use `codex-app-ssh`
+when the desktop app is attached to a remote workspace over SSH and its
+automation tools are unavailable; LoopX will generate a visible `/goal` task
+instead. Select `codex-ide-plugin` only when LoopX is running through the
+installed IDE plugin;
 using Codex beside an editor does not make the host an IDE plugin. If the exact
 host is not known, omit `--host-surface` once: LoopX
 returns a read-only selection gate with exact rerun commands and does not write
