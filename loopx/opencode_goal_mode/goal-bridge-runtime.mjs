@@ -11,6 +11,8 @@ const BRIDGE_SCHEMA_VERSION = "loopx_opencode_goal_bridge_v0"
 const TERMINAL_STATE_SCHEMA_VERSION = "goal_terminal_state_v0"
 const SOURCE_COMPLETENESS_SCHEMA_VERSION = "goal_terminal_source_completeness_v0"
 const DEFAULT_RETRY_MINUTES = 3
+const MAX_RETRY_MINUTES = 30
+const BINDING_LOCK_STALE_MS = 90_000
 const LOOPX_GOAL_LIMITS = {
   maxTurns: 10000,
   maxDurationMs: 30 * 24 * 60 * 60 * 1000,
@@ -145,10 +147,87 @@ export function createFileBindingStore({ root = defaultStateRoot() } = {}) {
 }
 
 
+export function probeRetryPlan(binding) {
+  const count = Number(binding?.probeRetryCount || 0)
+  const minutes = Math.min(DEFAULT_RETRY_MINUTES * 2 ** Math.min(count, 4), MAX_RETRY_MINUTES)
+  return { minutes, probeRetryCount: count + 1 }
+}
+
+
+export function pidIsAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error?.code === "EPERM"
+  }
+}
+
+
+export async function leaseIsLive(lock, { staleMs = BINDING_LOCK_STALE_MS, now = () => Date.now() } = {}) {
+  const heartbeatAt = lock?.heartbeatAt ? Date.parse(lock.heartbeatAt) : NaN
+  if (Number.isFinite(heartbeatAt) && now() - heartbeatAt < staleMs) return true
+  return pidIsAlive(lock?.pid)
+}
+
+
+export function createFileLockStore({ root = defaultStateRoot() } = {}) {
+  const target = (sessionID) => path.join(root, `${sanitizedSessionID(sessionID)}.lock`)
+  return {
+    async read(sessionID) {
+      try {
+        const payload = JSON.parse(await fs.readFile(target(sessionID), "utf8"))
+        if (!Number.isInteger(payload?.pid)) return null
+        return payload
+      } catch (error) {
+        if (error?.code === "ENOENT") return null
+        return null
+      }
+    },
+    async acquire(sessionID, { staleMs = BINDING_LOCK_STALE_MS } = {}) {
+      const lockPath = target(sessionID)
+      const existing = await this.read(sessionID)
+      if (existing && (await leaseIsLive(existing, { staleMs }))) {
+        return { acquired: false, holder: existing }
+      }
+      await fs.mkdir(root, { recursive: true, mode: 0o700 })
+      const temporary = `${lockPath}.${process.pid}.${Date.now()}.tmp`
+      await fs.writeFile(
+        temporary,
+        `${JSON.stringify({ pid: process.pid, heartbeatAt: new Date().toISOString() })}\n`,
+        { encoding: "utf8", mode: 0o600 },
+      )
+      await fs.rename(temporary, lockPath)
+      await fs.chmod(lockPath, 0o600)
+      return {
+        acquired: true,
+        holder: { pid: process.pid },
+        release: async () => {
+          try {
+            await fs.unlink(lockPath)
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error
+          }
+        },
+      }
+    },
+  }
+}
+
+
 export async function probeLoopxQuota(binding, { directory, execFileImpl = execFile } = {}) {
-  const args = []
-  if (binding.registryPath) args.push("--registry", binding.registryPath)
-  args.push(
+  const { stdout } = await runQuotaProbe(binding, directory, execFileImpl)
+  const decision = JSON.parse(stdout || "{}")
+  if (!decision || typeof decision !== "object" || Array.isArray(decision)) {
+    throw new Error("loopx quota should-run returned a non-object payload")
+  }
+  return decision
+}
+
+
+async function runQuotaProbe(binding, directory, execFileImpl) {
+  const args = [
+    ...(binding.registryPath ? ["--registry", binding.registryPath] : []),
     "--format",
     "json",
     "quota",
@@ -159,21 +238,27 @@ export async function probeLoopxQuota(binding, { directory, execFileImpl = execF
     "generic_cli",
     "--include-detail",
     "scheduler",
-  )
+    "--record-host-poll",
+  ]
   if (binding.agentId) args.push("--agent-id", binding.agentId)
   for (const capability of binding.availableCapabilities || []) {
     args.push("--available-capability", capability)
   }
-  const { stdout } = await execFileImpl(process.env.LOOPX_BIN || "loopx", args, {
-    cwd: binding.directory || directory,
-    timeout: 20_000,
-    maxBuffer: 4 * 1024 * 1024,
-  })
-  const decision = JSON.parse(stdout || "{}")
-  if (!decision || typeof decision !== "object" || Array.isArray(decision)) {
-    throw new Error("loopx quota should-run returned a non-object payload")
+  try {
+    return await execFileImpl(process.env.LOOPX_BIN || "loopx", args, {
+      cwd: binding.directory || directory,
+      timeout: 20_000,
+      maxBuffer: 4 * 1024 * 1024,
+    })
+  } catch (error) {
+    // A denied or gated decision exits non-zero but still carries the
+    // authoritative JSON payload on stdout. Only fail closed when the
+    // payload itself is unavailable.
+    if (typeof error?.stdout === "string" && error.stdout.trim()) {
+      return { stdout: error.stdout }
+    }
+    throw error
   }
-  return decision
 }
 
 
@@ -258,6 +343,7 @@ export function createLoopxGoalPlugin({
   GoalPlugin,
   tool,
   bindingStore = createFileBindingStore(),
+  lockStore = createFileLockStore(),
   quotaProbe = probeLoopxQuota,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -326,6 +412,7 @@ export function createLoopxGoalPlugin({
     const baseGoalSet = baseTools.goal_set
     const baseGoalResume = baseTools.goal_resume
     const baseGoalComplete = baseTools.goal_complete
+    const baseGoalPause = baseTools.goal_pause
     const baseEvent = base.event
     const baseChatMessage = base["chat.message"]
     const baseCommand = base["command.execute.before"]
@@ -410,16 +497,41 @@ export function createLoopxGoalPlugin({
         return
       }
 
+      const lock = await lockStore.acquire(sessionID)
+      if (!lock.acquired) {
+        await log("warn", "another process holds the LoopX session lock; retrying later", {
+          goalId: binding.goalId,
+          sessionID,
+          holderPid: lock.holder?.pid,
+        })
+        scheduleEvaluation(sessionID, DEFAULT_RETRY_MINUTES)
+        return
+      }
+      try {
+        await evaluateIdleLocked(sessionID, input, binding)
+      } finally {
+        await lock.release()
+      }
+    }
+
+    const evaluateIdleLocked = async (sessionID, input, initialBinding) => {
+      let binding = initialBinding
       let decision
       try {
         decision = await quotaProbe(binding, { directory: context.directory })
+        if (Number(binding.probeRetryCount || 0) > 0) {
+          await updateBinding(sessionID, { probeRetryCount: 0 })
+        }
       } catch (error) {
+        const plan = probeRetryPlan(binding)
+        await updateBinding(sessionID, { probeRetryCount: plan.probeRetryCount })
         await log("warn", "LoopX quota probe failed closed; scheduling a bounded retry", {
           goalId: binding.goalId,
           sessionID,
           error: error?.message || String(error),
+          retryMinutes: plan.minutes,
         })
-        scheduleEvaluation(sessionID, DEFAULT_RETRY_MINUTES)
+        scheduleEvaluation(sessionID, plan.minutes)
         return
       }
       if (disposed) return
@@ -446,6 +558,7 @@ export function createLoopxGoalPlugin({
           ...binding,
           schedulerToken: "",
           unchangedPolls: 0,
+          probeRetryCount: 0,
         })
         if (!initializedSessions.has(sessionID)) {
           initializedSessions.add(sessionID)
@@ -467,10 +580,30 @@ export function createLoopxGoalPlugin({
       const wait = waitPlan(decision, binding)
       if (wait.stop) {
         cancelScheduled(sessionID)
-        await log("info", "LoopX unchanged-poll limit stopped the OpenCode timer", {
-          goalId: binding.goalId,
-          sessionID,
+        await updateBinding(sessionID, {
+          autoResume: false,
+          lastPausedReason: "unchanged_poll_limit",
         })
+        if (typeof baseGoalPause?.execute === "function") {
+          try {
+            await executeTool(baseGoalPause, {}, toolContext(context, sessionID))
+            await log("info", "LoopX unchanged-poll limit paused the OpenCode goal", {
+              goalId: binding.goalId,
+              sessionID,
+            })
+          } catch (error) {
+            await log("warn", "OpenCode goal pause failed after the poll limit", {
+              goalId: binding.goalId,
+              sessionID,
+              error: error?.message || String(error),
+            })
+          }
+        } else {
+          await log("info", "LoopX unchanged-poll limit stopped the OpenCode timer", {
+            goalId: binding.goalId,
+            sessionID,
+          })
+        }
         return
       }
       await bindingStore.write(sessionID, {
@@ -580,14 +713,17 @@ export function createLoopxGoalPlugin({
     }
     wrapTool("goal_resume", async (sessionID, _args, result) => {
       if (toolResultSucceeded(result)) {
-        await updateBinding(sessionID, { autoResume: true })
+        await updateBinding(sessionID, { autoResume: true, lastPausedReason: "" })
         initializedSessions.add(sessionID)
       }
     })
     for (const name of ["goal_pause", "goal_block"]) {
       wrapTool(name, async (sessionID, _args, result) => {
         if (toolResultSucceeded(result)) {
-          await updateBinding(sessionID, { autoResume: false })
+          await updateBinding(sessionID, {
+            autoResume: false,
+            lastPausedReason: name === "goal_pause" ? "goal_pause" : "goal_block",
+          })
           cancelScheduled(sessionID)
         }
       })
@@ -610,10 +746,13 @@ export function createLoopxGoalPlugin({
       if (status === "complete") {
         await detachBinding(sessionID)
       } else if (status === "paused" || status === "blocked") {
-        await updateBinding(sessionID, { autoResume: false })
+        await updateBinding(sessionID, {
+          autoResume: false,
+          lastPausedReason: status === "paused" ? "goal_status_paused" : "goal_status_blocked",
+        })
         cancelScheduled(sessionID)
       } else if (status === "resumed") {
-        await updateBinding(sessionID, { autoResume: true })
+        await updateBinding(sessionID, { autoResume: true, lastPausedReason: "" })
         initializedSessions.add(sessionID)
       }
     })
@@ -642,10 +781,13 @@ export function createLoopxGoalPlugin({
         if (kind === "clear" || kind === "replace") {
           await detachBinding(sessionID)
         } else if (kind === "resume") {
-          await updateBinding(sessionID, { autoResume: true })
+          await updateBinding(sessionID, { autoResume: true, lastPausedReason: "" })
           initializedSessions.add(sessionID)
         } else if (kind === "pause") {
-          await updateBinding(sessionID, { autoResume: false })
+          await updateBinding(sessionID, {
+            autoResume: false,
+            lastPausedReason: "goal_pause",
+          })
           cancelScheduled(sessionID)
         }
       },
@@ -670,7 +812,11 @@ export function createLoopxGoalPlugin({
         }
         const binding = await readBinding(sessionID)
         if (binding) {
-          await bindingStore.write(sessionID, { ...binding, autoResume: false })
+          await bindingStore.write(sessionID, {
+            ...binding,
+            autoResume: false,
+            lastPausedReason: "user_message",
+          })
           cancelScheduled(sessionID)
         }
         await baseChatMessage?.(input, output)
@@ -683,7 +829,11 @@ export function createLoopxGoalPlugin({
             await detachBinding(sessionID)
             pendingGoalCommands.delete(sessionID)
           } else if (sessionID && shouldPauseForHostEvent(event)) {
-            await updateBinding(sessionID, { autoResume: false })
+            await updateBinding(sessionID, {
+              autoResume: false,
+              lastPausedReason:
+                event?.type === "session.error" ? "session_error" : "permission_denied",
+            })
             cancelScheduled(sessionID)
           }
           await baseEvent?.(input)

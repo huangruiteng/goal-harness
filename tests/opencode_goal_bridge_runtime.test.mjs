@@ -17,6 +17,22 @@ fakeTool.schema = {
 }
 
 
+function memoryLockStore() {
+  return {
+    async read() {
+      return null
+    },
+    async acquire() {
+      return {
+        acquired: true,
+        holder: { pid: process.pid },
+        release: async () => {},
+      }
+    },
+  }
+}
+
+
 function memoryBindingStore() {
   const bindings = new Map()
   return {
@@ -58,9 +74,9 @@ function terminalDecision() {
 }
 
 
-function harness(initialDecision) {
+function harness(initialDecision, { lockStore = memoryLockStore() } = {}) {
   const store = memoryBindingStore()
-  const calls = { chat: 0, event: 0, complete: 0, dispose: 0, quota: 0, resume: 0 }
+  const calls = { chat: 0, event: 0, complete: 0, dispose: 0, quota: 0, resume: 0, pause: 0 }
   const scheduled = []
   let decision = initialDecision
   const GoalPlugin = async (_context, options) => ({
@@ -86,7 +102,10 @@ function harness(initialDecision) {
       }),
       goal_pause: fakeTool({
         args: {},
-        execute: async () => JSON.stringify({ version: 1, operation: "pause", ok: true }),
+        execute: async () => {
+          calls.pause += 1
+          return JSON.stringify({ version: 1, operation: "pause", ok: true })
+        },
       }),
       goal_block: fakeTool({
         args: {},
@@ -132,6 +151,7 @@ function harness(initialDecision) {
     GoalPlugin,
     tool: fakeTool,
     bindingStore: store,
+    lockStore,
     quotaProbe: async () => {
       calls.quota += 1
       if (decision instanceof Error) throw decision
@@ -551,4 +571,149 @@ test("completes only after LoopX validates terminal no-follow-up", async () => {
   assert.equal(fixture.calls.complete, 1)
   assert.equal(await fixture.store.read("session-terminal"), null)
   assert.equal(fixture.calls.event, 0)
+})
+
+
+test("pauses the OpenCode goal visibly when the unchanged-poll limit stops the timer", async () => {
+  const fixture = harness({
+    should_run: false,
+    scheduler_hint: {
+      action: "backoff_waiting_for_user",
+      reset_policy: { reset_token: "stop-1" },
+      unchanged_poll: {
+        local_scheduler: {
+          recommended_interval_minutes: 3,
+          example_progression_minutes: [3, 6],
+          unchanged_poll_limit: 1,
+        },
+      },
+    },
+  })
+  const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
+  await hooks.tool.loopx_goal_activate.execute(
+    { goalId: "goal-stop", objective: "LoopX task body" },
+    { sessionID: "session-stop" },
+  )
+  const store = fixture.store
+  await store.write("session-stop", {
+    ...(await store.read("session-stop")),
+    schedulerToken: "stop-1",
+    unchangedPolls: 1,
+  })
+  await hooks.event({
+    event: { type: "session.idle", properties: { sessionID: "session-stop" } },
+  })
+  const binding = await store.read("session-stop")
+  assert.equal(binding.autoResume, false)
+  assert.equal(binding.lastPausedReason, "unchanged_poll_limit")
+  assert.equal(fixture.calls.pause, 1)
+  assert.equal(fixture.calls.event, 0)
+  assert.equal(fixture.scheduled.length, 0)
+})
+
+
+test("backs off quota probe retries with a bounded exponential ladder", async () => {
+  const fixture = harness(new Error("network timeout"))
+  const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
+  await hooks.tool.loopx_goal_activate.execute(
+    { goalId: "goal-backoff", objective: "LoopX task body" },
+    { sessionID: "session-backoff" },
+  )
+  const idle = () =>
+    hooks.event({
+      event: { type: "session.idle", properties: { sessionID: "session-backoff" } },
+    })
+  await idle()
+  assert.equal(fixture.scheduled.at(-1).delay, 180_000)
+  await idle()
+  assert.equal(fixture.scheduled.at(-1).delay, 360_000)
+  assert.equal((await fixture.store.read("session-backoff")).probeRetryCount, 2)
+  fixture.setDecision({ should_run: true, scheduler_hint: { action: "run_now" } })
+  await idle()
+  assert.equal((await fixture.store.read("session-backoff")).probeRetryCount, 0)
+})
+
+
+test("refuses to evaluate while another process holds the session lock", async () => {
+  const heldLock = {
+    async acquire() {
+      return { acquired: false, holder: { pid: process.pid } }
+    },
+  }
+  const fixture = harness(
+    { should_run: true, scheduler_hint: { action: "run_now" } },
+    { lockStore: heldLock },
+  )
+  const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
+  await hooks.tool.loopx_goal_activate.execute(
+    { goalId: "goal-locked", objective: "LoopX task body" },
+    { sessionID: "session-locked" },
+  )
+  await hooks.event({
+    event: { type: "session.idle", properties: { sessionID: "session-locked" } },
+  })
+  assert.equal(fixture.calls.quota, 0)
+  assert.equal(fixture.calls.event, 0)
+  assert.equal(fixture.scheduled.length, 1)
+  assert.equal(fixture.scheduled[0].delay, 180_000)
+})
+
+
+test("records and clears pause reasons around user messages and resume", async () => {
+  const fixture = harness({ should_run: true, scheduler_hint: { action: "run_now" } })
+  const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
+  await hooks.tool.loopx_goal_activate.execute(
+    { goalId: "goal-pause-reason", objective: "LoopX task body" },
+    { sessionID: "session-pause-reason" },
+  )
+  await hooks["chat.message"](
+    { sessionID: "session-pause-reason" },
+    { parts: [{ type: "text", text: "are you done yet?" }] },
+  )
+  const paused = await fixture.store.read("session-pause-reason")
+  assert.equal(paused.autoResume, false)
+  assert.equal(paused.lastPausedReason, "user_message")
+  await hooks.tool.goal_resume.execute({}, { sessionID: "session-pause-reason" })
+  const resumed = await fixture.store.read("session-pause-reason")
+  assert.equal(resumed.autoResume, true)
+  assert.equal(resumed.lastPausedReason, "")
+})
+
+
+test("probeLoopxQuota reads a denied decision that exits non-zero", async () => {
+  const { probeLoopxQuota } = await import("../loopx/opencode_goal_mode/goal-bridge-runtime.mjs")
+  const denied = JSON.stringify({
+    ok: false,
+    should_run: false,
+    effective_action: "operator_gate_notify",
+    scheduler_hint: { unchanged_poll: { local_scheduler: null } },
+  })
+  const execFileImpl = async () => {
+    const error = new Error("Command failed: loopx ...")
+    error.stdout = denied
+    throw error
+  }
+  const decision = await probeLoopxQuota(
+    { goalId: "goal-denied", directory: "/workspace" },
+    { directory: "/workspace", execFileImpl },
+  )
+  assert.equal(decision.should_run, false)
+  assert.equal(decision.effective_action, "operator_gate_notify")
+})
+
+
+test("probeLoopxQuota fails closed when a non-zero exit carries no payload", async () => {
+  const { probeLoopxQuota } = await import("../loopx/opencode_goal_mode/goal-bridge-runtime.mjs")
+  const execFileImpl = async () => {
+    const error = new Error("Command failed: loopx ...")
+    error.stdout = ""
+    throw error
+  }
+  await assert.rejects(
+    probeLoopxQuota(
+      { goalId: "goal-crash", directory: "/workspace" },
+      { directory: "/workspace", execFileImpl },
+    ),
+    /Command failed/,
+  )
 })
