@@ -152,10 +152,12 @@ def build_long_task_cadence_hint(
             else "keep"
         )
         reason = (
-            "fine_checkpoint_complete"
+            "fine_direction_review_due"
             if recommendation == "replan"
             else "repeated_surface_only"
             if recommendation == "widen"
+            else "fine_checkpoint_within_slice"
+            if fine_grained
             else _reason_from_granularity(granularity)
         )
         return {

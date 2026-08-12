@@ -95,8 +95,8 @@ def register_start_goal_command(subparsers: argparse._SubParsersAction) -> None:
         "--fine-grained",
         action="store_true",
         help=(
-            "Persist fine-grained execution for this goal: one small checkpoint "
-            "todo per turn, followed by evidence-driven replanning."
+            "Persist fine-grained planning for this goal: small verifiable checkpoint "
+            "Todos executed in coherent evidence-driven turn slices."
         ),
     )
     goal_input_group = start_goal_parser.add_mutually_exclusive_group(required=True)

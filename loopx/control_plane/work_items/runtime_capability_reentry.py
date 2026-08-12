@@ -93,6 +93,14 @@ def build_runtime_capability_reentry_packet(
         "state": "verification_required",
         "source": "quota_should_run.capability_gate.repair_missing",
         "candidates": reentry_candidates,
+        "verification_contract": {
+            "scope": "real_task_facing_callsite_for_blocked_todo",
+            "ordinary_delivery_allowed": False,
+            "advancement_checkpoint": False,
+            "settles_turn": False,
+            "on_success": "rerun_quota_in_same_turn_then_continue_if_allowed",
+            "on_failure": "record_exact_blocker_without_capability_flag",
+        },
         "inheritance_contract": {
             "source_invocation": "verified quota should-run reentry",
             "propagates_to": [

@@ -139,8 +139,10 @@ def build_goal_start_contract(
         contract["turn_mode"] = "fine_grained"
         contract["fine_grained"] = {
             "todo_granularity": "small_checkpoint",
-            "turn_boundary": "one_todo_per_turn",
-            "replan": "after_each_todo",
+            "turn_work_budget": "coherent_slice",
+            "turn_boundary": "settle_after_coherent_slice",
+            "replan": "direction_change_or_bounded_chain",
+            "checkpoint_accounting": "advancement_only",
         }
         planner = contract["planner"]
         planner["fine_grained_plan_horizon"] = (
@@ -177,11 +179,14 @@ def build_goal_start_prompt(
     )
     fine_rule = (
         "\n8. Fine-grained mode: the current Todo must be one small verifiable checkpoint. "
-        "If it is too broad, split it before work. Complete only that Todo this turn; "
-        "after validation, durable writeback, accountable refresh, and spend, end the "
-        "turn. The next heartbeat must use the existing replan obligation/ACK path to "
-        "read fresh evidence and retain, replace, or split the successor; do not execute "
-        "a prewritten successor in the same turn."
+        "If it is too broad, split it before work. A coherent decision slice may complete "
+        "one or more causally related Agent advancement Todos in the same turn: after each "
+        "completion inspect its fresh evidence before creating or claiming the next Todo, "
+        "and settle only once after the slice. Use the existing replan obligation/ACK path "
+        "when evidence changes direction or the bounded-chain review becomes due; never "
+        "prewrite a long runnable chain. Protocol/setup and capability re-entry steps stay "
+        "inline in the guided transaction, are not Todos, and do not count as advancement "
+        "checkpoints or turn settlement."
         if fine_grained
         else ""
     )

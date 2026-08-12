@@ -506,10 +506,5 @@ def acceptance_gaps_from_todo_completion_checkpoint(
                 else None
             ),
             "required_path_outcomes": ["continue", "no_change", "replan"],
-            **(
-                {"replan_cadence": "fine_grained_after_each_todo"}
-                if threshold == 1
-                else {}
-            ),
         }
     ]

@@ -1457,6 +1457,19 @@ def build_start_goal_guided_packet(
         "writes_now": False,
         "spends_quota_now": False,
         "command_cwd_source": "#/project",
+        **(
+            {
+                "checkpoint_policy": {
+                    "task_frontier": "agent_advancement_todos_only",
+                    "protocol_step_todo_projection": "forbidden",
+                    "protocol_step_advancement_checkpoint": False,
+                    "protocol_step_turn_settlement": False,
+                    "settlement": "once_after_task_facing_slice",
+                }
+            }
+            if fine_grained
+            else {}
+        ),
         "ordered_steps": [
             {
                 "id": "inspect_connection",

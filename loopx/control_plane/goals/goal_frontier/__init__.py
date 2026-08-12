@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....execution_profile import execution_profile_is_fine_grained
 from ...agents.agent_scope import (
     agent_scope_blocking_handoff_gates,
     agent_scope_count_advancement_items,
@@ -1338,10 +1337,6 @@ def derive_goal_frontier_replan_obligation_from_summaries(
             ),
         )
     if replan_rule.rule is GoalFrontierReplanRule.VISION_ACCEPTANCE_GAP:
-        fine_checkpoint_replan = any(
-            gap.get("replan_cadence") == "fine_grained_after_each_todo"
-            for gap in compact_acceptance_gaps
-        )
         return build_autonomous_replan_obligation_payload(
             schema_version=AUTONOMOUS_REPLAN_OBLIGATION_SCHEMA_VERSION,
             agent_id=agent_id,
@@ -1371,14 +1366,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                 for gap in compact_acceptance_gaps[:3]
             ],
             guidance_actions=[
-                *(
-                    [
-                        "read_latest_completed_todo_evidence",
-                        "retain_replace_or_split_successor",
-                    ]
-                    if fine_checkpoint_replan
-                    else ["create_successor"]
-                ),
+                "create_successor",
                 "update_agent_vision",
                 "record_evidence_gap",
                 "record_no_followup",
@@ -1389,11 +1377,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                     "role": "agent",
                     "priority": "P0",
                     "text": (
-                        "run a bounded fine-grained checkpoint replan: read the latest "
-                        "completion evidence, then retain, replace, or split the next "
-                        "runnable advancement todo, or record no-follow-up"
-                        if fine_checkpoint_replan
-                        else "run a bounded vision-gap replan: create the next runnable "
+                        "run a bounded vision-gap replan: create the next runnable "
                         "advancement todo or record an explicit no-follow-up rationale"
                     ),
                 }
@@ -1403,11 +1387,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                 "production actions, or owner-only decisions"
             ),
             recommended_action=(
-                "run the existing bounded replan path before successor execution: "
-                "read latest completion evidence, then retain, replace, or split the "
-                "successor and write a frontier delta, or record no-follow-up"
-                if fine_checkpoint_replan
-                else "run a bounded vision-gap replan before another quiet poll: create "
+                "run a bounded vision-gap replan before another quiet poll: create "
                 "successor work, update the agent vision, record evidence gap, or "
                 "record no-follow-up"
             ),
@@ -1705,13 +1685,7 @@ def build_goal_frontier_projection_context_from_status(
             latest_vision_checkpoint,
             agent_todo_summary=agent_todo_summary,
             agent_id=agent_id,
-            completed_todo_threshold=(
-                1
-                if execution_profile_is_fine_grained(
-                    (project_asset or {}).get("execution_profile")
-                )
-                else COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD
-            ),
+            completed_todo_threshold=COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD,
         )
     )
     if _terminal_no_followup_resolves_vision_checkpoint(

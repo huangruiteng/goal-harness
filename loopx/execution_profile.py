@@ -40,6 +40,10 @@ TURN_GRANULARITY_CHOICES = (
     TURN_GRANULARITY_STANDARD,
     TURN_GRANULARITY_FINE,
 )
+FINE_GRAINED_SMALL_SCALE_STREAK_THRESHOLD = 5
+FINE_GRAINED_PLANNING_GRANULARITY = "fine_checkpoint"
+FINE_GRAINED_TURN_WORK_BUDGET = "coherent_slice"
+FINE_GRAINED_CHECKPOINT_ACCOUNTING = "advancement_only"
 
 _LABEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,79}$")
 
@@ -68,6 +72,18 @@ def _positive_int(value: Any, fallback: int) -> int:
     except (TypeError, ValueError):
         return fallback
     return parsed if parsed > 0 else fallback
+
+
+def _apply_fine_grained_contract(profile: dict[str, Any]) -> None:
+    profile["turn_granularity"] = TURN_GRANULARITY_FINE
+    profile["planning_granularity"] = FINE_GRAINED_PLANNING_GRANULARITY
+    profile["turn_work_budget"] = FINE_GRAINED_TURN_WORK_BUDGET
+    profile["checkpoint_accounting"] = FINE_GRAINED_CHECKPOINT_ACCOUNTING
+    profile["minimum_scale"] = "single_surface"
+    profile["degradation_policy"] = {
+        "small_scale_streak_threshold": FINE_GRAINED_SMALL_SCALE_STREAK_THRESHOLD,
+        "on_degradation": "review_direction_after_bounded_chain",
+    }
 
 
 def build_execution_profile(
@@ -109,12 +125,7 @@ def build_execution_profile(
     if turn_granularity is not None:
         normalized_turn_granularity = normalize_turn_granularity(turn_granularity)
         if normalized_turn_granularity == TURN_GRANULARITY_FINE:
-            profile["turn_granularity"] = TURN_GRANULARITY_FINE
-            profile["minimum_scale"] = "single_surface"
-            profile["degradation_policy"] = {
-                "small_scale_streak_threshold": 1,
-                "on_degradation": "replan_after_checkpoint",
-            }
+            _apply_fine_grained_contract(profile)
     return profile
 
 
@@ -175,11 +186,7 @@ def compact_execution_profile(value: Any) -> dict[str, Any]:
     floor["if_unavailable"] = _label(raw_floor.get("if_unavailable"), str(floor["if_unavailable"]))
     profile["outcome_floor"] = floor
     if execution_profile_is_fine_grained(profile):
-        profile["minimum_scale"] = "single_surface"
-        profile["degradation_policy"] = {
-            "small_scale_streak_threshold": 1,
-            "on_degradation": "replan_after_checkpoint",
-        }
+        _apply_fine_grained_contract(profile)
     return profile
 
 
@@ -210,16 +217,14 @@ def execution_profile_with_turn_granularity(
     normalized = compact_execution_profile(profile)
     mode = normalize_turn_granularity(turn_granularity)
     if mode == TURN_GRANULARITY_FINE:
-        normalized["turn_granularity"] = TURN_GRANULARITY_FINE
-        normalized["minimum_scale"] = "single_surface"
-        normalized["degradation_policy"] = {
-            "small_scale_streak_threshold": 1,
-            "on_degradation": "replan_after_checkpoint",
-        }
+        _apply_fine_grained_contract(normalized)
         return normalized
     was_fine = execution_profile_is_fine_grained(normalized)
     normalized.pop("turn_granularity", None)
     if was_fine:
+        normalized.pop("planning_granularity", None)
+        normalized.pop("turn_work_budget", None)
+        normalized.pop("checkpoint_accounting", None)
         normalized["minimum_scale"] = DEFAULT_EXECUTION_PROFILE["minimum_scale"]
         normalized["degradation_policy"] = dict(
             DEFAULT_EXECUTION_PROFILE["degradation_policy"]
@@ -265,7 +270,8 @@ def execution_profile_summary(profile: dict[str, Any] | None) -> str:
             f"surface:{','.join(surface_hints)}"
         )
     turn_suffix = (
-        " turn_granularity=fine"
+        " turn_granularity=fine planning_granularity=fine_checkpoint "
+        "turn_work_budget=coherent_slice checkpoint_accounting=advancement_only"
         if execution_profile_is_fine_grained(normalized)
         else ""
     )

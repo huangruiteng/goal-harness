@@ -668,14 +668,15 @@ def interaction_next_cli_actions(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
         )
-    if capability_reentry is not None:
-        capability_resolution_actions.extend(
-            (
-                "after real-callsite verification of "
-                f"{candidate['capability']}: {candidate['command']}"
-            )
+    capability_reentry_actions = (
+        [
+            "after real-callsite verification of "
+            f"{candidate['capability']}: {candidate['command']}"
             for candidate in capability_reentry["candidates"]
-        )
+        ]
+        if capability_reentry is not None
+        else []
+    )
     if mode == "terminal_no_followup":
         return ["no quota spend until explicit goal resume or newly projected work"]
     if mode == "agent_monitor_only":
@@ -876,10 +877,15 @@ def interaction_next_cli_actions(
             ),
         ])
         return actions
+    if mode == "capability_bridge_repair":
+        return capability_reentry_actions or [
+            "perform the projected real task-facing capability check, then rerun "
+            "quota in this same turn"
+        ]
+    capability_resolution_actions.extend(capability_reentry_actions)
     if mode in {
         "bounded_delivery",
         "outcome_floor_recovery",
-        "capability_bridge_repair",
         "control_plane_self_repair",
         "boundary_projection_repair",
         "scoped_user_gate_fallback",
@@ -951,6 +957,11 @@ def _interaction_spend_policy(
         return "no spend for moving agent work into an independent worktree"
     if mode == "automation_prompt_upgrade":
         return "no spend until the host update is acknowledged and quota reruns"
+    if mode == "capability_bridge_repair":
+        return (
+            "no spend or advancement checkpoint for capability verification; rerun "
+            "quota in the same turn"
+        )
     if mode == "autonomous_replan":
         return (
             "spend only after accountable replan delta; no spend for "
@@ -1047,7 +1058,6 @@ def _interaction_spend_after_validation(mode: str) -> bool:
     return mode in {
         "bounded_delivery",
         "outcome_floor_recovery",
-        "capability_bridge_repair",
         "autonomous_replan",
         "control_plane_self_repair",
         "boundary_projection_repair",
