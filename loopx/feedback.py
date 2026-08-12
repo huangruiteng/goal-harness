@@ -11,6 +11,23 @@ from .paths import resolve_runtime_root
 from .registry import registry_goals, resolve_state_file
 
 
+GOAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+def validate_goal_id(goal_id: str) -> str:
+    """Return a goal id that is safe to use as a single path segment.
+
+    Rejects empty ids, path separators, ``..``, and shell metacharacters so a
+    caller-supplied goal id cannot escape the runtime goals directory.
+    """
+
+    if not GOAL_ID_RE.match(goal_id):
+        raise ValueError(
+            f"invalid goal_id {goal_id!r}: must match {GOAL_ID_RE.pattern}"
+        )
+    return goal_id
+
+
 REWARD_VALUES = {"positive", "negative", "mixed", "neutral"}
 LESSON_KINDS = {
     "route",
@@ -378,6 +395,7 @@ def append_human_reward(
     state_file_override: Path | None = None,
     write_active_state_summary: bool = False,
 ) -> dict[str, Any]:
+    validate_goal_id(goal_id)
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
     index_path = runtime_root / "goals" / goal_id / "runs" / "index.jsonl"

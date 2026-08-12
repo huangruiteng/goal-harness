@@ -15,7 +15,7 @@ from .extensions.presentation import (
     read_extension_projection,
 )
 from .extensions.runtime import default_extension_state_file
-from .feedback import append_human_reward, compact_reward
+from .feedback import append_human_reward, compact_reward, validate_goal_id
 from .history import load_registry
 from .materials import read_review_material
 from .paths import resolve_runtime_root
@@ -178,6 +178,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             raise ValueError(f"unknown reward field(s): {', '.join(unknown)}")
 
         goal_id = str(body.get("goal_id") or "").strip()
+        validate_goal_id(goal_id)
         decision = str(body.get("decision") or "").strip()
         reward_value = str(body.get("reward") or "").strip()
         reason_summary = str(body.get("reason_summary") or "").strip()
@@ -351,6 +352,7 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
         if unknown:
             raise ValueError(f"unknown configure-goal field(s): {', '.join(unknown)}")
         goal_id = str(body.get("goal_id") or "").strip()
+        validate_goal_id(goal_id)
         if not goal_id:
             raise ValueError("goal_id is required")
         allowed_domains = body.get("allowed_domains")
