@@ -30,8 +30,13 @@ COMMAND = (
 )
 
 
-def _obligation(*, triggered_at: str = TRIGGERED_AT) -> dict[str, object]:
-    return {
+def _obligation(
+    *,
+    triggered_at: str = TRIGGERED_AT,
+    obligation_id: str | None = None,
+    frontier_identity: str | None = None,
+) -> dict[str, object]:
+    obligation: dict[str, object] = {
         "required": True,
         "triggers": [
             {
@@ -44,18 +49,31 @@ def _obligation(*, triggered_at: str = TRIGGERED_AT) -> dict[str, object]:
             "writeback": "repair_delta",
         },
     }
+    if obligation_id:
+        obligation["obligation_id"] = obligation_id
+    if frontier_identity:
+        obligation["frontier_identity"] = frontier_identity
+    return obligation
 
 
-def _ack() -> dict[str, object]:
-    return {
+def _ack(
+    *,
+    generated_at: str = ACKED_AT,
+    frontier_identity: str | None = None,
+    delta_kinds: list[str] | None = None,
+) -> dict[str, object]:
+    ack: dict[str, object] = {
         "recorded": True,
         "agent_id": AGENT_ID,
-        "generated_at": ACKED_AT,
+        "generated_at": generated_at,
         "delta_contract": {
             "delta_present": True,
-            "delta_kinds": ["runnable_todo_set"],
+            "delta_kinds": delta_kinds or ["runnable_todo_set"],
         },
     }
+    if frontier_identity:
+        ack["frontier_identity"] = frontier_identity
+    return ack
 
 
 def _receipt(
@@ -86,6 +104,8 @@ def _receipt(
     }
     if error:
         receipt["error"] = error
+    if required_read_id:
+        receipt["required_read_id"] = required_read_id
     return receipt
 
 
@@ -256,6 +276,85 @@ def test_receipt_must_match_the_projected_read_window() -> None:
     assert validation["required_read_satisfied"] is False
 
 
+def test_pre_trigger_ack_without_typed_continuation_is_rejected() -> None:
+    validation = validate_replan_required_read_receipt(
+        _ack(generated_at="2026-08-12T00:59:59Z"),
+        replan_obligation=_obligation(obligation_id="replan-current"),
+        receipts=[],
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    assert validation is not None
+    assert validation["accepted"] is False
+    assert validation["rejected_claims"][0]["kind"] == ("required_read_not_executed")
+    assert "--required-read-id replan-current" in validation["required_read"]["command"]
+
+
+def test_pre_trigger_ack_accepts_matching_required_read_identity() -> None:
+    validation = validate_replan_required_read_receipt(
+        _ack(generated_at="2026-08-12T00:59:59Z"),
+        replan_obligation=_obligation(obligation_id="replan-current"),
+        receipts=[
+            _receipt(
+                "2026-08-12T00:59:58Z",
+                required_read_id="replan-current",
+            )
+        ],
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    assert validation is not None
+    assert validation["accepted"] is True
+    assert validation["required_read_satisfied"] is True
+    assert validation["matched_receipt"]["required_read_id"] == "replan-current"
+
+
+def test_pre_trigger_ack_exempts_only_matching_typed_watch_continuation() -> None:
+    obligation = _obligation(
+        obligation_id="replan-current",
+        frontier_identity="frontier-stable",
+    )
+
+    matching_watch = validate_replan_required_read_receipt(
+        _ack(
+            generated_at="2026-08-12T00:59:59Z",
+            frontier_identity="frontier-stable",
+            delta_kinds=["watch_lane_continuation"],
+        ),
+        replan_obligation=obligation,
+        receipts=[],
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    runnable_delta = validate_replan_required_read_receipt(
+        _ack(
+            generated_at="2026-08-12T00:59:59Z",
+            frontier_identity="frontier-stable",
+        ),
+        replan_obligation=obligation,
+        receipts=[],
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+    wrong_frontier = validate_replan_required_read_receipt(
+        _ack(
+            generated_at="2026-08-12T00:59:59Z",
+            frontier_identity="frontier-old",
+            delta_kinds=["watch_lane_continuation"],
+        ),
+        replan_obligation=obligation,
+        receipts=[],
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+    )
+
+    assert matching_watch is None
+    assert runnable_delta is not None and runnable_delta["accepted"] is False
+    assert wrong_frontier is not None and wrong_frontier["accepted"] is False
+
+
 def _quota_obligation() -> dict[str, object]:
     return build_autonomous_replan_obligation_payload(
         schema_version="autonomous_replan_obligation_v0",
@@ -279,6 +378,7 @@ def _quota_obligation() -> dict[str, object]:
 def _quota_payload(
     *,
     receipts: list[dict[str, object]] | None = None,
+    ack_generated_at: str = ACKED_AT,
 ) -> dict[str, object]:
     obligation = _quota_obligation()
     status_payload = quota_status_payload(
@@ -292,7 +392,7 @@ def _quota_payload(
         latest_runs=[
             {
                 "goal_id": GOAL_ID,
-                "generated_at": ACKED_AT,
+                "generated_at": ack_generated_at,
                 "agent_id": AGENT_ID,
                 "classification": "autonomous_replan_ack",
                 "autonomous_replan_ack": {
@@ -343,7 +443,6 @@ def test_quota_accepts_matching_obligation_receipt() -> None:
         "2026-08-12T01:05:00Z",
         required_read_id=str(obligation["obligation_id"]),
     )
-    receipt["required_read_id"] = obligation["obligation_id"]
     payload = _quota_payload(receipts=[receipt])
 
     assert payload.get("autonomous_replan_obligation") is None
@@ -358,10 +457,21 @@ def test_quota_accepts_failed_read_attempt_but_surfaces_warning() -> None:
         status="failed",
         error="registry unavailable",
     )
-    receipt["required_read_id"] = obligation["obligation_id"]
     payload = _quota_payload(receipts=[receipt])
 
     assert payload.get("autonomous_replan_obligation") is None
     feedback = payload["replan_ack_feedback"]
     assert feedback["accepted"] is True
     assert feedback["warnings"][0]["kind"] == "evidence_log_read_failed"
+
+
+def test_quota_rejects_pre_trigger_ack_and_reprojects_exact_required_read() -> None:
+    payload = _quota_payload(ack_generated_at="2026-08-12T00:59:59Z")
+
+    obligation = payload["autonomous_replan_obligation"]
+    feedback = payload["replan_ack_feedback"]
+    required_read = payload["required_reads"][0]
+    assert feedback["accepted"] is False
+    assert feedback["rejected_claims"][0]["kind"] == "required_read_not_executed"
+    assert required_read["required_read_id"] == obligation["obligation_id"]
+    assert required_read["command"] == feedback["required_read"]["command"]

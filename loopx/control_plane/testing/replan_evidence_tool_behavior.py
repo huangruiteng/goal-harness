@@ -52,6 +52,7 @@ _EVIDENCE_PLAN_VALUE_OPTIONS = {
     "--format",
     "--goal-id",
     "--limit",
+    "--required-read-id",
     "--registry",
     "--runtime-root",
 }
@@ -272,10 +273,17 @@ def _required_evidence_command_from_packet(packet: Mapping[str, Any]) -> str:
         raise ValueError("real quota packet must project exactly one required read")
     required_read = dict(required_reads[0])
     command = str(required_read.get("command") or "").strip()
+    required_read_id = str(required_read.get("required_read_id") or "").strip()
     if (
         required_read.get("kind") != "agent_scoped_evidence_log"
         or required_read.get("goal_id") != _FIXTURE_GOAL_ID
         or required_read.get("agent_id") != _FIXTURE_AGENT_ID
+        or not required_read_id
+        or _argument_value(
+            _loopx_command_tokens(command) or [],
+            "--required-read-id",
+        )
+        != required_read_id
         or " evidence-log " not in f" {command} "
     ):
         raise ValueError("real quota packet must bind to the fixture evidence log")
@@ -368,6 +376,10 @@ def _evidence_plan_classification(
     expected_goal_id = _argument_value(required_tokens, "--goal-id")
     expected_agent_id = _argument_value(required_tokens, "--agent-id")
     expected_limit = _argument_value(required_tokens, "--limit")
+    expected_required_read_id = _argument_value(
+        required_tokens,
+        "--required-read-id",
+    )
     if not expected_goal_id or not expected_agent_id or not expected_limit:
         raise ValueError("required evidence command is missing its scoped identity")
     segments = _evidence_plan_segments(command)
@@ -391,15 +403,14 @@ def _evidence_plan_classification(
             if parsed is None:
                 return "wrong_evidence_log"
             values, flags = parsed
-            if (
-                values
-                != {
-                    "--goal-id": expected_goal_id,
-                    "--agent-id": expected_agent_id,
-                    "--limit": expected_limit,
-                }
-                or flags != {"--thin"}
-            ):
+            expected_values = {
+                "--goal-id": expected_goal_id,
+                "--agent-id": expected_agent_id,
+                "--limit": expected_limit,
+            }
+            if expected_required_read_id:
+                expected_values["--required-read-id"] = expected_required_read_id
+            if values != expected_values or flags != {"--thin"}:
                 return "wrong_evidence_log"
             evidence_count += 1
             continue
@@ -722,8 +733,6 @@ class DoubaoReplanEvidenceToolBehaviorActor:
                         quota_packet
                     )
                     quota_observation = _quota_behavior_observation(quota_packet)
-                    if required_evidence_command != fixture.required_evidence_command:
-                        raise ValueError("quota required-read command drifted from fixture")
                     quota_observed = True
                     read_only_host_commands_executed = True
                 except (RuntimeError, ValueError, json.JSONDecodeError):

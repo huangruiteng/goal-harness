@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from loopx.control_plane.testing.model_tool_behavior import (
+    ScriptedDoubaoExecTransport,
+    ScriptedExecToolAction,
+)
+from loopx.control_plane.testing.model_tool_behavior import (
     scripted_exec_tool_response as _tool_response,
 )
 from loopx.control_plane.testing.replan_evidence_tool_behavior import (
@@ -14,28 +18,54 @@ from loopx.control_plane.testing.replan_evidence_tool_behavior import (
 )
 
 
+def _latest_required_read_command(request: Mapping[str, Any]) -> str:
+    messages = request.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise AssertionError("model request must include the latest quota tool result")
+    latest = messages[-1]
+    if not isinstance(latest, Mapping) or latest.get("role") != "tool":
+        raise AssertionError(
+            "required read must be selected after the quota tool result"
+        )
+    packet = json.loads(str(latest.get("content") or ""))
+    required_reads = packet.get("required_reads") or []
+    if len(required_reads) != 1 or not isinstance(required_reads[0], Mapping):
+        raise AssertionError("quota must project exactly one required read")
+    command = str(required_reads[0].get("command") or "").strip()
+    required_read_id = str(required_reads[0].get("required_read_id") or "").strip()
+    if not command or not required_read_id:
+        raise AssertionError("required read must carry its obligation identity")
+    if f"--required-read-id {required_read_id}" not in command:
+        raise AssertionError("required read command must bind the obligation identity")
+    return command
+
+
+def _required_read_action(
+    request: Mapping[str, Any],
+    *,
+    suffix: str = "",
+) -> ScriptedExecToolAction:
+    return ScriptedExecToolAction(
+        command=_latest_required_read_command(request) + suffix,
+    )
+
+
 def test_real_tool_loop_observes_production_evidence_log_intent(
     tmp_path: Path,
 ) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
-    requests: list[dict[str, Any]] = []
-    commands = [
-        "date -Iseconds",
-        "export LOOPX_TURN=2026-08-12T00:00:00+08:00 && "
-        + fixture.quota_guard_command,
-        fixture.required_evidence_command,
-    ]
-
-    def transport(
-        *,
-        endpoint: str,
-        headers: Mapping[str, str],
-        body: bytes,
-        timeout_seconds: float,
-    ) -> Mapping[str, Any]:
-        request = json.loads(body)
-        requests.append(request)
-        return _tool_response(f"call-{len(requests)}", commands[len(requests) - 1])
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command="date -Iseconds"),
+            ScriptedExecToolAction(
+                command=(
+                    "export LOOPX_TURN=2026-08-12T00:00:00+08:00 && "
+                    + fixture.quota_guard_command
+                )
+            ),
+            _required_read_action,
+        ]
+    )
 
     actor = DoubaoReplanEvidenceToolBehaviorActor(
         api_key="test-only-placeholder",
@@ -46,7 +76,11 @@ def test_real_tool_loop_observes_production_evidence_log_intent(
         fixture_root=tmp_path / "actor",
     )
 
-    assert receipt["qualification_passed"] is True
+    assert receipt["qualification_passed"] is True, (
+        receipt["failure_code"],
+        receipt["observed_tool_sequence"],
+        receipt["tool_call_receipts"],
+    )
     assert receipt["observed_tool_sequence"] == [
         "clock",
         "quota_should_run",
@@ -86,6 +120,7 @@ def test_real_tool_loop_observes_production_evidence_log_intent(
     }
     assert fixture.required_evidence_command not in json.dumps(receipt, sort_keys=True)
 
+    requests = transport.requests
     first = requests[0]
     assert first["messages"] == [
         {
@@ -115,8 +150,9 @@ def test_real_tool_loop_observes_production_evidence_log_intent(
         quota_result["interaction_contract"]["agent_channel"]["required_reads"][0]
     ]
     assert quota_result["required_reads"][0]["command"] == (
-        fixture.required_evidence_command
+        _latest_required_read_command(requests[2])
     )
+    assert quota_result["required_reads"][0]["required_read_id"]
     rollout_path = (
         tmp_path
         / "actor"
@@ -130,8 +166,15 @@ def test_real_tool_loop_observes_production_evidence_log_intent(
         for line in rollout_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert rollout_events[-1]["event_kind"] == "quota_should_run"
+    assert [event["event_kind"] for event in rollout_events[-2:]] == [
+        "quota_should_run",
+        "evidence_log_read",
+    ]
     assert rollout_events[-1]["agent_id"] == "codex-replan-evidence"
+    assert (
+        rollout_events[-1]["details"]["required_read_id"]
+        == (quota_result["required_reads"][0]["required_read_id"])
+    )
 
 
 def test_tool_loop_rejects_evidence_log_before_quota(tmp_path: Path) -> None:
@@ -155,35 +198,28 @@ def test_tool_loop_rejects_evidence_log_before_quota(tmp_path: Path) -> None:
 
 def test_tool_loop_accepts_a_bounded_evidence_read_plan(tmp_path: Path) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
-    commands = [
-        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
-        "\n".join(
-            (
-                "echo '=== evidence log ==='",
-                fixture.required_evidence_command,
-                "echo '=== registry goal ==='",
-                (
-                    "loopx --format json registry show-goal "
-                    "--goal-id replan-evidence-live-fixture 2>/dev/null || "
-                    "loopx --format json --registry "
-                    '"$HOME/.codex/loopx/registry.global.json" registry show-goal '
-                    "--goal-id replan-evidence-live-fixture"
-                ),
-                "echo '=== todos ==='",
-                (
-                    "loopx --format json todo list "
-                    "--goal-id replan-evidence-live-fixture 2>/dev/null"
-                ),
-            )
-        ),
-    ]
-    call_count = 0
-
-    def transport(**_: Any) -> Mapping[str, Any]:
-        nonlocal call_count
-        command = commands[call_count]
-        call_count += 1
-        return _tool_response(f"call-{call_count}", command)
+    suffix = (
+        "\necho '=== registry goal ==='\n"
+        "loopx --format json registry show-goal "
+        "--goal-id replan-evidence-live-fixture 2>/dev/null || "
+        "loopx --format json --registry "
+        '"$HOME/.codex/loopx/registry.global.json" registry show-goal '
+        "--goal-id replan-evidence-live-fixture\n"
+        "echo '=== todos ==='\n"
+        "loopx --format json todo list "
+        "--goal-id replan-evidence-live-fixture 2>/dev/null"
+    )
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(
+                command=fixture.quota_guard_command.replace(
+                    '"${LOOPX_TURN:?}"',
+                    "turn-001",
+                )
+            ),
+            lambda request: _required_read_action(request, suffix=suffix),
+        ]
+    )
 
     receipt = DoubaoReplanEvidenceToolBehaviorActor(
         api_key="test-only-placeholder",
@@ -204,27 +240,28 @@ def test_tool_loop_accepts_supplemental_replan_observation_intent(
     tmp_path: Path,
 ) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
-    commands = [
-        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
-        (
-            f"{fixture.required_evidence_command}\n"
-            "loopx --format json registry get-goal "
-            "--goal-id replan-evidence-live-fixture 2>/dev/null || "
-            "echo 'goal read unavailable'\n"
-            "loopx --format json project status "
-            "--goal-id replan-evidence-live-fixture 2>/dev/null || "
-            "echo 'project read unavailable'\n"
-            "loopx --format json todo list "
-            "--goal-id replan-evidence-live-fixture 2>/dev/null"
-        ),
-    ]
-    call_count = 0
-
-    def transport(**_: Any) -> Mapping[str, Any]:
-        nonlocal call_count
-        command = commands[call_count]
-        call_count += 1
-        return _tool_response(f"call-{call_count}", command)
+    suffix = (
+        "\n"
+        "loopx --format json registry get-goal "
+        "--goal-id replan-evidence-live-fixture 2>/dev/null || "
+        "echo 'goal read unavailable'\n"
+        "loopx --format json project status "
+        "--goal-id replan-evidence-live-fixture 2>/dev/null || "
+        "echo 'project read unavailable'\n"
+        "loopx --format json todo list "
+        "--goal-id replan-evidence-live-fixture 2>/dev/null"
+    )
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(
+                command=fixture.quota_guard_command.replace(
+                    '"${LOOPX_TURN:?}"',
+                    "turn-001",
+                )
+            ),
+            lambda request: _required_read_action(request, suffix=suffix),
+        ]
+    )
 
     receipt = DoubaoReplanEvidenceToolBehaviorActor(
         api_key="test-only-placeholder",
@@ -245,21 +282,22 @@ def test_tool_loop_rejects_state_change_bundled_with_evidence(
     tmp_path: Path,
 ) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
-    commands = [
-        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
-        (
-            f"{fixture.required_evidence_command}\n"
-            "loopx --format json todo complete "
-            "--goal-id replan-evidence-live-fixture --todo-id todo-unsafe"
-        ),
-    ]
-    call_count = 0
-
-    def transport(**_: Any) -> Mapping[str, Any]:
-        nonlocal call_count
-        command = commands[call_count]
-        call_count += 1
-        return _tool_response(f"call-{call_count}", command)
+    suffix = (
+        "\n"
+        "loopx --format json todo complete "
+        "--goal-id replan-evidence-live-fixture --todo-id todo-unsafe"
+    )
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(
+                command=fixture.quota_guard_command.replace(
+                    '"${LOOPX_TURN:?}"',
+                    "turn-001",
+                )
+            ),
+            lambda request: _required_read_action(request, suffix=suffix),
+        ]
+    )
 
     receipt = DoubaoReplanEvidenceToolBehaviorActor(
         api_key="test-only-placeholder",
@@ -277,17 +315,20 @@ def test_tool_loop_rejects_unsafe_command_bundled_with_evidence(
     tmp_path: Path,
 ) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
-    commands = [
-        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
-        fixture.required_evidence_command + "\nrm -rf temporary-fixture",
-    ]
-    call_count = 0
-
-    def transport(**_: Any) -> Mapping[str, Any]:
-        nonlocal call_count
-        command = commands[call_count]
-        call_count += 1
-        return _tool_response(f"call-{call_count}", command)
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(
+                command=fixture.quota_guard_command.replace(
+                    '"${LOOPX_TURN:?}"',
+                    "turn-001",
+                )
+            ),
+            lambda request: _required_read_action(
+                request,
+                suffix="\nrm -rf temporary-fixture",
+            ),
+        ]
+    )
 
     receipt = DoubaoReplanEvidenceToolBehaviorActor(
         api_key="test-only-placeholder",
@@ -307,16 +348,18 @@ def test_tool_loop_rejects_unsafe_command_bundled_with_evidence(
 
 def test_tool_loop_accepts_the_real_host_utc_clock_shape(tmp_path: Path) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
-    commands = [
-        'date -u +"%Y-%m-%dT%H:%M:%SZ"',
-        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
-        fixture.required_evidence_command,
-    ]
-    requests: list[dict[str, Any]] = []
-
-    def transport(**kwargs: Any) -> Mapping[str, Any]:
-        requests.append(json.loads(kwargs["body"]))
-        return _tool_response(f"call-{len(requests)}", commands[len(requests) - 1])
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command='date -u +"%Y-%m-%dT%H:%M:%SZ"'),
+            ScriptedExecToolAction(
+                command=fixture.quota_guard_command.replace(
+                    '"${LOOPX_TURN:?}"',
+                    "turn-001",
+                )
+            ),
+            _required_read_action,
+        ]
+    )
 
     receipt = DoubaoReplanEvidenceToolBehaviorActor(
         api_key="test-only-placeholder",
@@ -327,6 +370,7 @@ def test_tool_loop_accepts_the_real_host_utc_clock_shape(tmp_path: Path) -> None
     )
 
     assert receipt["qualification_passed"] is True
+    requests = transport.requests
     assert requests[1]["messages"][-1]["content"] == "2026-08-11T16:00:00Z\n"
 
 
@@ -334,19 +378,19 @@ def test_tool_loop_allows_distinct_normal_workspace_preflight_reads(
     tmp_path: Path,
 ) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
-    commands = [
-        "pwd",
-        "git status --short --branch",
-        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
-        fixture.required_evidence_command,
-    ]
-    call_count = 0
-
-    def transport(**_: Any) -> Mapping[str, Any]:
-        nonlocal call_count
-        command = commands[call_count]
-        call_count += 1
-        return _tool_response(f"call-{call_count}", command)
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command="pwd"),
+            ScriptedExecToolAction(command="git status --short --branch"),
+            ScriptedExecToolAction(
+                command=fixture.quota_guard_command.replace(
+                    '"${LOOPX_TURN:?}"',
+                    "turn-001",
+                )
+            ),
+            _required_read_action,
+        ]
+    )
 
     receipt = DoubaoReplanEvidenceToolBehaviorActor(
         api_key="test-only-placeholder",
@@ -370,9 +414,7 @@ def test_tool_loop_rejects_generic_or_wrong_evidence_read(tmp_path: Path) -> Non
     responses = [
         _tool_response(
             "call-1",
-            fixture.quota_guard_command.replace(
-                '"${LOOPX_TURN:?}"', "turn-001"
-            ),
+            fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
         ),
         _tool_response(
             "call-2",

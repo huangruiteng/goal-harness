@@ -293,6 +293,27 @@ def _replan_requires_agent_evidence_log(
     ).strip() == "agent_scoped_evidence_log"
 
 
+def _ack_is_prior_watch_continuation_for_obligation(
+    ack: dict[str, Any],
+    obligation: dict[str, Any],
+) -> bool:
+    """Return whether a prior ACK is typed evidence for this exact watch frontier."""
+
+    ack_frontier = str(ack.get("frontier_identity") or "").strip()
+    obligation_frontier = str(obligation.get("frontier_identity") or "").strip()
+    if not ack_frontier or ack_frontier != obligation_frontier:
+        return False
+    delta_contract = ack.get("delta_contract")
+    if not isinstance(delta_contract, dict):
+        return False
+    delta_kinds = {
+        str(item or "").strip()
+        for item in delta_contract.get("delta_kinds") or []
+        if str(item or "").strip()
+    }
+    return "watch_lane_continuation" in delta_kinds
+
+
 def validate_replan_required_read_receipt(
     ack: dict[str, Any] | None,
     *,
@@ -317,11 +338,14 @@ def validate_replan_required_read_receipt(
         acked_at is not None
         and triggered_at is not None
         and acked_at < triggered_at
+        and _ack_is_prior_watch_continuation_for_obligation(
+            ack,
+            replan_obligation,
+        )
     ):
-        # A standing continuation ACK that predates this obligation instance is
-        # not a response to it; watch-lane/frontier continuation semantics
-        # decide applicability, and a fresh read cannot be required for a
-        # pre-existing ACK.
+        # Only typed watch continuation evidence for the same stable frontier
+        # may predate the obligation. Ordinary replan ACKs must still satisfy
+        # this obligation by identity even when projection clocks are reordered.
         return None
     required_read_id = str(replan_obligation.get("obligation_id") or "").strip()
     command = build_agent_scoped_evidence_log_command(
@@ -350,14 +374,17 @@ def validate_replan_required_read_receipt(
                 and read_window.get("limit") == REPLAN_REQUIRED_READ_LIMIT
                 and (
                     not required_read_id
-                    or str(receipt.get("required_read_id") or "")
-                    == required_read_id
+                    or str(receipt.get("required_read_id") or "") == required_read_id
                 )
                 and (
                     recorded_at := parse_timestamp(receipt.get("recorded_at"))
                 )
                 is not None
-                and (triggered_at is None or triggered_at <= recorded_at)
+                and (
+                    bool(required_read_id)
+                    or triggered_at is None
+                    or triggered_at <= recorded_at
+                )
                 and recorded_at <= acked_at
             ),
             None,
