@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+import re
+import shlex
 from collections.abc import Mapping
 from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from loopx.bootstrap_command_pack import build_start_goal_guided_packet
 from loopx.control_plane.quota.cli_projection import (
     compact_quota_should_run_cli_payload,
 )
@@ -25,6 +27,15 @@ from loopx.control_plane.testing.actual_default_model_behavior_portfolio import 
 from loopx.control_plane.testing.doubao_model_behavior_actor import (
     DoubaoActorTransportError,
 )
+from loopx.control_plane.testing.capability_monitor_repair_tool_behavior import (
+    DoubaoCapabilityMonitorRepairToolBehaviorActor,
+    _build_capability_repair_fixture,
+)
+from loopx.control_plane.testing.model_tool_behavior import (
+    ScriptedAssistantAction,
+    ScriptedDoubaoExecTransport,
+    ScriptedExecToolAction,
+)
 from loopx.control_plane.testing.model_behavior_qualification import (
     FULL_QUOTA_DECISION_PACKET_SCHEMA_VERSION,
     MODEL_BEHAVIOR_ACTOR_RESULT_SCHEMA_VERSION,
@@ -34,261 +45,27 @@ from loopx.control_plane.testing.model_behavior_qualification import (
 from loopx.control_plane.testing.onboarding_model_behavior_qualification import (
     ONBOARDING_MODEL_BEHAVIOR_DECISION_SCHEMA_VERSION,
     ONBOARDING_MODEL_BEHAVIOR_RESULT_SCHEMA_VERSION,
-    build_onboarding_postcondition_observation,
     onboarding_entry_semantic_contract,
     onboarding_postcondition_semantic_contract,
 )
+from loopx.control_plane.testing.replan_evidence_tool_behavior import (
+    DoubaoReplanEvidenceToolBehaviorActor,
+    _build_fixture as _build_replan_fixture,
+)
+from loopx.control_plane.testing.scoped_gate_successor_tool_behavior import (
+    DoubaoScopedGateSuccessorToolBehaviorActor,
+    _build_scoped_gate_fixture,
+)
 from loopx.control_plane.testing.selected_todo_tool_behavior import (
     SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT,
+    DoubaoSelectedTodoToolBehaviorActor,
+    _build_fixture as _build_selected_fixture,
 )
-
-GOAL_ID = "portfolio-goal"
-AGENT_ID = "codex-portfolio"
-
-
-def _write_project(root: Path) -> tuple[Path, Path]:
-    project = root / "project"
-    state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
-    state_file.parent.mkdir(parents=True)
-    state_file.write_text("# Active Goal State\n", encoding="utf-8")
-    registry_path = project / ".loopx" / "registry.json"
-    registry_path.parent.mkdir(parents=True)
-    registry_path.write_text(
-        json.dumps(
-            {
-                "schema_version": "0.1",
-                "goals": [
-                    {
-                        "id": GOAL_ID,
-                        "status": "active",
-                        "repo": str(project),
-                        "state_file": str(state_file.relative_to(project)),
-                        "coordination": {
-                            "agent_model": "peer_v1",
-                            "registered_agents": [AGENT_ID],
-                        },
-                    }
-                ],
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return project, registry_path
-
-
-def _guided_packet(
-    project: Path,
-    *,
-    goal_id: str | None,
-    agent_id: str | None,
-) -> dict[str, Any]:
-    return build_start_goal_guided_packet(
-        project=project,
-        goal_id=goal_id,
-        agent_id=agent_id,
-        cli_bin="loopx",
-        host_surface="codex-app",
-        goal_text="Establish one public-safe quality contract.",
-        available_capabilities=["network"],
-        include_command_pack_detail=False,
-    )
-
-
-def _entry_packets(tmp_path: Path) -> dict[str, dict[str, Any]]:
-    project, registry_path = _write_project(tmp_path)
-    connect = _guided_packet(project, goal_id=GOAL_ID, agent_id=AGENT_ID)
-
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    registry["goals"][0]["coordination"]["registered_agents"].append(
-        "codex-portfolio-reviewer"
-    )
-    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
-    identity = _guided_packet(project, goal_id=GOAL_ID, agent_id=None)
-
-    second_goal = "portfolio-second-goal"
-    second_state = project / ".codex" / "goals" / second_goal / "ACTIVE_GOAL_STATE.md"
-    second_state.parent.mkdir(parents=True)
-    second_state.write_text("# Second Active Goal State\n", encoding="utf-8")
-    registry["goals"].append(
-        {
-            "id": second_goal,
-            "status": "active",
-            "repo": str(project),
-            "state_file": str(second_state.relative_to(project)),
-            "coordination": {
-                "agent_model": "peer_v1",
-                "registered_agents": ["codex-portfolio-second"],
-            },
-        }
-    )
-    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
-    goal_selection = _guided_packet(project, goal_id=None, agent_id=None)
-    return {
-        "onboarding_connect_default": connect,
-        "onboarding_agent_identity_gate": identity,
-        "onboarding_goal_selection_gate": goal_selection,
-    }
-
-
-def _turn_source(
-    *,
-    human_gate: bool,
-    agent_id: str = AGENT_ID,
-    continuation_policy: str | None = None,
-) -> dict[str, Any]:
-    selected_todo = None
-    if not human_gate:
-        selected_todo = {
-            "todo_id": "todo_portfolio001",
-            "status": "open",
-            "task_class": "advancement_task",
-            "claimed_by": agent_id,
-            "text": "Implement one bounded public-safe slice.",
-        }
-        if continuation_policy:
-            selected_todo["continuation_policy"] = continuation_policy
-    return {
-        "ok": True,
-        "mode": "should-run",
-        "goal_id": GOAL_ID,
-        "decision": "skip" if human_gate else "run",
-        "should_run": not human_gate,
-        "effective_action": "operator_gate" if human_gate else "normal_run",
-        "state": "operator_gate" if human_gate else "eligible",
-        "action_required": human_gate,
-        "open_count": 1 if human_gate else 0,
-        "recommended_action": (
-            "Approve the bounded public release."
-            if human_gate
-            else "Implement one bounded public-safe slice."
-        ),
-        "selected_todo": selected_todo,
-        "agent_identity": {"agent_id": agent_id},
-        "interaction_contract": {
-            "schema_version": "loopx_interaction_contract_v0",
-            "mode": "user_gate" if human_gate else "bounded_delivery",
-            **(
-                {
-                    "response_plan": {
-                        "schema_version": "interaction_response_plan_v0",
-                        "kind": "surface_user_gate",
-                        "decision": "ask_user",
-                        "action_sequence": ["notify", "wait"],
-                        "silent_wait_allowed": False,
-                    }
-                }
-                if human_gate
-                else {}
-            ),
-            "user_channel": {
-                "action_required": human_gate,
-                "notify": "NOTIFY" if human_gate else "DONT_NOTIFY",
-                "actions": ["Approve the bounded public release."]
-                if human_gate
-                else [],
-            },
-            "agent_channel": {
-                "must_attempt": not human_gate,
-                "delivery_allowed": not human_gate,
-                "quiet_noop_allowed": False,
-                "primary_action": (
-                    "Wait for release approval."
-                    if human_gate
-                    else "Implement one bounded public-safe slice."
-                ),
-            },
-            "cli_channel": {
-                "next_cli_actions": [],
-                "spend_allowed_now": False,
-                "spend_after_validation": not human_gate,
-                "spend_policy": (
-                    "no spend while user gate is open"
-                    if human_gate
-                    else "spend after validated writeback"
-                ),
-            },
-        },
-        "goal_boundary": {
-            "write_scope": ["loopx/**", "tests/**"],
-            "guards": ["stop before external writes"],
-        },
-    }
-
 
 def _scenario_inputs(
     tmp_path: Path,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    sources = _entry_packets(tmp_path)
-    production_sources, _ = build_actual_default_model_behavior_scenario_inputs(
-        tmp_path / "required-vision"
-    )
-    selected_source = _turn_source(human_gate=False)
-    selected_source["selected_todo"]["text"] = (
-        SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
-    )
-    selected_source["recommended_action"] = SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
-    selected_source["interaction_contract"]["agent_channel"]["primary_action"] = (
-        SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT
-    )
-    sources.update(
-        {
-            "turn_selected_todo": selected_source,
-            "turn_peer_agent_identity": _turn_source(
-                human_gate=False,
-                agent_id="codex-portfolio-reviewer",
-            ),
-            "turn_same_agent_continuation": _turn_source(
-                human_gate=False,
-                continuation_policy="same_agent_non_delivery",
-            ),
-            "turn_human_gate": _turn_source(human_gate=True),
-            "turn_required_vision_replan": production_sources[
-                "turn_required_vision_replan"
-            ],
-            "turn_scoped_gate_successor_replan": production_sources[
-                "turn_scoped_gate_successor_replan"
-            ],
-            "turn_capability_monitor_repair": production_sources[
-                "turn_capability_monitor_repair"
-            ],
-            "turn_quota_hot_path_compaction_regression": production_sources[
-                "turn_quota_hot_path_compaction_regression"
-            ],
-            "turn_quota_hot_path_selected_todo_invariance": production_sources[
-                "turn_quota_hot_path_selected_todo_invariance"
-            ],
-            "turn_quota_hot_path_human_gate_invariance": production_sources[
-                "turn_quota_hot_path_human_gate_invariance"
-            ],
-            "onboarding_healthy_continue": build_onboarding_postcondition_observation(
-                check_warning_codes=[],
-                executable_todo_count=1,
-                selected_action_kind="quality_qualification",
-                normal_delivery_allowed=True,
-                user_action_required=False,
-                next_action_actionable=True,
-            ),
-            "onboarding_projection_repair": build_onboarding_postcondition_observation(
-                check_warning_codes=["state_projection_gap"],
-                executable_todo_count=0,
-                selected_action_kind=None,
-                normal_delivery_allowed=False,
-                user_action_required=False,
-                next_action_actionable=True,
-            ),
-        }
-    )
-    packets = {
-        scenario_id: (
-            compact_quota_should_run_cli_payload(deepcopy(source))
-            if source.get("mode") == "should-run"
-            else deepcopy(source)
-        )
-        for scenario_id, source in sources.items()
-    }
-    return sources, packets
+    return build_actual_default_model_behavior_scenario_inputs(tmp_path)
 
 
 def _turn_decision(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -371,72 +148,66 @@ def _onboarding_actor(request: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _selected_todo_actor(_: str) -> dict[str, Any]:
+# These compact receipts exercise portfolio mismatch handling only. The
+# end-to-end test below uses the real scenario actors and provider protocol.
+def _passing_tool_receipt(
+    schema_version: str,
+    **scenario_fields: Any,
+) -> dict[str, Any]:
     return {
-        "schema_version": "selected_todo_tool_behavior_receipt_v0",
+        "schema_version": schema_version,
         "qualification_passed": True,
         "failure_code": None,
         "decision": "execute",
-        "selected_todo_id": "todo_portfolio001",
-        "user_action_required": False,
         "must_attempt_work": True,
-        "delivery_allowed": True,
         "quiet_noop_allowed": False,
         "external_write_requested": False,
-        "selected_action_matched_todo": True,
+        **scenario_fields,
     }
+
+
+def _selected_todo_actor(_: str) -> dict[str, Any]:
+    return _passing_tool_receipt(
+        "selected_todo_tool_behavior_receipt_v0",
+        selected_todo_id="todo_portfolio001",
+        user_action_required=False,
+        delivery_allowed=True,
+        selected_action_matched_todo=True,
+    )
 
 
 def _replan_evidence_actor(_: str) -> dict[str, Any]:
-    return {
-        "schema_version": "replan_evidence_tool_behavior_receipt_v0",
-        "qualification_passed": True,
-        "failure_code": None,
-        "decision": "execute",
-        "selected_todo_id": None,
-        "user_action_required": False,
-        "must_attempt_work": True,
-        "delivery_allowed": True,
-        "quiet_noop_allowed": False,
-        "external_write_requested": False,
-        "evidence_log_matched_required_read": True,
-        "vision_trigger_kinds": ["required_agent_vision_missing"],
-    }
+    return _passing_tool_receipt(
+        "replan_evidence_tool_behavior_receipt_v0",
+        selected_todo_id=None,
+        user_action_required=False,
+        delivery_allowed=True,
+        evidence_log_matched_required_read=True,
+        vision_trigger_kinds=["required_agent_vision_missing"],
+    )
 
 
 def _scoped_gate_successor_actor(_: str) -> dict[str, Any]:
-    return {
-        "schema_version": "scoped_gate_successor_tool_behavior_receipt_v0",
-        "qualification_passed": True,
-        "failure_code": None,
-        "decision": "execute",
-        "selected_todo_id": "todo_portfolio_deferred",
-        "user_action_required": True,
-        "must_attempt_work": True,
-        "delivery_allowed": True,
-        "quiet_noop_allowed": False,
-        "external_write_requested": False,
-        "non_blocking_notice_surfaced": True,
-        "selected_action_matched_todo": True,
-    }
+    return _passing_tool_receipt(
+        "scoped_gate_successor_tool_behavior_receipt_v0",
+        selected_todo_id="todo_portfolio_deferred",
+        user_action_required=True,
+        delivery_allowed=True,
+        non_blocking_notice_surfaced=True,
+        selected_action_matched_todo=True,
+    )
 
 
 def _capability_monitor_repair_actor(_: str) -> dict[str, Any]:
-    return {
-        "schema_version": "capability_monitor_repair_tool_behavior_receipt_v0",
-        "qualification_passed": True,
-        "failure_code": None,
-        "decision": "execute",
-        "selected_todo_id": None,
-        "user_action_required": False,
-        "must_attempt_work": True,
-        "delivery_allowed": False,
-        "quiet_noop_allowed": False,
-        "external_write_requested": False,
-        "capability_repair_executed": True,
-        "monitor_fallback_avoided": True,
-        "repair_missing": ["private_read"],
-    }
+    return _passing_tool_receipt(
+        "capability_monitor_repair_tool_behavior_receipt_v0",
+        selected_todo_id=None,
+        user_action_required=False,
+        delivery_allowed=False,
+        capability_repair_executed=True,
+        monitor_fallback_avoided=True,
+        repair_missing=["private_read"],
+    )
 
 
 def run_actual_default_model_behavior_portfolio(
@@ -452,6 +223,142 @@ def run_actual_default_model_behavior_portfolio(
         _capability_monitor_repair_actor,
     )
     return _run_actual_default_model_behavior_portfolio(*args, **kwargs)
+
+
+def _latest_tool_payload(request: Mapping[str, Any]) -> dict[str, Any]:
+    for message in reversed(request["messages"]):
+        if message.get("role") != "tool":
+            continue
+        try:
+            payload = json.loads(message["content"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict) and "interaction_contract" in payload:
+            return payload
+    raise AssertionError("scripted model did not receive a quota tool result")
+
+
+def _selected_read_action(request: Mapping[str, Any]) -> ScriptedExecToolAction:
+    payload = _latest_tool_payload(request)
+    selected_todo = dict(payload.get("selected_todo") or {})
+    interaction = dict(payload["interaction_contract"])
+    agent_channel = dict(interaction.get("agent_channel") or {})
+    action_text = " ".join(
+        (str(selected_todo.get("text") or ""), str(agent_channel.get("primary_action") or ""))
+    )
+    match = re.search(r"fixture/[a-z0-9_-]+\.json", action_text)
+    if match is None:
+        raise AssertionError("quota-selected action does not identify a fixture target")
+    return ScriptedExecToolAction(f"cat {shlex.quote(match.group(0))}")
+
+
+def _required_evidence_action(
+    request: Mapping[str, Any],
+) -> ScriptedExecToolAction:
+    payload = _latest_tool_payload(request)
+    required_reads = payload.get("required_reads") or []
+    command = required_reads[0]["command"]
+    return ScriptedExecToolAction(str(command))
+
+
+def _capability_repair_action(
+    request: Mapping[str, Any],
+) -> ScriptedExecToolAction:
+    payload = _latest_tool_payload(request)
+    cli_channel = payload["interaction_contract"]["cli_channel"]
+    return ScriptedExecToolAction(str(cli_channel["next_cli_actions"][0]))
+
+
+def _scoped_gate_final_action(
+    request: Mapping[str, Any],
+) -> ScriptedAssistantAction:
+    payload = _latest_tool_payload(request)
+    notice = payload["interaction_contract"]["user_channel"]["actions"][0]
+    return ScriptedAssistantAction(
+        f"Non-blocking notice: {notice} The selected successor action completed."
+    )
+
+
+def _real_tool_actors(root: Path) -> dict[str, Any]:
+    def run_root(actor_kind: str, run_id: str) -> Path:
+        digest = sha256(run_id.encode("utf-8")).hexdigest()[:16]
+        return root / actor_kind / digest
+
+    def selected_todo_actor(run_id: str) -> Mapping[str, Any]:
+        fixture_root = run_root("selected", run_id)
+        fixture = _build_selected_fixture(fixture_root / "oracle")
+        transport = ScriptedDoubaoExecTransport(
+            [
+                ScriptedExecToolAction(fixture.quota_guard_command),
+                _selected_read_action,
+            ]
+        )
+        return DoubaoSelectedTodoToolBehaviorActor(
+            api_key="test-only-placeholder",
+            transport=transport,
+        ).qualify(
+            qualification_id=run_id,
+            fixture_root=fixture_root / "actor",
+        )
+
+    def replan_evidence_actor(run_id: str) -> Mapping[str, Any]:
+        fixture_root = run_root("replan", run_id)
+        fixture = _build_replan_fixture(fixture_root / "oracle")
+        transport = ScriptedDoubaoExecTransport(
+            [
+                ScriptedExecToolAction(fixture.quota_guard_command),
+                _required_evidence_action,
+            ]
+        )
+        return DoubaoReplanEvidenceToolBehaviorActor(
+            api_key="test-only-placeholder",
+            transport=transport,
+        ).qualify(
+            qualification_id=run_id,
+            fixture_root=fixture_root / "actor",
+        )
+
+    def scoped_gate_successor_actor(run_id: str) -> Mapping[str, Any]:
+        fixture_root = run_root("scoped-gate", run_id)
+        fixture = _build_scoped_gate_fixture(fixture_root / "oracle")
+        transport = ScriptedDoubaoExecTransport(
+            [
+                ScriptedExecToolAction(fixture.quota_guard_command),
+                _selected_read_action,
+                _scoped_gate_final_action,
+            ]
+        )
+        return DoubaoScopedGateSuccessorToolBehaviorActor(
+            api_key="test-only-placeholder",
+            transport=transport,
+        ).qualify(
+            qualification_id=run_id,
+            fixture_root=fixture_root / "actor",
+        )
+
+    def capability_monitor_repair_actor(run_id: str) -> Mapping[str, Any]:
+        fixture_root = run_root("capability-repair", run_id)
+        fixture = _build_capability_repair_fixture(fixture_root / "oracle")
+        transport = ScriptedDoubaoExecTransport(
+            [
+                ScriptedExecToolAction(fixture.quota_guard_command),
+                _capability_repair_action,
+            ]
+        )
+        return DoubaoCapabilityMonitorRepairToolBehaviorActor(
+            api_key="test-only-placeholder",
+            transport=transport,
+        ).qualify(
+            qualification_id=run_id,
+            fixture_root=fixture_root / "actor",
+        )
+
+    return {
+        "selected_todo_actor": selected_todo_actor,
+        "replan_evidence_actor": replan_evidence_actor,
+        "scoped_gate_successor_actor": scoped_gate_successor_actor,
+        "capability_monitor_repair_actor": capability_monitor_repair_actor,
+    }
 
 
 def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) -> None:
@@ -717,7 +624,7 @@ def test_portfolio_source_oracle_rejects_mutated_compact_user_action(
 
 def test_portfolio_rejects_mutated_blocking_gate_response_plan(tmp_path: Path) -> None:
     sources, packets = _scenario_inputs(tmp_path)
-    source = _turn_source(human_gate=True)
+    source = deepcopy(sources["turn_human_gate"])
     source["interaction_contract"]["response_plan"]["action_sequence"] = ["wait"]
     sources["turn_human_gate"] = source
     packets["turn_human_gate"] = compact_quota_should_run_cli_payload(source)
@@ -906,10 +813,7 @@ def test_portfolio_aborts_on_authentication_failure_with_bounded_receipt(
 
 def test_portfolio_preflight_rejects_wrong_same_agent_route(tmp_path: Path) -> None:
     sources, packets = _scenario_inputs(tmp_path)
-    source = _turn_source(
-        human_gate=False,
-        continuation_policy="same_agent_non_delivery",
-    )
+    source = deepcopy(sources["turn_same_agent_continuation"])
     source["selected_todo"]["claimed_by"] = "codex-wrong-peer"
     sources["turn_same_agent_continuation"] = source
     packets["turn_same_agent_continuation"] = compact_quota_should_run_cli_payload(
@@ -980,108 +884,37 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
     assert all(request["semantic_contract_required"] is False for request in requests)
 
 
-def test_portfolio_selected_todo_uses_real_action_actor_when_supplied(
+def test_portfolio_real_tool_scenarios_choose_from_latest_quota_result(
     tmp_path: Path,
 ) -> None:
-    selected_calls: list[str] = []
-
-    def selected_todo_actor(run_id: str) -> Mapping[str, Any]:
-        selected_calls.append(run_id)
-        return {
-            "schema_version": "selected_todo_tool_behavior_receipt_v0",
-            "qualification_passed": True,
-            "failure_code": None,
-            "decision": "execute",
-            "selected_todo_id": "todo_portfolio001",
-            "user_action_required": False,
-            "must_attempt_work": True,
-            "delivery_allowed": True,
-            "quiet_noop_allowed": False,
-            "external_write_requested": False,
-            "selected_action_matched_todo": True,
-        }
-
     sources, packets = _scenario_inputs(tmp_path)
     result = run_actual_default_model_behavior_portfolio(
         packets,
         scenario_sources=sources,
-        qualification_id="actual-default-portfolio-real-selected-action",
+        qualification_id="actual-default-portfolio-real-tool-actions",
         turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
-        selected_todo_actor=selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        **_real_tool_actors(tmp_path / "real-tool-actors"),
     )
 
     assert result["qualification_passed"] is True
-    assert selected_calls == [
-        "actual-default-portfolio-real-selected-action:turn_selected_todo:r1",
-        "actual-default-portfolio-real-selected-action:turn_selected_todo:r2",
-    ]
-    assert result["boundary"]["tools_enabled"] is True
-    assert result["boundary"]["tool_enabled_scenario_count"] == 4
-    assert result["boundary"]["packet_interpretation_scenario_count"] == 11
-
-
-def test_portfolio_required_vision_replan_uses_real_action_actor_when_supplied(
-    tmp_path: Path,
-) -> None:
-    replan_calls: list[str] = []
-
-    def replan_evidence_actor(run_id: str) -> Mapping[str, Any]:
-        replan_calls.append(run_id)
-        return _replan_evidence_actor(run_id)
-
-    sources, packets = _scenario_inputs(tmp_path)
-    result = run_actual_default_model_behavior_portfolio(
-        packets,
-        scenario_sources=sources,
-        qualification_id="actual-default-portfolio-real-replan-evidence",
-        turn_actor=_turn_actor,
-        onboarding_actor=_onboarding_actor,
-        selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=replan_evidence_actor,
-        scoped_gate_successor_actor=_scoped_gate_successor_actor,
-    )
-
-    assert result["qualification_passed"] is True
-    assert replan_calls == [
-        "actual-default-portfolio-real-replan-evidence:turn_required_vision_replan:r1",
-        "actual-default-portfolio-real-replan-evidence:turn_required_vision_replan:r2",
-    ]
-
-
-def test_portfolio_scoped_gate_uses_real_successor_actor_when_supplied(
-    tmp_path: Path,
-) -> None:
-    scoped_calls: list[str] = []
-
-    def scoped_gate_successor_actor(run_id: str) -> Mapping[str, Any]:
-        scoped_calls.append(run_id)
-        return _scoped_gate_successor_actor(run_id)
-
-    sources, packets = _scenario_inputs(tmp_path)
-    result = run_actual_default_model_behavior_portfolio(
-        packets,
-        scenario_sources=sources,
-        qualification_id="actual-default-portfolio-real-scoped-gate",
-        turn_actor=_turn_actor,
-        onboarding_actor=_onboarding_actor,
-        selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
-        scoped_gate_successor_actor=scoped_gate_successor_actor,
-    )
-
-    assert result["qualification_passed"] is True
-    assert scoped_calls == [
-        (
-            "actual-default-portfolio-real-scoped-gate:"
-            "turn_scoped_gate_successor_replan:r1"
-        ),
-        (
-            "actual-default-portfolio-real-scoped-gate:"
-            "turn_scoped_gate_successor_replan:r2"
-        ),
-    ]
+    boundary = result["boundary"]
+    assert boundary["tools_enabled"] is True
+    assert boundary["tool_enabled_scenario_count"] == 4
+    assert boundary["packet_interpretation_scenario_count"] == 11
+    assert boundary["automatic_retries"] is False
+    assert boundary["raw_model_responses_persisted"] is False
+    assert boundary["raw_packets_persisted"] is False
+    tool_scenarios = {
+        "turn_selected_todo",
+        "turn_required_vision_replan",
+        "turn_scoped_gate_successor_replan",
+        "turn_capability_monitor_repair",
+    }
+    for scenario in result["scenarios"]:
+        if scenario["scenario_id"] in tool_scenarios:
+            assert scenario["status"] == "passed"
+            assert len(set(scenario["receipt_digests"])) == 2
 
 
 def test_portfolio_preflight_rejects_invalid_contrast_before_actor_spend(

@@ -5,55 +5,16 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from loopx.control_plane.testing.model_tool_behavior import (
+    scripted_assistant_response as _stop_response,
+    scripted_exec_tool_response as _tool_response,
+)
 from loopx.control_plane.testing.scoped_gate_successor_tool_behavior import (
     SCOPED_GATE_FINALIZATION_MESSAGE,
     SCOPED_GATE_SUCCESSOR_TODO_ID,
     DoubaoScopedGateSuccessorToolBehaviorActor,
     _build_scoped_gate_fixture,
 )
-
-
-def _tool_response(
-    call_id: str,
-    command: str,
-    *,
-    content: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "choices": [
-            {
-                "finish_reason": "tool_calls",
-                "message": {
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": json.dumps({"cmd": command}),
-                            },
-                        }
-                    ],
-                },
-            }
-        ]
-    }
-
-
-def _stop_response(content: str) -> dict[str, Any]:
-    return {
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {
-                    "role": "assistant",
-                    "content": content,
-                },
-            }
-        ]
-    }
 
 
 def test_real_quota_notice_and_selected_successor_execute_in_one_tool_loop(

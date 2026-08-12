@@ -5,34 +5,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from loopx.control_plane.testing.model_tool_behavior import (
+    scripted_exec_tool_response as _tool_response,
+)
 from loopx.control_plane.testing.selected_todo_tool_behavior import (
     DoubaoSelectedTodoToolBehaviorActor,
     _build_fixture,
 )
-
-
-def _tool_response(call_id: str, command: str) -> dict[str, Any]:
-    return {
-        "choices": [
-            {
-                "finish_reason": "tool_calls",
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": json.dumps({"cmd": command}),
-                            },
-                        }
-                    ],
-                },
-            }
-        ]
-    }
 
 
 def test_real_tool_loop_executes_action_selected_by_real_quota(

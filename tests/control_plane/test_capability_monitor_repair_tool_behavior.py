@@ -12,41 +12,14 @@ from loopx.control_plane.testing.capability_monitor_repair_tool_behavior import 
     DoubaoCapabilityMonitorRepairToolBehaviorActor,
     _build_capability_repair_fixture,
 )
-
-
-def _tool_response(call_id: str, command: str) -> dict[str, Any]:
-    return {
-        "choices": [
-            {
-                "finish_reason": "tool_calls",
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {
-                                "name": "exec_command",
-                                "arguments": json.dumps({"cmd": command}),
-                            },
-                        }
-                    ],
-                },
-            }
-        ]
-    }
+from loopx.control_plane.testing.model_tool_behavior import (
+    scripted_assistant_response as _scripted_assistant_response,
+    scripted_exec_tool_response as _tool_response,
+)
 
 
 def _stop_response(content: str = "Waiting.") -> dict[str, Any]:
-    return {
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {"role": "assistant", "content": content},
-            }
-        ]
-    }
+    return _scripted_assistant_response(content)
 
 
 def _repair_command(*, capability: str = CAPABILITY_REPAIR_TARGET_CAPABILITY) -> str:

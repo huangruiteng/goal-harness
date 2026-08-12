@@ -5,7 +5,7 @@ import os
 import shlex
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -57,6 +57,137 @@ class ExecToolCall:
 class ExecToolStep:
     assistant_content: str | None
     tool_call: ExecToolCall | None
+
+
+@dataclass(frozen=True)
+class ScriptedExecToolAction:
+    """One model-selected tool action for a hermetic behavior test."""
+
+    command: str
+    assistant_content: str | None = None
+    call_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ScriptedAssistantAction:
+    """One model final response for a hermetic behavior test."""
+
+    content: str
+
+
+ScriptedModelAction = ScriptedExecToolAction | ScriptedAssistantAction
+ScriptedModelActionFactory = Callable[[Mapping[str, Any]], ScriptedModelAction]
+
+
+def scripted_doubao_response(
+    action: ScriptedModelAction,
+    *,
+    default_call_id: str,
+) -> dict[str, Any]:
+    """Encode one model-like action through the provider response boundary."""
+
+    if isinstance(action, ScriptedAssistantAction):
+        return {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": action.content,
+                    },
+                }
+            ]
+        }
+    call_id = action.call_id or default_call_id
+    return {
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": action.assistant_content,
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": json.dumps(
+                                    {"cmd": action.command},
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ),
+                            },
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+
+
+def scripted_exec_tool_response(
+    call_id: str,
+    command: str,
+    *,
+    content: str | None = None,
+) -> dict[str, Any]:
+    return scripted_doubao_response(
+        ScriptedExecToolAction(
+            command=command,
+            assistant_content=content,
+            call_id=call_id,
+        ),
+        default_call_id=call_id,
+    )
+
+
+def scripted_assistant_response(content: str) -> dict[str, Any]:
+    return scripted_doubao_response(
+        ScriptedAssistantAction(content=content),
+        default_call_id="unused",
+    )
+
+
+class ScriptedDoubaoExecTransport:
+    """Drive the real provider decoder from model-like actions, not receipts.
+
+    A callable step may inspect the complete next provider request, including
+    the latest real tool result, before choosing the next model action.  This
+    keeps hermetic tests on the same message/tool protocol as live actors while
+    avoiding duplicated hand-built Ark response dictionaries.
+    """
+
+    def __init__(
+        self,
+        steps: Sequence[ScriptedModelAction | ScriptedModelActionFactory],
+    ) -> None:
+        self._steps = tuple(steps)
+        self.requests: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        *,
+        endpoint: str,
+        headers: Mapping[str, str],
+        body: bytes,
+        timeout_seconds: float,
+    ) -> Mapping[str, Any]:
+        del endpoint, headers, timeout_seconds
+        request = json.loads(body)
+        if not isinstance(request, dict):
+            raise ValueError("scripted Doubao request must be an object")
+        self.requests.append(request)
+        index = len(self.requests) - 1
+        if index >= len(self._steps):
+            raise ValueError("scripted Doubao transport exhausted its actions")
+        step = self._steps[index]
+        action = step(request) if callable(step) else step
+        return scripted_doubao_response(
+            action,
+            default_call_id=f"call-{len(self.requests)}",
+        )
 
 
 class DoubaoExecToolClient:
