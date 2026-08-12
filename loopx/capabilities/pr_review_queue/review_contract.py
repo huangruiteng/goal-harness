@@ -82,7 +82,7 @@ def build_review_template(item: Mapping[str, Any]) -> dict[str, Any]:
             _section(
                 "对主干的风险",
                 "250-500字",
-                "Use `failure_analysis`, `walkthroughs.negative`, and `validation_matrix`; trace each finding from triggering state to observed outcome and minimum repair. When `scope_fit` applies, name the active production caller or explicitly record a coverage-only boundary.",
+                "Use `failure_analysis`, `walkthroughs.negative`, and `validation_matrix`; trace each finding from triggering state to observed outcome and minimum repair. When `scope_fit` applies, name the active production caller or explicitly record a coverage-only boundary. Surface typed-state-rule, domain-neutrality, behavior-change-disclosure, and guidance-vs-obligation findings when their evidence applies.",
             ),
             _section(
                 "我的整体评价",
@@ -253,6 +253,71 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "behavior_preserving_validation",
                 ],
             },
+            {
+                "evidence_id": "typed_state_rule",
+                "required_when": "code_change",
+                "fields": [
+                    "state_classification_rule",
+                    "matching_mechanism",
+                    "typed_contract_or_enum",
+                    "false_positive_or_negative_risk",
+                    "migration_or_followup",
+                ],
+                "rule": (
+                    "State-classification and delivery-semantics rules must be typed "
+                    "enums, schemas, or transition helpers. Flag substring denylists, "
+                    "scattered booleans, and prose-only assumptions as findings with "
+                    "the concrete misclassification risk and the typed alternative."
+                ),
+            },
+            {
+                "evidence_id": "domain_neutrality",
+                "required_when": "product_runtime_or_policy_contract",
+                "fields": [
+                    "obligation_or_error_text",
+                    "domain_specific_language",
+                    "affected_goal_types",
+                    "neutral_alternative",
+                ],
+                "rule": (
+                    "Generic control-plane obligations and error text must stay "
+                    "domain-neutral. Flag product- or benchmark-specific wording in "
+                    "core work-lane, quota, todo, or settlement contracts and propose "
+                    "a goal-agnostic alternative."
+                ),
+            },
+            {
+                "evidence_id": "behavior_change_disclosure",
+                "required_when": "runtime_behavior_change",
+                "fields": [
+                    "previous_default",
+                    "new_default",
+                    "affected_callers_or_lanes",
+                    "disclosure_surface",
+                ],
+                "rule": (
+                    "Default behavior changes must be disclosed through renamed "
+                    "smokes, docs, or release notes. Flag silent behavior changes "
+                    "that alter existing automation without naming the old and new "
+                    "default."
+                ),
+            },
+            {
+                "evidence_id": "guidance_vs_obligation",
+                "required_when": "work_lane_or_obligation_contract",
+                "fields": [
+                    "advisory_or_enforced",
+                    "machine_flag",
+                    "consequence_when_ignored",
+                    "documented_semantics",
+                ],
+                "rule": (
+                    "Advisory versus machine-enforced semantics must be explicit. "
+                    "Flag text that calls a hard obligation 'guidance' when a "
+                    "contract flag such as must_attempt_work forces a turn, or that "
+                    "leaves the enforcement consequence undocumented."
+                ),
+            },
         ],
         "finding_contract": {
             "findings_first": True,
@@ -309,6 +374,11 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
     if code_change:
         required_evidence.insert(3, "symbol_map")
         required_evidence.append("scope_fit")
+        required_evidence.append("typed_state_rule")
+        required_evidence.append("behavior_change_disclosure")
+    if areas & {"product_runtime", "public_entry_or_policy"}:
+        required_evidence.append("domain_neutrality")
+        required_evidence.append("guidance_vs_obligation")
     number = item.get("number")
     head_oid = str(item.get("head_oid") or "").strip()
     target_key = f"{number}@{head_oid}" if number and head_oid else None
@@ -328,6 +398,14 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             "symbol_map_required": code_change,
             "scope_fit_required": code_change,
             "negative_walkthrough_required": bool(areas & NEGATIVE_PATH_AREAS),
+            "typed_state_rule_required": code_change,
+            "behavior_change_disclosure_required": code_change,
+            "domain_neutrality_required": bool(
+                areas & {"product_runtime", "public_entry_or_policy"}
+            ),
+            "guidance_vs_obligation_required": bool(
+                areas & {"product_runtime", "public_entry_or_policy"}
+            ),
         },
         "required_evidence_ids": required_evidence,
         "result_template": {

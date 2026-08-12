@@ -47,6 +47,10 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "validation_matrix",
         "failure_analysis",
         "code_volume",
+        "typed_state_rule",
+        "domain_neutrality",
+        "behavior_change_disclosure",
+        "guidance_vs_obligation",
     }
     assert requirements["symbol_map"]["item_count"] == {
         "minimum": 2,
@@ -55,6 +59,13 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
     assert "caller_evidence" in requirements["symbol_map"]["item_fields"]
     assert "negative_fields" in requirements["walkthroughs"]
     assert "regression_test" in requirements["failure_analysis"]["fields"]
+    assert requirements["typed_state_rule"]["required_when"] == "code_change"
+    assert "substring denylists" in requirements["typed_state_rule"]["rule"]
+    assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
+    assert "silent behavior changes" in requirements["behavior_change_disclosure"][
+        "rule"
+    ]
+    assert "must_attempt_work" in requirements["guidance_vs_obligation"]["rule"]
     assert contract["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert contract["completion_gate"]["stale_head_verdict_allowed"] is False
     assert contract["finding_contract"]["findings_first"] is True
@@ -73,8 +84,16 @@ def test_runtime_plan_requires_symbol_map_and_negative_walkthrough() -> None:
     assert plan["applicability"]["symbol_map_required"] is True
     assert plan["applicability"]["scope_fit_required"] is True
     assert plan["applicability"]["negative_walkthrough_required"] is True
+    assert plan["applicability"]["typed_state_rule_required"] is True
+    assert plan["applicability"]["behavior_change_disclosure_required"] is True
+    assert plan["applicability"]["domain_neutrality_required"] is True
+    assert plan["applicability"]["guidance_vs_obligation_required"] is True
     assert "symbol_map" in plan["required_evidence_ids"]
     assert "scope_fit" in plan["required_evidence_ids"]
+    assert "typed_state_rule" in plan["required_evidence_ids"]
+    assert "behavior_change_disclosure" in plan["required_evidence_ids"]
+    assert "domain_neutrality" in plan["required_evidence_ids"]
+    assert "guidance_vs_obligation" in plan["required_evidence_ids"]
     assert set(plan["result_template"]["evidence"]) == set(
         plan["required_evidence_ids"]
     )
@@ -94,10 +113,30 @@ def test_docs_plan_does_not_invent_code_symbols() -> None:
     assert plan["applicability"]["docs_only"] is True
     assert plan["applicability"]["symbol_map_required"] is False
     assert plan["applicability"]["scope_fit_required"] is False
+    assert plan["applicability"]["typed_state_rule_required"] is False
+    assert plan["applicability"]["behavior_change_disclosure_required"] is False
+    assert plan["applicability"]["domain_neutrality_required"] is False
+    assert plan["applicability"]["guidance_vs_obligation_required"] is False
     assert "symbol_map" not in plan["required_evidence_ids"]
     assert "scope_fit" not in plan["required_evidence_ids"]
+    assert "typed_state_rule" not in plan["required_evidence_ids"]
+    assert "domain_neutrality" not in plan["required_evidence_ids"]
+    assert "behavior_change_disclosure" not in plan["required_evidence_ids"]
+    assert "guidance_vs_obligation" not in plan["required_evidence_ids"]
     concrete = next(
         section for section in template["sections"] if section["label"] == "具体改动"
     )
     assert "### 关键内容讲解" in concrete["agent_instruction"]
     assert template["review_order"] == ["docs/design.md"]
+
+
+def test_test_only_plan_skips_runtime_lenses() -> None:
+    plan = build_review_plan(_item(areas={"test_or_example": 2}))
+
+    assert plan["applicability"]["code_change"] is False
+    assert plan["applicability"]["typed_state_rule_required"] is False
+    assert plan["applicability"]["behavior_change_disclosure_required"] is False
+    assert plan["applicability"]["domain_neutrality_required"] is False
+    assert plan["applicability"]["guidance_vs_obligation_required"] is False
+    assert "typed_state_rule" not in plan["required_evidence_ids"]
+    assert "domain_neutrality" not in plan["required_evidence_ids"]

@@ -475,6 +475,10 @@ def main() -> int:
         "validation_matrix",
         "failure_analysis",
         "code_volume",
+        "typed_state_rule",
+        "domain_neutrality",
+        "behavior_change_disclosure",
+        "guidance_vs_obligation",
     }, requirements
     assert requirements["symbol_map"]["item_count"] == {"minimum": 2, "maximum": 5}
     assert "caller_evidence" in requirements["symbol_map"]["item_fields"]
@@ -492,6 +496,12 @@ def main() -> int:
         "partly_avoidable",
         "not_yet_proven",
     ]
+    assert "substring denylists" in requirements["typed_state_rule"]["rule"]
+    assert "domain-neutral" in requirements["domain_neutrality"]["rule"]
+    assert "silent behavior changes" in requirements["behavior_change_disclosure"][
+        "rule"
+    ]
+    assert "must_attempt_work" in requirements["guidance_vs_obligation"]["rule"]
     assert execution["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert execution["completion_gate"]["stale_head_verdict_allowed"] is False
     assert execution["finding_contract"]["findings_first"] is True
@@ -499,6 +509,14 @@ def main() -> int:
     assert first_plan["schema_version"] == "pull_request_review_plan_v1", first_plan
     assert first_plan["applicability"]["docs_only"] is True, first_plan
     assert first_plan["applicability"]["symbol_map_required"] is False, first_plan
+    assert first_plan["applicability"]["typed_state_rule_required"] is False, first_plan
+    assert (
+        first_plan["applicability"]["behavior_change_disclosure_required"] is False
+    ), first_plan
+    assert first_plan["applicability"]["domain_neutrality_required"] is False, first_plan
+    assert (
+        first_plan["applicability"]["guidance_vs_obligation_required"] is False
+    ), first_plan
     assert "symbol_map" not in first_plan["required_evidence_ids"], first_plan
     assert first_plan["result_template"]["target_exact_head"] == (
         "773@7730000000000000000000000000000000000000"
@@ -508,6 +526,12 @@ def main() -> int:
     assert merged_plan["applicability"]["code_change"] is True, merged_plan
     assert merged_plan["applicability"]["symbol_map_required"] is True, merged_plan
     assert merged_plan["applicability"]["negative_walkthrough_required"] is True, merged_plan
+    assert merged_plan["applicability"]["typed_state_rule_required"] is True, merged_plan
+    assert (
+        merged_plan["applicability"]["behavior_change_disclosure_required"] is True
+    ), merged_plan
+    assert "typed_state_rule" in merged_plan["required_evidence_ids"], merged_plan
+    assert "behavior_change_disclosure" in merged_plan["required_evidence_ids"], merged_plan
     assert "symbol_map" in merged_plan["required_evidence_ids"], merged_plan
     merged_risk_hint = merged["metadata_risk_hint"]
     assert merged_risk_hint["level"] == "medium", merged_risk_hint
