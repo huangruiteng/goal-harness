@@ -226,6 +226,18 @@ def _redacted_command_shape(
     except ValueError:
         tokens = []
     executable = Path(tokens[0]).name if tokens else ""
+    target_index = next(
+        (
+            index
+            for index, token in enumerate(tokens)
+            if str(fixture.selected_target.name) in token
+        ),
+        -1,
+    )
+    redirect_index = next(
+        (index for index, token in enumerate(tokens) if "2>" in token),
+        -1,
+    )
     family = (
         "content_read"
         if executable in {"cat", "head", "sed", "jq", "python", "python3"}
@@ -255,6 +267,18 @@ def _redacted_command_shape(
         "has_stderr_redirect": "2>" in command,
         "has_conditional": "&&" in command or "||" in command,
         "has_option_terminator": " -- " in command,
+        "cat_option_count_bucket": (
+            min(
+                sum(1 for token in tokens[1:] if token.startswith("-")),
+                3,
+            )
+            if executable == "cat"
+            else 0
+        ),
+        "redirect_precedes_target": (
+            redirect_index >= 0 and target_index >= 0 and redirect_index < target_index
+        ),
+        "has_pwd_expansion": "$(pwd)" in command or "$PWD" in command,
     }
 
 
