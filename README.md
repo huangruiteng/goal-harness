@@ -10,7 +10,7 @@
 
 <a href="https://trendshift.io/repositories/102379?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-102379"><img src="https://trendshift.io/api/badge/repositories/102379" alt="huangruiteng/loopx on Trendshift" width="220" height="48"></a>
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20active-brightgreen.svg)](docs/product/release-readiness.md)
 
 [Public website](https://huangruiteng.github.io/loopx/) · [Docs](https://huangruiteng.github.io/loopx/docs/) · [Developer Book](https://huangruiteng.github.io/loopx/docs/book/) · [Try LoopX](#try-loopx) · [See real loops](#evidence) · [How it works](#why-loopx) · [User manual](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [简体中文](README.zh-CN.md)
 
@@ -525,9 +525,10 @@ long-running agent ecosystem. Our confirmed partners include:
 
 ## Community and Feedback
 
-LoopX is still early. The most useful feedback comes from real long-running
-agent projects: where the control plane helped, where it felt heavy, and which
-gates or handoffs disappeared from view.
+LoopX is already running real long-running agent goals and is under active
+development. The most useful feedback comes from real long-running agent
+projects: where the control plane helped, where it felt heavy, and which gates
+or handoffs disappeared from view.
 
 - Use [GitHub Issues](https://github.com/huangruiteng/loopx/issues) for
   reproducible bugs, install problems, and feature requests.
@@ -561,9 +562,9 @@ traces, credentials, private logs, or operator artifacts.
 
 ## Current Status
 
-The v0.4.x line is an early but usable local control plane for long-running
-agent work. It is not a full agent platform, an agent runtime, or an autonomous
-production controller.
+The v0.4.x line is a usable local control plane for long-running agent work and
+is entering broader adoption. It is not a full agent platform, an agent runtime,
+or an autonomous production controller.
 
 Today LoopX ships a durable state kernel for goals, typed todos and decision
 scopes, peer claims and leases, evidence and writeback, quota-aware scheduling,
