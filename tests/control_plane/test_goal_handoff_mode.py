@@ -554,6 +554,124 @@ def test_soft_claim_todo_verbs_behave_like_legacy(tmp_path: Path) -> None:
     assert result["task_lease_fence"]["required"] is False
 
 
+@pytest.mark.parametrize(
+    ("configured_mode", "expected_mode"),
+    [
+        (None, HANDOFF_MODE_LEGACY),
+        (HANDOFF_MODE_SOFT_CLAIM, HANDOFF_MODE_SOFT_CLAIM),
+    ],
+)
+def test_local_terminal_replay_matches_completion_response_shape_without_lease(
+    tmp_path: Path,
+    configured_mode: str | None,
+    expected_mode: str,
+) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=configured_mode)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    turn_key = "turn-terminal-response-parity"
+
+    completed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        evidence="complete the lease-free handoff-mode case",
+        completion_turn_key=turn_key,
+        no_followup=True,
+    )
+    completed_state = state.read_text(encoding="utf-8")
+    replayed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        evidence="retry the same local completion turn",
+        completion_turn_key=turn_key,
+        no_followup=True,
+    )
+
+    assert completed["handoff_mode"] == expected_mode
+    assert replayed["handoff_mode"] == expected_mode
+    assert replayed["completed"] is True
+    assert replayed["changed"] is False
+    assert replayed["idempotent_replay"] is True
+    assert state.read_text(encoding="utf-8") == completed_state
+
+
+def test_local_terminal_replay_reports_current_mode_not_original_result_proof(
+    tmp_path: Path,
+) -> None:
+    """Replay parity reads current goal mode; it is not an original receipt."""
+
+    registry, state = _write_workspace(tmp_path)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    turn_key = "turn-current-mode-parity"
+
+    completed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        evidence="complete before a legal quiescent mode transition",
+        completion_turn_key=turn_key,
+        no_followup=True,
+    )
+    assert completed["handoff_mode"] == HANDOFF_MODE_LEGACY
+    changed_mode = set_goal_handoff_mode(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        mode=HANDOFF_MODE_SOFT_CLAIM,
+    )
+    assert changed_mode["changed"] is True
+    mode_changed_state = state.read_text(encoding="utf-8")
+
+    replayed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        evidence="retry after the goal mode changed",
+        completion_turn_key=turn_key,
+        no_followup=True,
+    )
+
+    assert replayed["handoff_mode"] == HANDOFF_MODE_SOFT_CLAIM
+    assert replayed["changed"] is False
+    assert replayed["idempotent_replay"] is True
+    assert state.read_text(encoding="utf-8") == mode_changed_state
+
+
+def test_local_terminal_replay_fails_closed_on_current_invalid_mode(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_workspace(tmp_path)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    turn_key = "turn-invalid-mode-replay"
+    complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        completion_turn_key=turn_key,
+        no_followup=True,
+    )
+    _set_frontmatter_mode(state, "banana")
+    invalid_state = state.read_text(encoding="utf-8")
+
+    with pytest.raises(HandoffModeError) as error:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            agent_id=AGENT_A,
+            completion_turn_key=turn_key,
+            no_followup=True,
+        )
+
+    assert error.value.code == "invalid_handoff_mode"
+    assert state.read_text(encoding="utf-8") == invalid_state
+
+
 # ---------------------------------------------------------------------------
 # (c) hard_lease: ownership mutations require the actor to hold the lease.
 # ---------------------------------------------------------------------------
@@ -962,8 +1080,72 @@ def test_hard_lease_exact_user_gate_rejects_invalid_lease_fence_without_state_ch
     persisted_lease = json.loads(lease_file.read_text(encoding="utf-8"))
     assert persisted_lease["status"] == "active"
     assert persisted_lease["owner"] == lease_owner
+def test_hard_lease_local_terminal_replay_keeps_response_shape_after_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same-turn local replay does not re-enter lease authority or mutate state."""
 
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    lease_key = "turn-hard-lease-instance"
+    turn_key = "turn-hard-lease-completion"
+    _acquire(
+        registry,
+        tmp_path,
+        todo["todo_id"],
+        owner=AGENT_A,
+        key=lease_key,
+    )
 
+    completed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        task_lease_idempotency_key=lease_key,
+        completion_turn_key=turn_key,
+        evidence="complete under the held hard lease",
+        no_followup=True,
+    )
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+    )
+    assert completed["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert completed["task_lease_fence"]["released"] is True
+    assert not lease_file.exists()
+    completed_state = state.read_text(encoding="utf-8")
+
+    def unexpected_lease_effect(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("terminal replay must not re-enter the task-lease effect path")
+
+    monkeypatch.setattr(
+        "loopx.todos.hold_task_lease_mutation_fence",
+        unexpected_lease_effect,
+    )
+    monkeypatch.setattr(
+        "loopx.todos.release_verified_task_lease_fence",
+        unexpected_lease_effect,
+    )
+    replayed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        task_lease_idempotency_key=lease_key,
+        completion_turn_key=turn_key,
+        evidence="retry the same completion after lease release",
+        no_followup=True,
+    )
+
+    assert replayed["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert replayed["completed"] is True
+    assert replayed["changed"] is False
+    assert replayed["idempotent_replay"] is True
+    assert state.read_text(encoding="utf-8") == completed_state
+    assert not lease_file.exists()
 def test_hard_lease_self_disarm_state_becomes_loud_typed_error(
     tmp_path: Path,
 ) -> None:
@@ -1057,6 +1239,51 @@ def test_hard_lease_delegated_complete_passes_gate_with_marker(
     assert result["ok"] is True
     assert result["handoff_gate_overridden"] is True
     assert result["task_lease_fence"]["required"] is False
+
+
+def test_delegated_terminal_replay_parity_excludes_original_gate_effect_marker(
+    tmp_path: Path,
+) -> None:
+    """Current mode is replayable; an original gate override effect is not."""
+
+    registry, state = _write_workspace(
+        tmp_path,
+        handoff_mode=HANDOFF_MODE_HARD_LEASE,
+        lifecycle_authority=_orchestrator_grant(),
+    )
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    turn_key = "turn-delegated-terminal-replay"
+    completed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=ORCHESTRATOR,
+        authority_reason="close the item through delegated authority",
+        completion_turn_key=turn_key,
+        no_followup=True,
+    )
+    completed_state = state.read_text(encoding="utf-8")
+
+    replayed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=ORCHESTRATOR,
+        authority_reason="retry the delegated completion turn",
+        completion_turn_key=turn_key,
+        no_followup=True,
+    )
+
+    assert completed["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert completed["handoff_gate_overridden"] is True
+    assert replayed["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert replayed["mutation_authority"]["mode"] == (
+        "delegated_orchestration_override"
+    )
+    assert "handoff_gate_overridden" not in replayed
+    assert replayed["changed"] is False
+    assert replayed["idempotent_replay"] is True
+    assert state.read_text(encoding="utf-8") == completed_state
 
 
 def test_hard_lease_gate_has_no_untyped_bypass_without_grant(
