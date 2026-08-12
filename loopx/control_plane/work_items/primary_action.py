@@ -291,8 +291,9 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
     if mode == "capability_bridge_repair":
         return (
             "execute interaction_contract.agent_channel.next_task_action.instruction "
-            "with its real task-facing tool, not as CLI text and without another "
-            "workspace/state preflight; on success execute cli_channel."
+            "with its real task-facing tool and exact target_ref when projected, not "
+            "as CLI text and without another workspace/state preflight; on success "
+            "execute cli_channel."
             "next_cli_actions[0] in the same turn and continue only when quota allows"
         )
     if mode == "agent_workspace_repair":

@@ -119,6 +119,7 @@ def _build_capability_repair_fixture(root: Path) -> _SelectedTodoToolFixture:
         f"todo_id={CAPABILITY_REPAIR_BLOCKED_TODO_ID} status=open "
         "task_class=advancement_task action_kind=read_private_source "
         f"claimed_by={SELECTED_TODO_TOOL_FIXTURE_AGENT_ID} priority=P1 "
+        "target_key=fixture/private-source.json "
         f"required_capabilities={CAPABILITY_REPAIR_TARGET_CAPABILITY} -->\n",
         encoding="utf-8",
     )
@@ -298,6 +299,7 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         and next_task_action.get("kind") == "capability_verification"
         and next_task_action.get("todo_id") == target.get("todo_id")
         and next_task_action.get("instruction") == target.get("instruction")
+        and next_task_action.get("target_ref") == "fixture/private-source.json"
         and next_task_action.get("continuation_cli_action_index") == 0
         and len(reentry_actions) == 1
         and all("todo add" not in action for action in next_cli_actions)
@@ -438,8 +440,9 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                     "When real quota projects an agent-owned capability bridge repair, "
                     "verify it "
                     "by executing agent_channel.next_task_action.instruction with the "
-                    "appropriate task-facing tool; do not run that instruction as CLI "
-                    "text or inspect state/workspace again. After success, run "
+                    "appropriate task-facing tool against its exact target_ref; do not "
+                    "run that instruction as CLI text, probe target existence, or "
+                    "inspect state/workspace again. After success, run "
                     "cli_channel.next_cli_actions[0] in this same heartbeat. "
                     "Do not create a repair Todo, wait on, poll, or rewrite a monitor "
                     "fallback. Stop when quota makes the blocked Todo runnable."

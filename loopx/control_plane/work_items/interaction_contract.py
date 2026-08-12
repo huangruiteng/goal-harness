@@ -1139,6 +1139,8 @@ def _build_interaction_agent_channel(
             "instruction": target["instruction"],
             "continuation_cli_action_index": 0,
         }
+        if target.get("target_ref"):
+            channel["next_task_action"]["target_ref"] = target["target_ref"]
     if _blocked_successor_wait_observation_required(payload):
         channel["primary_action"] = (
             "record one no-spend blocked-successor wait observation, rerun quota, "

@@ -55,6 +55,7 @@ def _blocked_payload(*, missing: list[str]) -> dict:
                 {
                     "todo_id": "todo_blocked",
                     "action_kind": "inspect_target",
+                    "target_key": "fixture/target.json",
                     "text": "[P0] Inspect fixture/target.json.",
                     "required_capabilities": missing,
                 }
@@ -74,8 +75,9 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
     reentry = contract["cli_channel"]["runtime_capability_reentry"]
     assert contract["agent_channel"]["primary_action"] == (
         "execute interaction_contract.agent_channel.next_task_action.instruction "
-        "with its real task-facing tool, not as CLI text and without another "
-        "workspace/state preflight; on success execute cli_channel."
+        "with its real task-facing tool and exact target_ref when projected, not "
+        "as CLI text and without another workspace/state preflight; on success "
+        "execute cli_channel."
         "next_cli_actions[0] in the same turn and continue only when quota allows"
     )
     assert contract["agent_channel"]["next_task_action"] == {
@@ -84,6 +86,7 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
         "todo_id": "todo_blocked",
         "action_kind": "inspect_target",
         "instruction": "[P0] Inspect fixture/target.json.",
+        "target_ref": "fixture/target.json",
         "continuation_cli_action_index": 0,
     }
     assert reentry["schema_version"] == "runtime_capability_reentry_v0"
@@ -115,6 +118,7 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
         "todo_id": "todo_blocked",
         "action_kind": "inspect_target",
         "instruction": "[P0] Inspect fixture/target.json.",
+        "target_ref": "fixture/target.json",
     }
     assert candidate["command"] == (
         "loopx --format json quota should-run --goal-id "

@@ -44,11 +44,15 @@ def _verification_target_for_capability(
         instruction = str(candidate.get("text") or "").strip()
         if not instruction:
             continue
-        return {
+        target = {
             "todo_id": todo_id,
             "action_kind": str(candidate.get("action_kind") or "unspecified"),
             "instruction": instruction,
         }
+        target_ref = str(candidate.get("target_key") or "").strip()
+        if target_ref:
+            target["target_ref"] = target_ref
+        return target
     return None
 
 
