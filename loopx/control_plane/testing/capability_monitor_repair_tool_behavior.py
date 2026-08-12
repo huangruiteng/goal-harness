@@ -238,6 +238,19 @@ def _redacted_command_shape(
         (index for index, token in enumerate(tokens) if "2>" in token),
         -1,
     )
+    fallback_operation = None
+    for operator in ("||", "&&"):
+        if operator not in tokens:
+            continue
+        index = tokens.index(operator) + 1
+        if index < len(tokens):
+            candidate = Path(tokens[index]).name
+            fallback_operation = (
+                candidate
+                if candidate in {"exit", "return", "false", "echo", "printf", "cat"}
+                else "other"
+            )
+        break
     family = (
         "content_read"
         if executable in {"cat", "head", "sed", "jq", "python", "python3"}
@@ -263,9 +276,13 @@ def _redacted_command_shape(
         "mentions_fixture_dir": "fixture/" in command,
         "mentions_selected_target": str(fixture.selected_target.name) in command,
         "multiline": "\n" in command,
-        "has_pipe": "|" in command,
+        "has_pipe": "|" in tokens,
         "has_stderr_redirect": "2>" in command,
         "has_conditional": "&&" in command or "||" in command,
+        "conditional_kind": (
+            "or" if "||" in tokens else "and" if "&&" in tokens else None
+        ),
+        "fallback_operation": fallback_operation,
         "has_option_terminator": " -- " in command,
         "cat_option_count_bucket": (
             min(
