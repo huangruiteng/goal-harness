@@ -51,6 +51,7 @@ def test_execution_contract_owns_deep_review_requirements() -> None:
         "domain_neutrality",
         "behavior_change_disclosure",
         "guidance_vs_obligation",
+        "durable_smoke_value",
     }
     assert requirements["symbol_map"]["item_count"] == {
         "minimum": 2,
@@ -128,6 +129,34 @@ def test_docs_plan_does_not_invent_code_symbols() -> None:
     )
     assert "### 关键内容讲解" in concrete["agent_instruction"]
     assert template["review_order"] == ["docs/design.md"]
+
+
+def test_smoke_only_plan_requires_durable_value_evidence() -> None:
+    item = _item(areas={"test_or_example": 1})
+    item["key_files"] = [
+        {"path": "examples/walkthrough-smoke.py", "additions": 500, "deletions": 0}
+    ]
+
+    plan = build_review_plan(item)
+
+    assert plan["applicability"]["code_change"] is False
+    assert plan["applicability"]["docs_only"] is False
+    assert plan["applicability"]["smoke_or_example_only"] is True
+    assert plan["applicability"]["durable_smoke_value_required"] is True
+    assert plan["applicability"]["duplication_scan_required"] is True
+    assert plan["applicability"]["batch_pattern_scan_required"] is True
+    assert "durable_smoke_value" in plan["required_evidence_ids"]
+    assert set(plan["result_template"]["evidence"]) == set(
+        plan["required_evidence_ids"]
+    )
+
+
+def test_runtime_plan_does_not_require_smoke_durability_gate() -> None:
+    plan = build_review_plan(_item(areas={"product_runtime": 1}))
+
+    assert plan["applicability"]["smoke_or_example_only"] is False
+    assert plan["applicability"]["durable_smoke_value_required"] is False
+    assert "durable_smoke_value" not in plan["required_evidence_ids"]
 
 
 def test_test_only_plan_skips_runtime_lenses() -> None:

@@ -18,6 +18,8 @@ CODE_AREAS = {
     "build_or_config",
 }
 
+EXAMPLE_OR_SMOKE_AREAS = {"test_or_example"}
+
 NEGATIVE_PATH_AREAS = CODE_AREAS | {"public_entry_or_policy"}
 
 
@@ -318,6 +320,29 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "leaves the enforcement consequence undocumented."
                 ),
             },
+            {
+                "evidence_id": "durable_smoke_value",
+                "required_when": "smoke_or_example_only",
+                "fields": [
+                    "shipped_behavior_or_boundary_guarded",
+                    "active_call_site_or_consumer",
+                    "existing_coverage_scan",
+                    "duplication_verdict",
+                    "same_author_batch_scan",
+                    "consolidation_or_thinning_recommendation",
+                    "real_product_or_repo_value_verdict",
+                ],
+                "rule": (
+                    "For example, walkthrough, or smoke-only PRs, prove the added "
+                    "artifact delivers real, durable value to the repository or "
+                    "product: it guards shipped behavior or a real boundary, "
+                    "improves maintainability, or reduces a concrete maintenance "
+                    "cost. Running successfully, being deterministic, and being "
+                    "public-safe are necessary but not sufficient. Name the "
+                    "existing-coverage scan and reject one-off scaffolding, "
+                    "same-shape batch farming, or duplication of existing smokes."
+                ),
+            },
         ],
         "finding_contract": {
             "findings_first": True,
@@ -362,6 +387,7 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
     }
     code_change = bool(areas & CODE_AREAS)
     docs_only = bool(areas) and areas <= {"public_docs", "public_entry_or_policy"}
+    smoke_or_example_only = bool(areas & EXAMPLE_OR_SMOKE_AREAS) and not code_change
     required_evidence = [
         "problem_context",
         "architecture_flow",
@@ -379,6 +405,8 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
     if areas & {"product_runtime", "public_entry_or_policy"}:
         required_evidence.append("domain_neutrality")
         required_evidence.append("guidance_vs_obligation")
+    if smoke_or_example_only:
+        required_evidence.append("durable_smoke_value")
     number = item.get("number")
     head_oid = str(item.get("head_oid") or "").strip()
     target_key = f"{number}@{head_oid}" if number and head_oid else None
@@ -406,6 +434,10 @@ def build_review_plan(item: Mapping[str, Any]) -> dict[str, Any]:
             "guidance_vs_obligation_required": bool(
                 areas & {"product_runtime", "public_entry_or_policy"}
             ),
+            "smoke_or_example_only": smoke_or_example_only,
+            "durable_smoke_value_required": smoke_or_example_only,
+            "duplication_scan_required": smoke_or_example_only,
+            "batch_pattern_scan_required": smoke_or_example_only,
         },
         "required_evidence_ids": required_evidence,
         "result_template": {

@@ -479,6 +479,7 @@ def main() -> int:
         "domain_neutrality",
         "behavior_change_disclosure",
         "guidance_vs_obligation",
+        "durable_smoke_value",
     }, requirements
     assert requirements["symbol_map"]["item_count"] == {"minimum": 2, "maximum": 5}
     assert "caller_evidence" in requirements["symbol_map"]["item_fields"]
@@ -502,6 +503,8 @@ def main() -> int:
         "rule"
     ]
     assert "must_attempt_work" in requirements["guidance_vs_obligation"]["rule"]
+    assert "real, durable value" in requirements["durable_smoke_value"]["rule"]
+    assert "same-shape batch farming" in requirements["durable_smoke_value"]["rule"]
     assert execution["completion_gate"]["metadata_only_verdict_allowed"] is False
     assert execution["completion_gate"]["stale_head_verdict_allowed"] is False
     assert execution["finding_contract"]["findings_first"] is True
