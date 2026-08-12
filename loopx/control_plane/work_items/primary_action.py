@@ -290,9 +290,10 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
         return "produce the required outcome-floor evidence artifact or write the concrete blocker"
     if mode == "capability_bridge_repair":
         return (
-            "execute interaction_contract.agent_channel.next_task_action.instruction "
-            "with its real task-facing tool and exact target_ref when projected, not "
-            "as CLI text and without another workspace/state preflight; on success "
+            "execute interaction_contract.agent_channel.next_task_action.operation "
+            "once with its real task-facing tool and exact target_ref when projected; "
+            "preflight_allowed is false, and the instruction is context rather than "
+            "CLI text; on success "
             "execute cli_channel."
             "next_cli_actions[0] in the same turn and continue only when quota allows"
         )

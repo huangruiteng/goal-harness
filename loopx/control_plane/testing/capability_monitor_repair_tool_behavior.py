@@ -337,7 +337,7 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         and contract["must_attempt_work"] is True
         and contract["delivery_allowed"] is False
         and contract["quiet_noop_allowed"] is False
-        and "next_task_action.instruction"
+        and "next_task_action.operation"
         in str((interaction.get("agent_channel") or {}).get("primary_action") or "")
         and capability_gate.get("action") == "repair_bridge"
         and capability_gate.get("decision_owner") == "agent"
@@ -348,8 +348,12 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         and "fixture/private-source.json" in str(target.get("instruction") or "")
         and next_task_action.get("kind") == "capability_verification"
         and next_task_action.get("todo_id") == target.get("todo_id")
+        and next_task_action.get("operation") == "read_private_source"
         and next_task_action.get("instruction") == target.get("instruction")
         and next_task_action.get("target_ref") == "fixture/private-source.json"
+        and next_task_action.get("preflight_allowed") is False
+        and next_task_action.get("advancement_checkpoint") is False
+        and next_task_action.get("settles_turn") is False
         and next_task_action.get("continuation_cli_action_index") == 0
         and len(reentry_actions) == 1
         and all("todo add" not in action for action in next_cli_actions)
@@ -489,10 +493,11 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                     "project-relative task paths are directly addressable. "
                     "When real quota projects an agent-owned capability bridge repair, "
                     "verify it "
-                    "by executing agent_channel.next_task_action.instruction with the "
-                    "appropriate task-facing tool against its exact target_ref; do not "
-                    "run that instruction as CLI text, probe target existence, or "
-                    "inspect state/workspace again. After success, run "
+                    "by executing agent_channel.next_task_action.operation once with "
+                    "the appropriate task-facing tool against its exact target_ref. "
+                    "This exec-only qualification maps read_private_source to the "
+                    "single command `cat <target_ref>`. Do not probe target existence "
+                    "or inspect state/workspace again. After success, run "
                     "cli_channel.next_cli_actions[0] in this same heartbeat. "
                     "Do not create a repair Todo, wait on, poll, or rewrite a monitor "
                     "fallback. Stop when quota makes the blocked Todo runnable."

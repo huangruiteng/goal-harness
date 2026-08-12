@@ -1160,7 +1160,11 @@ def _build_interaction_agent_channel(
             "capability": candidate["capability"],
             "todo_id": target["todo_id"],
             "action_kind": target["action_kind"],
+            "operation": target["action_kind"],
             "instruction": target["instruction"],
+            "preflight_allowed": False,
+            "advancement_checkpoint": False,
+            "settles_turn": False,
             "continuation_cli_action_index": 0,
         }
         if target.get("target_ref"):

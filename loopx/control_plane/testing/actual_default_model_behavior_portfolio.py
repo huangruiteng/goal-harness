@@ -933,7 +933,7 @@ def _scenario_contract(
             raise ValueError(
                 "capability bridge repair must name the missing capability"
             )
-        if "next_task_action.instruction" not in str(action.get("primary_action")):
+        if "next_task_action.operation" not in str(action.get("primary_action")):
             raise ValueError(
                 "primary action must direct the agent to verify the bridge inline"
             )

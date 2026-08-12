@@ -74,9 +74,10 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
 
     reentry = contract["cli_channel"]["runtime_capability_reentry"]
     assert contract["agent_channel"]["primary_action"] == (
-        "execute interaction_contract.agent_channel.next_task_action.instruction "
-        "with its real task-facing tool and exact target_ref when projected, not "
-        "as CLI text and without another workspace/state preflight; on success "
+        "execute interaction_contract.agent_channel.next_task_action.operation "
+        "once with its real task-facing tool and exact target_ref when projected; "
+        "preflight_allowed is false, and the instruction is context rather than "
+        "CLI text; on success "
         "execute cli_channel."
         "next_cli_actions[0] in the same turn and continue only when quota allows"
     )
@@ -85,8 +86,12 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
         "capability": "network",
         "todo_id": "todo_blocked",
         "action_kind": "inspect_target",
+        "operation": "inspect_target",
         "instruction": "[P0] Inspect fixture/target.json.",
         "target_ref": "fixture/target.json",
+        "preflight_allowed": False,
+        "advancement_checkpoint": False,
+        "settles_turn": False,
         "continuation_cli_action_index": 0,
     }
     assert reentry["schema_version"] == "runtime_capability_reentry_v0"
