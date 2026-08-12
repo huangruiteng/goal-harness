@@ -331,6 +331,7 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "same_author_batch_scan",
                     "consolidation_or_thinning_recommendation",
                     "real_product_or_repo_value_verdict",
+                    "repeat_offender_escalation",
                 ],
                 "rule": (
                     "For example, walkthrough, or smoke-only PRs, prove the added "
@@ -341,6 +342,10 @@ def build_review_execution_contract() -> dict[str, Any]:
                     "public-safe are necessary but not sufficient. Name the "
                     "existing-coverage scan and reject one-off scaffolding, "
                     "same-shape batch farming, or duplication of existing smokes."
+                    " Repeated same-author violations after a REQUEST_CHANGES "
+                    "warning escalate to a contribution-restriction "
+                    "recommendation: the owner blocks that account from further "
+                    "PR submissions. The warning must name this consequence."
                 ),
             },
         ],

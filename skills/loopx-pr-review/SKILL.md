@@ -144,16 +144,18 @@ necessary but not enough.
 
 1. Name the shipped behavior, boundary, or maintenance cost this artifact
    guards. "Demonstrates something that already works" is not durable value.
-2. Scan existing coverage: `rg -l '<behavior|module>' examples tests` and
-   compare shapes with shipped smokes, walkthroughs, and focused tests.
-3. Scan the same-author batch: `gh pr list --repo <owner>/<repo> --state open
-   --author <author> --json number,title,createdAt` and `gh search prs`.
-   Flag same-shape batches opened within minutes as PR farming.
-4. Apply the repo smoke policy: thin + durable, guard shipped behavior or a
+2. Scan existing coverage (`rg -l '<behavior|module>' examples tests`) and the
+   same-author batch (`gh pr list ... --author <author>` / `gh search prs`);
+   flag same-shape batches opened within minutes as PR farming.
+3. Apply the repo smoke policy: thin + durable, guard shipped behavior or a
    real boundary, compress rather than append, consolidate same-shape
    walkthroughs into one PR or focused tests.
-5. Verdict: `REQUEST_CHANGES` for duplicative, oversized, or value-less
+4. Verdict: `REQUEST_CHANGES` for duplicative, oversized, or value-less
    scaffolding; name the consolidation or thinning repair in the body.
+5. Repeat offenders: after a REQUEST_CHANGES warning, further low-value
+   same-shape PRs from the same author escalate to a contribution-restriction
+   recommendation (owner blocks the account from further PR submissions); the
+   warning must name this consequence.
 
 ## Autonomous Queue
 
