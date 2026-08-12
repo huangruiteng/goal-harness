@@ -551,15 +551,17 @@ Monitor cadence or due horizon
 
 1. 增加第二个真实 interpreter，例如 `interpret_turn_result_packet` 或 `interpret_status_packet`，并用聚焦测试证明 `EffectTurn` 对该 family 也无损。
 2. 把 packet interpretation 保持为 read-model seam。只有当两个执行路径需要相同 plan/receipt 语义时，才抽取共享 runtime interpreter 或 executor protocol。暂不增加 registry 或通用组合框架。
-3. 为 `EffectNext` 增加 `execution_mode`，用聚焦测试文档化 `serial` / `parallel` / `interleaved` 语义。
-4. 当一个 owner 能执行并结算多个步骤时，引入 data-encoded ordered effect program shape 和真实 executor seam。在选中第一个 slice 前，qualify turn closeout、guided bootstrap 和 quota-to-host scheduling；现有 ordered list 本身不建立可执行 authority boundary。
-5. 在每一个 interpreter 中保持 failure、cancellation、permission 和 budget 语义结构化。不引入 catch-all wrapper。
+3. 把 replan evidence-log read receipt 视为第一个真实的 read-and-ACK 场景，而不是引入通用 executor 的充分依据。在第二个 runtime caller 需要相同的 effect-spec identity、freshness 和 durable receipt 语义之前，receipt 继续归现有 CLI/event-ledger 边界所有；quota/status read ACK 是优先候选。届时只抽取最小共享 read-observation receipt contract，并迁移两个 caller；replan policy 和 host ACK 仍留在 settlement 之外。
+4. 为 `EffectNext` 增加 `execution_mode`，用聚焦测试文档化 `serial` / `parallel` / `interleaved` 语义。
+5. 当一个 owner 能执行并结算多个步骤时，引入 data-encoded ordered effect program shape 和真实 executor seam。在选中第一个 slice 前，qualify turn closeout、guided bootstrap 和 quota-to-host scheduling；现有 ordered list 本身不建立可执行 authority boundary。
+6. 在每一个 interpreter 中保持 failure、cancellation、permission 和 budget 语义结构化。不引入 catch-all wrapper。
 
 验收标准：
 
 - 至少两个 packet family 产生 `EffectTurn`。
 - Runtime code（不只是 tests）消费共享 shape。
 - `next_effect` 能用显式 execution mode 表达有序 effect program。
+- 共享 read-observation receipt contract 至少有两个 runtime caller；只有一条 read-and-ACK 路径时继续由领域 owner 持有。
 - 在出现第二个 runtime caller 之前，不增加通用 `Effect` monad、registry 或 middleware framework。
 
 ## 测试策略

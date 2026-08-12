@@ -176,11 +176,52 @@ The agent should then write back one of:
 - a no-follow-up rationale when the ledger proves the lane is intentionally
   closed.
 
-LoopX cannot infer from an acknowledgement alone that a shell read happened.
-Accordingly, the evidence-log read is not a second settlement mechanism: the
-obligation clears only through a valid bounded repair delta, while the
-prompt-visible novelty policy prevents the preflight command from being buried
-as an unused packet field.
+Every successful `loopx evidence-log` execution now appends an
+`evidence_log_read` rollout event and returns an
+`evidence_log_read_receipt_v0`. The receipt carries the goal id, agent id,
+bounded read window, canonical public-safe command, opaque required-read id,
+and recorded timestamp. Receipt events are excluded from an unfiltered ledger
+view so repeated reads do not recursively inflate the evidence chronology;
+they remain available through the receipt projection and an explicit
+`--event-kind evidence_log_read` filter.
+
+Replan ACK validation compares that receipt with the current obligation. A
+receipt for another goal, agent, or required-read id does not match. When the
+trigger has a timestamp, the receipt must be at or after that trigger and no
+later than the ACK. The opaque required-read id binds obligations without a
+source timestamp and changes when their trigger payload changes, so a later
+obligation instance cannot silently reuse an earlier instance's receipt.
+
+The default enforcement is `soft`: a valid repair delta may still close the
+obligation, but quota projects `required_read_not_executed` through
+`replan_ack_feedback`. A goal can opt into rejection:
+
+```json
+{
+  "control_plane": {
+    "replan_required_reads": {
+      "enforcement": "hard"
+    }
+  }
+}
+```
+
+In `hard` mode the ACK cannot clear the obligation until a matching fresh
+receipt exists. The feedback includes the exact command and agent id needed to
+repair the ACK. Receipt enforcement validates the required preflight read; the
+repair delta remains the authoritative replan writeback.
+
+### Effect-program boundary
+
+This flow uses the accepted effect-program semantics without adding another
+settlement executor. The CLI call is the effect request; `evidence-log`
+interprets the bounded read and returns the durable receipt as its observation;
+ACK validation consumes that observation as a pure policy decision. It does not
+use the typed settlement algebra because there is no shared multi-step write
+owner, the read is intentionally repeatable rather than at-most-once, and ACK
+validation must not replay the read. A future adapter should adopt the typed
+algebra only if it introduces a stable effect identity and a receipt-backed,
+replayable sequence of external writes that removes duplicate settlement truth.
 
 The live behavior qualification tests that causal handoff through an actual
 function-tool conversation rather than a testing-only output field. A Doubao
@@ -211,13 +252,13 @@ say that only a compact pointer or count was recorded.
 
 ## Current Implementation Status
 
-The read-only CLI, rollout-event/run-history merge, bounded other-agent
-frontier, policy-owned quota/review-packet required reads, and public boundary
-smokes are implemented. Todo and material projections remain separate current-
-state surfaces; they are not copied into this chronological ledger. Replan
-novelty selection is owned by `replan_novelty_policy`, while durable acceptance
-is owned by the repair-delta control path rather than expanded inside the ledger
-builder.
+The CLI, rollout-event/run-history merge, bounded other-agent frontier,
+policy-owned quota/review-packet required reads, durable read receipts, and
+soft/hard ACK validation are implemented. Todo and material projections remain
+separate current-state surfaces; they are not copied into this chronological
+ledger. Replan novelty selection is owned by `replan_novelty_policy`; receipt
+validation enforces its preflight read, while the repair-delta control path
+continues to own writeback acceptance.
 
 ## Acceptance
 

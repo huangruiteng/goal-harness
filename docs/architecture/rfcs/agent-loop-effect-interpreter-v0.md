@@ -791,14 +791,21 @@ Steps:
    interpreter or executor protocol only when two execution paths need the
    same plan/receipt semantics. Do not add a registry or generic composition
    framework yet.
-3. Add `execution_mode` to `EffectNext` and document
+3. Treat the replan evidence-log read receipt as the first concrete
+   read-and-ACK case, not as sufficient evidence for a generic executor. Keep
+   its durable receipt at the existing CLI/event-ledger boundary until a
+   second runtime caller needs the same effect-spec identity, freshness, and
+   durable receipt semantics. A quota/status read ACK is the leading candidate.
+   At that point, extract the smallest shared read-observation receipt contract
+   and migrate both callers; keep replan policy and host ACK outside settlement.
+4. Add `execution_mode` to `EffectNext` and document
    `serial` / `parallel` / `interleaved` semantics with focused tests.
-4. Introduce a data-encoded ordered effect program shape and a real executor
+5. Introduce a data-encoded ordered effect program shape and a real executor
    seam when one owner can execute and settle multiple steps. Qualify turn
    closeout, guided bootstrap, and quota-to-host scheduling before selecting
    the first slice; an existing ordered list does not establish one executable
    authority boundary.
-5. Keep failure, cancellation, permission, and budget semantics structured
+6. Keep failure, cancellation, permission, and budget semantics structured
    across every interpreter. No catch-all wrapper.
 
 Acceptance criteria:
@@ -807,6 +814,8 @@ Acceptance criteria:
 - Runtime code, not only tests, consumes the shared shape.
 - `next_effect` can express an ordered effect program with an explicit
   execution mode.
+- A shared read-observation receipt contract has at least two runtime callers;
+  one read-and-ACK path alone remains domain-owned.
 - No generic `Effect` monad, registry, or middleware framework is added
   without a second runtime caller.
 
