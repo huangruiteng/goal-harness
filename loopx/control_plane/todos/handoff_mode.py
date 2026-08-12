@@ -22,6 +22,14 @@ file is the artifact that travels across endpoints; lease JSON and registry
 are host-local. Pre-NoKV the file syncs last-writer-wins, so two hosts can
 briefly disagree about the mode; that window is documented, not engineered
 around here.
+
+The v0 transition scan is materialized-state only: it reads open claims from
+the locked ``ACTIVE_GOAL_STATE.md`` text plus time-active local lease files. It
+does not merge the event projection, so a claim that exists only in the event
+log can be missed. A successful switch is therefore not a proof that every
+projection is quiescent. The selected mode's typed per-write gate remains the
+safety boundary for later governed ownership and completion mutations,
+including event-projected completion.
 """
 
 from __future__ import annotations
@@ -49,7 +57,9 @@ DELEGATED_AUTHORITY_MODE = "delegated_orchestration_override"
 class HandoffModeError(ValueError):
     """Typed handoff-mode failure; mirrors TaskLeaseError's code/payload shape."""
 
-    def __init__(self, message: str, *, code: str, payload: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, message: str, *, code: str, payload: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.payload = payload or {}
@@ -216,6 +226,14 @@ def _quiescence_offenders(
     goal_id: str,
     state_text: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return blockers visible to the v0 materialized-state scan.
+
+    Event-projection overlays are intentionally outside this pre-NoKV scan.
+    Callers must not interpret an empty result as an authority-wide safety
+    guarantee; later governed writes still cross the selected handoff-mode
+    gate.
+    """
+
     from ..work_items.task_lease import (
         lease_is_active,
         read_lease,
@@ -269,11 +287,14 @@ def set_goal_handoff_mode(
 ) -> dict[str, Any]:
     """Set the goal handoff mode; requires a quiescent goal for transitions.
 
-    Quiescence means no open todo carries a claimed_by owner and no
-    time-active lease file exists under the goal. Transitions on a
-    non-quiescent goal refuse with a typed offender list; there is no force
-    override in v0. Hand-editing the front-matter bypasses this check and is
-    out of contract.
+    In v0, quiescence means no open todo materialized in the locked active-state
+    Markdown carries a claimed_by owner and no time-active lease file exists
+    under the goal. The scan does not overlay event-only todos, so success is a
+    pre-NoKV migration check rather than an authority-wide safety guarantee;
+    every later governed ownership or completion write still crosses the
+    selected mode's typed gate. Visible non-quiescence refuses with a typed
+    offender list and there is no force override. Hand-editing the front-matter
+    bypasses this check and is out of contract.
     """
 
     from ...file_lock import exclusive_file_lock
@@ -352,11 +373,16 @@ def set_goal_handoff_mode(
             lines = original.splitlines()
             open_index, close_index = _frontmatter_bounds(lines)
             for index in range(open_index, close_index):
-                if lines[index].split(":", 1)[0].strip() == HANDOFF_MODE_FRONTMATTER_KEY:
+                if (
+                    lines[index].split(":", 1)[0].strip()
+                    == HANDOFF_MODE_FRONTMATTER_KEY
+                ):
                     lines[index] = f"{HANDOFF_MODE_FRONTMATTER_KEY}: {requested}"
                     break
             else:
-                lines.insert(close_index, f"{HANDOFF_MODE_FRONTMATTER_KEY}: {requested}")
+                lines.insert(
+                    close_index, f"{HANDOFF_MODE_FRONTMATTER_KEY}: {requested}"
+                )
             new_text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
             resolved_state_file.write_text(new_text, encoding="utf-8")
     payload["changed"] = True

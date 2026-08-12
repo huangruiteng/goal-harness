@@ -30,6 +30,7 @@ from loopx.control_plane.todos.handoff_mode import (
     HANDOFF_MODE_SOFT_CLAIM,
     HandoffModeError,
     goal_handoff_mode,
+    set_goal_handoff_mode,
 )
 from loopx.control_plane.work_items import task_lease
 from loopx.control_plane.work_items.task_lease import (
@@ -44,8 +45,18 @@ from loopx.control_plane.work_items.task_lease import (
     transfer_task_lease,
     write_lease,
 )
+from loopx.event_sourced_state import (
+    TODO_ADDED,
+    AppendOnlyStateEventStore,
+    make_state_event,
+)
 from loopx.status import parse_active_state_todos
-from loopx.todos import add_goal_todo, complete_goal_todo, update_goal_todo
+from loopx.todos import (
+    add_goal_todo,
+    complete_goal_todo,
+    list_goal_todos,
+    update_goal_todo,
+)
 
 GOAL_ID = "handoff-mode-gate"
 AGENT_A = "agent-a"
@@ -132,9 +143,7 @@ def _add_todo(registry: Path, *, claimed_by: str | None = None) -> dict[str, Any
 def _agent_todo(state: Path, todo_id: str) -> dict[str, Any]:
     todos = parse_active_state_todos(state.read_text(encoding="utf-8"))
     return next(
-        item
-        for item in todos["agent_todos"]["items"]
-        if item["todo_id"] == todo_id
+        item for item in todos["agent_todos"]["items"] if item["todo_id"] == todo_id
     )
 
 
@@ -245,6 +254,86 @@ def test_invalid_goal_handoff_mode_runtime_read_fails_closed_without_mutation(
 
 def test_goal_handoff_mode_without_frontmatter_is_legacy() -> None:
     assert goal_handoff_mode("## Agent Todo\n") == HANDOFF_MODE_LEGACY
+
+
+def test_event_only_claim_is_not_a_v0_quiescence_offender_but_hard_gate_blocks_write(
+    tmp_path: Path,
+) -> None:
+    """The v0 switch scan is materialized-state only, not a safety proof.
+
+    An event-only claim is visible through the real todo projection but absent
+    from ACTIVE_GOAL_STATE.md, so the transition scan does not see it.  After
+    the switch, the normal event writeback path must still cross the hard-lease
+    completion gate and leave both persisted surfaces unchanged on rejection.
+    """
+
+    registry, state = _write_workspace(tmp_path)
+    event_log = state.with_name("events.jsonl")
+    todo_id = "todo_event_only_claimed"
+    store = AppendOnlyStateEventStore(event_log)
+    store.append(
+        make_state_event(
+            event_id="evt-event-only-claimed",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": todo_id},
+            payload={
+                "role": "agent",
+                "title": "Complete the event-only claimed task.",
+                "task_class": "advancement_task",
+                "claimed_by": AGENT_A,
+            },
+            recorded_at="2026-08-01T00:01:00+00:00",
+            producer="handoff-mode-event-only-characterization",
+        )
+    )
+
+    assert todo_id not in state.read_text(encoding="utf-8")
+    projected = list_goal_todos(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+    )
+    assert projected["source"] == "event_projection_with_markdown_overlay"
+    assert todo_id in projected["projection_overlay"]["event_only_todo_ids"]
+    assert projected["todo"]["status"] == "open"
+    assert projected["todo"]["claimed_by"] == AGENT_A
+
+    event_log_before_switch = event_log.read_text(encoding="utf-8")
+    switched = set_goal_handoff_mode(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        mode=HANDOFF_MODE_HARD_LEASE,
+    )
+    assert switched["changed"] is True
+    assert switched["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert switched["previous_mode"] == HANDOFF_MODE_LEGACY
+    assert event_log.read_text(encoding="utf-8") == event_log_before_switch
+
+    state_after_switch = state.read_text(encoding="utf-8")
+    event_log_after_switch = event_log.read_text(encoding="utf-8")
+    with pytest.raises(TaskLeaseError) as error:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo_id,
+            claimed_by=AGENT_A,
+            agent_id=AGENT_A,
+            evidence="event-only completion still needs the post-switch lease gate",
+            no_followup=True,
+        )
+
+    assert error.value.code == "handoff_mode_requires_lease"
+    assert error.value.payload["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert state.read_text(encoding="utf-8") == state_after_switch
+    assert event_log.read_text(encoding="utf-8") == event_log_after_switch
+    projected_after = list_goal_todos(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+    )
+    assert projected_after["todo"]["status"] == "open"
+    assert projected_after["todo"]["claimed_by"] == AGENT_A
 
 
 # ---------------------------------------------------------------------------
