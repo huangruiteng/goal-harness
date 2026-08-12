@@ -112,6 +112,49 @@ def _run_gh_json(args: list[str], *, cwd: Path | None = None) -> Any:
     return json.loads(proc.stdout or "null")
 
 
+def _attach_status_check_rollup(
+    row: dict[str, Any],
+    *,
+    repository: str | None,
+    cwd: Path | None = None,
+) -> None:
+    """Attach check-run status for one exact PR head.
+
+    ``gh pr list`` does not support ``statusCheckRollup`` in its ``--json``
+    field set, so the queue scan fetches check runs by exact ``headRefOid``
+    through the commits check-runs API instead. A failed lookup leaves the
+    rollup absent; the risk hint then reports that no rollup was available.
+    """
+
+    head_oid = str(row.get("headRefOid") or "").strip()
+    if not head_oid or not repository:
+        return
+    try:
+        runs = _run_gh_json(
+            [
+                "api",
+                f"repos/{repository}/commits/{head_oid}/check-runs",
+                "--paginate",
+                "-q",
+                ".check_runs",
+            ],
+            cwd=cwd,
+        )
+    except Exception:
+        return
+    if not isinstance(runs, list):
+        return
+    row["statusCheckRollup"] = [
+        {
+            "name": str(item.get("name") or item.get("context") or ""),
+            "status": str(item.get("status") or ""),
+            "conclusion": str(item.get("conclusion") or ""),
+        }
+        for item in runs
+        if isinstance(item, dict)
+    ]
+
+
 def resolve_current_github_repository(*, cwd: Path | None = None) -> str | None:
     try:
         payload = _run_gh_json(["repo", "view", "--json", "nameWithOwner"], cwd=cwd)
@@ -193,6 +236,7 @@ def scan_github_pull_requests(
     since: str | None = None,
 ) -> dict[str, Any]:
     repo_args = ["--repo", repo] if repo else []
+    api_repository = repo or resolve_current_github_repository(cwd=cwd)
     normalized_state = normalize_pr_state_filter(state_filter)
     search_args: list[str] = []
     search_date = _github_search_date(since)
@@ -219,7 +263,6 @@ def scan_github_pull_requests(
         "changedFiles",
         "additions",
         "deletions",
-        "statusCheckRollup",
     ]
     fetch_limit = max(1, limit)
     if since:
@@ -268,6 +311,11 @@ def scan_github_pull_requests(
                 continue
             if number:
                 seen_numbers.add(number)
+            _attach_status_check_rollup(
+                row,
+                repository=api_repository,
+                cwd=cwd,
+            )
             detailed.append(row)
         state_scans.append(
             {
