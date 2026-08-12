@@ -290,9 +290,10 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
         return "produce the required outcome-floor evidence artifact or write the concrete blocker"
     if mode == "capability_bridge_repair":
         return (
-            "perform one real task-facing callsite check for the blocked Todo; on "
-            "success rerun quota with the observed capability in this same turn and "
-            "continue only when quota allows"
+            "execute runtime_capability_reentry.candidates[0].verification_target."
+            "instruction at the blocked Todo's real task-facing callsite; on success "
+            "rerun quota with the observed capability in this same turn and continue "
+            "only when quota allows"
         )
     if mode == "agent_workspace_repair":
         return "create or switch to an independent worktree/branch, then rerun quota guard before file edits"

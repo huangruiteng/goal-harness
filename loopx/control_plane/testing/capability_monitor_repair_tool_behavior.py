@@ -222,6 +222,12 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
     next_cli_actions = [str(item) for item in cli_channel.get("next_cli_actions") or []]
     reentry = dict(cli_channel.get("runtime_capability_reentry") or {})
     verification = dict(reentry.get("verification_contract") or {})
+    candidates = [
+        item for item in reentry.get("candidates") or [] if isinstance(item, Mapping)
+    ]
+    target = (
+        dict(candidates[0].get("verification_target") or {}) if candidates else {}
+    )
     reentry_actions = [
         item for item in next_cli_actions if _is_capability_reentry_command(item)
     ]
@@ -248,6 +254,8 @@ def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
         and CAPABILITY_REPAIR_TARGET_CAPABILITY in contract["repair_missing"]
         and verification.get("advancement_checkpoint") is False
         and verification.get("settles_turn") is False
+        and target.get("todo_id") == CAPABILITY_REPAIR_BLOCKED_TODO_ID
+        and "fixture/private-source.json" in str(target.get("instruction") or "")
         and len(reentry_actions) == 1
         and all("todo add" not in action for action in next_cli_actions)
     ):

@@ -51,6 +51,14 @@ def _blocked_payload(*, missing: list[str]) -> dict:
                 }
                 for capability in missing
             ],
+            "blocked_candidates": [
+                {
+                    "todo_id": "todo_blocked",
+                    "action_kind": "inspect_target",
+                    "text": "[P0] Inspect fixture/target.json.",
+                    "required_capabilities": missing,
+                }
+            ],
             "runnable_candidates": [],
         },
     }
@@ -65,9 +73,10 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
 
     reentry = contract["cli_channel"]["runtime_capability_reentry"]
     assert contract["agent_channel"]["primary_action"] == (
-        "perform one real task-facing callsite check for the blocked Todo; on "
-        "success rerun quota with the observed capability in this same turn and "
-        "continue only when quota allows"
+        "execute runtime_capability_reentry.candidates[0].verification_target."
+        "instruction at the blocked Todo's real task-facing callsite; on success "
+        "rerun quota with the observed capability in this same turn and continue "
+        "only when quota allows"
     )
     assert reentry["schema_version"] == "runtime_capability_reentry_v0"
     assert reentry["state"] == "verification_required"
@@ -94,23 +103,16 @@ def test_runtime_capability_gap_returns_verified_reentry_packet() -> None:
     assert candidate["verification_required"] == (
         "successful_real_callsite_observation"
     )
-    assert candidate["cli_args"] == [
-        "loopx",
-        "--format",
-        "json",
-        "quota",
-        "should-run",
-        "--goal-id",
-        GOAL_ID,
-        "--agent-id",
-        AGENT_ID,
-        "--available-capability",
-        "shell",
-        "--available-capability",
-        "network",
-        "--runtime-profile",
-        "ark_managed_agent_goal",
-    ]
+    assert candidate["verification_target"] == {
+        "todo_id": "todo_blocked",
+        "action_kind": "inspect_target",
+        "instruction": "[P0] Inspect fixture/target.json.",
+    }
+    assert candidate["command"] == (
+        "loopx --format json quota should-run --goal-id "
+        f"{GOAL_ID} --agent-id {AGENT_ID} --available-capability shell "
+        "--available-capability network --runtime-profile ark_managed_agent_goal"
+    )
     assert any(
         action.startswith("after real-callsite verification of network:")
         for action in contract["cli_channel"]["next_cli_actions"]

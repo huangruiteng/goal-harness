@@ -14,6 +14,44 @@ from ..scheduler.execution_context import (
 RUNTIME_CAPABILITY_REENTRY_SCHEMA_VERSION = "runtime_capability_reentry_v0"
 
 
+def _verification_target_for_capability(
+    capability_gate: Mapping[str, Any],
+    capability: str,
+) -> dict[str, Any] | None:
+    blocked_ids = {
+        str(todo_id)
+        for binding in capability_gate.get("resolution_bindings") or []
+        if isinstance(binding, Mapping)
+        and binding.get("owner") == "agent"
+        and binding.get("capability") == capability
+        for todo_id in (
+            binding.get("blocked_todo_ids")
+            or [binding.get("primary_blocked_todo_id")]
+        )
+        if str(todo_id or "").strip()
+    }
+    for candidate in capability_gate.get("blocked_candidates") or []:
+        if not isinstance(candidate, Mapping):
+            continue
+        todo_id = str(candidate.get("todo_id") or "").strip()
+        if todo_id not in blocked_ids:
+            continue
+        required = runtime_capabilities_for_cli_projection(
+            candidate.get("required_capabilities")
+        )
+        if capability not in required:
+            continue
+        instruction = str(candidate.get("text") or "").strip()
+        if not instruction:
+            continue
+        return {
+            "todo_id": todo_id,
+            "action_kind": str(candidate.get("action_kind") or "unspecified"),
+            "instruction": instruction,
+        }
+    return None
+
+
 def build_runtime_capability_reentry_packet(
     payload: Mapping[str, Any],
     *,
@@ -74,6 +112,12 @@ def build_runtime_capability_reentry_packet(
 
     reentry_candidates = []
     for capability in candidates:
+        verification_target = _verification_target_for_capability(
+            capability_gate,
+            capability,
+        )
+        if verification_target is None:
+            continue
         cli_args = [
             *base_args,
             "--available-capability",
@@ -84,10 +128,12 @@ def build_runtime_capability_reentry_packet(
             {
                 "capability": capability,
                 "verification_required": "successful_real_callsite_observation",
-                "cli_args": cli_args,
+                "verification_target": verification_target,
                 "command": shlex.join(cli_args),
             }
         )
+    if not reentry_candidates:
+        return None
     return {
         "schema_version": RUNTIME_CAPABILITY_REENTRY_SCHEMA_VERSION,
         "state": "verification_required",
