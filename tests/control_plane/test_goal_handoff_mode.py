@@ -598,6 +598,98 @@ def test_hard_lease_holder_claim_succeeds(tmp_path: Path) -> None:
     assert _agent_todo(state, todo["todo_id"])["claimed_by"] == AGENT_A
 
 
+def test_hard_lease_holder_can_handoff_claim_and_peer_can_finish(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    acquired_by_a = _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+    )
+
+    handed_off = update_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        claimed_by=AGENT_B,
+        agent_id=AGENT_A,
+    )
+
+    assert handed_off["ok"] is True
+    assert handed_off["mutation_authority"]["actor_agent_id"] == AGENT_A
+    assert handed_off["task_lease_holder_gate"]["owner"] == AGENT_A
+    assert _agent_todo(state, todo["todo_id"])["claimed_by"] == AGENT_B
+    lease_held_by_a = json.loads(lease_file.read_text(encoding="utf-8"))
+    assert lease_held_by_a["owner"] == AGENT_A
+    assert lease_held_by_a["status"] == "active"
+
+    state_during_handoff = state.read_text(encoding="utf-8")
+    with pytest.raises(TaskLeaseError) as claim_error:
+        update_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            agent_id=AGENT_B,
+            clear_claim=True,
+        )
+    assert claim_error.value.code == "handoff_mode_requires_lease"
+    assert claim_error.value.payload["actor_agent_id"] == AGENT_B
+    assert claim_error.value.payload["lease_owner"] == AGENT_A
+    assert state.read_text(encoding="utf-8") == state_during_handoff
+    assert json.loads(lease_file.read_text(encoding="utf-8")) == lease_held_by_a
+
+    with pytest.raises(TaskLeaseError) as completion_error:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            agent_id=AGENT_B,
+            evidence="peer cannot complete before acquiring the hard lease",
+        )
+    assert completion_error.value.code == "handoff_mode_lease_claim_divergence"
+    assert completion_error.value.payload["lease_owner"] == AGENT_A
+    assert state.read_text(encoding="utf-8") == state_during_handoff
+    assert json.loads(lease_file.read_text(encoding="utf-8")) == lease_held_by_a
+
+    released_by_a = release_task_lease(
+        registry_path=registry,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        owner=AGENT_A,
+        idempotency_key="turn-lease-1",
+        expected_version=acquired_by_a["lease"]["version"],
+    )
+    assert released_by_a["released"] is True
+    assert not lease_file.exists()
+
+    acquired_by_b = _acquire(
+        registry,
+        tmp_path,
+        todo["todo_id"],
+        owner=AGENT_B,
+        key="turn-lease-2",
+    )
+    completed_by_b = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_B,
+        task_lease_idempotency_key="turn-lease-2",
+        task_lease_expected_version=acquired_by_b["lease"]["version"],
+        evidence="peer completed after acquiring the hard lease",
+    )
+
+    assert completed_by_b["ok"] is True
+    assert completed_by_b["task_lease_fence"]["execution_instance_verified"] is True
+    assert completed_by_b["task_lease_fence"]["released"] is True
+    assert _agent_todo(state, todo["todo_id"])["status"] == "done"
+    assert not lease_file.exists()
+
+
 def test_hard_lease_expired_lease_does_not_authorize_claim(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
