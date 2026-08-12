@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from collections.abc import Mapping
 from hashlib import sha256
@@ -210,6 +211,29 @@ def _is_monitor_fallback_command(command: str) -> bool:
         and CAPABILITY_REPAIR_MONITOR_TODO_ID in tokens
         for index in range(len(tokens) - 1)
     )
+
+
+def _redacted_command_shape(
+    command: str,
+    *,
+    fixture: _SelectedTodoToolFixture,
+) -> dict[str, Any]:
+    """Describe a rejected live action without retaining provider-selected text."""
+
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = []
+    executable = Path(tokens[0]).name if tokens else ""
+    return {
+        "parseable": bool(tokens),
+        "token_count_bucket": min(len(tokens), 8),
+        "read_executable": executable in {"cat", "head", "sed", "jq", "python", "python3"},
+        "shell_wrapper": executable in {"bash", "sh", "zsh"},
+        "mentions_fixture_dir": "fixture/" in command,
+        "mentions_selected_target": str(fixture.selected_target.name) in command,
+        "multiline": "\n" in command,
+    }
 
 
 def _capability_repair_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
@@ -475,13 +499,17 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                     "workspace_read",
                 }:
                     kind = "unexpected_command"
-            steps.append(
-                {
-                    "ordinal": len(steps) + 1,
-                    "kind": kind,
-                    "command_digest": digest_text(tool_call.command),
-                }
-            )
+            step = {
+                "ordinal": len(steps) + 1,
+                "kind": kind,
+                "command_digest": digest_text(tool_call.command),
+            }
+            if kind == "unexpected_command":
+                step["redacted_command_shape"] = _redacted_command_shape(
+                    tool_call.command,
+                    fixture=fixture,
+                )
+            steps.append(step)
             if kind == "capability_callsite":
                 try:
                     tool_output = _execute_capability_callsite(
