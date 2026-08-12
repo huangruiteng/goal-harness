@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -63,6 +65,18 @@ def assert_contains(text: str, needle: str, label: str) -> None:
         raise AssertionError(f"{label} missing {needle!r}")
 
 
+def read_slash_catalog() -> dict:
+    completed = subprocess.run(
+        [sys.executable, "-m", "loopx.cli", "--format", "json", "slash-commands"],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return json.loads(completed.stdout)
+
+
 def main() -> int:
     contract = read(CONTRACT_PATH)
     index = read(INDEX_PATH)
@@ -109,6 +123,16 @@ def main() -> int:
     assert commands["/loopx-global-summary"]["protocol"] == "global_manager_command_v0", commands
     assert commands["/loopx-global-summary"]["legacy_aliases"] == ["/loop-global-summary"], commands
     assert registry["unknown_command_policy"] == "fail_closed_with_slash_help", registry
+
+    slash_commands = {
+        item["command"]: item for item in read_slash_catalog()["commands"]
+    }
+    global_risks = slash_commands["/loopx-global-risks"]
+    assert global_risks["implementation_status"] == "available", global_risks
+    assert global_risks["cli_reference"] == "loopx global-risks", global_risks
+    assert global_risks["legacy_aliases"] == ["/loop-global-risks"], global_risks
+    assert global_risks["mutation_policy"] == "read_only", global_risks
+    assert "/loop-global-risks" not in slash_commands, slash_commands
 
     handoff = next(item for item in blocks if item.get("schema_version") == "codex_app_host_command_handoff_v0")
     assert handoff["canonical_command"] == "/loopx <goal text>", handoff

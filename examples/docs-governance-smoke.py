@@ -165,8 +165,9 @@ def assert_effect_interpreter_docs_are_canonical() -> None:
 def assert_contributor_task_board_is_current() -> None:
     tasks = compact(read("CONTRIBUTOR_TASKS.md"))
     for required in (
-        "/loopx-global-todos` (all implemented)",
-        "Implement `/loopx-global-risks` next",
+        "The four canonical global manager CLI commands are shipped",
+        "`/loop-goal-summary` remains host-only and outside this contributor slice",
+        "GH-C61 | cli | Done",
         "A shared typed Effect Program now drives quota, Turn, and task-lease settlement",
         "The scheduler remains outside settlement",
         "do not force pure decision logic into Kleisli form",
@@ -175,6 +176,9 @@ def assert_contributor_task_board_is_current() -> None:
         assert required in tasks, required
     for stale in (
         "Implement `/loopx-global-todos` or `/loopx-global-risks` next",
+        "Implement `/loopx-global-risks` next",
+        "Implement the remaining canonical `/loopx-global-risks` command",
+        "global risks and goal summary stay host-only",
         "Add one negative fixture proving fail-closed legacy upgrade",
         "| GH-C82 |",
     ):

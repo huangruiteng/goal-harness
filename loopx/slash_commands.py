@@ -116,9 +116,8 @@ def build_slash_command_catalog(
             scope="global",
             intent="Show stale runs, boundary risks, failing checks, and rollback candidates.",
             mutation_policy="read_only",
-            cli_reference=f"{cli_bin} slash-commands; use {cli_bin} global-summary for the current compact global packet",
+            cli_reference=f"{cli_bin} global-risks",
             legacy_aliases=legacy_risks,
-            implementation_status="host_command_defined",
         ),
         _command(
             command="/loopx-pr-review",

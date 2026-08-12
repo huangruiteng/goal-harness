@@ -195,7 +195,9 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "argument_hint": "[optional focus]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                f"Run `{cli_bin} global-summary` first, then focus the answer on stale work, public/private boundary risks, failing checks, and rollback candidates.",
+                f"Run `{cli_bin} global-risks` first and summarize structured stale runs, "
+                "boundary warnings, failing checks, and whether a formally evidenced "
+                "rollback candidate source is available, without mutating state.",
                 "This command is read-only unless the user explicitly asks for a state update.",
             ],
         },

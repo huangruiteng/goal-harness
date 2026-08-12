@@ -4,6 +4,11 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from ..global_risks import (
+    build_global_risks,
+    build_global_risks_error,
+    render_global_risks_markdown,
+)
 from ..global_todos import (
     build_global_todos,
     build_global_todos_error,
@@ -112,6 +117,28 @@ def register_summary_all_command(
         limit_help="Maximum returned todo count.",
     )
 
+    risks_parser = subparsers.add_parser(
+        "global-risks",
+        help=(
+            "Read a public-safe current risk inbox across visible goals; "
+            "see `loopx slash-commands` for slash help."
+        ),
+    )
+    add_subcommand_format(risks_parser)
+    _add_current_manager_flags(
+        risks_parser,
+        agent_help="Registered agent id used to narrow risk projection.",
+        limit_help="Maximum returned risk count.",
+    )
+    risks_parser.add_argument(
+        "--time-range",
+        default="24h",
+        help=(
+            "Risk request window for protocol compatibility, e.g. 24h or 7d; "
+            "current risks remain visible."
+        ),
+    )
+
 
 def handle_summary_all_command(
     args: argparse.Namespace,
@@ -121,8 +148,27 @@ def handle_summary_all_command(
     output_format: FormatSelector,
     print_payload: PrintPayload,
 ) -> int | None:
-    if args.command not in {"global-summary", "global-gates", "global-todos"}:
+    if args.command not in {
+        "global-summary",
+        "global-gates",
+        "global-todos",
+        "global-risks",
+    }:
         return None
+    if args.command == "global-risks":
+        try:
+            payload = build_global_risks(
+                registry_path=registry_path,
+                runtime_root_override=runtime_root_arg,
+                scan_roots=_scan_roots(args),
+                agent_id=args.agent_id,
+                time_range=args.time_range,
+                limit=max(1, args.limit),
+            )
+        except Exception as exc:
+            payload = build_global_risks_error(exc, time_range=args.time_range)
+        print_payload(payload, output_format(args), render_global_risks_markdown)
+        return 0 if payload.get("ok") else 1
     if args.command == "global-gates":
         try:
             payload = build_global_gates(

@@ -10,7 +10,7 @@
 
 <a href="https://trendshift.io/repositories/102379?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-102379"><img src="https://trendshift.io/api/badge/repositories/102379" alt="huangruiteng/loopx 在 Trendshift 的趋势排名" width="220" height="48"></a>
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20early-orange.svg)](docs/product/release-readiness.md)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/huangruiteng/loopx?display_name=tag)](https://github.com/huangruiteng/loopx/releases/latest) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XmGgQyCFZd) [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Local first](https://img.shields.io/badge/control--plane-local--first-brightgreen.svg)](docs/public-private-boundary.md) [![Loop Agents](https://img.shields.io/badge/status-loop%20agents%20active-brightgreen.svg)](docs/product/release-readiness.md)
 
 [产品首页](https://huangruiteng.github.io/loopx/) · [文档](https://huangruiteng.github.io/loopx/docs/) · [开发者手册](https://huangruiteng.github.io/loopx/docs/book/) · [试用 LoopX](#试用-loopx) · [查看真实 Loop](#证据) · [理解工作原理](#为什么需要-loopx) · [用户手册](https://my.feishu.cn/wiki/CaL5wMk9ui17ngkWzeUcMlAYnZg) · [English](README.md)
 
@@ -472,8 +472,9 @@ LoopX 欢迎与其他开源项目协作，共建长程 Agent 生态。已确认�
 
 ## 用户群与反馈
 
-LoopX 还在早期，最需要真实长程 agent 项目里的反馈：控制面帮到了哪里、哪里太重，
-哪些 gate、handoff 或 scope 仍然不够清楚。
+LoopX 已在真实长程 agent 目标上持续运行，并处于活跃迭代期。最需要真实长程
+agent 项目里的反馈：控制面帮到了哪里、哪里太重，哪些 gate、handoff 或 scope
+仍然不够清楚。
 
 - 可复现 bug、安装问题、功能建议：请提
   [GitHub Issue](https://github.com/huangruiteng/loopx/issues)。
@@ -509,8 +510,8 @@ raw benchmark task/log/trajectory/verifier output、credentials、token、私有
 
 ## 当前状态
 
-`0.4.x` 已经是一套可用、但仍处于早期的长程 Agent 本地控制面。LoopX 不是完整
-agent platform，不是 agent runtime，也不是自治生产控制器。
+`0.4.x` 已经是一套可用的长程 Agent 本地控制面，正在进入更广泛的采用阶段。
+LoopX 不是完整 agent platform，不是 agent runtime，也不是自治生产控制器。
 
 目前 LoopX 已交付围绕 goal、typed todo / decision scope、平级 claim / lease、
 evidence / writeback、quota-aware scheduling 和跨轮 continuation 的 durable state
