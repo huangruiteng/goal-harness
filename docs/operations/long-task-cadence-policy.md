@@ -94,6 +94,19 @@ Elapsed wall time may become an optional future input, but it should not be the
 primary judge: a short validated fix can be valuable, and a long turn can still
 be stuck.
 
+`delivery_outcome` is a claim bounded by the same metadata, not an override.
+Planning, brief, dispatch, binding, checkpoint, setup, governance, protocol, and
+writeback action kinds remain `surface_only` even when a caller submits
+`outcome_progress`. A typed `advancement_task` with a non-surface action kind,
+a material batch scale, or compact benchmark/case/product evidence can support
+progress. An otherwise ambiguous progress claim is projected as `outcome_gap`.
+
+When a surface-only run requires follow-through, LoopX prefers an existing
+non-surface executable advancement Todo. If only preparation Todos remain, the
+work lane asks for one precise missing-product-work blocker and stops instead of
+creating another planning or binding layer. This is selection guidance, not a
+new artifact replay gate.
+
 ## Controller Use
 
 - `blocked` + `wait`: do not widen; show the concrete gate or blocker.

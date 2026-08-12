@@ -14,7 +14,9 @@ from .control_plane.work_items.delivery_batch_scale import (
 from .control_plane.work_items.delivery_outcome import (
     ACCOUNTABLE_DELIVERY_OUTCOMES,
     DELIVERY_OUTCOME_CHOICES as DELIVERY_OUTCOME_CHOICES,
+    evidence_bounded_delivery_outcome,
     require_delivery_outcome,
+    selected_todo_delivery_fields,
 )
 from .control_plane.agents.workspace_guard import capture_delivery_workspace
 from .control_plane.quota.settlement import (
@@ -528,6 +530,7 @@ def build_state_refresh_record(
     vision_checkpoint: dict[str, Any] | None = None,
     delivery_workspace: dict[str, Any] | None = None,
     settlement_identity: SettlementIdentity | None = None,
+    selected_todo_delivery: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     frontmatter = parse_frontmatter(state_text)
     next_action = extract_section_lines(state_text, "Next Action")
@@ -576,6 +579,8 @@ def build_state_refresh_record(
         record["settlement_identity"] = settlement_identity.as_dict()
         record["turn_instance_id"] = settlement_identity.turn_instance_id
         record["todo_id"] = settlement_identity.todo_id
+    if selected_todo_delivery:
+        record.update(selected_todo_delivery)
     if autonomous_replan_recorded:
         record["autonomous_replan_ack"] = {
             "schema_version": "autonomous_replan_ack_v0",
@@ -640,6 +645,9 @@ def _build_state_refresh_output_projections(
         "settlement_identity",
         "turn_instance_id",
         "todo_id",
+        "todo_task_class",
+        "todo_action_kind",
+        "todo_status",
     ):
         if field in record:
             index_record[field] = record[field]
@@ -1187,6 +1195,39 @@ def refresh_state_run(
                     ),
                 )
             )
+    selected_todo_delivery = selected_todo_delivery_fields(
+        parse_active_state_todos(state_text, item_limit=None),
+        todo_id=settlement_identity.todo_id if settlement_identity else None,
+    )
+    bounded_delivery_outcome = evidence_bounded_delivery_outcome(
+        {
+            "classification": classification,
+            "delivery_outcome": normalized_delivery_outcome,
+            "delivery_batch_scale": normalized_delivery_batch_scale,
+            **selected_todo_delivery,
+        },
+        normalized_delivery_outcome,
+    )
+    normalized_delivery_outcome = (
+        bounded_delivery_outcome.value if bounded_delivery_outcome else None
+    )
+    if (
+        settlement_identity
+        and normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
+    ):
+        raise ValueError(
+            "turn-scoped refresh-state cannot settle a planning/surface-only or "
+            "untyped delivery claim; complete a typed product advancement Todo "
+            "or write an unbound outcome gap/blocker"
+        )
+    if (
+        delivery_workspace_path is not None
+        and normalized_delivery_outcome not in ACCOUNTABLE_DELIVERY_OUTCOMES
+    ):
+        raise ValueError(
+            "--delivery-workspace-path requires typed material delivery evidence, "
+            "not a planning/surface-only or ambiguous claim"
+        )
     vision_checkpoint = build_vision_checkpoint(
         agent_id=normalized_agent_id or None,
         agent_vision=agent_vision,
@@ -1253,6 +1294,7 @@ def refresh_state_run(
         vision_checkpoint=vision_checkpoint,
         delivery_workspace=delivery_workspace,
         settlement_identity=settlement_identity,
+        selected_todo_delivery=selected_todo_delivery,
     )
     if delivery_workspace_causality:
         record["delivery_workspace_causality"] = delivery_workspace_causality

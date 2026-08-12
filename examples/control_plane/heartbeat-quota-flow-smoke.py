@@ -1212,7 +1212,11 @@ def main() -> int:
         lane = guard["work_lane_contract"]
         assert lane["lane"] == "advancement_task", lane
         assert lane["monitor_policy"] == "material_transition_only", lane
-        assert lane["reason_codes"] == ["open_agent_todo", "external_monitor_context"], lane
+        assert lane["reason_codes"] == [
+            "open_agent_todo",
+            "external_monitor_context",
+            "outcome_followthrough_required",
+        ], lane
         assert guard["execution_obligation"]["must_attempt_work"] is True, guard
         poll = run_cli(
             root,

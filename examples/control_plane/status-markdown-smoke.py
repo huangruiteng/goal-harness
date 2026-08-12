@@ -754,7 +754,7 @@ def assert_source_registry_shadow_collapses_into_live_queue_item(payload: dict) 
     assert quota_payload["plan_summary"]["health_blockers"] == 0, quota_payload
 
 
-def assert_connected_readonly_progress_run_stays_runnable(payload: dict, markdown: str) -> None:
+def assert_connected_readonly_gap_reports_product_blocker(payload: dict, markdown: str) -> None:
     items = payload["attention_queue"]["items"]
     assert len(items) == 1, items
     item = items[0]
@@ -773,7 +773,11 @@ def assert_connected_readonly_progress_run_stays_runnable(payload: dict, markdow
     assert quota_payload["state"] == "eligible", quota_payload
     assert quota_payload["waiting_on"] == "codex", quota_payload
     assert quota_payload["status"] == CONNECTED_READONLY_CLASSIFICATION, quota_payload
-    assert quota_payload["recommended_action"] == CONNECTED_READONLY_ACTION, quota_payload
+    assert quota_payload["work_lane_contract"]["obligation"] == (
+        "report_product_advancement_blocker"
+    ), quota_payload
+    assert "missing executable product advancement Todo" in quota_payload["recommended_action"], quota_payload
+    assert "do not add another planning" in quota_payload["recommended_action"], quota_payload
     quota_markdown = render_quota_should_run_markdown(quota_payload)
     assert "should_run: `True`" in quota_markdown, quota_markdown
     assert f"status: `{CONNECTED_READONLY_CLASSIFICATION}`" in quota_markdown, quota_markdown
@@ -982,7 +986,7 @@ def assert_delivery_batch_scale_prefers_test_named_runs() -> None:
             {"classification": "status_refresh_without_marker", "delivery_outcome": "primary_goal_outcome"},
             profile,
         )
-        == "primary_goal_outcome"
+        == "surface_only"
     )
 
 
@@ -1331,7 +1335,7 @@ def main() -> int:
     assert_source_registry_shadow_collapses_into_live_queue_item(shadow_payload)
     assert_explicit_delivery_refresh(explicit_payload, explicit_markdown)
     assert_stale_latest_run_projection_warning(stale_projection_payload, stale_projection_markdown)
-    assert_connected_readonly_progress_run_stays_runnable(readonly_payload, readonly_markdown)
+    assert_connected_readonly_gap_reports_product_blocker(readonly_payload, readonly_markdown)
     assert_dependency_blockers_stay_separate(dependency_payload, dependency_markdown)
     assert_connected_delivery_no_baseline_small_streak(small_streak_payload, small_streak_markdown)
     assert_connected_delivery_surface_loop(surface_loop_payload, surface_loop_markdown)

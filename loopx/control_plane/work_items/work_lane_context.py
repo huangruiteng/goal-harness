@@ -15,6 +15,7 @@ from ..todos.projection import (
     todo_summary_open_task_counts,
 )
 from .outcome_followthrough import build_outcome_followthrough_hint
+from .delivery_outcome import delivery_action_kind_is_surface_only
 from .work_lane import (
     build_work_lane_contract,
     due_monitor_preempts_advancement,
@@ -27,6 +28,30 @@ DEPENDENCY_OBSERVATION_CLASSIFICATION_HINTS = (
     "dependency_monitor",
 )
 DEFAULT_MONITOR_DUE_ITEM_LIMIT = 1
+
+
+def first_outcome_advancement_item(
+    agent_todo_summary: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(agent_todo_summary, dict):
+        return None
+    for key in (
+        "active_next_action_executable_items",
+        "first_executable_items",
+        "executable_backlog_items",
+    ):
+        items = agent_todo_summary.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("task_class") or "") != "advancement_task":
+                continue
+            if delivery_action_kind_is_surface_only(item.get("action_kind")):
+                continue
+            return item
+    return None
 
 
 def latest_run_progress_scope(run: dict[str, Any]) -> str:
@@ -120,11 +145,17 @@ def build_work_lane_context_contract(
         gap_items=monitor_schedule_gap_items,
     )
     first_due_monitor = due_monitor_items[0] if due_monitor_items else None
-    first_advancement = (
-        todo_summary_first_executable_item(agent_todo_summary)
-        if advancement_allowed
-        else None
-    )
+    followthrough = outcome_followthrough_hint(item) if advancement_allowed else None
+    projected_advancement_count = int(todo_counts.get("advancement") or 0)
+    first_advancement = None
+    if advancement_allowed:
+        first_advancement = (
+            first_outcome_advancement_item(agent_todo_summary)
+            if followthrough
+            else todo_summary_first_executable_item(agent_todo_summary)
+        )
+        if followthrough and first_advancement is None:
+            todo_counts = {**todo_counts, "advancement": 0}
     agent_id = todo_summary_claim_scope_agent_id(agent_todo_summary or {})
     monitor_blocked_resume_candidates = (
         _agent_scope_monitor_blocked_resume_candidates(
@@ -147,9 +178,7 @@ def build_work_lane_context_contract(
             first_due_monitor,
             first_advancement=first_advancement,
         ),
-        outcome_followthrough=(
-            outcome_followthrough_hint(item) if advancement_allowed else None
-        ),
+        outcome_followthrough=followthrough,
         next_action_requires_advancement=(
             next_action_requires_advancement(item) if advancement_allowed else False
         ),
@@ -158,4 +187,9 @@ def build_work_lane_context_contract(
         resume_blocked_by_monitor_items=monitor_blocked_resume_candidates,
         monitor_attempt_already_recorded=monitor_attempt_already_recorded,
         monitor_debt_backoff_active=monitor_debt_backoff_active,
+        outcome_advancement_missing=bool(
+            followthrough
+            and projected_advancement_count > 0
+            and first_advancement is None
+        ),
     )

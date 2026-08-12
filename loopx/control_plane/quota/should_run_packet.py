@@ -660,6 +660,10 @@ def _resolve_quota_should_run_route(
     due_monitor_attempt = work_lane_contract_is_due_monitor_attempt(
         prepared.work_lane_contract
     )
+    outcome_followthrough_required = bool(
+        isinstance(prepared.work_lane_contract, dict)
+        and prepared.work_lane_contract.get("outcome_followthrough")
+    )
     agent_lane_next_action = None
     if (
         not due_monitor_attempt
@@ -672,6 +676,7 @@ def _resolve_quota_should_run_route(
             agent_todo_summary=prepared.agent_todo_summary,
             capability_gate=prepared.capability_gate,
             scoped_user_gate_fallback=prepared.scoped_user_gate_fallback,
+            outcome_followthrough_required=outcome_followthrough_required,
             active_next_action=(
                 item.get("active_state_next_action")
                 or (
@@ -687,6 +692,7 @@ def _resolve_quota_should_run_route(
         selected_recommended_action = selected_action_with_agent_lane(
             selected_recommended_action,
             agent_lane_next_action=agent_lane_next_action,
+            outcome_followthrough_required=outcome_followthrough_required,
         )
         agent_scope_frontier = _agent_scope_no_candidate_frontier(
             agent_identity=prepared.agent_identity,

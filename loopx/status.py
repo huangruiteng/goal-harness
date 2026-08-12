@@ -705,7 +705,11 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
     if outcome != DELIVERY_OUTCOME_NOT_CONFIGURED:
         compact["delivery_outcome"] = outcome
     compact["delivery_turn_kind"] = delivery_turn_kind_for_run(
-        run,
+        {
+            **run,
+            "delivery_batch_scale": compact["delivery_batch_scale"],
+            "delivery_outcome": outcome,
+        },
         delivery_outcome=outcome,
     )
     return _attach_run_summary_projections_read_model(

@@ -15,6 +15,9 @@ from loopx.control_plane.scheduler.execution_context import (
     SchedulerRuntimeProfile,
     scheduler_execution_context_for_runtime_profile,
 )
+from loopx.control_plane.agents.agent_lane_recommendation import (
+    build_agent_lane_next_action,
+)
 from loopx.control_plane.todos.contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_MONITOR,
@@ -153,7 +156,7 @@ def assert_blocker_writeback_satisfies_contract_followthrough() -> None:
     assert "outcome_followthrough" not in lane, lane
 
 
-def assert_contract_word_alone_does_not_trigger_outcome_followthrough() -> None:
+def assert_contract_claim_cannot_suppress_outcome_followthrough() -> None:
     guard = build_quota_should_run(
         status_payload(
             status="runner_contract_delivered",
@@ -167,9 +170,64 @@ def assert_contract_word_alone_does_not_trigger_outcome_followthrough() -> None:
     )
     lane = guard["work_lane_contract"]
     assert lane["lane"] == "advancement_task", lane
-    assert lane["obligation"] == "advance_one_bounded_segment", lane
-    assert lane["reason_codes"] == ["open_agent_todo"], lane
-    assert "outcome_followthrough" not in lane, lane
+    assert lane["obligation"] == "advance_primary_outcome_or_write_blocker", lane
+    assert lane["reason_codes"] == [
+        "open_agent_todo",
+        "outcome_followthrough_required",
+    ], lane
+    assert lane["outcome_followthrough"]["latest_delivery_outcome"] == "surface_only", lane
+
+
+def assert_outcome_followthrough_prefers_product_todo_over_planning_todo() -> None:
+    planning = {
+        "index": 1,
+        "todo_id": "todo_planning_checkpoint",
+        "text": "Prepare another planning checkpoint.",
+        "role": "agent",
+        "status": "open",
+        "priority": "P0",
+        "task_class": "advancement_task",
+        "action_kind": "planning_checkpoint",
+        "claimed_by": "root",
+    }
+    product = {
+        "index": 2,
+        "todo_id": "todo_deliver_player_story",
+        "text": "Deliver one playable player story from the normal entry.",
+        "role": "agent",
+        "status": "open",
+        "priority": "P1",
+        "task_class": "advancement_task",
+        "action_kind": "deliver_player_story",
+        "claimed_by": "root",
+    }
+    summary = {
+        "active_next_action_executable_items": [planning],
+        "first_executable_items": [planning, product],
+        "executable_backlog_items": [planning, product],
+    }
+    selected = build_agent_lane_next_action(
+        agent_identity={"agent_id": "root"},
+        agent_todo_summary=summary,
+        capability_gate=None,
+        active_next_action="Prepare another planning checkpoint.",
+        outcome_followthrough_required=True,
+    )
+    assert selected is not None
+    assert selected["todo_id"] == "todo_deliver_player_story", selected
+
+    only_surface = build_agent_lane_next_action(
+        agent_identity={"agent_id": "root"},
+        agent_todo_summary={
+            "active_next_action_executable_items": [planning],
+            "first_executable_items": [planning],
+            "executable_backlog_items": [planning],
+        },
+        capability_gate=None,
+        active_next_action="Prepare another planning checkpoint.",
+        outcome_followthrough_required=True,
+    )
+    assert only_surface is None
 
 
 def assert_monitor_only_todo_requires_replan_before_quiet() -> None:
@@ -2199,7 +2257,8 @@ def main() -> int:
     assert_primary_status_stays_advancement_lane()
     assert_structured_surface_only_run_requires_outcome_followthrough()
     assert_blocker_writeback_satisfies_contract_followthrough()
-    assert_contract_word_alone_does_not_trigger_outcome_followthrough()
+    assert_contract_claim_cannot_suppress_outcome_followthrough()
+    assert_outcome_followthrough_prefers_product_todo_over_planning_todo()
     assert_monitor_only_todo_requires_replan_before_quiet()
     assert_monitor_only_with_user_todo_surfaces_user_action_without_transition()
     assert_blocked_agent_todo_with_user_gate_notifies_without_execution()

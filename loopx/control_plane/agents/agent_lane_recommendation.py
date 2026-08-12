@@ -10,6 +10,7 @@ from ..todos.contract import (
 )
 from ..todos.summary_item import compact_todo_summary_item
 from ..work_items.primary_action import protocol_action_text
+from ..work_items.delivery_outcome import delivery_action_kind_is_surface_only
 from ..work_items.work_lane import (
     work_lane_contract_is_due_monitor_attempt,
     work_lane_contract_is_lark_inbox_reply_due,
@@ -262,6 +263,12 @@ def selected_recommended_action_from_work_lane(
     prefer_agent_lane_recommendation: bool = False,
 ) -> Any:
     raw_action = item.get("recommended_action")
+    if (
+        isinstance(work_lane_contract, dict)
+        and work_lane_contract.get("obligation")
+        == "report_product_advancement_blocker"
+    ):
+        return work_lane_contract.get("action") or raw_action
     if prefer_agent_lane_recommendation:
         if isinstance(agent_lane_recommendation, dict):
             lane_action = agent_lane_recommendation.get("recommended_action")
@@ -306,6 +313,7 @@ def build_agent_lane_next_action(
     capability_gate: dict[str, Any] | None,
     active_next_action: Any = None,
     scoped_user_gate_fallback: dict[str, Any] | None = None,
+    outcome_followthrough_required: bool = False,
 ) -> dict[str, Any] | None:
     if not isinstance(agent_identity, dict):
         return None
@@ -327,6 +335,12 @@ def build_agent_lane_next_action(
                 text
                 and _todo_item_is_actionable_open(selected)
                 and _todo_task_class(selected) == TODO_TASK_CLASS_ADVANCEMENT
+                and not (
+                    outcome_followthrough_required
+                    and delivery_action_kind_is_surface_only(
+                        selected.get("action_kind")
+                    )
+                )
                 and agent_scope_item_claimed_by_agent_or_unclaimed(
                     selected,
                     agent_id=agent_id,
@@ -416,6 +430,13 @@ def build_agent_lane_next_action(
                 continue
             if _todo_task_class(raw_item) != TODO_TASK_CLASS_ADVANCEMENT:
                 continue
+            if (
+                outcome_followthrough_required
+                and delivery_action_kind_is_surface_only(
+                    raw_item.get("action_kind")
+                )
+            ):
+                continue
             text = protocol_action_text(raw_item.get("text"), limit=500)
             if not text:
                 continue
@@ -494,10 +515,11 @@ def selected_action_with_agent_lane(
     selected_action: Any,
     *,
     agent_lane_next_action: dict[str, Any] | None,
+    outcome_followthrough_required: bool = False,
 ) -> Any:
     if not isinstance(agent_lane_next_action, dict):
         return selected_action
-    if agent_lane_next_action.get("source") not in {
+    if not outcome_followthrough_required and agent_lane_next_action.get("source") not in {
         "capability_gate.runnable_candidates",
         "agent_todo_summary.active_next_action_executable_items",
     }:
