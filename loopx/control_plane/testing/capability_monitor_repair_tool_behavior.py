@@ -243,6 +243,11 @@ def _redacted_command_shape(
         "parseable": bool(tokens),
         "token_count_bucket": min(len(tokens), 8),
         "command_family": family,
+        "content_read_operation": (
+            executable
+            if family == "content_read"
+            else None
+        ),
         "mentions_fixture_dir": "fixture/" in command,
         "mentions_selected_target": str(fixture.selected_target.name) in command,
         "multiline": "\n" in command,
