@@ -103,6 +103,25 @@ def is_loopback_origin(origin: str | None) -> bool:
     return parsed.scheme in {"http", "https"} and is_loopback_host(parsed.hostname or "")
 
 
+def cors_response_headers(origin: str | None) -> dict[str, str]:
+    """Return CORS headers for an unauthenticated response.
+
+    Only loopback browser origins may read responses cross-origin. A
+    non-loopback ``Origin`` gets no ``Access-Control-Allow-Origin`` header so
+    browsers block reads; non-browser clients (no ``Origin`` header) need no
+    CORS headers at all.
+    """
+
+    if not origin or not is_loopback_origin(origin):
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Vary": "Origin",
+    }
+
+
 def reward_preview_id(payload: dict[str, Any]) -> str:
     stable = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(stable.encode("utf-8")).hexdigest()[:24]
@@ -146,17 +165,15 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        for key, value in cors_response_headers(self.headers.get("Origin")).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        for key, value in cors_response_headers(self.headers.get("Origin")).items():
+            self.send_header(key, value)
         self.end_headers()
 
     def _read_json_body(self) -> dict[str, Any]:
