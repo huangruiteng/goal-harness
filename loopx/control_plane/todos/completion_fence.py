@@ -11,12 +11,20 @@ def completed_todo_replay(
     goal_id: str,
     todo_id: str,
     completion_turn_key: str | None,
+    handoff_mode: str,
     mutation_authority: dict[str, Any],
     state_file: str,
     project: str | None,
     dry_run: bool,
 ) -> dict[str, Any] | None:
-    """Return the terminal-idempotent receipt for an already completed Todo."""
+    """Return local terminal-replay response-shape parity for a completed Todo.
+
+    ``handoff_mode`` is the currently resolved goal mode, not a persisted copy
+    of the original completion result. This local replay therefore is not a
+    durable operation receipt and must not be presented as Stage 2 proof.
+    Original effect markers such as a lease fence or handoff-gate override are
+    intentionally absent because this branch performs neither effect.
+    """
 
     if str(todo.get("status") or "") != TODO_STATUS_DONE:
         return None
@@ -34,6 +42,7 @@ def completed_todo_replay(
         "goal_id": goal_id,
         "todo_id": todo_id,
         "status": TODO_STATUS_DONE,
+        "handoff_mode": handoff_mode,
         "mutation_authority": mutation_authority,
         "state_file": state_file,
         "project": project,

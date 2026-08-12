@@ -1622,11 +1622,13 @@ def complete_goal_todo(
             decision_outcome=effective_decision_outcome,
             decision_target=decision_target,
         )
+        completion_handoff = resolve_todo_completion_handoff(state_text=original, mutation_authority=mutation_authority)
         terminal_replay = completed_todo_replay(
             todo=completion_todo,
             goal_id=goal_id,
             todo_id=todo_id,
             completion_turn_key=completion_turn_key,
+            handoff_mode=completion_handoff["handoff_mode"],
             mutation_authority=mutation_authority,
             state_file=str(resolved_state_file),
             project=str(resolved_project) if resolved_project else None,
@@ -1634,7 +1636,6 @@ def complete_goal_todo(
         )
         if terminal_replay:
             return terminal_replay
-        completion_handoff = resolve_todo_completion_handoff(state_text=original, mutation_authority=mutation_authority)
         task_lease_fence = lease_fence_stack.enter_context(
             hold_task_lease_mutation_fence(
                 registry_path=registry_path,
