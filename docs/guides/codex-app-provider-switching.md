@@ -119,7 +119,9 @@ CC Switch 的 `providers` 表保存每个 provider 的认证、配置片段和 m
       {
         "model": "deepseek-v4-flash",
         "displayName": "DeepSeek V4 Flash",
-        "contextWindow": 1048576
+        "contextWindow": 272000,
+        "maxContextWindow": 272000,
+        "effectiveContextWindowPercent": 100
       }
     ]
   }
@@ -127,6 +129,18 @@ CC Switch 的 `providers` 表保存每个 provider 的认证、配置片段和 m
 ```
 
 `model_catalog_json` 使用 profile 目录的绝对路径，而不是 `CODEX_HOME` 下的副本。这样即使 CC Switch 写入简化 catalog，Codex 仍会加载完整 catalog。
+
+### 窗口与 compaction 对标官方订阅
+
+Codex 官方订阅模型（如 gpt-5.4 / gpt-5.5 / gpt-5.6 系列）在官方 model catalog 里的 `contextWindow` 是 `272000`，Codex 默认在请求输入 token 达到约 `90% × contextWindow` 时自动 compaction（`auto_compact_token_limit` 为 null 时）；`effective_context_window_percent` 决定前端展示与计算使用的安全上限，官方模型不声明该字段，等价于 `100`。
+
+自定义 provider 的 catalog 里 `contextWindow` 决定 Codex 对模型窗口和 compaction 阈值的认知，和上游实际能力是两件事：
+
+- 如果声明 `1048576`，Codex 会按 1M 计算，compaction 要到约 943k 才触发；上游若真实支持 1M，这样能最大化单 turn 上下文。
+- 如果希望自定义 provider 的行为“对标官方订阅”（例如 benchmark 对照、或统一 compaction 节奏），应把 catalog 声明为 `contextWindow: 272000`、`maxContextWindow: 272000`、`effectiveContextWindowPercent: 100`，compaction 阈值会回到约 245k。
+- 若上游真实窗口小于声明值，请求会失败或截断；若上游支持更大窗口而声明偏小，只是人为缩小客户端可用窗口。需要单独调整触发点时可设置 `autoCompactTokenLimit`（null 表示走默认 90%）。
+
+建议以实际上游能力为准，并让 benchmark 对照的三臂（/goal、loopx、loopx fine-grained）使用同一份 catalog 口径，避免窗口差异污染对比结论。
 
 ### 本地代理
 
