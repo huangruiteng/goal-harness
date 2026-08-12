@@ -192,6 +192,22 @@ def test_goal_handoff_mode_rejects_unknown_value_loudly() -> None:
     assert error.value.code == "invalid_handoff_mode"
 
 
+def test_invalid_goal_handoff_mode_runtime_read_fails_closed_without_mutation(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_workspace(tmp_path)
+    todo = _add_todo(registry)
+    _set_frontmatter_mode(state, "banana")
+    before = state.read_bytes()
+
+    with pytest.raises(HandoffModeError) as error:
+        _claim(registry, todo["todo_id"], AGENT_A)
+
+    assert error.value.code == "invalid_handoff_mode"
+    assert error.value.payload["handoff_mode"] == "banana"
+    assert state.read_bytes() == before
+
+
 def test_goal_handoff_mode_without_frontmatter_is_legacy() -> None:
     assert goal_handoff_mode("## Agent Todo\n") == HANDOFF_MODE_LEGACY
 

@@ -99,6 +99,18 @@ def _add_todo(registry: Path, *, claimed_by: str | None = None) -> dict[str, Any
     )
 
 
+def _set_frontmatter_mode(state: Path, mode: str) -> None:
+    lines = state.read_text(encoding="utf-8").splitlines()
+    close = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
+    for index in range(1, close):
+        if lines[index].split(":", 1)[0].strip() == "handoff_mode":
+            lines[index] = f"handoff_mode: {mode}"
+            break
+    else:
+        lines.insert(close, f"handoff_mode: {mode}")
+    state.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # (e) mode switch CLI: show / set with quiescence enforcement.
 # ---------------------------------------------------------------------------
@@ -118,6 +130,54 @@ def test_handoff_mode_show_defaults_to_legacy(
     assert payload["ok"] is True
     assert payload["handoff_mode"] == HANDOFF_MODE_LEGACY
     assert payload["source"] == "default"
+
+
+def test_handoff_mode_show_rejects_invalid_frontmatter_without_mutation(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode="banana")
+    before = state.read_bytes()
+
+    exit_code, payload = _run_cli(
+        capsys, registry, "handoff-mode", "show", "--goal-id", GOAL_ID
+    )
+
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["error_code"] == "invalid_handoff_mode"
+    assert payload["handoff_mode"] == "banana"
+    assert state.read_bytes() == before
+
+
+def test_handoff_mode_set_repairs_invalid_frontmatter_on_quiescent_goal(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode="banana")
+    before = state.read_bytes()
+
+    exit_code, payload = _run_cli(
+        capsys,
+        registry,
+        "handoff-mode",
+        "set",
+        "--goal-id",
+        GOAL_ID,
+        "--mode",
+        HANDOFF_MODE_HARD_LEASE,
+    )
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["changed"] is True
+    assert payload["previous_mode"] == "banana"
+    assert payload["previous_mode_valid"] is False
+    assert payload["previous_mode_error_code"] == "invalid_handoff_mode"
+    assert payload["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert state.read_bytes() == before.replace(
+        b"handoff_mode: banana", b"handoff_mode: hard_lease"
+    )
 
 
 def test_handoff_mode_set_on_quiescent_goal_updates_frontmatter(
@@ -154,6 +214,37 @@ def test_handoff_mode_set_on_quiescent_goal_updates_frontmatter(
     assert show_payload["source"] == "frontmatter"
 
 
+def test_handoff_mode_set_invalid_previous_mode_still_refuses_claimed_todo(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    registry, state = _write_workspace(tmp_path)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _set_frontmatter_mode(state, "banana")
+    before = state.read_bytes()
+
+    exit_code, payload = _run_cli(
+        capsys,
+        registry,
+        "handoff-mode",
+        "set",
+        "--goal-id",
+        GOAL_ID,
+        "--mode",
+        HANDOFF_MODE_SOFT_CLAIM,
+    )
+
+    assert exit_code == 1
+    assert payload["error_code"] == "handoff_mode_not_quiescent"
+    assert payload["previous_mode"] == "banana"
+    assert payload["previous_mode_valid"] is False
+    assert payload["previous_mode_error_code"] == "invalid_handoff_mode"
+    assert [item["todo_id"] for item in payload["claimed_todos"]] == [
+        todo["todo_id"]
+    ]
+    assert state.read_bytes() == before
+
+
 def test_handoff_mode_set_refused_when_open_claimed_todo_exists(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -180,6 +271,46 @@ def test_handoff_mode_set_refused_when_open_claimed_todo_exists(
     assert [item["todo_id"] for item in claimed] == [todo["todo_id"]]
     assert claimed[0]["claimed_by"] == AGENT_A
     assert state.read_text(encoding="utf-8") == before
+
+
+def test_handoff_mode_set_invalid_previous_mode_still_refuses_active_lease(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    registry, state = _write_workspace(tmp_path)
+    todo = _add_todo(registry)
+    acquire_task_lease(
+        registry_path=registry,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        owner=AGENT_A,
+        idempotency_key="turn-invalid-mode-lease",
+        ttl_seconds=600,
+    )
+    _set_frontmatter_mode(state, "banana")
+    before = state.read_bytes()
+
+    exit_code, payload = _run_cli(
+        capsys,
+        registry,
+        "handoff-mode",
+        "set",
+        "--goal-id",
+        GOAL_ID,
+        "--mode",
+        HANDOFF_MODE_HARD_LEASE,
+    )
+
+    assert exit_code == 1
+    assert payload["error_code"] == "handoff_mode_not_quiescent"
+    assert payload["previous_mode"] == "banana"
+    assert payload["previous_mode_valid"] is False
+    assert payload["previous_mode_error_code"] == "invalid_handoff_mode"
+    assert [item["todo_id"] for item in payload["active_leases"]] == [
+        todo["todo_id"]
+    ]
+    assert state.read_bytes() == before
 
 
 def test_handoff_mode_set_refused_when_time_active_lease_exists(
