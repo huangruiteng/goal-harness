@@ -293,13 +293,29 @@ def set_goal_handoff_mode(
     )
     with exclusive_file_lock(resolved_state_file, operation="handoff_mode_set"):
         original = resolved_state_file.read_text(encoding="utf-8")
-        previous = goal_handoff_mode(original)
+        previous_raw = parse_state_frontmatter(original).get(
+            HANDOFF_MODE_FRONTMATTER_KEY
+        )
+        try:
+            previous = normalize_handoff_mode(previous_raw)
+        except HandoffModeError as exc:
+            previous = str(previous_raw or "").strip()
+            previous_mode_fields = {
+                "previous_mode": previous,
+                "previous_mode_valid": False,
+                "previous_mode_error_code": exc.code,
+            }
+        else:
+            previous_mode_fields = {
+                "previous_mode": previous,
+                "previous_mode_valid": True,
+            }
         payload = {
             "ok": True,
             "schema_version": HANDOFF_MODE_SCHEMA_VERSION,
             "action": "set",
             "goal_id": goal_id,
-            "previous_mode": previous,
+            **previous_mode_fields,
             "handoff_mode": requested,
             "state_file": str(resolved_state_file),
         }
@@ -325,7 +341,7 @@ def set_goal_handoff_mode(
                     payload={
                         "goal_id": goal_id,
                         "requested_mode": requested,
-                        "previous_mode": previous,
+                        **previous_mode_fields,
                         "claimed_todos": claimed,
                         "active_leases": leases,
                     },
