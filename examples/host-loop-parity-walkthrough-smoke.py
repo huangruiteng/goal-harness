@@ -283,13 +283,16 @@ def test_transaction_plan_same_identity() -> None:
 
 def test_independent_validation_callable() -> None:
     """build_loopx_turn_command_validator returns a host-independent
-    TaskValidator callable that runs a subprocess validator."""
-    validator = build_loopx_turn_command_validator(
-        ["python", "-c", "import sys; sys.exit(0)"],
+    TaskValidator callable. A zero-exit validator passes; a non-zero
+    exit validator fails with typed recovery_kind."""
+    # Use sys.executable so the walkthrough runs on any host (bare
+    # "python" may resolve to a stub, shim, or missing executable).
+    pass_validator = build_loopx_turn_command_validator(
+        [sys.executable, "-c", "import sys; sys.exit(0)"],
         project=REPO_ROOT,
         timeout_seconds=5.0,
     )
-    assert callable(validator)
+    assert callable(pass_validator)
 
     # Build a synthetic plan + result to validate.
     envelope = build_turn_envelope(_quota_decision())
@@ -301,12 +304,25 @@ def test_independent_validation_callable() -> None:
         "result_kind": "validated_progress",
         "completed_phases": ["host_execute", "typed_result"],
     }
-    receipt = validator(plan, result)
-    assert isinstance(receipt, dict)
-    # The exit code 0 → status "passed"
-    assert receipt["status"] in ("passed", "inconclusive", "unavailable")
+    passed = pass_validator(plan, result)
+    assert isinstance(passed, dict)
+    assert passed["status"] == "passed"
+    assert passed["exit_code"] == 0
 
-    _assert_public_safe({"receipt_status": receipt["status"]}, label="validation")
+    # A non-zero exit validator fails with typed recovery_kind.
+    fail_validator = build_loopx_turn_command_validator(
+        [sys.executable, "-c", "import sys; sys.exit(3)"],
+        project=REPO_ROOT,
+        timeout_seconds=5.0,
+        failure_recovery_kind="repair_required",
+    )
+    failed = fail_validator(plan, result)
+    assert isinstance(failed, dict)
+    assert failed["status"] == "failed"
+    assert failed["exit_code"] == 3
+    assert failed.get("recovery_kind") == "repair_required"
+
+    _assert_public_safe({"pass_status": passed["status"], "fail_status": failed["status"]}, label="validation")
 
 
 # ── Scenario 6: Loop disposition — run_now (no prior receipt) ──
