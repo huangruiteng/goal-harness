@@ -519,7 +519,7 @@ class DoubaoCapabilityMonitorRepairToolBehaviorActor:
                 "kind": kind,
                 "command_digest": digest_text(tool_call.command),
             }
-            if kind == "unexpected_command":
+            if kind in {"unexpected_command", "post_quota_backtracking"}:
                 step["redacted_command_shape"] = _redacted_command_shape(
                     tool_call.command,
                     fixture=fixture,
