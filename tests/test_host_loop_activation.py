@@ -516,6 +516,24 @@ def test_opencode_activation_uses_bridge_tool_and_generic_cli_quota() -> None:
     assert "--runtime-profile generic_cli" in packet["commands"]["heartbeat_prompt"]
 
 
+def test_opencode2_activation_starts_the_goal_worker() -> None:
+    packet = build_host_loop_activation_packet(
+        agent_type="opencode2",
+        goal_id="fixture-goal",
+        agent_id="opencode2-fixture",
+        registered_agents=["opencode2-fixture"],
+    )
+
+    assert packet["host_surface"] == "opencode2_goal_worker_mode"
+    assert packet["activation_method"] == "start_opencode2_goal_worker"
+    assert packet["host_mutation"]["host_tool"] == "opencode2-goal-worker"
+    assert packet["host_mutation"]["cli_can_mutate_directly"] is True
+    assert any(
+        "opencode2-goal-worker" in str(step) for step in packet["activation_steps"]
+    )
+    assert "--runtime-profile generic_cli" in packet["commands"]["heartbeat_prompt"]
+
+
 def test_standard_heartbeat_omits_inactive_visible_goal_host() -> None:
     payload = build_heartbeat_prompt(goal_id="standard-heartbeat-fixture", thin=True)
 

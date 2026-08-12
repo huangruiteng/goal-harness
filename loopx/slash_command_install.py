@@ -98,9 +98,11 @@ def _opencode_command_body(spec: dict[str, Any]) -> str:
             _managed_marker(command=str(spec["command"]), surface="opencode-command"),
             f"Treat this as the LoopX `{spec['command']}` OpenCode command.",
             (
-                "The exact current host is OpenCode. For goal start, pass "
+                "The exact current host is OpenCode. On OpenCode 1, pass "
                 "`--host-surface opencode` and use `loopx_goal_activate` from the "
-                "returned host-loop activation packet."
+                "returned host-loop activation packet. On OpenCode 2, pass "
+                "`--host-surface opencode2` and run the returned "
+                "`loopx opencode2-goal-worker` command with the heartbeat packet values."
             ),
             "\n".join(str(item) for item in spec["instructions"]),
             (
@@ -143,7 +145,7 @@ def _command_prompt_specs(*, cli_bin: str, include_legacy_aliases: bool) -> list
             "argument_hint": "[--fine-grained] [--capability-route issue-fix] [task text]",
             "instructions": [
                 "Visible command arguments: `$ARGUMENTS`.",
-                "Identify the exact current host surface (codex-app, codex-app-ssh, codex-ide-plugin, codex-cli-tui, opencode, traex-cli, pi, gemini-cli, cursor-agent, or ark-managed-agent).",
+                "Identify the exact current host surface (codex-app, codex-app-ssh, codex-ide-plugin, codex-cli-tui, opencode, opencode2, traex-cli, pi, gemini-cli, cursor-agent, or ark-managed-agent).",
                 _loopx_start_goal_arguments_instruction(
                     cli_bin=cli_bin,
                     host_surface=None,

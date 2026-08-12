@@ -141,6 +141,8 @@ VISIBLE_HOST_CONNECTOR_IDS: dict[str, str] = {
 VISIBLE_OPENCODE_ALIASES: dict[str, str] = {
     "opencode": "generic-cli",
     "open-code": "generic-cli",
+    "opencode2": "generic-cli",
+    "opencode-2": "generic-cli",
 }
 
 # Pi runs its visible goal loop through the generic-cli Turn host, same as

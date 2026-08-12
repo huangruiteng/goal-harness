@@ -38,6 +38,7 @@ def scheduler_command_binding_for_agent_type(
         "codex-ide-plugin": SchedulerRuntimeProfile.CODEX_CLI_VISIBLE,
         "claude-code": SchedulerRuntimeProfile.CLAUDE_CODE_VISIBLE,
         "opencode": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
+        "opencode2": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
         "traex-cli": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
         "pi": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
         "gemini-cli": SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP,
@@ -60,6 +61,7 @@ SUPPORTED_AGENT_TYPES = [
     "codex-cli",
     "claude-code",
     "opencode",
+    "opencode2",
     "traex-cli",
     "pi",
     "gemini-cli",
@@ -145,6 +147,18 @@ AGENT_TYPE_CATALOG: dict[str, dict[str, Any]] = {
         "host_loop": "visible OpenCode goal plugin gated by LoopX",
         "entry": "/loopx <task> with the LoopX OpenCode bridge installed",
         "accepted_inputs": ["opencode", "open-code", "open_code", "open code"],
+    },
+    "opencode2": {
+        "display_name": "OpenCode 2",
+        "host_loop": "visible OpenCode 2 session driven by the LoopX goal worker",
+        "entry": "/loopx <task> with OpenCode 2 and the LoopX goal worker",
+        "accepted_inputs": [
+            "opencode2",
+            "opencode-2",
+            "opencode_2",
+            "open-code-2",
+            "open code 2",
+        ],
     },
     "traex-cli": {
         "display_name": "TraeX CLI TUI",
@@ -266,6 +280,9 @@ HOST_SURFACE_TO_AGENT_TYPE = {
     "codex-cli-tui": "codex-cli",
     "claude-code": "claude-code",
     "opencode": "opencode",
+    "opencode2": "opencode2",
+    "opencode-v2": "opencode2",
+    "opencode_2": "opencode2",
     "traex-cli": "traex-cli",
     "traex-cli-tui": "traex-cli",
     "traex": "traex-cli",
@@ -400,6 +417,7 @@ def _heartbeat_commands(
         "codex-cli": "Codex CLI /goal visible TUI loop",
         "claude-code": "Claude Code native /loop gated by LoopX",
         "opencode": "OpenCode visible goal loop gated by LoopX",
+        "opencode2": "OpenCode 2 visible goal loop driven by the LoopX worker",
         "traex-cli": "TraeX CLI /goal visible TUI loop gated by LoopX",
         "pi": "Pi visible goal loop gated by LoopX",
         "gemini-cli": "Gemini CLI agent loop gated by LoopX",
@@ -855,6 +873,44 @@ def _opencode_activation(commands: dict[str, str], cli_bin: str) -> dict[str, An
     }
 
 
+def _opencode2_activation(commands: dict[str, str], cli_bin: str) -> dict[str, Any]:
+    return {
+        "host_surface": "opencode2_goal_worker_mode",
+        "entry_command_hint": "/loopx <task>",
+        "activation_method": "start_opencode2_goal_worker",
+        "activation_input_command": commands["heartbeat_prompt_json"],
+        "setup_command": None,
+        "host_mutation": {
+            "owner": "LoopX OpenCode 2 goal worker",
+            "host_tool": "opencode2-goal-worker",
+            "tool_argument_mapping": {
+                "goalId": "heartbeat_prompt.goal_id",
+                "directory": "the project directory",
+                "agentId": "heartbeat_prompt.agent_id when present",
+                "registryPath": "explicit registry path when present",
+                "availableCapabilities": "declared host capabilities when present",
+                "taskBody": "heartbeat_prompt.task_body",
+                "sessionId": "an existing OpenCode 2 session id when reattaching",
+            },
+            "cli_can_mutate_directly": True,
+            "missing_host_tool_gate": (
+                "The loopx opencode2-goal-worker command or the opencode2 binary "
+                "is unavailable; install LoopX and OpenCode 2 before claiming "
+                "autonomous heartbeat support."
+            ),
+        },
+        "activation_steps": [
+            "Run the heartbeat-prompt JSON command after project state and todos are written.",
+            "Start the worker from the project directory: loopx opencode2-goal-worker --goal-id <goal_id> --directory . --task-body <task_body>, with --agent-id, --registry, and --capability flags when those values are present.",
+            "Let the worker create or attach the visible OpenCode 2 session, gate every turn through LoopX quota should-run, and keep quiet waits free of model calls.",
+        ],
+        "success_criteria": [
+            "A visible OpenCode 2 session runs the goal and the worker survives TUI close because it owns the timers.",
+            "Quiet waits make no model call, active work auto-continues, user intervention pauses visibly, and validated terminal no-follow-up stops the worker.",
+        ],
+    }
+
+
 def _traex_activation(commands: dict[str, str]) -> dict[str, Any]:
     return {
         "host_surface": "traex_visible_goal_mode",
@@ -1055,6 +1111,8 @@ def build_host_loop_activation_packet(
         surface = _claude_code_activation(commands, cli_bin)
     elif canonical == "opencode":
         surface = _opencode_activation(commands, cli_bin)
+    elif canonical == "opencode2":
+        surface = _opencode2_activation(commands, cli_bin)
     elif canonical == "traex-cli":
         surface = _traex_activation(commands)
     elif canonical == "pi":
