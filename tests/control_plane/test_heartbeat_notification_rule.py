@@ -13,6 +13,19 @@ from loopx.control_plane.heartbeat.task_body import (
     render_brief_heartbeat_task_body,
     render_thin_heartbeat_task_body,
 )
+from loopx.control_plane.scheduler.execution_context import (
+    GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
+)
+from loopx.control_plane.testing.quota_fixtures import (
+    quota_status_payload,
+    quota_todo_item,
+    quota_todo_summary,
+)
+from loopx.quota import build_quota_should_run
+
+
+GOAL_ID = "heartbeat-notify-obligation-fixture"
+AGENT_ID = "codex-notify-agent"
 
 
 def test_short_rule_qualifies_dont_notify_as_output_only() -> None:
@@ -21,8 +34,8 @@ def test_short_rule_qualifies_dont_notify_as_output_only() -> None:
     assert "OUTPUT only" in rule
     # The old ambiguous mapping must be gone.
     assert "DONT_NOTIFY=quiet." not in rule
-    assert "execution_obligation.must_attempt_work=true" in rule
-    assert "must_attempt_work=false" in rule
+    assert "heartbeat_recommendation.agent_must_attempt" in rule
+    assert "execution_obligation.must_attempt_work" in rule
 
 
 def test_rendered_task_bodies_keep_execution_obligation_authority() -> None:
@@ -46,7 +59,61 @@ def test_rendered_task_bodies_keep_execution_obligation_authority() -> None:
     )
     for renderer in (render_thin_heartbeat_task_body, render_brief_heartbeat_task_body):
         body = renderer(**kwargs)
+        assert "agent_must_attempt" in body
         assert "execution_obligation.must_attempt_work" in body
         assert "OUTPUT only" in body
         # A bare "DONT_NOTIFY=quiet" no-op mapping must never appear in the prompt.
         assert "DONT_NOTIFY=quiet." not in body
+
+
+def test_heartbeat_recommendation_mirrors_execution_obligation_in_replan() -> None:
+    obligation = {
+        "schema_version": "autonomous_replan_obligation_v0",
+        "required": True,
+        "stall_threshold": 2,
+        "trigger_count": 1,
+        "triggers": [
+            {
+                "kind": "periodic_review_due",
+                "source": "run_history",
+                "agent_id": AGENT_ID,
+            }
+        ],
+        "stop_condition": (
+            "stop after one bounded replan slice writes back a concrete frontier delta"
+        ),
+    }
+    payload = quota_status_payload(
+        goal_id=GOAL_ID,
+        status="active",
+        recommended_action="Advance the current lane.",
+        agent_todos=quota_todo_summary(
+            [
+                quota_todo_item(
+                    todo_id="todo_advance",
+                    index=1,
+                    title="Advance the current lane.",
+                    task_class="advancement_task",
+                    claimed_by=AGENT_ID,
+                )
+            ]
+        ),
+        coordination={
+            "agent_model": "peer_v1",
+            "registered_agents": [AGENT_ID],
+        },
+        project_asset_extra={"autonomous_replan_obligation": obligation},
+    )
+    guard = build_quota_should_run(
+        payload,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        scheduler_execution_context=GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
+    )
+    assert guard["decision"] == "autonomous_replan_required"
+    heartbeat = guard["heartbeat_recommendation"]
+    obligation = guard["execution_obligation"]
+    assert heartbeat.get("agent_must_attempt") is True
+    assert heartbeat["agent_must_attempt"] is bool(
+        obligation.get("must_attempt_work")
+    )

@@ -810,6 +810,18 @@ def _build_quota_should_run_payload(
     route: _QuotaDecisionRoute,
 ) -> dict[str, Any]:
     agent_scope_action = _agent_scope_frontier_action(route.effective_action)
+    execution_obligation = _execution_obligation(
+        should_run=route.should_run,
+        effective_action=route.effective_action,
+        heartbeat_recommendation=route.heartbeat_recommendation,
+        work_lane_contract=route.payload_work_lane_contract,
+        external_evidence_observation=route.external_evidence_observation,
+    )
+    # Single-field mirror so heartbeat prompts can stay thin: agents key work
+    # obligation off this boolean instead of parsing notify semantics.
+    route.heartbeat_recommendation["agent_must_attempt"] = bool(
+        execution_obligation.get("must_attempt_work")
+    )
     payload = {
         **_standing_decision_authority_payload_from_status_item(
             prepared.item,
@@ -904,13 +916,7 @@ def _build_quota_should_run_payload(
         ),
         "handoff_readiness": prepared.item.get("handoff_readiness"),
         "heartbeat_recommendation": route.heartbeat_recommendation,
-        "execution_obligation": _execution_obligation(
-            should_run=route.should_run,
-            effective_action=route.effective_action,
-            heartbeat_recommendation=route.heartbeat_recommendation,
-            work_lane_contract=route.payload_work_lane_contract,
-            external_evidence_observation=route.external_evidence_observation,
-        ),
+        "execution_obligation": execution_obligation,
         "goal_boundary": prepared.goal_boundary,
         "goal_frontier_projection": prepared.goal_frontier_projection,
         "plan_summary": prepared.plan.get("summary"),

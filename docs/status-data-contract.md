@@ -1443,7 +1443,10 @@ is projected by a future `quota should-run`, not by the ack response.
 The payload also includes `execution_obligation`, which is the compatibility
 entry point for older workers deciding whether a quiet no-op is allowed.
 `heartbeat_recommendation.notify` is only a user-facing notification policy. It
-must not be interpreted as an execution gate. If
+must not be interpreted as an execution gate. `heartbeat_recommendation.
+agent_must_attempt` mirrors `execution_obligation.must_attempt_work` as a
+single-field shortcut so thin heartbeat prompts can key work obligation off
+one boolean instead of parsing notify semantics. If
 `execution_obligation.kind=external_evidence_observation_required`, ordinary
 delivery is still blocked, but the worker must perform one read-only
 observation or write a compact missing-handle blocker before it may stop. If
