@@ -42,6 +42,7 @@ from .control_plane.todos.contract import (
     normalize_todo_id,
     normalize_todo_id_list,
     normalize_todo_required_decision_scopes,
+    normalize_todo_replan_obligation_id,
     normalize_todo_resume_when,
     normalize_supported_todo_resume_when,
     normalize_todo_status,
@@ -52,7 +53,6 @@ from .control_plane.todos.contract import (
     resolve_next_user_task_class,
     resolve_todo_continuation_policy,
     require_supported_todo_resume_when,
-    todo_done_for_status,
     todo_marker_for_status,
 )
 from .control_plane.todos.active_state_editing import (
@@ -65,6 +65,7 @@ from .control_plane.todos.active_state_editing import (
     set_todo_marker,
     todo_blocks,
 )
+from .control_plane.todos.addition import matching_todo_block, require_replan_successor_rebinding, require_replan_successor_scope
 from .control_plane.todos.completed_archive import archive_completed_todo_lines
 from .control_plane.todos.completion_policy import (
     linked_successor_from_todo,
@@ -87,7 +88,7 @@ from .control_plane.todos.list_projection import (
 )
 from .control_plane.todos import monitor_metadata as todo_monitor_metadata
 from .control_plane.todos.mutation_authority import authorize_todo_lifecycle_mutation, todo_update_authority_action
-from .control_plane.todos.todo_summary import compact_todo_group, normalize_todo_text
+from .control_plane.todos.todo_summary import compact_todo_group, todo_item_status
 from .control_plane.todos.succession_warning import build_open_parent_successor_advisory
 from .control_plane.todos.todo_index import MAX_TODO_INDEX_ROLLOUT_EVENTS_PER_GOAL
 from .control_plane.todos.text import (
@@ -179,13 +180,6 @@ def resolve_todo_state_path(
     if not resolved_state_file.exists():
         raise ValueError(f"active state file does not exist: {resolved_state_file}")
     return resolved_project, resolved_state_file
-
-
-def todo_item_status(item: dict[str, Any]) -> str:
-    status = normalize_todo_status(item.get("status"))
-    if status:
-        return status
-    return TODO_STATUS_DONE if item.get("done") else TODO_STATUS_OPEN
 
 
 def empty_todo_summary(*, role: str) -> dict[str, Any]:
@@ -578,24 +572,6 @@ def list_goal_todos(
     return payload
 
 
-def matching_todo_block(
-    lines: list[str],
-    start: int,
-    end: int,
-    text: str,
-    *,
-    role: str | None = None,
-    source_section: str | None = None,
-) -> dict[str, Any] | None:
-    expected = normalize_todo_text(text)
-    for block in todo_blocks(lines, start, end, role=role, source_section=source_section):
-        if todo_done_for_status(todo_item_status(block)):
-            continue
-        if normalize_todo_text(str(block.get("text") or "")) == expected:
-            return block
-    return None
-
-
 def add_todo_to_lines(
     lines: list[str],
     *,
@@ -621,6 +597,7 @@ def add_todo_to_lines(
     excluded_agents: list[str] | None = None,
     global_gate: bool | None = None,
     unblocks_todo_id: str | None = None,
+    replan_obligation_id: str | None = None,
     resume_when: str | None = None,
     monitor_metadata: dict[str, Any] | None = None,
     evidence: str | None = None,
@@ -699,6 +676,7 @@ def add_todo_to_lines(
             excluded_agents=excluded_agents,
             global_gate=global_gate,
             unblocks_todo_id=unblocks_todo_id,
+            replan_obligation_id=replan_obligation_id,
             resume_when=normalized_resume_when,
             **normalized_monitor_metadata,
             evidence=evidence,
@@ -775,6 +753,11 @@ def add_todo_to_lines(
             updates["global_gate"] = global_gate
         if unblocks_todo_id:
             updates["unblocks_todo_id"] = unblocks_todo_id
+        if replan_obligation_id:
+            updates["replan_obligation_id"] = require_replan_successor_rebinding(
+                existing_obligation_id=block.get("replan_obligation_id"),
+                requested_obligation_id=replan_obligation_id,
+            )
         if normalized_resume_when:
             updates["resume_when"] = normalized_resume_when
         updates.update(normalized_monitor_metadata)
@@ -838,6 +821,9 @@ def add_todo_to_lines(
         ),
         "global_gate": normalize_todo_global_gate(effective_metadata.get("global_gate")),
         "unblocks_todo_id": normalize_todo_id(effective_metadata.get("unblocks_todo_id")),
+        "replan_obligation_id": normalize_todo_replan_obligation_id(
+            effective_metadata.get("replan_obligation_id")
+        ),
         "resume_when": normalize_todo_resume_when(effective_metadata.get("resume_when")),
         "target_key": effective_metadata.get("target_key"),
         "cadence": effective_metadata.get("cadence"),
@@ -876,6 +862,7 @@ def add_goal_todo(
     global_gate: bool = False,
     agent_id: str | None = None,
     unblocks_todo_id: str | None = None,
+    replan_obligation_id: str | None = None,
     resume_when: str | None = None,
     monitor_metadata: dict[str, Any] | None = None,
     project: Path | None = None,
@@ -908,6 +895,12 @@ def add_goal_todo(
         raise ValueError("task_domain is only valid for agent todos")
     if capability_binding_ref and role != "agent":
         raise ValueError("capability_binding_ref is only valid for agent todos")
+    replan_obligation_id = require_replan_successor_scope(
+        role=role,
+        task_class=task_class,
+        claimed_by=claimed_by,
+        obligation_id=replan_obligation_id,
+    )
     normalized_status = normalize_todo_status(status) if status else TODO_STATUS_OPEN
     if status and not normalized_status:
         raise ValueError("todo status must be one of: open, done, blocked, deferred")
@@ -1053,6 +1046,7 @@ def add_goal_todo(
             excluded_agents=effective_excluded_agents,
             global_gate=True if global_gate else None,
             unblocks_todo_id=normalized_unblocks_todo_id,
+            replan_obligation_id=replan_obligation_id,
             resume_when=normalized_resume_when,
             monitor_metadata=normalized_monitor_metadata,
             updated_at=updated_at,
@@ -1099,6 +1093,7 @@ def add_goal_todo(
         "excluded_agents": add_result.get("excluded_agents"),
         "global_gate": add_result.get("global_gate"),
         "unblocks_todo_id": add_result.get("unblocks_todo_id"),
+        "replan_obligation_id": add_result.get("replan_obligation_id"),
         "resume_when": add_result.get("resume_when"),
         "target_key": add_result.get("target_key"),
         "cadence": add_result.get("cadence"),

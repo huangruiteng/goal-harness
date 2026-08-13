@@ -8,6 +8,8 @@ from .contract import (
     TODO_RESUME_KIND_CAPACITY_AVAILABLE,
     TODO_RESUME_KIND_PR_MERGED,
     TODO_RESUME_KIND_TODO_DONE,
+    TODO_STATUS_DONE,
+    TODO_STATUS_OPEN,
     TODO_TASK_CLASS_ADVANCEMENT,
     TODO_TASK_CLASS_BLOCKER,
     TODO_TASK_CLASS_MONITOR,
@@ -154,6 +156,15 @@ def normalize_todo_text(text: str, *, limit: int = 500) -> str:
     if len(compact) <= limit:
         return compact
     return compact[: limit - 1].rstrip() + "…"
+
+
+def todo_item_status(item: dict[str, Any]) -> str:
+    """Return one Todo's explicit status with marker compatibility."""
+
+    status = normalize_todo_status(item.get("status"))
+    if status:
+        return status
+    return TODO_STATUS_DONE if item.get("done") else TODO_STATUS_OPEN
 
 
 def todo_archive_state(item: dict[str, Any]) -> str:
@@ -469,6 +480,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "resume_ready",
         "no_followup",
         "successor_todo_ids",
+        "replan_obligation_id",
         "target_key",
         "cadence",
         "next_due_at",

@@ -414,6 +414,15 @@ def build_heartbeat_prompt(
     if thin:
         payload.pop("compact_prompt_command", None)
         payload.pop("brief_prompt_command", None)
+        for key in (
+            "agent_profile",
+            "agent_role",
+            "agent_scope_source",
+            "agent_scopes",
+            "registered_agents",
+        ):
+            if not payload.get(key):
+                payload.pop(key, None)
     return payload
 def build_heartbeat_prompt_error_payload(
     *,

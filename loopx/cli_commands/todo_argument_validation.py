@@ -11,6 +11,7 @@ TODO_OPTION_FIELDS = (
     ("--follow-up", "followups"),
     ("--todo-id", "todo_id"),
     ("--turn-instance-id", "turn_instance_id"),
+    ("--replan-obligation-id", "replan_obligation_id"),
     ("--status", "status"),
     ("--note", "note"),
     ("--evidence", "evidence"),
@@ -453,6 +454,13 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
     if getattr(args, "turn_instance_id", None) and args.todo_command != "complete":
         raise ValueError(
             "--turn-instance-id is supported only by todo complete settlement"
+        )
+    if (
+        getattr(args, "replan_obligation_id", None)
+        and args.todo_command != "add"
+    ):
+        raise ValueError(
+            "--replan-obligation-id is supported only by todo add"
         )
     if (
         args.todo_command != "complete"

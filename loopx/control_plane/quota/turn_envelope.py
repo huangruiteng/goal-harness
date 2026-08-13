@@ -679,6 +679,8 @@ def _action_projection(
         "action": action,
         "user": user,
         "required_reads": _required_reads(interaction, payload),
+        "replan_action_packet": _mapping(payload.get("replan_action_packet"))
+        or None,
         "boundary": _boundary(payload),
         "execution_policy": _execution_policy(payload),
         "writeback": writeback,
@@ -709,6 +711,7 @@ def turn_envelope_action_signature_document(envelope: Mapping[str, Any]) -> dict
         "action",
         "user",
         "required_reads",
+        "replan_action_packet",
         "boundary",
         "execution_policy",
         "writeback",

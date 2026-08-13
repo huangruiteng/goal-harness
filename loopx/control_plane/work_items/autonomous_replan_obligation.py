@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-from typing import Any, Callable, Optional, Pattern
+from typing import Any, Callable, Optional
 
 from ..runtime.time import parse_timestamp
 from ..todos.contract import (
@@ -15,41 +14,37 @@ from ..todos.deferred_resume import (
     todo_summary_deferred_items,
     todo_summary_monitor_blocked_resume_items,
 )
+from .progress_observation import typed_progress_repeat_trigger
 
 
 PublicSafeText = Callable[..., Optional[str]]
 AckRecorded = Callable[[dict[str, Any]], bool]
-DeliveryOutcomeNormalizer = Callable[[Any], Any]
-SectionParser = Callable[[str, tuple[str, ...]], dict[str, list[str]]]
-SectionEntries = Callable[[list[str]], list[str]]
 
 
 MAX_AUTONOMOUS_REPLAN_TRIGGERS = 3
 AUTONOMOUS_REPLAN_STALL_THRESHOLD = 2
-REPLAN_NOVELTY_POLICY_SCHEMA_VERSION = "replan_novelty_policy_v0"
-# Keep the effective rule prompt-visible. The novelty policy owns the evidence
-# source, quota binds that source to the executable required_reads projection,
-# and repair_delta remains the only writeback/enforcement truth.
+REPLAN_NOVELTY_POLICY_SCHEMA_VERSION = "replan_evidence_delivery_policy_v0"
 REPLAN_NOVELTY_GUIDANCE = (
-    " Run required_reads[0] (evidence-log); choose an untried direction. "
-    "Reject repeats; exploration_exhausted needs coverage."
+    " Use the host-projected coverage ledger and produce a typed semantic delta; "
+    "repeated observations cannot close replan."
 )
 
 
 def build_replan_novelty_policy() -> dict[str, str]:
-    """Bind replan preflight to the existing repair-delta settlement truth."""
+    """Bind replan evidence delivery to the host-projected ledger."""
 
     return {
         "schema_version": REPLAN_NOVELTY_POLICY_SCHEMA_VERSION,
         "evidence_source": "agent_scoped_evidence_log",
-        "writeback": "repair_delta",
+        "delivery": "host_projected",
+        "writeback": "typed_semantic_delta",
     }
 
 
 def with_replan_novelty_guidance(action: str) -> str:
     """Make the policy visible once on every replan primary action."""
 
-    marker = "required_reads[0] (evidence-log)"
+    marker = "host-projected coverage ledger"
     normalized = str(action or "").strip()
     if marker in normalized:
         return normalized
@@ -66,17 +61,26 @@ def ensure_replan_novelty_policy(
         str(normalized.get("recommended_action") or "run a bounded autonomous replan")
     )
     normalized["replan_novelty_policy"] = build_replan_novelty_policy()
+    trigger_identity = [
+        {
+            key: trigger.get(key)
+            for key in (
+                "kind",
+                "frontier_identity",
+                "monitor_target_id",
+                "progress_fingerprint",
+                "agent_id",
+            )
+            if trigger.get(key) is not None
+        }
+        for trigger in normalized.get("triggers") or []
+        if isinstance(trigger, dict)
+    ]
     identity_payload = {
-        key: normalized.get(key)
-        for key in (
-            "schema_version",
-            "agent_id",
-            "frontier_identity",
-            "stall_threshold",
-            "trigger_count",
-            "triggers",
-        )
-        if normalized.get(key) is not None
+        "schema_version": normalized.get("schema_version"),
+        "agent_id": normalized.get("agent_id"),
+        "frontier_identity": normalized.get("frontier_identity"),
+        "trigger_identity": trigger_identity,
     }
     normalized["obligation_id"] = "replan-" + hashlib.sha256(
         json.dumps(
@@ -94,42 +98,6 @@ def ensure_replan_novelty_policy(
 # legitimately wait several cadence cycles for external evidence, and forcing
 # replan after two unchanged polls creates churn for slow external sources.
 MONITOR_NO_CHANGE_STREAK_THRESHOLD = 5
-AUTONOMOUS_REPLAN_TRIGGER_PATTERNS = (
-    (
-        "periodic_review",
-        re.compile(r"(?i)(?:periodic review|periodic replan|review cadence|规划复盘|周期复盘|每几十轮)"),
-    ),
-    (
-        "no_progress_streak",
-        re.compile(r"(?i)(?:no[- ]?progress|stalled?|stall streak|没有实质进展|停转|连续[^。；;]*无进展)"),
-    ),
-    (
-        "repeated_action_loop",
-        re.compile(r"(?i)(?:repeated[- ]?action|action loop|same action|looped|重复动作|循环观察|反复观察)"),
-    ),
-    (
-        "phase_transition",
-        re.compile(r"(?i)(?:phase transition|next phase|stage transition|readiness .*done|阶段切换|进入下一阶段)"),
-    ),
-    (
-        "backlog_mismatch",
-        re.compile(r"(?i)(?:backlog mismatch|todo mismatch|next action mismatch|todo.*淹没|待办.*不一致)"),
-    ),
-    (
-        "evidence_contradiction",
-        re.compile(r"(?i)(?:evidence contradiction|contradictory evidence|stale evidence|stale latest-run|证据矛盾|状态矛盾)"),
-    ),
-    (
-        "explicit_replan",
-        re.compile(r"(?i)(?:autonomous replan|replan obligation|planning[- ]?trigger|重新规划|重规划|规划触发)"),
-    ),
-)
-
-
-def normalized_run_history_stall_signature(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().lower())
-
-
 def _single_public_agent_id(items: list[dict[str, Any]]) -> str | None:
     agent_ids = {
         str(item.get("agent_id") or "").strip()
@@ -188,68 +156,6 @@ def run_history_monitor_target(run: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(event, dict) and isinstance(event.get("monitor_target"), dict):
         return event.get("monitor_target")
     return None
-
-
-def run_history_stall_signal(
-    run: dict[str, Any],
-    *,
-    autonomous_replan_ack_recorded: AckRecorded,
-    neutral_classifications: set[str],
-    progress_outcomes: set[Any],
-    stall_pattern: Pattern[str],
-    public_safe_compact_text: PublicSafeText,
-    normalize_delivery_outcome: DeliveryOutcomeNormalizer,
-) -> dict[str, Any] | None:
-    if autonomous_replan_ack_recorded(run):
-        return None
-    classification = str(run.get("classification") or "").strip()
-    if not classification or classification in neutral_classifications:
-        return None
-    delivery_outcome = normalize_delivery_outcome(run.get("delivery_outcome"))
-    if delivery_outcome in progress_outcomes:
-        return None
-    recommended_action = public_safe_compact_text(run.get("recommended_action"), limit=140)
-    health_check = public_safe_compact_text(run.get("health_check"), limit=140)
-    combined = " ".join(
-        value
-        for value in (
-            classification,
-            recommended_action,
-            health_check,
-            delivery_outcome.value if delivery_outcome else "",
-        )
-        if value
-    )
-    if not combined or not stall_pattern.search(combined):
-        return None
-    action_or_classification = recommended_action or classification
-    signal = {
-        "classification": classification,
-        "generated_at": str(run.get("generated_at") or ""),
-        "agent_id": str(run.get("agent_id") or "").strip() or None,
-        "recommended_action": recommended_action,
-        "delivery_outcome": delivery_outcome.value if delivery_outcome else None,
-        "signature": normalized_run_history_stall_signature(action_or_classification),
-    }
-    turn_instance_id = str(run.get("turn_instance_id") or "").strip()
-    if turn_instance_id:
-        signal["turn_instance_id"] = turn_instance_id
-    monitor_target = run_history_monitor_target(run)
-    if monitor_target:
-        signal["monitor_target_id"] = str(monitor_target.get("target_id") or "")
-        signal["monitor_target"] = {
-            key: monitor_target.get(key)
-            for key in (
-                "schema_version",
-                "target_id",
-                "monitor_mode",
-                "effective_action",
-                "agent_id",
-                "frontier_identity",
-            )
-            if monitor_target.get(key)
-        }
-    return signal
 
 
 def run_history_monitor_wait_already_acknowledged(
@@ -319,41 +225,6 @@ def autonomous_replan_periodic_review_from_runs(
             "agent_id": _single_public_agent_id(durable_runs),
         }
     ]
-    return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
-
-
-def autonomous_replan_obligation_from_state(
-    state_text: str,
-    *,
-    agent_todos: dict[str, Any] | None,
-    section_headings: tuple[str, ...],
-    section_parser: SectionParser,
-    section_entries: SectionEntries,
-    public_safe_compact_text: PublicSafeText,
-    build_autonomous_replan_obligation: Callable[..., dict[str, Any] | None],
-    trigger_patterns: tuple[tuple[str, Pattern[str]], ...] = AUTONOMOUS_REPLAN_TRIGGER_PATTERNS,
-    max_triggers: int = MAX_AUTONOMOUS_REPLAN_TRIGGERS,
-) -> dict[str, Any] | None:
-    evidence: list[dict[str, Any]] = []
-    seen_kinds: set[str] = set()
-    sections = section_parser(state_text, section_headings)
-    for section, lines in sections.items():
-        for entry in section_entries(lines):
-            text = public_safe_compact_text(entry, limit=160)
-            if not text:
-                continue
-            for kind, pattern in trigger_patterns:
-                if kind in seen_kinds or not pattern.search(text):
-                    continue
-                evidence.append({"kind": kind, "section": section, "text": text})
-                seen_kinds.add(kind)
-                if len(evidence) >= max_triggers:
-                    break
-            if len(evidence) >= max_triggers:
-                break
-        if len(evidence) >= max_triggers:
-            break
-
     return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
 
 
@@ -582,7 +453,7 @@ def build_autonomous_replan_obligation(
                 "priority": "P1",
                 "text": (
                     "discover and promote one safe in-scope evidence-backed successor; "
-                    "otherwise record watch-lane continuation for this frontier"
+                    "otherwise record a new evidence-backed blocker or bounded terminal"
                 ),
             }
         )
@@ -636,13 +507,13 @@ def build_autonomous_replan_obligation(
         recommended_action = (
             "run a bounded autonomous replan for the exact blocked successor: "
             "promote one safe in-scope evidence-backed successor when available; "
-            "otherwise record a no-spend wait continuation for this frontier"
+            "otherwise record a new evidence-backed blocker or coverage-backed terminal"
         )
     elif dead_monitor_evidence:
         recommended_action = (
-            "resolve a dead monitor loop: record watch-lane continuation with expiry, "
-            "a concrete blocker, todo supersede, or successor runnable todo before "
-            "another quiet monitor poll"
+            "resolve a dead monitor loop with a new evidence-backed blocker, todo "
+            "supersede, runnable successor, or coverage-backed terminal before another "
+            "quiet monitor poll"
         )
     elif any(item.get("kind") in {"periodic_review", "periodic_review_due"} for item in evidence):
         recommended_action = (
@@ -673,6 +544,23 @@ def build_autonomous_replan_obligation(
         extra_fields["frontier_identity"] = dead_monitor_evidence.get(
             "monitor_target_id"
         )
+    typed_progress_evidence = next(
+        (
+            item
+            for item in evidence
+            if item.get("kind") == "typed_progress_repeat"
+            and isinstance(item.get("progress_baseline"), dict)
+        ),
+        None,
+    )
+    if typed_progress_evidence:
+        extra_fields["progress_baseline"] = typed_progress_evidence[
+            "progress_baseline"
+        ]
+        extra_fields["frontier_identity"] = (
+            "progress:"
+            + str(typed_progress_evidence.get("progress_fingerprint") or "")
+        )
     result = build_autonomous_replan_obligation_payload(
         schema_version=autonomous_replan_schema_version,
         stall_threshold=(
@@ -685,7 +573,12 @@ def build_autonomous_replan_obligation(
         guidance_actions=(
             ["set_watch_expiry", "write_blocker", "supersede_monitor", "create_successor"]
             if dead_monitor_evidence
-            else ["discover_safe_successor", "create_successor", "record_wait_continuation"]
+            else [
+                "discover_safe_successor",
+                "create_successor",
+                "write_blocker",
+                "record_coverage_terminal",
+            ]
             if blocked_successor_evidence
             else ["keep", "split", "add", "retire", "ask_decision"]
         ),
@@ -753,10 +646,6 @@ def autonomous_replan_obligation_from_runs(
     agent_id: str | None = None,
     autonomous_replan_ack_recorded: AckRecorded,
     neutral_classifications: set[str],
-    progress_outcomes: set[Any],
-    stall_pattern: Pattern[str],
-    public_safe_compact_text: PublicSafeText,
-    normalize_delivery_outcome: DeliveryOutcomeNormalizer,
     build_autonomous_replan_obligation: Callable[..., dict[str, Any] | None],
     autonomous_replan_stall_threshold: int,
     dead_monitor_repeat_threshold: int,
@@ -779,165 +668,145 @@ def autonomous_replan_obligation_from_runs(
             build_autonomous_replan_obligation=build_autonomous_replan_obligation,
         )
 
-    signals: list[dict[str, Any]] = []
-    signal_scan_limit = max(autonomous_replan_stall_threshold, dead_monitor_repeat_threshold)
+    typed_repeat = typed_progress_repeat_trigger(
+        scoped_latest_runs,
+        agent_id=agent_id,
+        threshold=autonomous_replan_stall_threshold,
+    )
+    if typed_repeat:
+        return build_autonomous_replan_obligation(
+            [typed_repeat],
+            agent_todos=agent_todos,
+        )
+
+    # Monitor rows already carry a typed monitor target. Keep this explicit
+    # state-machine input; do not infer monitor/stall state from prose fields.
+    monitor_signals: list[dict[str, Any]] = []
+    signal_scan_limit = max(
+        autonomous_replan_stall_threshold,
+        dead_monitor_repeat_threshold,
+    )
     for run in scoped_latest_runs:
         if not isinstance(run, dict):
             continue
+        if autonomous_replan_ack_recorded(run):
+            break
         classification = str(run.get("classification") or "").strip()
         if classification in neutral_classifications:
             continue
-        signal = run_history_stall_signal(
-            run,
-            autonomous_replan_ack_recorded=autonomous_replan_ack_recorded,
-            neutral_classifications=neutral_classifications,
-            progress_outcomes=progress_outcomes,
-            stall_pattern=stall_pattern,
-            public_safe_compact_text=public_safe_compact_text,
-            normalize_delivery_outcome=normalize_delivery_outcome,
-        )
-        if not signal:
+        if classification != "quota_monitor_poll":
             break
-        signals.append(signal)
-        if len(signals) >= signal_scan_limit:
+        monitor_target = run_history_monitor_target(run)
+        if not isinstance(monitor_target, dict):
+            break
+        monitor_target_id = str(monitor_target.get("target_id") or "").strip()
+        monitor_mode = str(monitor_target.get("monitor_mode") or "").strip()
+        if not monitor_target_id or not monitor_mode:
+            break
+        signal: dict[str, Any] = {
+            "classification": classification,
+            "generated_at": str(run.get("generated_at") or ""),
+            "agent_id": run_history_agent_id(run),
+            "monitor_target_id": monitor_target_id,
+            "monitor_target": {
+                key: monitor_target.get(key)
+                for key in (
+                    "schema_version",
+                    "target_id",
+                    "monitor_mode",
+                    "effective_action",
+                    "agent_id",
+                    "frontier_identity",
+                )
+                if monitor_target.get(key)
+            },
+        }
+        turn_instance_id = str(run.get("turn_instance_id") or "").strip()
+        if turn_instance_id:
+            signal["turn_instance_id"] = turn_instance_id
+        monitor_signals.append(signal)
+        if len(monitor_signals) >= signal_scan_limit:
             break
 
-    stall_signals = signals[:autonomous_replan_stall_threshold]
-    if len(stall_signals) < autonomous_replan_stall_threshold:
+    if len(monitor_signals) < autonomous_replan_stall_threshold:
         return periodic_review()
 
-    signatures = {str(signal.get("signature") or "") for signal in stall_signals if signal.get("signature")}
-    classifications = {
-        str(signal.get("classification") or "")
-        for signal in stall_signals
-        if signal.get("classification")
+    blocked_successor_signals = monitor_signals[:autonomous_replan_stall_threshold]
+    blocked_successor_modes = {
+        str((signal.get("monitor_target") or {}).get("monitor_mode") or "")
+        for signal in blocked_successor_signals
     }
-    if len(signatures) > 1 and len(classifications) > 1:
-        return periodic_review()
-    if classifications == {"quota_monitor_poll"}:
-        blocked_successor_signals = signals[:autonomous_replan_stall_threshold]
-        blocked_successor_modes = {
-            str((signal.get("monitor_target") or {}).get("monitor_mode") or "")
-            for signal in blocked_successor_signals
-        }
-        if blocked_successor_modes == {
-            "blocked_successor_wait_without_material_transition"
-        }:
-            signal_agent_id = _single_public_agent_id(blocked_successor_signals)
-            if _future_due_blocking_monitor(
-                agent_todos,
-                latest_generated_at=str(signals[0].get("generated_at") or ""),
-                agent_id=signal_agent_id or agent_id,
-            ):
-                return periodic_review()
-            monitor_target_ids = {
-                str(signal.get("monitor_target_id") or "")
-                for signal in blocked_successor_signals
-                if signal.get("monitor_target_id")
-            }
-            frontier_identities = {
-                str((signal.get("monitor_target") or {}).get("frontier_identity") or "")
-                for signal in blocked_successor_signals
-                if (signal.get("monitor_target") or {}).get("frontier_identity")
-            }
-            if len(monitor_target_ids) != 1 or len(frontier_identities) != 1:
-                return periodic_review()
-            monitor_target_id = next(iter(monitor_target_ids))
-            frontier_identity = next(iter(frontier_identities))
-            evidence = [
-                {
-                    "kind": "blocked_successor_no_progress_repeat",
-                    "section": "run_history",
-                    "text": (
-                        f"latest {autonomous_replan_stall_threshold} exact blocked "
-                        "successor waits repeated the same frontier without progress"
-                    ),
-                    "run_count": len(blocked_successor_signals),
-                    "threshold": autonomous_replan_stall_threshold,
-                    "monitor_target_id": monitor_target_id,
-                    "frontier_identity": frontier_identity,
-                    "latest_generated_at": signals[0].get("generated_at"),
-                    "agent_id": _single_public_agent_id(blocked_successor_signals),
-                }
-            ]
-            return build_autonomous_replan_obligation(
-                evidence,
-                agent_todos=agent_todos,
-            )
-        heartbeat_monitor_signals = signals[:autonomous_replan_stall_threshold]
-        heartbeat_turn_ids = {
-            str(signal.get("turn_instance_id") or "")
-            for signal in heartbeat_monitor_signals
-            if signal.get("turn_instance_id")
-        }
-        distinct_heartbeat_repeat = (
-            len(heartbeat_monitor_signals) == autonomous_replan_stall_threshold
-            and len(heartbeat_turn_ids) == autonomous_replan_stall_threshold
-        )
-        monitor_repeat_threshold = (
-            autonomous_replan_stall_threshold
-            if distinct_heartbeat_repeat
-            else dead_monitor_repeat_threshold
-        )
-        monitor_signals = signals[:monitor_repeat_threshold]
-        if len(monitor_signals) < monitor_repeat_threshold:
-            return periodic_review()
-        monitor_classifications = {
-            str(signal.get("classification") or "")
-            for signal in monitor_signals
-            if signal.get("classification")
-        }
-        if monitor_classifications != {"quota_monitor_poll"}:
-            return periodic_review()
-        if not distinct_heartbeat_repeat and run_history_monitor_wait_already_acknowledged(
-            scoped_latest_runs,
-            signal_count=len(monitor_signals),
-            autonomous_replan_ack_recorded=autonomous_replan_ack_recorded,
-            neutral_classifications=neutral_classifications,
+    if blocked_successor_modes == {
+        "blocked_successor_wait_without_material_transition"
+    }:
+        signal_agent_id = _single_public_agent_id(blocked_successor_signals)
+        if _future_due_blocking_monitor(
+            agent_todos,
+            latest_generated_at=str(monitor_signals[0].get("generated_at") or ""),
+            agent_id=signal_agent_id or agent_id,
         ):
             return periodic_review()
         monitor_target_ids = {
             str(signal.get("monitor_target_id") or "")
-            for signal in monitor_signals
+            for signal in blocked_successor_signals
             if signal.get("monitor_target_id")
         }
-        if len(monitor_target_ids) != 1:
+        frontier_identities = {
+            str((signal.get("monitor_target") or {}).get("frontier_identity") or "")
+            for signal in blocked_successor_signals
+            if (signal.get("monitor_target") or {}).get("frontier_identity")
+        }
+        if len(monitor_target_ids) != 1 or len(frontier_identities) != 1:
             return periodic_review()
-        monitor_target_id = next(iter(monitor_target_ids))
         evidence = [
             {
-                "kind": "dead_monitor_repeat",
-                "schema_version": dead_monitor_repeat_schema_version,
+                "kind": "blocked_successor_no_progress_repeat",
                 "section": "run_history",
-                "text": (
-                    f"latest {monitor_repeat_threshold} monitor polls repeated "
-                    "the same monitor target without a material transition"
-                ),
-                "run_count": len(monitor_signals),
-                "threshold": monitor_repeat_threshold,
-                "monitor_target_id": monitor_target_id,
-                "latest_generated_at": signals[0].get("generated_at"),
-                "agent_id": _single_public_agent_id(monitor_signals),
+                "run_count": len(blocked_successor_signals),
+                "threshold": autonomous_replan_stall_threshold,
+                "monitor_target_id": next(iter(monitor_target_ids)),
+                "frontier_identity": next(iter(frontier_identities)),
+                "latest_generated_at": monitor_signals[0].get("generated_at"),
+                "agent_id": _single_public_agent_id(blocked_successor_signals),
             }
         ]
         return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)
 
-    action = public_safe_compact_text(
-        stall_signals[0].get("recommended_action") or stall_signals[0].get("classification"),
-        limit=120,
+    heartbeat_signals = monitor_signals[:autonomous_replan_stall_threshold]
+    heartbeat_turn_ids = {
+        str(signal.get("turn_instance_id") or "")
+        for signal in heartbeat_signals
+        if signal.get("turn_instance_id")
+    }
+    distinct_heartbeat_repeat = (
+        len(heartbeat_signals) == autonomous_replan_stall_threshold
+        and len(heartbeat_turn_ids) == autonomous_replan_stall_threshold
     )
-    evidence_text = (
-        f"latest {autonomous_replan_stall_threshold} public run records repeated "
-        f"{action or 'the same monitor/no-progress action'}"
+    monitor_repeat_threshold = (
+        autonomous_replan_stall_threshold
+        if distinct_heartbeat_repeat
+        else dead_monitor_repeat_threshold
     )
-    evidence: list[dict[str, Any]] = [
+    repeated_monitors = monitor_signals[:monitor_repeat_threshold]
+    if len(repeated_monitors) < monitor_repeat_threshold:
+        return periodic_review()
+    monitor_target_ids = {
+        str(signal.get("monitor_target_id") or "")
+        for signal in repeated_monitors
+        if signal.get("monitor_target_id")
+    }
+    if len(monitor_target_ids) != 1:
+        return periodic_review()
+    evidence = [
         {
-            "kind": "run_history_no_progress_repeat",
+            "kind": "dead_monitor_repeat",
+            "schema_version": dead_monitor_repeat_schema_version,
             "section": "run_history",
-            "text": evidence_text,
-            "run_count": len(stall_signals),
-            "latest_generated_at": stall_signals[0].get("generated_at"),
-            "agent_id": _single_public_agent_id(stall_signals),
+            "run_count": len(repeated_monitors),
+            "threshold": monitor_repeat_threshold,
+            "monitor_target_id": next(iter(monitor_target_ids)),
+            "latest_generated_at": repeated_monitors[0].get("generated_at"),
+            "agent_id": _single_public_agent_id(repeated_monitors),
         }
     ]
     return build_autonomous_replan_obligation(evidence, agent_todos=agent_todos)

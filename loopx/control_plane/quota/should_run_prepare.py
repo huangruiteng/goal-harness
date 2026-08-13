@@ -86,27 +86,6 @@ from ..work_items.work_lane import (
 )
 
 
-def _status_evidence_log_read_receipts(
-    status_payload: Mapping[str, Any],
-    *,
-    goal_id: str,
-) -> list[dict[str, Any]]:
-    attention_queue = status_payload.get("attention_queue")
-    items = (
-        attention_queue.get("items")
-        if isinstance(attention_queue, Mapping)
-        else []
-    )
-    for item in items if isinstance(items, list) else []:
-        if not isinstance(item, Mapping):
-            continue
-        if str(item.get("goal_id") or "") != goal_id:
-            continue
-        receipts = item.get("evidence_log_read_receipts")
-        if isinstance(receipts, list):
-            return [item for item in receipts if isinstance(item, dict)]
-    return []
-
 @dataclass(slots=True)
 class _QuotaDecisionPreparation:
     status_payload: dict[str, Any]
@@ -601,10 +580,6 @@ def _prepare_quota_should_run_item(
         registered_agent_ids=registered_agent_ids,
         goal_status=str(registry_goal.get("status") or ""),
         agent_profile=_quota_agent_profile(agent_identity),
-        evidence_log_read_receipts=_status_evidence_log_read_receipts(
-            status_payload,
-            goal_id=safe_goal_id,
-        ),
     )
     replan_obligation = goal_frontier_context.get("replan_obligation")
     replan_scope = goal_frontier_context.get("replan_scope") or {}

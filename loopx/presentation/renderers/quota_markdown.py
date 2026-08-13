@@ -664,6 +664,16 @@ def render_quota_should_run_markdown(payload: dict[str, Any]) -> str:
             f"trigger_count={replan_obligation.get('trigger_count')} "
             f"triggers={','.join(trigger_kinds)}"
         )
+    replan_action_packet = as_dict(payload.get("replan_action_packet"))
+    if replan_action_packet:
+        uncovered = as_dict(replan_action_packet.get("uncovered_frontier"))
+        required_any_of = as_list(uncovered.get("required_any_of"))
+        lines.append(
+            "- replan_action_packet: "
+            f"obligation_id={replan_action_packet.get('obligation_id')} "
+            f"required_outcome={replan_action_packet.get('required_outcome')} "
+            f"required_any_of={','.join(str(value) for value in required_any_of)}"
+        )
     required_reads = as_list(payload.get("required_reads"))
     for read in required_reads[:3]:
         if not isinstance(read, dict):

@@ -2,44 +2,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...work_items.repair_delta import repair_delta_kinds_have_frontier_delta
-from ..goal_vision_policy import goal_vision_repeats_advancement_until_closed
-from . import outcome_continuity
-
-REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
-    outcome_continuity.REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
+from ...todos.contract import (
+    TODO_TASK_CLASS_ADVANCEMENT,
+    normalize_todo_claimed_by,
+    normalize_todo_id,
+    normalize_todo_replan_obligation_id,
+    normalize_todo_status,
 )
+from ...work_items.progress_observation import required_semantic_outcomes
 
 
 def autonomous_replan_ack_has_frontier_delta(ack: dict[str, Any] | None) -> bool:
     if not isinstance(ack, dict) or ack.get("recorded") is not True:
         return False
-    delta_contract = ack.get("delta_contract")
-    if (
-        not isinstance(delta_contract, dict)
-        or delta_contract.get("delta_present") is not True
-    ):
-        return False
-    return repair_delta_kinds_have_frontier_delta(delta_contract.get("delta_kinds"))
-
-
-def blocked_successor_repeat_vision_open(
-    replan_obligation: dict[str, Any] | None,
-    acceptance_gaps: list[dict[str, Any]] | None,
-) -> bool:
-    trigger_kinds = {
-        str(trigger.get("kind") or "").strip()
-        for trigger in (
-            replan_obligation.get("triggers") or []
-            if isinstance(replan_obligation, dict)
-            else []
-        )
-        if isinstance(trigger, dict)
-    }
-    return "blocked_successor_no_progress_repeat" in trigger_kinds and any(
-        goal_vision_repeats_advancement_until_closed(gap.get("advancement_policy"))
-        for gap in (acceptance_gaps or [])
-        if isinstance(gap, dict)
+    semantic_delta = ack.get("semantic_delta")
+    return bool(
+        isinstance(semantic_delta, dict)
+        and semantic_delta.get("accepted") is True
+        and semantic_delta.get("outcomes")
     )
 
 
@@ -48,30 +28,95 @@ def autonomous_replan_ack_satisfies_obligation(
     *,
     replan_obligation: dict[str, Any] | None,
     acceptance_gaps: list[dict[str, Any]] | None,
-    required_read_validation: dict[str, Any] | None = None,
 ) -> bool:
-    """Reject ACKs that miss either a required read or a required frontier delta."""
+    """Reject ACKs that miss the obligation's typed semantic outcome."""
 
     if not autonomous_replan_ack_has_frontier_delta(ack):
         return False
-    if (
-        isinstance(required_read_validation, dict)
-        and required_read_validation.get("accepted") is False
-    ):
+    semantic_delta = ack.get("semantic_delta") if isinstance(ack, dict) else {}
+    obligation_id = str((replan_obligation or {}).get("obligation_id") or "").strip()
+    acknowledged_obligation_id = str(
+        semantic_delta.get("obligation_id")
+        if isinstance(semantic_delta, dict)
+        else ""
+    ).strip()
+    if not obligation_id or acknowledged_obligation_id != obligation_id:
         return False
-    if not blocked_successor_repeat_vision_open(
-        replan_obligation,
-        acceptance_gaps,
-    ):
-        return True
-    delta_contract = ack.get("delta_contract") if isinstance(ack, dict) else {}
-    delta_kinds = {
+    outcomes = {
         str(item or "").strip()
         for item in (
-            delta_contract.get("delta_kinds") or []
-            if isinstance(delta_contract, dict)
+            semantic_delta.get("outcomes") or []
+            if isinstance(semantic_delta, dict)
             else []
         )
         if str(item or "").strip()
     }
-    return bool(delta_kinds & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS))
+    required = set(required_semantic_outcomes(replan_obligation or {}))
+    return bool(outcomes & required)
+
+
+def replan_successor_transition_ack(
+    agent_todo_summary: dict[str, Any] | None,
+    *,
+    agent_id: str | None,
+    replan_obligation: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Project an exact runnable-successor Todo as the replan receipt.
+
+    The Todo row is the durable fact.  No prose classification and no second
+    ACK command are involved.  A receipt applies only while the bound Todo is
+    still open, advancement-class, runnable, and owned by the same agent.
+    """
+
+    obligation_id = normalize_todo_replan_obligation_id(
+        (replan_obligation or {}).get("obligation_id")
+    )
+    safe_agent_id = normalize_todo_claimed_by(agent_id)
+    if not obligation_id or not safe_agent_id:
+        return None
+    executable_items = (
+        agent_todo_summary.get("first_executable_items")
+        if isinstance(agent_todo_summary, dict)
+        and isinstance(agent_todo_summary.get("first_executable_items"), list)
+        else []
+    )
+    successor = next(
+        (
+            item
+            for item in executable_items
+            if isinstance(item, dict)
+            and normalize_todo_status(item.get("status")) == "open"
+            and item.get("task_class") == TODO_TASK_CLASS_ADVANCEMENT
+            and normalize_todo_claimed_by(item.get("claimed_by"))
+            == safe_agent_id
+            and normalize_todo_replan_obligation_id(
+                item.get("replan_obligation_id")
+            )
+            == obligation_id
+            and normalize_todo_id(item.get("todo_id"))
+        ),
+        None,
+    )
+    if successor is None:
+        return None
+    successor_todo_id = normalize_todo_id(successor.get("todo_id"))
+    semantic_delta = {
+        "schema_version": "replan_semantic_delta_v0",
+        "accepted": True,
+        "outcomes": ["new_runnable_successor"],
+        "satisfying_outcomes": ["new_runnable_successor"],
+        "required_any_of": required_semantic_outcomes(replan_obligation or {}),
+        "obligation_id": obligation_id,
+        "successor_todo_id": successor_todo_id,
+        "reason": (
+            "an exact current-obligation Todo transition created a runnable "
+            "successor"
+        ),
+    }
+    return {
+        "schema_version": "autonomous_replan_ack_v0",
+        "recorded": True,
+        "source": "todo_replan_successor_transition",
+        "generated_at": successor.get("updated_at"),
+        "semantic_delta": semantic_delta,
+    }

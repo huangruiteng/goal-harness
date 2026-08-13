@@ -64,6 +64,7 @@ def append_todo_rollout_event(
             "added": bool(payload.get("added")),
             "already_exists": bool(payload.get("already_exists")),
             "mutation_authority": payload.get("mutation_authority"),
+            "replan_transition": payload.get("replan_transition"),
             "settlement_effect_id": (
                 payload.get("settlement_identity", {}).get("effect_id")
                 if isinstance(payload.get("settlement_identity"), dict)

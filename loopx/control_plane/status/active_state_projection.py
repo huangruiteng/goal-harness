@@ -21,9 +21,6 @@ from ..todos.todo_summary import (
     MAX_STATUS_TODOS_PER_ROLE,
     normalize_todo_text,
 )
-from ..work_items.autonomous_replan_obligation import (
-    autonomous_replan_obligation_from_state as _autonomous_replan_obligation_from_state,
-)
 from ..work_items.backlog_hygiene import (
     MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS,
     backlog_hygiene_warning as _backlog_hygiene_warning,
@@ -31,7 +28,6 @@ from ..work_items.backlog_hygiene import (
 from ..work_items.issue_meta_surface import (
     parse_issue_meta_surface as _parse_issue_meta_surface,
 )
-from .autonomous_replan_projection import build_autonomous_replan_obligation
 
 
 STATE_EVENT_LOG_BASENAME = "events.jsonl"
@@ -40,10 +36,6 @@ BACKLOG_HYGIENE_SECTION_HEADINGS = ("Next Action", "Operating Lessons")
 BACKLOG_HYGIENE_BULLET_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+?)\s*$")
 BACKLOG_HYGIENE_HINT_PATTERN = re.compile(
     r"(?i)(?:\[p[0-4]\]|todo|backlog|follow[- ]?up|queue|audit|regression|smoke|cadence|mirror|monitor|sub-?agent|待办|回归|审计|修复|检查|推进)"
-)
-AUTONOMOUS_REPLAN_SECTION_HEADINGS = (
-    "Next Action",
-    "Operating Lessons",
 )
 
 
@@ -110,20 +102,4 @@ def backlog_hygiene_warning(state_text: str, *, agent_todos: dict[str, Any] | No
         hint_pattern=BACKLOG_HYGIENE_HINT_PATTERN,
         public_safe_compact_text=public_safe_compact_text,
         max_evidence_items=MAX_BACKLOG_HYGIENE_EVIDENCE_ITEMS,
-    )
-
-
-def autonomous_replan_obligation(
-    state_text: str,
-    *,
-    agent_todos: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    return _autonomous_replan_obligation_from_state(
-        state_text,
-        agent_todos=agent_todos,
-        section_headings=AUTONOMOUS_REPLAN_SECTION_HEADINGS,
-        section_parser=active_state_sections,
-        section_entries=active_state_section_entries,
-        public_safe_compact_text=public_safe_compact_text,
-        build_autonomous_replan_obligation=build_autonomous_replan_obligation,
     )

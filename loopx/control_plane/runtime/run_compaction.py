@@ -84,6 +84,7 @@ RUN_BASE_COMPACT_FIELDS = (
     "agent_id",
     "agent_lane",
     "progress_scope",
+    "progress_observation",
     "delivery_batch_scale",
     "delivery_outcome",
     "lifecycle_phase",

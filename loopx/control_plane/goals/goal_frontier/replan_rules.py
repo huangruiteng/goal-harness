@@ -19,8 +19,6 @@ class GoalFrontierReplanRule(str, Enum):
     TODO_SUCCESSION_GAP = "todo_succession_gap"
     VISION_ACCEPTANCE_GAP = "vision_acceptance_gap"
     LONG_TODO_CHAIN = "long_todo_chain"
-    LONG_TODO_CHAIN_ACKNOWLEDGED = "long_todo_chain_acknowledged"
-    WATCH_LANE_CONTINUATION_ACKNOWLEDGED = "watch_lane_continuation_acknowledged"
     CURRENT_AGENT_BLOCKER = "current_agent_blocker"
     MONITOR_NO_CHANGE_STREAK = "monitor_no_change_streak"
     NOT_MONITOR_ONLY = "not_monitor_only"
@@ -45,10 +43,7 @@ class GoalFrontierReplanFacts:
     acceptance_gap_count: int = 0
     selectable_frontier_advancement: int = 0
     outcome_checkpoint_replan_required: bool = False
-    acceptance_allows_watch_lane_continuation: bool = False
     long_todo_chain_triggered: bool = False
-    long_todo_chain_acknowledged: bool = False
-    watch_lane_continuation_acknowledged: bool = False
     current_agent_blocker_count: int = 0
     monitor_no_change_streak_triggered: bool = False
     monitor_only_lane: bool = False
@@ -117,10 +112,6 @@ def select_goal_frontier_replan_rule(
                 facts.successor_vision_required
                 or facts.outcome_checkpoint_replan_required
                 or facts.selectable_frontier_advancement == 0
-            )
-            and (
-                facts.outcome_checkpoint_replan_required
-                or not facts.acceptance_allows_watch_lane_continuation
             ),
             True,
             (
@@ -130,22 +121,9 @@ def select_goal_frontier_replan_rule(
         ),
         (
             GoalFrontierReplanRule.LONG_TODO_CHAIN,
-            facts.long_todo_chain_triggered
-            and not facts.long_todo_chain_acknowledged,
+            facts.long_todo_chain_triggered,
             True,
             "the selectable todo chain crossed the bounded replan threshold",
-        ),
-        (
-            GoalFrontierReplanRule.LONG_TODO_CHAIN_ACKNOWLEDGED,
-            facts.long_todo_chain_triggered and facts.long_todo_chain_acknowledged,
-            False,
-            "a frontier-delta acknowledgement covers the long todo chain",
-        ),
-        (
-            GoalFrontierReplanRule.WATCH_LANE_CONTINUATION_ACKNOWLEDGED,
-            facts.watch_lane_continuation_acknowledged,
-            False,
-            "an explicit watch-lane continuation covers the empty frontier",
         ),
         (
             GoalFrontierReplanRule.CURRENT_AGENT_BLOCKER,

@@ -154,14 +154,34 @@ def protocol_replan_requires_runnable_todo(payload: dict[str, Any]) -> bool:
         if isinstance(payload.get("autonomous_replan_obligation"), dict)
         else {}
     )
-    satisfying_delta_kinds = {
-        str(item or "").strip()
-        for item in (replan_obligation.get("satisfying_repair_delta_kinds") or [])
-        if str(item or "").strip()
-    }
+    return replan_obligation.get("agent_todo_writeback_required") is True
+
+
+def protocol_replan_action_packet_instruction(payload: dict[str, Any]) -> str:
+    packet = (
+        payload.get("replan_action_packet")
+        if isinstance(payload.get("replan_action_packet"), dict)
+        else {}
+    )
+    uncovered = (
+        packet.get("uncovered_frontier")
+        if isinstance(packet.get("uncovered_frontier"), dict)
+        else {}
+    )
+    outcomes = [
+        str(value or "").strip()
+        for value in (uncovered.get("required_any_of") or [])
+        if str(value or "").strip()
+    ]
+    if outcomes:
+        return (
+            "select and produce one typed semantic outcome from "
+            + ", ".join(outcomes)
+            + "; use the host-projected coverage ledger before choosing the next slice"
+        )
     return (
-        "runnable_todo_set" in satisfying_delta_kinds
-        or replan_obligation.get("agent_todo_writeback_required") is True
+        "select and produce one typed semantic outcome from the host-projected "
+        "replan action packet"
     )
 
 
@@ -224,13 +244,7 @@ def resolve_canonical_primary_action(payload: dict[str, Any], *, mode: str) -> s
             "write a compact blocker when it is absent"
         )
     if mode == "autonomous_replan":
-        strict_replan_action = protocol_strict_replan_action(payload)
-        if strict_replan_action:
-            return strict_replan_action
-        lane_action = protocol_first_candidate_action(payload)
-        if lane_action:
-            return f"run one bounded autonomous replan slice around {lane_action}"
-        return "run one bounded self-repair or replan segment before another quiet no-op"
+        return protocol_replan_action_packet_instruction(payload)
     if mode == "monitor_quiet_skip":
         return (
             "ensure this heartbeat's idempotent quota receipt is committed, then "

@@ -8,7 +8,6 @@ from ...work_items.autonomous_replan_ack import (
 
 VISION_CHECKPOINT_SATISFIED_DECISIONS = {
     "patched",
-    "retired_or_superseded",
     "unchanged_with_reason",
 }
 
@@ -50,6 +49,16 @@ def _latest_runs_for_goal(
     )
 
 
+def latest_runs_for_goal(
+    status_payload: dict[str, Any],
+    *,
+    goal_id: str,
+) -> list[dict[str, Any]]:
+    """Return newest-first compact runs used by semantic reducers."""
+
+    return _latest_runs_for_goal(status_payload, goal_id=goal_id)
+
+
 def _semantic_agent_context_for_goal(
     status_payload: dict[str, Any],
     *,
@@ -83,29 +92,6 @@ def _run_agent_id_matches(run: dict[str, Any], *, agent_id: str | None) -> bool:
         return True
     run_agent_id = str(run.get("agent_id") or "").strip()
     return not run_agent_id or run_agent_id == agent_id
-
-
-def _run_retires_prior_agent_vision(
-    run: dict[str, Any],
-    *,
-    agent_id: str | None,
-) -> bool:
-    if not _run_agent_id_matches(run, agent_id=agent_id):
-        return False
-    checkpoint = (
-        run.get("vision_checkpoint")
-        if isinstance(run.get("vision_checkpoint"), dict)
-        else {}
-    )
-    checkpoint_agent_id = str(
-        checkpoint.get("agent_id") or run.get("agent_id") or ""
-    ).strip()
-    if agent_id and checkpoint_agent_id and checkpoint_agent_id != agent_id:
-        return False
-    return bool(
-        checkpoint.get("satisfied") is True
-        and str(checkpoint.get("decision") or "").strip() == "retired_or_superseded"
-    )
 
 
 def latest_agent_vision_from_status_payload(
@@ -152,8 +138,6 @@ def latest_agent_vision_from_runs(
     for run in runs:
         vision = run.get("agent_vision")
         if not isinstance(vision, dict):
-            if _run_retires_prior_agent_vision(run, agent_id=agent_id):
-                return None
             continue
         vision_agent_id = str(
             vision.get("agent_id") or run.get("agent_id") or ""

@@ -23,6 +23,7 @@ TODO_CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 TODO_CAPABILITY_BINDING_REF_PATTERN = re.compile(
     r"^[a-z][a-z0-9_.-]{0,31}:[a-z][a-z0-9_.:-]{2,95}$"
 )
+TODO_REPLAN_OBLIGATION_ID_PATTERN = re.compile(r"^replan-[a-f0-9]{16}$")
 TODO_EXPLORE_RESULT_NODE_REF_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,95}$")
 TODO_EXPLORE_RESULT_NODE_REF_LIMIT = 8
 TODO_DECISION_SCOPE_KEY_PATTERN = re.compile(r"^(?:\*|[a-z0-9][a-z0-9_.:@*/-]{0,95})$")
@@ -255,6 +256,15 @@ def normalize_todo_task_domain(value: Any) -> str | None:
     if not candidate:
         return None
     if TODO_TASK_DOMAIN_PATTERN.fullmatch(candidate):
+        return candidate
+    return None
+
+
+def normalize_todo_replan_obligation_id(value: Any) -> str | None:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    if TODO_REPLAN_OBLIGATION_ID_PATTERN.fullmatch(candidate):
         return candidate
     return None
 
@@ -1055,6 +1065,14 @@ _TODO_METADATA_FIELD_SCHEMA = (
         ),
     ),
     _TodoMetadataField(
+        "replan_obligation_id",
+        normalize_todo_replan_obligation_id,
+        invalid_message=(
+            "replan_obligation_id must use the current replan-<16 lowercase hex> "
+            "identity"
+        ),
+    ),
+    _TodoMetadataField(
         "resume_when",
         normalize_todo_resume_when,
         invalid_message=(
@@ -1210,6 +1228,7 @@ def format_todo_metadata_line(
     global_gate: bool | None = None,
     unblocks_todo_id: str | None = None,
     successor_todo_ids: Any = None,
+    replan_obligation_id: str | None = None,
     resume_when: str | None = None,
     no_followup: bool | None = None,
     target_key: str | None = None,

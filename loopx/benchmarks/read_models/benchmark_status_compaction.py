@@ -9,9 +9,6 @@ from ...control_plane.work_items.delivery_batch_scale import (
     SMALL_DELIVERY_BATCH_SCALES as STRUCTURED_SMALL_DELIVERY_BATCH_SCALES,
     UNKNOWN_DELIVERY_BATCH_SCALE,
 )
-from ...control_plane.work_items.delivery_outcome import (
-    PROGRESS_DELIVERY_OUTCOMES,
-)
 from ...history import STATUS_NEUTRAL_CLASSIFICATIONS as HISTORY_STATUS_NEUTRAL_CLASSIFICATIONS
 from ...control_plane.work_items.project_asset import (
     TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION as TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION,
@@ -29,7 +26,6 @@ from ...control_plane.work_items.autonomous_replan_ack import (
 )
 from ...control_plane.work_items.autonomous_replan_obligation import (
     AUTONOMOUS_REPLAN_STALL_THRESHOLD as _AUTONOMOUS_REPLAN_STALL_THRESHOLD_READ_MODEL,
-    AUTONOMOUS_REPLAN_TRIGGER_PATTERNS as _AUTONOMOUS_REPLAN_TRIGGER_PATTERNS_READ_MODEL,
     MAX_AUTONOMOUS_REPLAN_TRIGGERS as _MAX_AUTONOMOUS_REPLAN_TRIGGERS_READ_MODEL,
 )
 from ...control_plane.work_items.backlog_hygiene import (
@@ -231,20 +227,11 @@ BACKLOG_HYGIENE_HINT_PATTERN = re.compile(
 )
 AUTONOMOUS_REPLAN_SCHEMA_VERSION = "autonomous_replan_obligation_v0"
 DEAD_MONITOR_REPEAT_SCHEMA_VERSION = "dead_monitor_repeat_v0"
-AUTONOMOUS_REPLAN_SECTION_HEADINGS = (
-    "Next Action",
-    "Operating Lessons",
-)
-AUTONOMOUS_REPLAN_TRIGGER_PATTERNS = _AUTONOMOUS_REPLAN_TRIGGER_PATTERNS_READ_MODEL
-AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES = PROGRESS_DELIVERY_OUTCOMES
 AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS = {
     "quota_slot_spent",
     "quota_slot_voided",
     "delivery_completion_spend_accounted_v0",
 }
-AUTONOMOUS_RUN_HISTORY_STALL_PATTERN = re.compile(
-    r"(?i)(?:monitor|observe|observation|poll|watch|quiet|no[-_ ]?op|no[-_ ]?progress|stalled?|unchanged|dependency|停转|无进展|重复|反复|观察|轮询)"
-)
 
 
 

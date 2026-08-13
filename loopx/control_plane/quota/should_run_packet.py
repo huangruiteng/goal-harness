@@ -27,6 +27,7 @@ from ..agents.agent_scope import (
 from ..goals.goal_frontier import (
     AUTONOMOUS_REPLAN_REQUIRED_MODE,
 )
+from ..work_items.progress_observation import build_replan_action_packet
 from ..quota.goal_boundary import (
     quota_execution_profile_summary as _quota_execution_profile_summary,
 )
@@ -73,7 +74,6 @@ from ..scheduler.state import (
     CODEX_APP_SURFACE,
     load_scheduler_state,
 )
-from ..runtime.agent_scoped_evidence_log import build_agent_scoped_required_read
 from ..runtime.decision_freshness import decision_freshness_warning as _decision_freshness_warning
 from ..runtime.promotion_readiness import promotion_readiness_warning as _promotion_readiness_warning
 from ..todos.contract import (
@@ -411,6 +411,7 @@ def _apply_agent_monitor_only_precedence(
         "open_todo_notification_policy",
         "open_todo_notify_reason",
         "required_reads",
+        "replan_action_packet",
         "scoped_user_gate_fallback",
         "stall_self_repair",
         "vision_continuation_audit",
@@ -922,6 +923,8 @@ def _build_quota_should_run_payload(
         "plan_summary": prepared.plan.get("summary"),
         "todo_write_hint": build_todo_write_hint(prepared.safe_goal_id),
     }
+    if payload["safe_bypass_policy"] is None:
+        payload.pop("safe_bypass_policy")
     payload = attach_task_orchestration_payload(
         payload,
         prepared.task_orchestration_contract,
@@ -1072,14 +1075,14 @@ def _build_quota_should_run_payload(
         monitor_only=prepared.agent_monitor_only,
         inbox_reply_due=prepared.inbox_reply_due,
     )
-    required_reads = _quota_required_reads(payload)
-    if required_reads:
-        payload["required_reads"] = required_reads
-        if isinstance(payload.get("autonomous_replan_obligation"), dict):
-            payload["autonomous_replan_obligation"] = {
-                **payload["autonomous_replan_obligation"],
-                "required_reads": required_reads,
-            }
+    if isinstance(payload.get("autonomous_replan_obligation"), dict):
+        payload["replan_action_packet"] = build_replan_action_packet(
+            payload["autonomous_replan_obligation"],
+            goal_id=prepared.safe_goal_id,
+            agent_id=(
+                quota_decision_agent_id(payload) or prepared.requested_agent_id
+            ),
+        )
     payload["automation_liveness"] = build_automation_liveness(payload)
     payload["interaction_contract"] = build_interaction_contract(
         payload,
@@ -1113,34 +1116,3 @@ def _build_quota_should_run_payload(
     )
     payload["protocol_action_packet"] = build_protocol_action_packet(payload)
     return payload
-
-
-def _quota_required_reads(decision: dict[str, Any]) -> list[dict[str, Any]]:
-    """Materialize only evidence reads requested by the novelty policy.
-
-    A generic replan action is not enough: that was the old, low-salience hint
-    path. The prompt-visible novelty policy is now the causal owner and the
-    required-read packet is its executable evidence provider.
-    """
-
-    obligation = decision.get("autonomous_replan_obligation")
-    if not isinstance(obligation, dict):
-        return []
-    policy = obligation.get("replan_novelty_policy")
-    if not isinstance(policy, dict):
-        return []
-    evidence_source = str(
-        policy.get("evidence_source") or policy.get("evidence") or ""
-    ).strip()
-    if evidence_source != "agent_scoped_evidence_log":
-        return []
-    read = build_agent_scoped_required_read(
-        goal_id=str(decision.get("goal_id") or ""),
-        agent_id=quota_decision_agent_id(decision),
-        required_read_id=str(obligation.get("obligation_id") or "") or None,
-        reason=(
-            "novelty policy evidence source; execute before selecting the "
-            "replan repair delta"
-        ),
-    )
-    return [read] if read else []

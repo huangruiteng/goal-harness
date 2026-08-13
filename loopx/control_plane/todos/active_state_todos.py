@@ -84,7 +84,6 @@ def active_state_todo_fields(
     parse_issue_meta_surface: Callable[[str], dict[str, Any] | None],
     backlog_hygiene_warning: Callable[..., dict[str, Any] | None],
     completed_todo_archive_warning: Callable[[dict[str, Any] | None], dict[str, Any] | None],
-    autonomous_replan_obligation: Callable[..., dict[str, Any] | None],
     state_projection_gap_warning: Callable[..., dict[str, Any] | None],
     attach_monitor_writeback_contract: Callable[..., None] | None = None,
     redacted_status_todo_fields: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
@@ -164,12 +163,6 @@ def active_state_todo_fields(
     )
     if archive_warning:
         fields["completed_todo_archive_warning"] = archive_warning
-    replan_obligation = autonomous_replan_obligation(
-        state_text,
-        agent_todos=fields.get("agent_todos") if isinstance(fields.get("agent_todos"), dict) else None,
-    )
-    if replan_obligation:
-        fields["autonomous_replan_obligation"] = replan_obligation
     projection_gap = state_projection_gap_warning(
         state_text,
         user_todos=fields.get("user_todos") if isinstance(fields.get("user_todos"), dict) else None,

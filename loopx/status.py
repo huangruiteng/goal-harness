@@ -20,7 +20,6 @@ from .control_plane.work_items.delivery_batch_scale import (
 )
 from .control_plane.work_items.delivery_outcome import (
     DELIVERY_OUTCOME_NOT_CONFIGURED,
-    PROGRESS_DELIVERY_OUTCOMES,
     delivery_turn_kind_for_run,
 )
 from .doctor import (
@@ -89,7 +88,6 @@ from .control_plane.work_items.autonomous_replan_ack import (
 )
 from .control_plane.work_items.autonomous_replan_obligation import (
     AUTONOMOUS_REPLAN_STALL_THRESHOLD as _AUTONOMOUS_REPLAN_STALL_THRESHOLD_READ_MODEL,
-    AUTONOMOUS_REPLAN_TRIGGER_PATTERNS as _AUTONOMOUS_REPLAN_TRIGGER_PATTERNS_READ_MODEL,
     MAX_AUTONOMOUS_REPLAN_TRIGGERS as _MAX_AUTONOMOUS_REPLAN_TRIGGERS_READ_MODEL,
 )
 from .control_plane.work_items.backlog_hygiene import (
@@ -395,20 +393,11 @@ BACKLOG_HYGIENE_HINT_PATTERN = re.compile(
 )
 AUTONOMOUS_REPLAN_SCHEMA_VERSION = "autonomous_replan_obligation_v0"
 DEAD_MONITOR_REPEAT_SCHEMA_VERSION = "dead_monitor_repeat_v0"
-AUTONOMOUS_REPLAN_SECTION_HEADINGS = (
-    "Next Action",
-    "Operating Lessons",
-)
-AUTONOMOUS_REPLAN_TRIGGER_PATTERNS = _AUTONOMOUS_REPLAN_TRIGGER_PATTERNS_READ_MODEL
-AUTONOMOUS_RUN_HISTORY_PROGRESS_OUTCOMES = PROGRESS_DELIVERY_OUTCOMES
 AUTONOMOUS_RUN_HISTORY_NEUTRAL_CLASSIFICATIONS = {
     "quota_slot_spent",
     "quota_slot_voided",
     "delivery_completion_spend_accounted_v0",
 }
-AUTONOMOUS_RUN_HISTORY_STALL_PATTERN = re.compile(
-    r"(?i)(?:monitor|observe|observation|poll|watch|quiet|no[-_ ]?op|no[-_ ]?progress|stalled?|unchanged|dependency|停转|无进展|重复|反复|观察|轮询)"
-)
 
 
 
@@ -474,18 +463,6 @@ def backlog_hygiene_warning(state_text: str, *, agent_todos: dict[str, Any] | No
     return _backlog_hygiene_warning(state_text, agent_todos=agent_todos)
 
 
-def autonomous_replan_obligation(
-    state_text: str,
-    *,
-    agent_todos: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    from .control_plane.status.active_state_projection import (
-        autonomous_replan_obligation as _autonomous_replan_obligation,
-    )
-
-    return _autonomous_replan_obligation(state_text, agent_todos=agent_todos)
-
-
 def build_autonomous_replan_obligation(
     evidence: list[dict[str, Any]],
     *,
@@ -499,14 +476,6 @@ def build_autonomous_replan_obligation(
         evidence,
         agent_todos=agent_todos,
     )
-
-
-def _run_history_stall_signal(run: dict[str, Any]) -> dict[str, Any] | None:
-    from .control_plane.status.autonomous_replan_projection import (
-        _run_history_stall_signal as _run_history_stall_signal_projection,
-    )
-
-    return _run_history_stall_signal_projection(run)
 
 
 def run_history_monitor_wait_already_acknowledged(
@@ -830,7 +799,6 @@ def active_state_todo_fields(
         parse_issue_meta_surface=parse_issue_meta_surface,
         backlog_hygiene_warning=backlog_hygiene_warning,
         completed_todo_archive_warning=completed_todo_archive_warning,
-        autonomous_replan_obligation=autonomous_replan_obligation,
         state_projection_gap_warning=state_projection_gap_warning,
     )
 

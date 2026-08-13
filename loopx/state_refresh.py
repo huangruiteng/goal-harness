@@ -33,15 +33,14 @@ from .control_plane.work_items.repair_delta import (
     repair_delta_kinds_have_accountable_progress,
 )
 from .control_plane.work_items.autonomous_replan_ack import (
-    REPLAN_REQUIRED_READ_LIMIT,
     latest_monitor_replan_frontier_identity,
     watch_lane_continuation_todo_ids,
 )
-from .control_plane.runtime.agent_scoped_evidence_log import (
-    build_agent_scoped_evidence_log_command,
+from .control_plane.work_items.progress_observation import (
+    normalize_progress_observation,
 )
-from .control_plane.status.autonomous_replan_projection import (
-    autonomous_replan_obligation_from_runs,
+from .control_plane.work_items.semantic_replan_writeback import (
+    enforce_open_replan_writeback,
 )
 from .control_plane.runtime.shared_runtime_refresh_projection import (
     build_shared_runtime_projection,
@@ -211,15 +210,11 @@ def build_vision_checkpoint(
     existing_agent_vision: dict[str, Any] | None,
     vision_unchanged_reason: str | None,
     delivery_outcome: str | None,
-    autonomous_replan_recorded: bool,
     active_state_next_action_update: dict[str, Any] | None,
-    repair_delta_kinds: list[str] | None,
 ) -> dict[str, Any]:
     """Return the explicit vision closeout decision for this refresh run."""
 
     triggers: list[dict[str, Any]] = []
-    if autonomous_replan_recorded:
-        triggers.append({"kind": "autonomous_replan_recorded"})
     if delivery_outcome in VISION_CHECKPOINT_MATERIAL_OUTCOMES:
         triggers.append(
             {
@@ -230,7 +225,6 @@ def build_vision_checkpoint(
     if active_state_next_action_update and active_state_next_action_update.get("would_update"):
         triggers.append({"kind": "durable_next_action_update"})
 
-    delta_kinds = set(repair_delta_kinds or [])
     unchanged = normalize_vision_unchanged_reason(vision_unchanged_reason)
 
     required = bool(triggers or unchanged)
@@ -243,9 +237,6 @@ def build_vision_checkpoint(
     elif unchanged:
         decision = "missing_required"
         satisfied = False
-    elif delta_kinds & {"no_followup", "successor_or_supersede"}:
-        decision = "retired_or_superseded"
-        satisfied = True
     elif required:
         decision = "missing_required"
         satisfied = False
@@ -269,15 +260,10 @@ def build_vision_checkpoint(
     elif unchanged:
         checkpoint["missing_baseline"] = True
         checkpoint["rejected_unchanged_reason"] = unchanged
-    if delta_kinds:
-        checkpoint["repair_delta_kinds"] = sorted(delta_kinds)
     if not satisfied:
         checkpoint["required_resolution"] = ["write_vision_patch"]
         if not checkpoint.get("missing_baseline"):
             checkpoint["required_resolution"].append("record_unchanged_reason")
-        checkpoint["required_resolution"].extend(
-            ["record_no_followup", "link_successor_or_supersede"]
-        )
     return checkpoint
 
 
@@ -530,9 +516,11 @@ def build_state_refresh_record(
     agent_lane: str | None = None,
     autonomous_replan_recorded: bool = False,
     repair_delta_contract: dict[str, Any] | None = None,
+    replan_semantic_delta: dict[str, Any] | None = None,
     autonomous_replan_frontier_identity: str | None = None,
     agent_vision: dict[str, Any] | None = None,
     vision_checkpoint: dict[str, Any] | None = None,
+    progress_observation: dict[str, Any] | None = None,
     delivery_workspace: dict[str, Any] | None = None,
     settlement_identity: SettlementIdentity | None = None,
 ) -> dict[str, Any]:
@@ -591,6 +579,10 @@ def build_state_refresh_record(
         }
         if repair_delta_contract:
             record["autonomous_replan_ack"]["delta_contract"] = repair_delta_contract
+        if replan_semantic_delta:
+            record["autonomous_replan_ack"]["semantic_delta"] = (
+                replan_semantic_delta
+            )
         if autonomous_replan_frontier_identity:
             record["autonomous_replan_ack"]["frontier_identity"] = (
                 autonomous_replan_frontier_identity
@@ -599,6 +591,8 @@ def build_state_refresh_record(
         record["agent_vision"] = agent_vision
     if vision_checkpoint:
         record["vision_checkpoint"] = vision_checkpoint
+    if progress_observation:
+        record["progress_observation"] = progress_observation
     if progress_scope:
         record["progress_scope"] = progress_scope
     if agent_id:
@@ -652,7 +646,7 @@ def _build_state_refresh_output_projections(
             index_record[field] = record[field]
 
     replan_ack = record.get("autonomous_replan_ack") or {}
-    if autonomous_replan_recorded_requested:
+    if autonomous_replan_recorded_requested or replan_ack.get("recorded") is True:
         index_record["autonomous_replan_ack"] = replan_ack
         if replan_ack.get("requested_classification"):
             index_record["requested_classification"] = replan_ack["requested_classification"]
@@ -669,7 +663,13 @@ def _build_state_refresh_output_projections(
         if isinstance(agent_vision.get("path_delta"), dict):
             index_record["agent_vision"]["path_delta"] = agent_vision["path_delta"]
 
-    for field in ("vision_checkpoint", "progress_scope", "agent_id", "agent_lane"):
+    for field in (
+        "vision_checkpoint",
+        "progress_observation",
+        "progress_scope",
+        "agent_id",
+        "agent_lane",
+    ):
         if field in record:
             index_record[field] = record[field]
 
@@ -883,62 +883,6 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def reject_maintenance_writeback_during_open_replan(
-    *,
-    classification: str,
-    vision_unchanged_reason: str | None,
-    repair_delta_kinds: list[str] | None,
-    autonomous_replan_recorded: bool,
-    newest_first_runs: list[dict[str, Any]] | None,
-    state_text: str,
-    agent_id: str,
-    goal_id: str,
-) -> None:
-    """Reject no-progress writebacks while an autonomous replan is due.
-
-    The quota layer enforces replan evidence passively at projection time; this
-    is the write-time gate so a maintenance writeback cannot keep the obligation
-    open forever. ACK-form writebacks and writebacks that carry a repair delta or
-    a material classification are unaffected.
-    """
-
-    safe_agent_id = str(agent_id or "").strip()
-    if not safe_agent_id or autonomous_replan_recorded:
-        return
-    if repair_delta_kinds:
-        return
-    maintenance_writeback = (
-        str(classification or "").strip().lower() == "source_audit_progress"
-        or bool(vision_unchanged_reason)
-    )
-    if not maintenance_writeback:
-        return
-    agent_todos = parse_active_state_todos(state_text, item_limit=None).get(
-        "agent_todos"
-    )
-    obligation = autonomous_replan_obligation_from_runs(
-        newest_first_runs,
-        agent_todos=agent_todos,
-        agent_id=safe_agent_id,
-    )
-    if not obligation:
-        return
-    obligation_id = str(obligation.get("obligation_id") or "").strip()
-    read_command = build_agent_scoped_evidence_log_command(
-        goal_id=goal_id,
-        agent_id=safe_agent_id,
-        limit=REPLAN_REQUIRED_READ_LIMIT,
-        required_read_id=obligation_id or None,
-    )
-    raise ValueError(
-        "an open autonomous replan obligation requires a replan delta; "
-        "maintenance writebacks (source_audit_progress / unchanged) are rejected "
-        f"while it is open. Read `{read_command}` then write the ACK with "
-        "`loopx refresh-state --classification autonomous_replan_recorded "
-        "--autonomous-replan-recorded --repair-delta-kind <kind> ...`"
-    )
-
-
 def refresh_state_run(
     *,
     registry_path: Path,
@@ -962,6 +906,7 @@ def refresh_state_run(
     agent_vision_packet: dict[str, Any] | None = None,
     merge_agent_vision_patch: bool = False,
     vision_unchanged_reason: str | None = None,
+    progress_observation: dict[str, Any] | None = None,
     dry_run: bool,
     sync_global: bool = True,
 ) -> dict[str, Any]:
@@ -989,6 +934,14 @@ def refresh_state_run(
             "--delivery-workspace-path requires an accountable --delivery-outcome"
         )
     normalized_repair_delta_kinds = normalize_repair_delta_kinds(repair_delta_kinds)
+    normalized_progress_observation = (
+        normalize_progress_observation(
+            progress_observation,
+            work_item_id=todo_id,
+        )
+        if progress_observation is not None
+        else None
+    )
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_override)
     settlement_identity = None
@@ -1162,16 +1115,6 @@ def refresh_state_run(
             goal_id=safe_goal_id,
             agent_id=normalized_agent_id,
         )
-    reject_maintenance_writeback_during_open_replan(
-        classification=classification,
-        vision_unchanged_reason=normalized_vision_unchanged_reason,
-        repair_delta_kinds=normalized_repair_delta_kinds,
-        autonomous_replan_recorded=autonomous_replan_recorded,
-        newest_first_runs=newest_first_runs,
-        state_text=state_text,
-        agent_id=normalized_agent_id,
-        goal_id=safe_goal_id,
-    )
     if agent_vision_packet is not None:
         agent_vision = normalize_goal_vision_update(
             agent_vision_packet,
@@ -1201,8 +1144,6 @@ def refresh_state_run(
                 "dry_run": bool(dry_run),
                 "updated_at": generated_at if state_updated else None,
             }
-            if state_updated and not dry_run:
-                resolved_state_file.write_text(updated_state_text, encoding="utf-8")
             state_text = updated_state_text if state_updated else locked_state_text
 
     if recommended_action:
@@ -1256,15 +1197,24 @@ def refresh_state_run(
                     ),
                 )
             )
+    replan_semantic_delta = enforce_open_replan_writeback(
+        newest_first_runs=newest_first_runs,
+        state_text=state_text,
+        agent_id=normalized_agent_id,
+        goal_id=safe_goal_id,
+        progress_observation=normalized_progress_observation,
+        registry_goal=registry_goal,
+        agent_vision=agent_vision,
+    )
+    if replan_semantic_delta:
+        effective_autonomous_replan_recorded = True
     vision_checkpoint = build_vision_checkpoint(
         agent_id=normalized_agent_id or None,
         agent_vision=agent_vision,
         existing_agent_vision=existing_agent_vision,
         vision_unchanged_reason=normalized_vision_unchanged_reason,
         delivery_outcome=normalized_delivery_outcome,
-        autonomous_replan_recorded=bool(autonomous_replan_recorded),
         active_state_next_action_update=active_state_next_action_update,
-        repair_delta_kinds=validated_repair_delta_kinds,
     )
     delivery_workspace = None
     workspace_requirement = str(
@@ -1301,6 +1251,19 @@ def refresh_state_run(
             delivery_workspace["repository_source"] = (
                 "refresh_state.delivery_workspace_path"
             )
+    if (
+        active_state_next_action_update
+        and active_state_next_action_update.get("would_update")
+        and not dry_run
+    ):
+        with exclusive_file_lock(resolved_state_file):
+            current_state_text = resolved_state_file.read_text(encoding="utf-8")
+            if current_state_text != expected_write_state_text:
+                raise ValueError(
+                    "active goal state changed while refresh-state was qualifying "
+                    "its semantic writeback; retry from the current state"
+                )
+            resolved_state_file.write_text(state_text, encoding="utf-8")
     record = build_state_refresh_record(
         goal_id=safe_goal_id,
         state_file=resolved_state_file,
@@ -1320,6 +1283,7 @@ def refresh_state_run(
         autonomous_replan_frontier_identity=autonomous_replan_frontier_identity,
         agent_vision=agent_vision,
         vision_checkpoint=vision_checkpoint,
+        progress_observation=normalized_progress_observation,
         delivery_workspace=delivery_workspace,
         settlement_identity=settlement_identity,
     )
@@ -1346,6 +1310,18 @@ def refresh_state_run(
                 "requested_classification": requested_classification,
                 "reason": "autonomous replan ACK requested without a machine-visible repair delta",
             }
+    if replan_semantic_delta:
+        record.setdefault(
+            "autonomous_replan_ack",
+            {
+                "schema_version": "autonomous_replan_ack_v0",
+                "recorded": True,
+                "source": "refresh_state_semantic_delta",
+            },
+        )
+        record["autonomous_replan_ack"]["semantic_delta"] = (
+            replan_semantic_delta
+        )
     if active_state_next_action_update:
         record["active_state_next_action_update"] = active_state_next_action_update
     compact_route = compact_runtime_projection_route(runtime_projection_route)

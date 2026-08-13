@@ -4,10 +4,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ...agents.agent_scope import agent_scope_item_claimed_by
-from ...work_items.repair_delta import repair_delta_kinds_have_frontier_delta
 from ..goal_vision_policy import (
     COMPLETED_TODO_CHAIN_REPLAN_THRESHOLD,
-    goal_vision_repeats_advancement_until_closed,
 )
 from ..goal_vision_state import goal_vision_state_is_closed
 
@@ -21,11 +19,8 @@ VISION_OUTCOME_CHECKPOINT_MATERIAL_OUTCOMES = {
 VISION_OUTCOME_CHECKPOINT_CONTINUATION_OUTCOMES = {
     "continue",
     "no_change",
+    "replan",
 }
-REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
-    "runnable_todo_set",
-    "successor_or_supersede",
-)
 def _compact_text(value: Any, *, limit: int) -> str | None:
     text = " ".join(str(value or "").strip().split())
     return text[:limit] if text else None
@@ -131,10 +126,7 @@ def latest_outcome_vision_checkpoint_from_status_payload(
             if isinstance(trigger, dict)
             and str(trigger.get("kind") or "").strip()
         }
-        if not (
-            "material_delivery_outcome" in trigger_kinds
-            or "autonomous_replan_recorded" in trigger_kinds
-        ):
+        if "material_delivery_outcome" not in trigger_kinds:
             continue
         result: dict[str, Any] = {
             "schema_version": checkpoint.get("schema_version"),
@@ -145,9 +137,6 @@ def latest_outcome_vision_checkpoint_from_status_payload(
             "decision": checkpoint.get("decision"),
             "triggers": checkpoint.get("triggers")
             if isinstance(checkpoint.get("triggers"), list)
-            else [],
-            "repair_delta_kinds": checkpoint.get("repair_delta_kinds")
-            if isinstance(checkpoint.get("repair_delta_kinds"), list)
             else [],
             "generated_at": run.get("generated_at"),
         }
@@ -267,15 +256,8 @@ def acceptance_gaps_from_outcome_checkpoint(
         and checkpoint.get("generated_at")
         == qualification_vision.get("generated_at")
     )
-    autonomous_replan_recorded = any(
-        trigger.get("kind") == "autonomous_replan_recorded"
-        for trigger in triggers
-    )
-    frontier_delta_recorded = repair_delta_kinds_have_frontier_delta(
-        checkpoint.get("repair_delta_kinds")
-    )
     outcome_gap_reported = "outcome_gap" in delivery_outcomes
-    continuation_checkpoint_complete = bool(
+    checkpoint_complete = bool(
         checkpoint.get("satisfied") is True
         and fresh_vision_patch
         and claim
@@ -283,16 +265,7 @@ def acceptance_gaps_from_outcome_checkpoint(
         and path_outcome in VISION_OUTCOME_CHECKPOINT_CONTINUATION_OUTCOMES
         and not outcome_gap_reported
     )
-    replan_checkpoint_complete = bool(
-        checkpoint.get("satisfied") is True
-        and fresh_vision_patch
-        and claim
-        and evidence_refs
-        and path_outcome == "replan"
-        and autonomous_replan_recorded
-        and frontier_delta_recorded
-    )
-    if continuation_checkpoint_complete or replan_checkpoint_complete:
+    if checkpoint_complete:
         return []
 
     gap: dict[str, Any] = {
@@ -342,11 +315,6 @@ def _checkpoint_covers_completed_todo(
 ) -> bool:
     if checkpoint.get("satisfied") is not True:
         return False
-    trigger_kinds = {
-        str(trigger.get("kind") or "").strip()
-        for trigger in (checkpoint.get("triggers") or [])
-        if isinstance(trigger, dict) and str(trigger.get("kind") or "").strip()
-    }
     material_checkpoint = any(
         trigger.get("kind") == "material_delivery_outcome"
         and str(trigger.get("delivery_outcome") or "").strip()
@@ -356,48 +324,7 @@ def _checkpoint_covers_completed_todo(
     )
     if material_checkpoint:
         return not acceptance_gaps_from_outcome_checkpoint(agent_vision, checkpoint)
-    if "autonomous_replan_recorded" not in trigger_kinds:
-        return False
-    repair_delta_kinds = {
-        str(value or "").strip()
-        for value in (checkpoint.get("repair_delta_kinds") or [])
-        if str(value or "").strip()
-    }
-    if repair_delta_kinds & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS):
-        return True
-    qualification_vision_value = checkpoint.get("qualification_agent_vision")
-    qualification_vision = (
-        qualification_vision_value
-        if isinstance(qualification_vision_value, dict)
-        else agent_vision
-    )
-    qualification_patch = _dict_field(qualification_vision, "vision_patch")
-    if goal_vision_repeats_advancement_until_closed(
-        qualification_patch.get("advancement_policy")
-    ):
-        return False
-    path_delta = _dict_field(qualification_vision, "path_delta")
-    evidence_refs = [
-        value
-        for value in (path_delta.get("evidence_refs") or [])
-        if _compact_text(value, limit=140)
-    ]
-    fresh_vision_patch = bool(
-        checkpoint.get("decision") == "patched"
-        and checkpoint.get("generated_at")
-        and checkpoint.get("generated_at")
-        == qualification_vision.get("generated_at")
-    )
-    return bool(
-        fresh_vision_patch
-        and _compact_text(qualification_patch.get("acceptance_summary"), limit=420)
-        and _compact_text(path_delta.get("outcome"), limit=32) == "replan"
-        and evidence_refs
-        and {
-            "goal_vision_patch",
-            "watch_lane_continuation",
-        }.issubset(repair_delta_kinds)
-    )
+    return False
 
 
 def acceptance_gaps_from_todo_completion_checkpoint(
