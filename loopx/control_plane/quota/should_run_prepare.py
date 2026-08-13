@@ -575,6 +575,7 @@ def _prepare_quota_should_run_item(
         project_asset=project_asset,
         user_todo_summary=user_todo_summary,
         agent_todo_summary=agent_todo_summary,
+        agent_todo_source_items=agent_todo_source_items,
         work_lane_contract=work_lane_contract,
         neutral_replan_ack_classifications=AUTONOMOUS_REPLAN_ACK_NEUTRAL_CLASSIFICATIONS,
         registered_agent_ids=registered_agent_ids,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from ...todos.contract import (
@@ -7,8 +8,8 @@ from ...todos.contract import (
     normalize_todo_claimed_by,
     normalize_todo_id,
     normalize_todo_replan_obligation_id,
-    normalize_todo_status,
 )
+from ...todos.projection import todo_item_is_actionable_open, todo_item_task_class
 from ...work_items.progress_observation import required_semantic_outcomes
 
 
@@ -60,6 +61,7 @@ def replan_successor_transition_ack(
     *,
     agent_id: str | None,
     replan_obligation: dict[str, Any] | None,
+    agent_todo_items: Iterable[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Project an exact runnable-successor Todo as the replan receipt.
 
@@ -74,19 +76,24 @@ def replan_successor_transition_ack(
     safe_agent_id = normalize_todo_claimed_by(agent_id)
     if not obligation_id or not safe_agent_id:
         return None
-    executable_items = (
-        agent_todo_summary.get("first_executable_items")
-        if isinstance(agent_todo_summary, dict)
-        and isinstance(agent_todo_summary.get("first_executable_items"), list)
-        else []
-    )
+    if agent_todo_items is None:
+        source_items = (
+            agent_todo_summary.get("first_executable_items")
+            if isinstance(agent_todo_summary, dict)
+            and isinstance(agent_todo_summary.get("first_executable_items"), list)
+            else []
+        )
+    else:
+        source_items = [
+            item for item in agent_todo_items if isinstance(item, dict)
+        ]
     successor = next(
         (
             item
-            for item in executable_items
+            for item in source_items
             if isinstance(item, dict)
-            and normalize_todo_status(item.get("status")) == "open"
-            and item.get("task_class") == TODO_TASK_CLASS_ADVANCEMENT
+            and todo_item_is_actionable_open(item)
+            and todo_item_task_class(item) == TODO_TASK_CLASS_ADVANCEMENT
             and normalize_todo_claimed_by(item.get("claimed_by"))
             == safe_agent_id
             and normalize_todo_replan_obligation_id(
