@@ -407,6 +407,52 @@ The packet selects at most one obligation for one agent turn. Status and
 drill-down commands may expose a separately bounded list and total counts. No
 hot path should enumerate every candidate pair or copy full evidence bodies.
 
+### 8.4 Bounded Autonomous Model Selection (Deferred)
+
+Eligibility and ranking are different decisions. The control plane proves that
+a candidate is legal, still pending, scoped to the current goal and agent, and
+within evidence, capability, authority, and projection budgets. It must not
+present a structural ordering as a success probability. A single eligible gap
+may be projected directly. When several gaps are eligible, a later
+implementation should deliver at most three public-safe typed candidate cards
+and let the model choose which one is most valuable to execute first.
+
+Each bounded candidate card should include at least:
+
+- experiment identity and normalized input node identities;
+- `interaction_kind` and typed closure basis;
+- each input's terminal result class and compact evidence abstract;
+- proposed probe family, capability readiness, cost class, and prior joint
+  attempt count;
+- the current obligation id and allowed outcomes.
+
+The model optimizes expected research value rather than a self-reported success
+probability. The first version should compare ordinal typed dimensions for
+breakthrough plausibility, information gain, falsifiability, execution cost,
+duplicate risk, and capability readiness. It must not publish or consume
+apparently precise numeric probabilities before calibration evidence exists.
+Model confidence is routing metadata only; it cannot create a finding, close a
+composition gap, or upgrade goal-acceptance truth.
+
+The model must return a bounded `composition_selection_v0` receipt containing
+at least the current obligation id, an experiment ref from the delivered
+candidate set, typed selection reasons, a confidence bucket, and bounded typed
+reasons for rejected alternatives. The semantic write gate must verify that:
+
+1. the obligation identity is still current;
+2. the selected experiment belongs to the candidate set actually delivered in
+   this turn;
+3. the candidate remains eligible and has no active bound successor;
+4. the successor binds both the obligation and experiment identities;
+5. the selection receipt is never treated as experiment-outcome evidence.
+
+Deterministic ordering may be used only as an explicit, observable weak-model
+fallback. It must not silently claim to have chosen the most promising
+candidate. M4 should first use real model-tool behavior and repeated live shadow
+to prove that a model can read candidate cards, select a legal candidate, and
+produce a meaningful experiment or justified dismissal. This RFC does not
+require M2 to implement the selection protocol.
+
 ## 9. Composition Gap Lifecycle
 
 The derived gap has a causal lifecycle even though its truth is computed from
@@ -728,6 +774,9 @@ events. Qualification should compare:
   direction;
 - composition-candidate precision: eligible gaps that lead to a meaningful
   experiment or justified dismissal;
+- autonomous-selection yield: meaningful experiments or justified dismissals
+  from model selections relative to the declared deterministic fallback;
+- out-of-set/invalid selection rate and time from selection to semantic outcome;
 - duplicate experiment rate;
 - false-obligation rate;
 - protocol/tooling share of total calls;
@@ -751,9 +800,9 @@ control-plane failures.
 |---|---|---|---|
 | M0 | RFC, current-state inventory, and explicit ownership decision | Maintainer review; no runtime behavior | Draft |
 | M1 | Characterization fixtures plus typed research observation and closure contract in Explore | Deterministic normalization, privacy, compatibility, and negative tests | Not started |
-| M2 | Explicit-only composition candidate, canonical gap projection, and read-only status shadow | No pairwise inference; bounded packet; projection parity | Not started |
+| M2 | Explicit-only composition candidate, canonical gap projection, and read-only status shadow | No pairwise inference; bounded packet; projection parity | Partially implemented (#3173: explicit experiment projection and successor binding) |
 | M3 | Goal-frontier obligation, exact Todo/experiment lineage, and shared write-time gate | State/replay matrix and premerge canary pass | Not started |
-| M4 | Real model-tool behavior qualification and repeated live shadow | Model selects the bound semantic action; compact receipts only | Not started |
+| M4 | Bounded multi-candidate cards, `composition_selection_v0`, real model-tool behavior qualification, and repeated live shadow | Model autonomously selects a legal semantic action from the delivered candidate set; selection quality is no worse than the declared fallback; compact receipts only | Not started |
 | M5 | Shared-constraint candidate ranking in shadow mode | Precision and cost evidence; no automatic trigger | Not started |
 | M6 | Optional inferred trigger | Explicit maintainer decision and measured promotion thresholds | Deferred |
 | M7 | N-ary composition or concurrent scheduling | A real second-order caller and authority boundary exist | Deferred |
@@ -855,6 +904,7 @@ This is a living RFC, not an append-only diary.
 | Date | Decision |
 |---|---|
 | 2026-08-13 | Adopt Explore as the canonical research-topology owner; choose explicit-only composition candidates for v0; represent joint work as an experiment node; defer shared-constraint inference to shadow qualification. |
+| 2026-08-13 | Separate eligibility from ranking: the control plane owns a legal bounded candidate set, while the model autonomously prioritizes among multiple eligible candidates. A selection receipt proves a scheduling choice, not research truth. Defer the protocol to M4 rather than adding it to the #3173 runtime slice. |
 
 ## 20. Acceptance Criteria for the RFC
 

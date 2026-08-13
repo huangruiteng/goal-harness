@@ -375,6 +375,44 @@ control-plane packet 不应该如此。
 另一份有界 list 和 total count。任何 hot path 都不能枚举所有 candidate pair
 或复制完整 evidence body。
 
+### 8.4 有界的模型自主选择（延后实现）
+
+Eligibility 与 ranking 是两个不同的判断。控制面负责证明 candidate 合法、仍然
+pending、位于当前 goal/agent scope，并满足 evidence、capability、authority 与
+projection budget；它不应把结构排序伪装成“成功概率”。当只有一个 eligible gap
+时可以直接投影它。当同时存在多个 eligible gap 时，后续实现应向模型交付最多三
+张 public-safe、类型化 candidate card，让模型选择最值得先执行的一个。
+
+Candidate card 至少应有界地携带：
+
+- experiment 与 normalized input node identity；
+- `interaction_kind` 与 typed closure basis；
+- 每个 input 的 terminal result class 和 compact evidence abstract；
+- proposed probe family、capability readiness、cost class 与 prior joint-attempt count；
+- 当前 obligation id 与允许的 outcome。
+
+模型的选择目标是预期研究价值，而不是自报的成功率。第一版使用 ordinal、typed
+维度比较 breakthrough plausibility、information gain、falsifiability、execution
+cost、duplicate risk 与 capability readiness；在没有校准 evidence 前，不发布或
+消费表面精确的数值 probability。模型 confidence 只是 routing metadata，不能产生
+finding、关闭 composition gap 或升级 goal acceptance truth。
+
+模型必须返回有界的 `composition_selection_v0` receipt，至少包括当前 obligation
+id、从交付 candidate set 中选择的 experiment ref、typed selection reasons、
+confidence bucket，以及被放弃候选的有界 typed reason。Semantic write gate 必须
+验证：
+
+1. obligation identity 仍是当前义务；
+2. selected experiment 属于本轮实际交付的 candidate set；
+3. candidate 仍 eligible，且没有 active bound successor；
+4. successor 同时绑定 obligation 与 experiment identity；
+5. selection receipt 不被误当成 experiment outcome evidence。
+
+确定性排序只可作为显式配置、可观测的弱模型 fallback，不能静默宣称它选中了
+“最有希望”的 candidate。M4 应先用真实 model-tool behavior 与重复 live shadow
+证明模型能够读取 candidate cards、选择合法候选并产生 meaningful experiment 或
+justified dismissal；本 RFC 不要求 M2 实现该选择协议。
+
 ## 9. Composition gap 生命周期
 
 尽管 gap truth 从 durable Explore event 派生，它仍有因果生命周期：
@@ -674,6 +712,9 @@ test 已足够。不要为假想 caller 增加 distributed coordination abstract
 - 真正产生新 runnable direction 的 replan obligation 比例；
 - composition-candidate precision：eligible gap 中产生 meaningful experiment
   或 justified dismissal 的比例；
+- autonomous-selection yield：模型选择相对于显式 deterministic fallback 产生
+  meaningful experiment 或 justified dismissal 的比例；
+- out-of-set/invalid selection rate，以及 selection 后到 semantic outcome 的时间；
 - duplicate experiment rate；
 - false-obligation rate；
 - protocol/tooling call 占比；
@@ -696,9 +737,9 @@ rule，以及 model variance 与 control-plane failure 的分离。
 |---|---|---|---|
 | M0 | RFC、current-state inventory 与显式 ownership decision | Maintainer review；无 runtime behavior | Draft |
 | M1 | Characterization fixture，以及 Explore 中的 typed research observation 与 closure contract | Deterministic normalization、privacy、compatibility 与 negative test | 未开始 |
-| M2 | Explicit-only composition candidate、canonical gap projection 与 read-only status shadow | 不做 pairwise inference；packet 有界；projection parity | 未开始 |
+| M2 | Explicit-only composition candidate、canonical gap projection 与 read-only status shadow | 不做 pairwise inference；packet 有界；projection parity | 部分实现（#3173：显式 experiment 投影与 successor binding） |
 | M3 | Goal-frontier obligation、精确 Todo/experiment lineage 与共享 write-time gate | State/replay matrix 与 premerge canary 通过 | 未开始 |
-| M4 | 真实 model-tool behavior qualification 与重复 live shadow | 模型选择绑定的 semantic action；只保留 compact receipt | 未开始 |
+| M4 | 有界 multi-candidate card、`composition_selection_v0`、真实 model-tool behavior qualification 与重复 live shadow | 模型从交付 candidate set 中自主选择合法 semantic action；选择质量不劣于 declared fallback；只保留 compact receipt | 未开始 |
 | M5 | Shared-constraint candidate 在 shadow mode 中排序 | 有 precision/cost evidence；不自动触发 | 未开始 |
 | M6 | 可选 inferred trigger | 显式 maintainer decision 与量化 promotion threshold | 延后 |
 | M7 | N-ary composition 或并发调度 | 存在真实 second-order caller 与 authority boundary | 延后 |
@@ -793,6 +834,7 @@ evidence-backed terminal result。
 | 日期 | 决策 |
 |---|---|
 | 2026-08-13 | 采用 Explore 作为 canonical research-topology owner；v0 选择 explicit-only composition candidate；joint work 表示为 experiment node；shared-constraint inference 延后到 shadow qualification。 |
+| 2026-08-13 | 将 eligibility 与 ranking 分离：控制面拥有合法、有界 candidate set，模型在多个 eligible candidate 中自主择优；selection receipt 只证明调度选择，不构成 research truth。该协议延后到 M4，不进入 #3173 的首期 runtime。 |
 
 ## 20. RFC 验收标准
 
