@@ -46,16 +46,16 @@ prompt session -> wait for the assistant turn to complete
   -> loopx quota should-run (generic_cli profile, host poll receipt)
   -> run_now: continue with a quota-gated continuation prompt
   -> wait: backoff ladder, no model calls during quiet waits
-  -> terminal_no_followup: visible synthetic completion notice, worker exits
+  -> terminal_no_followup: visible closure notice, then standby polling
+     (the worker stays attached and resumes automatically when new work
+     appears instead of pausing after one task)
   -> unchanged-poll limit: visible synthetic pause notice, worker exits
+  -> goal_not_found: the worker exits; the goal is no longer registered
 ```
 
-A user message that the worker did not send pauses the loop with a visible
-notice. Restart the worker to resume:
-
-```bash
-loopx opencode2-goal-worker --goal-id <goal_id> --directory <dir> --force-resume
-```
+User messages never pause the loop. The model answers the message and the
+worker keeps gating continuation through quota as usual. A stalled session,
+turn wait budget, turn budget, or duration budget still pauses visibly.
 
 ## State
 

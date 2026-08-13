@@ -533,7 +533,7 @@ test("coalesces concurrent idle events into one quota decision", async () => {
 })
 
 
-test("does not continue when the user intervenes during a quota probe", async () => {
+test("continues after the user intervenes during a quota probe", async () => {
   let releaseDecision
   const pendingDecision = new Promise((resolve) => {
     releaseDecision = resolve
@@ -551,14 +551,18 @@ test("does not continue when the user intervenes during a quota probe", async ()
     { sessionID: "session-intervention" },
     { parts: [{ type: "text", text: "change direction" }] },
   )
+  const binding = await fixture.store.read("session-intervention")
+  assert.equal(binding.autoResume, true)
+  assert.equal(binding.userMessagePending, true)
   releaseDecision({ should_run: true, scheduler_hint: { action: "run_now" } })
   await idle
-  assert.equal(fixture.calls.event, 0)
-  assert.equal((await fixture.store.read("session-intervention")).autoResume, false)
+  assert.equal(fixture.calls.event, 1)
+  assert.equal(fixture.calls.resume, 1)
+  assert.equal((await fixture.store.read("session-intervention")).userMessagePending, false)
 })
 
 
-test("completes only after LoopX validates terminal no-follow-up", async () => {
+test("stands by after terminal closure and resumes when new work appears", async () => {
   const fixture = harness(terminalDecision())
   const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
   await hooks.tool.loopx_goal_activate.execute(
@@ -568,9 +572,19 @@ test("completes only after LoopX validates terminal no-follow-up", async () => {
   await hooks.event({
     event: { type: "session.idle", properties: { sessionID: "session-terminal" } },
   })
-  assert.equal(fixture.calls.complete, 1)
-  assert.equal(await fixture.store.read("session-terminal"), null)
+  assert.equal(fixture.calls.complete, 0)
   assert.equal(fixture.calls.event, 0)
+  const standby = await fixture.store.read("session-terminal")
+  assert.equal(standby.phase, "standby")
+  assert.equal(standby.autoResume, true)
+  assert.equal(fixture.scheduled.at(-1).delay, 300_000)
+
+  fixture.setDecision({ should_run: true, scheduler_hint: { action: "run_now" } })
+  await fixture.scheduled.at(-1).callback()
+  assert.equal(fixture.calls.event, 1)
+  const working = await fixture.store.read("session-terminal")
+  assert.equal(working.phase, "working")
+  assert.equal(working.standbyPolls, 0)
 })
 
 
@@ -659,24 +673,27 @@ test("refuses to evaluate while another process holds the session lock", async (
 })
 
 
-test("records and clears pause reasons around user messages and resume", async () => {
+test("user messages keep the loop running and clear after the resume probe", async () => {
   const fixture = harness({ should_run: true, scheduler_hint: { action: "run_now" } })
   const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
   await hooks.tool.loopx_goal_activate.execute(
-    { goalId: "goal-pause-reason", objective: "LoopX task body" },
-    { sessionID: "session-pause-reason" },
+    { goalId: "goal-user-msg", objective: "LoopX task body" },
+    { sessionID: "session-user-msg" },
   )
   await hooks["chat.message"](
-    { sessionID: "session-pause-reason" },
+    { sessionID: "session-user-msg" },
     { parts: [{ type: "text", text: "are you done yet?" }] },
   )
-  const paused = await fixture.store.read("session-pause-reason")
-  assert.equal(paused.autoResume, false)
-  assert.equal(paused.lastPausedReason, "user_message")
-  await hooks.tool.goal_resume.execute({}, { sessionID: "session-pause-reason" })
-  const resumed = await fixture.store.read("session-pause-reason")
-  assert.equal(resumed.autoResume, true)
-  assert.equal(resumed.lastPausedReason, "")
+  const afterMessage = await fixture.store.read("session-user-msg")
+  assert.equal(afterMessage.autoResume, true)
+  assert.equal(afterMessage.userMessagePending, true)
+  await hooks.event({
+    event: { type: "session.idle", properties: { sessionID: "session-user-msg" } },
+  })
+  const afterIdle = await fixture.store.read("session-user-msg")
+  assert.equal(afterIdle.autoResume, true)
+  assert.equal(afterIdle.userMessagePending, false)
+  assert.equal(afterIdle.phase, "working")
 })
 
 

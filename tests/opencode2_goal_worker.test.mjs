@@ -17,6 +17,18 @@ import {
 } from "../loopx/opencode2_goal_mode/opencode2-goal-worker.mjs"
 
 
+function goalNotFoundDecision() {
+  return {
+    ok: false,
+    should_run: false,
+    state: "unknown",
+    status: "goal_not_found",
+    effective_action: "quota_skip",
+    reason: "goal is not present in the registered quota plan",
+  }
+}
+
+
 function terminalDecision() {
   return {
     should_run: false,
@@ -245,9 +257,16 @@ test("turnVerdict completes only after a final non-tool-call reply to the newest
     ).completed,
     true,
   )
-  const paused = turnVerdict([own("stranger", 30)], ["own-1", "own-2"])
-  assert.equal(paused.completed, false)
-  assert.equal(paused.pausedByUser.id, "stranger")
+  // A user message the worker did not send never pauses: the verdict just
+  // waits for the assistant reply to the newest user message.
+  const foreign = turnVerdict([own("stranger", 30)], ["own-1", "own-2"])
+  assert.equal(foreign.completed, false)
+  assert.equal(foreign.waiting, true)
+  const answered = turnVerdict(
+    [own("stranger", 30), assistant(31, 32, "stop")],
+    ["own-1", "own-2"],
+  )
+  assert.equal(answered.completed, true)
 })
 
 
@@ -292,7 +311,7 @@ test("decision helpers recognize terminal closure and run_now", () => {
 })
 
 
-test("worker drives a full loop: task prompt, run_now continuation, then terminal", async () => {
+test("worker drives a full loop: task prompt, run_now continuation, standby, then goal gone", async () => {
   const stateStore = memoryStateStore()
   const transport = fakeTransport()
   const sleepMs = []
@@ -303,6 +322,7 @@ test("worker drives a full loop: task prompt, run_now continuation, then termina
     decisions: [
       { should_run: true, scheduler_hint: { action: "run_now" } },
       terminalDecision(),
+      goalNotFoundDecision(),
     ],
   })
   const result = await runWorker({
@@ -311,13 +331,13 @@ test("worker drives a full loop: task prompt, run_now continuation, then termina
     taskBody: "Ship the task.",
     ...overrides,
   })
-  assert.equal(result.kind, "terminal")
+  assert.equal(result.kind, "goal_gone")
   assert.deepEqual(transport.calls.prompts, ["Ship the task.", CONTINUATION_PROMPT])
-  assert.equal(transport.calls.synthetics.length, 1)
+  assert.ok(transport.calls.synthetics.some((text) => text.includes("stays attached")))
   const state = await stateStore.read("goal-e2e")
-  assert.equal(state.phase, "terminal")
-  assert.equal(state.autoResume, false)
+  assert.equal(state.phase, "goal_gone")
   assert.equal(state.turnCount, 1)
+  assert.ok(sleepMs.includes("slept"))
 })
 
 
@@ -329,15 +349,15 @@ test("worker waits quietly between quota polls without prompting", async () => {
     transport,
     stateStore,
     sleepMs,
-    decisions: [waitDecision(), terminalDecision()],
+    decisions: [waitDecision(), terminalDecision(), goalNotFoundDecision()],
   })
   const result = await runWorker({ goalId: "goal-wait", directory: "/workspace", taskBody: "Task.", ...overrides })
-  assert.equal(result.kind, "terminal")
+  assert.equal(result.kind, "goal_gone")
   assert.equal(transport.calls.prompts.length, 1)
   assert.ok(sleepMs.length >= 1)
   const state = await stateStore.read("goal-wait")
-  assert.equal(state.unchangedPolls, 1)
-  assert.equal(state.schedulerToken, "wait-token")
+  assert.equal(state.phase, "goal_gone")
+  assert.equal(state.standbyPolls, 1)
 })
 
 
@@ -374,23 +394,27 @@ test("worker pauses visibly when the unchanged-poll limit stops the loop", async
 })
 
 
-test("worker pauses visibly after an external user message", async () => {
+test("worker keeps looping after an external user message", async () => {
   const stateStore = memoryStateStore()
   const transport = fakeTransport()
   const overrides = makeWorkerOverrides({
     transport,
     stateStore,
-    decisions: [{ should_run: true, scheduler_hint: { action: "run_now" } }],
+    decisions: [
+      { should_run: true, scheduler_hint: { action: "run_now" } },
+      goalNotFoundDecision(),
+    ],
   })
-  const run = runWorker({ goalId: "goal-pause", directory: "/workspace", taskBody: "Task.", ...overrides })
+  const run = runWorker({ goalId: "goal-user-msg", directory: "/workspace", taskBody: "Task.", ...overrides })
   await new Promise((resolve) => setTimeout(resolve, 0))
   transport.addUserMessage("hold on")
   const result = await run
-  assert.equal(result.kind, "paused_user_intervention")
-  const state = await stateStore.read("goal-pause")
-  assert.equal(state.autoResume, false)
-  assert.equal(state.pausedReason, "user_message")
-  assert.ok(transport.calls.synthetics.some((text) => text.includes("user intervention")))
+  assert.equal(result.kind, "goal_gone")
+  assert.equal(transport.calls.prompts.length, 2)
+  assert.equal(transport.calls.synthetics.length, 0)
+  const state = await stateStore.read("goal-user-msg")
+  assert.equal(state.phase, "goal_gone")
+  assert.equal(state.pausedReason, "goal_not_found")
 })
 
 
@@ -422,12 +446,14 @@ test("worker backs off quota probe failures and resets on success", async () => 
     new Error("probe timeout"),
     { should_run: true, scheduler_hint: { action: "run_now" } },
     terminalDecision(),
+    goalNotFoundDecision(),
   ]
   const overrides = makeWorkerOverrides({ transport, stateStore, sleepMs, decisions })
   const result = await runWorker({ goalId: "goal-probe-fail", directory: "/workspace", taskBody: "Task.", ...overrides })
-  assert.equal(result.kind, "terminal")
+  assert.equal(result.kind, "goal_gone")
   const state = await stateStore.read("goal-probe-fail")
   assert.equal(state.probeRetryCount, 0)
+  assert.equal(state.standbyPolls, 1)
 })
 
 

@@ -12,6 +12,7 @@ const TERMINAL_STATE_SCHEMA_VERSION = "goal_terminal_state_v0"
 const SOURCE_COMPLETENESS_SCHEMA_VERSION = "goal_terminal_source_completeness_v0"
 const DEFAULT_RETRY_MINUTES = 3
 const MAX_RETRY_MINUTES = 30
+const STANDBY_MINUTES = 5
 const BINDING_LOCK_STALE_MS = 90_000
 const LOOPX_GOAL_LIMITS = {
   maxTurns: 10000,
@@ -411,48 +412,10 @@ export function createLoopxGoalPlugin({
     const baseTools = base.tool || {}
     const baseGoalSet = baseTools.goal_set
     const baseGoalResume = baseTools.goal_resume
-    const baseGoalComplete = baseTools.goal_complete
     const baseGoalPause = baseTools.goal_pause
     const baseEvent = base.event
     const baseChatMessage = base["chat.message"]
     const baseCommand = base["command.execute.before"]
-
-    const completeTerminalGoal = async (sessionID, binding, decision) => {
-      try {
-        const reason = String(decision?.reason || "LoopX validated an empty terminal frontier.")
-        const result = await executeTool(
-          baseGoalComplete,
-          {
-            summary: "LoopX validated terminal no-follow-up.",
-            criteria: [
-              {
-                criterion: "LoopX reports validated goal closure with no remaining follow-up.",
-                evidence: [reason],
-              },
-            ],
-          },
-          toolContext(context, sessionID),
-        )
-        if (toolResultSucceeded(result) || toolResultHasError(result, "no_active_goal")) {
-          await detachBinding(sessionID)
-          await log("info", "LoopX terminal frontier completed the OpenCode goal", {
-            goalId: binding.goalId,
-            sessionID,
-          })
-          return
-        }
-        await log("warn", "OpenCode goal completion was rejected after LoopX terminal state", {
-          goalId: binding.goalId,
-          sessionID,
-        })
-      } catch (error) {
-        await log("error", "OpenCode goal completion failed", {
-          goalId: binding.goalId,
-          sessionID,
-          error: error?.message || String(error),
-        })
-      }
-    }
 
     const scheduleEvaluation = (sessionID, minutes) => {
       if (disposed) return
@@ -516,6 +479,24 @@ export function createLoopxGoalPlugin({
 
     const evaluateIdleLocked = async (sessionID, input, initialBinding) => {
       let binding = initialBinding
+      if (binding.userMessagePending) {
+        await bindingStore.write(sessionID, { ...binding, userMessagePending: false })
+        if (typeof baseGoalResume?.execute === "function") {
+          try {
+            await executeTool(baseGoalResume, {}, toolContext(context, sessionID))
+            await log("info", "resumed the OpenCode goal after user input", {
+              goalId: binding.goalId,
+              sessionID,
+            })
+          } catch (error) {
+            await log("warn", "OpenCode goal resume probe failed after user input", {
+              goalId: binding.goalId,
+              sessionID,
+              error: error?.message || String(error),
+            })
+          }
+        }
+      }
       let decision
       try {
         decision = await quotaProbe(binding, { directory: context.directory })
@@ -548,19 +529,40 @@ export function createLoopxGoalPlugin({
       binding = currentBinding
 
       if (isTerminalNoFollowup(decision)) {
-        await completeTerminalGoal(sessionID, binding, decision)
+        // Validated closure means the current work is done, not that the loop
+        // should end. Stand by and keep the goal active so new work resumes
+        // automatically instead of pausing after one task.
+        cancelScheduled(sessionID)
+        const standbyPolls = Number(binding.standbyPolls || 0) + 1
+        await bindingStore.write(sessionID, {
+          ...binding,
+          phase: "standby",
+          standbyPolls,
+          schedulerToken: "",
+          unchangedPolls: 0,
+        })
+        await log("info", "LoopX validated terminal closure; standing by for new work", {
+          goalId: binding.goalId,
+          sessionID,
+          standbyPolls,
+        })
+        scheduleEvaluation(sessionID, STANDBY_MINUTES)
         return
       }
 
       if (shouldRunNow(decision)) {
         cancelScheduled(sessionID)
+        let pendingResume = Boolean(binding.userMessagePending)
         await bindingStore.write(sessionID, {
           ...binding,
+          phase: "working",
+          standbyPolls: 0,
           schedulerToken: "",
           unchangedPolls: 0,
           probeRetryCount: 0,
+          userMessagePending: false,
         })
-        if (!initializedSessions.has(sessionID)) {
+        if (pendingResume || !initializedSessions.has(sessionID)) {
           initializedSessions.add(sessionID)
           try {
             await executeTool(baseGoalResume, {}, toolContext(context, sessionID))
@@ -812,10 +814,13 @@ export function createLoopxGoalPlugin({
         }
         const binding = await readBinding(sessionID)
         if (binding) {
+          // User input never pauses the loop. Stop any scheduled timer wake
+          // so it cannot fire mid-answer, and remember that the goal needs a
+          // resume probe on the next idle event (the wrapped goal plugin may
+          // pause its goal when the user chats).
           await bindingStore.write(sessionID, {
             ...binding,
-            autoResume: false,
-            lastPausedReason: "user_message",
+            userMessagePending: true,
           })
           cancelScheduled(sessionID)
         }
@@ -830,9 +835,7 @@ export function createLoopxGoalPlugin({
             pendingGoalCommands.delete(sessionID)
           } else if (sessionID && shouldPauseForHostEvent(event)) {
             await updateBinding(sessionID, {
-              autoResume: false,
-              lastPausedReason:
-                event?.type === "session.error" ? "session_error" : "permission_denied",
+              userMessagePending: true,
             })
             cancelScheduled(sessionID)
           }

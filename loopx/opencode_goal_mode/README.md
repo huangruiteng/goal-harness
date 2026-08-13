@@ -43,10 +43,18 @@ Run `/loopx <task>`, then activate the returned host packet through
 OpenCode idle event -> loopx quota should-run
   -> run_now: continue once
   -> wait: schedule a bounded local recheck without a model call
-  -> pause: remain stopped for user, permission, or session intervention
+  -> user input: answer it, resume the goal, keep gating through quota
   -> unchanged-poll limit: pause the visible goal and stop the timer
-  -> terminal_no_followup: submit completion and revalidate it in the auditor
+  -> terminal_no_followup: standby polling instead of completing; new work
+     resumes the goal automatically
 ```
+
+User messages and permission replies never pause the loop. The bridge stops
+scheduled timer wakes while the user's message is being answered, probes a
+goal resume on the next idle event, and continues quota-gated operation as
+usual. Validated terminal closure no longer completes the goal: the bridge
+keeps the goal active in standby and re-checks quota every five minutes, so
+finishing one task does not end the loop.
 
 Bindings are private per-session JSON files under
 `$LOOPX_OPENCODE_STATE_DIR`, or `$XDG_STATE_HOME/loopx/opencode` by default,
@@ -61,11 +69,12 @@ whose bridge died mid-wait. Probe failures retry with a bounded exponential
 backoff (3 minutes up to 30) and reset on success. A per-session lock file
 prevents two OpenCode processes from evaluating the same session at once.
 
-A user message pauses the loop and records `lastPausedReason=user_message`
-in the binding; `/goal resume` (or the resume tool) clears the pause reason
-and re-enables quota gating. The unchanged-poll limit no longer stops the
-timer silently: the bridge pauses the visible OpenCode goal so the stop is
-visible in the session and in LoopX state.
+A user message sets `userMessagePending` in the binding so the next idle
+evaluation resumes the wrapped goal (which may pause itself on user input)
+before continuing quota gating; explicit pause tools still record a typed
+`lastPausedReason` and `/goal resume` clears it. The unchanged-poll limit no
+longer stops the timer silently: the bridge pauses the visible OpenCode goal
+so the stop is visible in the session and in LoopX state.
 
 The wrapped goal plugin also persists private restart state under the active
 project's `.opencode/goals/` directory. Add `.opencode/goals/` to the project

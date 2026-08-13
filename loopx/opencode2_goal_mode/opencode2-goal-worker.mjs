@@ -43,14 +43,15 @@ export const CONTINUATION_PROMPT = [
   "Do not self-declare completion; LoopX validates closure.",
 ].join(" ")
 
-const TERMINAL_NOTICE = "LoopX validated terminal closure; the goal is complete."
+export const STANDBY_MINUTES = 5
+
+const TERMINAL_NOTICE = [
+  "LoopX validated terminal closure for the current work.",
+  "The worker stays attached and will resume automatically when new work appears.",
+].join(" ")
 const LIMIT_NOTICE = [
   "LoopX stopped this goal after the unchanged-poll limit.",
   "No new work was scheduled; review LoopX todos and resume explicitly when ready.",
-].join(" ")
-const PAUSE_NOTICE = [
-  "LoopX paused this goal after user intervention.",
-  "Resume by running the LoopX opencode2 goal worker again for this goal.",
 ].join(" ")
 const TURN_LIMIT_NOTICE = [
   "LoopX stopped this goal after the turn budget was exhausted.",
@@ -251,8 +252,9 @@ export function retryPlan(decision, state) {
 
 export function turnVerdict(messages, sentPromptIds) {
   // A turn completes only when an assistant message finished at or after the
-  // newest user prompt and that message is not an intermediate tool-call
-  // step. A user message we did not send pauses the loop.
+  // newest user message (regardless of who sent it) and that message is not
+  // an intermediate tool-call step. User input never pauses the loop: the
+  // model answers it, then quota gating continues as usual.
   const sent = new Set(sentPromptIds || [])
   let newestUser = null
   let newestAssistant = null
@@ -271,14 +273,15 @@ export function turnVerdict(messages, sentPromptIds) {
       }
     }
   }
-  if (!newestUser) return { completed: false, pausedByUser: null, waiting: true }
-  if (!sent.has(newestUser.id)) {
-    return { completed: false, pausedByUser: newestUser, waiting: false }
-  }
+  if (!newestUser) return { completed: false, waiting: true }
   const finished = Boolean(newestAssistant) && Number.isFinite(newestAssistant.time.completed)
   const terminalStep = finished && newestAssistant.finish !== "tool-calls"
   const afterPrompt = finished && newestAssistant.time.completed >= newestUser.time.created
-  return { completed: terminalStep && afterPrompt, pausedByUser: null, waiting: !(terminalStep && afterPrompt) }
+  const completed = terminalStep && afterPrompt
+  return {
+    completed,
+    waiting: !completed,
+  }
 }
 
 
@@ -450,7 +453,6 @@ export async function waitForTurn({
     await transport.waitForSession(sessionID, { timeoutMs: waitChunkMs })
     const messages = await transport.listMessages(sessionID)
     const verdict = turnVerdict(messages, sentPromptIds)
-    if (verdict.pausedByUser) return { kind: "paused", ...verdict }
     if (verdict.completed) return { kind: "completed", ...verdict }
     if (Date.now() - startedAt > timeoutMs) {
       return {
@@ -633,18 +635,6 @@ async function runWithLease({
       await log("info", "worker state was paused while waiting for the turn", { goalId, sessionID })
       return { kind: "paused_state" }
     }
-    if (waitOutcome.kind === "paused") {
-      state = await stateStore.write(goalId, {
-        ...state,
-        phase: "paused_user_intervention",
-        autoResume: false,
-        pausedReason: "user_message",
-        pausedMessage: waitOutcome.pausedByUser,
-      })
-      await transport.sendSynthetic(sessionID, PAUSE_NOTICE)
-      await log("info", "paused after user intervention", { goalId, sessionID })
-      return { kind: "paused_user_intervention" }
-    }
     if (waitOutcome.kind === "session_stalled") {
       state = await stateStore.write(goalId, {
         ...state,
@@ -704,24 +694,53 @@ async function runWithLease({
       continue
     }
 
-    if (isTerminalNoFollowup(decision)) {
+    if (decision?.status === "goal_not_found" || decision?.state === "unknown") {
       state = await stateStore.write(goalId, {
         ...state,
-        phase: "terminal",
+        phase: "goal_gone",
         autoResume: false,
+        pausedReason: "goal_not_found",
       })
-      await transport.sendSynthetic(sessionID, TERMINAL_NOTICE)
-      await log("info", "LoopX validated terminal closure; worker finished", { goalId, sessionID })
-      return { kind: "terminal" }
+      await log("info", "goal is no longer registered; worker finished", { goalId, sessionID })
+      return { kind: "goal_gone" }
+    }
+
+    if (isTerminalNoFollowup(decision)) {
+      // Validated closure means the CURRENT work is done, not that the loop
+      // should end. Stand by and keep polling so new work resumes the
+      // session automatically instead of pausing after one task.
+      const standbyPolls = Number(state.standbyPolls || 0) + 1
+      state = await stateStore.write(goalId, {
+        ...state,
+        phase: "standby",
+        schedulerToken: "",
+        unchangedPolls: 0,
+        standbyPolls,
+      })
+      if (standbyPolls === 1) {
+        await transport.sendSynthetic(sessionID, TERMINAL_NOTICE)
+      }
+      await log("info", "LoopX validated terminal closure; standing by for new work", {
+        goalId,
+        sessionID,
+        standbyPolls,
+      })
+      await sleepImpl(STANDBY_MINUTES * 60_000)
+      continue
     }
 
     if (shouldRunNow(decision)) {
+      const wasStandby = state.phase === "standby"
       state = await stateStore.write(goalId, {
         ...state,
         phase: "working",
         schedulerToken: "",
         unchangedPolls: 0,
+        standbyPolls: 0,
       })
+      if (wasStandby) {
+        await log("info", "new work appeared; resuming from standby", { goalId, sessionID })
+      }
       const promptId = await transport.sendPrompt(sessionID, CONTINUATION_PROMPT)
       state = await stateStore.write(goalId, {
         ...state,
