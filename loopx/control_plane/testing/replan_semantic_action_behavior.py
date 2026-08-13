@@ -247,11 +247,20 @@ def _build_fixture(
                 "evidence_ids": ["evidence-existing"],
             },
         }
-        prior_runs.append(run)
         safe_timestamp = generated_at.replace(":", "-")
-        (runs_dir / f"{safe_timestamp}.json").write_text(
+        json_path = runs_dir / f"{safe_timestamp}.json"
+        markdown_path = runs_dir / f"{safe_timestamp}.md"
+        json_path.write_text(
             json.dumps(run, sort_keys=True) + "\n",
             encoding="utf-8",
+        )
+        markdown_path.write_text("# Bounded fixture probe\n", encoding="utf-8")
+        prior_runs.append(
+            {
+                **run,
+                "json_path": str(json_path),
+                "markdown_path": str(markdown_path),
+            }
         )
     (runs_dir / "index.jsonl").write_text(
         "".join(json.dumps(run, sort_keys=True) + "\n" for run in prior_runs),
@@ -524,6 +533,11 @@ def _successor_reentry_observation(
         packet.get("autonomous_replan_obligation"), Mapping
     ):
         raise ValueError("successor_reentry_replan_not_closed")
+    if not (
+        packet.get("decision") == "run"
+        and packet.get("effective_action") == "normal_run"
+    ):
+        raise ValueError("successor_reentry_not_runnable")
 
     observation: dict[str, Any] = {
         "decision": packet.get("decision"),
@@ -916,6 +930,7 @@ _EXPECTED_BEHAVIOR_FAILURES = frozenset(
         "successor_reentry_selected_todo_missing",
         "successor_reentry_selected_todo_mismatch",
         "successor_reentry_replan_not_closed",
+        "successor_reentry_not_runnable",
         "successor_reentry_composition_not_scheduled",
         "quota_obligation_missing",
         "non_semantic_replan_action",

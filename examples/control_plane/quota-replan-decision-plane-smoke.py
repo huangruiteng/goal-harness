@@ -627,8 +627,11 @@ def assert_replan_beats_monitor_quiet_skip() -> None:
     assert "goal_frontier_projection: replan_required=True" in markdown, markdown
     assert "deferred_ready=0 acceptance_gaps=0" in markdown, markdown
     assert "autonomous_replan_decision: decision=autonomous_replan_required" in markdown, markdown
-    assert "replan_action_packet:" in markdown, markdown
-    assert "required_outcome=semantic_delta" in markdown, markdown
+    assert (
+        "interaction_agent_action: select one bounded next slice; prefer "
+        "replan_action_packet.writeback_contract.successor_command"
+        in markdown
+    ), markdown
     repeat_guard = build_quota_should_run(payload, goal_id=GOAL_ID, agent_id=SIDE_AGENT)
     assert repeat_guard["replan_action_packet"] == action_packet, repeat_guard
 
@@ -776,10 +779,14 @@ def assert_replan_preserves_current_agent_runnable_frontier() -> None:
     assert lane_action["selected_by"] == "current_agent_claimed_todo", guard
     assert lane_action["preserves_goal_next_action"] is True, guard
     primary_action = guard["interaction_contract"]["agent_channel"]["primary_action"]
-    assert "typed semantic outcome" in primary_action, guard
-    assert "host-projected coverage ledger" in primary_action, guard
+    assert "select one bounded next slice" in primary_action, guard
+    assert "replan_action_packet.writeback_contract.successor_command" in (
+        primary_action
+    ), guard
     cli_actions = guard["interaction_contract"]["cli_channel"]["next_cli_actions"]
-    assert "typed semantic outcome" in cli_actions[0], guard
+    assert cli_actions[0] == (
+        "execute replan_action_packet.writeback_contract.successor_command"
+    ), guard
     frontier = guard["goal_frontier_projection"]["remaining_advancement_frontier"]
     assert frontier["current_agent_claimed_advancement_count"] == 1, guard
     assert guard["goal_route_hint"]["current_agent_next_action"]["todo_id"] == (

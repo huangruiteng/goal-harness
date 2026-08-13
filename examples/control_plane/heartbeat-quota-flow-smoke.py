@@ -27,24 +27,32 @@ EXPECTED_NEXT_ACTION = (
 
 
 def run_cli(root: Path, *args: str, registry_path: Path, runtime: Path) -> dict:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "loopx.cli",
-            "--registry",
-            str(registry_path),
-            "--runtime-root",
-            str(runtime),
-            "--format",
-            "json",
-            *args,
-        ],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    command = [
+        sys.executable,
+        "-m",
+        "loopx.cli",
+        "--registry",
+        str(registry_path),
+        "--runtime-root",
+        str(runtime),
+        "--format",
+        "json",
+        *args,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise AssertionError(
+            "LoopX CLI failed during heartbeat smoke\n"
+            f"stdout:\n{exc.stdout}\n"
+            f"stderr:\n{exc.stderr}"
+        ) from exc
     return json.loads(result.stdout)
 
 
@@ -816,7 +824,7 @@ def main() -> int:
         assert interaction["agent_channel"]["quiet_noop_allowed"] is False, interaction
         assert interaction["cli_channel"]["spend_after_validation"] is True, interaction
         assert "accountable replan delta" in interaction["cli_channel"]["spend_policy"], interaction
-        assert "surface_only" in " ".join(interaction["cli_channel"]["next_cli_actions"]), interaction
+        assert "surface_only" in interaction["cli_channel"]["spend_policy"], interaction
 
         refresh = run_cli(
             root,

@@ -359,6 +359,10 @@ def test_model_can_create_and_bind_a_real_runnable_successor(tmp_path: Path) -> 
         "replan_successor_create",
     ]
     assert receipt["selected_semantic_outcomes"] == ["new_runnable_successor"]
+    successor_reentry = receipt["successor_reentry"]
+    assert successor_reentry["decision"] == "run"
+    assert successor_reentry["effective_action"] == "normal_run"
+    assert successor_reentry["replan_closed"] is True
 
 
 def test_stale_successor_obligation_is_rejected_before_todo_mutation(
