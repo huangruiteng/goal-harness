@@ -159,6 +159,61 @@ def enter_todo_ownership_handoff_gate(
     return extras
 
 
+def enter_added_todo_ownership_handoff_gate(
+    stack: ExitStack,
+    *,
+    lines: list[str],
+    state_text: str,
+    registry_path: Path,
+    goal_id: str,
+    role: str,
+    text: str,
+    claimed_by: str | None,
+    actor_agent_id: str | None,
+) -> dict[str, Any]:
+    """Gate the ``todo add`` path when it would reassign an existing todo.
+
+    ``todo add`` matches an open todo by text and upserts its metadata, so a
+    ``claimed_by`` argument on that branch changes the claim of a todo that
+    may already hold a lease. Creating a todo stays ungated in every mode: a
+    todo id that does not exist yet cannot hold one. Re-adding a todo with the
+    claim it already carries is not an ownership change and is not gated.
+
+    The delegated-authority door is not offered here. Reassignment under a
+    ``coordination.todo_lifecycle_authority`` grant goes through
+    ``todo update --claimed-by``, which is the verb that owns that action.
+    """
+
+    from ...todos import matching_todo_block  # loopx.todos, deferred: import cycle
+    from .active_state_editing import section_bounds
+
+    bounds = section_bounds(lines, role)
+    existing = (
+        matching_todo_block(
+            lines, bounds[0], bounds[1], text, role=role, source_section=bounds[2]
+        )
+        if bounds
+        else None
+    )
+    requested = normalize_todo_claimed_by(claimed_by) if claimed_by else None
+    current = normalize_todo_claimed_by(existing.get("claimed_by")) if existing else None
+    return enter_todo_ownership_handoff_gate(
+        stack,
+        state_text=state_text,
+        registry_path=registry_path,
+        goal_id=goal_id,
+        todo_id=str(existing.get("todo_id") or "") if existing else "",
+        mutation_authority={},
+        actor_agent_id=actor_agent_id,
+        ownership_mutation=(
+            role == "agent"
+            and existing is not None
+            and requested is not None
+            and requested != current
+        ),
+    )
+
+
 def resolve_todo_completion_handoff(
     *,
     state_text: str,

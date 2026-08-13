@@ -808,6 +808,103 @@ def test_hard_lease_holder_can_handoff_claim_and_peer_can_finish(
     assert not lease_file.exists()
 
 
+def test_hard_lease_blocks_todo_add_reassigning_a_leased_todo(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+    )
+    state_before = state.read_text(encoding="utf-8")
+    lease_before = json.loads(lease_file.read_text(encoding="utf-8"))
+
+    with pytest.raises(TaskLeaseError) as add_error:
+        _add_todo(registry, claimed_by=AGENT_B)
+
+    assert add_error.value.code == "handoff_mode_requires_lease"
+    assert add_error.value.payload["actor_agent_id"] == AGENT_B
+    assert add_error.value.payload["lease_owner"] == AGENT_A
+    assert state.read_text(encoding="utf-8") == state_before
+    assert json.loads(lease_file.read_text(encoding="utf-8")) == lease_before
+
+
+def test_hard_lease_allows_todo_add_creating_a_claimed_todo(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+
+    created = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Draft the follow-up migration note.",
+        task_class="advancement_task",
+        claimed_by=AGENT_A,
+    )
+
+    assert created["ok"] is True
+    assert created["added"] is True
+    assert created["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert "task_lease_holder_gate" not in created
+    assert _agent_todo(state, created["todo_id"])["claimed_by"] == AGENT_A
+
+
+def test_hard_lease_allows_todo_add_repeating_the_existing_claim(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+
+    repeated = _add_todo(registry, claimed_by=AGENT_A)
+
+    assert repeated["ok"] is True
+    assert repeated["already_exists"] is True
+    assert repeated["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert "task_lease_holder_gate" not in repeated
+    assert _agent_todo(state, todo["todo_id"])["claimed_by"] == AGENT_A
+
+
+def test_hard_lease_lease_holder_may_reassign_through_todo_add(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+
+    handed_off = add_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        role="agent",
+        text="Deliver one bounded control-plane change.",
+        task_class="advancement_task",
+        claimed_by=AGENT_B,
+        agent_id=AGENT_A,
+    )
+
+    assert handed_off["ok"] is True
+    assert handed_off["already_exists"] is True
+    assert handed_off["task_lease_holder_gate"]["owner"] == AGENT_A
+    assert _agent_todo(state, todo["todo_id"])["claimed_by"] == AGENT_B
+
+
+def test_legacy_pin_todo_add_reassigns_a_leased_todo(tmp_path: Path) -> None:
+    """Characterizes today's behavior: the add path is ungated in legacy mode."""
+
+    registry, state = _write_workspace(tmp_path)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+    )
+
+    reassigned = _add_todo(registry, claimed_by=AGENT_B)
+
+    assert reassigned["ok"] is True
+    assert reassigned["already_exists"] is True
+    assert reassigned["handoff_mode"] == HANDOFF_MODE_LEGACY
+    assert _agent_todo(state, todo["todo_id"])["claimed_by"] == AGENT_B
+    assert json.loads(lease_file.read_text(encoding="utf-8"))["owner"] == AGENT_A
+
+
 def test_hard_lease_expired_lease_does_not_authorize_claim(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

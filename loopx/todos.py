@@ -107,6 +107,7 @@ from .control_plane.todos.write_policy import (
     resolve_user_gate_global_gate_update,
 )
 from .control_plane.todos.handoff_mode import (
+    enter_added_todo_ownership_handoff_gate,
     enter_todo_ownership_handoff_gate,
     resolve_todo_completion_handoff,
 )
@@ -889,7 +890,7 @@ def add_goal_todo(
         resolved_state_file,
         agent_id=agent_id or claimed_by,
         operation="todo_add",
-    ):
+    ), ExitStack() as handoff_gate_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
@@ -991,6 +992,17 @@ def add_goal_todo(
             resume_when=normalized_resume_when,
             monitor_metadata=normalized_monitor_metadata,
         )
+        handoff_gate = enter_added_todo_ownership_handoff_gate(
+            handoff_gate_stack,
+            lines=lines,
+            state_text=original,
+            registry_path=registry_path,
+            goal_id=goal_id,
+            role=role,
+            text=todo_text,
+            claimed_by=effective_claimed_by,
+            actor_agent_id=effective_agent_id or effective_claimed_by,
+        )
         add_result = add_todo_to_lines(
             lines,
             role=role,
@@ -1074,6 +1086,7 @@ def add_goal_todo(
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
+        **handoff_gate,
     }
     return _attach_todo_write_correctness_dry_run_packet(
         payload,
