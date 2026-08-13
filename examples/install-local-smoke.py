@@ -148,6 +148,7 @@ def assert_release_snapshot_source_fallback(root: Path) -> None:
         release_id="fixture-nested",
         source_root=source_root,
         installed_at="2026-01-01T00:00:00Z",
+        env=local_checkout_install_env(os.environ),
     )
     assert nested_manifest["source"]["git_commit"] == source_manifest["source"]["git_commit"], nested_manifest
     assert nested_manifest["source"]["git_ref"] == source_manifest["source"]["git_ref"], nested_manifest
