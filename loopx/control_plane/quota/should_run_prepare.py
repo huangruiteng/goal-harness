@@ -51,6 +51,7 @@ from ..quota.stall_repair import (
 from ..quota.task_orchestration import (
     apply_task_orchestration_contract,
     build_quota_work_lane_contract,
+    task_orchestration_contract_is_actionable,
 )
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
@@ -337,6 +338,11 @@ def _build_agent_work_lane(
         user_todo_source_items=user_todo_source_items,
         available_capabilities=available_capabilities,
         parent_goal_id=goal_id,
+        agent_management_projection=(
+            status_payload.get("agent_management_projection")
+            if isinstance(status_payload.get("agent_management_projection"), dict)
+            else None
+        ),
     )
     return monitor_only, work_lane, task_orchestration
 
@@ -521,7 +527,7 @@ def _prepare_quota_should_run_item(
             monitor_item_limit=MONITOR_DUE_ITEM_LIMIT,
         )
     )
-    if task_orchestration_contract:
+    if task_orchestration_contract_is_actionable(task_orchestration_contract):
         capability_monitor_contract = capability_monitor_fallback = None
     work_lane_contract = capability_monitor_contract or work_lane_contract
     scoped_user_gate_fallback = _scoped_user_gate_fallback(

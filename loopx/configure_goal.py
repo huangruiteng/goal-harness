@@ -26,6 +26,7 @@ from .orchestration import (
     EXPLORE_HARNESS_PROFILES,
     MULTI_SUBAGENT_ORCHESTRATION_MODE,
     compact_orchestration_policy,
+    compact_peer_task_coordination_policy,
     orchestration_policy_summary,
 )
 from .quota import goal_quota_config
@@ -243,6 +244,9 @@ def _settings_summary(goal: dict[str, Any]) -> dict[str, Any]:
         "write_scope": _clean_write_scope(coordination.get("write_scope") or []) or [],
         "checkpointed_boundary_authority": checkpointed_boundary_authority_summary(coordination),
         "registered_agents": registered_agents,
+        "peer_task_coordination": deepcopy(
+            compact_peer_task_coordination_policy(coordination)
+        ),
         "todo_lifecycle_authority": normalize_todo_lifecycle_authority(
             coordination.get("todo_lifecycle_authority"),
             registered_agents=registered_agents,
@@ -421,6 +425,8 @@ def configure_goal(
     explore_graph_enabled: bool | None = None,
     registered_agents: list[str] | None = None,
     clear_registered_agents: bool = False,
+    peer_task_coordinator: str | None = None,
+    clear_peer_task_coordinator: bool = False,
     agent_profiles: list[dict[str, Any]] | None = None,
     clear_agent_profiles: list[str] | None = None,
     agent_work_modes: dict[str, str] | None = None,
@@ -467,6 +473,11 @@ def configure_goal(
         )
     if clear_registered_agents and registered_agents:
         raise ValueError("--clear-registered-agents cannot be combined with --registered-agent")
+    if clear_peer_task_coordinator and peer_task_coordinator:
+        raise ValueError(
+            "--clear-peer-task-coordinator cannot be combined with "
+            "--peer-task-coordinator"
+        )
     if agent_model is not None:
         agent_model = str(agent_model).strip().lower()
         if agent_model not in AGENT_MODEL_CHOICES:
@@ -556,6 +567,12 @@ def configure_goal(
         if allowed_domains:
             raise ValueError("--multi-subagent-feature off cannot be combined with --allowed-domain")
     registered_agents = _clean_registered_agents(registered_agents)
+    if peer_task_coordinator is not None:
+        peer_task_coordinator = normalize_todo_claimed_by(peer_task_coordinator)
+        if not peer_task_coordinator:
+            raise ValueError(
+                "--peer-task-coordinator must be a public-safe registered agent id"
+            )
     reward_memory_agents = _clean_registered_agents(reward_memory_agents)
     clear_agent_profiles = _clean_registered_agents(clear_agent_profiles)
     clear_agent_work_modes = _clean_registered_agents(clear_agent_work_modes)
@@ -595,6 +612,14 @@ def configure_goal(
         if registered_agents is not None
         else normalize_registered_agents(existing_coordination.get("registered_agents"))
     )
+    if (
+        peer_task_coordinator is not None
+        and peer_task_coordinator not in effective_registered_agents
+    ):
+        raise ValueError(
+            "--peer-task-coordinator must name an agent already registered for "
+            f"this goal: {peer_task_coordinator}"
+        )
     existing_reward_memory = reward_memory_goal_policy(goal)
     effective_reward_memory_agents = (
         reward_memory_agents
@@ -709,6 +734,8 @@ def configure_goal(
     elif execute and legacy_hierarchy_before and not migration_completed_before and (
         agent_model is not None
         or registered_agents is not None
+        or peer_task_coordinator is not None
+        or clear_peer_task_coordinator
         or clear_registered_agents
     ):
         raise ValueError(
@@ -900,6 +927,8 @@ def configure_goal(
     if (
         clear_registered_agents
         or registered_agents is not None
+        or peer_task_coordinator is not None
+        or clear_peer_task_coordinator
         or normalized_agent_profiles
         or clear_agent_profiles
         or normalized_agent_work_modes
@@ -925,8 +954,22 @@ def configure_goal(
             coordination.pop("agent_work_modes", None)
             coordination.pop("supervisor", None)
             coordination.pop("todo_lifecycle_authority", None)
+            coordination.pop("peer_task_coordination", None)
         elif registered_agents is not None:
             coordination["registered_agents"] = registered_agents
+            current_peer_task_coordination = (
+                coordination.get("peer_task_coordination")
+                if isinstance(coordination.get("peer_task_coordination"), dict)
+                else {}
+            )
+            current_peer_coordinator = normalize_todo_claimed_by(
+                current_peer_task_coordination.get("coordinator_agent_id")
+            )
+            if (
+                current_peer_coordinator
+                and current_peer_coordinator not in registered_agents
+            ):
+                coordination.pop("peer_task_coordination", None)
             existing_profiles = (
                 coordination.get("agent_profiles")
                 if isinstance(coordination.get("agent_profiles"), dict)
@@ -976,6 +1019,13 @@ def configure_goal(
                 coordination.pop("todo_lifecycle_authority", None)
         if not clear_registered_agents:
             coordination["agent_model"] = effective_agent_model
+        if not clear_registered_agents:
+            if clear_peer_task_coordinator:
+                coordination.pop("peer_task_coordination", None)
+            elif peer_task_coordinator is not None:
+                coordination["peer_task_coordination"] = {
+                    "coordinator_agent_id": peer_task_coordinator,
+                }
         if not clear_registered_agents and (
             normalized_agent_profiles or clear_agent_profiles
         ):
@@ -1109,6 +1159,9 @@ def configure_goal(
             or {"enabled": False}
         ),
         "peer_supervisor": deepcopy(after.get("supervisor") or {"enabled": False}),
+        "peer_task_coordination": deepcopy(
+            after.get("peer_task_coordination") or {"enabled": False}
+        ),
         "lark_event_inbox": _lark_event_inbox_config_summary(goal),
         "lark_kanban_heartbeat_sync": _lark_kanban_heartbeat_config_summary(goal),
         "reward_memory": reward_memory_goal_policy_summary(goal),

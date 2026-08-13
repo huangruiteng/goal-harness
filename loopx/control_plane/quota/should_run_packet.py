@@ -59,6 +59,7 @@ from ..quota.stall_repair import (
 from ..quota.task_orchestration import (
     attach_task_orchestration_payload,
     payload_work_lane_contract as _payload_work_lane_contract,
+    task_orchestration_contract_is_actionable,
     task_goal_route_hint,
 )
 from ..scheduler.automation_liveness import build_automation_liveness
@@ -665,7 +666,9 @@ def _resolve_quota_should_run_route(
     if (
         not due_monitor_attempt
         and not prepared.inbox_reply_due
-        and not prepared.task_orchestration_contract
+        and not task_orchestration_contract_is_actionable(
+            prepared.task_orchestration_contract
+        )
         and not prepared.capability_monitor_fallback
     ):
         agent_lane_next_action = build_agent_lane_next_action(

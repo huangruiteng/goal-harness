@@ -604,6 +604,10 @@ def handle_registry_admin_command(
                 lark_kanban_heartbeat_sync=args.lark_kanban_heartbeat_sync,
                 registered_agents=args.registered_agents,
                 clear_registered_agents=bool(args.clear_registered_agents),
+                peer_task_coordinator=args.peer_task_coordinator,
+                clear_peer_task_coordinator=bool(
+                    args.clear_peer_task_coordinator
+                ),
                 agent_profiles=agent_profiles,
                 clear_agent_profiles=args.clear_agent_profiles,
                 agent_work_modes=agent_work_modes or None,

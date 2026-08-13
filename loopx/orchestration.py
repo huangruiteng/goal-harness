@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import re
 from typing import Any
-
 
 DEFAULT_ORCHESTRATION_MODE = "default"
 MULTI_SUBAGENT_ORCHESTRATION_MODE = "multi_subagent"
@@ -81,6 +81,32 @@ def compact_orchestration_policy(spawn_policy: Any) -> dict[str, Any]:
     if isinstance(policy.get("explore_harness"), dict):
         compact["explore_harness"] = compact_explore_harness_policy(policy.get("explore_harness"))
     return compact
+
+
+def compact_peer_task_coordination_policy(coordination: Any) -> dict[str, Any] | None:
+    """Normalize the explicit registered-peer task coordinator selection.
+
+    Registered peer identity is not coordination authority.  The policy is
+    therefore fail-closed: only a non-empty ``coordinator_agent_id`` opts a
+    goal into peer task coordination.  Runtime capability admission remains a
+    separate, per-turn decision.
+    """
+
+    policy = coordination if isinstance(coordination, dict) else {}
+    peer_policy = (
+        policy.get("peer_task_coordination")
+        if isinstance(policy.get("peer_task_coordination"), dict)
+        else {}
+    )
+    coordinator_agent_id = str(
+        peer_policy.get("coordinator_agent_id") or ""
+    ).strip()
+    if not re.fullmatch(r"[a-z][a-z0-9_.:@-]{0,79}", coordinator_agent_id):
+        return None
+    return {
+        "enabled": True,
+        "coordinator_agent_id": coordinator_agent_id,
+    }
 
 
 def orchestration_policy_summary(policy: dict[str, Any] | None) -> str:

@@ -65,6 +65,8 @@ CONFIGURE_GOAL_REQUEST_FIELDS = {
     "clear_allowed_domains",
     "registered_agents",
     "clear_registered_agents",
+    "peer_task_coordinator",
+    "clear_peer_task_coordinator",
     "agent_profiles",
     "clear_agent_profiles",
     "agent_work_modes",
@@ -432,6 +434,10 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             "clear_allowed_domains": bool(body.get("clear_allowed_domains", False)),
             "registered_agents": [str(item) for item in registered_agents] if registered_agents is not None else None,
             "clear_registered_agents": bool(body.get("clear_registered_agents", False)),
+            "peer_task_coordinator": body.get("peer_task_coordinator"),
+            "clear_peer_task_coordinator": bool(
+                body.get("clear_peer_task_coordinator", False)
+            ),
             "agent_profiles": agent_profiles,
             "clear_agent_profiles": (
                 [str(item) for item in clear_agent_profiles]
@@ -492,6 +498,10 @@ class StatusRequestHandler(BaseHTTPRequestHandler):
             clear_allowed_domains=values["clear_allowed_domains"],
             registered_agents=values["registered_agents"],
             clear_registered_agents=values["clear_registered_agents"],
+            peer_task_coordinator=values["peer_task_coordinator"],
+            clear_peer_task_coordinator=values[
+                "clear_peer_task_coordinator"
+            ],
             agent_profiles=values["agent_profiles"],
             clear_agent_profiles=values["clear_agent_profiles"],
             agent_work_modes=values["agent_work_modes"],
