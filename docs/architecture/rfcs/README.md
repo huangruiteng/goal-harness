@@ -13,7 +13,7 @@ defined by the implementation and stable reference contracts.
 - [Goal Channel collaboration v0](goal-channel-collaboration-v0.md): bind one external collaboration channel to one LoopX goal while preserving LoopX as the source of truth.
 - [Goal Channel 协作模型 v0](goal-channel-collaboration-v0.zh-CN.md): 将一个外部协作通道绑定到一个 LoopX goal，同时保持 LoopX 作为事实源。
 - [Shared-goal online authority and pluggable coordination provider v0](shared-goal-authority-state-provider-v0.md): a claim-only contract proof for target-scoped conflicts over one canonical coordination aggregate, atomic original-receipt replay, and per-layer persistence ownership, with NoKV as an unpromoted provider candidate ([中文版](shared-goal-authority-state-provider-v0.zh-CN.md), [validation boundary](shared-goal-authority-state-provider-v0-evidence.zh-CN.md)).
-- [Goal artifact lifecycle projection v0](goal-artifact-lifecycle-projection-v0.md): treat a goal as a business artifact with derived milestones, blocking guards, and legal next transitions, projected read-only for operators and global views ([中文版](goal-artifact-lifecycle-projection-v0.zh-CN.md)).
+- [Goal artifact lifecycle projection v0](goal-artifact-lifecycle-projection-v0.md): derived from artifact-centric business process management (ABPM / GSM milestone-guard semantics); treat a goal as a business artifact with derived milestones, blocking guards, and legal next transitions, projected read-only for operators and global views ([中文版](goal-artifact-lifecycle-projection-v0.zh-CN.md)).
 
 RFCs must not contain internal conversations, private links, local filesystem
 paths, credentials, raw transcripts, or non-public organizational context.

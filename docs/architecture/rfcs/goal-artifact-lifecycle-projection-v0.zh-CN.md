@@ -9,6 +9,14 @@
 
 ---
 
+## 背景：由 Artifact-Centric 业务流程管理（ABPM）衍生
+
+本 RFC 由 **artifact-based business process management（ABPM）** 衍生而来。ABPM 是流程研究里以工件为中心的路线：把工作建模为“业务工件”而不是流程图。在 ABPM 中，业务工件是带身份和显式生命周期的实体；**guard condition（守卫条件）** 决定每个状态迁移是否合法，**milestone（里程碑）** 是 case 可以到达的、对外有意义的进度点。Guard-Stage-Milestone（GSM）是这个语义最著名的形态。
+
+LoopX 已经部分遵循这套哲学：goal、todo、gate、evidence、lease、run history 都是 typed 的，多个 bounded context（content item、benchmark case、observable artifact handle）已经有了类似工件生命周期。缺的是 **goal 这一层本身**的工件视角。
+
+本 RFC 只借用 artifact-lifecycle 的词汇（milestone / guard / next-transition），把它作为 goal 的只读投影。明确不采用流程引擎、流程图或统一生命周期抽象——这些是第 2 节里的非目标。
+
 ## 0. 一个帮助理解的例子
 
 运维打开一个长跑 benchmark 认证 goal 的 dashboard。这个 goal 已经跑了几周。页面上有 todo 数量、quota 状态、reason codes、最近一次 run 的 classification。但没有一个能回答运维真正关心的三个问题：
