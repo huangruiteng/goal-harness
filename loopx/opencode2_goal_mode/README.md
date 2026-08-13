@@ -35,7 +35,7 @@ loopx opencode2-goal-worker \
   --goal-id <goal_id> \
   --directory <project directory> \
   --task-body "<task body>" \
-  [--agent-id <agent_id>] [--registry <path>] [--capability <name>]... \
+  [--agent-id <agent_id>] [--capability <name>]... \
   [--session-id <existing session>]
 ```
 

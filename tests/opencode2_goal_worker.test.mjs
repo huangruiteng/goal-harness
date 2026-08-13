@@ -1,4 +1,9 @@
 import assert from "node:assert/strict"
+import { execFile as execFileCallback } from "node:child_process"
+import { promises as fs } from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { promisify } from "node:util"
 import test from "node:test"
 
 import {
@@ -15,6 +20,9 @@ import {
   turnVerdict,
   waitPlan,
 } from "../loopx/opencode2_goal_mode/opencode2-goal-worker.mjs"
+
+
+const execFile = promisify(execFileCallback)
 
 
 function goalNotFoundDecision() {
@@ -589,6 +597,42 @@ test("worker stops after the duration budget and posts the duration notice", asy
 test("createApiTransport probes the opencode2 api CLI shape", () => {
   assert.equal(typeof createApiTransport().sendPrompt, "function")
   assert.equal(typeof createApiTransport().sendSynthetic, "function")
+})
+
+
+test("worker entry runs main() even when argv[1] goes through a symlinked path", async () => {
+  const workerFile = path.resolve(
+    path.join(import.meta.dirname, "..", "loopx", "opencode2_goal_mode", "opencode2-goal-worker.mjs"),
+  )
+  const linkDir = path.join(os.tmpdir(), `loopx-worker-entry-${process.pid}`)
+  await fs.rm(linkDir, { recursive: true, force: true })
+  await fs.mkdir(path.dirname(workerFile), { recursive: true })
+  await fs.symlink(path.dirname(workerFile), linkDir)
+  try {
+    const argvPath = path.join(linkDir, path.basename(workerFile))
+    let stdout = ""
+    let exitCode = 0
+    try {
+      const result = await execFile(process.execPath, [argvPath, "--goal-id", "x", "--directory", "/tmp"], {
+        timeout: 30_000,
+        maxBuffer: 4 * 1024 * 1024,
+      })
+      stdout = result.stdout
+    } catch (error) {
+      exitCode = error?.code ?? 1
+      stdout = String(error?.stdout || "")
+    }
+    assert.equal(exitCode, 1, "the worker entry must fail closed with a non-zero exit")
+    const rendered = JSON.parse(stdout.trim())
+    assert.equal(rendered.operation, "opencode2_goal_worker")
+    assert.equal(rendered.ok, false)
+    assert.ok(
+      /first run requires --task-body/.test(rendered.error || ""),
+      "the worker entry must execute the real driver path",
+    )
+  } finally {
+    await fs.rm(linkDir, { recursive: true, force: true })
+  }
 })
 
 

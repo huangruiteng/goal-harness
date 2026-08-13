@@ -18,7 +18,7 @@
 // `loopx` for quota decisions.
 
 import { execFile as execFileCallback } from "node:child_process"
-import { promises as fs } from "node:fs"
+import { promises as fs, realpathSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
@@ -886,7 +886,18 @@ export function renderResult(result) {
 
 
 function isMainModule() {
-  return process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  // Compare realpaths: on macOS /var is a symlink to /private/var, so the
+  // argv[1] used to invoke the materialized worker can resolve differently
+  // from import.meta.url even though they name the same file. A mismatch
+  // silently skips main() and the CLI reports a fake success.
+  if (!process.argv[1]) return false
+  const argvPath = path.resolve(process.argv[1])
+  const modulePath = fileURLToPath(import.meta.url)
+  try {
+    return realpathSync(argvPath) === realpathSync(modulePath)
+  } catch {
+    return argvPath === modulePath
+  }
 }
 
 

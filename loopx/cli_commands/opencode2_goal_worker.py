@@ -160,25 +160,44 @@ def handle_opencode2_goal_worker_command(
             "exit_code": 130,
             "reason": "interrupted by the operator",
         }
+        log_path.unlink(missing_ok=True)
         print_payload(interrupt_payload, args.format, _render_worker_markdown)
         return 130
     stderr_thread.join(timeout=5)
     stdout_text = (stdout or "").strip()
+    try:
+        parsed = json.loads(stdout_text) if stdout_text else None
+    except json.JSONDecodeError:
+        parsed = None
+    if not isinstance(parsed, dict) or parsed.get("operation") != "opencode2_goal_worker":
+        payload: dict[str, object] = {
+            "ok": False,
+            "schema_version": "loopx_opencode2_worker_result_v0",
+            "operation": "opencode2_goal_worker",
+            "exit_code": process.returncode,
+            "error_kind": "worker_result_missing",
+            "reason": (
+                "the worker exited without a result payload; the driver did "
+                "not start or was interrupted, do not treat this as success"
+            ),
+        }
+        if stdout_text:
+            payload["raw_stdout"] = stdout_text[-800:]
+        if worker_log_tail:
+            payload["worker_log_tail"] = worker_log_tail[-1200:]
+        log_path.unlink(missing_ok=True)
+        print_payload(payload, args.format, _render_worker_markdown)
+        return 1
     payload: dict[str, object] = {
-        "ok": process.returncode == 0,
+        "ok": process.returncode == 0 and parsed.get("ok", True) is not False,
         "schema_version": "loopx_opencode2_worker_result_v0",
         "operation": "opencode2_goal_worker",
         "exit_code": process.returncode,
     }
-    try:
-        parsed = json.loads(stdout_text) if stdout_text else None
-        if isinstance(parsed, dict):
-            payload.update(parsed)
-    except json.JSONDecodeError:
-        payload["raw_stdout"] = stdout_text[-800:]
+    payload.update(parsed)
     if worker_log_tail:
         payload["worker_log_tail"] = worker_log_tail[-1200:]
-        payload["worker_log_path"] = str(log_path)
+    log_path.unlink(missing_ok=True)
     print_payload(payload, args.format, _render_worker_markdown)
     return process.returncode
 

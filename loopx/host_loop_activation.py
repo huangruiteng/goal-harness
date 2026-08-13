@@ -901,7 +901,7 @@ def _opencode2_activation(commands: dict[str, str], cli_bin: str) -> dict[str, A
         },
         "activation_steps": [
             "Run the heartbeat-prompt JSON command after project state and todos are written.",
-            "Start the worker from the project directory: loopx opencode2-goal-worker --goal-id <goal_id> --directory . --task-body <task_body>, with --agent-id, --registry, and --capability flags when those values are present.",
+            "Start the worker from the project directory: loopx opencode2-goal-worker --goal-id <goal_id> --directory . --task-body <task_body>, with --agent-id and --capability flags when those values are present.",
             "Let the worker create or attach the visible OpenCode 2 session, gate every turn through LoopX quota should-run, and keep quiet waits free of model calls.",
         ],
         "success_criteria": [
