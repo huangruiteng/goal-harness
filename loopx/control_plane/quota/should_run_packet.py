@@ -1070,6 +1070,17 @@ def _build_quota_should_run_payload(
         next_action_warning=route.next_action_warning,
         replan_obligation=prepared.replan_obligation,
     )
+    bounded_research_frontier = (
+        prepared.status_payload.get("bounded_research_frontier")
+        if isinstance(
+            prepared.status_payload.get("bounded_research_frontier"), dict
+        )
+        else None
+    )
+    _attach_truthy_fields(
+        payload,
+        bounded_research_frontier=bounded_research_frontier,
+    )
     _apply_agent_monitor_only_precedence(
         payload,
         monitor_only=prepared.agent_monitor_only,
@@ -1082,6 +1093,7 @@ def _build_quota_should_run_payload(
             agent_id=(
                 quota_decision_agent_id(payload) or prepared.requested_agent_id
             ),
+            bounded_research_frontier=bounded_research_frontier,
         )
     payload["automation_liveness"] = build_automation_liveness(payload)
     payload["interaction_contract"] = build_interaction_contract(

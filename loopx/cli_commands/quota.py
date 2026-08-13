@@ -5,6 +5,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..capabilities.explore.composition_frontier import (
+    project_live_explore_composition_frontier,
+)
 from ..control_plane.quota.cli_projection import (
     compact_quota_monitor_poll_cli_payload,
     compact_quota_should_run_cli_payload,
@@ -419,6 +422,9 @@ def handle_quota_command(
                 host_observation_resolver=resolve_codex_app_automation_rrule,
                 scheduler_execution_context=scheduler_context,
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                bounded_research_frontier_projector=(
+                    project_live_explore_composition_frontier
+                ),
             )
             if heartbeat_turn_id:
                 heartbeat_receipt_existing = find_heartbeat_receipt(
@@ -463,6 +469,9 @@ def handle_quota_command(
                             turn_instance_id=heartbeat_turn_id,
                             scheduler_execution_context=scheduler_context,
                             operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                            bounded_research_frontier_projector=(
+                                project_live_explore_composition_frontier
+                            ),
                         )
                         if not poll.get("ok"):
                             raise RuntimeError(

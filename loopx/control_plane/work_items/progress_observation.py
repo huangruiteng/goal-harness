@@ -491,6 +491,7 @@ def build_replan_action_packet(
     *,
     goal_id: str | None = None,
     agent_id: str | None = None,
+    bounded_research_frontier: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     context = obligation.get("replan_context")
     if not isinstance(context, Mapping):
@@ -515,14 +516,36 @@ def build_replan_action_packet(
     successor_priority = str(todo_action.get("priority") or "P1").strip()
     if successor_priority not in {"P0", "P1", "P2", "P3", "P4"}:
         successor_priority = "P1"
+    selected_gap = (
+        bounded_research_frontier.get("selected_gap")
+        if isinstance(bounded_research_frontier, Mapping)
+        and isinstance(bounded_research_frontier.get("selected_gap"), Mapping)
+        else None
+    )
     successor_summary = str(
-        todo_action.get("text")
+        (selected_gap or {}).get("successor_summary")
+        or todo_action.get("text")
         or "Select one evidence-grounded bounded successor slice."
     ).strip()[:240]
     successor_text = shlex.quote(
         f"[{successor_priority}] {successor_summary}"
     )
-    return {
+    successor_binding = (
+        selected_gap.get("successor_binding")
+        if isinstance(selected_gap, Mapping)
+        and isinstance(selected_gap.get("successor_binding"), Mapping)
+        else {}
+    )
+    explore_result_node_refs = [
+        ref
+        for raw in successor_binding.get("explore_result_node_refs") or []
+        if (ref := _stable_id(raw, field="explore_result_node_ref"))
+    ][:3]
+    successor_ref_args = "".join(
+        f" --explore-result-node-ref {shlex.quote(ref)}"
+        for ref in explore_result_node_refs
+    )
+    packet = {
         "schema_version": REPLAN_ACTION_PACKET_SCHEMA_VERSION,
         "decision": "replan_required",
         "obligation_id": obligation.get("obligation_id"),
@@ -537,6 +560,7 @@ def build_replan_action_packet(
                 f"--claimed-by {safe_agent_id} "
                 "--replan-obligation-id "
                 f"{obligation.get('obligation_id')}"
+                f"{successor_ref_args}"
             ),
             "successor_host_action": "end_current_heartbeat",
         },
@@ -546,3 +570,16 @@ def build_replan_action_packet(
             ProgressResultClass.NO_FOLLOWUP.value,
         ],
     }
+    if isinstance(selected_gap, Mapping):
+        packet["bounded_frontier"] = {
+            key: selected_gap[key]
+            for key in (
+                "schema_version",
+                "gap_id",
+                "experiment_node_ref",
+                "input_node_refs",
+                "required_outcome",
+            )
+            if key in selected_gap
+        }
+    return packet

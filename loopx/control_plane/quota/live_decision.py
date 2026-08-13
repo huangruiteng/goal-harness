@@ -12,6 +12,7 @@ from ..scheduler.execution_context import (
 
 
 HostObservationResolver = Callable[..., Mapping[str, Any]]
+BoundedResearchFrontierProjector = Callable[..., Mapping[str, Any] | None]
 
 
 def bind_scheduler_followup_cli_routes(
@@ -87,6 +88,7 @@ def build_live_quota_should_run_decision(
     route_source: str = "quota_cli_invocation",
     scheduler_execution_context: Mapping[str, Any] | SchedulerExecutionContextResolution | None = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    bounded_research_frontier_projector: BoundedResearchFrontierProjector | None = None,
 ) -> dict[str, Any]:
     """Build one live CLI decision while keeping host observation injectable."""
 
@@ -107,8 +109,21 @@ def build_live_quota_should_run_decision(
         if observation.get("available") is True:
             observed_rrule = str(observation.get("rrule") or "")
             observed_automation_id = str(observation.get("automation_id") or "").strip()
+    decision_status_payload = status_payload
+    if bounded_research_frontier_projector is not None:
+        frontier = bounded_research_frontier_projector(
+            runtime_root=runtime_root,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            status_payload=status_payload,
+        )
+        if isinstance(frontier, Mapping):
+            decision_status_payload = {
+                **status_payload,
+                "bounded_research_frontier": dict(frontier),
+            }
     payload = build_quota_should_run(
-        status_payload,
+        decision_status_payload,
         goal_id=goal_id,
         agent_id=agent_id,
         available_capabilities=available_capabilities,
