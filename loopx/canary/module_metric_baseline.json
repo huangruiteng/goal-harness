@@ -48,7 +48,7 @@
     "loopx/control_plane/goals/goal_frontier/__init__.py": {
       "any_count": 115,
       "dict_any_count": 0,
-      "lines": 2056
+      "lines": 2085
     },
     "loopx/control_plane/goals/goal_frontier/terminal.py": {
       "any_count": 15,

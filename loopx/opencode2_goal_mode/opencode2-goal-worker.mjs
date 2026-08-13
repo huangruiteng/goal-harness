@@ -460,6 +460,7 @@ export async function waitForTurn({
   pollMs = MESSAGE_POLL_MS,
   timeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   stallMs = 30 * 60 * 1000,
+  holdMs = 15 * 60 * 1000,
   waitChunkMs = 60_000,
   shouldPause = async () => false,
 }) {
@@ -470,8 +471,15 @@ export async function waitForTurn({
   // activity stops moving is reported as stalled instead of blocking until
   // the turn budget. Session updated timestamps are not a reliable liveness
   // signal in every build, so stall detection keys on message activity.
+  //
+  // A user pause (for example ESC in the host TUI) also stops message
+  // activity mid-turn. Before escalating to a permanent stall, the worker
+  // returns a quiet hold once the hold window passes; the main loop then
+  // waits without prompting and re-enters with the persisted activity time,
+  // so a paused session is never prompted and the stall window still
+  // escalates from the true last activity.
   const startedAt = Date.now()
-  let lastActivityAt = Date.now()
+  let lastActivityAt = Number(state?.pendingTurnActivityAt) || Date.now()
   const fallbackPromptCreated = Number(
     state?.lastPromptAt ?? state?.startedAtMs ?? Date.now()
   )
@@ -481,8 +489,12 @@ export async function waitForTurn({
     const messages = await transport.listMessages(sessionID)
     const activity = latestMessageActivity(messages)
     if (activity !== null && activity > lastActivityAt) lastActivityAt = activity
-    if (Date.now() - lastActivityAt > stallMs) {
+    const quietForMs = Date.now() - lastActivityAt
+    if (quietForMs > stallMs) {
       return { kind: "session_stalled", elapsedMs: Date.now() - startedAt }
+    }
+    if (quietForMs > holdMs) {
+      return { kind: "turn_hold", activityAt: lastActivityAt, quietForMs }
     }
     const verdict = turnVerdict(messages, sentPromptIds, { fallbackPromptCreated })
     if (verdict.completed) return { kind: "completed", ...verdict }
@@ -663,6 +675,7 @@ async function runWithLease({
       turnCount: 1,
       pendingTurn: true,
       lastPromptAt: Date.now(),
+      pendingTurnActivityAt: Date.now(),
       phase: "working",
     })
     await log("info", "prompted the session with the task body", { goalId, sessionID })
@@ -693,6 +706,28 @@ async function runWithLease({
         return Boolean(stored && stored.autoResume === false)
       },
     })
+    if (waitOutcome.kind === "turn_hold") {
+      const wasHolding = state.phase === "session_paused_hold"
+      state = await stateStore.write(goalId, {
+        ...state,
+        phase: "session_paused_hold",
+        pendingTurnActivityAt: Number(waitOutcome.activityAt) || state.pendingTurnActivityAt,
+        pausedReason: "session_paused_hold",
+      })
+      if (!wasHolding) {
+        await transport.sendSynthetic(
+          sessionID,
+          "The session appears paused. The LoopX worker holds quietly and resumes automatically when the session continues.",
+        )
+        await log("info", "pending turn went quiet; holding without prompting", {
+          goalId,
+          sessionID,
+          quietForMs: waitOutcome.quietForMs,
+        })
+      }
+      await sleepImpl(5 * 60_000)
+      continue
+    }
     if (waitOutcome.kind === "paused_state") {
       await log("info", "worker state was paused while waiting for the turn", { goalId, sessionID })
       return { kind: "paused_state" }
@@ -816,6 +851,7 @@ async function runWithLease({
         ...state,
         pendingTurn: true,
         lastPromptAt: Date.now(),
+        pendingTurnActivityAt: Date.now(),
         turnCount: Number(state.turnCount || 0) + 1,
       })
       await log("info", "quota granted another turn", { goalId, sessionID, turnCount: state.turnCount })

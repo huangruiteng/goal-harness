@@ -1011,6 +1011,64 @@ def _succession_gap_items(
     ]
 
 
+def _replan_evidence_acknowledged(
+    items: list[dict[str, Any]],
+    latest_replan_ack: dict[str, Any] | None,
+    *,
+    time_key: str,
+) -> bool:
+    """Return true when a valid replan ack postdates the newest evidence item.
+
+    A gap that the agent already acknowledged with a repair delta must not
+    re-derive an endless replan obligation: without this, any stale gap turns
+    quota into a permanent run-now loop that no acknowledgement can settle.
+    """
+
+    if not items or not isinstance(latest_replan_ack, dict):
+        return False
+    ack_time = parse_timestamp(latest_replan_ack.get("generated_at"))
+    if ack_time is None:
+        return False
+    newest = max(
+        (
+            timestamp
+            for item in items
+            if isinstance(item, dict)
+            if (timestamp := parse_timestamp(item.get(time_key))) is not None
+        ),
+        default=None,
+    )
+    if newest is None:
+        return False
+    return ack_time >= newest
+
+
+def _succession_gap_acknowledged(
+    gap_items: list[dict[str, Any]],
+    latest_replan_ack: dict[str, Any] | None,
+) -> bool:
+    """Return true when a valid replan ack postdates the newest succession gap."""
+
+    return _replan_evidence_acknowledged(
+        gap_items,
+        latest_replan_ack,
+        time_key="completed_at",
+    )
+
+
+def _vision_gap_acknowledged(
+    acceptance_gaps: list[dict[str, Any]],
+    latest_replan_ack: dict[str, Any] | None,
+) -> bool:
+    """Return true when a valid replan ack postdates the newest vision gap."""
+
+    return _replan_evidence_acknowledged(
+        acceptance_gaps,
+        latest_replan_ack,
+        time_key="generated_at",
+    )
+
+
 def derive_goal_frontier_replan_obligation_from_summaries(
     *,
     user_todo_summary: dict[str, Any] | None,
@@ -1084,7 +1142,16 @@ def derive_goal_frontier_replan_obligation_from_summaries(
             ),
             successor_vision_required=successor_vision_required,
             blocking_user_open_count=_blocking_user_open_count(user_todo_summary),
+            user_open_count=_open_todo_count(user_todo_summary),
             succession_gap_count=len(succession_gap_items),
+            succession_gap_acknowledged=_succession_gap_acknowledged(
+                succession_gap_items,
+                latest_replan_ack,
+            ),
+            vision_gap_acknowledged=_vision_gap_acknowledged(
+                compact_acceptance_gaps,
+                latest_replan_ack,
+            ),
             agent_advancement_count=agent_counts.get("advancement", 0),
             total_frontier_advancement=total_frontier_advancement,
             acceptance_gap_count=len(compact_acceptance_gaps),

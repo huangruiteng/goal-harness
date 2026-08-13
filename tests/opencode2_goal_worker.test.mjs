@@ -726,3 +726,61 @@ test("worker pauses when the session stops making progress", async () => {
   assert.equal(state.pausedReason, "session_stalled")
   assert.ok(transport.calls.synthetics.some((text) => text.includes("stopped making progress")))
 })
+
+
+test("worker holds quietly during a user pause and resumes when activity returns", async () => {
+  const stateStore = memoryStateStore()
+  const transport = fakeTransport()
+  let sessionPaused = true
+  const frozenAt = Date.now() - 200_000
+  transport.listMessages = async () => {
+    await new Promise((resolve) => setImmediate(resolve))
+    const messages = transport.userMessages.map((user) => ({
+      id: user.id,
+      type: "user",
+      text: user.text,
+      time: { created: Math.min(user.created, frozenAt) },
+    }))
+    if (!sessionPaused) {
+      const now = Date.now()
+      messages.push({
+        id: "msg_final",
+        type: "assistant",
+        finish: "stop",
+        time: { created: now, completed: now + 10 },
+      })
+    }
+    return messages
+  }
+  const overrides = makeWorkerOverrides({
+    transport,
+    stateStore,
+    decisions: [terminalDecision(), goalNotFoundDecision()],
+  })
+  const running = runWorker({
+    goalId: "goal-hold",
+    directory: "/workspace",
+    taskBody: "Task.",
+    waitTurnOptions: { holdMs: 1000, stallMs: 100_000 },
+    ...overrides,
+  })
+  // Wait for the first hold to land, then resume the paused session.
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    const state = await stateStore.read("goal-hold")
+    if (state?.phase === "session_paused_hold") break
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  const held = await stateStore.read("goal-hold")
+  assert.equal(held?.phase, "session_paused_hold")
+  assert.equal(held?.autoResume, true, "a user pause must not permanently pause the worker")
+  assert.ok(
+    transport.calls.synthetics.some((text) => text.includes("holds quietly")),
+    "the hold must be visible in the session",
+  )
+  sessionPaused = false
+  const result = await running
+  assert.equal(result.kind, "goal_gone")
+  const state = await stateStore.read("goal-hold")
+  assert.equal(state.phase, "goal_gone")
+})

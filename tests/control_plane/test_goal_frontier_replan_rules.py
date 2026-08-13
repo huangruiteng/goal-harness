@@ -274,3 +274,99 @@ def test_empty_authoritative_todo_source_does_not_use_stale_display_item() -> No
     )
 
     assert ack is None
+
+
+def _ack(generated_at: str, delta_kind: str = "goal_vision_patch") -> dict[str, object]:
+    return {
+        "generated_at": generated_at,
+        "schema_version": "autonomous_replan_ack_v0",
+        "recorded": True,
+        "delta_contract": {
+            "schema_version": "repair_delta_contract_v0",
+            "required": True,
+            "delta_present": True,
+            "delta_kinds": [delta_kind],
+        },
+    }
+
+
+def _vision_gap_with_generated_at(generated_at: str) -> list[dict[str, object]]:
+    return [
+        {
+            "kind": "vision_successor_required",
+            "acceptance_summary": "Write the next bounded agent vision.",
+            "replan_trigger_summary": "stage vision closed while the goal remains active",
+            "advancement_policy": "repeat_until_closed",
+            "generated_at": generated_at,
+        }
+    ]
+
+
+def test_fresh_replan_ack_settles_repeat_vision_gap_on_empty_frontier() -> None:
+    gap_time = "2026-08-13T08:00:00+08:00"
+    ack_time = "2026-08-13T09:00:00+08:00"
+
+    obligation = derive_goal_frontier_replan_obligation_from_summaries(
+        user_todo_summary={"open_count": 1},
+        agent_todo_summary={
+            "open_count": 0,
+            "claimed_advancement_open_count": 0,
+            "current_agent_claimed_advancement_count": 0,
+            "unclaimed_priority_open_items": [],
+            "executable_backlog_items": [],
+            "claim_scope": {"other_agent_claimed_items": []},
+        },
+        work_lane_contract={"lane": "advancement_task", "must_attempt_work": True},
+        agent_id="current-agent",
+        existing_replan_obligation=None,
+        acceptance_gaps=_vision_gap_with_generated_at(gap_time),
+        latest_replan_ack=_ack(ack_time),
+    )
+
+    assert obligation is None, "a fresh ack must settle the repeat vision gap"
+
+
+def test_stale_ack_does_not_settle_newer_vision_gap() -> None:
+    gap_time = "2026-08-13T09:00:00+08:00"
+    ack_time = "2026-08-13T08:00:00+08:00"
+
+    obligation = derive_goal_frontier_replan_obligation_from_summaries(
+        user_todo_summary={"open_count": 0},
+        agent_todo_summary={
+            "open_count": 0,
+            "claimed_advancement_open_count": 0,
+            "current_agent_claimed_advancement_count": 0,
+            "unclaimed_priority_open_items": [],
+            "executable_backlog_items": [],
+            "claim_scope": {"other_agent_claimed_items": []},
+        },
+        work_lane_contract={"lane": "advancement_task", "must_attempt_work": True},
+        agent_id="current-agent",
+        existing_replan_obligation=None,
+        acceptance_gaps=_vision_gap_with_generated_at(gap_time),
+        latest_replan_ack=_ack(ack_time),
+    )
+
+    assert obligation is not None, "an older ack must not settle a newer gap"
+
+
+def test_open_user_action_owns_empty_frontier_without_obligation() -> None:
+    obligation = derive_goal_frontier_replan_obligation_from_summaries(
+        user_todo_summary={
+            "open_count": 1,
+            "gate_open_items": [],
+        },
+        agent_todo_summary={
+            "open_count": 0,
+            "claimed_advancement_open_count": 0,
+            "current_agent_claimed_advancement_count": 0,
+            "unclaimed_priority_open_items": [],
+            "executable_backlog_items": [],
+            "claim_scope": {"other_agent_claimed_items": []},
+        },
+        work_lane_contract={"lane": "advancement_task", "must_attempt_work": True},
+        agent_id="current-agent",
+        existing_replan_obligation=None,
+    )
+
+    assert obligation is None, "open user-owned work owns the empty frontier"

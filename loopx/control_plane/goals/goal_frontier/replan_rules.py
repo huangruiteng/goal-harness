@@ -16,6 +16,7 @@ class GoalFrontierReplanRule(str, Enum):
     BLOCKING_HANDOFF_GATE = "blocking_handoff_gate"
     READY_DEFERRED_SUCCESSOR = "ready_deferred_successor"
     OPEN_USER_TODO = "open_user_todo"
+    USER_ACTION_OWNS_EMPTY_FRONTIER = "user_action_owns_empty_frontier"
     TODO_SUCCESSION_GAP = "todo_succession_gap"
     VISION_ACCEPTANCE_GAP = "vision_acceptance_gap"
     LONG_TODO_CHAIN = "long_todo_chain"
@@ -37,7 +38,10 @@ class GoalFrontierReplanFacts:
     ready_deferred_successor_count: int = 0
     successor_vision_required: bool = False
     blocking_user_open_count: int = 0
+    user_open_count: int = 0
     succession_gap_count: int = 0
+    succession_gap_acknowledged: bool = False
+    vision_gap_acknowledged: bool = False
     agent_advancement_count: int = 0
     total_frontier_advancement: int = 0
     acceptance_gap_count: int = 0
@@ -101,13 +105,15 @@ def select_goal_frontier_replan_rule(
             GoalFrontierReplanRule.TODO_SUCCESSION_GAP,
             facts.succession_gap_count > 0
             and facts.agent_advancement_count == 0
-            and facts.total_frontier_advancement == 0,
+            and facts.total_frontier_advancement == 0
+            and not facts.succession_gap_acknowledged,
             True,
             "completed advancement work lacks a successor or no-followup rationale",
         ),
         (
             GoalFrontierReplanRule.VISION_ACCEPTANCE_GAP,
             facts.acceptance_gap_count > 0
+            and not facts.vision_gap_acknowledged
             and (
                 facts.successor_vision_required
                 or facts.outcome_checkpoint_replan_required
@@ -138,6 +144,12 @@ def select_goal_frontier_replan_rule(
             and facts.monitor_no_change_streak_triggered,
             True,
             "the current agent monitor crossed the no-change replan threshold",
+        ),
+        (
+            GoalFrontierReplanRule.USER_ACTION_OWNS_EMPTY_FRONTIER,
+            facts.user_open_count > 0 and facts.total_frontier_advancement == 0,
+            False,
+            "open user-owned work owns the empty frontier",
         ),
         (
             GoalFrontierReplanRule.NOT_MONITOR_ONLY,
