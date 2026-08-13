@@ -7,12 +7,16 @@ import pytest
 from loopx.control_plane.goals.goal_frontier import (
     derive_goal_frontier_replan_obligation_from_summaries,
 )
+from loopx.control_plane.goals.goal_frontier.ack_policy import (
+    replan_successor_transition_ack,
+)
 from loopx.control_plane.goals.goal_frontier.replan_rules import (
     GOAL_FRONTIER_REPLAN_RULE_ORDER,
     GoalFrontierReplanFacts,
     GoalFrontierReplanRule,
     select_goal_frontier_replan_rule,
 )
+from loopx.control_plane.todos.summary_item import compact_todo_summary_item
 
 
 @pytest.mark.parametrize(
@@ -194,3 +198,76 @@ def test_current_agent_advancement_satisfies_scoped_vision_frontier() -> None:
     )
 
     assert obligation is None
+
+
+def test_exact_replan_successor_uses_authoritative_todo_source() -> None:
+    obligation_id = "replan-0123456789abcdef"
+    successor = compact_todo_summary_item(
+        {
+            "todo_id": "todo_0123456789ab",
+            "text": "Run the selected bounded experiment.",
+            "status": "open",
+            "task_class": "advancement_task",
+            "claimed_by": "current-agent",
+            "replan_obligation_id": obligation_id,
+        }
+    )
+    unrelated_display_items = [
+        _advancement(f"todo_{index:012x}", "current-agent") for index in range(3)
+    ]
+
+    ack = replan_successor_transition_ack(
+        {"first_executable_items": unrelated_display_items},
+        agent_id="current-agent",
+        replan_obligation={
+            "obligation_id": obligation_id,
+            "satisfying_semantic_outcomes": ["new_runnable_successor"],
+        },
+        agent_todo_items=[*unrelated_display_items, successor],
+    )
+
+    assert successor["replan_obligation_id"] == obligation_id
+    assert ack is not None
+    assert ack["semantic_delta"]["successor_todo_id"] == successor["todo_id"]
+    assert ack["semantic_delta"]["outcomes"] == ["new_runnable_successor"]
+
+
+def test_unrelated_actionable_todo_cannot_close_replan() -> None:
+    obligation_id = "replan-0123456789abcdef"
+
+    ack = replan_successor_transition_ack(
+        {"first_executable_items": []},
+        agent_id="current-agent",
+        replan_obligation={
+            "obligation_id": obligation_id,
+            "satisfying_semantic_outcomes": ["new_runnable_successor"],
+        },
+        agent_todo_items=[
+            {
+                **_advancement("todo_0123456789ab", "current-agent"),
+                "replan_obligation_id": "replan-fedcba9876543210",
+            }
+        ],
+    )
+
+    assert ack is None
+
+
+def test_empty_authoritative_todo_source_does_not_use_stale_display_item() -> None:
+    obligation_id = "replan-0123456789abcdef"
+    stale_display_item = {
+        **_advancement("todo_0123456789ab", "current-agent"),
+        "replan_obligation_id": obligation_id,
+    }
+
+    ack = replan_successor_transition_ack(
+        {"first_executable_items": [stale_display_item]},
+        agent_id="current-agent",
+        replan_obligation={
+            "obligation_id": obligation_id,
+            "satisfying_semantic_outcomes": ["new_runnable_successor"],
+        },
+        agent_todo_items=[],
+    )
+
+    assert ack is None

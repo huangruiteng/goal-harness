@@ -187,6 +187,15 @@ def test_real_tool_loop_selects_composition_gap_and_creates_bound_successor(
         "replan_successor_create",
     ]
     assert receipt["selected_semantic_outcomes"] == ["new_runnable_successor"]
+    successor_reentry = receipt["successor_reentry"]
+    assert successor_reentry["selected_todo_id"].startswith("todo_")
+    assert successor_reentry["decision"] == "run"
+    assert successor_reentry["effective_action"] == "normal_run"
+    assert successor_reentry["replan_closed"] is True
+    assert successor_reentry["composition_experiment_ref"] == (
+        "experiment-permission-composition"
+    )
+    assert successor_reentry["composition_status"] == "scheduled"
 
     quota_packet = json.loads(transport.requests[1]["messages"][-1]["content"])
     selected_gap = quota_packet["bounded_research_frontier"]["selected_gap"]
