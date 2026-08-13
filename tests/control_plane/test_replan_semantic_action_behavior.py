@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -58,6 +59,30 @@ def _semantic_action(
         "--progress-evidence-id evidence-permission-config "
         "--no-global-sync --suppress-external-sinks"
     )
+
+
+def _composition_successor_action(
+    request: Mapping[str, object],
+) -> ScriptedExecToolAction:
+    packet = _latest_quota_packet(request)
+    frontier = packet.get("bounded_research_frontier")
+    assert isinstance(frontier, Mapping)
+    selected_gap = frontier.get("selected_gap")
+    assert isinstance(selected_gap, Mapping)
+    assert selected_gap["required_outcome"] == "joint_experiment_result"
+    action = packet["replan_action_packet"]
+    assert isinstance(action, Mapping)
+    bounded = action.get("bounded_frontier")
+    assert isinstance(bounded, Mapping)
+    assert bounded["gap_id"] == selected_gap["gap_id"]
+    writeback = action.get("writeback_contract")
+    assert isinstance(writeback, Mapping)
+    command = str(writeback.get("successor_command") or "")
+    assert command
+    command_tokens = shlex.split(command)
+    assert command_tokens[0] == "loopx"
+    command_tokens[1:1] = ["--format", "json", "--registry", "ignored"]
+    return ScriptedExecToolAction(command=shlex.join(command_tokens))
 
 
 def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
@@ -128,6 +153,49 @@ def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
         "surface-permission-config"
     )
     assert latest["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
+
+
+def test_real_tool_loop_selects_composition_gap_and_creates_bound_successor(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(
+        tmp_path / "oracle",
+        composition_frontier=True,
+    )
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat replan-frontier.json"),
+            ScriptedExecToolAction(command="cat fixture/permission-config.json"),
+            _composition_successor_action,
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-composition-successor-001",
+        fixture_root=tmp_path / "actor",
+        composition_frontier=True,
+    )
+
+    assert receipt["qualification_passed"] is True, receipt
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "workspace_read",
+        "workspace_read",
+        "replan_successor_create",
+    ]
+    assert receipt["selected_semantic_outcomes"] == ["new_runnable_successor"]
+
+    quota_packet = json.loads(transport.requests[1]["messages"][-1]["content"])
+    selected_gap = quota_packet["bounded_research_frontier"]["selected_gap"]
+    assert selected_gap["experiment_node_ref"] == (
+        "experiment-permission-composition"
+    )
+    assert quota_packet["replan_action_packet"]["bounded_frontier"][
+        "experiment_node_ref"
+    ] == selected_gap["experiment_node_ref"]
 
 
 def test_action_outside_observed_frontier_is_rejected(tmp_path: Path) -> None:

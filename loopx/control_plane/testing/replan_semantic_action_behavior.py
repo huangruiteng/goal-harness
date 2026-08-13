@@ -46,6 +46,7 @@ _FIXTURE_NEW_SURFACE_ID = "surface-permission-config"
 _FIXTURE_NEW_HYPOTHESIS_ID = "hypothesis-permission-default"
 _FIXTURE_NEW_PROBE_KIND = "static-contract-read"
 _FIXTURE_NEW_EVIDENCE_ID = "evidence-permission-config"
+_FIXTURE_COMPOSITION_EXPERIMENT_ID = "experiment-permission-composition"
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class _ReplanSemanticActionFixture:
     source_root: Path
     frontier_target: Path
     work_source_target: Path
+    composition_experiment_ref: str | None = None
 
 
 @dataclass
@@ -81,7 +83,11 @@ def _digest(value: str) -> str:
     return digest_text(value)
 
 
-def _build_fixture(root: Path) -> _ReplanSemanticActionFixture:
+def _build_fixture(
+    root: Path,
+    *,
+    composition_frontier: bool = False,
+) -> _ReplanSemanticActionFixture:
     source_root = Path(__file__).resolve().parents[3]
     project_root = root / "project"
     runtime_root = root / "runtime"
@@ -172,43 +178,46 @@ def _build_fixture(root: Path) -> _ReplanSemanticActionFixture:
         "cadence=1d next_due_at=2999-01-01T00%3A00%3A00Z -->\n",
         encoding="utf-8",
     )
+    registry_goal: dict[str, Any] = {
+        "id": _FIXTURE_GOAL_ID,
+        "domain": "replan-semantic-action-fixture",
+        "status": "active",
+        "repo": str(project_root),
+        "state_file": str(state_relative),
+        "adapter": {
+            "kind": "fixture_connected_delivery_v0",
+            "status": "connected-delivery",
+        },
+        "coordination": {
+            "registered_agents": [_FIXTURE_AGENT_ID],
+            "agent_model": "peer_v1",
+            "agent_profiles": {
+                _FIXTURE_AGENT_ID: {
+                    "schema_version": "agent_profile_v1",
+                    "agent_id": _FIXTURE_AGENT_ID,
+                    "profile_role": "quality-qualification",
+                    "scope_summary": "Qualify one bounded semantic replan.",
+                    "default_task_classes": ["continuous_monitor"],
+                    "vision_requirement": "optional",
+                }
+            },
+        },
+        "authority_sources": [],
+        "quota": {
+            "compute": 1.0,
+            "window_hours": 24,
+            "allowed_slots": 5,
+        },
+    }
+    if composition_frontier:
+        registry_goal["spawn_policy"] = {
+            "explore_harness": {"enabled": True, "profile": "generic"}
+        }
     registry = {
         "schema_version": "0.1",
         "updated_at": "2026-08-13T00:00:00+08:00",
         "common_runtime_root": str(runtime_root),
-        "goals": [
-            {
-                "id": _FIXTURE_GOAL_ID,
-                "domain": "replan-semantic-action-fixture",
-                "status": "active",
-                "repo": str(project_root),
-                "state_file": str(state_relative),
-                "adapter": {
-                    "kind": "fixture_connected_delivery_v0",
-                    "status": "connected-delivery",
-                },
-                "coordination": {
-                    "registered_agents": [_FIXTURE_AGENT_ID],
-                    "agent_model": "peer_v1",
-                    "agent_profiles": {
-                        _FIXTURE_AGENT_ID: {
-                            "schema_version": "agent_profile_v1",
-                            "agent_id": _FIXTURE_AGENT_ID,
-                            "profile_role": "quality-qualification",
-                            "scope_summary": "Qualify one bounded semantic replan.",
-                            "default_task_classes": ["continuous_monitor"],
-                            "vision_requirement": "optional",
-                        }
-                    },
-                },
-                "authority_sources": [],
-                "quota": {
-                    "compute": 1.0,
-                    "window_hours": 24,
-                    "allowed_slots": 5,
-                },
-            }
-        ],
+        "goals": [registry_goal],
     }
     registry_text = json.dumps(registry, ensure_ascii=False, indent=2, sort_keys=True)
     for registry_path in (local_registry_path, global_registry_path):
@@ -248,6 +257,89 @@ def _build_fixture(root: Path) -> _ReplanSemanticActionFixture:
         encoding="utf-8",
     )
 
+    if composition_frontier:
+        explore_commands = (
+            (
+                "node",
+                "--node-id",
+                "surface-existing",
+                "--title",
+                "Existing closed surface",
+                "--kind",
+                "hypothesis",
+                "--status",
+                "resolved",
+                "--evidence-ref",
+                "evidence-existing",
+            ),
+            (
+                "node",
+                "--node-id",
+                _FIXTURE_NEW_SURFACE_ID,
+                "--title",
+                "Permission configuration surface",
+                "--kind",
+                "hypothesis",
+                "--status",
+                "dead_end",
+                "--evidence-ref",
+                _FIXTURE_NEW_EVIDENCE_ID,
+            ),
+            (
+                "node",
+                "--node-id",
+                _FIXTURE_COMPOSITION_EXPERIMENT_ID,
+                "--title",
+                "Jointly probe the existing and permission surfaces",
+                "--kind",
+                "experiment",
+                "--status",
+                "open",
+            ),
+            (
+                "edge",
+                "--from",
+                _FIXTURE_COMPOSITION_EXPERIMENT_ID,
+                "--to",
+                "surface-existing",
+                "--type",
+                "depends_on",
+            ),
+            (
+                "edge",
+                "--from",
+                _FIXTURE_COMPOSITION_EXPERIMENT_ID,
+                "--to",
+                _FIXTURE_NEW_SURFACE_ID,
+                "--type",
+                "depends_on",
+            ),
+        )
+        for explore_args in explore_commands:
+            execute_loopx_cli(
+                shlex.join(
+                    (
+                        "loopx",
+                        "--format",
+                        "json",
+                        "--registry",
+                        "fixture-registry",
+                        "--runtime-root",
+                        "fixture-runtime",
+                        "explore",
+                        *explore_args,
+                        "--goal-id",
+                        _FIXTURE_GOAL_ID,
+                    )
+                ),
+                source_root=source_root,
+                project_root=project_root,
+                argument_overrides={
+                    "--registry": str(global_registry_path),
+                    "--runtime-root": str(runtime_root),
+                },
+            )
+
     prompt = build_heartbeat_prompt(
         goal_id=_FIXTURE_GOAL_ID,
         thin=True,
@@ -272,6 +364,9 @@ def _build_fixture(root: Path) -> _ReplanSemanticActionFixture:
         source_root=source_root,
         frontier_target=frontier_target,
         work_source_target=source_target,
+        composition_experiment_ref=(
+            _FIXTURE_COMPOSITION_EXPERIMENT_ID if composition_frontier else None
+        ),
     )
 
 
@@ -635,6 +730,13 @@ def _handle_successor_command(command: str, state: _QualificationState) -> str:
     )
     if requested_obligation_id != expected_obligation_id:
         raise ValueError("successor_create_obligation_mismatch")
+    if state.fixture.composition_experiment_ref:
+        requested_experiment_ref = argument_value(
+            loopx_command_tokens(command) or [],
+            "--explore-result-node-ref",
+        )
+        if requested_experiment_ref != state.fixture.composition_experiment_ref:
+            raise ValueError("successor_create_composition_binding_mismatch")
     output = _execute_loopx(
         command,
         fixture=state.fixture,
@@ -742,6 +844,7 @@ _EXPECTED_BEHAVIOR_FAILURES = frozenset(
         "successor_create_before_frontier_read",
         "successor_create_before_work_source_read",
         "successor_create_obligation_mismatch",
+        "successor_create_composition_binding_mismatch",
         "repeated_successor_create",
         "successor_create_failed",
         "successor_transition_missing",
@@ -875,8 +978,12 @@ class DoubaoReplanSemanticActionBehaviorActor:
         *,
         qualification_id: str,
         fixture_root: Path,
+        composition_frontier: bool = False,
     ) -> dict[str, Any]:
-        fixture = _build_fixture(fixture_root)
+        fixture = _build_fixture(
+            fixture_root,
+            composition_frontier=composition_frontier,
+        )
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
