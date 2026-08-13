@@ -39,7 +39,7 @@ export const LEASE_STALE_MS = 5 * 60 * 1000
 
 export function continuationPrompt(directory) {
   const anchor = directory
-    ? `\nWorking directory: ${directory}\nStay inside this project; do not touch other goals or repositories.`
+    ? `\nWorking directory: ${directory}\nStay inside this project; do not touch other goals or repositories, and never run loopx install/update/rollback/slash-commands operations or modify the host loopx installation.`
     : ""
   return [
     "LoopX quota granted the next automatic turn.",
