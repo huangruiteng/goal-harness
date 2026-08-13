@@ -7,6 +7,8 @@ defined by the implementation and stable reference contracts.
 
 ## Active Drafts
 
+- [Research Exploration Control Plane v0](research-exploration-control-plane-v0.md): evolve a typed research frontier across coverage, closure, and explicit composition experiments while keeping Explore, goal-frontier, and execution authority separate.
+- [研究型探索控制面 v0](research-exploration-control-plane-v0.zh-CN.md)：围绕 coverage、closure 与显式组合实验演进类型化研究前沿，同时保持 Explore、goal-frontier 与执行权限彼此分离。
 - [Agent Loop Effect Interpreter v0](agent-loop-effect-interpreter-v0.md): model LoopX as the effect interpreter around an agent loop, with canonical effect-request/interpretation/observation packet semantics.
 - [Agent Loop Effect Interpreter v0（中文版）](agent-loop-effect-interpreter-v0.zh-CN.md): 把 LoopX 建模为 agent loop 外围的 effect interpreter，并给出 canonical effect-request/interpretation/observation packet 语义。
 - [Agent IM, LoopX, and OpenViking collaboration v0](agent-im-openviking-collaboration-v0.md): separate runtime delivery, durable control state, and scoped context while preserving direct agent-to-LoopX interaction.
