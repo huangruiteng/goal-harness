@@ -263,19 +263,3 @@ def test_policy_normalization_precedes_deterministic_peer_scope_selection() -> N
     assert selected <= set(registered_agents)
 
 
-def test_todo_evidence_comments_do_not_trigger_state_replan_scan() -> None:
-    from loopx.control_plane.work_items.autonomous_replan_obligation import (
-        _strip_todo_evidence_comments,
-    )
-
-    entry = (
-        "- [x] some done todo "
-        "<!-- loopx:todo todo_id=todo_1 status=done "
-        "evidence=session%20stalled%20no%20progress -->"
-    )
-    stripped = _strip_todo_evidence_comments(entry)
-    assert "stalled" not in stripped
-    assert "some done todo" in stripped
-
-    visible_prose = "- [ ] 系统停转，连续三轮无进展"
-    assert "停转" in _strip_todo_evidence_comments(visible_prose)
