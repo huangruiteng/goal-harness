@@ -35,7 +35,6 @@ from .primary_action import (
     protocol_action_text,
     protocol_first_candidate_action as _protocol_first_candidate_action,
     protocol_monitor_action as _protocol_monitor_action,
-    protocol_replan_action_packet_instruction as _protocol_replan_action_packet_instruction,
     protocol_replan_requires_runnable_todo as _protocol_replan_requires_runnable_todo,
 )
 from .runtime_capability_reentry import build_runtime_capability_reentry_packet
@@ -876,49 +875,53 @@ def interaction_next_cli_actions(
         runnable_todo_writeback_required = (
             _protocol_replan_requires_runnable_todo(payload)
         )
-        actions = [_protocol_replan_action_packet_instruction(payload)]
+        packet = (
+            payload.get("replan_action_packet")
+            if isinstance(payload.get("replan_action_packet"), dict)
+            else {}
+        )
+        writeback_contract = (
+            packet.get("writeback_contract")
+            if isinstance(packet.get("writeback_contract"), dict)
+            else {}
+        )
+        successor_command = str(
+            writeback_contract.get("successor_command") or ""
+        ).strip()
+        successor_ref = (
+            "execute replan_action_packet.writeback_contract.successor_command"
+            if successor_command
+            else ""
+        )
+        successor_boundary = "on host_action=end_current_heartbeat: stop"
         if runnable_todo_writeback_required:
-            packet = (
-                payload.get("replan_action_packet")
-                if isinstance(payload.get("replan_action_packet"), dict)
-                else {}
+            return (
+                [successor_command, successor_boundary]
+                if successor_command
+                else []
             )
-            writeback_contract = (
-                packet.get("writeback_contract")
-                if isinstance(packet.get("writeback_contract"), dict)
-                else {}
-            )
-            successor_command = str(
-                writeback_contract.get("new_runnable_successor_command") or ""
-            ).strip()
-            if successor_command:
-                actions.append(successor_command)
-            actions.append(
-                "when todo add returns host_action=end_current_heartbeat, end this "
-                "heartbeat immediately; execute the successor on the next heartbeat"
-            )
-            return actions
         typed_progress_args = (
             "--progress-result-class "
             "<advanced|blocked|exploration_exhausted|no_followup> "
             "<typed-progress-identifiers-and-evidence>"
         )
-        actions.extend([
-            (
-                f"loopx refresh-state --goal-id {goal_id} "
-                "--classification bounded_replan_progress "
-                f"{typed_progress_args} "
-                "--delivery-batch-scale <scale> --delivery-outcome <outcome>"
-                f"{settlement_args}{scoped_cli_args}"
-            ),
-            (
-                "if the typed replan writeback records an accountable delta such as "
-                "outcome_progress or primary_goal_outcome, run "
-                f"{_quota_spend_action(goal_id, scoped_cli_args=scoped_cli_args, payload=payload, settlement_plan=settlement_plan)}; "
-                "otherwise do not spend for surface_only watch-lane continuation/no-followup"
-            ),
-        ])
-        return actions
+        refresh_command = (
+            f"loopx refresh-state --goal-id {goal_id} "
+            "--progress-scope agent_lane "
+            "--classification bounded_replan_progress "
+            f"{typed_progress_args} "
+            "--delivery-batch-scale <scale> --delivery-outcome <outcome>"
+            f"{settlement_args}{scoped_cli_args}"
+        )
+        return [
+            action
+            for action in (
+                successor_ref,
+                refresh_command,
+                successor_boundary if successor_command else "",
+            )
+            if action
+        ]
     return _terminal_cli_actions(
         mode=mode,
         goal_id=goal_id,

@@ -512,7 +512,11 @@ def assert_autonomous_replan_preempts_monitor_quiet() -> None:
     assert contract["agent_channel"]["must_attempt"] is True, contract
     assert contract["cli_channel"]["spend_after_validation"] is True, contract
     assert "accountable replan delta" in contract["cli_channel"]["spend_policy"], contract
-    assert "surface_only" in " ".join(contract["cli_channel"]["next_cli_actions"]), contract
+    assert "surface_only" in contract["cli_channel"]["spend_policy"], contract
+    assert not any(
+        "spend-slot" in action
+        for action in contract["cli_channel"]["next_cli_actions"]
+    ), contract
     assert payload["scheduler_hint"]["action"] == "run_now", payload
 
 

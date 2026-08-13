@@ -121,15 +121,10 @@ def test_quota_delivers_coverage_context_and_minimal_replan_action() -> None:
         "uncovered_frontier": context["uncovered_frontier"],
         "required_outcome": "semantic_delta",
         "writeback_contract": {
-            "schema_version": "typed_progress_observation_v0",
-            "transport": "loopx_refresh_state",
-            "command_template": action["writeback_contract"]["command_template"],
-            "new_runnable_successor_command": action["writeback_contract"][
-                "new_runnable_successor_command"
+            "successor_command": action["writeback_contract"][
+                "successor_command"
             ],
-            "successor_turn_boundary": action["writeback_contract"][
-                "successor_turn_boundary"
-            ],
+            "successor_host_action": "end_current_heartbeat",
         },
         "allowed_terminal": [
             "exploration_exhausted",
@@ -138,10 +133,10 @@ def test_quota_delivers_coverage_context_and_minimal_replan_action() -> None:
         ],
     }
     assert "--goal-id replan-context-goal" in action["writeback_contract"][
-        "command_template"
+        "successor_command"
     ]
     assert obligation["obligation_id"] in action["writeback_contract"][
-        "new_runnable_successor_command"
+        "successor_command"
     ]
 
 

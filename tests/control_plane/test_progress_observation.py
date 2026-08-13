@@ -175,15 +175,12 @@ def test_host_projects_evidence_context_and_minimal_action_packet() -> None:
         "writeback_contract",
         "allowed_terminal",
     }
-    assert packet["writeback_contract"]["schema_version"] == (
-        "typed_progress_observation_v0"
-    )
-    assert "--progress-result-class" in packet["writeback_contract"][
-        "command_template"
-    ]
     assert "--replan-obligation-id replan-0123456789abcdef" in packet[
         "writeback_contract"
-    ]["new_runnable_successor_command"]
-    assert "host_action=end_current_heartbeat" in packet["writeback_contract"][
-        "successor_turn_boundary"
+    ]["successor_command"]
+    assert "<bounded next slice>" not in packet["writeback_contract"][
+        "successor_command"
     ]
+    assert packet["writeback_contract"]["successor_host_action"] == (
+        "end_current_heartbeat"
+    )

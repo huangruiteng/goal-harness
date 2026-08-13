@@ -168,21 +168,12 @@ def protocol_replan_action_packet_instruction(payload: dict[str, Any]) -> str:
         if isinstance(packet.get("uncovered_frontier"), dict)
         else {}
     )
-    outcomes = [
-        str(value or "").strip()
-        for value in (uncovered.get("required_any_of") or [])
-        if str(value or "").strip()
-    ]
-    if outcomes:
+    if uncovered.get("required_any_of"):
         return (
-            "select and produce one typed semantic outcome from "
-            + ", ".join(outcomes)
-            + "; use the host-projected coverage ledger before choosing the next slice"
+            "select one bounded next slice; prefer "
+            "replan_action_packet.writeback_contract.successor_command"
         )
-    return (
-        "select and produce one typed semantic outcome from the host-projected "
-        "replan action packet"
-    )
+    return "produce one typed outcome from the host-projected replan action packet"
 
 
 def protocol_strict_replan_action(payload: dict[str, Any]) -> str | None:

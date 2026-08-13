@@ -261,6 +261,58 @@ def test_turn_envelope_preserves_action_boundary_and_writeback() -> None:
     )
 
 
+def test_turn_envelope_compacts_replan_help_without_losing_successor_execution() -> None:
+    source = _full_decision()
+    successor_command = (
+        "loopx todo add --goal-id fixture-goal --role agent "
+        "--task-class advancement_task --text '[P0] next slice' "
+        "--claimed-by codex-fixture "
+        "--replan-obligation-id replan-0123456789abcdef"
+    )
+    source["interaction_contract"]["mode"] = "autonomous_replan"
+    source["interaction_contract"]["agent_channel"]["primary_action"] = (
+        "select one bounded next slice; prefer "
+        "replan_action_packet.writeback_contract.successor_command"
+    )
+    refresh_command = (
+        "loopx refresh-state --goal-id fixture-goal "
+        "--progress-scope agent_lane --progress-result-class <typed-class>"
+    )
+    source["interaction_contract"]["cli_channel"]["next_cli_actions"] = [
+        "execute replan_action_packet.writeback_contract.successor_command",
+        refresh_command,
+        "on host_action=end_current_heartbeat: stop",
+    ]
+    source["replan_action_packet"] = {
+        "schema_version": "replan_action_packet_v0",
+        "decision": "replan_required",
+        "obligation_id": "replan-0123456789abcdef",
+        "uncovered_frontier": {
+            "baseline": None,
+            "required_any_of": ["new_surface", "new_runnable_successor"],
+        },
+        "required_outcome": "semantic_delta",
+        "writeback_contract": {
+            "successor_command": successor_command,
+            "successor_host_action": "end_current_heartbeat",
+        },
+        "allowed_terminal": ["exploration_exhausted", "blocked", "no_followup"],
+    }
+
+    envelope = build_turn_envelope(source)
+    packet = envelope["replan_action_packet"]
+
+    assert "writeback_contract" not in packet
+    assert envelope["writeback"]["next_cli_actions"] == [
+        successor_command,
+        refresh_command,
+    ]
+    assert envelope["compaction"]["within_budget"] is True
+    assert quota_action_signature_document(
+        source
+    ) == turn_envelope_action_signature_document(envelope)
+
+
 def test_turn_envelope_derives_canonical_slots_through_effect_turn() -> None:
     source = _full_decision()
     turn = interpret_quota_should_run_packet(

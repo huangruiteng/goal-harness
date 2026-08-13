@@ -276,6 +276,32 @@ def _selected_todo(
     return compact or None
 
 
+def _replan_action_packet(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Project the semantic replan contract without duplicating cold-path help.
+
+    The full quota packet keeps copy-ready writeback templates.  The turn
+    envelope carries those operations once in ``writeback.next_cli_actions``;
+    retaining a second copy inside the decision packet spends scarce hot-path
+    budget without adding an executable choice.
+    """
+
+    source = _mapping(payload.get("replan_action_packet"))
+    if not source:
+        return None
+    compact = _compact_fields(
+        source,
+        (
+            "schema_version",
+            "decision",
+            "obligation_id",
+            "uncovered_frontier",
+            "required_outcome",
+            "allowed_terminal",
+        ),
+    )
+    return compact or None
+
+
 def _user_channel(interaction: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
     source = _mapping(interaction.get("user_channel"))
     channel: dict[str, Any] = {
@@ -577,7 +603,7 @@ def _contract_capsule(
         capsule["work_lane_contract"] = work_lane_compact
 
     packet = _mapping(payload.get("protocol_action_packet"))
-    if packet:
+    if packet and not _mapping(payload.get("replan_action_packet")):
         summary = _text(packet.get("summary"), limit=2_000)
         source_fields = protocol_action_packet_fields(dict(payload))
         derived_fields = _derived_protocol_action_packet_fields(
@@ -636,14 +662,23 @@ def _action_projection(
     interaction = _mapping(payload.get("interaction_contract"))
     agent_channel = _mapping(interaction.get("agent_channel"))
     cli_channel = _mapping(interaction.get("cli_channel"))
-    recommended_action = _text(
-        effect_turn.observation.recommended_action
-        or payload.get("recommended_action"),
-        limit=480,
+    replan_action_packet = _replan_action_packet(payload)
+    recommended_action = (
+        "apply replan_action_packet and emit one required semantic outcome"
+        if replan_action_packet
+        else _text(
+            effect_turn.observation.recommended_action
+            or payload.get("recommended_action"),
+            limit=480,
+        )
     )
     action = {
         "recommended_action": recommended_action,
-        "primary_action": _text(agent_channel.get("primary_action"), limit=480),
+        "primary_action": (
+            "produce one required semantic outcome"
+            if replan_action_packet
+            else _text(agent_channel.get("primary_action"), limit=480)
+        ),
         "must_attempt": bool(agent_channel.get("must_attempt")),
         "delivery_allowed": bool(agent_channel.get("delivery_allowed")),
         "quiet_noop_allowed": bool(agent_channel.get("quiet_noop_allowed")),
@@ -654,10 +689,31 @@ def _action_projection(
     }
     user = _user_channel(interaction, payload)
     scheduler = _scheduler(payload, turn=effect_turn)
+    next_cli_actions = list(effect_turn.next_effect.cli_actions) or list(
+        cli_channel.get("next_cli_actions") or []
+    )
+    if replan_action_packet:
+        # Resolve the full packet's atomic successor reference before the
+        # cold-path writeback contract is removed from the turn envelope.
+        full_packet = _mapping(payload.get("replan_action_packet"))
+        replan_writeback = _mapping(full_packet.get("writeback_contract"))
+        successor_command = replan_writeback.get("successor_command")
+        refresh_command = next(
+            (
+                action
+                for action in next_cli_actions
+                if isinstance(action, str) and "refresh-state" in action
+            ),
+            None,
+        )
+        next_cli_actions = []
+        if successor_command:
+            next_cli_actions.append(successor_command)
+        if refresh_command:
+            next_cli_actions.append(refresh_command)
     writeback = {
         "next_cli_actions": _text_list(
-            list(effect_turn.next_effect.cli_actions)
-            or cli_channel.get("next_cli_actions"),
+            next_cli_actions,
             limit=5,
             item_limit=420,
         ),
@@ -679,8 +735,7 @@ def _action_projection(
         "action": action,
         "user": user,
         "required_reads": _required_reads(interaction, payload),
-        "replan_action_packet": _mapping(payload.get("replan_action_packet"))
-        or None,
+        "replan_action_packet": replan_action_packet,
         "boundary": _boundary(payload),
         "execution_policy": _execution_policy(payload),
         "writeback": writeback,

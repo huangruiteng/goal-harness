@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any
@@ -499,6 +500,28 @@ def build_replan_action_packet(
         _stable_id(agent_id or obligation.get("agent_id"), field="agent_id")
         or "<agent-id>"
     )
+    todo_actions = obligation.get("todo_actions")
+    todo_action = next(
+        (
+            dict(item)
+            for item in todo_actions or []
+            if isinstance(item, Mapping)
+            and item.get("action") == "add"
+            and item.get("role") == "agent"
+            and str(item.get("text") or "").strip()
+        ),
+        {},
+    )
+    successor_priority = str(todo_action.get("priority") or "P1").strip()
+    if successor_priority not in {"P0", "P1", "P2", "P3", "P4"}:
+        successor_priority = "P1"
+    successor_summary = str(
+        todo_action.get("text")
+        or "Select one evidence-grounded bounded successor slice."
+    ).strip()[:240]
+    successor_text = shlex.quote(
+        f"[{successor_priority}] {successor_summary}"
+    )
     return {
         "schema_version": REPLAN_ACTION_PACKET_SCHEMA_VERSION,
         "decision": "replan_required",
@@ -506,34 +529,16 @@ def build_replan_action_packet(
         "uncovered_frontier": context.get("uncovered_frontier"),
         "required_outcome": "semantic_delta",
         "writeback_contract": {
-            "schema_version": PROGRESS_OBSERVATION_SCHEMA_VERSION,
-            "transport": "loopx_refresh_state",
-            "command_template": (
-                "loopx --format json --registry "
-                '"$HOME/.codex/loopx/registry.global.json" refresh-state '
-                f"--goal-id {safe_goal_id} --agent-id {safe_agent_id} "
-                "--progress-scope agent_lane "
-                "--classification bounded_replan_progress "
-                "--delivery-batch-scale single_surface "
-                "--delivery-outcome surface_only "
-                "--progress-result-class <typed-class> "
-                "--progress-evidence-id <evidence-id> "
-                "<typed-dimension-options>"
-            ),
-            "new_runnable_successor_command": (
-                "loopx --format json --registry "
-                '"$HOME/.codex/loopx/registry.global.json" todo add '
+            "successor_command": (
+                "loopx todo add "
                 f"--goal-id {safe_goal_id} --role agent "
-                "--task-class advancement_task --text '[P0] <bounded next slice>' "
+                "--task-class advancement_task "
+                f"--text {successor_text} "
                 f"--claimed-by {safe_agent_id} "
                 "--replan-obligation-id "
                 f"{obligation.get('obligation_id')}"
             ),
-            "successor_turn_boundary": (
-                "todo add records the semantic receipt atomically; when it returns "
-                "host_action=end_current_heartbeat, end this heartbeat and execute "
-                "the successor on the next heartbeat"
-            ),
+            "successor_host_action": "end_current_heartbeat",
         },
         "allowed_terminal": [
             ProgressResultClass.EXPLORATION_EXHAUSTED.value,
