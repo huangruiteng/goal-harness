@@ -7,6 +7,8 @@ defined by the implementation and stable reference contracts.
 
 ## Active Drafts
 
+- [Human Attention Wishlist v0](human-attention-wishlist-v0.md): let agents capture bounded, evidence-backed requests for optional human leverage as a non-blocking post-delivery sidecar, without changing user-gate authority, selected work, quota, or notification behavior.
+- [Human Attention Wishlist v0（中文版）](human-attention-wishlist-v0.zh-CN.md)：让 agent 把有证据、可增加价值但不阻塞当前交付的人类协作机会，作为有界的交付后 sidecar 写入；不改变 user gate 权限、选中工作、quota 或通知行为。
 - [Research Exploration Control Plane v0](research-exploration-control-plane-v0.md): evolve a typed research frontier across coverage, closure, and explicit composition experiments while keeping Explore, goal-frontier, and execution authority separate.
 - [研究型探索控制面 v0](research-exploration-control-plane-v0.zh-CN.md)：围绕 coverage、closure 与显式组合实验演进类型化研究前沿，同时保持 Explore、goal-frontier 与执行权限彼此分离。
 - [Agent Loop Effect Interpreter v0](agent-loop-effect-interpreter-v0.md): model LoopX as the effect interpreter around an agent loop, with canonical effect-request/interpretation/observation packet semantics.
