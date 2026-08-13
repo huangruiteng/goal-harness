@@ -202,6 +202,7 @@ def test_current_agent_advancement_satisfies_scoped_vision_frontier() -> None:
 
 def test_exact_replan_successor_uses_authoritative_todo_source() -> None:
     obligation_id = "replan-0123456789abcdef"
+    frontier_identity = "progress:abcdef0123456789"
     successor = compact_todo_summary_item(
         {
             "todo_id": "todo_0123456789ab",
@@ -221,6 +222,7 @@ def test_exact_replan_successor_uses_authoritative_todo_source() -> None:
         agent_id="current-agent",
         replan_obligation={
             "obligation_id": obligation_id,
+            "frontier_identity": frontier_identity,
             "satisfying_semantic_outcomes": ["new_runnable_successor"],
         },
         agent_todo_items=[*unrelated_display_items, successor],
@@ -228,6 +230,7 @@ def test_exact_replan_successor_uses_authoritative_todo_source() -> None:
 
     assert successor["replan_obligation_id"] == obligation_id
     assert ack is not None
+    assert ack["frontier_identity"] == frontier_identity
     assert ack["semantic_delta"]["successor_todo_id"] == successor["todo_id"]
     assert ack["semantic_delta"]["outcomes"] == ["new_runnable_successor"]
 

@@ -120,10 +120,16 @@ def replan_successor_transition_ack(
             "successor"
         ),
     }
-    return {
+    ack = {
         "schema_version": "autonomous_replan_ack_v0",
         "recorded": True,
         "source": "todo_replan_successor_transition",
         "generated_at": successor.get("updated_at"),
         "semantic_delta": semantic_delta,
     }
+    frontier_identity = str(
+        (replan_obligation or {}).get("frontier_identity") or ""
+    ).strip()
+    if frontier_identity:
+        ack["frontier_identity"] = frontier_identity
+    return ack
