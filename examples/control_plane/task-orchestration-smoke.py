@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import sys
 from pathlib import Path
 
@@ -210,6 +211,20 @@ def adaptive_payload() -> dict:
     }
 
 
+def without_agent_work(state: dict, *, agent_id: str) -> dict:
+    result = deepcopy(state)
+    summary = result["attention_queue"]["items"][0]["agent_todos"]
+    for item in summary["items"]:
+        if item.get("claimed_by") == agent_id:
+            item["status"] = "done"
+            item["done"] = True
+    summary["open"] = sum(
+        item.get("status") == "open" for item in summary["items"]
+    )
+    summary["done"] = sum(item.get("done") is True for item in summary["items"])
+    return result
+
+
 def main() -> int:
     decisions = {
         agent_id: build_quota_should_run(
@@ -242,6 +257,52 @@ def main() -> int:
     assert blocked_decision["effective_action"] != "coordinate_task_bundle", (
         blocked_decision
     )
+    assert blocked_decision["interaction_contract"]["mode"] == "bounded_delivery", (
+        blocked_decision
+    )
+
+    blocked_without_fallback = without_agent_work(
+        payload(peer_task_coordinator=coordinator),
+        agent_id=coordinator,
+    )
+    blocked_turns = [
+        build_quota_should_run(
+            blocked_without_fallback,
+            goal_id=GOAL_ID,
+            agent_id=coordinator,
+            scheduler_execution_context=(
+                scheduler_execution_context_for_runtime_profile(
+                    SchedulerRuntimeProfile.CODEX_APP_HEARTBEAT
+                )
+            ),
+        )
+        for _ in range(2)
+    ]
+    for blocked_turn in blocked_turns:
+        assert blocked_turn["decision"] == "peer_coordination_blocked", blocked_turn
+        assert blocked_turn["should_run"] is False, blocked_turn
+        assert blocked_turn["interaction_contract"]["mode"] == (
+            "peer_coordination_blocked"
+        ), blocked_turn
+        assert blocked_turn["scheduler_hint"]["action"] == (
+            "return_to_owner_until_material_change"
+        ), blocked_turn
+        assert blocked_turn["scheduler_hint"]["codex_app"]["host_action"] == (
+            "pause_or_delete_current_heartbeat"
+        ), blocked_turn
+        assert blocked_turn["scheduler_hint"]["unchanged_poll"][
+            "local_scheduler"
+        ] == "stop", blocked_turn
+        assert blocked_turn["interaction_contract"]["cli_channel"][
+            "spend_after_validation"
+        ] is False, blocked_turn
+    assert [
+        turn["task_orchestration_contract"]["assignment_key"]
+        for turn in blocked_turns
+    ] == [
+        blocked_turns[0]["task_orchestration_contract"]["assignment_key"],
+        blocked_turns[0]["task_orchestration_contract"]["assignment_key"],
+    ], blocked_turns
 
     decision = build_quota_should_run(
         payload(peer_task_coordinator=coordinator),

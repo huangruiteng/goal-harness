@@ -213,7 +213,11 @@ or non-resumable lane is projected under `blocked_peer_lanes`; if no peer lane
 can run, the bundle has `execution_state=blocked`,
 `terminal_outcome=blocked`, and `retry_policy=material_peer_state_change_only`.
 That blocked diagnostic does not replace the coordinator's own runnable lane or
-re-arm an activation obligation on every heartbeat.
+re-arm an activation obligation on every heartbeat. If the coordinator also
+has no in-scope runnable fallback, the final interaction mode is
+`peer_coordination_blocked`: schedulers return the bundle to its owner and stop
+the recurring heartbeat until peer capability/readiness, coordinator
+configuration, or the coordinator's own work frontier materially changes.
 
 Disable registered-peer coordination without changing peer registration or
 child-worker policy:

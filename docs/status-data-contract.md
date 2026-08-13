@@ -848,7 +848,10 @@ Item fields:
 - `goal_boundary.peer_task_coordination`: optional quota-only coordination
   authority. It appears only when the registry explicitly selects a
   `coordinator_agent_id`. Registered peers are otherwise independent; child
-  spawn policy never implies registered-peer coordination authority.
+  spawn policy never implies registered-peer coordination authority. A blocked
+  explicit bundle never displaces the coordinator's own runnable Todo; with no
+  local fallback it projects `interaction_contract.mode=peer_coordination_blocked`
+  so schedulers stop until a material coordination input changes.
 - Current routing authority: consumers should choose the current owner, gate,
   waiting party, and next action from `attention_queue.items` and its
   `project_asset`. `run_history.latest_runs` is an evidence and drill-down
