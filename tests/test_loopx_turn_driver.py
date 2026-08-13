@@ -1248,6 +1248,45 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "completed" else 7
     assert "LoopX%20Turn%20validated%20completion" in state
     assert f"completion_turn_key={payload['resume_turn_key']}" in state
 
+    next_plan_output = io.StringIO()
+    with contextlib.redirect_stdout(next_plan_output):
+        next_plan_exit_code = cli_main(
+            [
+                "--registry",
+                str(registry),
+                "--runtime-root",
+                str(runtime),
+                "--format",
+                "json",
+                "turn",
+                "plan",
+                "--goal-id",
+                "loopx-turn-fixture",
+                "--agent-id",
+                "codex-fixture",
+                "--host",
+                "generic-cli",
+                "--scheduler-owner",
+                "outer_controller",
+                "--execution-mode",
+                "isolated-headless",
+                "--scan-root",
+                str(project),
+            ]
+        )
+    next_plan = json.loads(next_plan_output.getvalue())
+    assert next_plan_exit_code == 0, next_plan
+    # The completion-created obligation is deferred only for the causal
+    # closeout write.  It must be visible immediately at the next decision;
+    # Turn itself stays blocked until that replan creates a runnable successor.
+    assert next_plan["route"]["kind"] == "blocked"
+    assert (
+        next_plan["turn_envelope"]["effective_action"]
+        == "autonomous_replan_required"
+    )
+    next_obligation = next_plan["turn_envelope"]["replan_action_packet"]
+    assert next_obligation["decision"] == "replan_required"
+
     recovered_completion = complete_goal_todo(
         registry_path=registry,
         goal_id="loopx-turn-fixture",

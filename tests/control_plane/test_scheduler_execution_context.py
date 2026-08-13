@@ -615,20 +615,9 @@ def test_quota_payload_compaction_preserves_earliest_frontier_deadline() -> None
     )
     now = datetime(2026, 8, 2, 6, 0, 0, tzinfo=UTC)
     agent_id = "frontier-deadline-agent"
-    watch_lane_ack = {
-        "classification": "autonomous_replan_recorded",
-        "generated_at": now.isoformat(),
-        "agent_id": agent_id,
-        "autonomous_replan_ack": {
-            "schema_version": "autonomous_replan_ack_v0",
-            "recorded": True,
-            "source": "fixture",
-            "delta_contract": {
-                "schema_version": "repair_delta_contract_v0",
-                "delta_present": True,
-                "delta_kinds": ["watch_lane_continuation"],
-            },
-        },
+    coordination = {
+        "registered_agents": [agent_id],
+        "agent_work_modes": {agent_id: "monitor_only"},
     }
     status = quota_status_payload(
         goal_id="frontier-deadline-compaction-fixture",
@@ -672,9 +661,8 @@ def test_quota_payload_compaction_preserves_earliest_frontier_deadline() -> None
                 },
             ],
         },
-        latest_runs=[watch_lane_ack],
         claim_scope_agent_id=agent_id,
-        coordination={"registered_agents": [agent_id]},
+        coordination=coordination,
     )
 
     original_scheduler_now = scheduler_hint_mod.now_utc

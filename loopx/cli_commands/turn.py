@@ -443,7 +443,12 @@ def handle_turn_command(
                 else None
             )
 
-            def writeback(result: dict[str, object]) -> dict[str, object]:
+            def writeback(
+                result: dict[str, object],
+                *,
+                completion_todo_id: str | None = None,
+                completion_turn_key: str | None = None,
+            ) -> dict[str, object]:
                 # The host workspace is execution context, not state authority.
                 state_project = None
                 result_kind = str(result.get("result_kind") or "")
@@ -485,6 +490,8 @@ def handle_turn_command(
                     vision_unchanged_reason=(
                         str(result.get("vision_unchanged_reason") or "") or None
                     ),
+                    completion_todo_id=completion_todo_id,
+                    completion_turn_key=completion_turn_key,
                     dry_run=False,
                     sync_global=not bool(args.no_global_sync),
                 )
@@ -510,7 +517,11 @@ def handle_turn_command(
                     project=None,
                     dry_run=False,
                 )
-                refresh = writeback(result)
+                refresh = writeback(
+                    result,
+                    completion_todo_id=todo_id,
+                    completion_turn_key=str(result["turn_key"]),
+                )
                 return {
                     "ok": bool(completion.get("ok")) and bool(refresh.get("ok")),
                     # A completed Todo is idempotent under Turn replay: after an

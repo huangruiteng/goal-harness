@@ -907,6 +907,8 @@ def refresh_state_run(
     merge_agent_vision_patch: bool = False,
     vision_unchanged_reason: str | None = None,
     progress_observation: dict[str, Any] | None = None,
+    completion_todo_id: str | None = None,
+    completion_turn_key: str | None = None,
     dry_run: bool,
     sync_global: bool = True,
 ) -> dict[str, Any]:
@@ -1205,6 +1207,8 @@ def refresh_state_run(
         progress_observation=normalized_progress_observation,
         registry_goal=registry_goal,
         agent_vision=agent_vision,
+        completion_todo_id=completion_todo_id,
+        completion_turn_key=completion_turn_key,
     )
     if replan_semantic_delta:
         effective_autonomous_replan_recorded = True

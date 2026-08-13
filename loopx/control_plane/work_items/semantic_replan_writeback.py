@@ -15,6 +15,51 @@ from .progress_observation import semantic_delta_from_writeback
 from .work_lane_context import build_work_lane_context_contract
 
 
+def _obligation_was_created_by_current_completion(
+    obligation: dict[str, Any],
+    *,
+    agent_todos: dict[str, Any] | None,
+    completion_todo_id: str | None,
+    completion_turn_key: str | None,
+) -> bool:
+    """Keep a new successor obligation for the next decision boundary.
+
+    A validated Turn completes its Todo before its refresh row is written.  The
+    completion can therefore create a ``completed_advancement_without_successor``
+    obligation inside the same transaction.  That new obligation did not exist
+    when the Turn began and must govern the next decision, not reject the
+    completion that caused it.
+
+    The exemption is deliberately narrow and causal: every trigger must name
+    the Todo completed by this exact Turn, and the current durable Todo row must
+    carry the same completion identity.  Any older or mixed obligation remains
+    write-gated.
+    """
+
+    safe_todo_id = str(completion_todo_id or "").strip()
+    safe_turn_key = str(completion_turn_key or "").strip()
+    if not safe_todo_id or not safe_turn_key or not isinstance(agent_todos, dict):
+        return False
+    triggers = obligation.get("triggers")
+    if not isinstance(triggers, list) or not triggers:
+        return False
+    if any(
+        not isinstance(trigger, dict)
+        or trigger.get("kind") != "completed_advancement_without_successor"
+        or str(trigger.get("todo_id") or "").strip() != safe_todo_id
+        for trigger in triggers
+    ):
+        return False
+    items = agent_todos.get("items")
+    return any(
+        isinstance(item, dict)
+        and str(item.get("todo_id") or "").strip() == safe_todo_id
+        and item.get("status") == "done"
+        and str(item.get("completion_turn_key") or "").strip() == safe_turn_key
+        for item in items or []
+    )
+
+
 def qualify_replan_writeback(
     *,
     newest_first_runs: list[dict[str, Any]] | None,
@@ -24,6 +69,8 @@ def qualify_replan_writeback(
     progress_observation: dict[str, Any] | None = None,
     registry_goal: dict[str, Any] | None = None,
     agent_vision: dict[str, Any] | None = None,
+    completion_todo_id: str | None = None,
+    completion_turn_key: str | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Return the shared open obligation and the writeback's typed delta.
 
@@ -78,6 +125,13 @@ def qualify_replan_writeback(
     obligation = context.get("replan_obligation")
     if not obligation:
         return None, None
+    if _obligation_was_created_by_current_completion(
+        obligation,
+        agent_todos=agent_todos,
+        completion_todo_id=completion_todo_id,
+        completion_turn_key=completion_turn_key,
+    ):
+        return None, None
     return obligation, semantic_delta_from_writeback(
         obligation=obligation,
         progress_observation=progress_observation,
@@ -94,6 +148,8 @@ def enforce_open_replan_writeback(
     progress_observation: dict[str, Any] | None = None,
     registry_goal: dict[str, Any] | None = None,
     agent_vision: dict[str, Any] | None = None,
+    completion_todo_id: str | None = None,
+    completion_turn_key: str | None = None,
 ) -> dict[str, Any] | None:
     """Fail closed unless concrete typed evidence satisfies the open replan."""
 
@@ -105,6 +161,8 @@ def enforce_open_replan_writeback(
         progress_observation=progress_observation,
         registry_goal=registry_goal,
         agent_vision=agent_vision,
+        completion_todo_id=completion_todo_id,
+        completion_turn_key=completion_turn_key,
     )
     if not obligation:
         return None
