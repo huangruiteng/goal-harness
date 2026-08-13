@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import re
 from typing import Any
+
+from .agent_registry import normalize_registered_agents
 
 DEFAULT_ORCHESTRATION_MODE = "default"
 MULTI_SUBAGENT_ORCHESTRATION_MODE = "multi_subagent"
@@ -98,14 +99,14 @@ def compact_peer_task_coordination_policy(coordination: Any) -> dict[str, Any] |
         if isinstance(policy.get("peer_task_coordination"), dict)
         else {}
     )
-    coordinator_agent_id = str(
-        peer_policy.get("coordinator_agent_id") or ""
-    ).strip()
-    if not re.fullmatch(r"[a-z][a-z0-9_.:@-]{0,79}", coordinator_agent_id):
+    coordinator_agent_ids = normalize_registered_agents(
+        [peer_policy.get("coordinator_agent_id")]
+    )
+    if not coordinator_agent_ids:
         return None
     return {
         "enabled": True,
-        "coordinator_agent_id": coordinator_agent_id,
+        "coordinator_agent_id": coordinator_agent_ids[0],
     }
 
 
