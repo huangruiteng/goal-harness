@@ -254,11 +254,16 @@ export function retryPlan(decision, state) {
 }
 
 
-export function turnVerdict(messages, sentPromptIds) {
+export function turnVerdict(messages, sentPromptIds, { fallbackPromptCreated } = {}) {
   // A turn completes only when an assistant message finished at or after the
   // newest user message (regardless of who sent it) and that message is not
   // an intermediate tool-call step. User input never pauses the loop: the
   // model answers it, then quota gating continues as usual.
+  //
+  // Long tool-heavy turns can fill the newest message page entirely with
+  // assistant messages, so the page may contain no user message at all. The
+  // caller supplies fallbackPromptCreated (the worker's last prompt time) to
+  // bound the verdict in that case; a user message on the page always wins.
   let newestUser = null
   let newestAssistant = null
   for (const message of messages || []) {
@@ -276,10 +281,13 @@ export function turnVerdict(messages, sentPromptIds) {
       }
     }
   }
-  if (!newestUser) return { completed: false, waiting: true }
+  const boundaryCreated = newestUser
+    ? newestUser.time.created
+    : Number(fallbackPromptCreated)
+  if (!Number.isFinite(boundaryCreated)) return { completed: false, waiting: true }
   const finished = Boolean(newestAssistant) && Number.isFinite(newestAssistant.time.completed)
   const terminalStep = finished && newestAssistant.finish !== "tool-calls"
-  const afterPrompt = finished && newestAssistant.time.completed >= newestUser.time.created
+  const afterPrompt = finished && newestAssistant.time.completed >= boundaryCreated
   const completed = terminalStep && afterPrompt
   return {
     completed,
@@ -454,6 +462,9 @@ export async function waitForTurn({
   // signal in every build, so stall detection keys on message activity.
   const startedAt = Date.now()
   let lastActivityAt = Date.now()
+  const fallbackPromptCreated = Number(
+    state?.lastPromptAt ?? state?.startedAtMs ?? Date.now()
+  )
   while (true) {
     if (await shouldPause(state)) return { kind: "paused_state" }
     await transport.waitForSession(sessionID, { timeoutMs: waitChunkMs })
@@ -463,7 +474,7 @@ export async function waitForTurn({
     if (Date.now() - lastActivityAt > stallMs) {
       return { kind: "session_stalled", elapsedMs: Date.now() - startedAt }
     }
-    const verdict = turnVerdict(messages, sentPromptIds)
+    const verdict = turnVerdict(messages, sentPromptIds, { fallbackPromptCreated })
     if (verdict.completed) return { kind: "completed", ...verdict }
     if (Date.now() - startedAt > timeoutMs) {
       return {
@@ -607,6 +618,14 @@ async function runWithLease({
     })
     await log("info", "worker state resumed with --force-resume", { goalId })
   }
+  if (!Number.isFinite(Number(state.lastPromptAt))) {
+    const migratedAt = Date.parse(state.startedAt) || Date.now()
+    state = await stateStore.write(goalId, { ...state, lastPromptAt: migratedAt })
+    await log("info", "migrated worker state with a lastPromptAt boundary", {
+      goalId,
+      lastPromptAt: migratedAt,
+    })
+  }
 
   const directoryNow = directory || state.directory
 
@@ -633,6 +652,7 @@ async function runWithLease({
       ...state,
       turnCount: 1,
       pendingTurn: true,
+      lastPromptAt: Date.now(),
       phase: "working",
     })
     await log("info", "prompted the session with the task body", { goalId, sessionID })
@@ -785,6 +805,7 @@ async function runWithLease({
       state = await stateStore.write(goalId, {
         ...state,
         pendingTurn: true,
+        lastPromptAt: Date.now(),
         turnCount: Number(state.turnCount || 0) + 1,
       })
       await log("info", "quota granted another turn", { goalId, sessionID, turnCount: state.turnCount })

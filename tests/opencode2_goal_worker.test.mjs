@@ -273,8 +273,24 @@ test("turnVerdict completes only after a final non-tool-call reply to the newest
   const answered = turnVerdict(
     [own("stranger", 30), assistant(31, 32, "stop")],
     ["own-1", "own-2"],
+    { fallbackPromptCreated: 20 },
+  ).completed
+  assert.equal(answered, true)
+  // A page filled entirely with assistant messages (long tool-heavy turns)
+  // still completes against the worker's last-prompt boundary.
+  const toolHeavy = turnVerdict(
+    [assistant(11, 12, "tool-calls"), assistant(13, 14, "stop")],
+    [],
+    { fallbackPromptCreated: 10 },
   )
-  assert.equal(answered.completed, true)
+  assert.equal(toolHeavy.completed, true)
+  // Without any boundary the verdict keeps waiting.
+  assert.equal(turnVerdict([assistant(11, 12, "stop")], []).waiting, true)
+  // A stale assistant reply before the fallback boundary does not complete.
+  assert.equal(
+    turnVerdict([assistant(5, 6, "stop")], [], { fallbackPromptCreated: 10 }).completed,
+    false,
+  )
 })
 
 
