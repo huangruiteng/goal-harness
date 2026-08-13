@@ -13,7 +13,11 @@ USER_TODO_FINAL_MESSAGE_RULE = (
     "the projection internally and stay quiet."
 )
 HEARTBEAT_NOTIFICATION_RULE_SHORT = (
-    "`user_channel.notify`: NOTIFY=Chinese action; DONT_NOTIFY=quiet. "
+    "`user_channel.notify` controls OUTPUT only: NOTIFY=向用户输出具体动作/问题; "
+    "DONT_NOTIFY=quiet output（不打扰用户），不代表无需工作。"
+    "Execution obligation is separate: `execution_obligation.must_attempt_work=true` "
+    "-> run the bounded slice and write back even under DONT_NOTIFY; "
+    "quiet no-op requires `must_attempt_work=false` and DONT_NOTIFY. "
     "Due/peer gate != prompt; missing NOTIFY action->"
     "具体user todo未投影，需修复LoopX状态投影."
 )
