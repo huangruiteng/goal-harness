@@ -438,6 +438,8 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
         return "monitor_due"
     if effective_action == "terminal_no_followup" or state == "terminal_no_followup":
         return "terminal_no_followup"
+    if effective_action == "peer_coordination_blocked":
+        return effective_action
     if payload.get("scoped_user_gate_fallback"):
         return "scoped_user_gate_fallback"
     if _user_gate_notification_suppressed(payload):
@@ -1068,6 +1070,7 @@ def _interaction_quiet_noop_allowed(
         "blocked_wait",
         "user_gate_cooldown_wait",
         "terminal_no_followup",
+        "peer_coordination_blocked",
         "agent_monitor_only",
         "skip",
     }

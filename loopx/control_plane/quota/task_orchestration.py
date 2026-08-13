@@ -22,6 +22,7 @@ AGENT_SCOPE_NON_EXECUTION_ACTIONS = {
     AgentScopeFrontierAction.REASSIGNMENT_REQUIRED.value,
 }
 PEER_AGENT_ACTIVATION_CAPABILITY = "peer_agent_activation"
+PEER_COORDINATION_BLOCKED_ACTION = "peer_coordination_blocked"
 
 
 def task_orchestration_contract_is_actionable(
@@ -30,6 +31,29 @@ def task_orchestration_contract_is_actionable(
     if not isinstance(contract, dict):
         return False
     return str(contract.get("execution_state") or "ready") == "ready"
+
+
+def task_orchestration_requires_material_change_stop(
+    contract: dict[str, Any] | None,
+    *,
+    effective_action: str,
+) -> bool:
+    """Stop an explicitly coordinated peer lane that has no local fallback.
+
+    A blocked peer bundle remains useful diagnostic state, but it is not a
+    runnable obligation.  The caller supplies the already-derived agent-scope
+    action so this rule only stops a coordinator after its own runnable
+    frontier has been exhausted.
+    """
+
+    if not isinstance(contract, dict):
+        return False
+    return bool(
+        contract.get("mode") == "task_scoped_peer"
+        and contract.get("execution_state") == "blocked"
+        and contract.get("retry_policy") == "material_peer_state_change_only"
+        and effective_action in AGENT_SCOPE_NON_EXECUTION_ACTIONS
+    )
 
 
 def build_quota_work_lane_contract(

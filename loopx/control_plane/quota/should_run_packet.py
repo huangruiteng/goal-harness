@@ -57,9 +57,11 @@ from ..quota.stall_repair import (
     standing_decision_authority_payload_from_status_item as _standing_decision_authority_payload_from_status_item,
 )
 from ..quota.task_orchestration import (
+    PEER_COORDINATION_BLOCKED_ACTION,
     attach_task_orchestration_payload,
     payload_work_lane_contract as _payload_work_lane_contract,
     task_orchestration_contract_is_actionable,
+    task_orchestration_requires_material_change_stop,
     task_goal_route_hint,
 )
 from ..scheduler.automation_liveness import build_automation_liveness
@@ -739,6 +741,27 @@ def _resolve_quota_should_run_route(
                 "spend_policy": agent_scope_frontier.get("spend_policy")
                 or "do not append quota spend while the current agent has no in-scope runnable candidate",
             }
+            if task_orchestration_requires_material_change_stop(
+                prepared.task_orchestration_contract,
+                effective_action=effective_action,
+            ):
+                effective_action = PEER_COORDINATION_BLOCKED_ACTION
+                reason = (
+                    "the explicitly selected peer task bundle is blocked and the "
+                    "coordinator has no in-scope runnable fallback; return control "
+                    "until peer capability, peer readiness, coordinator config, or "
+                    "the coordinator's own frontier changes"
+                )
+                selected_recommended_action = reason
+                heartbeat_recommendation = {
+                    **heartbeat_recommendation,
+                    "recommended_mode": PEER_COORDINATION_BLOCKED_ACTION,
+                    "notify": "DONT_NOTIFY",
+                    "reason": reason,
+                    "spend_policy": (
+                        "no quota spend while explicit peer coordination is blocked"
+                    ),
+                }
     state_action_projection_warning = build_state_action_projection_warning(
         item,
         agent_todo_summary=prepared.agent_todo_summary,
@@ -862,6 +885,8 @@ def _build_quota_should_run_payload(
             if prepared.automation_prompt_upgrade_required
             else agent_scope_action.value
             if agent_scope_action is not None
+            else PEER_COORDINATION_BLOCKED_ACTION
+            if route.effective_action == PEER_COORDINATION_BLOCKED_ACTION
             else "skip"
         ),
         "should_run": route.should_run,

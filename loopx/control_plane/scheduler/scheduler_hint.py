@@ -148,6 +148,57 @@ def _scheduler_identity_keys(
     )
 
 
+def _build_scheduler_stop_hint(
+    *,
+    execution_context: SchedulerExecutionContextResolution,
+    action: str,
+    cadence_class: str,
+    reason_code: str,
+    reason: str,
+    spend_policy: str,
+    resume_trigger: str,
+    ssh_goal_runtime_action: str,
+    unchanged_spend_policy: str,
+) -> dict[str, Any]:
+    return apply_scheduler_execution_context(
+        {
+            "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
+            "source": "quota.should-run",
+            "action": action,
+            "cadence_class": cadence_class,
+            "reason_code": reason_code,
+            "reason": reason,
+            "spend_policy": spend_policy,
+            "codex_app": {
+                "apply": "pause_or_delete_current_heartbeat_if_possible",
+                "host_tool": "automation_update",
+                "host_action": "pause_or_delete_current_heartbeat",
+                "host_action_required": True,
+                "attempt_limit": 1,
+                "verify_host_result": True,
+                "ack_required": False,
+                "resume_trigger": resume_trigger,
+                "no_spend_for_host_action": True,
+            },
+            "unchanged_poll": {
+                "local_scheduler": "stop",
+                "codex_cli_tui": "exit",
+                CODEX_APP_SSH_GOAL_RUNTIME_KEY: ssh_goal_runtime_action,
+                "claude_code_loop": "stop",
+                "final_quota_replan_check_enabled": False,
+                "spend_policy": unchanged_spend_policy,
+            },
+            "unchanged_identity_keys": list(
+                _scheduler_identity_keys(
+                    cadence_class=cadence_class,
+                    execution_context=execution_context,
+                )
+            ),
+        },
+        execution_context,
+    )
+
+
 def _scheduler_progression_interval_elapsed(
     scheduler_state: Mapping[str, Any],
     *,
@@ -1016,45 +1067,43 @@ def build_scheduler_hint(
     )
 
     if arbitration.disposition == SchedulerDisposition.TERMINAL_STOP:
-        return apply_scheduler_execution_context(
-            {
-                "schema_version": SCHEDULER_HINT_SCHEMA_VERSION,
-                "source": "quota.should-run",
-                "action": "stop_until_explicit_resume",
-                "cadence_class": "terminal_no_followup",
-                "reason_code": arbitration.reason_code,
-                "reason": (
-                    "validated closure evidence derives no-follow-up and confirms no "
-                    "remaining frontier; recurring polling must stop until resume"
-                ),
-                "spend_policy": "no quota spend for terminal automation shutdown",
-                "codex_app": {
-                    "apply": "pause_or_delete_current_heartbeat_if_possible",
-                    "host_tool": "automation_update",
-                    "host_action": "pause_or_delete_current_heartbeat",
-                    "host_action_required": True,
-                    "attempt_limit": 1,
-                    "verify_host_result": True,
-                    "ack_required": False,
-                    "resume_trigger": "explicit goal resume or newly projected work",
-                    "no_spend_for_host_action": True,
-                },
-                "unchanged_poll": {
-                    "local_scheduler": "stop",
-                    "codex_cli_tui": "exit",
-                    CODEX_APP_SSH_GOAL_RUNTIME_KEY: "complete_host_goal",
-                    "claude_code_loop": "stop",
-                    "final_quota_replan_check_enabled": False,
-                    "spend_policy": "no quota spend for terminal loop stop",
-                },
-                "unchanged_identity_keys": list(
-                    _scheduler_identity_keys(
-                        cadence_class="terminal_no_followup",
-                        execution_context=execution_context,
-                    )
-                ),
-            },
-            execution_context,
+        return _build_scheduler_stop_hint(
+            execution_context=execution_context,
+            action="stop_until_explicit_resume",
+            cadence_class="terminal_no_followup",
+            reason_code=arbitration.reason_code,
+            reason=(
+                "validated closure evidence derives no-follow-up and confirms no "
+                "remaining frontier; recurring polling must stop until resume"
+            ),
+            spend_policy="no quota spend for terminal automation shutdown",
+            resume_trigger="explicit goal resume or newly projected work",
+            ssh_goal_runtime_action="complete_host_goal",
+            unchanged_spend_policy="no quota spend for terminal loop stop",
+        )
+
+    if arbitration.disposition == SchedulerDisposition.PEER_COORDINATION_STOP:
+        cadence_class = "peer_coordination_blocked"
+        return _build_scheduler_stop_hint(
+            execution_context=execution_context,
+            action="return_to_owner_until_material_change",
+            cadence_class=cadence_class,
+            reason_code=arbitration.reason_code,
+            reason=(
+                "explicit peer coordination has no executable peer lane or local "
+                "fallback; recurring polling must stop until its inputs change"
+            ),
+            spend_policy=(
+                "no quota spend while explicit peer coordination is blocked"
+            ),
+            resume_trigger=(
+                "peer activation capability, peer runtime readiness, coordinator "
+                "configuration, or newly projected local work"
+            ),
+            ssh_goal_runtime_action="return_to_owner",
+            unchanged_spend_policy=(
+                "no quota spend for blocked coordination stop"
+            ),
         )
 
     builder = _SchedulerHintBuilder(
