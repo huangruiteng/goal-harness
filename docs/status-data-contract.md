@@ -1447,6 +1447,9 @@ must not be interpreted as an execution gate. `heartbeat_recommendation.
 agent_must_attempt` mirrors `execution_obligation.must_attempt_work` as a
 single-field shortcut so thin heartbeat prompts can key work obligation off
 one boolean instead of parsing notify semantics. If
+`autonomous_replan_required`, `heartbeat_recommendation.notify` is `NOTIFY`:
+replan turns are machine execution contracts and must not be projected as
+`DONT_NOTIFY`, which agents can misread as permission for a quiet no-op. If
 `execution_obligation.kind=external_evidence_observation_required`, ordinary
 delivery is still blocked, but the worker must perform one read-only
 observation or write a compact missing-handle blocker before it may stop. If

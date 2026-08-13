@@ -109,7 +109,7 @@ def test_required_replan_preempts_waiting_user_todo() -> None:
     )
 
     assert recommendation["recommended_mode"] == "autonomous_replan_required"
-    assert recommendation["notify"] == "DONT_NOTIFY"
+    assert recommendation["notify"] == "NOTIFY"
     assert recommendation["replan_obligation"]["trigger_count"] == 1
 
 

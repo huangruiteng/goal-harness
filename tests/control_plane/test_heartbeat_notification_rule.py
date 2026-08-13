@@ -113,6 +113,11 @@ def test_heartbeat_recommendation_mirrors_execution_obligation_in_replan() -> No
     assert guard["decision"] == "autonomous_replan_required"
     heartbeat = guard["heartbeat_recommendation"]
     obligation = guard["execution_obligation"]
+    assert heartbeat.get("notify") == "NOTIFY"
+    user_channel = (
+        (guard.get("interaction_contract") or {}).get("user_channel") or {}
+    )
+    assert user_channel.get("notify") == "NOTIFY"
     assert heartbeat.get("agent_must_attempt") is True
     assert heartbeat["agent_must_attempt"] is bool(
         obligation.get("must_attempt_work")

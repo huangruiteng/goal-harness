@@ -1892,7 +1892,7 @@ def build_autonomous_replan_recommendation(
 ) -> dict[str, Any]:
     return {
         "recommended_mode": AUTONOMOUS_REPLAN_REQUIRED_MODE,
-        "notify": "DONT_NOTIFY",
+        "notify": "NOTIFY",
         "replan_obligation": compact_replan_obligation(replan_obligation),
         "spend_policy": (
             "append exactly one heartbeat spend only after executing the selected "
@@ -1901,7 +1901,9 @@ def build_autonomous_replan_recommendation(
         "reason": reason
         or (
             "status exposes an autonomous replan obligation; advance the goal-level "
-            "planning-trigger slice before monitor-only or agent-scope wait classification"
+            "planning-trigger slice before monitor-only or agent-scope wait "
+            "classification; replan turns always notify because DONT_NOTIFY would "
+            "mislead agents into a quiet no-op"
         ),
     }
 
