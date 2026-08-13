@@ -332,7 +332,7 @@ export function createApiTransport({ bin = process.env.OPENCODE2_BIN || "opencod
     if (body !== null) args.push("-d", JSON.stringify(body))
     const { stdout } = await execFileImpl(bin, args, {
       timeout: timeoutMs,
-      maxBuffer: 16 * 1024 * 1024,
+      maxBuffer: 32 * 1024 * 1024,
     })
     return JSON.parse(stdout || "{}")
   }
@@ -352,8 +352,18 @@ export function createApiTransport({ bin = process.env.OPENCODE2_BIN || "opencod
       }
     },
     async listMessages(sessionID) {
-      const response = await call("get", `/api/session/${sessionID}/message`)
-      return response?.data || []
+      // Bounded newest-first page: long sessions grow unbounded message
+      // lists, and the turn verdict only needs the recent tail.
+      try {
+        const response = await call("get", `/api/session/${sessionID}/message?limit=30&order=desc`)
+        return response?.data || []
+      } catch (error) {
+        if (!String(error?.message || "").includes("JSON")) throw error
+        // Some hosts truncate oversized payloads; a smaller tail is enough
+        // for the completion verdict.
+        const response = await call("get", `/api/session/${sessionID}/message?limit=5&order=desc`)
+        return response?.data || []
+      }
     },
     async sessionInfo(sessionID) {
       const response = await call("get", `/api/session/${sessionID}`)
@@ -428,30 +438,28 @@ export async function waitForTurn({
   sentPromptIds,
   pollMs = MESSAGE_POLL_MS,
   timeoutMs = DEFAULT_TURN_TIMEOUT_MS,
-  stallMs = 10 * 60 * 1000,
+  stallMs = 30 * 60 * 1000,
   waitChunkMs = 60_000,
   shouldPause = async () => false,
 }) {
   // Block on the session wait endpoint (resolves at idle) in bounded chunks,
   // then verify the message tail. Intermediate tool-call steps complete their
   // messages without ending the turn, so the verdict requires a non-tool-call
-  // final message after the newest own prompt. A session whose update
-  // timestamp stops moving is reported as stalled instead of blocking until
-  // the turn budget.
+  // final message after the newest own prompt. A session whose message
+  // activity stops moving is reported as stalled instead of blocking until
+  // the turn budget. Session updated timestamps are not a reliable liveness
+  // signal in every build, so stall detection keys on message activity.
   const startedAt = Date.now()
-  let lastChangedAt = Date.now()
+  let lastActivityAt = Date.now()
   while (true) {
     if (await shouldPause(state)) return { kind: "paused_state" }
-    const before = await transport.sessionInfo(sessionID)
-    const beforeUpdated = Number(before?.time?.updated)
-    if (Number.isFinite(beforeUpdated) && beforeUpdated > lastChangedAt) {
-      lastChangedAt = beforeUpdated
-    }
-    if (Date.now() - lastChangedAt > stallMs) {
-      return { kind: "session_stalled", elapsedMs: Date.now() - startedAt }
-    }
     await transport.waitForSession(sessionID, { timeoutMs: waitChunkMs })
     const messages = await transport.listMessages(sessionID)
+    const activity = latestMessageActivity(messages)
+    if (activity !== null && activity > lastActivityAt) lastActivityAt = activity
+    if (Date.now() - lastActivityAt > stallMs) {
+      return { kind: "session_stalled", elapsedMs: Date.now() - startedAt }
+    }
     const verdict = turnVerdict(messages, sentPromptIds)
     if (verdict.completed) return { kind: "completed", ...verdict }
     if (Date.now() - startedAt > timeoutMs) {
@@ -463,6 +471,21 @@ export async function waitForTurn({
     }
     await sleep(pollMs)
   }
+}
+
+
+export function latestMessageActivity(messages) {
+  let latest = null
+  for (const message of messages || []) {
+    const created = Number(message?.time?.created)
+    const completed = Number(message?.time?.completed)
+    for (const candidate of [created, completed]) {
+      if (Number.isFinite(candidate) && (latest === null || candidate > latest)) {
+        latest = candidate
+      }
+    }
+  }
+  return latest
 }
 
 
@@ -573,7 +596,12 @@ async function runWithLease({
     return { kind: "paused_state" }
   }
   if (state.autoResume === false && forceResume) {
-    state = await stateStore.write(goalId, { ...state, autoResume: true, lastPausedReason: "" })
+    state = await stateStore.write(goalId, {
+      ...state,
+      autoResume: true,
+      lastPausedReason: "",
+      pausedReason: "",
+    })
     await log("info", "worker state resumed with --force-resume", { goalId })
   }
 

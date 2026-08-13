@@ -596,14 +596,13 @@ test("worker pauses when the session stops making progress", async () => {
   const stateStore = memoryStateStore()
   const transport = fakeTransport()
   const frozenAt = Date.now() - 100_000
-  transport.sessionInfo = async () => ({ time: { updated: frozenAt } })
   transport.listMessages = async () => {
     await new Promise((resolve) => setImmediate(resolve))
     return transport.userMessages.map((user) => ({
       id: user.id,
       type: "user",
       text: user.text,
-      time: { created: user.created },
+      time: { created: Math.min(user.created, frozenAt) },
     }))
   }
   const overrides = makeWorkerOverrides({
