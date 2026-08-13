@@ -1071,6 +1071,9 @@ def _vision_gap_acknowledged(
 
     if not acceptance_gaps or not isinstance(latest_replan_ack, dict):
         return False
+    semantic_delta = latest_replan_ack.get("semantic_delta")
+    if isinstance(semantic_delta, dict) and semantic_delta.get("accepted") is True:
+        return True
     delta_contract = latest_replan_ack.get("delta_contract")
     delta_kinds = (
         delta_contract.get("delta_kinds")
