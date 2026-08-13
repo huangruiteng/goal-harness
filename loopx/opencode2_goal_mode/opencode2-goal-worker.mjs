@@ -37,11 +37,21 @@ export const DEFAULT_MAX_TURNS = 10_000
 export const DEFAULT_MAX_DURATION_MS = 30 * 24 * 60 * 60 * 1000
 export const LEASE_STALE_MS = 5 * 60 * 1000
 
-export const CONTINUATION_PROMPT = [
-  "LoopX quota granted the next automatic turn.",
-  "Continue the goal work and report progress.",
-  "Do not self-declare completion; LoopX validates closure.",
-].join(" ")
+export function continuationPrompt(directory) {
+  const anchor = directory
+    ? `\nWorking directory: ${directory}\nStay inside this project; do not touch other goals or repositories.`
+    : ""
+  return [
+    "LoopX quota granted the next automatic turn.",
+    "Continue the goal work and report progress.",
+    "Do not self-declare completion; LoopX validates closure.",
+    anchor,
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
+export const CONTINUATION_PROMPT = continuationPrompt()
 
 export const STANDBY_MINUTES = 5
 
@@ -801,7 +811,7 @@ async function runWithLease({
       if (wasStandby) {
         await log("info", "new work appeared; resuming from standby", { goalId, sessionID })
       }
-      await transport.sendPrompt(sessionID, CONTINUATION_PROMPT)
+      await transport.sendPrompt(sessionID, continuationPrompt(directoryNow))
       state = await stateStore.write(goalId, {
         ...state,
         pendingTurn: true,

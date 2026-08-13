@@ -7,7 +7,7 @@ import { promisify } from "node:util"
 import test from "node:test"
 
 import {
-  CONTINUATION_PROMPT,
+  continuationPrompt,
   createApiTransport,
   createStateStore,
   isTerminalNoFollowup,
@@ -356,7 +356,7 @@ test("worker drives a full loop: task prompt, run_now continuation, standby, the
     ...overrides,
   })
   assert.equal(result.kind, "goal_gone")
-  assert.deepEqual(transport.calls.prompts, ["Ship the task.", CONTINUATION_PROMPT])
+  assert.deepEqual(transport.calls.prompts, ["Ship the task.", continuationPrompt("/workspace")])
   assert.ok(transport.calls.synthetics.some((text) => text.includes("stays attached")))
   const state = await stateStore.read("goal-e2e")
   assert.equal(state.phase, "goal_gone")
