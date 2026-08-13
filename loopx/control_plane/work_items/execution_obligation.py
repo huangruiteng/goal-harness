@@ -13,6 +13,7 @@ def build_execution_obligation(
     heartbeat_recommendation: dict[str, Any],
     work_lane_contract: dict[str, Any] | None = None,
     external_evidence_observation: dict[str, Any] | None = None,
+    user_gate_owns_frontier: bool = False,
     successor_replan_mode: str = SUCCESSOR_REPLAN_REQUIRED_MODE,
 ) -> dict[str, Any]:
     """Separate the worker execution contract from user-facing notification."""
@@ -210,7 +211,7 @@ def build_execution_obligation(
                 "heartbeat_recommendation is explanatory"
             ),
         }
-    if should_run:
+    if should_run and not user_gate_owns_frontier:
         return {
             "must_attempt_work": True,
             "kind": effective_action or recommended_mode or "bounded_delivery",
@@ -219,6 +220,17 @@ def build_execution_obligation(
             "reason": (
                 "should_run=true means a Codex-actionable turn exists; heartbeat notify "
                 "only controls whether to interrupt the user"
+            ),
+        }
+    if should_run:
+        return {
+            "must_attempt_work": False,
+            "kind": "user_gate_quiet_wait",
+            "delivery_allowed": False,
+            "notify_is_execution_gate": False,
+            "reason": (
+                "the user owns the next step and the agent lane has no executable "
+                "work; wait quietly for the user instead of repeating the same turn"
             ),
         }
     return {

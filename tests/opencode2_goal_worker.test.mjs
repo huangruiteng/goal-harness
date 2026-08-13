@@ -329,9 +329,13 @@ test("retryPlan backs off exponentially with a ceiling", () => {
 
 test("decision helpers recognize terminal closure and run_now", () => {
   assert.equal(isTerminalNoFollowup(terminalDecision()), true)
-  assert.equal(shouldRunNow({ should_run: true }), true)
   assert.equal(shouldRunNow({ scheduler_hint: { action: "run_now" } }), true)
+  assert.equal(shouldRunNow({ should_run: true }), false)
   assert.equal(shouldRunNow({ should_run: false }), false)
+  assert.equal(
+    shouldRunNow({ should_run: true, scheduler_hint: { action: "backoff_waiting_for_user" } }),
+    false,
+  )
 })
 
 

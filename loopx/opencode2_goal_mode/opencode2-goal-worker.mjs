@@ -225,7 +225,10 @@ export function isTerminalNoFollowup(decision) {
 
 
 export function shouldRunNow(decision) {
-  return decision?.scheduler_hint?.action === "run_now" || decision?.should_run === true
+  // The scheduler hint is authoritative: a should_run=true decision that the
+  // scheduler classifies as a backoff (for example waiting for the user)
+  // must not prompt the model.
+  return decision?.scheduler_hint?.action === "run_now"
 }
 
 

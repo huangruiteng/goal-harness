@@ -318,7 +318,7 @@ def build_work_lane_contract(
             return due_monitor_contract(
                 reason_codes=["monitor_due", "due_monitor_priority_preempts_advancement"]
             )
-        if has_advancement_todos:
+        if has_advancement_todos and first_advancement is not None:
             reason_codes = ["open_agent_todo"]
             if first_due_monitor:
                 reason_codes.append("due_monitor_context")

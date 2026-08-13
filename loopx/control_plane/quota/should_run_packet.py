@@ -91,6 +91,7 @@ from ..todos.write_hint import build_todo_write_hint
 from ..work_items.execution_obligation import build_execution_obligation
 from ..work_items.goal_route_hint import build_goal_route_hint
 from ..work_items.interaction_contract import (
+    _user_action_owns_empty_agent_lane_from_summaries as _user_action_owns_empty_agent_lane,
     build_interaction_contract,
     build_protocol_action_packet,
     finalize_user_gate_notification_cooldown,
@@ -180,6 +181,7 @@ def _execution_obligation(
     heartbeat_recommendation: dict[str, Any],
     work_lane_contract: dict[str, Any] | None = None,
     external_evidence_observation: dict[str, Any] | None = None,
+    user_gate_owns_frontier: bool = False,
 ) -> dict[str, Any]:
     return build_execution_obligation(
         should_run=should_run,
@@ -187,6 +189,7 @@ def _execution_obligation(
         heartbeat_recommendation=heartbeat_recommendation,
         work_lane_contract=work_lane_contract,
         external_evidence_observation=external_evidence_observation,
+        user_gate_owns_frontier=user_gate_owns_frontier,
         successor_replan_mode=AgentScopeFrontierAction.SUCCESSOR_REPLAN_REQUIRED.value,
     )
 
@@ -817,6 +820,10 @@ def _build_quota_should_run_payload(
         heartbeat_recommendation=route.heartbeat_recommendation,
         work_lane_contract=route.payload_work_lane_contract,
         external_evidence_observation=route.external_evidence_observation,
+        user_gate_owns_frontier=_user_action_owns_empty_agent_lane(
+            prepared.user_todo_summary,
+            prepared.agent_todo_summary,
+        ),
     )
     # Single-field mirror so heartbeat prompts can stay thin: agents key work
     # obligation off this boolean instead of parsing notify semantics.

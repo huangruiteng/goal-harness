@@ -136,9 +136,55 @@ def user_channel_action_required(payload: dict[str, Any]) -> bool:
         return False
     if _user_gate_notification_suppressed(payload):
         return False
+    obligation = payload.get("autonomous_replan_obligation")
+    if isinstance(obligation, dict) and obligation.get("required") is True:
+        # An active replan obligation owns the frontier; a non-blocking user
+        # action must not mask the agent-side work it obligates.
+        return False
     return bool(payload.get("requires_user_action")) or bool(
         user_channel_action_todo_actions(payload.get("user_todo_summary"))
+    ) or _user_action_owns_empty_agent_lane(payload)
+
+
+def _user_action_owns_empty_agent_lane(payload: dict[str, Any]) -> bool:
+    """Return true when an open user-action todo is the lane's only remaining work.
+
+    A user_action todo is a notice by default, but when the agent lane has no
+    executable work it owns the frontier: the loop must wait quietly for the
+    user instead of re-running the same steering-audit turn forever.
+    """
+
+    return _user_action_owns_empty_agent_lane_from_summaries(
+        payload.get("user_todo_summary"),
+        payload.get("agent_todo_summary"),
     )
+
+
+def _user_action_owns_empty_agent_lane_from_summaries(
+    user_summary: Any,
+    agent_summary: Any,
+) -> bool:
+    if not isinstance(user_summary, dict) or not isinstance(agent_summary, dict):
+        return False
+    user_items = user_summary.get("user_action_items")
+    if not isinstance(user_items, list):
+        user_items = user_summary.get("first_open_items")
+    if not isinstance(user_items, list):
+        return False
+    has_open_user_action = any(
+        isinstance(item, dict)
+        and not item.get("done")
+        and str(item.get("status") or "open").strip().lower()
+        in {"", "open", "todo", "active", "pending"}
+        and todo_item_task_class(item) == TODO_TASK_CLASS_USER_ACTION
+        for item in user_items
+    )
+    if not has_open_user_action:
+        return False
+    first_executable = agent_summary.get("first_executable_items")
+    if isinstance(first_executable, list) and first_executable:
+        return False
+    return True
 
 
 def _user_gate_notification_suppressed(payload: dict[str, Any]) -> bool:
