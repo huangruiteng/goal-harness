@@ -497,6 +497,9 @@ def handle_quota_command(
                             host_observation_resolver=resolve_codex_app_automation_rrule,
                             scheduler_execution_context=scheduler_context,
                             operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                            bounded_research_frontier_projector=(
+                                project_live_explore_composition_frontier
+                            ),
                         )
                         cache_metadata = None
                         heartbeat_stall_observation = (
@@ -537,6 +540,9 @@ def handle_quota_command(
                 next_claimed_by=args.next_claimed_by,
                 scheduler_execution_context=scheduler_context,
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                bounded_research_frontier_projector=(
+                    project_live_explore_composition_frontier
+                ),
                 status_reloader=lambda: collect_status(
                     registry_path=registry_path,
                     runtime_root_override=runtime_root_arg,

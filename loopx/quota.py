@@ -941,17 +941,38 @@ def record_quota_monitor_poll(
     turn_instance_id: str | None = None,
     scheduler_execution_context: Mapping[str, Any] | SchedulerExecutionContextResolution | None = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    bounded_research_frontier_projector: (
+        Callable[..., Mapping[str, Any] | None] | None
+    ) = None,
     status_reloader: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
+
     def should_run(current_status: dict[str, Any]) -> dict[str, Any]:
-        return build_quota_should_run(current_status,
+        decision_status = current_status
+        if bounded_research_frontier_projector is not None:
+            raw_runtime_root = current_status.get("runtime_root")
+            if raw_runtime_root:
+                frontier = bounded_research_frontier_projector(
+                    runtime_root=Path(str(raw_runtime_root)).expanduser(),
+                    goal_id=safe_goal_id,
+                    agent_id=agent_id,
+                    status_payload=current_status,
+                )
+                if isinstance(frontier, Mapping):
+                    decision_status = {
+                        **current_status,
+                        "bounded_research_frontier": dict(frontier),
+                    }
+        return build_quota_should_run(
+            decision_status,
             goal_id=safe_goal_id,
             agent_id=agent_id,
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
             operator_inbox_urgency_projector=operator_inbox_urgency_projector,
         )
+
     before = should_run(status_payload)
     return record_quota_monitor_poll_for_decision(
         before,
