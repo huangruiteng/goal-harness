@@ -1,14 +1,62 @@
 <!--
 Copy this file into the draft GitHub release body. Replace every angle-bracket
 placeholder, remove instructional comments, and omit empty detailed groups.
-Keep the Release Decision section compact enough to scan before the fold.
+
+Order rule: the scan-first `## At a Glance` section comes first (headline,
+upgrade, highlights with usage posture, replan fixes, contributors). The
+detailed groups and the bilingual Release Decision come after, so a reader who
+only wants "what changed and how to use it" never has to scroll.
+
+The headings, decision fields, usage fields, and no-change declarations below
+are asserted by `examples/release/release-readiness-doc-smoke.py`; do not
+rename or remove them.
 -->
 
 # LoopX vX.Y.Z
 
-<Summarize the release in one outcome-led paragraph. Name the most important
-improvement and its authority or compatibility boundary without repeating the
-section list.>
+## At a Glance
+
+<One outcome-led headline for the release, e.g. "更安全、更会收口、更容易被
+运营看见" / "Security hardening, semantic replan closeout, and a clearer
+operator surface." Keep this readable in 15 seconds.>
+
+### Upgrade
+
+<Existing installs upgrade explicitly; fresh installs use the bootstrap
+command. Full commands live in `## Install / Update` below.>
+
+```bash
+loopx update --check       # 已是最新则无需操作
+loopx update --execute     # 升级到 vX.Y.Z
+loopx --version && loopx doctor
+```
+
+### Highlights
+
+<3-6 bullets. Each bullet = one user-visible capability + one line of usage
+posture (with an inline command when useful) + direct PR links. This is the
+copy-ready "what's new and how to use it" list.>
+
+- <Capability A: one-line outcome. Usage posture: <short command or behavior>.
+  (#PR, #PR)>
+- <Capability B: one-line outcome. Usage posture: <short command or behavior>.
+  (#PR, #PR)>
+
+### Replan Fixes
+
+<Bullets naming the concrete replan bugs this release fixes, each with a
+one-line before/after and a direct PR link. Use this section only when the tag
+range contains replan changes.>
+
+- <Before -> after. (#PR)>
+
+### Contributors
+
+<@-mention every eligible community contributor from the tag range with their
+concrete feature and PRs, exactly like the detailed `## Community Contributors`
+section. If there is no community contribution, write: 无社区贡献（本版本全部
+提交由维护者完成）/ "No community contribution in this release range." Do not
+list or thank the founder in this section.>
 
 ## Release Decision
 
@@ -35,32 +83,32 @@ loopx doctor
 <focused-command-that-proves-the-affected-behavior>
 ```
 
-<!-- Omit an empty product group. Every material claim needs direct PR links. -->
-
 ## State Kernel & Control Plane
 
-- <User-visible state, todo, quota, scheduler, gate, peer-routing, or authority
-  change with direct PR links.>
+<Detailed: user-visible state, todo, quota, scheduler, gate, peer-routing, or
+authority change with direct PR links.>
 
 ## Capabilities & Workflows
 
-- <Shipped user outcome, shipped layer, and any last-mile boundary with direct
-  PR links.>
+<Detailed: shipped user outcome, shipped layer, and any last-mile boundary with
+direct PR links.>
 
 ## Quality & Testing
 
-- <Durable regression coverage, canary, qualification, or release-gate change
-  with direct PR links.>
+<Detailed: durable regression coverage, canary, qualification, or release-gate
+change with direct PR links.>
 
 ## Benchmarks & Integrations
 
-- <Host, provider, benchmark, or external-boundary change with direct PR links.
-  State explicitly when no benchmark or long-horizon outcome claim is made.>
+<Detailed: host, provider, benchmark, or external-boundary change with direct PR
+links. State explicitly when no benchmark or long-horizon outcome claim is
+made.>
 
 ## Documentation & Compatibility
 
-- <Documentation, migration, default, deprecation, or compatibility detail with
-  direct PR links. Repeat the persisted-state migration decision explicitly.>
+<Detailed: documentation, migration, default, deprecation, or compatibility
+detail with direct PR links. Repeat the persisted-state migration decision
+explicitly.>
 
 <!--
 Include this section only when the tag range contains eligible contributors
@@ -70,8 +118,9 @@ section; it is already named in Release Decision when relevant.
 
 ## Community Contributors
 
-- <Link each eligible GitHub handle and PR, and name the concrete contribution.
-  Call out external or first-time contributors when applicable.>
+<Detailed: link each eligible GitHub handle and PR, and name the concrete
+contribution. Call out external or first-time contributors when applicable.
+This section mirrors the `At a Glance > Contributors` list in full detail.>
 
 ## Optional Capability Activation & Use
 
@@ -111,7 +160,18 @@ loopx update --execute --ref stable
 loopx doctor
 ```
 
+Fresh installs (no existing LoopX):
+
+```bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+loopx doctor
+```
+
 ## 中文摘要
+
+<把 `At a Glance` 的标题、升级、Highlights、Replan 修复与贡献者以中文镜像到
+本段开头，再进入详细分组。可以更短，但不能弱化。>
 
 ### 升级决策
 
@@ -131,29 +191,29 @@ loopx doctor
 
 ### 状态内核与控制面
 
-- <中文摘要与 PR 链接。>
+<中文摘要与 PR 链接。>
 
 ### 能力与工作流
 
-- <中文摘要与 PR 链接。>
+<中文摘要与 PR 链接。>
 
 ### 质量与测试
 
-- <中文摘要与 PR 链接。>
+<中文摘要与 PR 链接。>
 
 ### 基准与集成
 
-- <中文摘要与 PR 链接。>
+<中文摘要与 PR 链接。>
 
 ### 文档与兼容性
 
-- <中文摘要与 PR 链接。>
+<中文摘要与 PR 链接。>
 
 <!-- 英文存在 Community Contributors 时，保留同一人员、PR 和贡献范围。 -->
 
 ### 社区贡献者
 
-- <社区贡献者中文归因。>
+<社区贡献者中文归因。>
 
 ### 可选能力启用与使用
 
