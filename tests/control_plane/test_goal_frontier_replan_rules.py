@@ -344,10 +344,10 @@ def test_stale_ack_does_not_settle_newer_vision_gap() -> None:
         agent_id="current-agent",
         existing_replan_obligation=None,
         acceptance_gaps=_vision_gap_with_generated_at(gap_time),
-        latest_replan_ack=_ack(ack_time),
+        latest_replan_ack=_ack(ack_time, delta_kind="successor_link"),
     )
 
-    assert obligation is not None, "an older ack must not settle a newer gap"
+    assert obligation is not None, "an older non-vision ack must not settle a newer gap"
 
 
 def test_open_user_action_owns_empty_frontier_without_obligation() -> None:
@@ -370,3 +370,28 @@ def test_open_user_action_owns_empty_frontier_without_obligation() -> None:
     )
 
     assert obligation is None, "open user-owned work owns the empty frontier"
+
+def test_vision_patch_ack_settles_newer_gap_from_the_ack_turn() -> None:
+    gap_time = "2026-08-13T09:10:00+08:00"
+    ack_time = "2026-08-13T09:00:00+08:00"
+
+    obligation = derive_goal_frontier_replan_obligation_from_summaries(
+        user_todo_summary={"open_count": 1},
+        agent_todo_summary={
+            "open_count": 0,
+            "claimed_advancement_open_count": 0,
+            "current_agent_claimed_advancement_count": 0,
+            "unclaimed_priority_open_items": [],
+            "executable_backlog_items": [],
+            "claim_scope": {"other_agent_claimed_items": []},
+        },
+        work_lane_contract={"lane": "advancement_task", "must_attempt_work": True},
+        agent_id="current-agent",
+        existing_replan_obligation=None,
+        acceptance_gaps=_vision_gap_with_generated_at(gap_time),
+        latest_replan_ack=_ack(ack_time, delta_kind="goal_vision_patch"),
+    )
+
+    assert obligation is None, (
+        "a goal_vision_patch ack settles vision gaps written by the ack turn itself"
+    )

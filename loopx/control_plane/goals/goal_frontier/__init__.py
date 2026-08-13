@@ -1060,8 +1060,28 @@ def _vision_gap_acknowledged(
     acceptance_gaps: list[dict[str, Any]],
     latest_replan_ack: dict[str, Any] | None,
 ) -> bool:
-    """Return true when a valid replan ack postdates the newest vision gap."""
+    """Return true when a valid replan ack covers the newest vision gap.
 
+    A goal_vision_patch ack settles vision successor/checkpoint gaps even when
+    the ack turn's own vision writebacks carry slightly newer timestamps;
+    without this, an agent's acknowledgement turn regenerates the gap and quota
+    stays in a permanent run-now loop (observed as alternating
+    autonomous_replan_recorded / quota_slot_spent runs with no advancement).
+    """
+
+    if not acceptance_gaps or not isinstance(latest_replan_ack, dict):
+        return False
+    delta_contract = latest_replan_ack.get("delta_contract")
+    delta_kinds = (
+        delta_contract.get("delta_kinds")
+        if isinstance(delta_contract, dict)
+        else None
+    )
+    if isinstance(delta_kinds, list) and any(
+        str(kind) in {"goal_vision_patch", "goal_vision_replan_trigger"}
+        for kind in delta_kinds
+    ):
+        return True
     return _replan_evidence_acknowledged(
         acceptance_gaps,
         latest_replan_ack,
