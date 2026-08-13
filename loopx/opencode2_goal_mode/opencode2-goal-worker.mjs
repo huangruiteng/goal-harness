@@ -57,6 +57,10 @@ const TURN_LIMIT_NOTICE = [
   "LoopX stopped this goal after the turn budget was exhausted.",
   "Review LoopX todos before requesting another run.",
 ].join(" ")
+const DURATION_LIMIT_NOTICE = [
+  "LoopX stopped this goal after the duration budget was exhausted.",
+  "Review LoopX todos before requesting another run.",
+].join(" ")
 
 
 export function sanitizedStateName(value) {
@@ -255,7 +259,6 @@ export function turnVerdict(messages, sentPromptIds) {
   // newest user message (regardless of who sent it) and that message is not
   // an intermediate tool-call step. User input never pauses the loop: the
   // model answers it, then quota gating continues as usual.
-  const sent = new Set(sentPromptIds || [])
   let newestUser = null
   let newestAssistant = null
   for (const message of messages || []) {
@@ -586,7 +589,7 @@ async function runWithLease({
       unchangedPolls: 0,
       probeRetryCount: 0,
       turnCount: 0,
-      sentPromptIds: [],
+      pendingTurn: false,
       startedAt: new Date().toISOString(),
     })
   }
@@ -625,10 +628,11 @@ async function runWithLease({
   }
 
   if (state.turnCount === 0 && taskBody) {
-    const firstPromptId = await transport.sendPrompt(sessionID, taskBody)
+    await transport.sendPrompt(sessionID, taskBody)
     state = await stateStore.write(goalId, {
       ...state,
-      sentPromptIds: [...(state.sentPromptIds || []), firstPromptId].filter(Boolean),
+      turnCount: 1,
+      pendingTurn: true,
       phase: "working",
     })
     await log("info", "prompted the session with the task body", { goalId, sessionID })
@@ -637,11 +641,11 @@ async function runWithLease({
   while (true) {
     if (Date.now() - startedAt > maxDurationMs) {
       state = await stateStore.write(goalId, { ...state, phase: "duration_limit" })
-      await transport.sendSynthetic(sessionID, TURN_LIMIT_NOTICE)
+      await transport.sendSynthetic(sessionID, DURATION_LIMIT_NOTICE)
       await log("info", "stopped after the duration budget", { goalId })
       return { kind: "duration_limit" }
     }
-    if (state.turnCount >= maxTurns) {
+    if (!state.pendingTurn && state.turnCount >= maxTurns) {
       state = await stateStore.write(goalId, { ...state, phase: "turn_limit" })
       await transport.sendSynthetic(sessionID, TURN_LIMIT_NOTICE)
       await log("info", "stopped after the turn budget", { goalId })
@@ -690,6 +694,14 @@ async function runWithLease({
       )
       await log("warn", "turn wait budget exhausted", { goalId, sessionID })
       return { kind: "turn_timeout" }
+    }
+
+    state = await stateStore.write(goalId, { ...state, pendingTurn: false })
+    if (state.turnCount >= maxTurns) {
+      state = await stateStore.write(goalId, { ...state, phase: "turn_limit" })
+      await transport.sendSynthetic(sessionID, TURN_LIMIT_NOTICE)
+      await log("info", "stopped after the turn budget", { goalId, sessionID })
+      return { kind: "turn_limit" }
     }
 
     state = await stateStore.read(goalId)
@@ -769,10 +781,10 @@ async function runWithLease({
       if (wasStandby) {
         await log("info", "new work appeared; resuming from standby", { goalId, sessionID })
       }
-      const promptId = await transport.sendPrompt(sessionID, CONTINUATION_PROMPT)
+      await transport.sendPrompt(sessionID, CONTINUATION_PROMPT)
       state = await stateStore.write(goalId, {
         ...state,
-        sentPromptIds: [...(state.sentPromptIds || []), promptId].filter(Boolean),
+        pendingTurn: true,
         turnCount: Number(state.turnCount || 0) + 1,
       })
       await log("info", "quota granted another turn", { goalId, sessionID, turnCount: state.turnCount })

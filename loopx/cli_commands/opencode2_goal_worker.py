@@ -4,8 +4,9 @@ import argparse
 import json
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from ..opencode2_goal_mode import worker_source
 
@@ -48,7 +49,6 @@ def register_opencode2_goal_worker_command(
         help="Project directory for the OpenCode 2 session and quota probes.",
     )
     parser.add_argument("--agent-id", help="LoopX agent id to scope quota decisions.")
-    parser.add_argument("--registry", help="LoopX registry path.")
     parser.add_argument(
         "--capability",
         action="append",
@@ -113,11 +113,11 @@ def handle_opencode2_goal_worker_command(
         node_args += ["--state-dir", args.state_dir]
 
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             node_args,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=False,
         )
     except FileNotFoundError:
         payload = {
@@ -128,24 +128,59 @@ def handle_opencode2_goal_worker_command(
         }
         print_payload(payload, args.format, _render_worker_markdown)
         return 1
-    stdout = (completed.stdout or "").strip()
-    stderr = (completed.stderr or "").strip()
+
+    log_path = Path(
+        tempfile.mkstemp(prefix="loopx-oc2-worker-", suffix=".log")[1]
+    )
+    worker_log_tail = ""
+
+    def _drain(stream: Iterable[str]) -> None:
+        nonlocal worker_log_tail
+        with log_path.open("a", encoding="utf-8") as log_handle:
+            for line in stream:
+                print(line, end="", flush=True)
+                log_handle.write(line)
+                log_handle.flush()
+        tail = log_path.read_text(encoding="utf-8").splitlines()[-120:]
+        worker_log_tail = "\n".join(tail)
+
+    stderr_thread = threading.Thread(
+        target=_drain, args=(process.stderr,), daemon=True
+    )
+    stderr_thread.start()
+    try:
+        stdout, _ = process.communicate()
+    except KeyboardInterrupt:
+        process.kill()
+        process.wait()
+        interrupt_payload: dict[str, object] = {
+            "ok": False,
+            "schema_version": "loopx_opencode2_worker_result_v0",
+            "operation": "opencode2_goal_worker",
+            "exit_code": 130,
+            "reason": "interrupted by the operator",
+        }
+        print_payload(interrupt_payload, args.format, _render_worker_markdown)
+        return 130
+    stderr_thread.join(timeout=5)
+    stdout_text = (stdout or "").strip()
     payload: dict[str, object] = {
-        "ok": completed.returncode == 0,
+        "ok": process.returncode == 0,
         "schema_version": "loopx_opencode2_worker_result_v0",
         "operation": "opencode2_goal_worker",
-        "exit_code": completed.returncode,
+        "exit_code": process.returncode,
     }
     try:
-        parsed = json.loads(stdout) if stdout else None
+        parsed = json.loads(stdout_text) if stdout_text else None
         if isinstance(parsed, dict):
             payload.update(parsed)
     except json.JSONDecodeError:
-        payload["raw_stdout"] = stdout[-800:]
-    if stderr:
-        payload["worker_log_tail"] = stderr[-1200:]
+        payload["raw_stdout"] = stdout_text[-800:]
+    if worker_log_tail:
+        payload["worker_log_tail"] = worker_log_tail[-1200:]
+        payload["worker_log_path"] = str(log_path)
     print_payload(payload, args.format, _render_worker_markdown)
-    return completed.returncode
+    return process.returncode
 
 
 def _render_worker_markdown(payload: dict[str, object]) -> str:

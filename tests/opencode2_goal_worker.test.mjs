@@ -336,7 +336,7 @@ test("worker drives a full loop: task prompt, run_now continuation, standby, the
   assert.ok(transport.calls.synthetics.some((text) => text.includes("stays attached")))
   const state = await stateStore.read("goal-e2e")
   assert.equal(state.phase, "goal_gone")
-  assert.equal(state.turnCount, 1)
+  assert.equal(state.turnCount, 2)
   assert.ok(sleepMs.includes("slept"))
 })
 
@@ -541,6 +541,48 @@ test("worker stops after the turn budget and posts a visible notice", async () =
   })
   assert.equal(result.kind, "turn_limit")
   assert.ok(transport.calls.synthetics.some((text) => text.includes("turn budget")))
+})
+
+
+test("first prompt counts toward the turn budget and its turn finishes before stopping", async () => {
+  const stateStore = memoryStateStore()
+  const transport = fakeTransport()
+  const overrides = makeWorkerOverrides({ transport, stateStore, decisions: [] })
+  const result = await runWorker({
+    goalId: "goal-first-turn",
+    directory: "/workspace",
+    taskBody: "Ship the task.",
+    maxTurns: 1,
+    ...overrides,
+  })
+  assert.equal(result.kind, "turn_limit")
+  assert.deepEqual(transport.calls.prompts, ["Ship the task."])
+  assert.ok(
+    transport.calls.synthetics.some((text) => text.includes("turn budget")),
+    "the initial prompt must count toward the budget",
+  )
+  const state = await stateStore.read("goal-first-turn")
+  assert.equal(state.turnCount, 1)
+  assert.equal(state.pendingTurn, false)
+})
+
+
+test("worker stops after the duration budget and posts the duration notice", async () => {
+  const stateStore = memoryStateStore()
+  const transport = fakeTransport()
+  const overrides = makeWorkerOverrides({ transport, stateStore, decisions: [] })
+  const result = await runWorker({
+    goalId: "goal-duration",
+    directory: "/workspace",
+    taskBody: "Task.",
+    maxDurationMs: -1,
+    ...overrides,
+  })
+  assert.equal(result.kind, "duration_limit")
+  assert.ok(
+    transport.calls.synthetics.some((text) => text.includes("duration budget")),
+    "duration stop must post the duration notice, not the turn notice",
+  )
 })
 
 
