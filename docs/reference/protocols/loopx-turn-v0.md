@@ -226,6 +226,28 @@ One driver tick has exactly these ordered phases:
 The driver may stop after any phase. A stop must return a typed result and must
 not silently continue with a different execution mode.
 
+### User-Gate Quiet Wait
+
+When the user owns the next step and the agent lane has no executable work, the
+decision envelope carries an execution obligation of kind `user_gate_quiet_wait`
+with `must_attempt_work=false` and `delivery_allowed=false`. This happens when
+at least one open user-action todo exists while the agent lane exposes no first
+executable item, and no agent replan obligation takes precedence.
+
+A quiet-wait envelope is not a stall:
+
+- the host must not invoke the model, send prompts, retry with backoff, or
+  consume a heartbeat spend;
+- the host must not report a stall, session failure, or dead-process risk for a
+  driver that is correctly waiting at this obligation;
+- the driver stays quiet until the projected user action clears the frontier or
+  a later decision rotates the obligation (for example to a replan or a fresh
+  runnable todo).
+
+The obligation is machine-enforced by the control plane, not host prose: the
+host reads `must_attempt_work=false` from the typed obligation and preserves the
+quiet wait without re-deriving an action from status text.
+
 For material results, schema-valid host output is only candidate evidence. The
 caller or adapter must select an independent task/postcondition validator
 before host execution. The generic CLI accepts a trusted JSON argv array,
