@@ -24,6 +24,15 @@ export type WorkspaceTodo = WorkspaceAgentTodo & {
   ownerLabel?: string | null;
 };
 
+export type WorkspaceGoalUsage = {
+  costUsd7d: number;
+  costUsd24h: number;
+  durationMs7d: number;
+  durationMs24h: number;
+  tokens7d: number;
+  tokens24h: number;
+};
+
 export type WorkspaceGoal = {
   agentId: string;
   agentLabel?: string;
@@ -36,6 +45,7 @@ export type WorkspaceGoal = {
   nextSentence: string;
   state: WorkspaceGoalState;
   title: string;
+  usage?: WorkspaceGoalUsage | null;
 };
 
 export type WorkspaceAttention = {
@@ -275,4 +285,34 @@ export function attentionAgeLabel(updatedAt?: string | null): string | null {
   const days = Math.floor(diff / 86_400_000);
   if (days >= 1) return `${days} 天`;
   return `${Math.floor(diff / 3_600_000)} 小时`;
+}
+
+export function formatTokenCount(value?: number | null): string {
+  const n = value ?? 0;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+export function formatCostUsd(value?: number | null): string {
+  return `$${(value ?? 0).toFixed(2)}`;
+}
+
+export function formatDurationMs(value?: number | null): string {
+  const ms = value ?? 0;
+  if (ms >= 3_600_000) return `${(ms / 3_600_000).toFixed(1)}h`;
+  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`;
+  if (ms >= 1_000) return `${Math.round(ms / 1_000)}s`;
+  return `${ms}ms`;
+}
+
+/** True only when a goal has actually reported usage; zeros mean ingestion has not landed yet. */
+export function hasGoalUsage(usage?: WorkspaceGoalUsage | null): usage is WorkspaceGoalUsage {
+  return Boolean(usage && (usage.tokens24h + usage.tokens7d + usage.costUsd24h + usage.costUsd7d + usage.durationMs24h + usage.durationMs7d) > 0);
+}
+
+/** Compact header chip, e.g. "7d 45.6k tokens · $0.42"; null when nothing reported. */
+export function goalUsageLabel(usage?: WorkspaceGoalUsage | null): string | null {
+  if (!hasGoalUsage(usage)) return null;
+  return `7d ${formatTokenCount(usage.tokens7d)} tokens · ${formatCostUsd(usage.costUsd7d)}`;
 }

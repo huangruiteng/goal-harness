@@ -5060,6 +5060,7 @@ function answerPersonalManagerQuestion(
 
 function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]): PersonalHomeModel {
   const rowById = new Map(rows.map((row) => [row.goal.id, row]));
+  const usageById = shareUsageById(payload.usage_summary);
   const agentRows = buildAgentManagementRows(rows, payload.todo_index, payload.agent_management_projection);
   const allUserTodos = payload.attention_queue.items.flatMap((item, sourceOrder) => {
     const blocking = ["user_or_controller", "controller"].includes(item.waiting_on);
@@ -5124,6 +5125,17 @@ function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]
       runEvidence: personalRunEvidence(payload, row),
       state,
       title: personalGoalTitle(goal.id),
+      usage: (() => {
+        const goalUsage = usageById.get(goal.id);
+        return goalUsage ? {
+          costUsd24h: goalUsage.cost_usd_24h,
+          costUsd7d: goalUsage.cost_usd_7d,
+          durationMs24h: goalUsage.duration_ms_24h,
+          durationMs7d: goalUsage.duration_ms_7d,
+          tokens24h: goalUsage.input_tokens_24h + goalUsage.output_tokens_24h,
+          tokens7d: goalUsage.input_tokens_7d + goalUsage.output_tokens_7d,
+        } : null;
+      })(),
     }];
   });
   return {

@@ -1,6 +1,7 @@
 import { Bot, ChevronDown, Menu, RefreshCw } from "lucide-react";
 
 import type { WorkspaceAgentOption, WorkspaceGoal, WorkspaceGoalTab } from "./personal-workspace-model";
+import { goalUsageLabel } from "./personal-workspace-model";
 
 export function ChannelHeader({
   agents,
@@ -29,7 +30,7 @@ export function ChannelHeader({
       <div className="personal-channel-title">
         <h1>{selectedGoal?.title ?? "LoopX 管家"}</h1>
         <p>{selectedGoal
-          ? `${selectedGoal.agentLabel ?? selectedGoal.agentId} · ${selectedGoal.state} · ${selectedGoal.nextSentence}`
+          ? `${selectedGoal.agentLabel ?? selectedGoal.agentId} · ${selectedGoal.state}${goalUsageLabel(selectedGoal.usage) ? ` · ${goalUsageLabel(selectedGoal.usage)}` : ""} · ${selectedGoal.nextSentence}`
           : "跨 Goal 的个人工作入口"}</p>
       </div>
       {selectedGoal ? <nav aria-label="Goal 视图" className="personal-goal-tabs">{(["chat", "tasks", "files"] as const).map((tab) => <button aria-current={selectedGoalTab === tab ? "page" : undefined} key={tab} onClick={() => onSelectGoalTab(tab)} type="button">{tab === "chat" ? "Chat" : tab === "tasks" ? "Tasks" : "Files"}</button>)}</nav> : null}

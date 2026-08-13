@@ -25,7 +25,7 @@ import type {
   WorkspaceDrawerSelection,
   WorkspaceTodo,
 } from "./personal-workspace-model";
-import { attentionAgeLabel } from "./personal-workspace-model";
+import { attentionAgeLabel, formatCostUsd, formatDurationMs, formatTokenCount, hasGoalUsage } from "./personal-workspace-model";
 
 const focusableSelector = [
   "a[href]",
@@ -245,7 +245,18 @@ export function ContextDrawer({ agents, callbacks, onClose, selection }: {
 
         {selection.kind === "goal" ? (
           <>
-            <section className="personal-detail-card"><small>{selection.item.state}</small><h3>{selection.item.title}</h3><p>{selection.item.agentSentence}</p></section>
+            <section className="personal-detail-card">
+              <small>{selection.item.state}</small>
+              <h3>{selection.item.title}</h3>
+              <p>{selection.item.agentSentence}</p>
+              {hasGoalUsage(selection.item.usage) ? (
+                <dl>
+                  <div><dt>Tokens 24h / 7d</dt><dd>{formatTokenCount(selection.item.usage.tokens24h)} / {formatTokenCount(selection.item.usage.tokens7d)}</dd></div>
+                  <div><dt>成本 24h / 7d</dt><dd>{formatCostUsd(selection.item.usage.costUsd24h)} / {formatCostUsd(selection.item.usage.costUsd7d)}</dd></div>
+                  <div><dt>运行时长 24h / 7d</dt><dd>{formatDurationMs(selection.item.usage.durationMs24h)} / {formatDurationMs(selection.item.usage.durationMs7d)}</dd></div>
+                </dl>
+              ) : null}
+            </section>
             <div className="personal-drawer-action-grid">
               <button className="personal-secondary-action" onClick={() => callbacks.onRequestScheduleConfig?.("heartbeat", selection.item.goalId)} type="button"><Radio size={16} />设置 Heartbeat</button>
               <button className="personal-secondary-action" onClick={() => callbacks.onRequestScheduleConfig?.("monitor", selection.item.goalId)} type="button"><CalendarClock size={16} />添加定时检查</button>
