@@ -85,6 +85,11 @@
       "dict_any_count": 0,
       "lines": 1999
     },
+    "loopx/state_refresh.py": {
+      "any_count": 28,
+      "dict_any_count": 0,
+      "lines": 1509
+    },
     "loopx/status.py": {
       "any_count": 180,
       "dict_any_count": 0,
