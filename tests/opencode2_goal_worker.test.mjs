@@ -788,3 +788,47 @@ test("worker holds quietly during a user pause and resumes when activity returns
   const state = await stateStore.read("goal-hold")
   assert.equal(state.phase, "goal_gone")
 })
+
+
+test("worker resumes by prompting when quota grants run_now and no turn is pending", async () => {
+  const stateStore = memoryStateStore()
+  await stateStore.write("goal-resume", {
+    directory: "/workspace",
+    agentId: "e2e",
+    registryPath: "",
+    availableCapabilities: [],
+    sessionID: "ses_resume_1",
+    autoResume: true,
+    phase: "limit_stopped",
+    schedulerToken: "",
+    unchangedPolls: 2,
+    probeRetryCount: 0,
+    turnCount: 3,
+    pendingTurn: false,
+    lastPromptAt: Date.now() - 60_000,
+    pendingTurnActivityAt: Date.now() - 60_000,
+  })
+  const transport = fakeTransport()
+  const overrides = makeWorkerOverrides({
+    transport,
+    stateStore,
+    decisions: [
+      { should_run: true, scheduler_hint: { action: "run_now" } },
+      terminalDecision(),
+      goalNotFoundDecision(),
+    ],
+  })
+  const result = await runWorker({
+    goalId: "goal-resume",
+    directory: "/workspace",
+    ...overrides,
+  })
+  assert.equal(result.kind, "goal_gone")
+  assert.equal(
+    transport.calls.prompts.length,
+    1,
+    "a resumed worker with no pending turn must prompt on run_now",
+  )
+  const state = await stateStore.read("goal-resume")
+  assert.equal(state.turnCount, 4)
+})

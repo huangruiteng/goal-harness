@@ -698,48 +698,49 @@ async function runWithLease({
       return { kind: "turn_limit" }
     }
 
-    const waitOutcome = await waitForTurn({
-      transport,
-      sessionID,
-      state,
-      sentPromptIds: state.sentPromptIds || [],
-      ...waitTurnOptions,
-      shouldPause: async () => {
-        const stored = await stateStore.read(goalId)
-        return Boolean(stored && stored.autoResume === false)
-      },
-    })
-    if (waitOutcome.kind === "turn_hold") {
-      const wasHolding = state.phase === "session_paused_hold"
-      state = await stateStore.write(goalId, {
-        ...state,
-        phase: "session_paused_hold",
-        pendingTurnActivityAt: Number(waitOutcome.activityAt) || state.pendingTurnActivityAt,
-        pausedReason: "session_paused_hold",
+    if (state.pendingTurn) {
+      const waitOutcome = await waitForTurn({
+        transport,
+        sessionID,
+        state,
+        sentPromptIds: state.sentPromptIds || [],
+        ...waitTurnOptions,
+        shouldPause: async () => {
+          const stored = await stateStore.read(goalId)
+          return Boolean(stored && stored.autoResume === false)
+        },
       })
-      if (!wasHolding) {
-        await transport.sendSynthetic(
-          sessionID,
-          "The session appears paused. The LoopX worker holds quietly and resumes automatically when the session continues.",
-        )
-        await log("info", "pending turn went quiet; holding without prompting", {
-          goalId,
-          sessionID,
-          quietForMs: waitOutcome.quietForMs,
+      if (waitOutcome.kind === "turn_hold") {
+        const wasHolding = state.phase === "session_paused_hold"
+        state = await stateStore.write(goalId, {
+          ...state,
+          phase: "session_paused_hold",
+          pendingTurnActivityAt: Number(waitOutcome.activityAt) || state.pendingTurnActivityAt,
+          pausedReason: "session_paused_hold",
         })
+        if (!wasHolding) {
+          await transport.sendSynthetic(
+            sessionID,
+            "The session appears paused. The LoopX worker holds quietly and resumes automatically when the session continues.",
+          )
+          await log("info", "pending turn went quiet; holding without prompting", {
+            goalId,
+            sessionID,
+            quietForMs: waitOutcome.quietForMs,
+          })
+        }
+        await sleepImpl(5 * 60_000)
+        continue
       }
-      await sleepImpl(5 * 60_000)
-      continue
-    }
-    if (waitOutcome.kind === "paused_state") {
-      await log("info", "worker state was paused while waiting for the turn", { goalId, sessionID })
-      return { kind: "paused_state" }
-    }
-    if (waitOutcome.kind === "session_stalled") {
-      state = await stateStore.write(goalId, {
-        ...state,
-        phase: "session_stalled",
-        autoResume: false,
+      if (waitOutcome.kind === "paused_state") {
+        await log("info", "worker state was paused while waiting for the turn", { goalId, sessionID })
+        return { kind: "paused_state" }
+      }
+      if (waitOutcome.kind === "session_stalled") {
+        state = await stateStore.write(goalId, {
+          ...state,
+          phase: "session_stalled",
+          autoResume: false,
         pausedReason: "session_stalled",
       })
       await transport.sendSynthetic(
@@ -770,6 +771,7 @@ async function runWithLease({
       await transport.sendSynthetic(sessionID, TURN_LIMIT_NOTICE)
       await log("info", "stopped after the turn budget", { goalId, sessionID })
       return { kind: "turn_limit" }
+    }
     }
 
     state = await stateStore.read(goalId)
