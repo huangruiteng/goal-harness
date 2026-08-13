@@ -131,6 +131,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
         "commands": [
             {"command": "loopx bootstrap / loopx connect", "purpose": "Create or connect project-local state."},
             {
+                "command": "loopx project --help",
+                "purpose": "Register a durable Project and bind or resolve its foreground Goal.",
+            },
+            {
                 "command": "loopx new-project-prompt",
                 "purpose": "Generate a copy-paste project connection prompt for an agent.",
             },

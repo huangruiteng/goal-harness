@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .authority import compact_authority_registry
+from .control_plane.projects.contract import validate_project_record_bindings
 from .control_plane.runtime.time import now_local_iso
 from .file_lock import exclusive_file_lock
 from .history import load_registry
@@ -299,9 +300,51 @@ def merge_goal_entries(
     return merged, actions, synced_ids, collisions
 
 
+def merge_project_entries(
+    existing: list[Any],
+    incoming: list[dict[str, Any]],
+) -> list[Any]:
+    incoming_by_id = _project_entries_by_id(incoming, source="source registry")
+    existing_by_id = _project_entries_by_id(existing, source="global registry")
+    for project_id, project in incoming_by_id.items():
+        existing_project = existing_by_id.get(project_id)
+        if existing_project is not None and existing_project != project:
+            raise ValueError(
+                f"global ProjectRecord conflicts with source registry: {project_id}"
+            )
+    return [
+        item
+        for item in existing
+        if not (
+            isinstance(item, dict)
+            and str(item.get("project_id") or "") in incoming_by_id
+        )
+    ] + list(incoming_by_id.values())
+
+
+def _project_entries_by_id(
+    entries: list[Any],
+    *,
+    source: str,
+) -> dict[str, dict[str, Any]]:
+    projects: dict[str, dict[str, Any]] = {}
+    for item in entries:
+        if not isinstance(item, dict):
+            raise ValueError(f"{source} projects entries must be JSON objects")
+        project_id = str(item.get("project_id") or "").strip()
+        if not project_id:
+            raise ValueError(f"{source} ProjectRecord is missing project_id")
+        if project_id in projects:
+            raise ValueError(f"{source} has duplicate project_id: {project_id}")
+        validate_project_record_bindings(item, source=source)
+        projects[project_id] = item
+    return projects
+
+
 def _merge_global_registry_payload(
     existing: dict[str, Any],
     incoming: list[dict[str, Any]],
+    incoming_projects: list[dict[str, Any]],
     *,
     allow_route_replacement: bool,
     schema_version_fallback: str,
@@ -318,6 +361,12 @@ def _merge_global_registry_payload(
         incoming,
         allow_route_replacement=allow_route_replacement,
     )
+    existing_projects = existing.get("projects")
+    if existing_projects is None:
+        existing_projects = []
+    elif not isinstance(existing_projects, list):
+        raise ValueError("global registry projects must be a list")
+    merged_projects = merge_project_entries(existing_projects, incoming_projects)
     payload = dict(existing)
     payload["schema_version"] = str(
         payload.get("schema_version") or schema_version_fallback or "0.1"
@@ -325,6 +374,8 @@ def _merge_global_registry_payload(
     payload["updated_at"] = synced_at
     payload["common_runtime_root"] = str(runtime_root or DEFAULT_RUNTIME_ROOT)
     payload["registry_role"] = "global-local"
+    if merged_projects:
+        payload["projects"] = merged_projects
     payload["goals"] = merged_goals
     return payload, merged_goals, actions, synced_ids, collisions
 
@@ -332,6 +383,7 @@ def _merge_global_registry_payload(
 def _sync_global_registry_reduction(
     current: dict[str, Any],
     incoming: list[dict[str, Any]],
+    incoming_projects: list[dict[str, Any]],
     *,
     allow_route_replacement: bool,
     schema_version_fallback: str,
@@ -342,6 +394,7 @@ def _sync_global_registry_reduction(
         _merge_global_registry_payload(
             current,
             incoming,
+            incoming_projects,
             allow_route_replacement=allow_route_replacement,
             schema_version_fallback=schema_version_fallback,
             runtime_root=runtime_root,
@@ -607,6 +660,26 @@ def sync_project_registry_to_global(
         )
         for goal in goals
     ]
+    source_projects = project_registry.get("projects")
+    if source_projects is None:
+        source_projects = []
+    elif not isinstance(source_projects, list):
+        raise ValueError("source registry projects must be a list")
+    project_ids = {
+        str(goal.get("project_id"))
+        for goal in goals
+        if str(goal.get("project_id") or "").strip()
+    }
+    projects_by_id = _project_entries_by_id(
+        source_projects,
+        source="source registry",
+    )
+    missing_project_ids = sorted(project_ids - projects_by_id.keys())
+    if missing_project_ids:
+        raise ValueError(
+            "goal references a missing ProjectRecord: " + ", ".join(missing_project_ids)
+        )
+    incoming_projects = [projects_by_id[project_id] for project_id in sorted(project_ids)]
     merge_kwargs: dict[str, Any] = {
         "allow_route_replacement": allow_route_replacement,
         "schema_version_fallback": str(project_registry.get("schema_version") or "0.1"),
@@ -616,6 +689,7 @@ def sync_project_registry_to_global(
     preview = _sync_global_registry_reduction(
         load_registry(global_path),
         incoming,
+        incoming_projects,
         **merge_kwargs,
     )
     preview_receipt = preview.receipt
@@ -672,6 +746,7 @@ def sync_project_registry_to_global(
                 lambda current: _sync_global_registry_reduction(
                     current,
                     incoming,
+                    incoming_projects,
                     **merge_kwargs,
                 ),
             )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -77,6 +78,7 @@ from .cli_commands import (
     handle_multi_agent_command,
     handle_preset_command,
     handle_presentation_command,
+    handle_project_command,
     handle_project_lifecycle_command,
     handle_pr_review_command,
     handle_quota_command,
@@ -114,6 +116,7 @@ from .cli_commands import (
     register_multi_agent_commands,
     register_preset_commands,
     register_presentation_commands,
+    register_project_commands,
     register_project_lifecycle_commands,
     register_pr_review_command,
     register_quota_command,
@@ -263,6 +266,7 @@ def build_parser() -> LoopXArgumentParser:
     register_host_mode_plan_command(sub, add_subcommand_format)
     register_preset_commands(sub, add_subcommand_format)
     register_presentation_commands(sub, add_subcommand_format)
+    register_project_commands(sub, add_subcommand_format)
     register_ready_score_command(sub, add_subcommand_format)
 
     register_registry_admin_commands(sub)
@@ -301,6 +305,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(raw_argv)
     args.format = resolve_global_output_format(args)
     registry_path = Path(args.registry).expanduser()
+    registry_was_configured = user_supplied_registry(raw_argv) or bool(
+        os.environ.get("LOOPX_REGISTRY")
+    )
+    project_register_uses_default_registry = (
+        args.command == "project"
+        and args.project_command == "register"
+        and not registry_was_configured
+    )
+    if project_register_uses_default_registry:
+        registry_path = (
+            Path(args.knowledge_root).expanduser() / ".loopx" / "registry.json"
+        )
     if (
         args.command
         not in {
@@ -338,7 +354,8 @@ def main(argv: list[str] | None = None) -> int:
             "version",
             "host-mode-plan",
         }
-        and not user_supplied_registry(raw_argv)
+        and not project_register_uses_default_registry
+        and not registry_was_configured
         and not registry_path.exists()
     ):
         runtime_root = Path(args.runtime_root).expanduser() if args.runtime_root else DEFAULT_RUNTIME_ROOT
@@ -495,6 +512,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if presentation_result is not None:
         return presentation_result
+
+    project_result = handle_project_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if project_result is not None:
+        return project_result
 
     ready_score_result = handle_ready_score_command(
         args,

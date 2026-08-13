@@ -34,9 +34,19 @@ def _project_registry(root: Path, name: str, runtime_root: Path) -> Path:
             {
                 "schema_version": "0.1",
                 "common_runtime_root": str(runtime_root),
+                "projects": [
+                    {
+                        "project_id": f"project-{name}",
+                        "project_kind": "work",
+                        "knowledge_root": str(project),
+                        "repository_bindings": [],
+                        "external_locator_bindings": [],
+                    }
+                ],
                 "goals": [
                     {
                         "id": f"goal-{name}",
+                        "project_id": f"project-{name}",
                         "domain": "write-serialization-fixture",
                         "status": "active",
                         "repo": str(project),
@@ -429,3 +439,10 @@ def test_concurrent_project_syncs_do_not_drop_goals(tmp_path: Path) -> None:
     payload = json.loads(global_registry_path(runtime_root).read_text(encoding="utf-8"))
     synced = sorted(str(goal.get("id")) for goal in payload["goals"])
     assert synced == sorted(f"goal-{name}" for name in names)
+    synced_projects = sorted(
+        str(project.get("project_id")) for project in payload["projects"]
+    )
+    assert synced_projects == sorted(f"project-{name}" for name in names)
+    assert {
+        str(goal.get("id")): str(goal.get("project_id")) for goal in payload["goals"]
+    } == {f"goal-{name}": f"project-{name}" for name in names}
