@@ -74,6 +74,19 @@ def run_install(env: dict[str, str], release_id: str) -> subprocess.CompletedPro
     )
 
 
+def local_checkout_install_env(env: dict[str, str]) -> dict[str, str]:
+    local_env = dict(env)
+    archive_names = (
+        "LOOPX_ARCHIVE_URL",
+        "LOOPX_ARCHIVE_SHA256",
+        "LOOPX_REPO",
+        "LOOPX_REF",
+    )
+    for name in archive_names:
+        local_env.pop(name, None)
+    return local_env
+
+
 def write_promotion_readiness(
     runtime_run_dir: Path,
     *,
@@ -192,19 +205,21 @@ def main() -> int:
         )
         profile = home / ".zshrc"
         assert_release_snapshot_source_fallback(root)
-        env = {
-            **os.environ,
-            "HOME": str(home),
-            "CODEX_HOME": str(codex_home),
-            "OPENCODE_CONFIG_DIR": str(home / ".config" / "opencode"),
-            "LOOPX_BIN_DIR": str(bin_dir),
-            "LOOPX_SHELL_PROFILE": str(profile),
-            "LOOPX_INSTALL_SKILL": "1",
-            "LOOPX_PROMOTE_DEFAULT": "1",
-            "LOOPX_PYTHON": sys.executable,
-            "PATH": os.environ.get("PATH", ""),
-            "SHELL": "/bin/zsh",
-        }
+        env = local_checkout_install_env(
+            {
+                **os.environ,
+                "HOME": str(home),
+                "CODEX_HOME": str(codex_home),
+                "OPENCODE_CONFIG_DIR": str(home / ".config" / "opencode"),
+                "LOOPX_BIN_DIR": str(bin_dir),
+                "LOOPX_SHELL_PROFILE": str(profile),
+                "LOOPX_INSTALL_SKILL": "1",
+                "LOOPX_PROMOTE_DEFAULT": "1",
+                "LOOPX_PYTHON": sys.executable,
+                "PATH": os.environ.get("PATH", ""),
+                "SHELL": "/bin/zsh",
+            }
+        )
         source_commit = source_git_commit()
 
         install = run_install(env, "install-smoke-initial")
