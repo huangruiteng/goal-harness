@@ -53,6 +53,37 @@ def test_goal_boundary_uses_registry_goal_for_scope_and_capability_projection() 
     ]
     assert boundary["requires_parent_approval"] == ["write", "publish"]
     assert boundary["guards"] == ["stay public"]
+    assert "peer_task_coordination" not in boundary
+
+
+def test_goal_boundary_projects_only_explicit_valid_peer_coordinator() -> None:
+    boundary = goal_boundary(
+        {
+            "coordination": {
+                "registered_agents": ["codex-alpha", "codex-beta"],
+                "peer_task_coordination": {
+                    "coordinator_agent_id": "codex-alpha",
+                },
+            },
+        }
+    )
+
+    assert boundary is not None
+    assert boundary["peer_task_coordination"] == {
+        "enabled": True,
+        "coordinator_agent_id": "codex-alpha",
+    }
+
+    invalid = goal_boundary(
+        {
+            "coordination": {
+                "peer_task_coordination": {
+                    "coordinator_agent_id": "../../private",
+                },
+            },
+        }
+    )
+    assert invalid is None
 
 
 def test_goal_boundary_projects_credential_free_repository_identity(

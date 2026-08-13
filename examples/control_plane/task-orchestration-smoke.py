@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke deterministic task-scoped coordination among equal peers."""
+"""Smoke explicitly selected task-scoped coordination among equal peers."""
 
 from __future__ import annotations
 
@@ -20,7 +20,10 @@ from loopx.control_plane.turn_driver import (  # noqa: E402
     build_loopx_turn_host_request,
     build_loopx_turn_plan,
 )
-from loopx.quota import build_quota_should_run, render_quota_should_run_markdown  # noqa: E402
+from loopx.quota import (  # noqa: E402
+    build_quota_should_run,
+    render_quota_should_run_markdown,
+)
 
 
 GOAL_ID = "task-orchestration-fixture"
@@ -28,7 +31,11 @@ PEERS = ["codex-alpha", "codex-beta", "codex-gamma"]
 DORMANT_PEER = "codex-dormant"
 
 
-def payload(*, reverse_agents: bool = False) -> dict:
+def payload(
+    *,
+    reverse_agents: bool = False,
+    peer_task_coordinator: str | None = None,
+) -> dict:
     registered_agents = [*PEERS, DORMANT_PEER]
     if reverse_agents:
         registered_agents = list(reversed(registered_agents))
@@ -36,6 +43,10 @@ def payload(*, reverse_agents: bool = False) -> dict:
         "agent_model": "peer_v1",
         "registered_agents": registered_agents,
     }
+    if peer_task_coordinator:
+        coordination["peer_task_coordination"] = {
+            "coordinator_agent_id": peer_task_coordinator,
+        }
     todos = [
         {
             "index": index,
@@ -101,6 +112,24 @@ def payload(*, reverse_agents: bool = False) -> dict:
         "ok": True,
         "attention_queue": {"items": [attention]},
         "run_history": {"goals": [goal]},
+        "agent_management_projection": {
+            "schema_version": "agent_management_projection_v0",
+            "agents": [
+                {
+                    "agent_id": agent_id,
+                    "state": "running",
+                    "last_activity_at": "2026-08-14T12:00:00Z",
+                }
+                for agent_id in PEERS
+            ]
+            + [
+                {
+                    "agent_id": DORMANT_PEER,
+                    "state": "waiting",
+                    "last_activity_at": None,
+                }
+            ],
+        },
     }
 
 
@@ -190,18 +219,41 @@ def main() -> int:
         )
         for agent_id in PEERS
     }
-    coordinators = [
-        agent_id
-        for agent_id, decision in decisions.items()
-        if "task_orchestration_contract" in decision
-    ]
-    assert len(coordinators) == 1, decisions
-    coordinator = coordinators[0]
-    decision = decisions[coordinator]
+    assert all(
+        "task_orchestration_contract" not in decision
+        for decision in decisions.values()
+    ), decisions
+    assert all(
+        decision["effective_action"] != "coordinate_task_bundle"
+        for decision in decisions.values()
+    ), decisions
+
+    coordinator = "codex-alpha"
+    blocked_decision = build_quota_should_run(
+        payload(peer_task_coordinator=coordinator),
+        goal_id=GOAL_ID,
+        agent_id=coordinator,
+    )
+    blocked_contract = blocked_decision["task_orchestration_contract"]
+    assert blocked_contract["execution_state"] == "blocked", blocked_contract
+    assert blocked_contract["eligible_peer_lanes"] == [], blocked_contract
+    assert len(blocked_contract["blocked_peer_lanes"]) == 2, blocked_contract
+    assert blocked_contract["terminal_outcome"] == "blocked", blocked_contract
+    assert blocked_decision["effective_action"] != "coordinate_task_bundle", (
+        blocked_decision
+    )
+
+    decision = build_quota_should_run(
+        payload(peer_task_coordinator=coordinator),
+        goal_id=GOAL_ID,
+        agent_id=coordinator,
+        available_capabilities=["peer_agent_activation"],
+    )
     contract = decision["task_orchestration_contract"]
     assert decision["effective_action"] == "coordinate_task_bundle", decision
     assert decision["interaction_contract"]["mode"] == "task_orchestration", decision
     assert contract["coordinator_agent_id"] == coordinator, contract
+    assert contract["execution_state"] == "ready", contract
     assert coordinator in PEERS and coordinator != DORMANT_PEER, contract
     assert contract["writeback_owner"] == "task_coordinator", contract
     assert "controller_agent_id" not in contract, contract
@@ -218,9 +270,10 @@ def main() -> int:
     assert "task_orchestration: mode=task_scoped_peer" in markdown, markdown
 
     reversed_decision = build_quota_should_run(
-        payload(reverse_agents=True),
+        payload(reverse_agents=True, peer_task_coordinator=coordinator),
         goal_id=GOAL_ID,
         agent_id=coordinator,
+        available_capabilities=["peer_agent_activation"],
     )
     assert reversed_decision["task_orchestration_contract"][
         "coordinator_agent_id"
