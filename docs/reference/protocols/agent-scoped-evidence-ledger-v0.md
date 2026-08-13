@@ -19,10 +19,10 @@ jobs:
 | `loopx status` | Projects current state, todo index, attention queues, agent lanes, run history, and event summaries. | It answers "what is true now", not "what sequence should this agent review before replanning". |
 | `loopx review-packet` | Packages status and attention items for review or handoff. | It is packet-shaped, not a general scoped event ledger. |
 | `loopx history` | Reads compact run history and run indexes. | It is run-centric and not equivalent to rollout events. |
-| `loopx quota should-run --agent-id ...` | Decides whether a specific agent lane should act and materializes the evidence source requested by `replan_novelty_policy`. | A standalone required-read hint has insufficient prompt salience and is not a replan control mechanism. |
+| `loopx quota should-run --agent-id ...` | Decides whether a specific agent lane should act and projects a compact coverage ledger plus uncovered frontier from the evidence source. | It does not ask the model to reconstruct history or treat a read receipt as progress. |
 
-The resulting surface is a public-safe, bounded, agent-scoped ledger that an
-agent can read before replanning.
+The resulting surface is a public-safe, bounded, agent-scoped ledger that the
+host can project into a replan action packet and an operator can inspect in full.
 
 ## Ownership Boundary
 
@@ -30,11 +30,11 @@ agent can read before replanning.
 | --- | --- | --- |
 | Event sources | Durable append-only events, compact run records, ids, timestamps, and public-safe refs. | Prompt-ready planning summaries or cross-agent privacy policy. |
 | Status and review packets | Current projections, attention queues, frontier summaries, and operator packets. | Raw chronological replay or write authority. |
-| Quota | Lane routing, spend policy, scheduler hints, and required read hints. | Reconstructing history itself or storing replan rationale. |
-| Agent-scoped evidence ledger | Thin chronological rows for the current agent plus compressed frontier for other agents. | Replan selection policy, repair-delta validation, canonical writes, raw logs, raw trajectories, private documents, or full other-agent traces. |
-| Replan novelty policy | Makes evidence preflight and uncovered-direction selection prompt-visible. | Reimplementing blocker fingerprints, successor validation, or terminal-closure truth. |
-| Repair delta | Validates the durable replan writeback, including repeated-blocker rejection and coverage-backed `exploration_exhausted`. | Reconstructing the evidence ledger. |
-| Acting agent | Executes projected required reads, selects an uncovered direction, and submits the resulting repair delta. | Treating a read receipt alone as progress or inferring hidden context from another agent's private lane. |
+| Quota | Lane routing, spend policy, scheduler hints, host context delivery, and the minimal replan action packet. | Storing replan rationale or accepting writeback. |
+| Agent-scoped evidence ledger | Thin chronological rows for the current agent plus compressed frontier for other agents. | Replan selection policy, semantic-delta validation, canonical writes, raw logs, raw trajectories, private documents, or full other-agent traces. |
+| Replan context policy | Builds the coverage ledger, delivery receipt, and uncovered frontier. | Reimplementing typed progress comparison or terminal-closure truth. |
+| Semantic write gate | Validates typed progress, state-grounded successors, fresh vision outcomes, blockers, and coverage-backed terminal results against the current obligation. | Reconstructing the evidence ledger or interpreting classification prose. |
+| Acting agent | Selects an uncovered direction from delivered context and submits a typed observation or vision outcome. | Treating context delivery, a manual read, or a legacy ACK alone as progress. |
 
 ## Read Model Shape
 
@@ -141,95 +141,80 @@ without inheriting another lane's private scratchpad.
 
 ## Replan Integration
 
-When quota or status projects a replan obligation for an agent, the interaction
-contract should include required reads:
+When quota or status projects a replan obligation for an agent, the host folds
+the bounded agent-scoped chronology into a compact coverage ledger and delivers
+it with the current obligation:
 
 ```json
 {
-  "effective_action": "autonomous_replan",
-  "required_reads": [
-    {
-      "kind": "agent_scoped_evidence_log",
-      "command": "loopx --format json evidence-log --goal-id loopx-meta --agent-id codex-evidence-peer --thin --limit 24",
-      "reason": "Read this agent's own material chronology before writing a replan delta."
-    }
-  ]
+  "replan_action_packet": {
+    "decision": "replan_required",
+    "obligation_id": "replan-opaque-id",
+    "uncovered_frontier": {
+      "baseline": {"surface_id": "surface-auth", "result_class": "unchanged"},
+      "required_any_of": ["new_surface", "new_hypothesis", "new_probe_family"]
+    },
+    "required_outcome": "semantic_delta",
+    "writeback_contract": {
+      "schema_version": "typed_progress_observation_v0",
+      "transport": "loopx_refresh_state",
+      "command_template": "loopx ... refresh-state ... --progress-result-class <typed-class> --progress-evidence-id <evidence-id> <typed-dimension-options>"
+    },
+    "allowed_terminal": ["exploration_exhausted", "blocked", "no_followup"]
+  }
 }
 ```
 
-The control-plane responsibilities are deliberately split and causally bound:
+The full obligation also carries `replan_context_v0`: a bounded
+`coverage_ledger`, the same uncovered frontier, and a
+`replan_context_delivery_receipt_v0`. The control-plane responsibilities are
+deliberately split and causally bound:
 
-- `replan_novelty_policy` is the baseline: it names
-  `agent_scoped_evidence_log` as its evidence source and makes uncovered-
-  direction selection visible in the primary recommended action;
-- quota materializes that requested source as `required_reads[0]`, which carries
-  the exact command. A generic replan without the novelty policy does not
-  recreate the old standalone hint;
-- `repair_delta` remains the only writeback truth for repeated blockers,
-  successor novelty, and coverage-backed exhaustion.
+- the evidence log remains the durable public-safe chronology;
+- quota owns context delivery and does not require a weak protocol-following
+  model to discover or execute a read ritual;
+- `typed_progress_observation_v0` owns work-slice identity and result semantics;
+- quota and `refresh-state` use the same goal-frontier reducer, while the write
+  gate closes only the current obligation with an accepted semantic delta.
 
 The agent should then write back one of:
 
-- a bounded replan delta that cites the ledger digest;
-- a successor todo or handoff route;
-- a concrete blocker or user todo;
-- a no-follow-up rationale when the ledger proves the lane is intentionally
-  closed.
+- an `advanced` observation with a new surface, hypothesis, or probe family;
+- an `advanced` observation naming a successor Todo that is actually runnable
+  in current state;
+- a new concrete blocker with evidence;
+- coverage-backed `exploration_exhausted` or `no_followup`; or
+- for a vision-derived duty, a fresh evidence-linked vision path outcome.
 
-Every successful `loopx evidence-log` execution now appends an
+Every successful diagnostic `loopx evidence-log` execution appends an
 `evidence_log_read` rollout event and returns an
 `evidence_log_read_receipt_v0`. The receipt carries the goal id, agent id,
-bounded read window, canonical public-safe command, opaque required-read id,
-and recorded timestamp. Receipt events are excluded from an unfiltered ledger
-view so repeated reads do not recursively inflate the evidence chronology;
-they remain available through the receipt projection and an explicit
-`--event-kind evidence_log_read` filter.
-
-Replan ACK validation compares that receipt with the current obligation. A
-receipt for another goal, agent, or required-read id does not match. When the
-trigger has a timestamp, the receipt must be at or after that trigger and no
-later than the ACK. The opaque required-read id binds obligations without a
-source timestamp and changes when their trigger payload changes, so a later
-obligation instance cannot silently reuse an earlier instance's receipt.
-
-Enforcement is always `hard`: the ACK cannot clear the obligation until a
-matching fresh receipt exists. Missing or stale receipts keep the obligation
-open and project `required_read_not_executed` through
-`replan_ack_feedback`, with the exact command and agent id needed to repair
-the ACK. Receipt enforcement validates the required preflight read; the repair
-delta remains the authoritative replan writeback.
-
-Failure escape hatch: if `loopx evidence-log` itself fails (for example the
-registry or runtime is unavailable), the CLI appends an `evidence_log_read`
-event with `status=failed` and records a matching receipt. A fresh failed
-receipt satisfies the read-attempt requirement so a broken read path cannot
-deadlock the obligation, and `replan_ack_feedback` surfaces
-`evidence_log_read_failed` with the failure reason so the operator can repair
-the environment.
+bounded read window, canonical public-safe command, and recorded timestamp.
+Receipt events are excluded from an unfiltered ledger view so repeated reads do
+not recursively inflate the chronology. They are observability facts only: a
+read, a failed read, a prose ACK, or a historical repair-delta ACK does not
+close the current obligation. This prevents a receipt for an earlier periodic
+review from masking a later vision/frontier duty.
 
 ### Effect-program boundary
 
-This flow uses the accepted effect-program semantics without adding another
-settlement executor. The CLI call is the effect request; `evidence-log`
-interprets the bounded read and returns the durable receipt as its observation;
-ACK validation consumes that observation as a pure policy decision. It does not
-use the typed settlement algebra because there is no shared multi-step write
-owner, the read is intentionally repeatable rather than at-most-once, and ACK
-validation must not replay the read. A future adapter should adopt the typed
-algebra only if it introduces a stable effect identity and a receipt-backed,
-replayable sequence of external writes that removes duplicate settlement truth.
+This flow uses the effect-program separation without adding a second settlement
+executor. Host context projection is a repeatable read effect; the typed
+progress writeback is a separately validated state transition. The delivery
+receipt proves context delivery, while the semantic delta proves use of that
+context. Neither receipt is allowed to impersonate the other.
 
 The live behavior qualification tests that causal handoff through an actual
 function-tool conversation rather than a testing-only output field. A Doubao
 actor receives the shipped Codex App heartbeat body and chooses the quota
 command against a hermetic public-safe Goal. The harness runs that command
-through the real LoopX CLI, returns its actual replan packet, and requires the
-actor to call the exact evidence-log command from that packet. The evidence
-command is also executed through the real read-only CLI and its goal/agent
-readback is checked before the run passes. Prose such as "read the log next", a
-generic read action, a command for another agent, or an evidence-log call made
-before quota does not pass. Only temporary fixture state may change, and the
-receipt stores bounded command digests rather than prompts, packets, or output.
+through the real LoopX CLI, returns its actual context/action packet, and asks
+the actor to choose the next real tool action. The actor independently qualifies
+the selected typed observation, then executes the real `refresh-state` command.
+Evidence-log-only, prose-only, pre-quota, equivalent-fingerprint, and ungrounded
+successor actions do not pass. Only temporary fixture state may change, and the
+receipt stores bounded command digests and typed outcomes rather than prompts,
+packets, or output.
 
 ## Privacy Boundary
 
@@ -249,12 +234,11 @@ say that only a compact pointer or count was recorded.
 ## Current Implementation Status
 
 The CLI, rollout-event/run-history merge, bounded other-agent frontier,
-policy-owned quota/review-packet required reads, durable read receipts, and
-soft/hard ACK validation are implemented. Todo and material projections remain
-separate current-state surfaces; they are not copied into this chronological
-ledger. Replan novelty selection is owned by `replan_novelty_policy`; receipt
-validation enforces its preflight read, while the repair-delta control path
-continues to own writeback acceptance.
+host-projected coverage context, minimal action packet, typed repeat detector,
+and shared quota/write-time semantic gate are implemented. Todo and material
+projections remain separate current-state surfaces; they are not copied into
+this chronological ledger. Historical repair ACKs have a bounded read adapter
+for old run rows, but new replan closure has one truth: typed semantic delta.
 
 ## Acceptance
 
@@ -266,11 +250,11 @@ A change satisfies this contract only when:
   default;
 - filters behave deterministically and do not require parsing raw JSONL in agent
   prompts;
-- replan-capable quota/status payloads can point agents to the required ledger
-  read;
+- replan-capable quota/status payloads deliver a compact coverage ledger and
+  uncovered frontier without requiring a model read ritual;
 - the live function-tool qualification proves that the default model selects
-  that exact read from a production heartbeat/quota exchange rather than merely
-  echoing a test field;
+  and executes a semantic next action from a production heartbeat/quota
+  exchange rather than merely echoing a test field;
 - the existing status, history, review-packet, and rollout-event-log surfaces
   keep their current responsibilities; and
 - public tests prove the privacy boundary without committing private state,

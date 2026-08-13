@@ -753,6 +753,47 @@ def _validate_quota_hot_path_compaction_regression(
         raise ValueError("compaction regression must preserve the selected todo")
 
 
+def _validate_required_vision_replan_scenario(
+    source_packet: Mapping[str, Any],
+    contract: Mapping[str, Any],
+) -> None:
+    semantics = model_behavior_semantic_contract_from_packet(
+        source_packet,
+        arm="full_packet",
+    )
+    vision = semantics["vision_continuation"]
+    trigger_kinds = set(vision.get("trigger_kinds", []))
+    required = {
+        "selected_todo_id": None,
+        "user_action_required": False,
+        "must_attempt_work": True,
+        "quiet_noop_allowed": False,
+    }
+    if any(contract.get(field) != value for field, value in required.items()):
+        raise ValueError("required-vision scenario must execute before quiet wait")
+    if vision.get("required") is not True or (
+        "required_agent_vision_missing" not in trigger_kinds
+    ):
+        raise ValueError("required-vision scenario must preserve the profile gap")
+    if semantics["required_reads"]:
+        raise ValueError("required-vision replan must not require a model read ritual")
+    action_packet = source_packet.get("replan_action_packet")
+    obligation = source_packet.get("autonomous_replan_obligation")
+    if not (
+        isinstance(action_packet, Mapping)
+        and isinstance(obligation, Mapping)
+        and action_packet.get("decision") == "replan_required"
+        and action_packet.get("obligation_id") == obligation.get("obligation_id")
+        and dict(obligation.get("replan_context") or {}).get("delivery")
+        == "host_projected"
+    ):
+        raise ValueError(
+            "required-vision scenario must preserve host-delivered replan context"
+        )
+    if semantics["scheduler_action"].get("action") != "run_now":
+        raise ValueError("required-vision scenario must remain immediately runnable")
+
+
 def _scenario_contract(
     spec: _ScenarioSpec,
     source_packet: Mapping[str, Any],
@@ -855,30 +896,7 @@ def _scenario_contract(
         if any(contract.get(field) != value for field, value in required.items()):
             raise ValueError("human-gate scenario violates final gate precedence")
     if spec.scenario_id == "turn_required_vision_replan":
-        semantics = model_behavior_semantic_contract_from_packet(
-            source_packet,
-            arm="full_packet",
-        )
-        vision = semantics["vision_continuation"]
-        trigger_kinds = set(vision.get("trigger_kinds", []))
-        required = {
-            "selected_todo_id": None,
-            "user_action_required": False,
-            "must_attempt_work": True,
-            "quiet_noop_allowed": False,
-        }
-        if any(contract.get(field) != value for field, value in required.items()):
-            raise ValueError("required-vision scenario must execute before quiet wait")
-        if vision.get("required") is not True or (
-            "required_agent_vision_missing" not in trigger_kinds
-        ):
-            raise ValueError("required-vision scenario must preserve the profile gap")
-        if not semantics["required_reads"]:
-            raise ValueError("required-vision scenario must preserve required reads")
-        if semantics["scheduler_action"].get("action") != "run_now":
-            raise ValueError(
-                "required-vision scenario must remain immediately runnable"
-            )
+        _validate_required_vision_replan_scenario(source_packet, contract)
     if spec.scenario_id == "turn_scoped_gate_successor_replan":
         signature = quota_action_signature_document(source_packet)
         action = dict(signature.get("action") or {})
@@ -1033,7 +1051,7 @@ def _scenario_result(
     turn_actor: ModelBehaviorActor,
     onboarding_actor: OnboardingModelBehaviorActor,
     selected_todo_actor: Callable[[str], Mapping[str, Any]],
-    replan_evidence_actor: Callable[[str], Mapping[str, Any]],
+    replan_semantic_action_actor: Callable[[str], Mapping[str, Any]],
     scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
     capability_monitor_repair_actor: Callable[[str], Mapping[str, Any]],
 ) -> tuple[dict[str, Any], bool, list[dict[str, Any]]]:
@@ -1053,7 +1071,7 @@ def _scenario_result(
                     )
                 observed_route = str(receipt.get("decision") or "")
             elif spec.actor_kind == "replan_tool":
-                receipt = dict(replan_evidence_actor(run_id))
+                receipt = dict(replan_semantic_action_actor(run_id))
                 if receipt.get("qualification_passed") is not True:
                     failure_codes.append(
                         str(receipt.get("failure_code") or "tool_behavior_failed")
@@ -1180,7 +1198,7 @@ def run_actual_default_model_behavior_portfolio(
     turn_actor: ModelBehaviorActor,
     onboarding_actor: OnboardingModelBehaviorActor,
     selected_todo_actor: Callable[[str], Mapping[str, Any]],
-    replan_evidence_actor: Callable[[str], Mapping[str, Any]],
+    replan_semantic_action_actor: Callable[[str], Mapping[str, Any]],
     scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
     capability_monitor_repair_actor: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:
@@ -1241,7 +1259,7 @@ def run_actual_default_model_behavior_portfolio(
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
             selected_todo_actor=selected_todo_actor,
-            replan_evidence_actor=replan_evidence_actor,
+            replan_semantic_action_actor=replan_semantic_action_actor,
             scoped_gate_successor_actor=scoped_gate_successor_actor,
             capability_monitor_repair_actor=capability_monitor_repair_actor,
         )

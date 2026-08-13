@@ -512,7 +512,7 @@ def test_unscoped_or_malformed_blocker_does_not_defer_open_vision_gap(
     assert guard["goal_frontier_projection"]["replan_required"] is True
 
 
-def test_blocker_delta_ack_clears_existing_vision_replan_obligation() -> None:
+def test_unbound_legacy_blocker_ack_cannot_clear_vision_replan_obligation() -> None:
     obligation = {
         "schema_version": "autonomous_replan_obligation_v0",
         "required": True,
@@ -546,13 +546,10 @@ def test_blocker_delta_ack_clears_existing_vision_replan_obligation() -> None:
 
     guard = _quota(payload)
 
-    assert guard["decision"] == "reassignment_required"
-    assert guard["should_run"] is False
-    assert guard.get("autonomous_replan_obligation") is None
-    assert guard["goal_frontier_projection"]["replan_required"] is False
-    assert guard["goal_frontier_projection"]["vision_wait_state"][
-        "reason_code"
-    ] == "current_agent_blocker"
+    assert guard["decision"] == "autonomous_replan_required"
+    assert guard["should_run"] is True
+    assert guard["autonomous_replan_obligation"]["required"] is True
+    assert guard["goal_frontier_projection"]["replan_required"] is True
 
 
 def _status_payload_with_replan_runs(
@@ -773,33 +770,32 @@ def test_two_identical_blocked_successor_waits_trigger_bounded_replan() -> None:
         "create_runnable_todo",
         "successor_or_supersede",
     ]
-    assert obligation["satisfying_repair_delta_kinds"] == [
-        "runnable_todo_set",
-        "successor_or_supersede",
+    assert obligation["satisfying_semantic_outcomes"] == [
+        "fresh_vision_path_outcome",
+        "new_runnable_successor",
+        "new_concrete_blocker",
+        "coverage_backed_exploration_exhausted",
+        "coverage_backed_no_followup",
     ]
-    assert "watch-lane continuation alone does not satisfy" in obligation[
+    assert "maintenance-only continuation does not satisfy" in obligation[
         "recommended_action"
     ]
     assert "watch-lane continuation" not in obligation["todo_actions"][-1]["text"]
-    primary_action = guard["interaction_contract"]["agent_channel"]["primary_action"]
-    assert "watch-lane continuation alone" in primary_action
-    assert "wait quietly for material monitor evidence" not in primary_action
-    assert "otherwise record a no-spend wait continuation" not in primary_action
+    assert guard["replan_action_packet"]["uncovered_frontier"][
+        "required_any_of"
+    ] == obligation["satisfying_semantic_outcomes"]
     cli_actions = guard["interaction_contract"]["cli_channel"]["next_cli_actions"]
-    todo_add = next(action for action in cli_actions if "todo add" in action)
-    assert f"--claimed-by {AGENT_ID}" in todo_add
-    assert "--agent-id" not in todo_add
-    assert any(
-        "--repair-delta-kind runnable_todo_set" in action
-        for action in cli_actions
-    )
+    refresh_action = next(action for action in cli_actions if "refresh-state" in action)
+    assert "--progress-result-class" in refresh_action
+    assert "--autonomous-replan-recorded" not in refresh_action
+    assert "--repair-delta-kind" not in refresh_action
 
 
 def test_agent_status_mirrors_quota_guidance_without_changing_peer() -> None:
     runs = [*_blocked_wait_polls(), _vision_run()]
     payload, raw_obligation = _status_payload_with_replan_runs(runs)
     assert raw_obligation is not None
-    assert "otherwise record a no-spend wait continuation" in raw_obligation[
+    assert "new evidence-backed blocker or coverage-backed terminal" in raw_obligation[
         "recommended_action"
     ]
 
@@ -826,10 +822,10 @@ def test_agent_status_mirrors_quota_guidance_without_changing_peer() -> None:
         obligations_by_agent = target["autonomous_replan_obligations_by_agent"]
         assert obligations_by_agent[AGENT_ID] == expected
         assert obligations_by_agent[PRIMARY_AGENT] == peer_obligation
-    assert "watch-lane continuation alone does not satisfy" in expected[
+    assert "maintenance-only continuation does not satisfy" in expected[
         "recommended_action"
     ]
-    assert "otherwise record a no-spend wait continuation" not in expected[
+    assert "new evidence-backed blocker or coverage-backed terminal" not in expected[
         "recommended_action"
     ]
 
@@ -847,15 +843,15 @@ def test_agent_status_preserves_as_needed_wait_guidance_from_quota() -> None:
     item = payload["attention_queue"]["items"][0]
     assert item["autonomous_replan_obligation"] == expected
     assert item["project_asset"]["autonomous_replan_obligation"] == expected
-    assert "otherwise record a no-spend wait continuation" in expected[
+    assert "new evidence-backed blocker or coverage-backed terminal" in expected[
         "recommended_action"
     ]
-    assert "watch-lane continuation alone does not satisfy" not in expected[
+    assert "maintenance-only continuation does not satisfy" not in expected[
         "recommended_action"
     ]
 
 
-def test_agent_status_removes_obligation_cleared_by_actionable_ack() -> None:
+def test_agent_status_keeps_vision_duty_after_legacy_actionable_ack() -> None:
     polls = _blocked_wait_polls()
     frontier_identity = polls[0]["monitor_target"]["frontier_identity"]
     ack = {
@@ -881,19 +877,21 @@ def test_agent_status_removes_obligation_cleared_by_actionable_ack() -> None:
         payload,
         raw_obligation,
     )
-    assert _quota(payload).get("autonomous_replan_obligation") is None
+    expected = _quota(payload).get("autonomous_replan_obligation")
+    assert expected is not None
 
     attach_agent_lane_next_actions(payload, agent_id=AGENT_ID)
 
-    assert "autonomous_replan_obligation" not in item
-    assert "autonomous_replan_obligation" not in item["project_asset"]
+    assert item["autonomous_replan_obligation"] == expected
+    assert item["project_asset"]["autonomous_replan_obligation"] == expected
     for target in (item, item["project_asset"]):
         assert target["autonomous_replan_obligations_by_agent"] == {
-            PRIMARY_AGENT: peer_obligation
+            AGENT_ID: expected,
+            PRIMARY_AGENT: peer_obligation,
         }
 
 
-def test_as_needed_blocked_successor_guidance_keeps_wait_continuation() -> None:
+def test_as_needed_blocked_successor_guidance_requires_semantic_outcome() -> None:
     guard = _quota_with_replan_runs(
         [*_blocked_wait_polls(), _vision_run(advancement_policy="as_needed")]
     )
@@ -902,10 +900,11 @@ def test_as_needed_blocked_successor_guidance_keeps_wait_continuation() -> None:
     assert obligation["guidance_actions"] == [
         "discover_safe_successor",
         "create_successor",
-        "record_wait_continuation",
+        "write_blocker",
+        "record_coverage_terminal",
     ]
     assert "satisfying_repair_delta_kinds" not in obligation
-    assert "otherwise record a no-spend wait continuation" in obligation[
+    assert "new evidence-backed blocker or coverage-backed terminal" in obligation[
         "recommended_action"
     ]
 
@@ -1033,14 +1032,14 @@ def test_compacted_monitor_quiet_vision_waits_trigger_bounded_replan() -> None:
     assert trigger["frontier_identity"] == compact_target["frontier_identity"]
 
 
-def test_bounded_watch_ack_covers_newer_same_target_dead_monitor_repeat() -> None:
+def test_watch_ack_cannot_cover_newer_same_target_dead_monitor_repeat() -> None:
     guard = _generic_watch_quota(
         ack=_generic_watch_ack(frontier_identity="generic-watch-target")
     )
 
-    assert guard["effective_action"] == "monitor_quiet_skip"
-    assert guard.get("autonomous_replan_obligation") is None
-    assert guard["goal_frontier_projection"]["replan_required"] is False
+    assert guard["effective_action"] == "autonomous_replan_required"
+    assert guard["autonomous_replan_obligation"]["required"] is True
+    assert guard["goal_frontier_projection"]["replan_required"] is True
 
 
 @pytest.mark.parametrize(
@@ -1140,7 +1139,7 @@ def test_wait_only_ack_does_not_clear_repeat_vision_blocked_successor() -> None:
     )
 
 
-def test_runnable_ack_dedupes_only_the_same_blocked_successor_frontier() -> None:
+def test_legacy_runnable_ack_cannot_close_blocked_successor_vision_duty() -> None:
     polls = _blocked_wait_polls()
     frontier_identity = polls[0]["monitor_target"]["frontier_identity"]
     ack = {
@@ -1161,8 +1160,10 @@ def test_runnable_ack_dedupes_only_the_same_blocked_successor_frontier() -> None
     }
 
     same_frontier = _quota_with_replan_runs([*polls, ack, _vision_run()])
-    assert same_frontier["decision"] == "agent_scope_wait"
-    assert same_frontier.get("autonomous_replan_obligation") is None
+    assert same_frontier["decision"] == "autonomous_replan_required"
+    assert same_frontier["autonomous_replan_obligation"][
+        "frontier_identity"
+    ] == frontier_identity
 
     ack["autonomous_replan_ack"]["frontier_identity"] = "different-frontier"
     changed_frontier = _quota_with_replan_runs([*polls, ack, _vision_run()])
@@ -1172,7 +1173,7 @@ def test_runnable_ack_dedupes_only_the_same_blocked_successor_frontier() -> None
     ] == frontier_identity
 
 
-def test_wait_only_ack_can_cover_non_repeating_blocked_successor() -> None:
+def test_wait_only_ack_cannot_close_blocked_successor_replan() -> None:
     polls = _blocked_wait_polls()
     frontier_identity = polls[0]["monitor_target"]["frontier_identity"]
     ack = {
@@ -1200,11 +1201,11 @@ def test_wait_only_ack_can_cover_non_repeating_blocked_successor() -> None:
         ]
     )
 
-    assert covered["decision"] == "agent_scope_wait"
-    assert covered.get("autonomous_replan_obligation") is None
+    assert covered["decision"] == "autonomous_replan_required"
+    assert covered["autonomous_replan_obligation"]["required"] is True
 
 
-def test_wait_ack_covers_newer_same_frontier_stalls_for_as_needed_vision() -> None:
+def test_wait_ack_cannot_close_newer_same_frontier_stalls() -> None:
     polls = _blocked_wait_polls()
     frontier_identity = polls[0]["monitor_target"]["frontier_identity"]
     older_ack = {
@@ -1228,9 +1229,9 @@ def test_wait_ack_covers_newer_same_frontier_stalls_for_as_needed_vision() -> No
         [*polls, older_ack, _vision_run(advancement_policy="as_needed")]
     )
 
-    assert covered["decision"] == "agent_scope_wait"
-    assert covered["goal_frontier_projection"]["replan_required"] is False
-    assert covered.get("autonomous_replan_obligation") is None
+    assert covered["decision"] == "autonomous_replan_required"
+    assert covered["goal_frontier_projection"]["replan_required"] is True
+    assert covered["autonomous_replan_obligation"]["required"] is True
 
     older_ack["autonomous_replan_ack"]["frontier_identity"] = "changed-frontier"
     changed = _quota_with_replan_runs(
@@ -1333,7 +1334,7 @@ def test_refresh_ack_recovers_generic_dead_monitor_target_identity() -> None:
     ) == "bounded-generic-target"
 
 
-def test_refresh_ack_recovers_only_the_current_agent_frontier(tmp_path) -> None:
+def test_legacy_watch_ack_cannot_close_current_agent_frontier(tmp_path) -> None:
     registry_path, runtime_root, project = write_cli_fixture(
         tmp_path / "fixture",
         scoped_agents=True,
@@ -1412,25 +1413,24 @@ def test_refresh_ack_recovers_only_the_current_agent_frontier(tmp_path) -> None:
         for run in reversed(runs):
             index_file.write(json.dumps(run, ensure_ascii=False) + "\n")
 
-    payload = refresh_state_run(
-        registry_path=registry_path,
-        runtime_root_override=None,
-        goal_id="half-speed",
-        project=None,
-        state_file=None,
-        classification="autonomous_replan_recorded",
-        recommended_action="Continue the current agent replan.",
-        agent_id=SCOPED_AGENT_ID,
-        autonomous_replan_recorded=True,
-        repair_delta_kinds=["watch_lane_continuation"],
-        dry_run=True,
-        sync_global=False,
-    )
+    with pytest.raises(ValueError, match="typed semantic delta"):
+        refresh_state_run(
+            registry_path=registry_path,
+            runtime_root_override=None,
+            goal_id="half-speed",
+            project=None,
+            state_file=None,
+            classification="autonomous_replan_recorded",
+            recommended_action="Continue the current agent replan.",
+            agent_id=SCOPED_AGENT_ID,
+            autonomous_replan_recorded=True,
+            repair_delta_kinds=["watch_lane_continuation"],
+            dry_run=True,
+            sync_global=False,
+        )
 
-    assert payload["autonomous_replan_ack"]["frontier_identity"] == current_frontier
 
-
-def test_refresh_watch_ack_crosses_material_run_with_exact_todo_evidence(
+def test_legacy_watch_ack_cannot_cross_material_run_with_todo_evidence(
     tmp_path,
 ) -> None:
     registry_path, runtime_root, project = write_cli_fixture(
@@ -1462,55 +1462,21 @@ def test_refresh_watch_ack_crosses_material_run_with_exact_todo_evidence(
         for run in (poll, material_run):
             index_file.write(json.dumps(run, ensure_ascii=False) + "\n")
 
-    payload = refresh_state_run(
-        registry_path=registry_path,
-        runtime_root_override=None,
-        goal_id="half-speed",
-        project=None,
-        state_file=None,
-        classification="postdelivery_watch_replan",
-        recommended_action="Keep the exact bounded watch active.",
-        agent_id=SCOPED_AGENT_ID,
-        autonomous_replan_recorded=True,
-        repair_delta_kinds=["watch_lane_continuation"],
-        dry_run=True,
-        sync_global=False,
-    )
-
-    ack = payload["autonomous_replan_ack"]
-    assert ack["recorded"] is True
-    assert ack["frontier_identity"] == target_id
-    assert ack["delta_contract"]["auto_evidence"][0]["todo_ids"] == [MONITOR_ID]
-
-
-def test_watch_only_replan_downgrades_accountable_delivery_outcome(tmp_path) -> None:
-    registry_path, _, _ = write_cli_fixture(
-        tmp_path / "fixture",
-        scoped_agents=True,
-    )
-
-    payload = refresh_state_run(
-        registry_path=registry_path,
-        runtime_root_override=None,
-        goal_id="half-speed",
-        project=None,
-        state_file=None,
-        classification="bounded_progress_segment",
-        recommended_action="Keep watching the unchanged external dependency.",
-        next_action="Keep watching the unchanged external dependency.",
-        delivery_batch_scale="single_surface",
-        delivery_outcome="outcome_progress",
-        agent_id=SCOPED_AGENT_ID,
-        progress_scope="goal",
-        autonomous_replan_recorded=True,
-        repair_delta_kinds=["active_state_next_action"],
-        dry_run=True,
-        sync_global=False,
-    )
-
-    assert payload["autonomous_replan_recorded"] is True
-    assert payload["repair_delta_contract"]["delta_present"] is True
-    assert payload["delivery_outcome"] == "outcome_gap"
+    with pytest.raises(ValueError, match="typed semantic delta"):
+        refresh_state_run(
+            registry_path=registry_path,
+            runtime_root_override=None,
+            goal_id="half-speed",
+            project=None,
+            state_file=None,
+            classification="postdelivery_watch_replan",
+            recommended_action="Keep the exact bounded watch active.",
+            agent_id=SCOPED_AGENT_ID,
+            autonomous_replan_recorded=True,
+            repair_delta_kinds=["watch_lane_continuation"],
+            dry_run=True,
+            sync_global=False,
+        )
 
 
 def test_status_projects_exact_blocker_and_resume_contract() -> None:

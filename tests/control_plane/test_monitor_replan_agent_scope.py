@@ -655,7 +655,13 @@ def test_nonblocking_user_action_does_not_suppress_empty_frontier_replan() -> No
         for action in cli_actions
     ), cli_actions
     assert any(
-        "--repair-delta-kind runnable_todo_set" in action
+        "--replan-obligation-id" in action
+        and "todo add" in action
+        and "--repair-delta-kind" not in action
+        for action in cli_actions
+    ), cli_actions
+    assert any(
+        "host_action=end_current_heartbeat" in action
         for action in cli_actions
     ), cli_actions
 

@@ -24,17 +24,12 @@ from loopx.control_plane.testing.actual_default_model_behavior_portfolio import 
 from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (
     run_actual_default_model_behavior_portfolio as _run_actual_default_model_behavior_portfolio,
 )
-from loopx.control_plane.testing.doubao_model_behavior_actor import (
-    DoubaoActorTransportError,
-)
 from loopx.control_plane.testing.capability_monitor_repair_tool_behavior import (
     DoubaoCapabilityMonitorRepairToolBehaviorActor,
     _build_capability_repair_fixture,
 )
-from loopx.control_plane.testing.model_tool_behavior import (
-    ScriptedAssistantAction,
-    ScriptedDoubaoExecTransport,
-    ScriptedExecToolAction,
+from loopx.control_plane.testing.doubao_model_behavior_actor import (
+    DoubaoActorTransportError,
 )
 from loopx.control_plane.testing.model_behavior_qualification import (
     FULL_QUOTA_DECISION_PACKET_SCHEMA_VERSION,
@@ -42,14 +37,21 @@ from loopx.control_plane.testing.model_behavior_qualification import (
     MODEL_BEHAVIOR_DECISION_SCHEMA_VERSION,
     model_behavior_semantic_contract_from_packet,
 )
+from loopx.control_plane.testing.model_tool_behavior import (
+    ScriptedAssistantAction,
+    ScriptedDoubaoExecTransport,
+    ScriptedExecToolAction,
+)
 from loopx.control_plane.testing.onboarding_model_behavior_qualification import (
     ONBOARDING_MODEL_BEHAVIOR_DECISION_SCHEMA_VERSION,
     ONBOARDING_MODEL_BEHAVIOR_RESULT_SCHEMA_VERSION,
     onboarding_entry_semantic_contract,
     onboarding_postcondition_semantic_contract,
 )
-from loopx.control_plane.testing.replan_evidence_tool_behavior import (
-    DoubaoReplanEvidenceToolBehaviorActor,
+from loopx.control_plane.testing.replan_semantic_action_behavior import (
+    DoubaoReplanSemanticActionBehaviorActor,
+)
+from loopx.control_plane.testing.replan_semantic_action_behavior import (
     _build_fixture as _build_replan_fixture,
 )
 from loopx.control_plane.testing.scoped_gate_successor_tool_behavior import (
@@ -59,8 +61,11 @@ from loopx.control_plane.testing.scoped_gate_successor_tool_behavior import (
 from loopx.control_plane.testing.selected_todo_tool_behavior import (
     SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT,
     DoubaoSelectedTodoToolBehaviorActor,
+)
+from loopx.control_plane.testing.selected_todo_tool_behavior import (
     _build_fixture as _build_selected_fixture,
 )
+
 
 def _scenario_inputs(
     tmp_path: Path,
@@ -176,14 +181,15 @@ def _selected_todo_actor(_: str) -> dict[str, Any]:
     )
 
 
-def _replan_evidence_actor(_: str) -> dict[str, Any]:
+def _replan_semantic_action_actor(_: str) -> dict[str, Any]:
     return _passing_tool_receipt(
-        "replan_evidence_tool_behavior_receipt_v0",
+        "replan_semantic_action_behavior_receipt_v0",
         selected_todo_id=None,
         user_action_required=False,
         delivery_allowed=True,
-        evidence_log_matched_required_read=True,
-        vision_trigger_kinds=["required_agent_vision_missing"],
+        semantic_action_accepted=True,
+        context_delivery="host_projected",
+        selected_semantic_outcomes=["new_surface"],
     )
 
 
@@ -255,13 +261,32 @@ def _selected_read_action(request: Mapping[str, Any]) -> ScriptedExecToolAction:
     return ScriptedExecToolAction(f"cat {shlex.quote(match.group(0))}")
 
 
-def _required_evidence_action(
+def _replan_frontier_read_action(
     request: Mapping[str, Any],
 ) -> ScriptedExecToolAction:
     payload = _latest_tool_payload(request)
-    required_reads = payload.get("required_reads") or []
-    command = required_reads[0]["command"]
-    return ScriptedExecToolAction(str(command))
+    action = payload["replan_action_packet"]
+    assert "new_surface" in action["uncovered_frontier"]["required_any_of"]
+    assert "replan-frontier.json" in payload["active_state_next_action"]
+    return ScriptedExecToolAction("cat replan-frontier.json")
+
+
+def _semantic_replan_action() -> ScriptedExecToolAction:
+    return ScriptedExecToolAction(
+        "loopx --format json --registry ignored --runtime-root ignored "
+        "refresh-state --goal-id replan-semantic-action-fixture "
+        "--agent-id codex-replan-semantic-action --progress-scope agent_lane "
+        "--classification bounded_replan_progress "
+        "--recommended-action inspect-the-new-surface "
+        "--delivery-batch-scale single_surface "
+        "--delivery-outcome outcome_progress "
+        "--progress-result-class advanced "
+        "--progress-surface-id surface-permission-config "
+        "--progress-hypothesis-id hypothesis-permission-default "
+        "--progress-probe-kind static-contract-read "
+        "--progress-evidence-id evidence-permission-config "
+        "--no-global-sync --suppress-external-sinks"
+    )
 
 
 def _capability_callsite_action(
@@ -315,16 +340,18 @@ def _real_tool_actors(root: Path) -> dict[str, Any]:
             fixture_root=fixture_root / "actor",
         )
 
-    def replan_evidence_actor(run_id: str) -> Mapping[str, Any]:
+    def replan_semantic_action_actor(run_id: str) -> Mapping[str, Any]:
         fixture_root = run_root("replan", run_id)
         fixture = _build_replan_fixture(fixture_root / "oracle")
         transport = ScriptedDoubaoExecTransport(
             [
                 ScriptedExecToolAction(fixture.quota_guard_command),
-                _required_evidence_action,
+                _replan_frontier_read_action,
+                ScriptedExecToolAction("cat fixture/permission-config.json"),
+                _semantic_replan_action(),
             ]
         )
-        return DoubaoReplanEvidenceToolBehaviorActor(
+        return DoubaoReplanSemanticActionBehaviorActor(
             api_key="test-only-placeholder",
             transport=transport,
         ).qualify(
@@ -370,7 +397,7 @@ def _real_tool_actors(root: Path) -> dict[str, Any]:
 
     return {
         "selected_todo_actor": selected_todo_actor,
-        "replan_evidence_actor": replan_evidence_actor,
+        "replan_semantic_action_actor": replan_semantic_action_actor,
         "scoped_gate_successor_actor": scoped_gate_successor_actor,
         "capability_monitor_repair_actor": capability_monitor_repair_actor,
     }
@@ -445,7 +472,11 @@ def test_live_packet_builder_uses_production_blocking_gate_plan(tmp_path: Path) 
     vision = semantics["vision_continuation"]
     assert vision["required"] is True
     assert vision["trigger_kinds"] == ["required_agent_vision_missing"]
-    assert semantics["required_reads"]
+    assert semantics["required_reads"] == []
+    assert replan["replan_action_packet"]["decision"] == "replan_required"
+    assert replan["autonomous_replan_obligation"]["replan_context"][
+        "delivery"
+    ] == "host_projected"
     assert semantics["scheduler_action"]["action"] == "run_now"
     continuation_source = sources["turn_quota_hot_path_selected_todo_invariance"]
     continuation = packets["turn_quota_hot_path_selected_todo_invariance"]
@@ -590,7 +621,7 @@ def test_portfolio_oracle_catches_wrong_selected_todo(tmp_path: Path) -> None:
         turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=wrong_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        replan_semantic_action_actor=_replan_semantic_action_actor,
         scoped_gate_successor_actor=_scoped_gate_successor_actor,
     )
 
@@ -630,7 +661,7 @@ def test_portfolio_source_oracle_rejects_mutated_compact_user_action(
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
-            replan_evidence_actor=_replan_evidence_actor,
+            replan_semantic_action_actor=_replan_semantic_action_actor,
             scoped_gate_successor_actor=_scoped_gate_successor_actor,
         )
 
@@ -655,7 +686,7 @@ def test_portfolio_rejects_mutated_blocking_gate_response_plan(tmp_path: Path) -
             turn_actor=_turn_actor,
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
-            replan_evidence_actor=_replan_evidence_actor,
+            replan_semantic_action_actor=_replan_semantic_action_actor,
         )
 
 
@@ -679,7 +710,7 @@ def test_portfolio_oracle_rejects_silent_wait_for_user_gate(tmp_path: Path) -> N
         turn_actor=silent_wait_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        replan_semantic_action_actor=_replan_semantic_action_actor,
     )
 
     gate = next(
@@ -788,7 +819,7 @@ def test_portfolio_preflights_every_scenario_before_actor_spend(tmp_path: Path) 
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
-            replan_evidence_actor=_replan_evidence_actor,
+            replan_semantic_action_actor=_replan_semantic_action_actor,
         )
 
     assert calls == 0
@@ -815,7 +846,7 @@ def test_portfolio_aborts_on_authentication_failure_with_bounded_receipt(
         turn_actor=turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        replan_semantic_action_actor=_replan_semantic_action_actor,
     )
 
     assert calls == 1
@@ -852,7 +883,7 @@ def test_portfolio_preflight_rejects_wrong_same_agent_route(tmp_path: Path) -> N
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
-            replan_evidence_actor=_replan_evidence_actor,
+            replan_semantic_action_actor=_replan_semantic_action_actor,
         )
 
     assert calls == 0
@@ -877,7 +908,7 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
         turn_actor=turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        replan_semantic_action_actor=_replan_semantic_action_actor,
     )
 
     assert result["qualification_passed"] is True
@@ -962,7 +993,7 @@ def test_portfolio_preflight_rejects_invalid_contrast_before_actor_spend(
             turn_actor=turn_actor,
             onboarding_actor=_onboarding_actor,
             selected_todo_actor=_selected_todo_actor,
-            replan_evidence_actor=_replan_evidence_actor,
+            replan_semantic_action_actor=_replan_semantic_action_actor,
         )
 
     assert calls == 0
@@ -993,7 +1024,7 @@ def test_portfolio_contrast_rejects_noisy_gate_semantic_collapse(
         turn_actor=collapsed_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        replan_semantic_action_actor=_replan_semantic_action_actor,
     )
 
     contrast = next(
@@ -1014,7 +1045,7 @@ def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
 ) -> None:
     def quiet_wait_actor(run_id: str) -> dict[str, Any]:
         return {
-            **_replan_evidence_actor(run_id),
+            **_replan_semantic_action_actor(run_id),
             "decision": "wait",
         }
 
@@ -1026,7 +1057,7 @@ def test_portfolio_oracle_rejects_quiet_wait_for_required_vision_replan(
         turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=quiet_wait_actor,
+        replan_semantic_action_actor=quiet_wait_actor,
         scoped_gate_successor_actor=_scoped_gate_successor_actor,
     )
 
@@ -1064,7 +1095,7 @@ def test_portfolio_oracle_rejects_waiting_on_hot_path_compaction_refs(
         turn_actor=waiting_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        replan_semantic_action_actor=_replan_semantic_action_actor,
     )
 
     scenario = next(
@@ -1098,7 +1129,7 @@ def test_portfolio_oracle_rejects_treating_non_blocking_notice_as_gate(
         turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        replan_semantic_action_actor=_replan_semantic_action_actor,
         scoped_gate_successor_actor=blocking_actor,
     )
 
@@ -1133,7 +1164,7 @@ def test_portfolio_oracle_rejects_waiting_on_capability_monitor_repair(
         turn_actor=_turn_actor,
         onboarding_actor=_onboarding_actor,
         selected_todo_actor=_selected_todo_actor,
-        replan_evidence_actor=_replan_evidence_actor,
+        replan_semantic_action_actor=_replan_semantic_action_actor,
         capability_monitor_repair_actor=waiting_actor,
     )
 

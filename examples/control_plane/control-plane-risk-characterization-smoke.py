@@ -332,7 +332,7 @@ def assert_monitor_only_frontier_requires_replan_without_delta() -> None:
     contract = quota["interaction_contract"]
     assert contract["mode"] == "autonomous_replan", contract
     assert contract["user_channel"]["action_required"] is False, contract
-    assert contract["user_channel"]["notify"] == "DONT_NOTIFY", contract
+    assert contract["user_channel"]["notify"] == "NOTIFY", contract
     assert contract["agent_channel"]["must_attempt"] is True, contract
     assert contract["agent_channel"]["delivery_allowed"] is True, contract
     assert contract["agent_channel"]["quiet_noop_allowed"] is False, contract

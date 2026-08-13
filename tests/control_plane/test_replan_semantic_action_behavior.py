@@ -1,0 +1,357 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from pathlib import Path
+
+import pytest
+
+from loopx.control_plane.testing.model_tool_behavior import (
+    ScriptedAssistantAction,
+    ScriptedDoubaoExecTransport,
+    ScriptedExecToolAction,
+)
+from loopx.control_plane.testing.replan_semantic_action_behavior import (
+    DoubaoReplanSemanticActionBehaviorActor,
+    _build_fixture,
+    _execute_loopx,
+)
+
+
+def _latest_quota_packet(request: Mapping[str, object]) -> dict[str, object]:
+    messages = request.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise AssertionError("model request must include a real quota result")
+    for message in reversed(messages):
+        if not isinstance(message, Mapping) or message.get("role") != "tool":
+            continue
+        try:
+            packet = json.loads(str(message.get("content") or ""))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(packet, dict) and packet.get("replan_action_packet"):
+            return packet
+    raise AssertionError("semantic action must follow a real quota packet")
+
+
+def _semantic_action(
+    request: Mapping[str, object],
+    *,
+    surface_id: str = "surface-permission-config",
+) -> ScriptedExecToolAction:
+    packet = _latest_quota_packet(request)
+    action = packet["replan_action_packet"]
+    assert isinstance(action, Mapping)
+    assert "new_surface" in action["uncovered_frontier"]["required_any_of"]
+    return ScriptedExecToolAction(
+        "loopx --format json --registry ignored --runtime-root ignored "
+        "refresh-state --goal-id replan-semantic-action-fixture "
+        "--agent-id codex-replan-semantic-action --progress-scope agent_lane "
+        "--classification bounded_replan_progress "
+        "--recommended-action inspect-the-new-surface "
+        "--delivery-batch-scale single_surface "
+        "--delivery-outcome outcome_progress "
+        "--progress-result-class advanced "
+        f"--progress-surface-id {surface_id} "
+        "--progress-hypothesis-id hypothesis-permission-default "
+        "--progress-probe-kind static-contract-read "
+        "--progress-evidence-id evidence-permission-config "
+        "--no-global-sync --suppress-external-sinks"
+    )
+
+
+def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command="date -Iseconds"),
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat replan-frontier.json"),
+            ScriptedExecToolAction(command="cat fixture/permission-config.json"),
+            _semantic_action,
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-semantic-action-001",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True, receipt
+    assert receipt["observed_tool_sequence"] == [
+        "clock",
+        "quota_should_run",
+        "workspace_read",
+        "workspace_read",
+        "semantic_replan_writeback",
+    ]
+    assert receipt["context_delivery"] == "host_projected"
+    assert receipt["semantic_action_accepted"] is True
+    assert "new_surface" in receipt["selected_semantic_outcomes"]
+    assert "new_surface" in receipt["required_semantic_outcomes"]
+    assert receipt["replan_obligation_id"].startswith("replan-")
+    assert receipt["boundary"] == {
+        "raw_prompt_persisted": False,
+        "raw_provider_response_persisted": False,
+        "raw_command_persisted": False,
+        "filesystem_writes_executed": True,
+        "writes_limited_to_temporary_fixture": True,
+        "external_writes_executed": False,
+        "shell_commands_executed": False,
+        "read_only_host_commands_executed": True,
+    }
+
+    quota_packet = json.loads(transport.requests[2]["messages"][-1]["content"])
+    assert quota_packet.get("required_reads") in (None, [])
+    assert quota_packet["autonomous_replan_obligation"]["replan_context"][
+        "delivery_receipt"
+    ]["status"] == "delivered"
+    assert quota_packet["replan_action_packet"]["obligation_id"] == receipt[
+        "replan_obligation_id"
+    ]
+
+    index_path = (
+        tmp_path
+        / "actor"
+        / "runtime"
+        / "goals"
+        / "replan-semantic-action-fixture"
+        / "runs"
+        / "index.jsonl"
+    )
+    latest = json.loads(index_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert latest["progress_observation"]["surface_id"] == (
+        "surface-permission-config"
+    )
+    assert latest["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
+
+
+def test_action_outside_observed_frontier_is_rejected(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat replan-frontier.json"),
+            ScriptedExecToolAction(command="cat fixture/permission-config.json"),
+            lambda request: _semantic_action(request, surface_id="surface-existing"),
+        ]
+    )
+
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-repeat-rejected",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "semantic_action_misses_uncovered_frontier"
+
+
+def test_fully_repeated_observation_cannot_close_replan(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+
+    def repeated_action(request: Mapping[str, object]) -> ScriptedExecToolAction:
+        _latest_quota_packet(request)
+        return ScriptedExecToolAction(
+            "loopx --format json --registry ignored --runtime-root ignored "
+            "refresh-state --goal-id replan-semantic-action-fixture "
+            "--agent-id codex-replan-semantic-action --progress-scope agent_lane "
+            "--classification differently-worded-progress "
+            "--progress-result-class advanced "
+            "--progress-surface-id surface-existing "
+            "--progress-hypothesis-id hypothesis-existing "
+            "--progress-probe-kind probe-existing "
+            "--progress-evidence-id evidence-existing "
+            "--no-global-sync --suppress-external-sinks"
+        )
+
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat replan-frontier.json"),
+            ScriptedExecToolAction(command="cat fixture/permission-config.json"),
+            repeated_action,
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-full-repeat-rejected",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "semantic_action_misses_uncovered_frontier"
+    assert receipt["semantic_action_accepted"] is False
+
+
+def test_manual_evidence_read_is_context_not_replan_completion(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(
+                command=(
+                    "loopx --format json evidence-log "
+                    "--goal-id replan-semantic-action-fixture "
+                    "--agent-id codex-replan-semantic-action --thin"
+                )
+            ),
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-read-only-rejected",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "manual_evidence_read_is_not_replan"
+
+
+def test_semantic_action_must_follow_real_frontier_read(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            _semantic_action,
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-action-before-frontier-read",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "semantic_action_before_frontier_read"
+
+
+def test_model_can_create_and_bind_a_real_runnable_successor(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+
+    def create_bound_successor(
+        request: Mapping[str, object],
+    ) -> ScriptedExecToolAction:
+        packet = _latest_quota_packet(request)
+        obligation = packet["autonomous_replan_obligation"]
+        assert isinstance(obligation, Mapping)
+        return ScriptedExecToolAction(
+            "loopx --format json --registry ignored todo add "
+            "--goal-id replan-semantic-action-fixture --role agent "
+            "--task-class advancement_task "
+            "--text '[P0] Inspect the uncovered permission contract' "
+            "--claimed-by codex-replan-semantic-action "
+            f"--replan-obligation-id {obligation['obligation_id']}"
+        )
+
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat replan-frontier.json"),
+            ScriptedExecToolAction(command="cat fixture/permission-config.json"),
+            create_bound_successor,
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-real-successor",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True, receipt
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "workspace_read",
+        "workspace_read",
+        "replan_successor_create",
+    ]
+    assert receipt["selected_semantic_outcomes"] == ["new_runnable_successor"]
+
+
+def test_stale_successor_obligation_is_rejected_before_todo_mutation(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "fixture")
+    state_path = (
+        fixture.project_root
+        / ".codex"
+        / "goals"
+        / "replan-semantic-action-fixture"
+        / "ACTIVE_GOAL_STATE.md"
+    )
+    before = state_path.read_text(encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="does not match the current open obligation"):
+        _execute_loopx(
+            "loopx --format json --registry ignored todo add "
+            "--goal-id replan-semantic-action-fixture --role agent "
+            "--task-class advancement_task "
+            "--text '[P0] Stale successor must not be written' "
+            "--claimed-by codex-replan-semantic-action "
+            "--replan-obligation-id replan-0000000000000000",
+            fixture=fixture,
+            turn_instance_id="stale-successor-turn",
+        )
+
+    assert state_path.read_text(encoding="utf-8") == before
+
+
+def test_semantic_writeback_before_quota_is_rejected(tmp_path: Path) -> None:
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(
+                command=(
+                    "loopx --format json --registry ignored --runtime-root ignored "
+                    "refresh-state --goal-id replan-semantic-action-fixture "
+                    "--agent-id codex-replan-semantic-action "
+                    "--progress-scope agent_lane "
+                    "--progress-result-class advanced "
+                    "--progress-surface-id surface-new "
+                    "--no-global-sync --suppress-external-sinks"
+                )
+            )
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-action-before-quota",
+        fixture_root=tmp_path,
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "semantic_action_before_quota"
+
+
+def test_prose_intent_without_typed_action_is_rejected(tmp_path: Path) -> None:
+    transport = ScriptedDoubaoExecTransport(
+        [ScriptedAssistantAction(content="I would explore a new surface next.")]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-prose-only",
+        fixture_root=tmp_path,
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "model_returned_without_semantic_action"
+    assert receipt["tool_call_count"] == 0

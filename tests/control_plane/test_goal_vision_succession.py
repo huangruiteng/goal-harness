@@ -197,8 +197,6 @@ def _material_checkpoint(
     *,
     generated_at: str = "2026-07-12T00:01:00Z",
     decision: str = "patched",
-    autonomous_replan_recorded: bool = False,
-    repair_delta_kinds: list[str] | None = None,
 ) -> dict[str, object]:
     triggers: list[dict[str, object]] = [
         {
@@ -206,8 +204,6 @@ def _material_checkpoint(
             "delivery_outcome": "outcome_progress",
         }
     ]
-    if autonomous_replan_recorded:
-        triggers.insert(0, {"kind": "autonomous_replan_recorded"})
     return {
         "schema_version": "vision_checkpoint_v0",
         "agent_id": AGENT_ID,
@@ -215,7 +211,6 @@ def _material_checkpoint(
         "satisfied": True,
         "decision": decision,
         "triggers": triggers,
-        "repair_delta_kinds": repair_delta_kinds or [],
         "generated_at": generated_at,
     }
 
@@ -251,30 +246,14 @@ def test_unsatisfied_material_checkpoint_cannot_preserve_frontier() -> None:
     assert gaps[0]["kind"] == "vision_outcome_checkpoint_required"
 
 
-@pytest.mark.parametrize(
-    ("repair_delta_kinds", "expects_gap"),
-    [
-        ([], True),
-        (["monitor_target"], True),
-        (["successor_or_supersede"], False),
-    ],
-)
-def test_fresh_replan_checkpoint_requires_frontier_delta(
-    repair_delta_kinds: list[str],
-    expects_gap: bool,
-) -> None:
+def test_fresh_evidence_linked_replan_checkpoint_preserves_frontier() -> None:
     active_vision = _outcome_vision(
         outcome="replan",
         evidence_refs=["result:outcome-conflict"],
     )
-    checkpoint = _material_checkpoint(
-        autonomous_replan_recorded=True,
-        repair_delta_kinds=repair_delta_kinds,
-    )
+    checkpoint = _material_checkpoint()
 
-    gaps = acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint)
-
-    assert bool(gaps) is expects_gap
+    assert acceptance_gaps_from_outcome_checkpoint(active_vision, checkpoint) == []
 
 
 @pytest.mark.parametrize(
@@ -343,29 +322,12 @@ def test_completed_todo_chain_without_vision_baseline_still_requires_checkpoint(
     assert "Write a bounded agent vision patch" in gaps[0]["acceptance_summary"]
 
 
-@pytest.mark.parametrize(
-    ("advancement_policy", "repair_delta_kinds", "expects_gap"),
-    [
-        ("as_needed", ["goal_vision_patch", "watch_lane_continuation"], False),
-        ("as_needed", ["goal_vision_patch"], True),
-        (
-            "repeat_until_closed",
-            ["goal_vision_patch", "watch_lane_continuation"],
-            True,
-        ),
-    ],
-)
-def test_completed_chain_accepts_only_bounded_as_needed_watch_replan(
-    advancement_policy: str,
-    repair_delta_kinds: list[str],
-    expects_gap: bool,
-) -> None:
+def test_legacy_replan_checkpoint_does_not_cover_completed_chain() -> None:
     active_vision = _outcome_vision(
         generated_at="2026-07-12T00:03:00Z",
         outcome="replan",
         evidence_refs=["todo:bounded-watch"],
     )
-    active_vision["vision_patch"]["advancement_policy"] = advancement_policy
     checkpoint = {
         "schema_version": "vision_checkpoint_v0",
         "agent_id": AGENT_ID,
@@ -373,7 +335,7 @@ def test_completed_chain_accepts_only_bounded_as_needed_watch_replan(
         "satisfied": True,
         "decision": "patched",
         "triggers": [{"kind": "autonomous_replan_recorded"}],
-        "repair_delta_kinds": repair_delta_kinds,
+        "repair_delta_kinds": ["goal_vision_patch", "watch_lane_continuation"],
         "generated_at": "2026-07-12T00:03:00Z",
         "qualification_agent_vision": active_vision,
     }
@@ -395,7 +357,8 @@ def test_completed_chain_accepts_only_bounded_as_needed_watch_replan(
         agent_id=AGENT_ID,
     )
 
-    assert bool(gaps) is expects_gap
+    assert len(gaps) == 1
+    assert gaps[0]["kind"] == "vision_outcome_checkpoint_required"
 
 
 def test_four_completed_todos_do_not_force_a_chain_checkpoint() -> None:

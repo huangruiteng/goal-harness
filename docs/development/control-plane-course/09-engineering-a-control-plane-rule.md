@@ -196,8 +196,8 @@ class GoalFrontierReplanRule(str, Enum):
     TODO_SUCCESSION_GAP = "todo_succession_gap"
     VISION_ACCEPTANCE_GAP = "vision_acceptance_gap"
     LONG_TODO_CHAIN = "long_todo_chain"
-    LONG_TODO_CHAIN_ACKNOWLEDGED = "long_todo_chain_acknowledged"
-    WATCH_LANE_CONTINUATION_ACKNOWLEDGED = "watch_lane_continuation_acknowledged"
+    CURRENT_AGENT_BLOCKER = "current_agent_blocker"
+    MONITOR_NO_CHANGE_STREAK = "monitor_no_change_streak"
     NOT_MONITOR_ONLY = "not_monitor_only"
     NO_OPEN_MONITOR = "no_open_monitor"
     ADVANCEMENT_REMAINS = "advancement_remains"
@@ -223,7 +223,7 @@ def select_goal_frontier_replan_rule(facts):
          and not facts.successor_vision_required, False, "successor is runnable"),
         (GoalFrontierReplanRule.OPEN_USER_TODO,
          facts.user_open_count > 0, False, "user work owns frontier"),
-        # succession gap, vision gap, long-chain and acknowledgement rules
+        # succession gap, vision gap, long-chain, blocker and monitor-streak rules
         (GoalFrontierReplanRule.ADVANCEMENT_REMAINS,
          facts.agent_advancement_count > 0
          or facts.total_frontier_advancement > 0, False, "advancement remains"),
@@ -246,7 +246,7 @@ def select_goal_frontier_replan_rule(facts):
 
 重构按四层验证：
 
-1. 13 行 decision table 让每条 rule 都成为 first match，并故意叠加低优先级事实；
+1. decision table 让每条 rule 都成为 first match，并故意叠加低优先级事实；
 2. metamorphic test 把其他 agent 的 backlog 从 1 改成 2、8，当前 agent 的 vision gap
    仍不能被满足；加入当前 agent 自己的 runnable advancement 后，replan 必须消失；
 3. quota smoke 串起 peer-only、own-frontier、monitor-only 三条真实路由；

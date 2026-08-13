@@ -791,13 +791,13 @@ Steps:
    interpreter or executor protocol only when two execution paths need the
    same plan/receipt semantics. Do not add a registry or generic composition
    framework yet.
-3. Treat the replan evidence-log read receipt as the first concrete
-   read-and-ACK case, not as sufficient evidence for a generic executor. Keep
-   its durable receipt at the existing CLI/event-ledger boundary until a
-   second runtime caller needs the same effect-spec identity, freshness, and
-   durable receipt semantics. A quota/status read ACK is the leading candidate.
-   At that point, extract the smallest shared read-observation receipt contract
-   and migrate both callers; keep replan policy and host ACK outside settlement.
+3. Do not use replan as a generic read-and-ACK precedent. Replan evidence is
+   now host-projected context, and an exact runnable-successor Todo or typed
+   progress write is the semantic receipt. Keep that transition in the replan
+   domain until a second runtime caller needs the same effect identity,
+   freshness, atomic state transition, and turn-boundary semantics. If such a
+   caller appears, extract the smallest shared observation/transition receipt;
+   do not resurrect a manual evidence-read ACK ritual.
 4. Add `execution_mode` to `EffectNext` and document
    `serial` / `parallel` / `interleaved` semantics with focused tests.
 5. Introduce a data-encoded ordered effect program shape and a real executor
@@ -814,8 +814,8 @@ Acceptance criteria:
 - Runtime code, not only tests, consumes the shared shape.
 - `next_effect` can express an ordered effect program with an explicit
   execution mode.
-- A shared read-observation receipt contract has at least two runtime callers;
-  one read-and-ACK path alone remains domain-owned.
+- A shared observation/transition receipt contract has at least two runtime
+  callers; one domain transition alone remains domain-owned.
 - No generic `Effect` monad, registry, or middleware framework is added
   without a second runtime caller.
 

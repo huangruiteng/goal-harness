@@ -289,28 +289,29 @@ nonzero unless every real provider call passes. See
 [Model behavior qualification v0](../reference/protocols/model-behavior-qualification-v0.md)
 for the actor and promotion contract.
 
-Replan evidence preflight has a separate function-tool qualification because a
-no-tool JSON decision cannot prove that the model would perform a shell read.
-It creates a hermetic public-safe Goal, gives the live model the shipped thin
-Codex App heartbeat task body and one ordinary `exec_command` function tool,
-and runs the model's accepted quota and evidence commands through the real
-LoopX CLI. The bounded host loop passes only when the real `quota should-run`
-result projects one evidence-log read and the model subsequently selects and
-successfully executes that exact command:
+Replan semantic action has a separate function-tool qualification because a
+no-tool JSON decision cannot prove that the model would use projected coverage
+to choose and persist a different direction. It creates a hermetic public-safe
+Goal with two equivalent typed progress observations, gives the live model the
+shipped thin Codex App heartbeat task body and one ordinary `exec_command`
+function tool, and runs accepted quota and refresh commands through the real
+LoopX CLI. The bounded host loop passes only when real quota emits the
+host-projected coverage context and minimal action packet, and the model then
+submits a typed semantic delta accepted by the write-time gate:
 
 ```bash
-python3 scripts/qualify-doubao-replan-evidence-tool-live.py \
+python3 scripts/qualify-doubao-replan-semantic-action-live.py \
   --qualification-id <public-safe-run-id>
 ```
 
-The model does not receive a testing-only decision schema, required-read index,
-expected command, or prebuilt quota packet. Clock and a small set of workspace
-reads are supported so the model can follow the normal heartbeat preflight.
-Commands are parsed into a strict allowlist without invoking a shell; quota may
-write only its normal receipt inside the temporary fixture, and no external or
-repository write is allowed. The receipt retains only action kinds and command
-digests. Fake transports validate the tool protocol, real CLI execution seam,
-and negative cases; only a real provider run qualifies model behavior.
+The model does not receive a testing-only decision schema, expected command, or
+prebuilt quota packet. Clock and a small set of workspace reads are supported
+for normal heartbeat preflight. Commands are parsed into a strict allowlist
+without invoking a shell; quota and refresh may write only inside the temporary
+fixture, and no external or repository write is allowed. The actor independently
+qualifies the selected typed observation before executing it. Evidence-log-only,
+prose-only, pre-quota, equivalent-fingerprint, and ungrounded actions fail. The
+receipt retains only action kinds, command digests, and typed semantic outcomes.
 
 The selected-Todo scenario has its own focused real-action entrypoint for
 changes to quota selection, heartbeat instructions, or the shared tool seam:
@@ -331,15 +332,16 @@ action without calling the tool, or issuing an unallowlisted command fails.
 作为 Doubao 行为通过证据。真实入口缺少密钥时直接失败，且任一真实调用不通过都会以
 非零状态退出。
 
-replan evidence preflight 另有一条 function-tool 行为资格门，因为 no-tool JSON 决策
-不能证明模型真的会发起 shell read。资格门创建一个隔离、public-safe 的临时 Goal；
-真实模型只看到正式的 thin Codex App heartbeat task body 和普通 `exec_command` tool。
-模型选中的 quota 与 evidence 命令会经过严格 allowlist 后进入真实 LoopX CLI；只有真实
-`quota should-run` 投影出一条 required read，且模型随后选中并成功执行该精确
-evidence-log 命令才算通过。模型看不到测试专用 decision schema、required-read index、
-预期命令或预制 quota packet。clock 与少量 workspace read 允许正常 preflight；
-不调用 shell，quota 的正常 receipt 只写入临时 fixture，仓库与外部系统均不写入，最终
-receipt 只保留 action kind 与 command digest。
+replan semantic action 另有一条 function-tool 行为资格门，因为 no-tool JSON 决策不能
+证明模型会使用覆盖账本选择新方向并完成真实写回。资格门创建一个包含两个等价 typed
+progress observation 的隔离、public-safe 临时 Goal；真实模型只看到正式 thin Codex App
+heartbeat task body 和普通 `exec_command` tool。真实 quota 必须投影 host coverage context
+与最小 action packet，模型随后提交的 typed semantic delta 还要通过独立语义判定和真实
+写时闸门。若模型选择新 successor，资格门要求它以当前 `obligation_id` 调用真实
+`todo add`，验证 Todo 原子 receipt 与 `host_action=end_current_heartbeat`，且不得在同一
+turn 执行 successor；surface/hypothesis/probe 等结果仍走真实 `refresh-state`。仅读
+evidence-log、只换措辞、quota 前动作、等价指纹或未落在当前状态中的 successor 都不算
+通过。receipt 只保留 action kind、command digest 与 typed semantic outcome。
 
 The scoped-gate successor composition case is also a real tool loop. Its
 hermetic Goal contains an unrelated open user gate and a deferred successor
@@ -379,7 +381,8 @@ attempts each. Its selected-Todo case starts from a production thin heartbeat,
 executes real quota, and requires the model to perform the selected Todo's
 read-only target action. Its required-vision replan case independently builds a
 hermetic missing-vision state, executes real quota, and requires the model to
-perform the exact projected evidence-log read. The other turn cases remain
+use host-projected frontier/work-source context and submit a typed semantic
+action through the real write path. The other turn cases remain
 bounded packet-interpretation checks. Nine core scenarios check normal
 onboarding, agent identity and goal selection, selected todo, peer identity
 routing, same-agent continuation, final human gate, healthy continuation, and
@@ -414,8 +417,8 @@ work 与 required vision replan 仍然可区分。每个
 场景都有在 CLI projection 前推导的独立确定性 source oracle，所有重复都必须通过；
 actor 硬错误不自动重试。selected-Todo 场景从正式 thin heartbeat 开始，执行真实 quota，
 并要求模型实际读取 selected Todo 指向的目标；required-vision replan 场景独立构造
-缺失 vision 的 hermetic 状态，执行真实 quota，并要求模型实际读取投影出的精确
-evidence-log；其他 turn 场景仍直接读取 Codex App
+缺失 vision 的 hermetic 状态，执行真实 quota，并要求模型读取 host 投影的 frontier 与
+工作源，再通过真实写路径提交 typed semantic action；其他 turn 场景仍直接读取 Codex App
 automation 使用的默认 CLI hot-path `quota should-run` projection 并返回运行时决策，
 scoped-gate successor 场景也从 hermetic Goal 与正式 heartbeat 开始：真实 quota 必须
 同时投影非阻塞 user notice 和 ready deferred successor，模型随后既要呈现提醒，也要

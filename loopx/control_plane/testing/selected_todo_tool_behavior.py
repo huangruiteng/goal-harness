@@ -62,7 +62,7 @@ class _SelectedTodoToolFixture:
 
 
 @dataclass(frozen=True)
-class _ReadStep:
+class BoundedWorkspaceReadStep:
     kind: str
     argv: tuple[str, ...]
     target: Path | None = None
@@ -320,7 +320,7 @@ def _metadata_pipeline_step(
     *,
     fixture: _SelectedTodoToolFixture,
     operator: str,
-) -> _ReadStep | None:
+) -> BoundedWorkspaceReadStep | None:
     pipe_indices = [index for index, token in enumerate(segment) if token == "|"]
     if len(pipe_indices) not in {1, 2}:
         return None
@@ -356,7 +356,7 @@ def _metadata_pipeline_step(
         return None
     discovery_argv = _discovery_tokens(left, fixture=fixture)
     if discovery_argv is not None:
-        return _ReadStep(
+        return BoundedWorkspaceReadStep(
             "metadata",
             tuple(discovery_argv),
             operator=operator,
@@ -371,7 +371,7 @@ def _metadata_pipeline_step(
     }
     if target not in allowed_registries:
         return None
-    return _ReadStep(
+    return BoundedWorkspaceReadStep(
         "metadata",
         ("head", "-n", str(limit), str(target)),
         operator=operator,
@@ -389,11 +389,11 @@ def _read_plan_tokens(command: str) -> list[str] | None:
     return tokens or None
 
 
-def _read_plan(
+def bounded_workspace_read_plan(
     command: str,
     *,
     fixture: _SelectedTodoToolFixture,
-) -> list[_ReadStep] | None:
+) -> list[BoundedWorkspaceReadStep] | None:
     tokens = _read_plan_tokens(command)
     if not tokens:
         return None
@@ -414,7 +414,7 @@ def _read_plan(
     if not segments[-1] or len(segments) > 8:
         return None
 
-    plan: list[_ReadStep] = []
+    plan: list[BoundedWorkspaceReadStep] = []
     for operator, raw_segment in zip(operators, segments, strict=True):
         segment = list(raw_segment)
         if "|" in segment:
@@ -441,20 +441,20 @@ def _read_plan(
             and segment[1].startswith("LOOPX_TURN=")
             and len(segment[1]) <= 160
         ):
-            plan.append(_ReadStep("metadata", ("true",), operator=operator))
+            plan.append(BoundedWorkspaceReadStep("metadata", ("true",), operator=operator))
             continue
         if executable == "cd" and len(segment) == 2:
             target = _resolve_metadata_path(segment[1], fixture=fixture)
             if target != fixture.project_root.resolve():
                 return None
-            plan.append(_ReadStep("metadata", ("true",), operator=operator))
+            plan.append(BoundedWorkspaceReadStep("metadata", ("true",), operator=operator))
             continue
         if executable == "pwd" and len(segment) == 1:
-            plan.append(_ReadStep("metadata", (executable,), operator=operator))
+            plan.append(BoundedWorkspaceReadStep("metadata", (executable,), operator=operator))
             continue
         if executable == "echo" and len(segment) == 2:
             plan.append(
-                _ReadStep(
+                BoundedWorkspaceReadStep(
                     "separator",
                     (executable, *segment[1:]),
                     operator=operator,
@@ -464,26 +464,23 @@ def _read_plan(
         if executable == "ls":
             paths = [token for token in segment[1:] if not token.startswith("-")]
             options = [token for token in segment[1:] if token.startswith("-")]
-            resolved_path = (
-                _resolve_metadata_path(paths[0], fixture=fixture)
-                if paths
-                else None
-            )
+            resolved_paths = [
+                _resolve_metadata_path(path, fixture=fixture) for path in paths
+            ]
             if (
-                len(paths) > 1
+                len(paths) > 4
                 or any(set(option[1:]) - {"a", "l"} for option in options)
-                or (paths and resolved_path is None)
+                or any(path is None for path in resolved_paths)
             ):
                 return None
             argv = [executable, *options]
-            if resolved_path is not None:
-                argv.append(str(resolved_path))
-            plan.append(_ReadStep("metadata", tuple(argv), operator=operator))
+            argv.extend(str(path) for path in resolved_paths if path is not None)
+            plan.append(BoundedWorkspaceReadStep("metadata", tuple(argv), operator=operator))
             continue
         discovery_argv = _discovery_tokens(segment, fixture=fixture)
         if discovery_argv is not None:
             plan.append(
-                _ReadStep(
+                BoundedWorkspaceReadStep(
                     "metadata",
                     tuple(discovery_argv),
                     operator=operator,
@@ -520,7 +517,7 @@ def _read_plan(
         if target is None:
             return None
         plan.append(
-            _ReadStep(
+            BoundedWorkspaceReadStep(
                 "content",
                 (executable, *segment[1:-1], str(target)),
                 target,
@@ -555,6 +552,9 @@ def _discovery_tokens(
     has_maxdepth = False
     while index < len(tokens):
         token = tokens[index]
+        if token == "-o":
+            index += 1
+            continue
         if token == "-print":
             index += 1
             continue
@@ -622,7 +622,7 @@ def _execute_selected_read(
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> str:
-    plan = _read_plan(command, fixture=fixture)
+    plan = bounded_workspace_read_plan(command, fixture=fixture)
     content_steps = [step for step in (plan or []) if step.kind == "content"]
     selected_steps = [
         step
@@ -644,7 +644,7 @@ def _execute_selected_read(
 
 
 def _execute_read_plan(
-    plan: list[_ReadStep],
+    plan: list[BoundedWorkspaceReadStep],
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> tuple[str, int]:
@@ -698,7 +698,7 @@ def _execute_workspace_read(
     *,
     fixture: _SelectedTodoToolFixture,
 ) -> str:
-    plan = _read_plan(command, fixture=fixture)
+    plan = bounded_workspace_read_plan(command, fixture=fixture)
     if plan is not None:
         output, _ = _execute_read_plan(plan, fixture=fixture)
         return output
@@ -733,7 +733,7 @@ def _classify_tool_command(
         return "workspace_read", None
     if _discovery_argv(command, fixture=fixture) is not None:
         return "workspace_read", None
-    plan = _read_plan(command, fixture=fixture)
+    plan = bounded_workspace_read_plan(command, fixture=fixture)
     if plan is not None:
         content_targets = [
             step.target for step in plan if step.kind == "content"

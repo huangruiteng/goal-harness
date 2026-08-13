@@ -16,17 +16,17 @@ if sys.path[0] != repo_root_text:
 from loopx.control_plane.testing.release_commit_qualification import (  # noqa: E402
     collect_release_source_identity,
 )
-from loopx.control_plane.testing.replan_evidence_tool_behavior import (  # noqa: E402
-    DoubaoReplanEvidenceToolBehaviorActor,
+from loopx.control_plane.testing.replan_semantic_action_behavior import (  # noqa: E402
+    DoubaoReplanSemanticActionBehaviorActor,
 )
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run one production-prompt Doubao function-tool loop against a "
-            "hermetic real LoopX goal and verify that replan selects and "
-            "executes the projected evidence-log read."
+            "Run one production-prompt Doubao tool loop against a hermetic "
+            "LoopX goal and verify that the model chooses a typed semantic "
+            "delta from the host-projected replan action packet."
         )
     )
     parser.add_argument("--qualification-id", required=True)
@@ -42,10 +42,10 @@ def main() -> int:
         raise RuntimeError(
             "live Doubao qualification requires a clean candidate checkout"
         )
-    actor = DoubaoReplanEvidenceToolBehaviorActor.from_environment(
+    actor = DoubaoReplanSemanticActionBehaviorActor.from_environment(
         timeout_seconds=args.timeout_seconds
     )
-    with TemporaryDirectory(prefix="loopx-doubao-replan-tool-") as temp_dir:
+    with TemporaryDirectory(prefix="loopx-doubao-replan-semantic-") as temp_dir:
         result = actor.qualify(
             qualification_id=args.qualification_id,
             fixture_root=Path(temp_dir),

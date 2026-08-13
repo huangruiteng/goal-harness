@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test autonomous replan obligation projection in status and quota."""
+"""Exercise typed autonomous-replan projection and semantic closeout."""
 
 from __future__ import annotations
 
@@ -17,22 +17,21 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from loopx import cli as loopx_cli
 
+
 GOAL_ID = "autonomous-replan-fixture"
+AGENT_ID = "codex-autonomous-replan-fixture"
 CLI_TIMEOUT_SECONDS = 30
 USE_SUBPROCESS_CLI = False
 
 
-def run_cli(
-    *args: str,
-    registry_path: Path,
-    runtime: Path,
-    timeout: int = CLI_TIMEOUT_SECONDS,
-    use_subprocess: bool | None = None,
-) -> dict:
-    use_subprocess = USE_SUBPROCESS_CLI if use_subprocess is None else use_subprocess
+def _argv(args: tuple[str, ...], *, registry_path: Path, runtime: Path) -> list[str]:
     project_root = registry_path.parent.parent
-    scan_path_args = ["--scan-path", str(project_root)] if args and args[0] in {"status", "quota"} else []
-    argv = [
+    scan_path_args = (
+        ["--scan-path", str(project_root)]
+        if args and args[0] in {"status", "quota"}
+        else []
+    )
+    return [
         "--registry",
         str(registry_path),
         "--runtime-root",
@@ -42,16 +41,24 @@ def run_cli(
         *args,
         *scan_path_args,
     ]
-    if not use_subprocess:
+
+
+def run_cli(
+    *args: str,
+    registry_path: Path,
+    runtime: Path,
+    timeout: int = CLI_TIMEOUT_SECONDS,
+) -> dict:
+    argv = _argv(args, registry_path=registry_path, runtime=runtime)
+    if not USE_SUBPROCESS_CLI:
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = loopx_cli.main(argv)
         if exit_code != 0:
-            public_args = " ".join(args)
             raise AssertionError(
-                f"loopx fixture command failed with exit {exit_code}: {public_args}\n"
-                f"{stderr.getvalue().strip()}"
+                f"loopx fixture command failed with exit {exit_code}: {' '.join(args)}\n"
+                f"{stderr.getvalue().strip()}\n{stdout.getvalue().strip()}"
             )
         return json.loads(stdout.getvalue())
 
@@ -66,43 +73,75 @@ def run_cli(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        public_args = " ".join(args)
         raise AssertionError(
-            f"loopx fixture command timed out after {timeout}s: {public_args}"
+            f"loopx fixture command timed out after {timeout}s: {' '.join(args)}"
         ) from exc
     return json.loads(result.stdout)
+
+
+def run_cli_error(
+    *args: str,
+    registry_path: Path,
+    runtime: Path,
+    timeout: int = CLI_TIMEOUT_SECONDS,
+) -> str:
+    argv = _argv(args, registry_path=registry_path, runtime=runtime)
+    if not USE_SUBPROCESS_CLI:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = loopx_cli.main(argv)
+        assert exit_code != 0, stdout.getvalue()
+        return "\n".join((stderr.getvalue(), stdout.getvalue()))
+
+    result = subprocess.run(
+        [sys.executable, "-m", "loopx.cli", *argv],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    assert result.returncode != 0, result.stdout
+    return result.stderr
 
 
 def append_run_record(runs_dir: Path, record: dict) -> None:
     runs_dir.mkdir(parents=True, exist_ok=True)
     generated_at = str(record["generated_at"])
-    json_path = runs_dir / f"{generated_at.replace(':', '-')}.json"
-    markdown_path = runs_dir / f"{generated_at.replace(':', '-')}.md"
-    record = {
+    stem = generated_at.replace(":", "-")
+    json_path = runs_dir / f"{stem}.json"
+    markdown_path = runs_dir / f"{stem}.md"
+    stored = {
         **record,
         "goal_id": GOAL_ID,
         "json_path": str(json_path),
         "markdown_path": str(markdown_path),
     }
-    json_path.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
-    markdown_path.write_text(
-        "# Fixture Run\n\n"
-        f"- classification: `{record['classification']}`\n"
-        f"- recommended_action: {record.get('recommended_action', '')}\n",
-        encoding="utf-8",
-    )
-    with (runs_dir / "index.jsonl").open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, sort_keys=True) + "\n")
+    json_path.write_text(json.dumps(stored, sort_keys=True) + "\n", encoding="utf-8")
+    markdown_path.write_text("# Fixture Run\n", encoding="utf-8")
+    with (runs_dir / "index.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(stored, sort_keys=True) + "\n")
+
+
+def _progress_observation(*, result_class: str, surface_id: str) -> dict:
+    return {
+        "schema_version": "typed_progress_observation_v0",
+        "work_item_id": "todo_bounded_replan_slice",
+        "surface_id": surface_id,
+        "hypothesis_id": "hypothesis-current-boundary",
+        "probe_kind": "probe-current-route",
+        "result_class": result_class,
+        "evidence_ids": ["evidence-current-route"],
+    }
 
 
 def write_fixture(
     root: Path,
     *,
-    include_replan_signals: bool,
-    include_run_history_stalls: bool = False,
-    monitor_poll_repeat_count: int = 0,
+    typed_repeat_count: int = 0,
+    monitor_repeat_count: int = 0,
     periodic_run_count: int = 0,
-    include_recent_replan_ack: bool = False,
 ) -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
@@ -111,29 +150,6 @@ def write_fixture(
     registry_path = project / ".loopx" / "registry.json"
 
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    replan_section = ""
-    if include_replan_signals:
-        replan_section = (
-            "## Operating Lessons\n\n"
-            "- no-progress streak: two eligible heartbeats repeated the same dependency observation.\n"
-            "- repeated-action loop: the same monitor-only next action appeared again.\n"
-            "- phase transition: readiness work is done and the next phase should advance planning-trigger work.\n\n"
-        )
-    historical_noise_section = ""
-    done_todo_line = ""
-    if not include_replan_signals:
-        historical_noise_section = (
-            "## Recent Progress\n\n"
-            "- 2026-01-01: An older no-progress streak repair was already completed.\n\n"
-        )
-        done_todo_line = (
-            "- [x] [P1] Completed autonomous planning-trigger work with a replan obligation.\n"
-        )
-    todo_text = (
-        "[P1] Autonomous planning-trigger implementation slice: emit a machine-readable replan obligation."
-        if include_replan_signals
-        else "[P1] Advance the next bounded project hardening slice."
-    )
     state_path.write_text(
         "---\n"
         "status: active\n"
@@ -141,12 +157,13 @@ def write_fixture(
         "---\n\n"
         "# Autonomous Replan Fixture\n\n"
         "## Next Action\n\n"
-        "- Advance the first executable agent todo after observing current state.\n\n"
-        f"{replan_section}"
-        f"{historical_noise_section}"
+        "- Advance the first executable typed work slice.\n\n"
+        "## User Todo / Owner Review Reading Queue\n\n"
         "## Agent Todo\n\n"
-        f"{done_todo_line}"
-        f"- [ ] {todo_text}\n",
+        "- [ ] [P1] Advance the next bounded hardening slice.\n"
+        "  <!-- loopx:todo todo_id=todo_bounded_replan_slice status=open "
+        "task_class=advancement_task "
+        f"claimed_by={AGENT_ID} -->\n",
         encoding="utf-8",
     )
     registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,12 +184,12 @@ def write_fixture(
                             "kind": "harness_self_improvement",
                             "status": "connected-read-only",
                         },
-                        "authority_sources": [],
-                        "quota": {
-                            "compute": 1.0,
-                            "window_hours": 24,
-                            "allowed_slots": 5,
+                        "coordination": {
+                            "agent_model": "peer_v1",
+                            "registered_agents": [AGENT_ID],
                         },
+                        "authority_sources": [],
+                        "quota": {"compute": 1.0, "window_hours": 24, "allowed_slots": 5},
                     }
                 ],
             },
@@ -182,84 +199,48 @@ def write_fixture(
         + "\n",
         encoding="utf-8",
     )
-    if include_run_history_stalls or monitor_poll_repeat_count or periodic_run_count or include_recent_replan_ack:
-        runs_dir = runtime / "goals" / GOAL_ID / "runs"
-        if include_recent_replan_ack:
-            append_run_record(
-                runs_dir,
-                {
-                    "generated_at": "2026-01-02T00:30:00+00:00",
-                    "classification": "autonomous_replan_recorded",
-                    "recommended_action": "Periodic review was recorded; continue selected next slice.",
-                    "health_check": "compact replan ack",
-                    "delivery_outcome": "outcome_progress",
-                    "autonomous_replan_ack": {
-                        "schema_version": "autonomous_replan_ack_v0",
-                        "recorded": True,
-                        "source": "fixture",
-                        "delta_contract": {
-                            "schema_version": "repair_delta_contract_v0",
-                            "required": True,
-                            "delta_present": True,
-                            "delta_kinds": ["runnable_todo_set"],
-                            "auto_evidence": [],
-                            "accepted_without_delta": False,
-                        },
-                    },
+    runs_dir = runtime / "goals" / GOAL_ID / "runs"
+    for offset in range(typed_repeat_count):
+        append_run_record(
+            runs_dir,
+            {
+                "generated_at": f"2026-01-01T01:{offset:02d}:00+00:00",
+                "classification": f"wording-does-not-own-semantics-{offset}",
+                "agent_id": AGENT_ID,
+                "delivery_outcome": "surface_only",
+                "progress_observation": _progress_observation(
+                    result_class="unchanged",
+                    surface_id="surface-current-route",
+                ),
+            },
+        )
+    for offset in range(monitor_repeat_count):
+        append_run_record(
+            runs_dir,
+            {
+                "generated_at": f"2026-01-01T02:{offset:02d}:00+00:00",
+                "classification": "quota_monitor_poll",
+                "agent_id": AGENT_ID,
+                "delivery_outcome": "surface_only",
+                "monitor_target": {
+                    "schema_version": "quota_monitor_target_v0",
+                    "target_id": "monitor-current-route",
+                    "monitor_mode": "due_monitor_observed_without_material_transition",
+                    "effective_action": "normal_run",
+                    "agent_id": AGENT_ID,
                 },
-            )
-    if monitor_poll_repeat_count:
-        runs_dir = runtime / "goals" / GOAL_ID / "runs"
-        for offset in range(monitor_poll_repeat_count):
-            minute = monitor_poll_repeat_count - offset
-            append_run_record(
-                runs_dir,
-                {
-                    "generated_at": f"2026-01-01T00:{minute:02d}:00+00:00",
-                    "classification": "quota_monitor_poll",
-                    "recommended_action": "monitor poll unchanged; no material transition",
-                    "health_check": "quota monitor poll unchanged; no material transition",
-                    "delivery_outcome": "surface_only",
-                    "monitor_target": {
-                        "schema_version": "quota_monitor_target_v0",
-                        "target_id": "repeat-monitor-target",
-                        "monitor_mode": "due_monitor_observed_without_material_transition",
-                        "effective_action": "normal_run",
-                        "agent_id": "codex-product-capability",
-                    },
-                },
-            )
-    if periodic_run_count:
-        runs_dir = runtime / "goals" / GOAL_ID / "runs"
-        for offset in range(periodic_run_count):
-            minute = periodic_run_count - offset
-            append_run_record(
-                runs_dir,
-                {
-                    "generated_at": f"2026-01-01T00:{minute:02d}:00+00:00",
-                    "classification": "benchmark_rotation_iteration",
-                    "recommended_action": f"Advance bounded benchmark/control-plane slice {minute}.",
-                    "health_check": "compact durable run event",
-                    "delivery_outcome": "outcome_progress",
-                },
-            )
-    if include_run_history_stalls:
-        runs_dir = runtime / "goals" / GOAL_ID / "runs"
-        repeated_action = "Observe dependency state; no material transition yet."
-        for generated_at in (
-            "2026-01-01T00:04:00+00:00",
-            "2026-01-01T00:00:00+00:00",
-        ):
-            append_run_record(
-                runs_dir,
-                {
-                    "generated_at": generated_at,
-                    "classification": "dependency_observation_monitor",
-                    "recommended_action": repeated_action,
-                    "health_check": "monitor-only observation unchanged",
-                    "delivery_outcome": "surface_only",
-                },
-            )
+            },
+        )
+    for offset in range(periodic_run_count):
+        append_run_record(
+            runs_dir,
+            {
+                "generated_at": f"2026-01-01T03:{offset:02d}:00+00:00",
+                "classification": "bounded_iteration",
+                "agent_id": AGENT_ID,
+                "delivery_outcome": "outcome_progress",
+            },
+        )
     return registry_path, runtime
 
 
@@ -269,511 +250,144 @@ def attention_item(status_payload: dict) -> dict:
     return items[0]
 
 
-def assert_replan_obligation_projected() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(Path(tmp), include_replan_signals=True)
-        status_payload = run_cli("status", registry_path=registry_path, runtime=runtime)
-        item = attention_item(status_payload)
-        obligation = item["project_asset"]["autonomous_replan_obligation"]
-        assert obligation["schema_version"] == "autonomous_replan_obligation_v0", obligation
-        assert obligation["required"] is True, obligation
-        assert obligation["stall_threshold"] == 2, obligation
-        assert obligation["trigger_count"] == 3, obligation
-        assert [trigger["kind"] for trigger in obligation["triggers"]] == [
-            "no_progress_streak",
-            "repeated_action_loop",
-            "phase_transition",
-        ], obligation
-        assert item["autonomous_replan_obligation"] == obligation, item
-        assert obligation["todo_actions"][0]["action"] == "split", obligation
-        assert obligation["todo_actions"][1]["action"] == "add", obligation
-        assert obligation["todo_actions"][2]["action"] == "retire", obligation
-
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert guard["should_run"] is True, guard
-        assert guard["autonomous_replan_obligation"] == obligation, guard
-        recommendation = guard["heartbeat_recommendation"]
-        assert recommendation["recommended_mode"] == "autonomous_replan_required", recommendation
-        assert recommendation["replan_obligation"]["stall_threshold"] == 2, recommendation
-        assert recommendation["replan_obligation"]["trigger_count"] == 3, recommendation
-        assert guard["execution_obligation"]["must_attempt_work"] is True, guard
-        assert guard["execution_obligation"]["kind"] == "autonomous_replan_required", guard
-        assert guard["execution_obligation"]["stall_threshold"] == 2, guard
-        assert guard["automation_liveness"]["automation_action"] == "execute_bounded_work", guard
-        assert guard["automation_liveness"]["keep_active"] is True, guard
-        assert guard["automation_liveness"]["pause_allowed"] is False, guard
-
-
-def assert_replan_obligation_projected_from_run_history() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            include_run_history_stalls=True,
-        )
-        status_payload = run_cli("status", registry_path=registry_path, runtime=runtime)
-        item = attention_item(status_payload)
-        obligation = item["project_asset"]["autonomous_replan_obligation"]
-        assert obligation["schema_version"] == "autonomous_replan_obligation_v0", obligation
-        assert obligation["required"] is True, obligation
-        assert obligation["stall_threshold"] == 2, obligation
-        assert obligation["trigger_count"] == 1, obligation
-        assert obligation["triggers"][0]["kind"] == "run_history_no_progress_repeat", obligation
-        assert obligation["triggers"][0]["section"] == "run_history", obligation
-
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert guard["should_run"] is True, guard
-        assert guard["autonomous_replan_obligation"] == obligation, guard
-        recommendation = guard["heartbeat_recommendation"]
-        assert recommendation["recommended_mode"] == "autonomous_replan_required", recommendation
-        assert recommendation["replan_obligation"]["stall_threshold"] == 2, recommendation
-        assert guard["execution_obligation"]["kind"] == "autonomous_replan_required", guard
-        assert guard["automation_liveness"]["automation_action"] == "execute_bounded_work", guard
-        assert guard["automation_liveness"]["pause_allowed"] is False, guard
-
-
-def assert_dead_monitor_repeat_requires_six_same_target_polls() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-dead-monitor-repeat-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            monitor_poll_repeat_count=5,
-        )
-        status_payload = run_cli("status", registry_path=registry_path, runtime=runtime)
-        item = attention_item(status_payload)
+def assert_typed_repeat_requires_two_equivalent_observations() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-typed-replan-") as tmp:
+        registry_path, runtime = write_fixture(Path(tmp), typed_repeat_count=1)
+        item = attention_item(run_cli("status", registry_path=registry_path, runtime=runtime))
         assert "autonomous_replan_obligation" not in item, item
-        assert "autonomous_replan_obligation" not in item["project_asset"], item
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert "autonomous_replan_obligation" not in guard, guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] != "autonomous_replan_required", guard
 
-    with tempfile.TemporaryDirectory(prefix="loopx-dead-monitor-repeat-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            monitor_poll_repeat_count=6,
-        )
-        status_payload = run_cli("status", registry_path=registry_path, runtime=runtime)
-        item = attention_item(status_payload)
-        obligation = item["project_asset"]["autonomous_replan_obligation"]
-        detector = obligation["dead_monitor_detector"]
-        assert obligation["schema_version"] == "autonomous_replan_obligation_v0", obligation
-        assert obligation["required"] is True, obligation
-        assert obligation["stall_threshold"] == 6, obligation
-        assert obligation["trigger_count"] == 1, obligation
-        assert obligation["triggers"][0]["kind"] == "dead_monitor_repeat", obligation
-        assert obligation["triggers"][0]["run_count"] == 6, obligation
-        assert detector["schema_version"] == "dead_monitor_repeat_v0", detector
-        assert detector["monitor_target_id"] == "repeat-monitor-target", detector
-        assert detector["run_count"] == 6, detector
-        assert detector["threshold"] == 6, detector
-
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert guard["autonomous_replan_obligation"] == obligation, guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] == "autonomous_replan_required", guard
-        assert guard["execution_obligation"]["kind"] == "autonomous_replan_required", guard
-        assert guard["execution_obligation"]["stall_threshold"] == 6, guard
-
-
-def assert_periodic_replan_obligation_projected_from_run_history() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=20,
-        )
-        status_payload = run_cli(
-            "status",
-            "--limit",
-            "30",
-            registry_path=registry_path,
-            runtime=runtime,
-        )
-        item = attention_item(status_payload)
-        obligation = item["project_asset"]["autonomous_replan_obligation"]
-        assert obligation["schema_version"] == "autonomous_replan_obligation_v0", obligation
-        assert obligation["required"] is True, obligation
-        assert obligation["trigger_count"] == 1, obligation
-        assert obligation["triggers"][0]["kind"] == "periodic_review_due", obligation
-        assert obligation["triggers"][0]["section"] == "run_history", obligation
-        assert obligation["triggers"][0]["run_count"] == 20, obligation
-        assert obligation["triggers"][0]["threshold"] == 20, obligation
-        assert obligation["guidance_actions"] == [
-            "keep",
-            "split",
-            "add",
-            "retire",
-            "ask_decision",
-        ], obligation
-        assert obligation["todo_actions"][0]["action"] == "split", obligation
-        assert obligation["todo_actions"][1]["action"] == "add", obligation
-        assert obligation["todo_actions"][2]["action"] == "ask_decision", obligation
-        assert "bounded autonomous periodic review" in obligation["recommended_action"], obligation
-
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert guard["should_run"] is True, guard
-        assert guard["autonomous_replan_obligation"] == obligation, guard
-        recommendation = guard["heartbeat_recommendation"]
-        assert recommendation["recommended_mode"] == "autonomous_replan_required", recommendation
-        assert guard["execution_obligation"]["kind"] == "autonomous_replan_required", guard
-        assert guard["automation_liveness"]["automation_action"] == "execute_bounded_work", guard
-
-
-def assert_no_periodic_replan_before_threshold_or_after_ack() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=19,
-        )
-        status_payload = run_cli(
-            "status",
-            "--limit",
-            "30",
-            registry_path=registry_path,
-            runtime=runtime,
-        )
-        item = attention_item(status_payload)
-        assert "autonomous_replan_obligation" not in item, item
-        assert "autonomous_replan_obligation" not in item["project_asset"], item
-
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert "autonomous_replan_obligation" not in guard, guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] != "autonomous_replan_required", guard
-
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=20,
-            include_recent_replan_ack=True,
-        )
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert "autonomous_replan_obligation" not in guard, guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] != "autonomous_replan_required", guard
-
-
-def assert_validated_classification_without_ack_does_not_clear_replan() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=20,
-        )
-        append_run_record(
-            runtime / "goals" / GOAL_ID / "runs",
-            {
-                "generated_at": "2026-01-02T00:30:00+00:00",
-                "classification": "autonomous_replan_validated_20260621",
-                "recommended_action": "A progress refresh was written, but no explicit replan ACK was recorded.",
-                "health_check": "compact progress refresh",
-                "delivery_outcome": "surface_only",
-            },
-        )
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        obligation = guard["autonomous_replan_obligation"]
-        assert obligation["required"] is True, guard
-        assert obligation["triggers"][0]["kind"] == "periodic_review_due", guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] == "autonomous_replan_required", guard
-
-
-def assert_refresh_state_structured_ack_clears_replan() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=20,
-        )
-        refresh = run_cli(
-            "refresh-state",
-            "--goal-id",
-            GOAL_ID,
-            "--classification",
-            "autonomous_replan_validated_20260621",
-            "--autonomous-replan-recorded",
-            "--repair-delta-kind",
-            "runnable_todo_set",
-            "--delivery-batch-scale",
-            "single_surface",
-            "--delivery-outcome",
-            "surface_only",
-            "--recommended-action",
-            "Explicit bounded replan ACK recorded; continue the selected next slice.",
-            registry_path=registry_path,
-            runtime=runtime,
-        )
-        assert refresh["autonomous_replan_recorded"] is True, refresh
-        json_path = Path(refresh["json_path"])
-        record = json.loads(json_path.read_text(encoding="utf-8"))
-        assert record["autonomous_replan_ack"]["recorded"] is True, record
-        delta = record["autonomous_replan_ack"]["delta_contract"]
-        assert delta["schema_version"] == "repair_delta_contract_v0", delta
-        assert delta["delta_present"] is True, delta
-        assert delta["delta_kinds"] == ["runnable_todo_set"], delta
-
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert "autonomous_replan_obligation" not in guard, guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] != "autonomous_replan_required", guard
-
-
-def assert_replan_ack_without_delta_is_noop() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=20,
-        )
-        refresh = run_cli(
-            "refresh-state",
-            "--goal-id",
-            GOAL_ID,
-            "--classification",
-            "autonomous_replan_recorded",
-            "--autonomous-replan-recorded",
-            "--delivery-batch-scale",
-            "single_surface",
-            "--delivery-outcome",
-            "outcome_progress",
-            "--recommended-action",
-            "Tried to acknowledge a replan without changing the frontier.",
-            registry_path=registry_path,
-            runtime=runtime,
-        )
-        assert refresh["classification"] == "replan_noop", refresh
-        assert refresh["delivery_outcome"] == "outcome_gap", refresh
-        assert refresh["autonomous_replan_recorded"] is False, refresh
-        assert refresh["autonomous_replan_recorded_requested"] is True, refresh
-        delta = refresh["repair_delta_contract"]
-        assert delta["schema_version"] == "repair_delta_contract_v0", delta
-        assert delta["delta_present"] is False, delta
-
-        record = json.loads(Path(refresh["json_path"]).read_text(encoding="utf-8"))
-        assert record["autonomous_replan_ack"]["recorded"] is False, record
-        assert record["autonomous_replan_ack"]["requested"] is True, record
-        assert record["autonomous_replan_noop"]["classification"] == "replan_noop", record
-
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        obligation = guard["autonomous_replan_obligation"]
-        assert obligation["required"] is True, guard
-        assert obligation["triggers"][0]["kind"] == "periodic_review_due", guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] == "autonomous_replan_required", guard
-
-
-def assert_bare_successor_claim_does_not_clear_replan() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=20,
-        )
-        refresh = run_cli(
-            "refresh-state",
-            "--goal-id",
-            GOAL_ID,
-            "--classification",
-            "autonomous_replan_recorded",
-            "--autonomous-replan-recorded",
-            "--repair-delta-kind",
-            "successor_or_supersede",
-            registry_path=registry_path,
-            runtime=runtime,
-        )
-
-        assert refresh["classification"] == "replan_noop", refresh
-        delta = refresh["repair_delta_contract"]
-        assert delta["delta_present"] is False, delta
-        assert delta["delta_kinds"] == [], delta
-        assert delta["rejected_claims"] == [
-            {
-                "kind": "successor_or_supersede",
-                "reason": "no completed todo links a scoped open advancement successor",
-            }
-        ], delta
-        assert refresh["vision_checkpoint"]["decision"] == "missing_required", refresh
-
+    with tempfile.TemporaryDirectory(prefix="loopx-typed-replan-") as tmp:
+        registry_path, runtime = write_fixture(Path(tmp), typed_repeat_count=2)
         guard = run_cli(
             "quota",
             "should-run",
             "--goal-id",
             GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
             registry_path=registry_path,
             runtime=runtime,
         )
-        assert guard["autonomous_replan_obligation"]["required"] is True, guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] == (
-            "autonomous_replan_required"
-        ), guard
+        obligation = guard["autonomous_replan_obligation"]
+        assert obligation["triggers"][0]["kind"] == "typed_progress_repeat", guard
+        assert obligation["triggers"][0]["run_count"] == 2, guard
+        assert obligation["progress_baseline"]["surface_id"] == "surface-current-route", guard
+        assert obligation["replan_context"]["delivery"] == "host_projected", guard
+        assert guard["replan_action_packet"]["obligation_id"] == obligation["obligation_id"], guard
+        assert guard["replan_action_packet"]["required_outcome"] == "semantic_delta", guard
 
 
-def assert_no_followup_replan_ack_is_todo_local() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=20,
+def assert_equivalent_observation_is_rejected_before_write() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-typed-replan-") as tmp:
+        registry_path, runtime = write_fixture(Path(tmp), typed_repeat_count=2)
+        runs_index = runtime / "goals" / GOAL_ID / "runs" / "index.jsonl"
+        before = runs_index.read_text(encoding="utf-8")
+        error = run_cli_error(
+            "refresh-state",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            "--classification",
+            "source_audit_progress",
+            "--progress-result-class",
+            "advanced",
+            "--progress-surface-id",
+            "surface-current-route",
+            "--progress-hypothesis-id",
+            "hypothesis-current-boundary",
+            "--progress-probe-kind",
+            "probe-current-route",
+            "--progress-evidence-id",
+            "evidence-new-wording",
+            registry_path=registry_path,
+            runtime=runtime,
         )
-        state_path = (
-            registry_path.parent.parent
-            / ".codex"
-            / "goals"
-            / GOAL_ID
-            / "ACTIVE_GOAL_STATE.md"
-        )
-        state_text = state_path.read_text(encoding="utf-8")
-        old_agent_todos = (
-            "## Agent Todo\n\n"
-            "- [x] [P1] Completed autonomous planning-trigger work with a replan obligation.\n"
-            "- [ ] [P1] Advance the next bounded project hardening slice.\n"
-        )
-        local_closure_with_monitor = (
-            "## Agent Todo\n\n"
-            "- [x] [P1] Deduplicate an already handled exact-head review.\n"
-            "  <!-- loopx:todo todo_id=todo_dedup123456 status=done "
-            "task_class=advancement_task claimed_by=quality-agent "
-            "no_followup=true evidence=verified -->\n"
-            "- [ ] [P1] Continue the long-running review queue monitor.\n"
-            "  <!-- loopx:todo todo_id=todo_monitor1234 status=open "
-            "task_class=continuous_monitor claimed_by=quality-agent "
-            "target_key=review-queue cadence=30m "
-            "next_due_at=2026-08-01T13:00:00Z "
-            "expires_at=2099-08-02T13:00:00Z -->\n"
-        )
-        assert old_agent_todos in state_text, state_text
-        state_path.write_text(
-            state_text.replace(old_agent_todos, local_closure_with_monitor),
-            encoding="utf-8",
-        )
+        assert "typed semantic delta" in error, error
+        assert runs_index.read_text(encoding="utf-8") == before
 
+
+def assert_new_typed_surface_closes_exact_obligation() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-typed-replan-") as tmp:
+        registry_path, runtime = write_fixture(Path(tmp), typed_repeat_count=2)
+        before = run_cli(
+            "quota",
+            "should-run",
+            "--goal-id",
+            GOAL_ID,
+            "--agent-id",
+            AGENT_ID,
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        obligation_id = before["autonomous_replan_obligation"]["obligation_id"]
         refresh = run_cli(
             "refresh-state",
             "--goal-id",
             GOAL_ID,
-            "--classification",
-            "exact_head_review_deduplicated",
             "--agent-id",
-            "quality-agent",
-            "--autonomous-replan-recorded",
-            "--repair-delta-kind",
-            "no_followup",
-            "--recommended-action",
-            "Wait for a material review-queue transition before creating another review todo.",
+            AGENT_ID,
+            "--classification",
+            "bounded_replan_progress",
+            "--progress-result-class",
+            "advanced",
+            "--progress-surface-id",
+            "surface-new-route",
+            "--progress-hypothesis-id",
+            "hypothesis-current-boundary",
+            "--progress-probe-kind",
+            "probe-current-route",
+            "--progress-evidence-id",
+            "evidence-new-route",
             registry_path=registry_path,
             runtime=runtime,
         )
+        semantic_delta = refresh["autonomous_replan_ack"]["semantic_delta"]
+        assert semantic_delta["accepted"] is True, refresh
+        assert semantic_delta["obligation_id"] == obligation_id, refresh
+        assert semantic_delta["satisfying_outcomes"] == ["new_surface"], refresh
 
-        assert refresh["classification"] == "exact_head_review_deduplicated", refresh
-        assert refresh["autonomous_replan_recorded"] is True, refresh
-        delta = refresh["repair_delta_contract"]
-        assert delta["delta_present"] is True, delta
-        assert delta["delta_kinds"] == ["no_followup"], delta
-        assert delta["auto_evidence"] == [
-            {
-                "kind": "no_followup",
-                "source": "active_state_agent_todos",
-                "todo_ids": ["todo_dedup123456"],
-            }
-        ], delta
-
-
-def assert_watch_replan_ack_requires_bounded_state_evidence() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(
-            Path(tmp),
-            include_replan_signals=False,
-            periodic_run_count=20,
-        )
-        state_path = (
-            registry_path.parent.parent
-            / ".codex"
-            / "goals"
-            / GOAL_ID
-            / "ACTIVE_GOAL_STATE.md"
-        )
-        state_text = state_path.read_text(encoding="utf-8")
-        advancement = "- [ ] [P1] Advance the next bounded project hardening slice.\n"
-        monitor = (
-            "- [ ] [P1] Watch the external review transition.\n"
-            "  <!-- loopx:todo todo_id=todo_123456789abc status=open "
-            "task_class=continuous_monitor target_key=review cadence=30m "
-            "next_due_at=2026-08-01T13:00:00Z -->\n"
-        )
-        state_path.write_text(
-            state_text.replace(advancement, monitor),
-            encoding="utf-8",
-        )
-
-        rejected = run_cli(
-            "refresh-state",
+        after = run_cli(
+            "quota",
+            "should-run",
             "--goal-id",
             GOAL_ID,
-            "--classification",
-            "autonomous_replan_recorded",
-            "--autonomous-replan-recorded",
-            "--repair-delta-kind",
-            "watch_lane_continuation",
+            "--agent-id",
+            AGENT_ID,
             registry_path=registry_path,
             runtime=runtime,
         )
-        assert rejected["classification"] == "replan_noop", rejected
-        assert rejected["repair_delta_contract"]["delta_present"] is False, rejected
-        assert rejected["repair_delta_contract"]["rejected_claims"], rejected
+        assert "autonomous_replan_obligation" not in after, after
 
-        state_path.write_text(
-            state_path.read_text(encoding="utf-8").replace(
-                "next_due_at=2026-08-01T13:00:00Z",
-                "next_due_at=2026-08-01T13:00:00Z expires_at=2099-08-02T13:00:00Z",
-            ),
-            encoding="utf-8",
+
+def assert_typed_monitor_and_periodic_thresholds_remain_explicit() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-monitor-replan-") as tmp:
+        registry_path, runtime = write_fixture(Path(tmp), monitor_repeat_count=6)
+        item = attention_item(run_cli("status", registry_path=registry_path, runtime=runtime))
+        obligation = item["project_asset"]["autonomous_replan_obligation"]
+        assert obligation["triggers"][0]["kind"] == "dead_monitor_repeat", obligation
+        assert obligation["triggers"][0]["run_count"] == 6, obligation
+
+    with tempfile.TemporaryDirectory(prefix="loopx-periodic-replan-") as tmp:
+        registry_path, runtime = write_fixture(Path(tmp), periodic_run_count=20)
+        item = attention_item(
+            run_cli("status", "--limit", "30", registry_path=registry_path, runtime=runtime)
         )
-        accepted = run_cli(
-            "refresh-state",
-            "--goal-id",
-            GOAL_ID,
-            "--classification",
-            "autonomous_replan_recorded",
-            "--autonomous-replan-recorded",
-            "--repair-delta-kind",
-            "watch_lane_continuation",
-            registry_path=registry_path,
-            runtime=runtime,
-        )
-        assert accepted["autonomous_replan_recorded"] is True, accepted
-        evidence = accepted["repair_delta_contract"]["auto_evidence"]
-        assert evidence[0]["todo_ids"] == ["todo_123456789abc"], evidence
-
-
-def assert_no_replan_obligation_without_signal() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-autonomous-replan-") as tmp:
-        registry_path, runtime = write_fixture(Path(tmp), include_replan_signals=False)
-        status_payload = run_cli("status", registry_path=registry_path, runtime=runtime)
-        item = attention_item(status_payload)
-        assert "autonomous_replan_obligation" not in item, item
-        assert "autonomous_replan_obligation" not in item["project_asset"], item
-
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert "autonomous_replan_obligation" not in guard, guard
-        assert guard["heartbeat_recommendation"]["recommended_mode"] != "autonomous_replan_required", guard
+        obligation = item["project_asset"]["autonomous_replan_obligation"]
+        assert obligation["triggers"][0]["kind"] == "periodic_review_due", obligation
+        assert obligation["triggers"][0]["run_count"] == 20, obligation
 
 
 def main() -> int:
     global USE_SUBPROCESS_CLI
-    argv = sys.argv[1:]
-    unknown_args = sorted(set(argv) - {"--subprocess-cli"})
+    unknown_args = sorted(set(sys.argv[1:]) - {"--subprocess-cli"})
     if unknown_args:
         raise SystemExit(f"unknown arguments: {' '.join(unknown_args)}")
-    USE_SUBPROCESS_CLI = "--subprocess-cli" in argv
-    assert_replan_obligation_projected()
-    assert_replan_obligation_projected_from_run_history()
-    assert_dead_monitor_repeat_requires_six_same_target_polls()
-    assert_periodic_replan_obligation_projected_from_run_history()
-    assert_no_periodic_replan_before_threshold_or_after_ack()
-    assert_validated_classification_without_ack_does_not_clear_replan()
-    assert_refresh_state_structured_ack_clears_replan()
-    assert_replan_ack_without_delta_is_noop()
-    assert_bare_successor_claim_does_not_clear_replan()
-    assert_no_followup_replan_ack_is_todo_local()
-    assert_watch_replan_ack_requires_bounded_state_evidence()
-    assert_no_replan_obligation_without_signal()
+    USE_SUBPROCESS_CLI = "--subprocess-cli" in sys.argv[1:]
+    assert_typed_repeat_requires_two_equivalent_observations()
+    assert_equivalent_observation_is_rejected_before_write()
+    assert_new_typed_surface_closes_exact_obligation()
+    assert_typed_monitor_and_periodic_thresholds_remain_explicit()
     print("autonomous-replan-obligation-smoke ok")
     return 0
 

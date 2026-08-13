@@ -923,13 +923,7 @@ def select_frontier_rule(facts):
         ("open_user_todo", facts.blocking_user_open_count > 0, False),
         ("todo_succession_gap", facts.succession_gap_without_frontier, True),
         ("vision_acceptance_gap", facts.unsatisfied_gap_without_frontier, True),
-        ("long_todo_chain", facts.long_chain_without_ack, True),
-        ("long_todo_chain_acknowledged", facts.long_chain_with_ack, False),
-        (
-            "watch_lane_continuation_acknowledged",
-            facts.watch_lane_continuation_acknowledged,
-            False,
-        ),
+        ("long_todo_chain", facts.long_todo_chain_triggered, True),
         ("current_agent_blocker", facts.current_agent_blocker_count > 0, False),
         (
             "monitor_no_change_streak",
@@ -958,15 +952,13 @@ def select_frontier_rule(facts):
 | 4 | `open_user_todo` | 存在真正阻塞当前路径的用户工作；系统应等待具体输入，不能把缺少 authority 误写成 Replan。 | 否 |
 | 5 | `todo_succession_gap` | Advancement 已完成，但没有 successor 或 `no_followup` 理由，且没有其他 advancement 接续；必须补上局部闭包。 | 是 |
 | 6 | `vision_acceptance_gap` | Acceptance 仍有缺口，但没有满足它的 selectable work，或 successor 需要 Vision 决策；必须重建方向与 Frontier。 | 是 |
-| 7 | `long_todo_chain` | 可选 Todo 链超过有界阈值且没有 Frontier Delta ACK；先做 Vision checkpoint、分组或裁剪，不能继续线性执行。 | 是 |
-| 8 | `long_todo_chain_acknowledged` | 长链仍存在，但已有明确 Frontier Delta ACK 证明它被审视和重组过；不要为同一事实重复 Replan。 | 否 |
-| 9 | `watch_lane_continuation_acknowledged` | 已显式确认空 advancement frontier 是有意的 watch lane，并有继续观察的合同；允许按 cadence 等待。 | 否 |
-| 10 | `current_agent_blocker` | 当前 Agent 已有具体 blocker 解释为什么不能推进；下一步由 blocker 的 resume route 决定，而不是再造计划。 | 否 |
-| 11 | `monitor_no_change_streak` | Monitor-only lane 连续 unchanged 达到阈值；必须用 expiry、blocker、supersede 或 successor 结束热等待。 | 是 |
-| 12 | `not_monitor_only` | 当前 lane 并非纯 monitor 等待；monitor exhaustion 规则不适用，交还普通 advancement 路径处理。 | 否 |
-| 13 | `no_open_monitor` | 根本没有 open monitor，不能以“monitor frontier 耗尽”为由派生 Replan；更早的 succession/Vision gap 已优先检查。 | 否 |
-| 14 | `advancement_remains` | 当前 Agent 或全局 Frontier 仍有 advancement work；旁边的 monitor 不能让整个 Goal 进入 Replan。 | 否 |
-| 15 | `monitor_frontier_exhausted` | 前述护栏均未命中，只剩 monitor、没有 advancement，也没有有效 ACK/blocker；必须明确 successor、expiry、supersede 或 `no_followup`。 | 是 |
+| 7 | `long_todo_chain` | 可选 Todo 链超过有界阈值；先做 Vision checkpoint、分组或裁剪，不能用无绑定 ACK 跳过。当前 obligation 只能由匹配其 id 的 semantic delta 闭合。 | 是 |
+| 8 | `current_agent_blocker` | 当前 Agent 已有具体 blocker 解释为什么不能推进；下一步由 blocker 的 resume route 决定，而不是再造计划。 | 否 |
+| 9 | `monitor_no_change_streak` | Monitor-only lane 连续 unchanged 达到阈值；必须用 expiry、blocker、supersede 或 successor 结束热等待。 | 是 |
+| 10 | `not_monitor_only` | 当前 lane 并非纯 monitor 等待；monitor exhaustion 规则不适用，交还普通 advancement 路径处理。 | 否 |
+| 11 | `no_open_monitor` | 根本没有 open monitor，不能以“monitor frontier 耗尽”为由派生 Replan；更早的 succession/Vision gap 已优先检查。 | 否 |
+| 12 | `advancement_remains` | 当前 Agent 或全局 Frontier 仍有 advancement work；旁边的 monitor 不能让整个 Goal 进入 Replan。 | 否 |
+| 13 | `monitor_frontier_exhausted` | 前述护栏均未命中，只剩 monitor、没有 advancement，也没有当前 obligation 绑定的 semantic closure；必须明确 successor、expiry、supersede 或 `no_followup`。 | 是 |
 
 顺序因此分成三层：
 
@@ -992,10 +984,9 @@ if decision.rule is TODO_SUCCESSION_GAP:
     return obligation(
         triggers=succession_gap_items,
         guidance=["create_successor", "link_successor", "record_no_followup"],
-        allowed_delta=[
-            "runnable_todo_set",
-            "successor_or_supersede",
-            "no_followup",
+        allowed_outcome=[
+            "new_runnable_successor",
+            "coverage_backed_no_followup",
         ],
         priority="P0",
     )
@@ -1009,10 +1000,10 @@ if decision.rule is VISION_ACCEPTANCE_GAP:
             "record_evidence_gap",
             "record_no_followup",
         ],
-        allowed_delta=[
-            "runnable_todo_set",
-            "goal_vision_patch",
-            "no_followup",
+        allowed_outcome=[
+            "new_runnable_successor",
+            "fresh_vision_path_outcome",
+            "coverage_backed_no_followup",
         ],
         priority="P0",
     )
@@ -1021,15 +1012,14 @@ if decision.rule is LONG_TODO_CHAIN:
     return obligation(
         triggers=[long_chain_trigger],
         guidance=[
-            "read_evidence_log",
+            "use_host_projected_coverage_ledger",
             "group_or_prune_todo_chain",
             "update_agent_vision",
             "create_successor",
         ],
-        allowed_delta=[
-            "runnable_todo_set",
-            "successor_or_supersede",
-            "goal_vision_patch",
+        allowed_outcome=[
+            "new_runnable_successor",
+            "fresh_vision_path_outcome",
         ],
         priority="P1",
     )
@@ -1043,11 +1033,10 @@ if decision.rule in {MONITOR_NO_CHANGE_STREAK, MONITOR_FRONTIER_EXHAUSTED}:
             "supersede_monitor",
             "create_successor",
         ],
-        allowed_delta=[
-            "blocker",
-            "active_state_next_action",
-            "successor_or_supersede",
-            "watch_lane_continuation",
+        allowed_outcome=[
+            "new_runnable_successor",
+            "new_concrete_blocker",
+            "coverage_backed_no_followup",
         ],
         priority="P1",
     )
@@ -1142,128 +1131,67 @@ if autonomous_replan_obligation.required:
 Replan，再回到 monitor 或普通 advancement。反过来，若真正缺少 owner-only authority，
 前面的 `open_user_todo` 或 gate rule 已经短路，不会把用户决策伪装成自主 Replan。
 
-### 核心代码四之六：只有 Accountable Delta 才能结算
+### 核心代码四之六：只有绑定当前义务的 Semantic Delta 才能结算
 
-Agent 执行 bounded Replan 后，至少要写回一种能改变下一轮 Frontier 的 Delta：
+Agent 执行 bounded Replan 后，至少要写回一种 typed outcome：
 
 ```text
-runnable_todo_set           新的可运行工作集合
-successor_or_supersede      successor 链接或旧工作退役
-goal_vision_patch           Vision / Acceptance 的可审计更新
-blocker                     具体 blocker 与恢复依据
-active_state_next_action    可回读的下一动作变化
-watch_lane_continuation     有边界、有 cadence 的继续观察合同
-no_followup                 带理由的局部终止
+new_surface                         新覆盖面
+new_hypothesis                      新假设
+new_probe_family                    新探测族
+new_runnable_successor              当前状态中真实 runnable 的 successor
+new_concrete_blocker                新 blocker + evidence
+coverage_backed_exploration_exhausted / no_followup
+fresh_vision_path_outcome           vision-derived 义务的 evidence-linked path
 ```
 
-结算顺序仍遵守 Turn 的 writeback-before-spend 原则：
+结算顺序仍遵守 writeback-before-spend，但 evidence read 已由 host projection 交付：
 
 ```python
-result = execute_one_bounded_replan_slice(obligation)
-validate(result.delta_contract)
+obligation = quota.replan_action_packet
+context = quota.replan_context              # host-projected evidence ledger
+result = execute_one_bounded_replan_slice(context)
 
-refresh_state(
-    classification="autonomous_replan_recorded",
-    autonomous_replan_recorded=True,
-    repair_delta_kind=result.delta_kind,
-    frontier_identity=obligation.frontier_identity,
+delta = qualify_typed_progress(
+    result.progress_observation,
+    baseline=context.uncovered_frontier.baseline,
+    current_runnable_successors=current_state.runnable_successors,
 )
-read_back_ack()
+require(delta.accepted and delta.obligation_id == obligation.obligation_id)
+writeback(delta)
+read_back_semantic_receipt()
 spend_one_slot()
 ```
 
-仅写 `autonomous_replan_recorded=True` 不够。`autonomous_replan_ack_recorded` 还要求
-`delta_contract.delta_present=True`；否则这是 `replan_noop`，下一轮 obligation 仍然成立。
-这条约束防止 Agent 用一篇新总结关闭旧循环。
+classification、手工 ACK、读收据和 caller 自报 repair kind 都不是结算凭证。写时 gate
+先重算与 quota 相同的完整 goal frontier，再检查 typed delta；因此旧 periodic ACK 不能关闭
+随后轮换出的 vision/frontier obligation，重复维护写回也不能落盘。
 
-### 工程案例：Guidance 与 ACK 不一致时，Replan 也会成环
+### 工程案例：为什么“读过 evidence + ACK”仍会形成 Replan 环
 
-[PR #2597](https://github.com/huangruiteng/loopx/pull/2597) 修复了一个很适合解释长程控制面
-的真实问题：系统投影给 Agent 的 Replan guidance 允许继续等待，但同一条控制链末端的 ACK
-validator 又不接受这次等待。Agent 每一轮都遵循建议，却永远无法关闭 obligation。
+旧实现把 detection、guidance 与 closure 分散在不同语义里：quota 能从 vision/frontier
+派生新义务，写时 gate 却只看 run-history；Agent 又可以用不绑定当前义务的 ACK 或
+`source_audit_progress` 继续写回。结果是新义务一直存在、维护写回一直被接受。
 
-问题发生在下面这组状态同时成立时：
-
-- blocked successor 连续两次没有进展；
-- 对应 Vision 使用 `repeat_until_closed`，要求 Acceptance gap 关闭前持续推进；
-- 当前没有其他 runnable advancement；
-- Replan guidance 仍把 `record_wait_continuation` 列为合法选择。
-
-修改前的执行链可以压成：
+新实现把三处收敛到同一条因果链：
 
 ```text
-blocked successor 连续无进展
-  -> 派生 autonomous_replan_obligation
-  -> guidance 建议：创建 successor，或者继续 watch
-  -> Agent 选择成本最低的 wait continuation
-  -> ACK validator 拒绝：repeat-until-closed 不能只等待
-  -> obligation 保持 open
-  -> 下一轮收到同一条 guidance
+quota + refresh-state
+  -> shared full goal-frontier reducer
+  -> obligation_id + required typed outcomes
+  -> host-projected evidence coverage
+  -> typed progress observation
+  -> semantic delta bound to exact obligation_id
 ```
 
-这类循环很难仅从单个模块看出来。Obligation builder 的输出合理，ACK validator 的约束也
-合理；错误来自两处对“什么算完成 Replan”给出了不同答案。模型换一种措辞、增加思考长度，
-都不会改变这个结构性矛盾。
+其中 `read receipt` 只表示 `context_delivered`，不能关闭 obligation；新 evidence id 本身也
+不算方向变化。系统只接受覆盖维度变化、状态中真实存在的 runnable successor、新 blocker，
+或带覆盖证明的终态。这样 guidance、writeback schema 与 acceptance 使用的是同一组 enum，
+而不是两份 prose 或 repair-kind 列表。
 
-修复先把严格场景归一化成同一个事实判断。下面是对应实现的等价伪代码：
-
-```python
-def blocked_successor_repeat_vision_open(obligation, acceptance_gaps):
-    return (
-        obligation.trigger == "blocked_successor_no_progress_repeat"
-        and any(
-            gap.advancement_policy == "repeat_until_closed"
-            for gap in acceptance_gaps
-        )
-    )
-```
-
-然后让 guidance 与 ACK 共享同一组满足条件：
-
-```python
-REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS = (
-    "runnable_todo_set",
-    "successor_or_supersede",
-)
-
-if blocked_successor_repeat_vision_open(obligation, acceptance_gaps):
-    obligation.guidance_actions = [
-        "discover_safe_successor",
-        "create_runnable_todo",
-        "successor_or_supersede",
-    ]
-    obligation.satisfying_repair_delta_kinds = (
-        REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS
-    )
-
-ack_valid = bool(
-    ack.delta_kinds
-    & set(REPEAT_VISION_REPLAN_SATISFYING_DELTA_KINDS)
-)
-```
-
-`runnable_todo_set` 表示建立一项当前即可执行、并能缩小 Acceptance gap 的工作；它不能是为
-了填空而制造的旁支 Todo。`successor_or_supersede` 表示修复原有任务关系：给 blocked work
-接上新的 successor，或者显式退役已经失效的路径。
-
-这里不能简单放宽 ACK，让 `watch_lane_continuation` 也算成功。对
-`repeat_until_closed` Vision 来说，合法终态必须保留一条能够继续推进的 Frontier。若 ACK
-接受纯等待，系统会把“没有可执行工作”结算成成功，随后进入长期合法空转。
-
-`as_needed` Vision 则继续允许 wait continuation。它可能在等 CI、外部数据、定时 monitor
-或下一次人工输入，等待本身就是受约束的正确动作：
-
-| Vision advancement policy | 合法的 Replan 结果 |
-| --- | --- |
-| `repeat_until_closed` | `runnable_todo_set` 或 `successor_or_supersede` |
-| `as_needed` | 可以写入有 cadence、expiry 或恢复条件的 wait continuation |
-
-这个案例补充了一条实现层不变量：
-
-> Guidance、writeback schema 与 ACK acceptance 必须描述同一组可结算动作。
-
-检测到循环只解决了一半问题。控制面还要保证 Agent 被引导执行的动作能够通过结算，并在
-下一轮形成不同且合法的 Frontier；否则 Replan 自己也会成为局部循环的一部分。
+对 `repeat_until_closed` vision，maintenance-only continuation 不能结算；对确实应该等待的
+`as_needed` 场景，等待应留在有 cadence、expiry、resume condition 的 monitor Todo 生命周期
+中，而不是冒充 replan 成功。这个区分避免把“合法等待”与“方向改变”压进同一个 ACK。
 
 ### 端到端 Trace：为什么一次 Replan 之后还可能继续 Replan
 
@@ -1281,7 +1209,7 @@ ack_valid = bool(
 | T1 | succession gap + acceptance gap + monitor-only | `todo_succession_gap` | successor 或 `no_followup` | 先补局部连续性 |
 | T2a | successor 已 runnable | `ready_deferred_successor` 或 `advancement_remains` | 不派生新 obligation | 执行 successor |
 | T2b | 记录 `no_followup`，但 Acceptance gap 仍无 Frontier | `vision_acceptance_gap` | Vision patch、evidence gap 或新 successor | 重新对齐方向 |
-| T3 | Acceptance 已闭合，只剩有界 watch lane | `watch_lane_continuation_acknowledged` | 不派生新 obligation | 按 cadence quiet |
+| T3 | Acceptance 已闭合，只剩有界 watch lane | 当前 obligation 绑定的 coverage-backed `no_followup` | 不派生新 obligation | 按 cadence quiet |
 | T3-alt | Monitor 无 expiry 且连续 unchanged | `monitor_no_change_streak` | expiry、blocker、supersede 或 successor | 结束热等待 |
 
 这个 trace 展示了 Replan 的两个关键特性：

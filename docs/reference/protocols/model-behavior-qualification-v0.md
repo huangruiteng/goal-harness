@@ -253,7 +253,9 @@ capability scenario also wraps that task body in the trigger envelope carrying
 the heartbeat time, matching the Codex App input that makes `LOOPX_TURN`
 reusable. The first requires a real read-only action against the
 selected Todo target; the second requires the exact agent-scoped evidence-log
-read projected by a hermetic missing-vision replan state; the third requires a
+context projected by a hermetic typed-repeat replan state, then a real
+frontier/source read and either a typed `refresh-state` delta or one
+obligation-bound successor `todo add`; the third requires a
 post-quota non-blocking user notice followed by the exact ready-successor
 action. The fourth requires a real task-facing call against the blocked Todo,
 followed by the quota-projected capability re-entry command in the same
@@ -282,9 +284,11 @@ It also carries three control-plane composition decisions. These are not wider
 snapshots; each packet is generated through the production quota, interaction,
 and scheduler paths and deliberately contains competing signals:
 
-10. a monitor lane and peer-owned advancement both look non-runnable, but a
-    missing required per-agent vision still selects autonomous replan and the
-    model executes the projected evidence-log read before choosing a delta;
+10. two equivalent typed observations select autonomous replan; quota
+    host-projects the compact evidence ledger, the model reads the real
+    uncovered frontier/source, and it persists a semantic delta. A runnable
+    successor is one exact-obligation Todo transition with an immediate turn
+    boundary, not a read-plus-ACK sequence;
 11. an open user notice coexists with a ready deferred successor, so the model
     must surface the notice and execute the successor replan rather than treat
     every `user_action_required` value as a blocking gate;
@@ -334,7 +338,7 @@ Generic full-versus-candidate pair mode remains available only
 for temporary sensitive differentials or explicit stable-versus-candidate
 outcome claims, not as a permanent regular-behavior baseline.
 
-The selected-Todo, replan evidence-log, scoped-gate successor, and capability-
+The selected-Todo, replan semantic-action, scoped-gate successor, and capability-
 bridge repair gates share only proven mechanics:
 ordinary exec-tool decoding, bounded LoopX argv extraction, and isolated CLI
 execution. Their Goal fixtures, legal action state machines, and semantic

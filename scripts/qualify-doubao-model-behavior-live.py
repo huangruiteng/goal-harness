@@ -28,8 +28,8 @@ from loopx.control_plane.testing.doubao_model_behavior_actor import (
 from loopx.control_plane.testing.release_commit_qualification import (
     collect_release_source_identity,
 )
-from loopx.control_plane.testing.replan_evidence_tool_behavior import (
-    DoubaoReplanEvidenceToolBehaviorActor,
+from loopx.control_plane.testing.replan_semantic_action_behavior import (
+    DoubaoReplanSemanticActionBehaviorActor,
 )
 from loopx.control_plane.testing.scoped_gate_successor_tool_behavior import (
     DoubaoScopedGateSuccessorToolBehaviorActor,
@@ -68,7 +68,7 @@ def main() -> int:
     selected_todo_actor = DoubaoSelectedTodoToolBehaviorActor.from_environment(
         timeout_seconds=args.timeout_seconds
     )
-    replan_evidence_actor = DoubaoReplanEvidenceToolBehaviorActor.from_environment(
+    replan_semantic_action_actor = DoubaoReplanSemanticActionBehaviorActor.from_environment(
         timeout_seconds=args.timeout_seconds
     )
     scoped_gate_successor_actor = (
@@ -91,11 +91,11 @@ def main() -> int:
                 fixture_root=temp_root / "selected-todo" / run_digest,
             )
 
-        def qualify_replan_evidence(run_id: str) -> dict[str, object]:
+        def qualify_replan_semantic_action(run_id: str) -> dict[str, object]:
             run_digest = sha256(run_id.encode("utf-8")).hexdigest()[:16]
-            return replan_evidence_actor.qualify(
+            return replan_semantic_action_actor.qualify(
                 qualification_id=run_id,
-                fixture_root=temp_root / "replan-evidence" / run_digest,
+                fixture_root=temp_root / "replan-semantic-action" / run_digest,
             )
 
         def qualify_scoped_gate_successor(run_id: str) -> dict[str, object]:
@@ -122,7 +122,7 @@ def main() -> int:
             turn_actor=turn_actor,
             onboarding_actor=onboarding_actor,
             selected_todo_actor=qualify_selected_todo,
-            replan_evidence_actor=qualify_replan_evidence,
+            replan_semantic_action_actor=qualify_replan_semantic_action,
             scoped_gate_successor_actor=qualify_scoped_gate_successor,
             capability_monitor_repair_actor=qualify_capability_monitor_repair,
         )

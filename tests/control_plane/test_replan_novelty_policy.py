@@ -5,10 +5,16 @@ from loopx.control_plane.goals.goal_frontier import (
     autonomous_replan_scope_decision,
     compact_replan_obligation,
 )
+from loopx.control_plane.goals.goal_frontier.ack_policy import (
+    autonomous_replan_ack_satisfies_obligation,
+)
+from loopx.control_plane.work_items.progress_observation import (
+    build_replan_action_packet,
+    build_replan_context,
+)
 from loopx.control_plane.work_items.autonomous_replan_obligation import (
     build_autonomous_replan_obligation_payload,
 )
-from loopx.control_plane.quota.should_run_packet import _quota_required_reads
 from loopx.status import (
     DEAD_MONITOR_REPEAT_THRESHOLD,
     build_autonomous_replan_obligation,
@@ -25,23 +31,27 @@ def test_generic_stall_obligation_carries_novelty_guidance() -> None:
     obligation = _obligation(
         [
             {
-                "kind": "run_history_no_progress_repeat",
-                "section": "run_history",
-                "text": "two stalled turns repeated the same action",
+                "kind": "typed_progress_repeat",
+                "progress_fingerprint": "fingerprint-repeat",
+                "progress_baseline": {
+                    "schema_version": "typed_progress_observation_v0",
+                    "result_class": "unchanged",
+                    "surface_id": "surface-existing",
+                    "fingerprint": "fingerprint-repeat",
+                },
             }
         ]
     )
 
     policy = obligation["replan_novelty_policy"]
-    assert policy["schema_version"] == "replan_novelty_policy_v0"
+    assert policy["schema_version"] == "replan_evidence_delivery_policy_v0"
     assert policy["evidence_source"] == "agent_scoped_evidence_log"
-    assert policy["writeback"] == "repair_delta"
+    assert policy["delivery"] == "host_projected"
+    assert policy["writeback"] == "typed_semantic_delta"
 
     action = obligation["recommended_action"]
-    assert "required_reads[0] (evidence-log)" in action
-    assert "untried direction" in action
-    assert "Reject repeats" in action
-    assert "exploration_exhausted" in action
+    assert "host-projected coverage ledger" in action
+    assert "typed semantic delta" in action
 
 
 def test_dead_monitor_obligation_reuses_the_same_repair_delta_contract() -> None:
@@ -58,10 +68,10 @@ def test_dead_monitor_obligation_reuses_the_same_repair_delta_contract() -> None
 
     policy = obligation["replan_novelty_policy"]
     assert policy["evidence_source"] == "agent_scoped_evidence_log"
-    assert policy["writeback"] == "repair_delta"
+    assert policy["writeback"] == "typed_semantic_delta"
     action = obligation["recommended_action"]
     assert "resolve a dead monitor loop" in action
-    assert "required_reads[0] (evidence-log)" in action
+    assert "host-projected coverage ledger" in action
 
 
 def test_periodic_review_obligation_reuses_the_same_preflight_contract() -> None:
@@ -79,7 +89,7 @@ def test_periodic_review_obligation_reuses_the_same_preflight_contract() -> None
     assert policy["evidence_source"] == "agent_scoped_evidence_log"
     action = obligation["recommended_action"]
     assert "bounded autonomous periodic review" in action
-    assert "required_reads[0] (evidence-log)" in action
+    assert "host-projected coverage ledger" in action
 
 
 def test_aligned_repeat_until_closed_guidance_keeps_novelty_hint() -> None:
@@ -103,27 +113,29 @@ def test_aligned_repeat_until_closed_guidance_keeps_novelty_hint() -> None:
         ],
     )
     assert aligned is not None
-    assert (
-        "watch-lane continuation alone does not satisfy"
-        in aligned["recommended_action"]
+    assert "maintenance-only continuation does not satisfy" in aligned[
+        "recommended_action"
+    ]
+    assert "host-projected coverage ledger" in aligned["recommended_action"]
+    assert aligned["replan_novelty_policy"]["writeback"] == (
+        "typed_semantic_delta"
     )
-    assert "required_reads[0] (evidence-log)" in aligned["recommended_action"]
-    assert aligned["replan_novelty_policy"]["writeback"] == "repair_delta"
 
 
 def test_compact_replan_obligation_keeps_only_authoritative_seam_refs() -> None:
     obligation = _obligation(
         [
             {
-                "kind": "run_history_no_progress_repeat",
-                "section": "run_history",
-                "text": "two stalled turns repeated the same action",
+                "kind": "typed_progress_repeat",
+                "progress_fingerprint": "fingerprint-repeat",
             }
         ]
     )
     compact = compact_replan_obligation(obligation)
     assert compact["replan_novelty_policy"] == {
-        "evidence": "agent_scoped_evidence_log",
+        "evidence_source": "agent_scoped_evidence_log",
+        "delivery": "host_projected",
+        "writeback": "typed_semantic_delta",
     }
 
 
@@ -139,14 +151,14 @@ def test_payload_builder_defaults_to_novelty_guidance_and_policy() -> None:
         recommended_action="run a bounded frontier replan",
     )
 
-    assert "required_reads[0] (evidence-log)" in payload["recommended_action"]
-    assert "untried direction" in payload["recommended_action"]
+    assert "host-projected coverage ledger" in payload["recommended_action"]
     policy = payload["replan_novelty_policy"]
     assert policy["evidence_source"] == "agent_scoped_evidence_log"
-    assert policy["writeback"] == "repair_delta"
+    assert policy["delivery"] == "host_projected"
+    assert policy["writeback"] == "typed_semantic_delta"
 
 
-def test_payload_builder_normalizes_legacy_policy_extra_fields() -> None:
+def test_payload_builder_replaces_conflicting_policy_extra_fields() -> None:
     payload = build_autonomous_replan_obligation_payload(
         schema_version="autonomous_replan_obligation_v0",
         stall_threshold=1,
@@ -158,7 +170,7 @@ def test_payload_builder_normalizes_legacy_policy_extra_fields() -> None:
         recommended_action="run a bounded replan",
         extra_fields={
             "replan_novelty_policy": {
-                "schema_version": "replan_novelty_policy_v0",
+                "schema_version": "obsolete_policy",
                 "review_evidence_log": True,
                 "prefer_unattempted_direction": True,
                 "repeated_blocker_restatement_rejected": True,
@@ -168,43 +180,67 @@ def test_payload_builder_normalizes_legacy_policy_extra_fields() -> None:
     )
 
     assert payload["replan_novelty_policy"] == {
-        "schema_version": "replan_novelty_policy_v0",
+        "schema_version": "replan_evidence_delivery_policy_v0",
         "evidence_source": "agent_scoped_evidence_log",
-        "writeback": "repair_delta",
+        "delivery": "host_projected",
+        "writeback": "typed_semantic_delta",
     }
 
 
-def test_novelty_policy_materializes_the_evidence_log_provider() -> None:
-    reads = _quota_required_reads(
-        {
-            "goal_id": "replan-goal",
-            "agent_identity": {"agent_id": "codex-replan"},
-            "autonomous_replan_obligation": {
-                "replan_novelty_policy": {
-                    "evidence": "agent_scoped_evidence_log",
-                    "writeback": "repair_delta",
-                }
-            },
-        }
+def test_novelty_policy_materializes_host_context_and_action_packet() -> None:
+    obligation = _obligation(
+        [{"kind": "periodic_review_due", "source": "fixture"}]
     )
-
-    assert reads[0]["kind"] == "agent_scoped_evidence_log"
-    assert "evidence-log --goal-id replan-goal" in reads[0]["command"]
-    assert "--agent-id codex-replan" in reads[0]["command"]
-    assert "novelty policy evidence source" in reads[0]["reason"]
-
-
-def test_generic_replan_without_novelty_policy_does_not_restore_the_old_hint() -> None:
-    reads = _quota_required_reads(
-        {
-            "goal_id": "replan-goal",
-            "effective_action": "autonomous_replan",
-            "agent_identity": {"agent_id": "codex-replan"},
-            "autonomous_replan_obligation": {},
-        }
+    context = build_replan_context(
+        obligation,
+        goal_id="replan-goal",
+        agent_id="codex-replan",
+        newest_first_runs=[],
     )
+    enriched = {**obligation, "replan_context": context}
+    action = build_replan_action_packet(enriched)
 
-    assert reads == []
+    assert context["evidence_source"] == "agent_scoped_evidence_log"
+    assert context["delivery"] == "host_projected"
+    assert action["obligation_id"] == obligation["obligation_id"]
+    assert action["required_outcome"] == "semantic_delta"
+
+
+def test_semantic_ack_is_bound_to_the_exact_rotated_obligation() -> None:
+    old_obligation = _obligation(
+        [{"kind": "periodic_review_due", "source": "old-periodic-review"}]
+    )
+    current_obligation = _obligation(
+        [{"kind": "vision_acceptance_gap", "source": "current-vision"}]
+    )
+    old_ack = {
+        "recorded": True,
+        "semantic_delta": {
+            "schema_version": "replan_semantic_delta_v0",
+            "accepted": True,
+            "obligation_id": old_obligation["obligation_id"],
+            "outcomes": ["fresh_vision_path_outcome"],
+        },
+    }
+
+    assert autonomous_replan_ack_satisfies_obligation(
+        old_ack,
+        replan_obligation=current_obligation,
+        acceptance_gaps=current_obligation["triggers"],
+    ) is False
+
+    current_ack = {
+        **old_ack,
+        "semantic_delta": {
+            **old_ack["semantic_delta"],
+            "obligation_id": current_obligation["obligation_id"],
+        },
+    }
+    assert autonomous_replan_ack_satisfies_obligation(
+        current_ack,
+        replan_obligation=current_obligation,
+        acceptance_gaps=current_obligation["triggers"],
+    ) is True
 
 
 def test_policy_normalization_precedes_deterministic_peer_scope_selection() -> None:

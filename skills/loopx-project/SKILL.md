@@ -913,8 +913,11 @@ When the next agent slice is not yet known, keep the bound `user_action`
 visible without converting it into a gate. If bounded no-progress evidence
 accumulates while the agent frontier is empty, follow
 `autonomous_replan_required`: create and claim a concrete runnable agent todo,
-then record `runnable_todo_set`. Only authoritative terminal-closure evidence
-may replace that todo writeback with explicit no-follow-up.
+binding it to the projected `obligation_id` with
+`--replan-obligation-id <exact-id>`. The atomic Todo mutation is the semantic
+receipt; do not add a second repair ACK. Only authoritative typed
+terminal-closure evidence may replace that Todo writeback with explicit
+no-follow-up.
 `successor_todo_ids` records lineage only: linking successors does not suspend
 an open parent. When splitting a parent into explicit successors, decide whether
 the parent still has an independent immediate action. If it does not, explicitly

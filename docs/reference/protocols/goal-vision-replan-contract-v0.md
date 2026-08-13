@@ -68,26 +68,23 @@ loopx refresh-state \
 ```
 
 `advancement_policy` is a small machine-readable frontier rule, not a domain
-label. It defaults to `as_needed`, which preserves bounded external waits: an
-open acceptance gap, whether implicit or paired with an explicit replan
-trigger, may remain quiet when a continuous monitor lane has recorded an exact
-`watch_lane_continuation` ACK. The ACK does not prove acceptance or close the
-vision; it records that current monitors cover the next decision checkpoint and
-keeps the gap visible for audit. Without that ACK or monitor coverage, the same
-gap still requires bounded replan. Use `repeat_until_closed` for campaigns,
+label. It defaults to `as_needed`, which preserves bounded external waits only
+when the wait belongs to the current vision, current blocked Todo, or its
+explicit successor lineage. An unrelated deferred Todo or historical ACK
+cannot suppress an acceptance gap. Use `repeat_until_closed` for campaigns,
 iterative research, sweepers, and other visions whose open acceptance requires
 another advancement iteration whenever the runnable advancement frontier is
-empty. In that mode, monitor successors and a watch ACK remain useful evidence,
-but cannot satisfy advancement continuation by themselves. A runnable
-advancement successor, blocker or scoped gate, or a closed/superseding vision
-still prevents duplicate replan churn.
+empty. In that mode, monitor observations remain useful evidence but cannot
+satisfy advancement continuation by themselves. A fresh evidence-linked vision
+path outcome, new concrete blocker, coverage-backed terminal result, or a
+closed/superseding vision resolves the duty.
 
 For machine-generated or multi-field patches, the same command also accepts
 `--agent-vision-json <packet.json>`. The two forms are mutually exclusive and
-both pass through the same budget validation. When paired with
-`--autonomous-replan-recorded`, a valid packet counts as the machine-visible
-`goal_vision_patch` repair delta. An invalid or over-budget packet fails the
-command instead of recording a partial ACK.
+both pass through the same budget validation. When a vision-derived replan duty
+is open, a valid packet counts only when it carries a fresh evidence-linked path
+outcome accepted by the shared semantic write gate. An invalid, over-budget, or
+pathless packet fails instead of recording a partial closure.
 
 Inline vision writes require `--agent-id`. JSON packets must also resolve to
 the same `agent_id` as the refresh run. This keeps `research-executor`,
@@ -153,8 +150,8 @@ memory or owner reminders.
 ## Vision Checkpoint
 
 `refresh-state` is the normal closeout boundary for a LoopX turn. When a turn
-records a material delivery outcome, records an autonomous replan ACK, or
-updates the durable `## Next Action`, it emits a per-agent
+records a material delivery outcome or updates the durable `## Next Action`,
+it emits a per-agent
 `vision_checkpoint_v0`:
 
 ```json
@@ -177,8 +174,6 @@ Valid checkpoint decisions are:
   applies, with a compact public-safe reason. A reason cannot create the first
   vision baseline; without one, the checkpoint remains `missing_required` and
   requires `write_vision_patch`;
-- `retired_or_superseded`: the frontier was explicitly closed, superseded, or
-  given a no-follow-up rationale;
 - `missing_required`: the turn was material but did not make a per-agent vision
   decision; and
 - `not_required`: no material closeout trigger was present.
@@ -187,8 +182,8 @@ Valid checkpoint decisions are:
 history, quota filters it by current `agent_id`, and goal-frontier projection
 turns it into `acceptance_gaps[]`. If the current agent has no runnable
 advancement frontier, that gap can trigger `autonomous_replan_required`.
-For the same `agent_id`, a newer satisfied checkpoint with `patched`,
-`unchanged_with_reason`, or `retired_or_superseded` supersedes older
+For the same `agent_id`, a newer satisfied checkpoint with `patched` or
+`unchanged_with_reason` supersedes older
 `missing_required` checkpoints; `not_required` does not.
 
 A satisfied checkpoint is protocol-complete, but a material closeout also has
@@ -198,8 +193,9 @@ refresh must name the active `acceptance_summary`, attach public-safe
 
 - `continue` or `no_change` when the new evidence supports the final-outcome
   path and the delivery did not report `outcome_gap`; or
-- `replan` when the evidence contradicts or leaves the path open and the same
-  refresh records an autonomous replan with a real frontier delta.
+- `replan` when the evidence contradicts or leaves the path open. The typed
+  path outcome is itself the vision decision; it does not rely on a legacy
+  autonomous-replan ACK flag.
 
 An older path delta, an unchanged-with-reason decision, or an unrelated
 runnable todo does not qualify the material closeout. Quota projects
@@ -210,17 +206,15 @@ qualifying checkpoint. Todo completion is therefore the checkpoint timing
 signal, not proof that the final acceptance contract is done; the evidence
 decides whether to continue, replan/supersede, or close.
 
-Checkpoint and autonomous-replan ACK packets are protocol records, not semantic
-completion proof. A future monitor schedule is also not completion proof; it
-only says when to poll. A recent same-agent ACK may suppress duplicate
-monitor-only empty-frontier requests only after it explicitly carries
-`watch_lane_continuation`, and after the current per-agent vision has no
-projected acceptance gap. Generic deltas such as a vision patch, no-follow-up,
-or active next action do not authorize a monitor-only wait by themselves. An
-ACK from another agent lane must not clear this lane's empty-frontier
-obligation. If evidence, successor state, blocker state, or a superseding
+Checkpoint packets, context-delivery receipts, manual evidence reads, and
+historical autonomous-replan ACKs are protocol records, not semantic completion
+proof. A future monitor schedule is also not completion proof; it only says
+when to poll. If evidence, successor state, blocker state, or a superseding
 vision packet still shows the vision is unmet, the acceptance gap remains
-authoritative and quota must continue to project replan work.
+authoritative and quota must continue to project replan work. The write-time
+gate derives that same obligation from the goal-frontier reducer, so a
+maintenance classification or an ACK for an earlier periodic duty cannot bypass
+a newly rotated vision duty.
 
 ### Semantic History Continuity
 
@@ -265,8 +259,8 @@ ACK, it must audit the current evidence against the active
    outputs, successor state, blocker state, or a superseding vision packet.
 3. Treat weak, indirect, stale, or protocol-only evidence as incomplete.
 4. Before external research, inspect the selected goal's registry-declared
-   `topic_authority` and `project_materials`, preferring projected
-   `agent_material_frontier` or `required_reads`. Use role, freshness, revision,
+   `topic_authority` and `project_materials`, preferring the host-projected
+   replan coverage ledger and `agent_material_frontier`. Use role, freshness, revision,
    boundary, gate status, and conflict rule to select permitted references.
    Registration guides discovery; it neither grants access nor proves acceptance.
 5. If projected evidence and permitted registry references remain weak, and the
@@ -285,10 +279,10 @@ selected todo, recorded a checkpoint, or observed that another lane is quiet.
 The audit also exposes a compact deterministic `vision_gap_judge_v0`
 instruction packet for the agent. It borrows the strict done-judge stance used
 by autonomous goal loops without calling an LLM: the agent is told to compare
-the active vision `acceptance_summary` with projected evidence, using
-projected required reads, an explicit agent-scoped `loopx evidence-log
---goal-id <goal> --agent-id <agent> --thin` read when available, then permitted
-registry-declared material references. Bounded public web research is the next
+the active vision `acceptance_summary` with the host-projected coverage ledger,
+then permitted registry-declared material references. The agent-scoped
+`evidence-log` remains an operator diagnostic, not a mandatory model ritual.
+Bounded public web research is the next
 fallback when those sources are missing or stale and the gap depends on public
 facts. `done=true` is only valid
 when the response or state clearly provides one of these outcomes:
@@ -420,21 +414,16 @@ A valid replan writes at least one bounded delta:
 }
 ```
 
-An acknowledgement without a vision, todo, acceptance, or no-follow-up delta is
-a `replan_noop` and must not clear the obligation.
-
-`refresh-state` does not treat a caller-supplied delta kind as proof. A
-`runnable_todo_set` claim must resolve to a scoped open advancement todo. A
-`watch_lane_continuation` claim must resolve to a scoped monitor with a target,
-parseable cadence and next due time, plus an unexpired expiry or unresolved
-resume condition; it cannot settle a `repeat_until_closed` vision. Todo scope
-uses the canonical claim, exclusion, and removed-continuation predicate.
-`successor_or_supersede` must resolve a completed Todo to an existing scoped
-open advancement successor, while `no_followup` must resolve the canonical
-terminal closure proof. Every frontier-clearing delta kind requires an evidence
-resolver; kinds without one cannot form ACK evidence. Rejected claims remain
-visible in the repair delta contract and the acknowledgement is a no-op when no
-verified frontier delta remains.
+An acknowledgement without a typed semantic delta is a no-op and must not clear
+the obligation. `refresh-state` does not treat classification prose,
+`--autonomous-replan-recorded`, or a caller-supplied repair kind as proof. New
+writebacks use `typed_progress_observation_v0`: changed surface, hypothesis, or
+probe identifiers are compared with the obligation baseline; a successor id
+must resolve to a current runnable advancement Todo; blockers must be new and
+evidence-backed; terminal results require coverage scope and evidence. A
+vision-derived duty accepts only its declared vision outcomes. Historical
+repair ACKs are not accepted by the semantic replan reducer; they remain inert
+history rather than a compatibility closure path.
 
 ### Bad Case: ACK Hidden By Scheduler Accounting
 
@@ -470,12 +459,13 @@ compact goal-route facts:
 These fields are projections. Writeback still goes through LoopX write APIs,
 not through dashboards, Lark mirrors, or chat text.
 
-When quota requires an autonomous replan, the required evidence read is scoped
-to the current agent's recent public-safe evidence ledger. A todo-specific
-evidence read may be useful as drill-down, but it is not sufficient as the
-decision basis for watch-lane continuation, no-follow-up, or successor choice.
-If local evidence is empty, stale, or contradictory, the agent may use bounded
-public-safe search as supporting evidence and write back source references.
+When quota requires an autonomous replan, the host projects the current agent's
+recent public-safe evidence ledger into `replan_context_v0`; a weak
+protocol-following model does not need to discover and execute a separate read
+ritual. A todo-specific evidence read remains useful as drill-down, but its
+receipt proves only context access. If projected evidence is empty, stale, or
+contradictory, the agent may use bounded public-safe search and write back
+source references with the typed observation.
 
 ## Write / Correction Mechanism
 
@@ -498,8 +488,8 @@ todo, PR, capability, or monitor wait should normally update its own todo plus
 `replan_trigger_summary` or `last_patch_summary`; it must not replace the
 role's broader `vision_summary` merely because that dependency is current.
 
-JSON packets are complete generated updates. During
-`--autonomous-replan-recorded`, changing an existing `vision_summary`,
+JSON packets are complete generated updates. When satisfying a current
+vision-derived replan obligation, changing an existing `vision_summary`,
 `role_scope`, `acceptance_summary`, or `advancement_policy` requires a
 `goal_path_delta_v0` with `outcome=replan`, regardless of whether the update
 arrived through JSON or inline flags. This keeps a real mainline change
@@ -522,12 +512,13 @@ A change satisfies this contract only when:
   global goal-level noise;
 - quota/status and `interaction_contract` expose a
   `vision_continuation_audit_v0` before todo closeout, no-follow-up,
-  `--vision-unchanged-reason`, or replan ACK;
+  `--vision-unchanged-reason`, or typed replan writeback;
 - ordinary `refresh-state` calls can write bounded vision corrections without a
   separate self-repair-only path;
 - replan state is decided from goal-level projection before local quiet/wait
   classifications;
-- replan can clear an obligation only by writing a bounded delta;
+- replan can clear an obligation only by writing a typed semantic delta accepted
+  against the current goal-frontier obligation;
 - durable replan ACKs survive neutral scheduler/accounting runs until material
   frontier state changes;
 - `quota.py` consumes the resulting projection instead of storing vision logic;

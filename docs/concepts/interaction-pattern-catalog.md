@@ -2168,37 +2168,37 @@ replan obligation, but they stay a side lane: they can inform review or repair,
 not enter promotion/execution until the blocking replan obligation is absent or
 resolved. The two lanes must not collapse into each other.
 
-Replan closeout is explicit. A normal validated progress refresh may record
-useful work, but it must not silently close the
-`autonomous_replan_obligation_v0`. After the agent performs the bounded replan
-slice and writes back the selected todo/guidance changes, it must append a
-structured ACK:
+Replan closeout is semantic and causally bound. A normal validated progress
+refresh may record useful work, but it must not silently close the
+`autonomous_replan_obligation_v0`. Quota first projects the evidence-log into a
+compact coverage ledger and emits an opaque `obligation_id`; after the bounded
+slice, the agent writes one typed observation. When the result is a runnable
+successor, the Todo transition itself is the receipt:
 
 ```bash
-loopx refresh-state \
+loopx todo add \
   --goal-id <goal-id> \
-  --classification autonomous_replan_recorded \
-  --autonomous-replan-recorded \
-  --repair-delta-kind runnable_todo_set \
-  --delivery-batch-scale <scale> \
-  --delivery-outcome <outcome>
+  --role agent \
+  --task-class advancement_task \
+  --text '[P0] <bounded next slice>' \
+  --claimed-by <agent-id> \
+  --replan-obligation-id <current-obligation-id>
 ```
 
-The resulting run carries `autonomous_replan_ack_v0` with
-`repair_delta_contract_v0`. Classification remains a human-readable history
-label; the structured ACK plus `delta_present=true` is the control-plane signal
-that lets status/quota stop projecting the replan obligation. This keeps agents
-responsible for actively closing the loop instead of relying on loose
-classification wording such as `autonomous_replan_validated_*`.
-If `--autonomous-replan-recorded` is used without a delta, the run is stored as
-`replan_noop`/`repair_noop`; any progress outcome is downgraded so it cannot
-hide the unresolved obligation.
+The Todo row atomically carries a semantic receipt bound to the exact current
+obligation and returns `host_action=end_current_heartbeat`; the successor runs
+on the next heartbeat rather than in the replan turn. Other typed observations
+still use the projected `refresh-state` template. Accepted outcomes are typed:
+a new surface, hypothesis, probe
+family, current runnable successor, evidence-backed blocker, coverage-backed
+terminal, or—only for vision-derived duties—a fresh evidence-linked vision path.
+Classification prose, an evidence read receipt, a caller-claimed repair kind,
+or an ACK bound to an earlier obligation cannot close the current one.
 
-A replan ACK should also change the work frontier. It should add, split,
-supersede, complete-with-successor, or block a todo, or else record an explicit
-watch-lane continuation. If the runnable todo set, user gate, blocker state,
-monitor target, or `effective_action` does not change, the replan is likely a
-no-op and should not hide the stall.
+`refresh-state` recomputes the same full goal-frontier context as quota before
+any durable write. A materially equivalent observation, repeated blocker,
+ungrounded successor, or maintenance-only writeback therefore fails closed;
+it cannot create a quiet false-progress loop.
 
 **Visual Model**
 

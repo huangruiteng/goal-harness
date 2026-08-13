@@ -828,22 +828,29 @@ def main() -> int:
             "--progress-scope",
             "goal",
             "--classification",
-            "monitor_poll_autonomous_replan_recorded_v0",
-            "--autonomous-replan-recorded",
-            "--repair-delta-kind",
-            "watch_lane_continuation",
-            "--vision-unchanged-reason",
-            "watch lane continuation recorded; no current acceptance gap is claimed complete",
+            "bounded_replan_progress",
+            "--progress-result-class",
+            "no_followup",
+            "--progress-coverage-scope-id",
+            "monitor-fixture-frontier",
+            "--progress-evidence-id",
+            "evidence:monitor-fixture-boundedness",
             "--delivery-batch-scale",
             "single_surface",
             "--delivery-outcome",
-            "outcome_progress",
+            "surface_only",
             "--no-global-sync",
             registry_path=registry_path,
             runtime=runtime,
         )
         assert refresh["ok"] is True, refresh
-        assert refresh["delivery_outcome"] == "outcome_gap", refresh
+        assert refresh["delivery_outcome"] == "surface_only", refresh
+        assert refresh["progress_observation"]["result_class"] == "no_followup", refresh
+        refresh_delta = refresh["autonomous_replan_ack"]["semantic_delta"]
+        assert refresh_delta["accepted"] is True, refresh
+        assert refresh_delta["obligation_id"] == (
+            first_guard["autonomous_replan_obligation"]["obligation_id"]
+        ), (first_guard, refresh)
 
         post_refresh_guard = run_cli(
             root,
@@ -1051,14 +1058,13 @@ def main() -> int:
             "--progress-scope",
             "agent_lane",
             "--classification",
-            "monitor_poll_autonomous_replan_recorded_v0",
-            "--autonomous-replan-recorded",
-            "--repair-delta-kind",
-            "watch_lane_continuation",
-            "--repair-delta-kind",
+            "bounded_replan_progress",
+            "--progress-result-class",
             "no_followup",
-            "--vision-unchanged-reason",
-            "watch lane continuation recorded; no current acceptance gap is claimed complete",
+            "--progress-coverage-scope-id",
+            "monitor-agent-lane-frontier",
+            "--progress-evidence-id",
+            "evidence:monitor-agent-lane-boundedness",
             "--delivery-batch-scale",
             "single_surface",
             "--delivery-outcome",
@@ -1271,11 +1277,12 @@ def main() -> int:
         assert interaction["mode"] == "autonomous_replan", interaction
         assert interaction["agent_channel"]["must_attempt"] is True, interaction
         assert interaction["agent_channel"]["delivery_allowed"] is True, interaction
-        required_reads = interaction["agent_channel"]["required_reads"]
-        assert required_reads[0]["kind"] == "agent_scoped_evidence_log", required_reads
-        assert required_reads[0]["agent_id"] == "codex-side-bypass", required_reads
-        assert required_reads[0]["todo_id"] is None, required_reads
-        assert "--agent-id codex-side-bypass" in required_reads[0]["command"], required_reads
+        assert "required_reads" not in interaction["agent_channel"], interaction
+        assert guard["replan_action_packet"]["required_outcome"] == (
+            "semantic_delta"
+        ), guard
+        replan_context = guard["autonomous_replan_obligation"]["replan_context"]
+        assert replan_context["delivery"] == "host_projected", replan_context
 
     with tempfile.TemporaryDirectory(prefix="loopx-external-evidence-projection-") as tmp:
         root = Path(tmp)

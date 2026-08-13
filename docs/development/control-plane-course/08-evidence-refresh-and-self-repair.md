@@ -372,29 +372,36 @@ provider 与 default-off 边界见[第 11 讲的 Reward Memory](11-extension-lay
 
 ## Replan 与 Dreaming
 
-Replan 是当前目标图上的机器可见变化：
+Replan 是当前目标图或覆盖账本上的机器可见语义变化：
 
-- 新增/删除/重排 todo；
-- 修改 gate/blocker；
-- 写 successor/supersede；
-- 改 acceptance/vision；
-- 修复 capability/workspace route。
+- 新 surface、hypothesis 或 probe family；
+- 当前状态中真实 runnable 的 successor Todo；
+- 新的、带 evidence 的 blocker；
+- 带覆盖证明的 `exploration_exhausted` / `no_followup`；
+- 对 vision-derived obligation，带 evidence 的新 vision path outcome。
 
 Dreaming 是探索未来可能性，可以产生 proposal，但不能替代当前 runnable frontier。
 
-一个 replan 只有在 `repair_delta_kind` 指明变化时才清除 obligation：
+quota 会把 evidence-log 压成 host-projected coverage ledger，并给出当前
+`obligation_id`。新 surface / hypothesis / probe 用 typed observation 写回；如果
+replan 的结果是下一条 runnable direction，则 Todo 本身就是原子语义 receipt：
 
 ```bash
-loopx refresh-state \
+loopx todo add \
   --goal-id <goal-id> \
-  --classification control_plane_repaired \
-  --autonomous-replan-recorded \
-  --repair-delta-kind runnable_todo_set \
-  --repair-delta-kind successor_or_supersede \
-  --agent-id <agent-id>
+  --role agent \
+  --task-class advancement_task \
+  --text '[P0] <bounded next slice>' \
+  --claimed-by <agent-id> \
+  --replan-obligation-id <current-obligation-id>
 ```
 
-只有 ACK，没有 delta，是 `replan_noop`。
+成功结果返回 `host_action=end_current_heartbeat`。fine-grained host 应立即结算本轮，
+下一 heartbeat 再执行新 Todo；不需要再调用一次 `refresh-state` 来 ACK Todo。
+其他 typed observation 仍通过 action packet 给出的 `refresh-state` 模板写回。
+
+写时 gate 会重算与 quota 相同的完整 goal frontier。旧 ACK、读收据、prose-only
+classification 或 caller 自报 repair kind 都不能关闭新 obligation。
 
 ## Projection Gap 的 Self-Repair
 
@@ -615,22 +622,24 @@ loopx refresh-state ... --suppress-external-sinks
 在实验 goal 中：
 
 1. 创建一个没有 successor 的 blocked todo；
-2. 运行 quota，记录 repair/replan obligation；
-3. 只运行 `--autonomous-replan-recorded`，观察 obligation 不应清除；
-4. 添加具体 successor 或 resume condition；
-5. 再运行 refresh，并声明对应 `repair_delta_kind`；
-6. 检查 quota 是否看到新 frontier。
+2. 运行 quota，记录 `obligation_id` 与 host-projected coverage ledger；
+3. 只写 classification 或重复 baseline observation，观察写时 gate 拒绝；
+4. 用带当前 `obligation_id` 的单条 `todo add` 添加 runnable successor，或写回带
+   evidence 的新 blocker；
+5. 如果 Todo 命令返回 `host_action=end_current_heartbeat`，结束本轮，不再执行
+   第二条 ACK 命令；
+6. 检查 receipt 是否绑定当前 obligation，quota 是否看到新 frontier。
 
 示例：
 
 ```bash
-loopx refresh-state \
+loopx todo add \
   --goal-id <lab-goal> \
-  --classification lab_replan \
-  --autonomous-replan-recorded \
-  --repair-delta-kind successor_or_supersede \
-  --agent-id <lab-agent> \
-  --vision-unchanged-reason "lab acceptance remains unchanged"
+  --role agent \
+  --task-class advancement_task \
+  --text '[P0] Validate the newly selected surface' \
+  --claimed-by <lab-agent> \
+  --replan-obligation-id <current-obligation-id>
 ```
 
 ## Turn Journal 只拥有事务恢复
@@ -678,32 +687,29 @@ work effect
   -> spend-slot 绑定最新未消费 delivery run
 ```
 
-### 1. Repair 不能只写 classification，必须带 delta
+### 1. Replan 不能靠 classification 或 ACK，必须带 typed semantic delta
 
-`loopx/state_refresh.py::build_repair_delta_contract` 只承认真正的状态变化：
+`loopx/control_plane/work_items/progress_observation.py` 从显式 enum 与稳定 ID
+推导语义变化，不从 prose 猜测：
 
 ```python
-delta_kinds = list(requested_delta_kinds)
-if active_state_next_action_update.get("updated") is True:
-    delta_kinds.append("active_state_next_action")
-    evidence.append({"source": "refresh_state_next_action_update", ...})
-if agent_vision:
-    delta_kinds.append("goal_vision_patch")
-    evidence.append({"source": "refresh_state_agent_vision", ...})
-
-return {
-    "required": True,
-    "delta_present": bool(delta_kinds),
-    "delta_kinds": delta_kinds,
-    "accepted_without_delta": False,
-}
+observation = normalize_progress_observation(progress_observation)
+delta = semantic_progress_delta(
+    observation,
+    baseline=obligation.get("progress_baseline"),
+)
 ```
 
-`--autonomous-replan-recorded` 只是声明，不会自动制造 delta。没有 successor、resume condition、Next Action 或 vision patch 时，refresh 应降级为 `replan_noop`/`repair_noop`，而不是清除 obligation。
+成功 receipt 必须携带当前 `obligation_id`，且 outcome 属于该 obligation 的
+`required_any_of`。`new_runnable_successor` 不走 `refresh-state` 的 successor 声明；
+它由 `todo add --replan-obligation-id <current>` 原子创建 Todo 与 receipt，避免“先写
+Todo、再补 ACK”的半完成状态。历史 repair ACK 只允许在 read model 中解释旧记录，
+不再是写路径。
 
 ### 2. Vision checkpoint 防止“局部推进，目标悄悄漂移”
 
-`build_vision_checkpoint` 先从 material outcome、replan 和 durable Next Action 生成 triggers：
+`build_vision_checkpoint` 只从 material outcome 与 durable Next Action 生成 triggers；
+replan 本身不再冒充 vision 完成：
 
 ```python
 required = bool(triggers or unchanged_reason)
@@ -711,15 +717,16 @@ if agent_vision:
     decision, satisfied = "patched", True
 elif unchanged_reason and existing_agent_vision:
     decision, satisfied = "unchanged_with_reason", True
-elif delta_kinds & {"no_followup", "successor_or_supersede"}:
-    decision, satisfied = "retired_or_superseded", True
 elif required:
     decision, satisfied = "missing_required", False
 else:
     decision, satisfied = "not_required", True
 ```
 
-`vision_unchanged_reason` 只有在已有 baseline 时才诚实；没有 baseline 却声称 unchanged，会得到 `missing_required`。这迫使 agent 明确：是更新目标、证明目标未变，还是用 successor/no-followup 关闭当前 vision。
+`vision_unchanged_reason` 只有在已有 baseline 时才诚实；没有 baseline 却声称
+unchanged，会得到 `missing_required`。这迫使 agent 明确写入 vision/path outcome；
+创建 successor 可以关闭当前 replan obligation，但不能伪造一个缺失的 vision
+checkpoint。
 
 ### 3. Refresh 对 multi-agent attribution fail closed
 
@@ -816,7 +823,7 @@ CLI/status/quota 并补 smoke；只更新文档不会改变机器的下一次决
 
 ### 断点练习
 
-1. 只传 `--autonomous-replan-recorded`，观察 `delta_present=False`。
+1. 写入与 baseline 物质等价的 typed observation，观察 write gate 拒绝。
 2. multi-agent goal 不传 `--agent-id`，确认 refresh 在写文件前失败。
 3. 用 `agent_lane` 同时传 `--next-action`，确认共享状态写入被拒绝。
 4. 在一个 worktree refresh，切到另一个 checkout preview spend，观察 workspace guard。

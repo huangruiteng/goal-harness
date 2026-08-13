@@ -53,7 +53,6 @@ from loopx.control_plane.goals.goal_frontier.replan_rules import (
                 "acceptance_gap_count": 1,
                 "selectable_frontier_advancement": 1,
                 "outcome_checkpoint_replan_required": True,
-                "acceptance_allows_watch_lane_continuation": True,
             },
             GoalFrontierReplanRule.VISION_ACCEPTANCE_GAP,
             True,
@@ -65,24 +64,6 @@ from loopx.control_plane.goals.goal_frontier.replan_rules import (
             },
             GoalFrontierReplanRule.LONG_TODO_CHAIN,
             True,
-        ),
-        (
-            {
-                "long_todo_chain_triggered": True,
-                "long_todo_chain_acknowledged": True,
-                "selectable_frontier_advancement": 15,
-            },
-            GoalFrontierReplanRule.LONG_TODO_CHAIN_ACKNOWLEDGED,
-            False,
-        ),
-        (
-            {
-                "watch_lane_continuation_acknowledged": True,
-                "monitor_only_lane": True,
-                "monitor_count": 1,
-            },
-            GoalFrontierReplanRule.WATCH_LANE_CONTINUATION_ACKNOWLEDGED,
-            False,
         ),
         (
             {

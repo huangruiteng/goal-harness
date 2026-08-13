@@ -523,8 +523,9 @@ def execute_loopx_cli(
         timeout=timeout_seconds,
     )
     if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
         raise RuntimeError(
-            "LoopX read command failed with "
-            f"exit={completed.returncode}: {completed.stderr[-500:]}"
+            "LoopX CLI command failed with "
+            f"exit={completed.returncode}: {detail[-500:]}"
         )
     return completed.stdout
