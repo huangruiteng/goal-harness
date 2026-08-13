@@ -33,8 +33,15 @@ from .control_plane.work_items.repair_delta import (
     repair_delta_kinds_have_accountable_progress,
 )
 from .control_plane.work_items.autonomous_replan_ack import (
+    REPLAN_REQUIRED_READ_LIMIT,
     latest_monitor_replan_frontier_identity,
     watch_lane_continuation_todo_ids,
+)
+from .control_plane.runtime.agent_scoped_evidence_log import (
+    build_agent_scoped_evidence_log_command,
+)
+from .control_plane.status.autonomous_replan_projection import (
+    autonomous_replan_obligation_from_runs,
 )
 from .control_plane.runtime.shared_runtime_refresh_projection import (
     build_shared_runtime_projection,
@@ -876,6 +883,62 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def reject_maintenance_writeback_during_open_replan(
+    *,
+    classification: str,
+    vision_unchanged_reason: str | None,
+    repair_delta_kinds: list[str] | None,
+    autonomous_replan_recorded: bool,
+    newest_first_runs: list[dict[str, Any]] | None,
+    state_text: str,
+    agent_id: str,
+    goal_id: str,
+) -> None:
+    """Reject no-progress writebacks while an autonomous replan is due.
+
+    The quota layer enforces replan evidence passively at projection time; this
+    is the write-time gate so a maintenance writeback cannot keep the obligation
+    open forever. ACK-form writebacks and writebacks that carry a repair delta or
+    a material classification are unaffected.
+    """
+
+    safe_agent_id = str(agent_id or "").strip()
+    if not safe_agent_id or autonomous_replan_recorded:
+        return
+    if repair_delta_kinds:
+        return
+    maintenance_writeback = (
+        str(classification or "").strip().lower() == "source_audit_progress"
+        or bool(vision_unchanged_reason)
+    )
+    if not maintenance_writeback:
+        return
+    agent_todos = parse_active_state_todos(state_text, item_limit=None).get(
+        "agent_todos"
+    )
+    obligation = autonomous_replan_obligation_from_runs(
+        newest_first_runs,
+        agent_todos=agent_todos,
+        agent_id=safe_agent_id,
+    )
+    if not obligation:
+        return
+    obligation_id = str(obligation.get("obligation_id") or "").strip()
+    read_command = build_agent_scoped_evidence_log_command(
+        goal_id=goal_id,
+        agent_id=safe_agent_id,
+        limit=REPLAN_REQUIRED_READ_LIMIT,
+        required_read_id=obligation_id or None,
+    )
+    raise ValueError(
+        "an open autonomous replan obligation requires a replan delta; "
+        "maintenance writebacks (source_audit_progress / unchanged) are rejected "
+        f"while it is open. Read `{read_command}` then write the ACK with "
+        "`loopx refresh-state --classification autonomous_replan_recorded "
+        "--autonomous-replan-recorded --repair-delta-kind <kind> ...`"
+    )
+
+
 def refresh_state_run(
     *,
     registry_path: Path,
@@ -1082,11 +1145,7 @@ def refresh_state_run(
     existing_agent_vision: dict[str, Any] | None = None
     autonomous_replan_frontier_identity: str | None = None
     newest_first_runs: list[dict[str, Any]] = []
-    if normalized_agent_id and (
-        agent_vision_packet is not None
-        or normalized_vision_unchanged_reason
-        or autonomous_replan_recorded
-    ):
+    if normalized_agent_id:
         existing_runs, _ = load_index(
             runtime_root / "goals" / safe_goal_id / "runs" / "index.jsonl"
         )
@@ -1103,6 +1162,16 @@ def refresh_state_run(
             goal_id=safe_goal_id,
             agent_id=normalized_agent_id,
         )
+    reject_maintenance_writeback_during_open_replan(
+        classification=classification,
+        vision_unchanged_reason=normalized_vision_unchanged_reason,
+        repair_delta_kinds=normalized_repair_delta_kinds,
+        autonomous_replan_recorded=autonomous_replan_recorded,
+        newest_first_runs=newest_first_runs,
+        state_text=state_text,
+        agent_id=normalized_agent_id,
+        goal_id=safe_goal_id,
+    )
     if agent_vision_packet is not None:
         agent_vision = normalize_goal_vision_update(
             agent_vision_packet,
