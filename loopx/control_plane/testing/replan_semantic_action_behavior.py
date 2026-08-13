@@ -60,6 +60,23 @@ class _ReplanSemanticActionFixture:
     work_source_target: Path
 
 
+@dataclass
+class _QualificationState:
+    fixture: _ReplanSemanticActionFixture
+    messages: list[dict[str, Any]]
+    steps: list[dict[str, Any]]
+    turn_instance_id: str
+    quota_packet: dict[str, Any] | None = None
+    quota_observation: dict[str, Any] | None = None
+    semantic_delta: dict[str, Any] | None = None
+    seen_quota: bool = False
+    seen_clock: bool = False
+    read_only_host_commands_executed: bool = False
+    frontier_context_read: bool = False
+    work_source_read: bool = False
+    created_successor_id: str | None = None
+
+
 def _digest(value: str) -> str:
     return digest_text(value)
 
@@ -513,6 +530,307 @@ def _receipt(
     return receipt
 
 
+def _qualification_receipt(
+    state: _QualificationState,
+    *,
+    qualification_id: str,
+    actor_ref: str,
+    passed: bool,
+    failure_code: str | None,
+) -> dict[str, Any]:
+    return _receipt(
+        qualification_id=qualification_id,
+        actor_ref=actor_ref,
+        steps=state.steps,
+        passed=passed,
+        failure_code=failure_code,
+        quota_observation=state.quota_observation,
+        semantic_delta=state.semantic_delta,
+        local_fixture_writes_executed=True,
+        read_only_host_commands_executed=state.read_only_host_commands_executed,
+    )
+
+
+def _record_tool_step(
+    state: _QualificationState,
+    *,
+    kind: str,
+    command: str,
+) -> None:
+    state.steps.append(
+        {
+            "ordinal": len(state.steps) + 1,
+            "kind": kind,
+            "command_digest": _digest(command),
+        }
+    )
+
+
+def _handle_quota_command(command: str, state: _QualificationState) -> str:
+    if state.seen_quota:
+        raise ValueError("repeated_quota_should_run")
+    output = _execute_loopx(
+        command,
+        fixture=state.fixture,
+        turn_instance_id=state.turn_instance_id,
+    )
+    decoded = json.loads(output)
+    if not isinstance(decoded, dict):
+        raise ValueError("quota result must be an object")
+    state.quota_packet = decoded
+    state.quota_observation = _quota_behavior_observation(decoded)
+    state.seen_quota = True
+    state.read_only_host_commands_executed = True
+    return output
+
+
+def _handle_clock_command(output: str, state: _QualificationState) -> str:
+    if state.seen_clock:
+        raise ValueError("repeated_clock")
+    state.seen_clock = True
+    state.read_only_host_commands_executed = True
+    return output
+
+
+def _handle_workspace_read(command: str, state: _QualificationState) -> str:
+    output, read_frontier, read_work_source = _execute_workspace_read(
+        command,
+        fixture=state.fixture,
+    )
+    state.frontier_context_read = state.frontier_context_read or read_frontier
+    state.work_source_read = state.work_source_read or read_work_source
+    state.read_only_host_commands_executed = True
+    return output
+
+
+def _expected_obligation_id(state: _QualificationState) -> str:
+    if state.quota_packet is None:
+        raise ValueError("semantic_action_before_quota")
+    obligation = state.quota_packet.get("autonomous_replan_obligation")
+    if not isinstance(obligation, Mapping):
+        raise ValueError("quota_obligation_missing")
+    obligation_id = str(obligation.get("obligation_id") or "").strip()
+    if not obligation_id:
+        raise ValueError("quota_obligation_missing")
+    return obligation_id
+
+
+def _require_observed_frontier(state: _QualificationState, *, prefix: str) -> None:
+    if state.quota_packet is None:
+        raise ValueError(f"{prefix}_before_quota")
+    if not state.frontier_context_read:
+        raise ValueError(f"{prefix}_before_frontier_read")
+    if not state.work_source_read:
+        raise ValueError(f"{prefix}_before_work_source_read")
+
+
+def _handle_successor_command(command: str, state: _QualificationState) -> str:
+    _require_observed_frontier(state, prefix="successor_create")
+    if state.created_successor_id is not None:
+        raise ValueError("repeated_successor_create")
+    expected_obligation_id = _expected_obligation_id(state)
+    requested_obligation_id = argument_value(
+        loopx_command_tokens(command) or [],
+        "--replan-obligation-id",
+    )
+    if requested_obligation_id != expected_obligation_id:
+        raise ValueError("successor_create_obligation_mismatch")
+    output = _execute_loopx(
+        command,
+        fixture=state.fixture,
+        turn_instance_id=state.turn_instance_id,
+    )
+    decoded = json.loads(output)
+    state.created_successor_id = (
+        str(decoded.get("todo_id") or "").strip()
+        if isinstance(decoded, dict)
+        else ""
+    )
+    if not (
+        isinstance(decoded, dict)
+        and decoded.get("ok") is True
+        and decoded.get("added") is True
+        and state.created_successor_id
+        and decoded.get("host_action") == "end_current_heartbeat"
+    ):
+        raise ValueError("successor_create_failed")
+    transition = decoded.get("replan_transition")
+    if not (
+        isinstance(transition, dict)
+        and transition.get("recorded") is True
+        and transition.get("obligation_id") == expected_obligation_id
+        and transition.get("successor_todo_id") == state.created_successor_id
+        and transition.get("outcome") == "new_runnable_successor"
+    ):
+        raise ValueError("successor_transition_missing")
+    state.semantic_delta = {
+        "accepted": True,
+        "satisfying_outcomes": ["new_runnable_successor"],
+    }
+    return output
+
+
+def _handle_semantic_writeback(
+    command: str,
+    observation: Mapping[str, Any],
+    state: _QualificationState,
+) -> str:
+    _require_observed_frontier(state, prefix="semantic_action")
+    matches_observed_surface = bool(
+        observation.get("surface_id") == _FIXTURE_NEW_SURFACE_ID
+        and observation.get("hypothesis_id") == _FIXTURE_NEW_HYPOTHESIS_ID
+        and observation.get("probe_kind") == _FIXTURE_NEW_PROBE_KIND
+        and _FIXTURE_NEW_EVIDENCE_ID in set(observation.get("evidence_ids") or [])
+    )
+    if not matches_observed_surface:
+        raise ValueError("semantic_action_misses_uncovered_frontier")
+    obligation_id = _expected_obligation_id(state)
+    obligation = dict(
+        (state.quota_packet or {}).get("autonomous_replan_obligation") or {}
+    )
+    if obligation.get("obligation_id") != obligation_id:
+        raise ValueError("quota_obligation_missing")
+    state.semantic_delta = semantic_delta_from_writeback(
+        obligation=obligation,
+        progress_observation=observation,
+    )
+    if state.semantic_delta.get("accepted") is not True:
+        raise ValueError("non_semantic_replan_action")
+    output = _execute_loopx(
+        command,
+        fixture=state.fixture,
+        turn_instance_id=state.turn_instance_id,
+    )
+    decoded = json.loads(output)
+    if not isinstance(decoded, dict) or decoded.get("ok") is not True:
+        raise ValueError("semantic_writeback_failed")
+    return output
+
+
+def _dispatch_behavior_command(
+    command: str,
+    state: _QualificationState,
+) -> tuple[str, str, bool]:
+    if _is_quota_guard(command):
+        return _handle_quota_command(command, state), "quota_should_run", False
+    if (clock_output := _clock_output(command)) is not None:
+        return _handle_clock_command(clock_output, state), "clock", False
+    if _bounded_workspace_read_plan(command, fixture=state.fixture) is not None:
+        return _handle_workspace_read(command, state), "workspace_read", False
+    if _is_replan_successor_create(command):
+        return _handle_successor_command(command, state), "replan_successor_create", True
+    if (observation := _progress_observation_from_command(command)) is not None:
+        return (
+            _handle_semantic_writeback(command, observation, state),
+            "semantic_replan_writeback",
+            True,
+        )
+    if "evidence-log" in command:
+        raise ValueError("manual_evidence_read_is_not_replan")
+    raise ValueError("unexpected_command")
+
+
+_EXPECTED_BEHAVIOR_FAILURES = frozenset(
+    {
+        "repeated_quota_should_run",
+        "repeated_clock",
+        "semantic_action_before_quota",
+        "semantic_action_before_frontier_read",
+        "semantic_action_before_work_source_read",
+        "semantic_action_misses_uncovered_frontier",
+        "successor_create_before_quota",
+        "successor_create_before_frontier_read",
+        "successor_create_before_work_source_read",
+        "successor_create_obligation_mismatch",
+        "repeated_successor_create",
+        "successor_create_failed",
+        "successor_transition_missing",
+        "quota_obligation_missing",
+        "non_semantic_replan_action",
+        "semantic_writeback_failed",
+        "manual_evidence_read_is_not_replan",
+        "unexpected_command",
+    }
+)
+
+
+def _behavior_failure_code(exc: Exception, *, kind: str) -> str:
+    failure = str(exc)
+    return failure if failure in _EXPECTED_BEHAVIOR_FAILURES else f"{kind}_execution_failed"
+
+
+def _append_tool_response(
+    state: _QualificationState,
+    *,
+    tool_call: Any,
+    output: str,
+) -> None:
+    state.messages.extend(
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [tool_call.provider_value],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.call_id,
+                "content": output,
+            },
+        ]
+    )
+
+
+def _run_qualification_loop(
+    client: DoubaoExecToolClient,
+    state: _QualificationState,
+    *,
+    qualification_id: str,
+) -> dict[str, Any]:
+    for _ in range(REPLAN_SEMANTIC_ACTION_BEHAVIOR_MAX_CALLS):
+        tool_call = client.next_tool_call(state.messages)
+        if tool_call is None:
+            return _qualification_receipt(
+                state,
+                qualification_id=qualification_id,
+                actor_ref=client.actor_ref,
+                passed=False,
+                failure_code="model_returned_without_semantic_action",
+            )
+        kind = "unexpected_command"
+        try:
+            output, kind, completed = _dispatch_behavior_command(
+                tool_call.command,
+                state,
+            )
+        except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            _record_tool_step(state, kind=kind, command=tool_call.command)
+            return _qualification_receipt(
+                state,
+                qualification_id=qualification_id,
+                actor_ref=client.actor_ref,
+                passed=False,
+                failure_code=_behavior_failure_code(exc, kind=kind),
+            )
+        _record_tool_step(state, kind=kind, command=tool_call.command)
+        if completed:
+            return _qualification_receipt(
+                state,
+                qualification_id=qualification_id,
+                actor_ref=client.actor_ref,
+                passed=True,
+                failure_code=None,
+            )
+        _append_tool_response(state, tool_call=tool_call, output=output)
+    return _qualification_receipt(
+        state,
+        qualification_id=qualification_id,
+        actor_ref=client.actor_ref,
+        passed=False,
+        failure_code="tool_call_budget_exhausted",
+    )
+
+
 class DoubaoReplanSemanticActionBehaviorActor:
     """Qualify a model-selected semantic replan through the real CLI boundary."""
 
@@ -574,239 +892,15 @@ class DoubaoReplanSemanticActionBehaviorActor:
             },
             {"role": "user", "content": fixture.task_body},
         ]
-        steps: list[dict[str, Any]] = []
-        quota_packet: dict[str, Any] | None = None
-        quota_observation: dict[str, Any] | None = None
-        semantic_delta: dict[str, Any] | None = None
-        seen_quota = False
-        seen_clock = False
-        read_only_host_commands_executed = False
-        frontier_context_read = False
-        work_source_read = False
-        created_successor_id: str | None = None
-        local_fixture_writes_executed = True
         digest = sha256(qualification_id.encode()).hexdigest()[:16]
-        turn_instance_id = f"qualification-{digest}"
-
-        def receipt(*, passed: bool, failure_code: str | None) -> dict[str, Any]:
-            return _receipt(
-                qualification_id=qualification_id,
-                actor_ref=self._client.actor_ref,
-                steps=steps,
-                passed=passed,
-                failure_code=failure_code,
-                quota_observation=quota_observation,
-                semantic_delta=semantic_delta,
-                local_fixture_writes_executed=local_fixture_writes_executed,
-                read_only_host_commands_executed=read_only_host_commands_executed,
-            )
-
-        for _ in range(REPLAN_SEMANTIC_ACTION_BEHAVIOR_MAX_CALLS):
-            tool_call = self._client.next_tool_call(messages)
-            if tool_call is None:
-                return receipt(
-                    passed=False,
-                    failure_code="model_returned_without_semantic_action",
-                )
-            command = tool_call.command
-            output = ""
-            kind = "unexpected_command"
-            try:
-                if _is_quota_guard(command):
-                    if seen_quota:
-                        raise ValueError("repeated_quota_should_run")
-                    kind = "quota_should_run"
-                    output = _execute_loopx(
-                        command,
-                        fixture=fixture,
-                        turn_instance_id=turn_instance_id,
-                    )
-                    decoded = json.loads(output)
-                    if not isinstance(decoded, dict):
-                        raise ValueError("quota result must be an object")
-                    quota_packet = decoded
-                    quota_observation = _quota_behavior_observation(decoded)
-                    seen_quota = True
-                    read_only_host_commands_executed = True
-                elif (clock_output := _clock_output(command)) is not None:
-                    if seen_clock:
-                        raise ValueError("repeated_clock")
-                    kind = "clock"
-                    output = clock_output
-                    seen_clock = True
-                    read_only_host_commands_executed = True
-                elif _bounded_workspace_read_plan(command, fixture=fixture) is not None:
-                    kind = "workspace_read"
-                    output, read_frontier, read_work_source = _execute_workspace_read(
-                        command,
-                        fixture=fixture,
-                    )
-                    frontier_context_read = frontier_context_read or read_frontier
-                    work_source_read = work_source_read or read_work_source
-                    read_only_host_commands_executed = True
-                elif _is_replan_successor_create(command):
-                    kind = "replan_successor_create"
-                    if quota_packet is None:
-                        raise ValueError("successor_create_before_quota")
-                    if not frontier_context_read:
-                        raise ValueError("successor_create_before_frontier_read")
-                    if not work_source_read:
-                        raise ValueError("successor_create_before_work_source_read")
-                    if created_successor_id is not None:
-                        raise ValueError("repeated_successor_create")
-                    obligation = quota_packet.get("autonomous_replan_obligation")
-                    expected_obligation_id = str(
-                        (obligation or {}).get("obligation_id")
-                        if isinstance(obligation, Mapping)
-                        else ""
-                    ).strip()
-                    requested_obligation_id = argument_value(
-                        loopx_command_tokens(command) or [],
-                        "--replan-obligation-id",
-                    )
-                    if requested_obligation_id != expected_obligation_id:
-                        raise ValueError("successor_create_obligation_mismatch")
-                    output = _execute_loopx(
-                        command,
-                        fixture=fixture,
-                        turn_instance_id=turn_instance_id,
-                    )
-                    decoded = json.loads(output)
-                    created_successor_id = (
-                        str(decoded.get("todo_id") or "").strip()
-                        if isinstance(decoded, dict)
-                        else ""
-                    )
-                    if not (
-                        isinstance(decoded, dict)
-                        and decoded.get("ok") is True
-                        and decoded.get("added") is True
-                        and created_successor_id
-                        and decoded.get("host_action")
-                        == "end_current_heartbeat"
-                    ):
-                        raise ValueError("successor_create_failed")
-                    transition = decoded.get("replan_transition")
-                    if not (
-                        isinstance(transition, dict)
-                        and transition.get("recorded") is True
-                        and transition.get("obligation_id")
-                        == expected_obligation_id
-                        and transition.get("successor_todo_id")
-                        == created_successor_id
-                        and transition.get("outcome")
-                        == "new_runnable_successor"
-                    ):
-                        raise ValueError("successor_transition_missing")
-                    semantic_delta = {
-                        "accepted": True,
-                        "satisfying_outcomes": ["new_runnable_successor"],
-                    }
-                    steps.append(
-                        {
-                            "ordinal": len(steps) + 1,
-                            "kind": kind,
-                            "command_digest": _digest(command),
-                        }
-                    )
-                    return receipt(passed=True, failure_code=None)
-                elif (observation := _progress_observation_from_command(command)) is not None:
-                    kind = "semantic_replan_writeback"
-                    if quota_packet is None:
-                        raise ValueError("semantic_action_before_quota")
-                    if not frontier_context_read:
-                        raise ValueError("semantic_action_before_frontier_read")
-                    if not work_source_read:
-                        raise ValueError("semantic_action_before_work_source_read")
-                    matches_observed_surface = bool(
-                        observation.get("surface_id") == _FIXTURE_NEW_SURFACE_ID
-                        and observation.get("hypothesis_id")
-                        == _FIXTURE_NEW_HYPOTHESIS_ID
-                        and observation.get("probe_kind") == _FIXTURE_NEW_PROBE_KIND
-                        and _FIXTURE_NEW_EVIDENCE_ID
-                        in set(observation.get("evidence_ids") or [])
-                    )
-                    if not matches_observed_surface:
-                        raise ValueError("semantic_action_misses_uncovered_frontier")
-                    obligation = quota_packet.get("autonomous_replan_obligation")
-                    if not isinstance(obligation, Mapping):
-                        raise ValueError("quota_obligation_missing")
-                    semantic_delta = semantic_delta_from_writeback(
-                        obligation=obligation,
-                        progress_observation=observation,
-                    )
-                    if semantic_delta.get("accepted") is not True:
-                        raise ValueError("non_semantic_replan_action")
-                    output = _execute_loopx(
-                        command,
-                        fixture=fixture,
-                        turn_instance_id=turn_instance_id,
-                    )
-                    decoded = json.loads(output)
-                    if not isinstance(decoded, dict) or decoded.get("ok") is not True:
-                        raise ValueError("semantic_writeback_failed")
-                    steps.append(
-                        {
-                            "ordinal": len(steps) + 1,
-                            "kind": kind,
-                            "command_digest": _digest(command),
-                        }
-                    )
-                    return receipt(passed=True, failure_code=None)
-                elif "evidence-log" in command:
-                    raise ValueError("manual_evidence_read_is_not_replan")
-                else:
-                    raise ValueError("unexpected_command")
-            except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
-                failure = str(exc)
-                if failure not in {
-                    "repeated_quota_should_run",
-                    "repeated_clock",
-                    "semantic_action_before_quota",
-                    "semantic_action_before_frontier_read",
-                    "semantic_action_before_work_source_read",
-                    "semantic_action_misses_uncovered_frontier",
-                    "successor_create_before_quota",
-                    "successor_create_before_frontier_read",
-                    "successor_create_before_work_source_read",
-                    "successor_create_obligation_mismatch",
-                    "repeated_successor_create",
-                    "successor_create_failed",
-                    "successor_transition_missing",
-                    "quota_obligation_missing",
-                    "non_semantic_replan_action",
-                    "semantic_writeback_failed",
-                    "manual_evidence_read_is_not_replan",
-                    "unexpected_command",
-                }:
-                    failure = f"{kind}_execution_failed"
-                steps.append(
-                    {
-                        "ordinal": len(steps) + 1,
-                        "kind": kind,
-                        "command_digest": _digest(command),
-                    }
-                )
-                return receipt(passed=False, failure_code=failure)
-            steps.append(
-                {
-                    "ordinal": len(steps) + 1,
-                    "kind": kind,
-                    "command_digest": _digest(command),
-                }
-            )
-            messages.extend(
-                [
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [tool_call.provider_value],
-                    },
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.call_id,
-                        "content": output,
-                    },
-                ]
-            )
-        return receipt(passed=False, failure_code="tool_call_budget_exhausted")
+        state = _QualificationState(
+            fixture=fixture,
+            messages=messages,
+            steps=[],
+            turn_instance_id=f"qualification-{digest}",
+        )
+        return _run_qualification_loop(
+            self._client,
+            state,
+            qualification_id=qualification_id,
+        )
