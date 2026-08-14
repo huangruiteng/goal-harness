@@ -5,7 +5,12 @@ from typing import Any
 
 import pytest
 
-from loopx.control_plane.effect_program import EffectNext, interpret_turn_journal
+from loopx.control_plane.effect_program import (
+    TURN_TRANSACTION_PHASES,
+    EffectNext,
+    interpret_turn_journal,
+)
+from loopx.control_plane.turn_driver.transaction import TRANSACTION_PHASES
 
 
 def _journal(*, status: str = "committed") -> dict[str, Any]:
@@ -170,3 +175,64 @@ def test_turn_journal_blocks_unknown_status_as_unsupported() -> None:
     assert turn.request.context["replay_legal"] is False
     assert turn.request.context["tombstone_retained"] is False
     assert turn.request.context["violations"] == ("journal_status_unsupported",)
+
+
+def test_turn_journal_compares_identity_strings_exactly() -> None:
+    journal = _journal()
+    journal["goal_id"] = " fixture-goal "
+
+    turn = interpret_turn_journal(
+        journal,
+        goal_id="fixture-goal",
+        agent_id="fixture-agent",
+        turn_key="sha256:fixture-turn",
+    )
+
+    assert turn.request.context["replay_legal"] is False
+    assert turn.request.context["goal_matches"] is False
+    assert turn.request.context["violations"] == ("goal_mismatch",)
+
+
+def test_turn_journal_blocks_present_malformed_identity_fields() -> None:
+    journal = _journal()
+    journal["plan"]["turn_envelope"]["agent_id"] = 7
+    journal["host_result"]["turn_key"] = ""
+    journal["receipt"]["turn_key"] = object()
+
+    turn = interpret_turn_journal(
+        journal,
+        goal_id="fixture-goal",
+        agent_id="fixture-agent",
+        turn_key="sha256:fixture-turn",
+    )
+
+    assert turn.request.context["replay_legal"] is False
+    assert turn.request.context["owner_matches"] is False
+    assert turn.request.context["turn_key_matches"] is False
+    assert turn.request.context["violations"] == (
+        "owner_identity_missing",
+        "turn_key_identity_missing",
+    )
+
+
+def test_turn_journal_blocks_explicit_empty_identity_expectations() -> None:
+    turn = interpret_turn_journal(
+        _journal(),
+        goal_id="",
+        agent_id="",
+        turn_key="",
+    )
+
+    assert turn.request.context["replay_legal"] is False
+    assert turn.request.context["goal_matches"] is False
+    assert turn.request.context["owner_matches"] is False
+    assert turn.request.context["turn_key_matches"] is False
+    assert turn.request.context["violations"] == (
+        "goal_identity_missing",
+        "owner_identity_missing",
+        "turn_key_identity_missing",
+    )
+
+
+def test_turn_transaction_keeps_the_canonical_phase_tuple_alias() -> None:
+    assert TRANSACTION_PHASES is TURN_TRANSACTION_PHASES

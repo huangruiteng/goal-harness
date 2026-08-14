@@ -288,27 +288,33 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _present_strings(*values: Any) -> tuple[str, ...]:
-    return tuple(
-        normalized
-        for item in values
-        if (normalized := str(item or "").strip())
-    )
+def _valid_identity_value(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _identity_state(
     required_values: Sequence[Any],
     *,
-    optional_values: Sequence[Any] = (),
+    optional_values: Sequence[tuple[bool, Any]] = (),
     expected: str | None = None,
 ) -> tuple[bool, bool]:
-    required = _present_strings(*required_values)
-    complete = len(required) == len(required_values)
-    observed = (
-        *required,
-        *_present_strings(*optional_values),
-        *_present_strings(expected),
+    required_complete = all(
+        _valid_identity_value(value) for value in required_values
     )
+    optional_complete = all(
+        not present or _valid_identity_value(value)
+        for present, value in optional_values
+    )
+    expected_complete = expected is None or _valid_identity_value(expected)
+    complete = required_complete and optional_complete and expected_complete
+    observed = [value for value in required_values if _valid_identity_value(value)]
+    observed.extend(
+        value
+        for present, value in optional_values
+        if present and _valid_identity_value(value)
+    )
+    if expected is not None and _valid_identity_value(expected):
+        observed.append(expected)
     return complete, complete and len(set(observed)) == 1
 
 
@@ -458,7 +464,10 @@ def interpret_turn_journal(
     )
     turn_key_complete, turn_key_matches = _identity_state(
         (journal.get("turn_key"), transaction.get("turn_key")),
-        optional_values=(host_result.get("turn_key"), receipt.get("turn_key")),
+        optional_values=(
+            ("turn_key" in host_result, host_result.get("turn_key")),
+            ("turn_key" in receipt, receipt.get("turn_key")),
+        ),
         expected=turn_key,
     )
 
