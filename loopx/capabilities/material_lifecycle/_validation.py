@@ -91,6 +91,37 @@ def positive_int(value: Any, *, field: str) -> int:
     return normalized
 
 
+DEFAULT_MAX_MATERIALS_PER_ENTRY = 3
+
+
+def material_catalog_entry_limit(
+    *,
+    explicit: int | None,
+    catalog: Mapping[str, Any] | None,
+) -> int:
+    """Resolve the per-entry material cap from an explicit override or catalog.
+
+    The catalog contract reads
+    ``rankings.ranked_entries.constraints.max_materials_per_entry``. When a
+    catalog is supplied but no explicit override is, that constraint is
+    required so builders never silently fall back to a stale default.
+    """
+    if explicit is not None:
+        return positive_int(explicit, field="max_materials_per_entry")
+    if catalog is None:
+        return DEFAULT_MAX_MATERIALS_PER_ENTRY
+    try:
+        constraint = catalog["rankings"]["ranked_entries"]["constraints"][
+            "max_materials_per_entry"
+        ]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            "catalog must define rankings.ranked_entries.constraints."
+            "max_materials_per_entry when max_materials_per_entry is not provided"
+        ) from exc
+    return positive_int(constraint, field="catalog.max_materials_per_entry")
+
+
 def token_list(
     values: Sequence[Any] | None,
     *,

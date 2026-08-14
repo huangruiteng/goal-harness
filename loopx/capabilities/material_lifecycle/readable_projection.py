@@ -12,6 +12,7 @@ from ._validation import (
     check_record_keys,
     compact_token,
     iso_timestamp,
+    material_catalog_entry_limit,
     packet_ref,
     positive_int,
 )
@@ -344,18 +345,24 @@ def build_material_readable_projection(
     expected_material_refs: Sequence[str],
     canonical_item_count: int,
     top_window_size: int = 30,
-    max_materials_per_entry: int = 3,
+    max_materials_per_entry: int | None = None,
+    catalog: Mapping[str, Any] | None = None,
     document_title: str = "Current Material Priorities",
     intro_lines: Sequence[str] | None = None,
     footer_lines: Sequence[str] | None = None,
     labels: Mapping[str, Any] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
-    """Render a local-readable view and a content-free public-safe receipt."""
+    """Render a local-readable view and a content-free public-safe receipt.
+
+    When ``max_materials_per_entry`` is omitted, the cap is read from
+    ``catalog["rankings"]["ranked_entries"]["constraints"]``; without a catalog
+    it falls back to the default of 3.
+    """
 
     window_size = positive_int(top_window_size, field="top_window_size")
-    entry_limit = positive_int(
-        max_materials_per_entry,
-        field="max_materials_per_entry",
+    entry_limit = material_catalog_entry_limit(
+        explicit=max_materials_per_entry,
+        catalog=catalog,
     )
     item_count = positive_int(canonical_item_count, field="canonical_item_count")
     if isinstance(expected_material_refs, (str, bytes)) or not isinstance(

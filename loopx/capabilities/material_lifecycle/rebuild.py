@@ -11,6 +11,7 @@ from ._validation import (
     compact_text,
     compact_token,
     iso_timestamp,
+    material_catalog_entry_limit,
     packet_ref,
     positive_int,
     token_list,
@@ -289,15 +290,21 @@ def build_material_ranked_entry_rebuild_plan(
     observed_at: str,
     source_entries: Sequence[Mapping[str, Any]],
     rebuilt_entries: Sequence[Mapping[str, Any]],
-    max_materials_per_entry: int = 3,
+    max_materials_per_entry: int | None = None,
+    catalog: Mapping[str, Any] | None = None,
     top_window_size: int = 30,
     protected_rank_anchors: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Validate a lossless structural rebuild without applying store changes."""
+    """Validate a lossless structural rebuild without applying store changes.
 
-    entry_limit = positive_int(
-        max_materials_per_entry,
-        field="max_materials_per_entry",
+    When ``max_materials_per_entry`` is omitted, the cap is read from
+    ``catalog["rankings"]["ranked_entries"]["constraints"]``; without a catalog
+    it falls back to the default of 3.
+    """
+
+    entry_limit = material_catalog_entry_limit(
+        explicit=max_materials_per_entry,
+        catalog=catalog,
     )
     window_size = positive_int(top_window_size, field="top_window_size")
     normalized_source, source_by_ref, source_material_refs = (
