@@ -26,6 +26,24 @@ decision or turn-settlement logic; they give refactor and test code one
 stable abstraction for reading the effect program shape across packet
 families.
 
+## Turn Journal Lens
+
+`interpret_turn_journal` reads an existing fenced Turn journal and returns an
+`EffectTurn`. It compares goal, agent owner, and Turn-key identity across the
+journal, stored plan, typed settlement identity, host result, and receipt. It
+also validates that completed phases are an ordered transaction prefix and
+exposes retained `committed`, `stopped`, and `failed` journal tombstones.
+
+`request.context.replay_legal` is the replay-legality signal. Identity,
+phase-order, and terminal-status failures appear together as stable typed
+violation values in `request.context.violations`; semantic mismatches return a
+blocked observation instead of raising an exception.
+
+`EffectObservation.should_run` remains false and `EffectNext` remains empty.
+Interpretation therefore grants no authority to execute or retry a Turn,
+schedule work, write state, or spend quota. In particular, failed-journal
+recovery with `retry_failed=True` remains owned by the Turn executor.
+
 ## Canonical Example
 
 ### 1. Effect Request
