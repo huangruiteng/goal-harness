@@ -127,6 +127,56 @@ def _source_refs(
     }
 
 
+def _compact_scheduler_hint(value: Any) -> dict[str, Any] | None:
+    """Compact a Phase 5 ``scheduler_hint`` for the frontstage projection.
+
+    Whitelists only public-safe, scalar/lightweight scheduler contract fields so
+    the frontstage Budget & Governance block can show real cadence decisions
+    instead of demo placeholders. Raw/private material is never copied.
+    """
+    source = _as_mapping(value)
+    if not source:
+        return None
+    compact: dict[str, Any] = {}
+    for key in ("action", "cadence_class", "reason_code", "spend_policy"):
+        text = _text(source.get(key), limit=180)
+        if text is not None:
+            compact[key] = text
+    reason = _text(source.get("reason"), limit=300)
+    if reason is not None:
+        compact["reason"] = reason
+    heartbeat = _as_mapping(source.get("heartbeat_recommendation"))
+    if heartbeat:
+        heart_compact: dict[str, Any] = {}
+        for key in ("recommended_mode", "cadence_class", "recommended_interval_seconds"):
+            text = _text(heartbeat.get(key), limit=120)
+            if text is not None:
+                heart_compact[key] = text
+        if heart_compact:
+            compact["heartbeat_recommendation"] = heart_compact
+    return compact
+
+
+def _compact_policy_decision(value: Any) -> dict[str, Any] | None:
+    """Compact a Phase 5 ``policy_decision`` for the frontstage projection.
+
+    Only the unified decision outcome/source/reason/retry surface is exposed;
+    never the raw underlying payloads.
+    """
+    source = _as_mapping(value)
+    if not source:
+        return None
+    compact: dict[str, Any] = {}
+    for key in ("outcome", "source", "reason", "retry_after_seconds", "manual_approval_required"):
+        if key not in source:
+            continue
+        child = source[key]
+        text = _text(child, limit=220) if not isinstance(child, Mapping) else None
+        if text is not None:
+            compact[key] = text
+    return compact
+
+
 def _compact_quota(quota_payload: Mapping[str, Any], project_asset: Mapping[str, Any]) -> dict[str, Any]:
     source = quota_payload.get("quota") if isinstance(quota_payload.get("quota"), Mapping) else {}
     if not source and isinstance(project_asset.get("quota"), Mapping):
@@ -136,6 +186,21 @@ def _compact_quota(quota_payload: Mapping[str, Any], project_asset: Mapping[str,
         value = _text(source.get(key), limit=220)
         if value is not None:
             compact[key] = value
+    # Phase 5 new-architecture pass-through: when the quota source carries the
+    # unified scheduler hint / policy decision, surface their public-safe fields
+    # so the frontstage Budget & Governance block reads real cadence decisions.
+    # When absent (legacy path) the output is byte-identical to before (opt-in).
+    scheduler_hint = _compact_scheduler_hint(source.get("scheduler_hint"))
+    if scheduler_hint:
+        compact["scheduler_hint"] = scheduler_hint
+    policy_decision = _compact_policy_decision(source.get("policy_decision"))
+    if policy_decision:
+        compact["policy_decision"] = policy_decision
+    # Frontstage also reads top-level cadence scalar keys directly.
+    for key in ("scheduler_rrule", "scheduler_reset_token", "cadence_class"):
+        text = _text(source.get(key), limit=160)
+        if text is not None:
+            compact[key] = text
     return compact
 
 

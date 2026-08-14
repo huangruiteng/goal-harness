@@ -5,6 +5,7 @@ from importlib import import_module
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from ..capabilities.explore.activation import (
     sync_explore_graph_after_material_refresh,
@@ -68,7 +69,41 @@ PROJECT_LIFECYCLE_COMMANDS = {
     "read-only-map",
     "reward",
     "operator-gate",
+    "goal-closure",
 }
+
+
+def render_goal_closure_markdown(payload: dict[str, Any]) -> str:
+    """Render a goal-closure evaluation as compact Markdown."""
+    evaluation = payload.get("evaluation") or {}
+    lines = [
+        "# Goal Closure\n",
+        f"- goal_id: `{payload.get('goal_id')}`",
+        f"- ready: `{evaluation.get('ready')}`",
+        f"- tri_state: `{evaluation.get('tri_state')}`",
+        f"- reason: `{evaluation.get('reason')}`",
+    ]
+    evidence = evaluation.get("evidence") or {}
+    lines.append(
+        "- evidence: ready="
+        f"`{len(evidence.get('ready_todo_ids') or [])}`, "
+        f"blocked=`{len(evidence.get('blocked_todo_ids') or [])}`, "
+        f"deferred=`{len(evidence.get('deferred_todo_ids') or [])}`, "
+        f"replan=`{evidence.get('replan_required')}`, "
+        f"acceptance_satisfied=`{evidence.get('acceptance_satisfied')}`, "
+        f"acceptance_gap_count=`{evidence.get('acceptance_gap_count')}`"
+    )
+    acceptance = payload.get("acceptance") or {}
+    gaps = acceptance.get("acceptance_gaps") or []
+    if gaps:
+        lines.append(
+            "- acceptance gaps: `"
+            + "`, `".join(str(g.get("criterion_id")) for g in gaps)
+            + "`"
+        )
+    if payload.get("applied"):
+        lines.append("- applied: `true` (goal_closure_ready + goal_closed emitted)")
+    return "\n".join(lines) + "\n"
 
 INLINE_VISION_FIELDS = {
     "vision_summary": "vision_summary",
@@ -497,6 +532,104 @@ def register_project_lifecycle_commands(
         help="Do not refresh the shared global registry after writing the gate decision.",
     )
 
+    closure_parser = subparsers.add_parser(
+        "goal-closure",
+        help=(
+            "Evaluate whether a goal is closable (no ready work, no pending "
+            "dependencies, no replan, no external follow-up) and emit "
+            "goal_closure_ready + goal_closed events when it is."
+        ),
+    )
+    add_subcommand_format(closure_parser)
+    closure_parser.add_argument(
+        "--goal-id",
+        required=True,
+        help="Goal id whose closure is being evaluated.",
+    )
+    closure_parser.add_argument(
+        "--runtime-root",
+        default=None,
+        help="Runtime root where the task queue / rollout event log live. Defaults to the registry goal's runtime root.",
+    )
+    closure_parser.add_argument(
+        "--ready-todo-id",
+        action="append",
+        default=[],
+        help="Ready todo id (repeatable). Any present value keeps the goal RUN/WAIT.",
+    )
+    closure_parser.add_argument(
+        "--blocked-todo-id",
+        action="append",
+        default=[],
+        help="Blocked todo id (repeatable). Any present value keeps the goal WAIT.",
+    )
+    closure_parser.add_argument(
+        "--deferred-todo-id",
+        action="append",
+        default=[],
+        help="Deferred todo id (repeatable). Any present value keeps the goal WAIT.",
+    )
+    closure_parser.add_argument(
+        "--replan-required",
+        action="store_true",
+        help="Treat the goal as requiring replan (keeps it WAIT, not closable).",
+    )
+    closure_parser.add_argument(
+        "--external-followup-required",
+        action="store_true",
+        help="Treat the goal as requiring external follow-up (keeps it WAIT).",
+    )
+    closure_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="When closable, actually emit goal_closure_ready + goal_closed events.",
+    )
+    closure_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the evaluation without writing any events.",
+    )
+    closure_parser.add_argument(
+        "--acceptance-criteria",
+        action="append",
+        default=[],
+        help=(
+            "Declare an acceptance criterion as criterion_id=description "
+            "(repeatable). A goal is NOT closable until every criterion has "
+            "satisfying evidence. e.g. color_green=theme color is #22c55e"
+        ),
+    )
+    closure_parser.add_argument(
+        "--evidence",
+        action="append",
+        default=[],
+        help=(
+            "Declare evidence as criterion_id=kind=ref[=regex] (repeatable). "
+            "kind in {grep,snapshot,test,file,manual}. For kind=grep, an optional "
+            "4th segment is the regex pattern the framework independently matches "
+            "against ref (relative to --project), overriding any self-reported ok. "
+            "e.g. color_green=grep=index.html=#22c55e"
+        ),
+    )
+    closure_parser.add_argument(
+        "--verify",
+        action="store_true",
+        help=(
+            "Run the Goal Acceptance evaluator: verify every acceptance "
+            "criterion against evidence. Emits goal_acceptance_pending when gaps "
+            "remain, blocking closure."
+        ),
+    )
+    closure_parser.add_argument(
+        "--project",
+        default=None,
+        help=(
+            "Project root for independently verifying grep evidence. Defaults to "
+            "the registry goal repo. Without it, grep evidence degrades to "
+            "self-reported ok."
+        ),
+    )
+
 
 def handle_project_lifecycle_command(
     args: argparse.Namespace,
@@ -800,6 +933,149 @@ def handle_project_lifecycle_command(
                 "error": str(exc),
             }
         print_payload(payload, fmt, render_reward_markdown)
+        return 0 if payload.get("ok") else 1
+
+    if args.command == "goal-closure":
+        try:
+            from ..control_plane.goals.goal_closure import (
+                build_goal_closure_state,
+                emit_goal_closed,
+                emit_goal_closure_ready,
+                evaluate_goal_closure,
+            )
+            from ..control_plane.scheduler.event_driven_dispatch import (
+                load_task_queue,
+                task_queue_path,
+            )
+            from ..rollout_event_log import rollout_event_log_path
+
+            runtime_root = Path(
+                resolve_runtime_root(load_registry(registry_path), args.runtime_root)
+            )
+            queue_view = load_task_queue(
+                task_queue_path(runtime_root, goal_id=args.goal_id)
+            )
+            # Goal Acceptance evaluation (when criteria/evidence supplied).
+            acceptance = None
+            if (
+                bool(getattr(args, "verify", False))
+                or getattr(args, "acceptance_criteria", None)
+                or getattr(args, "evidence", None)
+            ):
+                from ..control_plane.goals.goal_acceptance import (
+                    evaluate_goal_acceptance,
+                )
+
+                criteria = []
+                for spec in getattr(args, "acceptance_criteria", None) or []:
+                    if "=" in spec:
+                        cid, _, desc = spec.partition("=")
+                        criteria.append(
+                            {"criterion_id": cid.strip(), "description": desc.strip()}
+                        )
+                evidence = []
+                for spec in getattr(args, "evidence", None) or []:
+                    # format: criterion_id=kind=ref[=regex]
+                    parts = spec.split("=")
+                    if len(parts) < 3:
+                        continue
+                    kind = parts[1].strip()
+                    item: dict[str, Any] = {
+                        "criterion_ids": [parts[0].strip()],
+                        "kind": kind,
+                        "ref": parts[2].strip(),
+                        "ok": True,
+                    }
+                    if len(parts) >= 4:
+                        item["pattern"] = parts[3].strip()
+                    if kind == "grep":
+                        # Independent verification when a regex is provided; the
+                        # self-reported ok is only a fallback without one.
+                        item["ok"] = bool(item.get("pattern"))
+                    evidence.append(item)
+                # Resolve the project root for independent grep verification.
+                base_dir = None
+                if getattr(args, "project", None):
+                    base_dir = Path(args.project).expanduser().resolve()
+                acceptance = evaluate_goal_acceptance(
+                    acceptance_criteria=criteria or None,
+                    evidence=evidence or None,
+                    base_dir=base_dir,
+                )
+            state = build_goal_closure_state(
+                ready_todo_ids=list(getattr(args, "ready_todo_id", None) or [])
+                or queue_view.get("pending_todo_ids", []),
+                blocked_todo_ids=list(getattr(args, "blocked_todo_id", None) or []),
+                deferred_todo_ids=list(getattr(args, "deferred_todo_id", None) or []),
+                pending_dependency_ids=list(getattr(args, "blocked_todo_id", None) or []),
+                replan_required=bool(getattr(args, "replan_required", False)),
+                external_followup_required=bool(
+                    getattr(args, "external_followup_required", False)
+                ),
+                open_todo_count=queue_view.get("pending_count", 0),
+                claimed_advancement_count=queue_view.get("claimed_count", 0),
+                acceptance=acceptance,
+            )
+            evaluation = evaluate_goal_closure(state)
+            applied = False
+            log_path = rollout_event_log_path(runtime_root, goal_id=args.goal_id)
+            if evaluation["ready"] and bool(getattr(args, "apply", False)):
+                emit_goal_closure_ready(
+                    log_path=log_path,
+                    goal_id=args.goal_id,
+                    reason=evaluation["reason"],
+                    evidence=evaluation["evidence"],
+                )
+                emit_goal_closed(
+                    log_path=log_path,
+                    goal_id=args.goal_id,
+                    kind="derived",
+                    reason=evaluation["reason"],
+                )
+                applied = True
+                # Keep the registry goal entry's status in lockstep with the
+                # rollout log so `status`/registry and start-goal's guided packet
+                # (which reads the rollout log) agree that the goal is closed.
+                from ..registry import sync_registry_goal_closed
+
+                sync_registry_goal_closed(registry_path, args.goal_id)
+            # When acceptance has gaps and --apply (or --verify), record pending.
+            if (
+                acceptance is not None
+                and acceptance.get("satisfied") is not True
+                and (
+                    bool(getattr(args, "apply", False))
+                    or bool(getattr(args, "verify", False))
+                )
+            ):
+                from ..control_plane.goals.goal_acceptance import (
+                    emit_goal_acceptance_pending,
+                )
+
+                gaps = acceptance.get("acceptance_gaps") or []
+                if gaps:
+                    emit_goal_acceptance_pending(
+                        log_path=log_path,
+                        goal_id=args.goal_id,
+                        acceptance_gaps=gaps,
+                    )
+            payload = {
+                "ok": True,
+                "goal_id": args.goal_id,
+                "evaluation": evaluation,
+                "acceptance": acceptance,
+                "applied": applied,
+                "dry_run": bool(getattr(args, "dry_run", False)),
+            }
+        except Exception as exc:  # noqa: BLE001
+            payload = {
+                "ok": False,
+                "goal_id": args.goal_id,
+                "evaluation": None,
+                "applied": False,
+                "error": str(exc),
+            }
+        print_payload(payload, fmt, render_goal_closure_markdown)
         return 0 if payload.get("ok") else 1
 
     try:

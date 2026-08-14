@@ -41,6 +41,20 @@ RUNTIME_EXECUTION_ROUTING_RULE = (
     "Normal turns use CLI `interaction_contract`; use `loopx-project` for "
     "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
 )
+EVENT_DRIVEN_EXECUTION_RULE = (
+    "Prefer the event-driven scheduler for advancing agent todos: run "
+    "`codex-cli-local-scheduler-dispatch --goal-id <goal-id> --project . "
+    "--agent-id <agent-id> --event-driven [--completed-todo-id <done-todo-id>] "
+    "--acceptance-criteria <id>=<desc> --evidence <id>=grep=<rel-path>=<regex>` "
+    "instead of hand-editing files and calling `todo complete` yourself. The "
+    "dispatcher recomputes READY successors from todo events, enqueues them, "
+    "claims for a worker, and — when the queue is empty and acceptance evidence "
+    "satisfies — atomically emits goal_closure_ready + goal_closed in one tick. "
+    "You only declare the plan (todos), provide acceptance criteria + evidence; "
+    "let the dispatcher drive execution and closure. Fall back to manual "
+    "`todo complete --no-follow-up` only when no advancement todo remains and "
+    "you must close a goal without new work."
+)
 CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE = """
 
 Native Codex `/goal` owns its blocked state. At the matching

@@ -10,6 +10,7 @@ const execFile = promisify(execFileCallback)
 const BRIDGE_SCHEMA_VERSION = "loopx_opencode_goal_bridge_v0"
 const TERMINAL_STATE_SCHEMA_VERSION = "goal_terminal_state_v0"
 const SOURCE_COMPLETENESS_SCHEMA_VERSION = "goal_terminal_source_completeness_v0"
+const POLICY_DECISION_SCHEMA_VERSION = "loopx_opencode_goal_policy_decision_v0"
 const DEFAULT_RETRY_MINUTES = 3
 const LOOPX_GOAL_LIMITS = {
   maxTurns: 10000,
@@ -177,10 +178,77 @@ export async function probeLoopxQuota(binding, { directory, execFileImpl = execF
 }
 
 
+// Phase 5/6 new-architecture compatibility: advance the event-driven Task
+// Queue for the bound goal (record task_ready / task_enqueued / task_dispatched
+// audit facts and claim the next pending task for the bound worker). This is the
+// event-driven dispatch half of the loop: ``quota should-run`` remains the
+// policy decision source (its ``policy_decision`` carries the authoritative
+// run | wait | deny outcome), while this probe keeps the Task Queue lifecycle
+// (claim -> complete -> fail) actually moving so the resident scheduler and the
+// goal acceptance / closure layer see real queue advancement.
+//
+// The dispatch CLI is enabled by default (its ``--event-driven`` flag falls
+// back to the new-architecture master switch, which is on). When the master
+// switch is explicitly off (``LOOPX_NEW_ARCHITECTURE=0``) the dispatch returns
+// a ``disabled`` marker and writes nothing, preserving the legacy heartbeat
+// path. Callers treat any failure as a silent no-op so the quota-gated loop
+// never breaks on the optional dispatch advancement.
+export async function probeEventDrivenDispatch(binding, { directory, execFileImpl = execFile } = {}) {
+  const args = []
+  if (binding.registryPath) args.push("--registry", binding.registryPath)
+  args.push(
+    "--format",
+    "json",
+    "codex-cli-local-scheduler-dispatch",
+    "--goal-id",
+    binding.goalId,
+  )
+  const workerId = binding.agentId || binding.workerId || ""
+  if (workerId) {
+    args.push("--worker-id", workerId)
+  }
+  const { stdout } = await execFileImpl(process.env.LOOPX_BIN || "loopx", args, {
+    cwd: binding.directory || directory,
+    timeout: 20_000,
+    maxBuffer: 4 * 1024 * 1024,
+  })
+  const payload = JSON.parse(stdout || "{}")
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("loopx codex-cli-local-scheduler-dispatch returned a non-object payload")
+  }
+  return payload
+}
+
+
+// Phase 5 new-architecture compatibility: the control_plane now attaches a
+// normalized `policy_decision` (outcome = run | wait | deny) to the quota
+// should-run payload by default (master switch). When present, the loop prefers
+// the unified contract and falls back to the legacy quota fields otherwise,
+// keeping the opt-out path behaviour identical.
+//
+//   policy_decision.outcome:
+//     "run"   -> continue now (like legacy should_run === true / run_now)
+//     "wait"  -> back off using retry_after_seconds / retry_at
+//     "deny"  -> not authorized to continue; non-terminal denies hold the loop
+//
+// `retry_at` is an ISO 8601 datetime; `retry_after_seconds` is seconds.
+export function policyDecisionOf(decision) {
+  const unified = decision?.policy_decision
+  if (!unified || typeof unified !== "object") return null
+  const outcome = String(unified.outcome || "")
+  if (outcome !== "run" && outcome !== "wait" && outcome !== "deny") return null
+  return unified
+}
+
+
 export function isTerminalNoFollowup(decision) {
   const frontier = decision?.goal_frontier_projection
   const terminal = frontier?.terminal_state
   const completeness = frontier?.source_completeness
+  // The unified policy decision does not carry the validated goal-closure
+  // projection (that lives on the quota layer), so terminal detection still
+  // requires the frontier proof. A policy outcome of "deny" alone is not a
+  // validated terminal state and must never self-close the goal.
   return Boolean(
     decision?.should_run === false &&
       decision?.effective_action === "terminal_no_followup" &&
@@ -196,11 +264,65 @@ export function isTerminalNoFollowup(decision) {
 
 
 function shouldRunNow(decision) {
+  const unified = policyDecisionOf(decision)
+  if (unified) {
+    // Prefer the unified policy contract; the legacy fields are still present
+    // but are subsumed by the composed outcome.
+    if (unified.outcome === "run") return true
+    if (unified.outcome === "deny") return false
+    if (unified.outcome === "wait") return false
+  }
   return decision?.scheduler_hint?.action === "run_now" || decision?.should_run === true
 }
 
 
+// Minutes to wait for the next poll from a unified policy decision.
+function unifiedRetryMinutes(unified) {
+  const seconds = Number(unified?.retry_after_seconds)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    const minutes = Math.ceil(seconds / 60)
+    return Math.max(1, minutes)
+  }
+  const at = unified?.retry_at
+  if (typeof at === "string" && at) {
+    const when = Date.parse(at)
+    if (Number.isFinite(when)) {
+      const minutes = Math.ceil((when - Date.now()) / 60_000)
+      if (minutes > 0) return minutes
+    }
+  }
+  return null
+}
+
+
 function waitPlan(decision, binding) {
+  const unified = policyDecisionOf(decision)
+  if (unified) {
+    // Unified path: "run" is intercepted by shouldRunNow; "deny" without a
+    // validated terminal is a non-terminal hold, so we back off rather than
+    // poll-spin and must not self-close the goal.
+    const fromUnified = unifiedRetryMinutes(unified)
+    if (fromUnified !== null) {
+      return {
+        stop: false,
+        minutes: fromUnified,
+        schedulerToken: binding.schedulerToken,
+        unchangedPolls: binding.unchangedPolls,
+      }
+    }
+    if (unified.outcome === "deny") {
+      // No retry hint and not terminal: hold the loop. Stop polling now; a
+      // later explicit activation / resume re-arms it.
+      return {
+        stop: true,
+        minutes: DEFAULT_RETRY_MINUTES,
+        schedulerToken: binding.schedulerToken,
+        unchangedPolls: binding.unchangedPolls,
+      }
+    }
+    // "wait" without a retry hint: fall through to the legacy scheduler hints so
+    // behaviour matches the pre-PolicyEngine path when no hint is provided.
+  }
   const local = decision?.scheduler_hint?.unchanged_poll?.local_scheduler
   if (!local || local === "stop") return { stop: true }
   const token = decision?.scheduler_hint?.reset_policy?.reset_token || ""
@@ -259,6 +381,7 @@ export function createLoopxGoalPlugin({
   tool,
   bindingStore = createFileBindingStore(),
   quotaProbe = probeLoopxQuota,
+  dispatchProbe = probeEventDrivenDispatch,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 } = {}) {
@@ -434,6 +557,27 @@ export function createLoopxGoalPlugin({
         return
       }
       binding = currentBinding
+
+      // Phase 5/6: advance the event-driven Task Queue for this goal. This is a
+      // fire-and-forget best-effort probe — it records task_ready / enqueued /
+      // dispatched audit facts and claims the next pending task, but never gates
+      // the policy decision (which stays authoritative via ``quota should-run``).
+      // Any failure is a silent no-op so the quota-gated loop cannot break, and
+      // a disabled master switch (``LOOPX_NEW_ARCHITECTURE=0``) returns a
+      // ``disabled`` marker that writes nothing (legacy heartbeat path).
+      if (typeof dispatchProbe === "function") {
+        void (async () => {
+          try {
+            await dispatchProbe(binding, { directory: context.directory })
+          } catch (error) {
+            await log("debug", "LoopX event-driven dispatch advancement skipped", {
+              goalId: binding.goalId,
+              sessionID,
+              error: error?.message || String(error),
+            })
+          }
+        })()
+      }
 
       if (isTerminalNoFollowup(decision)) {
         await completeTerminalGoal(sessionID, binding, decision)

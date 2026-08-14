@@ -112,6 +112,27 @@ def _runtime_profile_flag_is_unsupported(out: subprocess.CompletedProcess) -> bo
     )
 
 
+def resolve_should_run(data: dict) -> bool | None:
+    """Resolve the run gate from a ``quota should-run`` payload.
+
+    New-architecture aware: when the payload carries the unified
+    ``policy_decision`` (on by default), its ``outcome`` is the authoritative
+    control-plane decision. ``run`` -> True; ``deny``/``wait`` -> False (the
+    PolicyEngine may compose a stricter capability/scheduler layer that the
+    legacy quota ``should_run`` does not reflect). Falls back to the legacy
+    ``should_run`` bool when no unified decision is present.
+    """
+    pd = data.get("policy_decision")
+    if isinstance(pd, dict):
+        outcome = pd.get("outcome")
+        if outcome == "run":
+            return True
+        if outcome in ("deny", "wait"):
+            return False
+    should_run_value = data.get("should_run")
+    return should_run_value if isinstance(should_run_value, bool) else None
+
+
 def should_run(registry, goal_id, agent_id=None) -> bool | None:
     """Return True/False from loopx quota should-run, or None if unknown."""
     if not goal_id:
@@ -142,8 +163,7 @@ def should_run(registry, goal_id, agent_id=None) -> bool | None:
         data = json.loads(out.stdout or "{}")
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
-    should_run_value = data.get("should_run")
-    return should_run_value if isinstance(should_run_value, bool) else None
+    return resolve_should_run(data)
 
 
 def decide(ev: dict) -> dict:

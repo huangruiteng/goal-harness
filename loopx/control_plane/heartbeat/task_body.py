@@ -8,6 +8,7 @@ from .rules import (
     CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE,
     DEFAULT_MATERIAL_QUEUE_RULE,
     DEFAULT_PERMISSION_RULE,
+    EVENT_DRIVEN_EXECUTION_RULE,
     HEARTBEAT_NOTIFICATION_RULE_SHORT,
     HEARTBEAT_VISION_WRITEBACK_RULE_SHORT,
     RUNTIME_CAPABILITY_PROJECTION_THIN_RULE,
@@ -171,7 +172,7 @@ If the result says `should_run=true`:
 4. Choose one bounded, verifiable progress segment from that audit. It may be a
    coherent batch across related implementation, test, doc, and state-writeback
    files when the write scope is clear and validation is explicit; it should not
-   be forced into a tiny single-file step.
+   be forced into a tiny single-file step. {EVENT_DRIVEN_EXECUTION_RULE}
 5. Do that segment only. Stay inside `goal_boundary` when present and keep
    public/private boundaries intact. Public-safe repo publication is not an
    operator gate by itself: for routine public project work, commit, push, and

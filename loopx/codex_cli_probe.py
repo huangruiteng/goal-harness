@@ -7,6 +7,7 @@ from .bootstrap import default_goal_id
 from .codex_cli_probe_markdown import (
     render_codex_cli_bounded_visible_pilot_adapter_markdown as render_codex_cli_bounded_visible_pilot_adapter_markdown,
     render_codex_cli_local_driver_plan_markdown as render_codex_cli_local_driver_plan_markdown,
+    render_codex_cli_local_scheduler_dispatch_markdown as render_codex_cli_local_scheduler_dispatch_markdown,
     render_codex_cli_local_scheduler_executor_markdown as render_codex_cli_local_scheduler_executor_markdown,
     render_codex_cli_local_scheduler_tick_markdown as render_codex_cli_local_scheduler_tick_markdown,
     render_codex_cli_one_message_loop_pilot_markdown as render_codex_cli_one_message_loop_pilot_markdown,

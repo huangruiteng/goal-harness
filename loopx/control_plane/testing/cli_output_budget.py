@@ -320,7 +320,7 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
         semantic_json_keys=("ledger", "truncated", "other_agent_frontier"),
         markdown_anchor="# LoopX Evidence Log",
         max_chars={
-            "small": {"json": 2_900, "markdown": 800},
+            "small": {"json": 2_900, "markdown": 900},
             "crowded": {"json": 3_500, "markdown": 1_100},
             "multi_agent": {"json": 4_300, "markdown": 1_200},
         },
@@ -590,6 +590,12 @@ CLI_OUTPUT_COMMAND_CLASSIFICATIONS: tuple[CliOutputCommandClassification, ...] =
         qualification="explicit_cold_path_exception",
         surface_id=None,
         rationale="interactive local workspace launched explicitly by the operator",
+    ),
+    CliOutputCommandClassification(
+        command_id="dashboard",
+        qualification="explicit_cold_path_exception",
+        surface_id=None,
+        rationale="interactive local dashboard service launched explicitly by the operator",
     ),
     CliOutputCommandClassification(
         command_id="diagnose",

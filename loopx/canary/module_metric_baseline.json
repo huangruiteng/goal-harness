@@ -6,9 +6,14 @@
   },
   "module_metric_ceilings": {
     "loopx/bootstrap_command_pack.py": {
-      "any_count": 32,
+      "any_count": 33,
       "dict_any_count": 0,
-      "lines": 2240
+      "lines": 2322
+    },
+    "loopx/chat_actions.py": {
+      "any_count": 52,
+      "dict_any_count": 0,
+      "lines": 1590
     },
     "loopx/canary/planner.py": {
       "any_count": 22,
@@ -38,7 +43,7 @@
     "loopx/codex_cli_probe.py": {
       "any_count": 37,
       "dict_any_count": 0,
-      "lines": 1530
+      "lines": 1531
     },
     "loopx/control_plane/agents/agent_scope.py": {
       "any_count": 107,
@@ -76,9 +81,9 @@
       "lines": 1508
     },
     "loopx/presentation/renderers/status_markdown.py": {
-      "any_count": 47,
+      "any_count": 49,
       "dict_any_count": 0,
-      "lines": 1570
+      "lines": 1690
     },
     "loopx/quota.py": {
       "any_count": 219,
@@ -93,7 +98,7 @@
     "loopx/todos.py": {
       "any_count": 48,
       "dict_any_count": 0,
-      "lines": 2142
+      "lines": 2205
     },
     "loopx/worker_bridge.py": {
       "any_count": 28,

@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,42 @@ def find_registry_goal(registry: dict[str, Any], goal_id: str) -> dict[str, Any]
         if str(goal.get("id") or "") == goal_id:
             return goal
     return None
+
+
+def sync_registry_goal_closed(
+    registry_path: Path,
+    goal_id: str,
+    *,
+    recorded_at: str | None = None,
+) -> bool:
+    """Synchronize the registry goal's ``status`` to ``closed``.
+
+    The Goal Closure Evaluator records a ``goal_closed`` rollout event when it
+    derives closure, but the registry goal entry's ``status`` field was never
+    updated alongside it. That split made ``start-goal``'s guided packet (which
+    reads the rollout log via ``_goal_already_closed``) report the goal as closed
+    while ``status``/registry still showed ``active`` — the agent then looped
+    between "packet says closed" and "registry says active".
+
+    This writes ``status=closed`` on the goal entry so the two state sources
+    agree. Idempotent: an already-``closed`` goal is a no-op.
+    """
+    try:
+        registry = read_json(registry_path)
+    except Exception:
+        return False
+    goal = find_registry_goal(registry, goal_id)
+    if goal is None:
+        return False
+    if str(goal.get("status") or "") == "closed":
+        return False
+    goal["status"] = "closed"
+    goal["updated_at"] = recorded_at or datetime.now(timezone.utc).isoformat()
+    try:
+        atomic_write_json(registry_path, registry)
+    except Exception:
+        return False
+    return True
 
 
 def atomic_write_json(

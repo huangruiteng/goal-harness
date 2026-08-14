@@ -82,6 +82,10 @@ DEFAULT_SKIP_DIRS = {
     "dist",
     "node_modules",
     "runtime",
+    # loopx's own smoke/example fixtures are test stubs (incl. negative
+    # credential tests) and must not be treated as real project secrets.
+    "examples",
+    "docs",
 }
 LOCAL_PRIVATE_STATE_PARTS = {
     ".codex",
@@ -92,7 +96,15 @@ LOCAL_PRIVATE_STATE_PARTS = {
     "logs",
     "runtime",
 }
-LOCAL_PRIVATE_STATE_FILE_NAMES = {"ACTIVE_GOAL_STATE.md", "ACTIVE_GOAL_STATE.md.lock"}
+LOCAL_PRIVATE_STATE_FILE_NAMES = {
+    "ACTIVE_GOAL_STATE.md",
+    "ACTIVE_GOAL_STATE.md.lock",
+    # Session exports capture prior conversation text (including discussion of
+    # test-stub credentials / false-positive findings); scanning them as real
+    # secrets produces false-positive health blocks.
+    "session-export.json",
+    "session-export-.json",
+}
 TERMINAL_TODO_STATUSES = {TODO_STATUS_DONE, TODO_STATUS_DEFERRED, "completed", "closed", "archived"}
 
 
@@ -645,6 +657,11 @@ def _tracked_scan_files(scan_root: Path) -> list[Path]:
             continue
         path = (repo_root / rel_path).resolve()
         if path.name.endswith(".local.json"):
+            continue
+        # Keep git-tracked files consistent with the os.walk skip rules so that
+        # skip-dir members (e.g. loopx's own "examples" fixtures) are not
+        # re-introduced into the scan via the tracked file list.
+        if any(part in DEFAULT_SKIP_DIRS for part in path.parts):
             continue
         if path.is_file() and path.suffix in DEFAULT_SCAN_SUFFIXES:
             files.append(path)

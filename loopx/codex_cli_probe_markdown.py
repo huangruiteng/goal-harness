@@ -933,3 +933,92 @@ def render_codex_cli_visible_attach_acceptance_markdown(payload: dict[str, Any])
 
 {warning_lines}
 """
+
+
+def render_codex_cli_local_scheduler_dispatch_markdown(payload: dict[str, Any]) -> str:
+    dispatch = payload.get("event_driven_dispatch")
+    if not isinstance(dispatch, dict):
+        dispatch = {}
+    queue = dispatch.get("queue")
+    if not isinstance(queue, dict):
+        queue = {}
+    ready_successors = (
+        dispatch.get("ready_successors") if isinstance(dispatch.get("ready_successors"), list) else []
+    )
+    newly_enqueued = (
+        dispatch.get("newly_enqueued") if isinstance(dispatch.get("newly_enqueued"), list) else []
+    )
+    skipped_duplicates = (
+        dispatch.get("skipped_duplicates")
+        if isinstance(dispatch.get("skipped_duplicates"), list)
+        else []
+    )
+    dispatched = dispatch.get("dispatched")
+    if not isinstance(dispatched, dict):
+        dispatched = {}
+    pending = queue.get("pending_todo_ids") if isinstance(queue.get("pending_todo_ids"), list) else []
+    claimed = queue.get("claimed_todo_ids") if isinstance(queue.get("claimed_todo_ids"), list) else []
+    done = queue.get("done_todo_ids") if isinstance(queue.get("done_todo_ids"), list) else []
+    ready_lines = "\n".join(f"- {todo_id}" for todo_id in ready_successors) if ready_successors else "- none"
+    enqueued_lines = "\n".join(f"- {todo_id}" for todo_id in newly_enqueued) if newly_enqueued else "- none"
+    skipped_lines = "\n".join(f"- {todo_id}" for todo_id in skipped_duplicates) if skipped_duplicates else "- none"
+    pending_lines = "\n".join(f"- {todo_id}" for todo_id in pending) if pending else "- none"
+    claimed_lines = "\n".join(f"- {todo_id}" for todo_id in claimed) if claimed else "- none"
+    done_lines = "\n".join(f"- {todo_id}" for todo_id in done) if done else "- none"
+    closure = dispatch.get("closure")
+    if not isinstance(closure, dict):
+        closure = None
+    closure_section = ""
+    if closure is not None:
+        closure_evidence = (
+            closure.get("evidence") if isinstance(closure.get("evidence"), dict) else {}
+        )
+        closure_section = f"""
+
+## Closure
+
+- ready: `{closure.get("ready")}`
+- tri_state: `{closure.get("tri_state")}`
+- reason: `{closure.get("reason")}`
+- acceptance_satisfied: `{closure_evidence.get("acceptance_satisfied")}`
+- acceptance_gap_count: `{closure_evidence.get("acceptance_gap_count")}`
+- ready_todo_ids: `{len(closure_evidence.get("ready_todo_ids") or [])}`
+- blocked_todo_ids: `{len(closure_evidence.get("blocked_todo_ids") or [])}`
+- deferred_todo_ids: `{len(closure_evidence.get("deferred_todo_ids") or [])}`
+"""
+    return f"""# Codex CLI Local Scheduler Dispatch
+
+- ok: `{payload.get("ok")}`
+- disabled: `{payload.get("disabled")}`
+- goal_id: `{payload.get("goal_id")}`
+- event_driven_dispatch_enabled: `{dispatch.get("enabled")}`
+
+## Ready Successors (handoff gates recomputed)
+
+{ready_lines}
+
+## Newly Enqueued
+
+{enqueued_lines}
+
+## Skipped Duplicates
+
+{skipped_lines}
+
+## Dispatched
+
+- todo_id: `{dispatched.get("todo_id")}`
+- claimed_by: `{dispatched.get("claimed_by")}`
+- status: `{dispatched.get("status")}`
+{closure_section}
+## Queue
+
+- pending: `{queue.get("pending_count")}` / {pending_lines}
+- claimed: `{queue.get("claimed_count")}` / {claimed_lines}
+- done: `{queue.get("done_count")}` / {done_lines}
+
+## Recorded Events
+
+- task_ready: `{len((payload.get("recorded_events") or {}).get("task_ready") or [])}`
+- task_enqueued: `{len((payload.get("recorded_events") or {}).get("task_enqueued") or [])}`
+"""

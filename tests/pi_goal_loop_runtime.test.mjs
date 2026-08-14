@@ -11,8 +11,11 @@ import {
   createEphemeralSessionIdentity,
   createGoalLoop,
   createMemoryBindingStore,
+  isTerminalNoFollowup,
+  policyDecisionOf,
   sanitizedKey,
   sessionKey,
+  shouldRunNow,
   waitPlan,
 } from "../loopx/pi_goal_mode/pi-goal-loop-runtime.mjs"
 
@@ -99,6 +102,56 @@ function backoffDecision() {
           example_progression_minutes: [3, 6, 12],
           unchanged_poll_limit: 3,
         },
+      },
+    },
+  }
+}
+
+
+// Phase 5 unified policy-decision payloads (control_plane PolicyEngine). The
+// loop must prefer `policy_decision.outcome` when present and fall back to the
+// legacy quota fields otherwise.
+function policyDecision({ outcome, retryAfterSeconds, retryAt, source }) {
+  const unified = { outcome, source: source || "quota" }
+  if (retryAfterSeconds !== undefined) unified.retry_after_seconds = retryAfterSeconds
+  if (retryAt !== undefined) unified.retry_at = retryAt
+  return {
+    policy_decision: unified,
+    // Legacy fields still travel alongside the unified decision.
+    should_run: outcome === "run",
+    effective_action: outcome === "run" ? "run_now" : "backoff_waiting_for_user",
+  }
+}
+
+function policyRunDecision() {
+  return policyDecision({ outcome: "run" })
+}
+
+function policyWaitDecision(retryAfterSeconds) {
+  return policyDecision({ outcome: "wait", retryAfterSeconds })
+}
+
+function policyDenyDecision(retryAfterSeconds) {
+  return policyDecision({ outcome: "deny", retryAfterSeconds })
+}
+
+// A legacy terminal decision carrying the validated goal-closure projection.
+function policyTerminalDecision() {
+  return {
+    should_run: false,
+    effective_action: "terminal_no_followup",
+    policy_decision: { outcome: "deny", source: "quota" },
+    goal_frontier_projection: {
+      terminal_state: {
+        schema_version: "goal_terminal_state_v0",
+        kind: "no_followup",
+        derived: true,
+        source: "validated_goal_closure",
+      },
+      source_completeness: {
+        schema_version: "goal_terminal_source_completeness_v0",
+        user_todos: "valid",
+        agent_todos: "valid",
       },
     },
   }
@@ -411,6 +464,95 @@ test("wait plan resets the unchanged count when the scheduler token changes", ()
   const plan = waitPlan(backoffDecision(), binding)
   assert.equal(plan.stop, false)
   assert.equal(plan.unchangedPolls, 1)
+})
+
+
+test("policy_decision run outcome continues immediately like legacy run_now", async () => {
+  const fixture = harness(policyRunDecision())
+  fixture.loop.bind("session-policy-run", fixture.services)
+  await fixture.activate("session-policy-run")
+  await fixture.loop.settle("session-policy-run")
+
+  assert.equal(fixture.calls.quota, 1)
+  assert.equal(fixture.calls.send, 1)
+  assert.equal(fixture.calls.messages[0], "LoopX task body")
+  assert.equal(fixture.scheduled.length, 0)
+  const binding = await fixture.store.read("session-policy-run")
+  assert.equal(binding.lastInjectedPrompt, "LoopX task body")
+  assert.equal(binding.autoResume, true)
+})
+
+
+test("policy_decision deny without a validated terminal holds the loop", async () => {
+  // deny alone is not a validated goal closure; the loop must neither send a
+  // message nor schedule a backoff timer, and must not self-close the goal.
+  const fixture = harness(policyDenyDecision())
+  fixture.loop.bind("session-policy-deny", fixture.services)
+  await fixture.activate("session-policy-deny")
+  await fixture.loop.settle("session-policy-deny")
+
+  assert.equal(fixture.calls.quota, 1)
+  assert.equal(fixture.calls.send, 0)
+  assert.equal(fixture.scheduled.length, 0)
+  const binding = await fixture.store.read("session-policy-deny")
+  assert.equal(binding.terminal, false)
+  assert.equal(binding.autoResume, true)
+})
+
+
+test("policy_decision wait uses retry_after_seconds for the backoff timer", async () => {
+  const fixture = harness(policyWaitDecision(300)) // 300s -> 5 min
+  fixture.loop.bind("session-policy-wait", fixture.services)
+  await fixture.activate("session-policy-wait")
+  await fixture.loop.settle("session-policy-wait")
+
+  assert.equal(fixture.calls.send, 0)
+  assert.equal(fixture.scheduled.length, 1)
+  assert.equal(fixture.scheduled[0].delayMs, 300_000)
+  assert.equal(fixture.scheduled[0].cleared, false)
+})
+
+
+test("policy_decision deny plus validated terminal projection stops the loop", async () => {
+  const fixture = harness(policyTerminalDecision())
+  fixture.loop.bind("session-policy-terminal", fixture.services)
+  await fixture.activate("session-policy-terminal")
+  const notifyAfterActivate = fixture.calls.notify
+  await fixture.loop.settle("session-policy-terminal")
+
+  assert.equal(fixture.calls.send, 0)
+  assert.equal(fixture.calls.notify, notifyAfterActivate + 1)
+  assert.equal(fixture.scheduled.length, 0)
+  const binding = await fixture.store.read("session-policy-terminal")
+  assert.equal(binding.terminal, true)
+  assert.equal(binding.autoResume, false)
+})
+
+
+test("policy_decisionOf rejects unknown outcomes and missing objects", () => {
+  assert.equal(policyDecisionOf({ policy_decision: { outcome: "run" } }).outcome, "run")
+  assert.equal(policyDecisionOf({ policy_decision: { outcome: "wait" } }).outcome, "wait")
+  assert.equal(policyDecisionOf({ policy_decision: { outcome: "deny" } }).outcome, "deny")
+  // Unknown / malformed unified decisions are ignored so the legacy path wins.
+  assert.equal(policyDecisionOf({ policy_decision: { outcome: "weird" } }), null)
+  assert.equal(policyDecisionOf({ policy_decision: "not-an-object" }), null)
+  assert.equal(policyDecisionOf({}), null)
+  assert.equal(policyDecisionOf(null), null)
+})
+
+
+test("shouldRunNow falls back to legacy fields when no policy_decision", () => {
+  assert.equal(shouldRunNow({ should_run: true, scheduler_hint: { action: "run_now" } }), true)
+  assert.equal(shouldRunNow({ should_run: false, scheduler_hint: { action: "backoff" } }), false)
+  assert.equal(shouldRunNow({}), false)
+})
+
+
+test("isTerminalNoFollowup requires the validated frontier even with deny", () => {
+  // deny without the closure projection is not terminal.
+  assert.equal(isTerminalNoFollowup(policyDenyDecision()), false)
+  // deny with the validated projection is terminal.
+  assert.equal(isTerminalNoFollowup(policyTerminalDecision()), true)
 })
 
 

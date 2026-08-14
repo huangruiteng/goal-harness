@@ -552,3 +552,105 @@ test("completes only after LoopX validates terminal no-follow-up", async () => {
   assert.equal(await fixture.store.read("session-terminal"), null)
   assert.equal(fixture.calls.event, 0)
 })
+
+
+function policyDecision({ outcome, retryAfterSeconds, retryAt }) {
+  const unified = { outcome, source: "quota" }
+  if (retryAfterSeconds !== undefined) unified.retry_after_seconds = retryAfterSeconds
+  if (retryAt !== undefined) unified.retry_at = retryAt
+  return {
+    policy_decision: unified,
+    should_run: outcome === "run",
+    effective_action: outcome === "run" ? "run_now" : "backoff_waiting_for_user",
+  }
+}
+
+function policyTerminalDecision() {
+  return {
+    should_run: false,
+    effective_action: "terminal_no_followup",
+    policy_decision: { outcome: "deny", source: "quota" },
+    goal_frontier_projection: {
+      terminal_state: {
+        schema_version: "goal_terminal_state_v0",
+        kind: "no_followup",
+        derived: true,
+        source: "validated_goal_closure",
+      },
+      source_completeness: {
+        schema_version: "goal_terminal_source_completeness_v0",
+        user_todos: "valid",
+        agent_todos: "valid",
+      },
+    },
+  }
+}
+
+
+test("policy_decision run outcome continues immediately like legacy run_now", async () => {
+  const fixture = harness(policyDecision({ outcome: "run" }))
+  const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
+  await hooks.tool.loopx_goal_activate.execute(
+    { goalId: "goal-policy-run", objective: "LoopX task body" },
+    { sessionID: "session-policy-run" },
+  )
+  await hooks.event({ event: { type: "session.idle", properties: { sessionID: "session-policy-run" } } })
+
+  assert.equal(fixture.calls.event, 1)
+  assert.equal(fixture.scheduled.length, 0)
+  const binding = await fixture.store.read("session-policy-run")
+  assert.equal(binding.autoResume, true)
+})
+
+
+test("policy_decision deny without a validated terminal holds the loop", async () => {
+  // deny alone is not a validated goal closure; the loop must neither continue,
+  // schedule, nor self-close the goal.
+  const fixture = harness(policyDecision({ outcome: "deny" }))
+  const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
+  await hooks.tool.loopx_goal_activate.execute(
+    { goalId: "goal-policy-deny", objective: "LoopX task body" },
+    { sessionID: "session-policy-deny" },
+  )
+  await hooks.event({ event: { type: "session.idle", properties: { sessionID: "session-policy-deny" } } })
+
+  assert.equal(fixture.calls.event, 0)
+  assert.equal(fixture.calls.complete, 0)
+  assert.equal(fixture.scheduled.length, 0)
+  const binding = await fixture.store.read("session-policy-deny")
+  assert.notEqual(binding, null)
+  assert.equal(binding.terminal, undefined)
+})
+
+
+test("policy_decision wait uses retry_after_seconds for the backoff timer", async () => {
+  const fixture = harness(policyDecision({ outcome: "wait", retryAfterSeconds: 300 }))
+  const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
+  await hooks.tool.loopx_goal_activate.execute(
+    { goalId: "goal-policy-wait", objective: "LoopX task body" },
+    { sessionID: "session-policy-wait" },
+  )
+  await hooks.event({ event: { type: "session.idle", properties: { sessionID: "session-policy-wait" } } })
+
+  assert.equal(fixture.calls.event, 0)
+  assert.equal(fixture.scheduled.length, 1)
+  assert.equal(fixture.scheduled[0].delay, 300_000)
+  assert.equal(fixture.scheduled[0].cleared, false)
+})
+
+
+test("policy_decision deny plus validated terminal projection completes the goal", async () => {
+  const fixture = harness(policyTerminalDecision())
+  const hooks = await fixture.plugin({ directory: "/workspace", client: {} })
+  await hooks.tool.loopx_goal_activate.execute(
+    { goalId: "goal-policy-terminal", objective: "LoopX task body" },
+    { sessionID: "session-policy-terminal" },
+  )
+  await hooks.event({
+    event: { type: "session.idle", properties: { sessionID: "session-policy-terminal" } },
+  })
+
+  assert.equal(fixture.calls.complete, 1)
+  assert.equal(await fixture.store.read("session-policy-terminal"), null)
+  assert.equal(fixture.calls.event, 0)
+})
