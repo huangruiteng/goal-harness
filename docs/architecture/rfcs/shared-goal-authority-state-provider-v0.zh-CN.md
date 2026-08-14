@@ -503,6 +503,13 @@ gate/dependency ref、claim/lease field 与按 privacy class 标注的 opaque po
 history、quota、scheduler 或 evidence 的通用存储抽象，这些账继续遵守第 3 节的 owner
 边界。
 
+完成续接（continuation）的持久化读回
+（`durable_completion.py`：`read_persisted_todo_record` /
+`project_durable_completion_outcome`）是一个 provider read point：它在完成写入之后、
+settlement 之前重新读取已落盘的 lifecycle record（Markdown 优先，event projection
+兜底）。一旦远端 provider 成为 canonical，这个 seam 翻转为 provider-first，且不改变
+下述 typed outcome 合同。
+
 ### P0：合同与 deterministic proof
 
 - 本 ownership matrix 与显式 shared-mode boundary；
@@ -518,6 +525,10 @@ history、quota、scheduler 或 evidence 的通用存储抽象，这些账继续
 
 - Lease renewal、显式 release、过期 lease reclaim 与 stale-fence writeback rejection；
   production shared mode 前必须完成这些能力；
+- durable completion continuation projection
+  （`successor | no_followup | active_goal`），带 fail-closed 矛盾规则
+  （`no_followup` + successors、悬挂的 declared successor），并由 provider 以相同
+  语义复现；
 - atomic `complete_todo_with_successor` 与 accepted evidence pointer；
 - transfer 与受限 delegated assignment；
 - 经 Agent IM 的 delivery/wake integration；

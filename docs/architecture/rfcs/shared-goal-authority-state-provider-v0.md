@@ -577,6 +577,14 @@ only the `load` / `compare_and_put` provider. This prerequisite does not create
 a generic storage abstraction over registry, run history, quota, scheduler, or
 evidence; those ledgers retain the owners defined in Section 3.
 
+Durable completion continuation read-back
+(`durable_completion.py`: `read_persisted_todo_record` /
+`project_durable_completion_outcome`) is a provider read point: it re-reads
+the persisted lifecycle record (Markdown first, event projection fallback)
+after the completion write and before settlement. Once a remote provider
+becomes canonical, this seam flips to provider-first without changing the
+typed outcome contract below.
+
 ### P0: contract and deterministic proof
 
 - this ownership matrix and explicit shared-mode boundary;
@@ -593,6 +601,10 @@ evidence; those ledgers retain the owners defined in Section 3.
 
 - lease renewal, explicit release, expired-lease reclaim, and stale-fence
   writeback rejection, all required before production shared mode;
+- durable completion continuation projection
+  (`successor | no_followup | active_goal`) with fail-closed contradiction
+  rules (`no_followup` + successors, dangling declared successor), reproduced
+  by the provider with identical semantics;
 - atomic `complete_todo_with_successor` and accepted evidence pointers;
 - transfer and restricted delegated assignment;
 - delivery/wake integration through Agent IM;
