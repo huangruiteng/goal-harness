@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+import pytest
+
 from loopx.control_plane.effect_program import EffectNext, interpret_turn_journal
 
 
@@ -86,3 +88,85 @@ def test_turn_journal_reports_legal_replay_without_mutating_input() -> None:
     assert turn.observation.effective_action == "observe_replay"
     assert turn.next_effect == EffectNext()
     assert journal == before
+
+
+def test_turn_journal_accumulates_identity_and_phase_violations() -> None:
+    journal = _journal()
+    journal["goal_id"] = "other-goal"
+    journal["turn_key"] = "sha256:other-turn"
+    journal["completed_phases"] = ["host_execute", "validation"]
+    identity = journal["plan"]["transaction"]["settlement_plan"]["identity"]
+    identity["agent_id"] = "other-agent"
+
+    turn = interpret_turn_journal(
+        journal,
+        goal_id="fixture-goal",
+        agent_id="fixture-agent",
+        turn_key="sha256:fixture-turn",
+    )
+
+    assert turn.request.context["replay_legal"] is False
+    assert turn.request.context["goal_matches"] is False
+    assert turn.request.context["owner_matches"] is False
+    assert turn.request.context["turn_key_matches"] is False
+    assert turn.request.context["phases_form_ordered_prefix"] is False
+    assert turn.request.context["violations"] == (
+        "goal_mismatch",
+        "owner_mismatch",
+        "turn_key_mismatch",
+        "completed_phases_not_ordered_prefix",
+    )
+    assert turn.observation.decision == "replay_blocked"
+    assert turn.observation.should_run is False
+    assert turn.observation.effective_action == "block_replay"
+    assert turn.next_effect == EffectNext()
+
+
+@pytest.mark.parametrize("status", ["committed", "stopped", "failed"])
+def test_turn_journal_retains_terminal_tombstones(status: str) -> None:
+    turn = interpret_turn_journal(
+        _journal(status=status),
+        goal_id="fixture-goal",
+        agent_id="fixture-agent",
+        turn_key="sha256:fixture-turn",
+    )
+
+    assert turn.request.context["tombstone_retained"] is True
+    assert turn.request.context["journal_status"] == status
+    assert turn.request.context["replay_legal"] is True
+
+
+def test_turn_journal_blocks_non_terminal_and_malformed_trace() -> None:
+    journal = {"status": "in_progress", "completed_phases": "host_execute"}
+
+    turn = interpret_turn_journal(journal)
+
+    assert turn.request.context["replay_legal"] is False
+    assert turn.request.context["goal_matches"] is False
+    assert turn.request.context["owner_matches"] is False
+    assert turn.request.context["turn_key_matches"] is False
+    assert turn.request.context["phases_form_ordered_prefix"] is False
+    assert turn.request.context["tombstone_retained"] is False
+    assert turn.request.context["completed_phases"] == ()
+    assert turn.request.context["violations"] == (
+        "goal_identity_missing",
+        "owner_identity_missing",
+        "turn_key_identity_missing",
+        "completed_phases_invalid",
+        "journal_not_terminal",
+    )
+    assert turn.observation.decision == "replay_blocked"
+    assert turn.observation.should_run is False
+
+
+def test_turn_journal_blocks_unknown_status_as_unsupported() -> None:
+    turn = interpret_turn_journal(
+        _journal(status="retired"),
+        goal_id="fixture-goal",
+        agent_id="fixture-agent",
+        turn_key="sha256:fixture-turn",
+    )
+
+    assert turn.request.context["replay_legal"] is False
+    assert turn.request.context["tombstone_retained"] is False
+    assert turn.request.context["violations"] == ("journal_status_unsupported",)

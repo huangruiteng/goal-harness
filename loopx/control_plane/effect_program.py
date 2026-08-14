@@ -87,6 +87,19 @@ class TurnTransactionPhase(StrEnum):
 TURN_TRANSACTION_PHASES = tuple(phase.value for phase in TurnTransactionPhase)
 
 
+class TurnJournalViolation(StrEnum):
+    GOAL_IDENTITY_MISSING = "goal_identity_missing"
+    GOAL_MISMATCH = "goal_mismatch"
+    OWNER_IDENTITY_MISSING = "owner_identity_missing"
+    OWNER_MISMATCH = "owner_mismatch"
+    TURN_KEY_IDENTITY_MISSING = "turn_key_identity_missing"
+    TURN_KEY_MISMATCH = "turn_key_mismatch"
+    COMPLETED_PHASES_INVALID = "completed_phases_invalid"
+    COMPLETED_PHASES_NOT_ORDERED_PREFIX = "completed_phases_not_ordered_prefix"
+    JOURNAL_NOT_TERMINAL = "journal_not_terminal"
+    JOURNAL_STATUS_UNSUPPORTED = "journal_status_unsupported"
+
+
 class SettlementStepKind(StrEnum):
     VALIDATION = "validation"
     TODO_COMPLETION = "todo_completion"
@@ -275,6 +288,30 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _present_strings(*values: Any) -> tuple[str, ...]:
+    return tuple(
+        normalized
+        for item in values
+        if (normalized := str(item or "").strip())
+    )
+
+
+def _identity_state(
+    required_values: Sequence[Any],
+    *,
+    optional_values: Sequence[Any] = (),
+    expected: str | None = None,
+) -> tuple[bool, bool]:
+    required = _present_strings(*required_values)
+    complete = len(required) == len(required_values)
+    observed = (
+        *required,
+        *_present_strings(*optional_values),
+        *_present_strings(expected),
+    )
+    return complete, complete and len(set(observed)) == 1
+
+
 def effect_program_from_ordered_steps(
     ordered_steps: Sequence[Mapping[str, Any]],
     *,
@@ -399,24 +436,79 @@ def interpret_turn_journal(
 ) -> EffectTurn:
     """Read one fenced Turn journal through the canonical effect slots."""
 
-    completed_phases = tuple(
-        str(phase) for phase in journal.get("completed_phases", [])
+    plan = _mapping(journal.get("plan"))
+    envelope = _mapping(plan.get("turn_envelope"))
+    transaction = _mapping(plan.get("transaction"))
+    settlement = _mapping(transaction.get("settlement_plan"))
+    identity = _mapping(settlement.get("identity"))
+    host_result = _mapping(journal.get("host_result"))
+    receipt = _mapping(journal.get("receipt"))
+
+    goal_complete, goal_matches = _identity_state(
+        (
+            journal.get("goal_id"),
+            envelope.get("goal_id"),
+            identity.get("goal_id"),
+        ),
+        expected=goal_id,
     )
+    owner_complete, owner_matches = _identity_state(
+        (envelope.get("agent_id"), identity.get("agent_id")),
+        expected=agent_id,
+    )
+    turn_key_complete, turn_key_matches = _identity_state(
+        (journal.get("turn_key"), transaction.get("turn_key")),
+        optional_values=(host_result.get("turn_key"), receipt.get("turn_key")),
+        expected=turn_key,
+    )
+
+    violations: list[TurnJournalViolation] = []
+    if not goal_complete:
+        violations.append(TurnJournalViolation.GOAL_IDENTITY_MISSING)
+    elif not goal_matches:
+        violations.append(TurnJournalViolation.GOAL_MISMATCH)
+    if not owner_complete:
+        violations.append(TurnJournalViolation.OWNER_IDENTITY_MISSING)
+    elif not owner_matches:
+        violations.append(TurnJournalViolation.OWNER_MISMATCH)
+    if not turn_key_complete:
+        violations.append(TurnJournalViolation.TURN_KEY_IDENTITY_MISSING)
+    elif not turn_key_matches:
+        violations.append(TurnJournalViolation.TURN_KEY_MISMATCH)
+
+    raw_completed_phases = journal.get("completed_phases")
+    if isinstance(raw_completed_phases, list):
+        completed_phases = tuple(str(phase) for phase in raw_completed_phases)
+        phases_form_ordered_prefix = completed_phases == TURN_TRANSACTION_PHASES[
+            : len(completed_phases)
+        ]
+        if not phases_form_ordered_prefix:
+            violations.append(
+                TurnJournalViolation.COMPLETED_PHASES_NOT_ORDERED_PREFIX
+            )
+    else:
+        completed_phases = ()
+        phases_form_ordered_prefix = False
+        violations.append(TurnJournalViolation.COMPLETED_PHASES_INVALID)
+
     journal_status = str(journal.get("status") or "")
-    phases_form_ordered_prefix = completed_phases == TURN_TRANSACTION_PHASES[
-        : len(completed_phases)
-    ]
+    tombstone_retained = journal_status in {"committed", "stopped", "failed"}
+    if journal_status in {"in_progress", "scheduler_action_required"}:
+        violations.append(TurnJournalViolation.JOURNAL_NOT_TERMINAL)
+    elif not tombstone_retained:
+        violations.append(TurnJournalViolation.JOURNAL_STATUS_UNSUPPORTED)
+
+    replay_legal = not violations
     context = {
-        "replay_legal": True,
-        "goal_matches": True,
-        "owner_matches": True,
-        "turn_key_matches": True,
+        "replay_legal": replay_legal,
+        "goal_matches": goal_matches,
+        "owner_matches": owner_matches,
+        "turn_key_matches": turn_key_matches,
         "phases_form_ordered_prefix": phases_form_ordered_prefix,
         "journal_status": journal_status,
-        "tombstone_retained": journal_status
-        in {"committed", "stopped", "failed"},
+        "tombstone_retained": tombstone_retained,
         "completed_phases": completed_phases,
-        "violations": (),
+        "violations": tuple(violation.value for violation in violations),
     }
     return EffectTurn(
         request=EffectRequest(
@@ -433,11 +525,22 @@ def interpret_turn_journal(
             interaction_mode="read_only",
         ),
         observation=EffectObservation(
-            decision="replay_legal",
+            decision="replay_legal" if replay_legal else "replay_blocked",
             should_run=False,
-            effective_action="observe_replay",
-            recommended_action="Retain the terminal Turn journal tombstone.",
-            protocol_summary="Turn journal replay is legal and effect-free.",
+            effective_action=("observe_replay" if replay_legal else "block_replay"),
+            recommended_action=(
+                "Retain the terminal Turn journal tombstone."
+                if replay_legal
+                else "Inspect the structured Turn journal violations before replay."
+            ),
+            protocol_summary=(
+                "Turn journal replay is legal and effect-free."
+                if replay_legal
+                else (
+                    "Turn journal replay is blocked by "
+                    f"{len(violations)} structured violation(s)."
+                )
+            ),
         ),
         next_effect=EffectNext(),
     )
