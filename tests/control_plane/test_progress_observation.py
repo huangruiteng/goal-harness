@@ -197,6 +197,48 @@ def test_terminal_coverage_requires_a_semantically_new_scope(
     ]
 
 
+def test_terminal_result_class_change_is_a_semantic_delta() -> None:
+    baseline = normalize_progress_observation(
+        _observation(
+            result_class="exploration_exhausted",
+            coverage_scope_id="scope-public-entrypoints",
+            coverage_complete=True,
+        )
+    )
+    no_followup = normalize_progress_observation(
+        _observation(
+            result_class="no_followup",
+            coverage_scope_id="scope-public-entrypoints",
+        )
+    )
+
+    assert semantic_progress_delta(no_followup, baseline=baseline)["delta_kinds"] == [
+        "coverage_backed_no_followup"
+    ]
+
+
+def test_no_followup_ignores_coverage_complete_churn() -> None:
+    baseline = normalize_progress_observation(
+        _observation(
+            result_class="no_followup",
+            coverage_scope_id="scope-public-entrypoints",
+            coverage_complete=False,
+        )
+    )
+    coverage_flag_only = normalize_progress_observation(
+        _observation(
+            result_class="no_followup",
+            coverage_scope_id="scope-public-entrypoints",
+            coverage_complete=True,
+        )
+    )
+
+    assert (
+        semantic_progress_delta(coverage_flag_only, baseline=baseline)["accepted"]
+        is False
+    )
+
+
 def test_host_projects_evidence_context_and_minimal_action_packet() -> None:
     runs = [
         _run("2026-08-13T01:01:00Z", _observation()),
