@@ -1051,7 +1051,6 @@ def test_visual_sync_single_sink_lane_style_falls_back_to_mermaid(
 def test_visual_sync_publishes_overview_board_without_stages(tmp_path) -> None:
     projection = _complex_projection()
     config = LarkExploreConfig(base_token="PUBLIC_FIXTURE_BASE")
-    bundle = build_explore_presentation_bundle(projection)
 
     synced = sync_explore_visuals_to_lark(
         config,
