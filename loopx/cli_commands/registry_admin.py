@@ -34,6 +34,7 @@ from ..state_migration import (
 from ..thread_agent_binding import (
     bind_thread_agent_in_registry,
     resolve_thread_agent_binding,
+    unbind_thread_agent_in_registry,
 )
 from ..upgrade import build_upgrade_plan
 from .registry_admin_configure import register_configure_goal_command
@@ -53,6 +54,7 @@ REGISTRY_ADMIN_COMMANDS = {
     "configure-goal",
     "register-agent",
     "bind-agent-thread",
+    "unbind-agent-thread",
     "archive-runtime",
     "retire-global-goal",
     "uninstall-project",
@@ -403,6 +405,16 @@ def register_registry_admin_commands(subparsers: argparse._SubParsersAction) -> 
     bind_thread_parser.add_argument("--agent-id", required=True, help="Already registered public-safe agent id.")
     bind_thread_parser.add_argument("--execute", action="store_true", help="Write the binding; otherwise preview only.")
 
+    unbind_thread_parser = subparsers.add_parser(
+        "unbind-agent-thread",
+        help="Remove one exact host-thread binding from its expected LoopX agent.",
+    )
+    unbind_thread_parser.add_argument("--goal-id", required=True, help="Goal id already present in the global registry.")
+    unbind_thread_parser.add_argument("--thread-id", required=True, help="Stable opaque host thread id.")
+    unbind_thread_parser.add_argument("--host-surface", required=True, help="Host surface such as codex-app.")
+    unbind_thread_parser.add_argument("--agent-id", required=True, help="Expected registered public-safe agent id.")
+    unbind_thread_parser.add_argument("--execute", action="store_true", help="Remove the binding; otherwise preview only.")
+
     archive_runtime_parser = subparsers.add_parser(
         "archive-runtime",
         help="Move an obsolete runtime goal directory into the archive area. Defaults to dry-run.",
@@ -692,7 +704,7 @@ def handle_registry_admin_command(
         print_payload(payload, args.format, render_register_agent_markdown)
         return 0 if payload.get("ok") else 1
 
-    if args.command == "bind-agent-thread":
+    if args.command in {"bind-agent-thread", "unbind-agent-thread"}:
         try:
             global_path = explicit_global_registry(args.runtime_root)
             global_goal = _registry_goal(global_path, args.goal_id)
@@ -728,7 +740,12 @@ def handle_registry_admin_command(
                     }
                     print_payload(payload, args.format, render_register_agent_markdown)
                     return 1
-            payload = bind_thread_agent_in_registry(
+            binding_operation = (
+                bind_thread_agent_in_registry
+                if args.command == "bind-agent-thread"
+                else unbind_thread_agent_in_registry
+            )
+            payload = binding_operation(
                 registry_path=source_path,
                 goal_id=args.goal_id,
                 host_surface=args.host_surface,
@@ -755,11 +772,27 @@ def handle_registry_admin_command(
                     host_surface=args.host_surface,
                     thread_id=args.thread_id,
                 )
-                readback_verified = all(
-                    binding.get("status") == "bound"
-                    and binding.get("agent_id") == args.agent_id
-                    for binding in (source_binding, global_binding)
-                )
+                if args.command == "bind-agent-thread":
+                    readback_verified = all(
+                        binding.get("status") == "bound"
+                        and binding.get("agent_id") == args.agent_id
+                        for binding in (source_binding, global_binding)
+                    )
+                else:
+                    source_agents = _goal_registered_agents(
+                        _registry_goal(source_path, args.goal_id)
+                    )
+                    global_agents = _goal_registered_agents(
+                        _registry_goal(global_path, args.goal_id)
+                    )
+                    readback_verified = (
+                        all(
+                            binding.get("status") == "missing"
+                            for binding in (source_binding, global_binding)
+                        )
+                        and args.agent_id in source_agents
+                        and args.agent_id in global_agents
+                    )
                 payload["registration_readback"] = {"verified": readback_verified}
                 payload["ok"] = bool(payload["global_sync"].get("ok")) and readback_verified
                 if not payload["ok"]:

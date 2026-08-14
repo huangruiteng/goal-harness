@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -1009,6 +1009,164 @@ def test_project_bind_session_rejects_invalid_foreground_goal_without_writing(
     assert registry_path.read_bytes() == before
 
 
+def test_project_unbind_session_removes_only_the_expected_session(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    registry_path = tmp_path / "registry.global.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "project_id": "atlas",
+                        "project_kind": "work",
+                        "knowledge_root": str(tmp_path / "atlas"),
+                        "repository_bindings": [],
+                        "external_locator_bindings": [],
+                    }
+                ],
+                "goals": [
+                    {
+                        "id": "atlas-import",
+                        "project_id": "atlas",
+                        "status": "complete",
+                    }
+                ],
+                "session_bindings": [
+                    {
+                        "session_id": "session-current",
+                        "foreground_goal_id": "atlas-import",
+                    },
+                    {
+                        "session_id": "session-other",
+                        "foreground_goal_id": "atlas-import",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "--format",
+                "json",
+                "--registry",
+                str(registry_path),
+                "project",
+                "unbind-session",
+                "--session-id",
+                "session-current",
+                "--goal-id",
+                "atlas-import",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+
+    assert payload["changed"] is True
+    assert payload["project_id"] == "atlas"
+    assert payload["binding"] == {
+        "session_id": "session-current",
+        "foreground_goal_id": "atlas-import",
+    }
+    assert registry["session_bindings"] == [
+        {
+            "session_id": "session-other",
+            "foreground_goal_id": "atlas-import",
+        }
+    ]
+
+
+def test_project_unbind_session_is_idempotent_and_rejects_stale_goal(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    registry_path = tmp_path / "registry.global.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "project_id": "atlas",
+                        "project_kind": "work",
+                        "knowledge_root": str(tmp_path / "atlas"),
+                        "repository_bindings": [],
+                        "external_locator_bindings": [],
+                    }
+                ],
+                "goals": [
+                    {
+                        "id": "atlas-import",
+                        "project_id": "atlas",
+                        "status": "active",
+                    },
+                    {
+                        "id": "atlas-other",
+                        "project_id": "atlas",
+                        "status": "active",
+                    },
+                ],
+                "session_bindings": [
+                    {
+                        "session_id": "session-current",
+                        "foreground_goal_id": "atlas-import",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    before = registry_path.read_bytes()
+
+    assert (
+        main(
+            [
+                "--format",
+                "json",
+                "--registry",
+                str(registry_path),
+                "project",
+                "unbind-session",
+                "--session-id",
+                "session-current",
+                "--goal-id",
+                "atlas-other",
+            ]
+        )
+        == 1
+    )
+    mismatch = json.loads(capsys.readouterr().out)
+    assert mismatch["ok"] is False
+    assert "does not match expected foreground goal" in mismatch["error"]
+    assert registry_path.read_bytes() == before
+
+    assert (
+        main(
+            [
+                "--format",
+                "json",
+                "--registry",
+                str(registry_path),
+                "project",
+                "unbind-session",
+                "--session-id",
+                "session-missing",
+                "--goal-id",
+                "atlas-import",
+            ]
+        )
+        == 0
+    )
+    missing = json.loads(capsys.readouterr().out)
+    assert missing["changed"] is False
+    assert registry_path.read_bytes() == before
+
+
 def test_project_commands_reject_malformed_session_bindings(
     tmp_path: Path,
     capsys,
@@ -1040,6 +1198,13 @@ def test_project_commands_reject_malformed_session_bindings(
     for command in [
         [
             "bind-session",
+            "--session-id",
+            "session-public-fixture",
+            "--goal-id",
+            "atlas-import",
+        ],
+        [
+            "unbind-session",
             "--session-id",
             "session-public-fixture",
             "--goal-id",

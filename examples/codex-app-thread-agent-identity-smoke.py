@@ -195,6 +195,73 @@ def main() -> None:
         assert reused_fresh["agent_id"] == "codex-c", reused_fresh
         assert reused_fresh["thread_agent_binding"]["status"] == "bound", reused_fresh
 
+        unbind_output = io.StringIO()
+        with contextlib.redirect_stdout(unbind_output):
+            unbind_exit = cli_main(
+                [
+                    "--runtime-root",
+                    str(runtime),
+                    "--format",
+                    "json",
+                    "unbind-agent-thread",
+                    "--goal-id",
+                    "goal",
+                    "--thread-id",
+                    "thread-b",
+                    "--host-surface",
+                    "codex-app",
+                    "--agent-id",
+                    "codex-c",
+                    "--execute",
+                ]
+            )
+        assert unbind_exit == 0, unbind_output.getvalue()
+        unbound = json.loads(unbind_output.getvalue())
+        assert unbound["registration_readback"]["verified"] is True, unbound
+        assert unbound["binding"]["status"] == "missing", unbound
+
+        rebind_output = io.StringIO()
+        with contextlib.redirect_stdout(rebind_output):
+            rebind_exit = cli_main(
+                [
+                    "--runtime-root",
+                    str(runtime),
+                    "--format",
+                    "json",
+                    "bind-agent-thread",
+                    "--goal-id",
+                    "goal",
+                    "--thread-id",
+                    "thread-b",
+                    "--host-surface",
+                    "codex-app",
+                    "--agent-id",
+                    "codex-b",
+                    "--execute",
+                ]
+            )
+        assert rebind_exit == 0, rebind_output.getvalue()
+        rebound = json.loads(rebind_output.getvalue())
+        assert rebound["binding"]["agent_id"] == "codex-b", rebound
+
+        source_after = json.loads(registry.read_text(encoding="utf-8"))
+        bindings_after = source_after["goals"][0]["coordination"][
+            "thread_agent_bindings"
+        ]
+        assert {
+            "thread_id": "thread-a",
+            "host_surface": "codex-app",
+            "agent_id": "codex-a",
+        } in bindings_after, bindings_after
+        assert {
+            "thread_id": "thread-b",
+            "host_surface": "codex-app",
+            "agent_id": "codex-b",
+        } in bindings_after, bindings_after
+        assert "codex-c" in source_after["goals"][0]["coordination"][
+            "registered_agents"
+        ], source_after
+
         fresh = build_start_goal_guided_packet(
             project=project,
             goal_id="goal",

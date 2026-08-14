@@ -1,4 +1,4 @@
-.TH LOOPX 1 "" "LoopX 0.4.5" "User Commands"
+.TH LOOPX 1 "" "LoopX 0.4.6" "User Commands"
 .SH NAME
 loopx \- control-plane helper for long-running agent work
 .SH SYNOPSIS
@@ -114,13 +114,16 @@ Select a safe host mode (visible, isolated headless Turn, gateway, timer, hybrid
 Create or connect project\-local state.
 .TP
 \fBloopx project \-\-help\fR
-Register a durable Project and bind or resolve its foreground Goal.
+Register a durable Project and bind, unbind, or resolve its foreground Goal.
 .TP
 \fBloopx new\-project\-prompt\fR
 Generate a copy\-paste project connection prompt for an agent.
 .TP
 \fBloopx bind\-agent\-thread\fR
 Persist one stable host thread binding to an already registered LoopX agent.
+.TP
+\fBloopx unbind\-agent\-thread\fR
+Remove one exact host thread binding without unregistering its agent or peer sessions.
 .TP
 \fBloopx codex\-cli\-bootstrap\-message\fR
 Generate the visible Codex CLI TUI setup message.

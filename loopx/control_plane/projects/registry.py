@@ -14,7 +14,6 @@ from ...registry import atomic_write_json
 from ...repository_identity import normalize_repository_identity
 from .contract import validate_project_record_bindings
 
-
 PROJECT_KINDS = ("work", "personal")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 
@@ -53,11 +52,11 @@ def _registry_records(
         return []
     records = registry[field]
     if not isinstance(records, list):
-        raise ValueError(f"registry {field} must be a list")
+        raise TypeError(f"registry {field} must be a list")
     seen: set[str] = set()
     for record in records:
         if not isinstance(record, dict):
-            raise ValueError(f"registry {field} entries must be JSON objects")
+            raise TypeError(f"registry {field} entries must be JSON objects")
         record_id = str(record.get(identity) or "").strip()
         if not record_id:
             raise ValueError(f"registry {field} entry is missing {identity}")
@@ -74,6 +73,26 @@ def _project_goal_records(
     for project in projects:
         validate_project_record_bindings(project, source="registry")
     return projects, _registry_records(registry, field="goals", identity="id")
+
+
+def _project_id_for_goal(
+    registry: dict[str, Any],
+    *,
+    goal_id: str,
+    require_active: bool,
+) -> str:
+    projects, goals = _project_goal_records(registry)
+    goal = next((item for item in goals if item.get("id") == goal_id), None)
+    if goal is None:
+        raise ValueError(f"goal_id is not registered: {goal_id}")
+    if require_active and goal.get("status") != "active":
+        raise ValueError(f"foreground goal is not active: {goal_id}")
+    project_id = str(goal.get("project_id") or "").strip()
+    if not project_id:
+        raise ValueError(f"foreground goal has no project_id: {goal_id}")
+    if not any(item.get("project_id") == project_id for item in projects):
+        raise ValueError(f"foreground goal references an unknown project_id: {project_id}")
+    return project_id
 
 
 def _resolve_exact_project_binding(
@@ -383,24 +402,12 @@ def bind_session(
             raise FileNotFoundError(f"registry file does not exist: {registry_path}")
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
         if not isinstance(registry, dict):
-            raise ValueError("registry root must be a JSON object")
-        goals = _registry_records(registry, field="goals", identity="id")
-        matching_goals = [item for item in goals if item.get("id") == goal_id]
-        if not matching_goals:
-            raise ValueError(f"goal_id is not registered: {goal_id}")
-        goal = matching_goals[0]
-        if goal.get("status") != "active":
-            raise ValueError(f"foreground goal is not active: {goal_id}")
-        project_id = str(goal.get("project_id") or "").strip()
-        if not project_id:
-            raise ValueError(f"foreground goal has no project_id: {goal_id}")
-        projects = _registry_records(
+            raise TypeError("registry root must be a JSON object")
+        project_id = _project_id_for_goal(
             registry,
-            field="projects",
-            identity="project_id",
+            goal_id=goal_id,
+            require_active=True,
         )
-        if not any(item.get("project_id") == project_id for item in projects):
-            raise ValueError(f"foreground goal references an unknown project_id: {project_id}")
 
         bindings = _registry_records(
             registry,
@@ -450,6 +457,74 @@ def bind_session(
     }
 
 
+def unbind_session(
+    *,
+    registry_path: Path,
+    session_id: str,
+    goal_id: str,
+) -> dict[str, Any]:
+    """Remove one exact session-to-goal binding without touching peer sessions."""
+
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        raise ValueError("session_id is required")
+    goal_id = _identifier(goal_id, field="goal_id")
+    registry_path = registry_path.expanduser()
+
+    with exclusive_file_lock(registry_path, operation="project_unbind_session"):
+        if not registry_path.exists():
+            raise FileNotFoundError(f"registry file does not exist: {registry_path}")
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        if not isinstance(registry, dict):
+            raise TypeError("registry root must be a JSON object")
+        project_id = _project_id_for_goal(
+            registry,
+            goal_id=goal_id,
+            require_active=False,
+        )
+        bindings = _registry_records(
+            registry,
+            field="session_bindings",
+            identity="session_id",
+        )
+        if any(not str(item.get("foreground_goal_id") or "").strip() for item in bindings):
+            raise ValueError(
+                "registry session_bindings entry is missing foreground_goal_id"
+            )
+        matching = [item for item in bindings if item.get("session_id") == session_id]
+        if not matching:
+            return {
+                "ok": True,
+                "schema_version": "loopx_session_unbinding_v0",
+                "changed": False,
+                "registry": str(registry_path),
+                "project_id": project_id,
+                "binding": None,
+            }
+        binding = matching[0]
+        if binding.get("foreground_goal_id") != goal_id:
+            raise ValueError(
+                "session binding does not match expected foreground goal: "
+                f"{session_id} is bound to {binding.get('foreground_goal_id')}, "
+                f"not {goal_id}"
+            )
+
+        registry["session_bindings"] = [
+            item for item in bindings if item.get("session_id") != session_id
+        ]
+        registry["updated_at"] = now_local_iso()
+        atomic_write_json(registry_path, registry)
+
+    return {
+        "ok": True,
+        "schema_version": "loopx_session_unbinding_v0",
+        "changed": True,
+        "registry": str(registry_path),
+        "project_id": project_id,
+        "binding": binding,
+    }
+
+
 def resolve_project(
     *,
     registry_path: Path,
@@ -463,7 +538,7 @@ def resolve_project(
         raise FileNotFoundError(f"registry file does not exist: {registry_path}")
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     if not isinstance(registry, dict):
-        raise ValueError("registry root must be a JSON object")
+        raise TypeError("registry root must be a JSON object")
     projects = _registry_records(
         registry,
         field="projects",

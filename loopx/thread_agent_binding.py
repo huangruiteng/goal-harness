@@ -125,15 +125,14 @@ def _merge_thread_binding_entries(
     return merged
 
 
-def _prepare_binding(
+def _binding_context(
     payload: dict[str, Any],
     *,
     goal_id: str,
     host_surface: str,
     thread_id: str,
     agent_id: str,
-    execute: bool,
-) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, str]]]:
+) -> tuple[dict[str, Any], list[dict[str, str]], dict[str, Any]]:
     goal = find_registry_goal(payload, goal_id)
     if goal is None:
         raise ValueError(f"goal_id not found in registry: {goal_id}")
@@ -148,12 +147,30 @@ def _prepare_binding(
         raise ValueError(
             f"agent_id={agent_id!r} is not registered for goal {goal_id!r}"
         )
-
     current = _bindings_for_goal(goal)
     existing = resolve_thread_agent_binding(
         goal,
         host_surface=host_surface,
         thread_id=thread_id,
+    )
+    return goal, current, existing
+
+
+def _prepare_binding(
+    payload: dict[str, Any],
+    *,
+    goal_id: str,
+    host_surface: str,
+    thread_id: str,
+    agent_id: str,
+    execute: bool,
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, str]]]:
+    goal, current, existing = _binding_context(
+        payload,
+        goal_id=goal_id,
+        host_surface=host_surface,
+        thread_id=thread_id,
+        agent_id=agent_id,
     )
     if existing["status"] == "conflict":
         return (
@@ -203,6 +220,78 @@ def _prepare_binding(
     return result, goal, merged
 
 
+def _prepare_unbinding(
+    payload: dict[str, Any],
+    *,
+    goal_id: str,
+    host_surface: str,
+    thread_id: str,
+    agent_id: str,
+    execute: bool,
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, str]]]:
+    goal, current, existing = _binding_context(
+        payload,
+        goal_id=goal_id,
+        host_surface=host_surface,
+        thread_id=thread_id,
+        agent_id=agent_id,
+    )
+    result: dict[str, Any] = {
+        "ok": True,
+        "dry_run": not execute,
+        "execute": execute,
+        "goal_id": goal_id,
+        "registry": "",
+        "thread_id": thread_id,
+        "host_surface": host_surface,
+        "agent_id": agent_id,
+        "changed": False,
+        "written": False,
+        "binding": {
+            "schema_version": THREAD_BINDING_SCHEMA_VERSION,
+            "thread_id": thread_id,
+            "host_surface": host_surface,
+            "agent_id": None,
+            "status": "missing",
+        },
+    }
+    if existing["status"] == "conflict":
+        result.update(
+            {
+                "ok": False,
+                "error_kind": "thread_agent_binding_conflict",
+                "binding": existing,
+            }
+        )
+        return result, goal, current
+    if existing["status"] == "missing":
+        return result, goal, current
+    if existing["agent_id"] != agent_id:
+        result.update(
+            {
+                "ok": False,
+                "error_kind": "thread_agent_binding_agent_mismatch",
+                "error": (
+                    "thread binding does not match expected agent: "
+                    f"{existing['agent_id']} != {agent_id}"
+                ),
+                "binding": existing,
+            }
+        )
+        return result, goal, current
+
+    remaining = [
+        item
+        for item in current
+        if not (
+            item["thread_id"] == thread_id
+            and item["host_surface"] == host_surface
+        )
+    ]
+    result["changed"] = remaining != current
+    return result, goal, remaining
+
+
 def bind_thread_agent_in_registry(
     *,
     registry_path: Path,
@@ -250,6 +339,64 @@ def bind_thread_agent_in_registry(
 
     payload = load_registry(registry_path)
     result, _goal, _merged = _prepare_binding(
+        payload,
+        goal_id=goal_id,
+        host_surface=normalized_surface,
+        thread_id=normalized_thread_id,
+        agent_id=normalized_agent,
+        execute=False,
+    )
+    result["registry"] = str(registry_path)
+    return result
+
+
+def unbind_thread_agent_in_registry(
+    *,
+    registry_path: Path,
+    goal_id: str,
+    host_surface: str,
+    thread_id: str,
+    agent_id: str,
+    execute: bool,
+) -> dict[str, Any]:
+    """Preview or atomically remove one exact thread-to-agent binding."""
+
+    normalized_thread_id = normalize_thread_id(thread_id)
+    if normalized_thread_id is None:
+        raise ValueError("thread_id is required")
+    normalized_surface = _normalized_host_surface(host_surface)
+    normalized_agent = normalize_todo_claimed_by(agent_id)
+    if not normalized_agent:
+        raise ValueError("agent_id must be a public-safe registered agent id")
+
+    if execute:
+        with exclusive_file_lock(
+            registry_path,
+            agent_id=normalized_agent,
+            operation="unbind_agent_thread",
+        ):
+            latest = load_registry(registry_path)
+            result, latest_goal, remaining = _prepare_unbinding(
+                latest,
+                goal_id=goal_id,
+                host_surface=normalized_surface,
+                thread_id=normalized_thread_id,
+                agent_id=normalized_agent,
+                execute=True,
+            )
+            result["registry"] = str(registry_path)
+            if not result["ok"] or not result["changed"]:
+                return result
+            coordination = latest_goal.get("coordination")
+            coordination = coordination if isinstance(coordination, dict) else {}
+            coordination["thread_agent_bindings"] = remaining
+            latest_goal["coordination"] = coordination
+            atomic_write_json(registry_path, latest, preserve_mode=True)
+            result["written"] = True
+            return result
+
+    payload = load_registry(registry_path)
+    result, _goal, _remaining = _prepare_unbinding(
         payload,
         goal_id=goal_id,
         host_surface=normalized_surface,

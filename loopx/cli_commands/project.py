@@ -9,8 +9,8 @@ from ..control_plane.projects.registry import (
     bind_session,
     register_project_goal,
     resolve_project,
+    unbind_session,
 )
-
 
 PrintPayload = Callable[[dict[str, object], str, Callable[[dict[str, object]], str]], None]
 
@@ -49,6 +49,14 @@ def register_project_commands(
     add_subcommand_format(bind_parser)
     bind_parser.add_argument("--session-id", required=True)
     bind_parser.add_argument("--goal-id", required=True)
+
+    unbind_parser = project_sub.add_parser(
+        "unbind-session",
+        help="Remove one exact host session binding from its expected foreground Goal.",
+    )
+    add_subcommand_format(unbind_parser)
+    unbind_parser.add_argument("--session-id", required=True)
+    unbind_parser.add_argument("--goal-id", required=True)
 
     resolve_parser = project_sub.add_parser(
         "resolve",
@@ -116,6 +124,12 @@ def handle_project_command(
                 session_id=args.session_id,
                 goal_id=args.goal_id,
             )
+        elif args.project_command == "unbind-session":
+            payload = unbind_session(
+                registry_path=registry_path,
+                session_id=args.session_id,
+                goal_id=args.goal_id,
+            )
         else:
             payload = resolve_project(
                 registry_path=registry_path,
@@ -124,7 +138,7 @@ def handle_project_command(
                 repository=args.repository,
                 external_locator=args.external_locator,
             )
-    except (OSError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         payload = {
             "ok": False,
             "changed": False,
