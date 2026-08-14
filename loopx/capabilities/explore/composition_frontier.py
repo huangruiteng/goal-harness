@@ -178,6 +178,9 @@ def build_explore_composition_frontier(
                     + str(experiment.get("title") or experiment_id)
                 )[:240],
                 "successor_binding": {
+                    "action_kind": "joint_probe",
+                    "task_domain": "research",
+                    "target_key": experiment_id,
                     "explore_result_node_refs": [experiment_id],
                 },
             }

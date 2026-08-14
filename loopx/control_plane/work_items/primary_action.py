@@ -148,15 +148,6 @@ def protocol_first_candidate_action(payload: dict[str, Any]) -> str | None:
     return protocol_action_text(payload.get("recommended_action"))
 
 
-def protocol_replan_requires_runnable_todo(payload: dict[str, Any]) -> bool:
-    replan_obligation = (
-        payload.get("autonomous_replan_obligation")
-        if isinstance(payload.get("autonomous_replan_obligation"), dict)
-        else {}
-    )
-    return replan_obligation.get("agent_todo_writeback_required") is True
-
-
 def protocol_replan_action_packet_instruction(payload: dict[str, Any]) -> str:
     packet = (
         payload.get("replan_action_packet")
@@ -168,22 +159,19 @@ def protocol_replan_action_packet_instruction(payload: dict[str, Any]) -> str:
         if isinstance(packet.get("uncovered_frontier"), dict)
         else {}
     )
-    if uncovered.get("required_any_of"):
+    writeback_contract = (
+        packet.get("writeback_contract")
+        if isinstance(packet.get("writeback_contract"), dict)
+        else {}
+    )
+    if uncovered.get("required_any_of") and writeback_contract.get(
+        "successor_command"
+    ):
         return (
             "select one bounded next slice; prefer "
             "replan_action_packet.writeback_contract.successor_command"
         )
     return "produce one typed outcome from the host-projected replan action packet"
-
-
-def protocol_strict_replan_action(payload: dict[str, Any]) -> str | None:
-    if not protocol_replan_requires_runnable_todo(payload):
-        return None
-    replan_obligation = payload["autonomous_replan_obligation"]
-    return protocol_action_text(
-        replan_obligation.get("recommended_action"),
-        limit=320,
-    )
 
 
 def protocol_monitor_action(payload: dict[str, Any]) -> str | None:

@@ -8,6 +8,7 @@ from ...todos.contract import (
     normalize_todo_claimed_by,
     normalize_todo_id,
     normalize_todo_replan_obligation_id,
+    replan_successor_semantic_binding,
 )
 from ...todos.projection import todo_item_is_actionable_open, todo_item_task_class
 from ...work_items.progress_observation import required_semantic_outcomes
@@ -101,12 +102,24 @@ def replan_successor_transition_ack(
             )
             == obligation_id
             and normalize_todo_id(item.get("todo_id"))
+            and replan_successor_semantic_binding(
+                action_kind=item.get("action_kind"),
+                target_key=item.get("target_key"),
+                explore_result_node_refs=item.get("explore_result_node_refs"),
+            )
         ),
         None,
     )
     if successor is None:
         return None
     successor_todo_id = normalize_todo_id(successor.get("todo_id"))
+    successor_binding = replan_successor_semantic_binding(
+        action_kind=successor.get("action_kind"),
+        target_key=successor.get("target_key"),
+        explore_result_node_refs=successor.get("explore_result_node_refs"),
+    )
+    if successor_binding is None:
+        return None
     semantic_delta = {
         "schema_version": "replan_semantic_delta_v0",
         "accepted": True,
@@ -115,6 +128,7 @@ def replan_successor_transition_ack(
         "required_any_of": required_semantic_outcomes(replan_obligation or {}),
         "obligation_id": obligation_id,
         "successor_todo_id": successor_todo_id,
+        "successor_binding": successor_binding,
         "reason": (
             "an exact current-obligation Todo transition created a runnable "
             "successor"
