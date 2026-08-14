@@ -37,6 +37,25 @@ def _clip(s, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _resolve_run(data: dict) -> bool | None:
+    """New-architecture aware run gate.
+
+    Prefer the unified ``policy_decision.outcome`` (run -> True, deny/wait ->
+    False) so the statusline reflects the composed control-plane decision, not
+    just the quota-level ``should_run`` which may remain permissive under a
+    stricter capability/scheduler layer.
+    """
+    pd = data.get("policy_decision")
+    if isinstance(pd, dict):
+        outcome = pd.get("outcome")
+        if outcome == "run":
+            return True
+        if outcome in ("deny", "wait"):
+            return False
+    sr = data.get("should_run")
+    return sr if isinstance(sr, bool) else None
+
+
 def _render(gid: str, d: dict) -> str:
     """Turn a `quota should-run` payload into one compact statusline string."""
     agent = d.get("agent_todo_summary") or {}
@@ -53,7 +72,7 @@ def _render(gid: str, d: dict) -> str:
         msg = gate or f"{users.get('open_count') or 'a'} user todo(s) to answer"
         return f"[loopx {gid} · ⚠ needs you: {_clip(msg, 46)}]"
 
-    if d.get("should_run") is True:
+    if _resolve_run(d) is True:
         nxt = d.get("recommended_action")
         head = f"▶ {prog}".rstrip() if prog else "▶ working"
         return f"[loopx {gid} · {head}" + (f" · next: {_clip(nxt, 40)}]" if nxt else "]")

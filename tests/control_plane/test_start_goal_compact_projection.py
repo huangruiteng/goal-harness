@@ -14,8 +14,11 @@ from loopx.bootstrap_command_pack import (
     GUIDED_COMMAND_PACK_PROJECTION_SCHEMA_VERSION,
     build_loopx_bootstrap_command_pack,
     build_start_goal_guided_packet,
+    inspect_bootstrap_connection,
     render_start_goal_guided_markdown,
 )
+from loopx.control_plane.goals.goal_closure import emit_goal_closed
+from loopx.rollout_event_log import rollout_event_log_path
 from loopx.capabilities.issue_fix.candidate_preflight import (
     build_issue_fix_candidate_preflight_packet,
     candidate_preflight_input_contract,
@@ -896,6 +899,56 @@ def test_cli_codex_app_unbound_ambient_thread_defaults_to_fresh_registration(
     assert gate["state"] == "fresh_agent_registration_required"
     assert gate["default_action"] == "register_fresh_agent"
     assert gate["fresh_agent_registration"]["recommended"] is True
+
+
+def _write_connected_project_with_runtime(root: Path) -> tuple[Path, Path]:
+    """Variant of _write_connected_project that also sets common_runtime_root."""
+    project = _write_connected_project(root)
+    runtime = root / "runtime"
+    runtime.mkdir()
+    registry_path = project / ".loopx" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["common_runtime_root"] = str(runtime)
+    registry_path.write_text(
+        json.dumps(registry, indent=2) + "\n", encoding="utf-8"
+    )
+    return project, runtime
+
+
+def test_start_goal_requires_new_goal_when_existing_is_closed(tmp_path: Path) -> None:
+    """A closed goal must not be reused: start-goal should surface a fresh-goal
+    requirement instead of appending new todos to a finished goal (the website1
+    yellow->purple state-pollution regression)."""
+    project, runtime = _write_connected_project_with_runtime(tmp_path)
+    emit_goal_closed(
+        log_path=rollout_event_log_path(runtime, GOAL_ID),
+        goal_id=GOAL_ID,
+        reason="done",
+    )
+
+    inspection = inspect_bootstrap_connection(project, goal_id=GOAL_ID)
+    assert inspection["connection_state"] == "goal_reuse_closed"
+    assert inspection["should_start_new_goal"] is True
+
+    payload = build_start_goal_guided_packet(
+        project=project,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        cli_bin="loopx",
+        host_surface="codex-app",
+        goal_text=GOAL_TEXT,
+    )
+    step = payload.get("recommended_next_step", {})
+    assert step["kind"] == "goal_reuse_closed_require_new_goal"
+    assert step["suggested_new_goal_id"] == f"{GOAL_ID}-2"
+
+
+def test_start_goal_reuses_open_goal_without_new_goal_signal(tmp_path: Path) -> None:
+    """An open goal (no goal_closed event) keeps the normal connected path."""
+    project, _runtime = _write_connected_project_with_runtime(tmp_path)
+    inspection = inspect_bootstrap_connection(project, goal_id=GOAL_ID)
+    assert inspection["connection_state"] == "connected"
+    assert inspection.get("should_start_new_goal") is None
 
 
 def test_start_goal_new_peer_explicitly_allows_fresh_registration(tmp_path: Path) -> None:

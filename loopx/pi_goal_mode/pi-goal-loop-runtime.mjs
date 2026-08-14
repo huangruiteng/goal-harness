@@ -32,6 +32,7 @@ import path from "node:path"
 export const BRIDGE_SCHEMA_VERSION = "loopx_pi_goal_bridge_v0"
 export const TERMINAL_STATE_SCHEMA_VERSION = "goal_terminal_state_v0"
 export const SOURCE_COMPLETENESS_SCHEMA_VERSION = "goal_terminal_source_completeness_v0"
+export const POLICY_DECISION_SCHEMA_VERSION = "loopx_pi_goal_policy_decision_v0"
 export const DEFAULT_RETRY_MINUTES = 3
 
 // The label prefix of a session key reserves room for the digest suffix so
@@ -229,10 +230,62 @@ export function buildQuotaArgs(binding) {
   return args
 }
 
+// Phase 5/6 new-architecture compatibility: advance the event-driven Task Queue
+// for the bound goal. ``quota should-run`` stays the policy decision source (its
+// ``policy_decision`` carries the authoritative run | wait | deny outcome); this
+// dispatch args array drives the Task Queue lifecycle (task_ready / enqueued /
+// dispatched audit facts + claim the next pending task) so the resident
+// scheduler and goal acceptance / closure layer see real queue advancement.
+//
+// The dispatch CLI is enabled by default (its ``--event-driven`` flag falls
+// back to the new-architecture master switch, which is on). When the master
+// switch is explicitly off (``LOOPX_NEW_ARCHITECTURE=0``) the dispatch returns a
+// ``disabled`` marker and writes nothing, preserving the legacy heartbeat path.
+export function buildDispatchArgs(binding) {
+  const args = []
+  if (binding.registryPath) args.push("--registry", binding.registryPath)
+  args.push(
+    "--format",
+    "json",
+    "codex-cli-local-scheduler-dispatch",
+    "--goal-id",
+    binding.goalId,
+  )
+  const workerId = binding.agentId || binding.workerId || ""
+  if (workerId) {
+    args.push("--worker-id", workerId)
+  }
+  return args
+}
+
+// Phase 5 compatibility: the control_plane PolicyEngine attaches a normalized
+// `policy_decision` to the quota should-run payload. When present, the loop
+// prefers the unified contract (outcome = run | wait | deny) and falls back to
+// the legacy quota fields otherwise, keeping the default path behaviour identical.
+//
+//   policy_decision.outcome:
+//     "run"   -> continue now (like legacy should_run === true / run_now)
+//     "wait"  -> back off using retry_after_seconds / retry_at, else legacy scheduler
+//     "deny"  -> not authorized to continue; non-terminal denies hold the loop
+//
+// `retry_at` is an ISO 8601 datetime; `retry_after_seconds` is a plain seconds
+// count. Both are honoured when the unified decision is in effect.
+export function policyDecisionOf(decision) {
+  const unified = decision?.policy_decision
+  if (!unified || typeof unified !== "object") return null
+  const outcome = String(unified.outcome || "")
+  if (outcome !== "run" && outcome !== "wait" && outcome !== "deny") return null
+  return unified
+}
+
 export function isTerminalNoFollowup(decision) {
   const frontier = decision?.goal_frontier_projection
   const terminal = frontier?.terminal_state
   const completeness = frontier?.source_completeness
+  // The unified policy decision does not carry the validated goal-closure
+  // projection (that lives on the quota layer), so terminal detection still
+  // requires the frontier proof. A policy outcome of "deny" alone is not a
+  // validated terminal state and must never self-close the loop.
   return Boolean(
     decision?.should_run === false &&
       decision?.effective_action === "terminal_no_followup" &&
@@ -247,11 +300,64 @@ export function isTerminalNoFollowup(decision) {
 }
 
 export function shouldRunNow(decision) {
+  const unified = policyDecisionOf(decision)
+  if (unified) {
+    // Prefer the unified policy contract; the legacy fields are still present
+    // but are subsumed by the composed outcome.
+    if (unified.outcome === "run") return true
+    if (unified.outcome === "deny") return false
+    if (unified.outcome === "wait") return false
+  }
   const hint = decision?.scheduler_hint
   return hint?.action === "run_now" || decision?.should_run === true
 }
 
+// Minutes to wait for the next poll from a unified policy decision.
+function unifiedRetryMinutes(unified) {
+  const seconds = Number(unified?.retry_after_seconds)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    const minutes = Math.ceil(seconds / 60)
+    return Math.max(1, minutes)
+  }
+  const at = unified?.retry_at
+  if (typeof at === "string" && at) {
+    const when = Date.parse(at)
+    if (Number.isFinite(when)) {
+      const minutes = Math.ceil((when - Date.now()) / 60_000)
+      if (minutes > 0) return minutes
+    }
+  }
+  return null
+}
+
 export function waitPlan(decision, binding) {
+  const unified = policyDecisionOf(decision)
+  if (unified) {
+    // Unified path: the policy engine already resolved the action. "run" should
+    // never reach here (shouldRunNow intercepts it); "deny" without a validated
+    // terminal is a non-terminal hold, so we back off rather than poll-spin.
+    const fromUnified = unifiedRetryMinutes(unified)
+    if (fromUnified !== null) {
+      return {
+        stop: false,
+        minutes: fromUnified,
+        schedulerToken: binding.schedulerToken,
+        unchangedPolls: binding.unchangedPolls,
+      }
+    }
+    if (unified.outcome === "deny") {
+      // No retry hint and not terminal: hold the loop. Stop polling now; a later
+      // explicit activation / resume re-arms it.
+      return {
+        stop: true,
+        minutes: DEFAULT_RETRY_MINUTES,
+        schedulerToken: binding.schedulerToken,
+        unchangedPolls: binding.unchangedPolls,
+      }
+    }
+    // "wait" without a retry hint: fall through to the legacy scheduler hints so
+    // behaviour matches the pre-PolicyEngine path when no hint is provided.
+  }
   const hint = decision?.scheduler_hint || {}
   const unchanged = hint?.unchanged_poll || {}
   const local = unchanged?.local_scheduler
@@ -309,7 +415,7 @@ export function waitPlan(decision, binding) {
 // goalId, so a stale evaluation cannot commit past a re-activation even when
 // its write was already in-flight.
 export function createGoalLoop(options) {
-  const { quotaProbe, sendMessage, setTimer, clearTimer } = options
+  const { quotaProbe, dispatchProbe, sendMessage, setTimer, clearTimer } = options
   const timers = new Map()
   const evaluations = new Map()
   const contexts = new Map()
@@ -405,6 +511,23 @@ export function createGoalLoop(options) {
     ) {
       cancelScheduled(key)
       return
+    }
+
+    // Phase 5/6: advance the event-driven Task Queue for this goal. This is a
+    // best-effort fire-and-forget probe — it records task_ready / enqueued /
+    // dispatched audit facts and claims the next pending task, but never gates
+    // the policy decision (which stays authoritative via ``quota should-run``).
+    // Any failure is a silent no-op so the quota-gated loop cannot break, and a
+    // disabled master switch (``LOOPX_NEW_ARCHITECTURE=0``) returns a
+    // ``disabled`` marker that writes nothing (legacy heartbeat path).
+    if (typeof dispatchProbe === "function") {
+      void (async () => {
+        try {
+          await dispatchProbe(binding)
+        } catch {
+          // Best-effort: the Task Queue advancement is optional to the loop.
+        }
+      })()
     }
 
     if (isTerminalNoFollowup(decision)) {

@@ -6,55 +6,26 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .capabilities.content_ops.cli import (
-    handle_content_ops_command,
-    register_content_ops_commands,
-)
-from .capabilities.agent_turn_recall.cli import (
-    handle_agent_turn_recall_command,
-    register_agent_turn_recall_commands,
-)
-from .capabilities.change_quality.cli import (
-    handle_change_quality_command,
-    register_change_quality_commands,
-)
-from .capabilities.integration_branch.cli import (
-    handle_integration_branch_command,
-    register_integration_branch_commands,
-)
-from .capabilities.decision_context.cli import (
-    handle_decision_context_command,
-    register_decision_context_commands,
-)
-from .capabilities.material_lifecycle.cli import (
-    handle_material_lifecycle_command,
-    register_material_lifecycle_commands,
-)
-from .capabilities.issue_fix.cli import (
-    handle_issue_fix_command,
-    register_issue_fix_commands,
-)
-from .capabilities.reward_memory.cli import (
-    handle_reward_memory_command,
-    register_reward_memory_commands,
-)
-from .capabilities.periodic_report.cli import (
-    handle_periodic_report_command,
-    register_periodic_report_commands,
-)
-from .capabilities.semantic_preference.cli import (
-    handle_semantic_preference_command,
-    register_semantic_preference_commands,
-)
+from .control_plane.capabilities_bridge import register_all_capability_commands
+from .capabilities.catalog import build_capability_registry
+# Capability-pack command *registration* is registry-driven (see
+# ``register_all_capability_commands`` below), so only the pack-specific command
+# *dispatchers* are imported statically (their signatures cannot be generalized).
+from .capabilities.content_ops.cli import handle_content_ops_command
+from .capabilities.agent_turn_recall.cli import handle_agent_turn_recall_command
+from .capabilities.change_quality.cli import handle_change_quality_command
+from .capabilities.integration_branch.cli import handle_integration_branch_command
+from .capabilities.decision_context.cli import handle_decision_context_command
+from .capabilities.material_lifecycle.cli import handle_material_lifecycle_command
+from .capabilities.issue_fix.cli import handle_issue_fix_command
+from .capabilities.reward_memory.cli import handle_reward_memory_command
+from .capabilities.periodic_report.cli import handle_periodic_report_command
+from .capabilities.semantic_preference.cli import handle_semantic_preference_command
 from .capabilities.auto_research.cli import (
     handle_auto_research_command,
-    register_auto_research_commands,
     rewrite_auto_research_question_argv,
 )
-from .capabilities.value_connectors.cli import (
-    handle_value_connector_command,
-    register_value_connector_commands,
-)
+from .capabilities.value_connectors.cli import handle_value_connector_command
 from .cli_commands import (
     handle_turn_command,
     handle_benchmark_command,
@@ -230,35 +201,21 @@ def build_parser() -> LoopXArgumentParser:
 
     register_extension_commands(sub, add_subcommand_format)
 
-    register_change_quality_commands(sub, add_subcommand_format)
-
-    register_integration_branch_commands(sub, add_subcommand_format)
-
-    register_content_ops_commands(sub, add_subcommand_format)
-
-    register_decision_context_commands(sub, add_subcommand_format)
-
-    register_material_lifecycle_commands(sub, add_subcommand_format)
+    # Capability packs self-register their CLI from the capability catalog, so
+    # adding a pack no longer requires touching this wiring. The legacy static
+    # imports above are retained for their ``handle_*`` dispatchers (which carry
+    # pack-specific signatures and cannot be generalized).
+    register_all_capability_commands(
+        sub,
+        add_subcommand_format,
+        registry=build_capability_registry(),
+    )
 
     register_project_skill_commands(sub, add_subcommand_format)
 
-    register_issue_fix_commands(sub, add_subcommand_format)
-
-    register_reward_memory_commands(sub, add_subcommand_format)
-
-    register_agent_turn_recall_commands(sub, add_subcommand_format)
-
     register_review_batch_commands(sub, add_subcommand_format)
 
-    register_periodic_report_commands(sub, add_subcommand_format)
-
-    register_semantic_preference_commands(sub, add_subcommand_format)
-
-    register_value_connector_commands(sub, add_subcommand_format)
-
     register_ml_experiment_commands(sub, add_subcommand_format)
-
-    register_auto_research_commands(sub, add_subcommand_format)
 
     register_multi_agent_commands(sub, add_subcommand_format)
     register_turn_commands(sub, add_subcommand_format)
@@ -316,7 +273,10 @@ def main(argv: list[str] | None = None) -> int:
             "codex-cli-exec-handoff",
             "codex-cli-visible-first-response-capture-plan",
             "codex-cli-local-driver-plan",
+            "codex-cli-local-scheduler-dispatch",
             "codex-cli-local-scheduler-exec",
+            "codex-cli-local-scheduler-merge",
+            "codex-cli-local-scheduler-resident",
             "codex-cli-local-scheduler-tick",
             "codex-cli-one-message-loop-pilot",
             "codex-cli-runtime-idle-detector",

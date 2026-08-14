@@ -15,6 +15,8 @@ from loopx.control_plane.work_items.task_lease import (
     TaskLeaseError,
     acquire_task_lease,
 )
+from loopx.control_plane.scheduler.merge import load_todo_items_from_rollout_log
+from loopx.rollout_event_log import load_rollout_events, rollout_event_log_path
 from loopx.event_sourced_state import (
     TODO_ADDED,
     TODO_UPDATED,
@@ -917,6 +919,29 @@ def test_delegated_orchestrator_requires_reason_before_state_write(
         )
 
     assert state.read_text(encoding="utf-8") == before
+
+
+def test_todo_add_bridges_rollout_event_for_event_driven_dispatch(
+    tmp_path: Path,
+) -> None:
+    """A todo created via add_goal_todo must be visible to the event-driven
+    scheduler (load_todo_items_from_rollout_log), not just the markdown file."""
+    registry, _state = _write_fixture(tmp_path)
+    todo = _add_agent_todo(registry)
+
+    runtime_root = tmp_path / "runtime"
+    log_path = rollout_event_log_path(runtime_root, GOAL_ID)
+    assert log_path.exists(), "todo add must append a rollout todo_add event"
+
+    kinds = [e["event_kind"] for e in load_rollout_events(log_path)]
+    assert "todo_add" in kinds
+
+    items = load_todo_items_from_rollout_log(runtime_root, GOAL_ID)
+    added = next((it for it in items if it["todo_id"] == todo["todo_id"]), None)
+    assert added is not None
+    assert added["status"] == "open"
+    assert added["role"] == "agent"
+    assert added["task_class"] == "advancement_task"
 
 
 def test_delegated_orchestration_authority_is_action_scoped(

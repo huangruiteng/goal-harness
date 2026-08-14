@@ -482,6 +482,115 @@ def append_decision_freshness_summary_markdown(
         )
 
 
+def append_policy_decision_markdown(
+    lines: list[str],
+    policy_decision: dict[str, Any],
+) -> None:
+    """Render the Phase 5 unified policy decision (outcome = run | wait | deny).
+
+    The new-architecture PolicyEngine attaches this normalized contract to the
+    quota should-run payload. It is read-only display; absent it emits nothing.
+    """
+    if not isinstance(policy_decision, dict):
+        return
+    outcome = markdown_scalar(policy_decision.get("outcome") or "")
+    if outcome not in {"run", "wait", "deny"}:
+        return
+    retry = ""
+    if policy_decision.get("retry_after_seconds") is not None:
+        retry = f" retry_after_seconds={policy_decision.get('retry_after_seconds')}"
+    elif policy_decision.get("retry_at"):
+        retry = f" retry_at={markdown_scalar(policy_decision.get('retry_at') or '')}"
+    reason = markdown_scalar(policy_decision.get("reason") or policy_decision.get("reason_code") or "")
+    reason_text = f" reason={reason}" if reason else ""
+    lines.append(
+        "  - policy_decision: "
+        f"outcome={outcome}"
+        f"{retry}"
+        f"{reason_text}"
+        f" action={markdown_scalar(policy_decision.get('action') or policy_decision.get('effective_action') or '')}"
+    )
+
+
+def append_control_plane_status_markdown(
+    lines: list[str],
+    control_plane_status: dict[str, Any],
+) -> None:
+    """Render the Phase 5/6 control-plane observability snapshot (P2).
+
+    Read-only digest of the event-driven control plane: scheduler, worker pool,
+    task queue (incl. lifecycle states), and decision history. Absent it emits
+    nothing.
+    """
+    if not isinstance(control_plane_status, dict):
+        return
+    # Emit nothing unless at least one observability section carries data, so a
+    # missing ``control_plane_status`` key (rendered as ``{}`` upstream) never
+    # produces an empty heading.
+    if not any(control_plane_status.get(k) for k in ("scheduler", "queue", "workers", "decision_history")):
+        return
+    lines.extend(["", "## Control-Plane Status (event-driven)", "- scheduler:"])
+    scheduler = (
+        control_plane_status.get("scheduler")
+        if isinstance(control_plane_status.get("scheduler"), dict)
+        else {}
+    )
+    lines.append(
+        f"  - tick_count={scheduler.get('tick_count')} "
+        f"workers={','.join(markdown_scalar(w) for w in (scheduler.get('worker_ids') or [])) or '-'}"
+    )
+    queue = (
+        control_plane_status.get("queue")
+        if isinstance(control_plane_status.get("queue"), dict)
+        else {}
+    )
+    if queue:
+        extended = queue.get("extended") if isinstance(queue.get("extended"), dict) else {}
+        lines.append(
+            "  - queue: "
+            f"pending={queue.get('pending_count', 0)} "
+            f"claimed={queue.get('claimed_count', 0)} "
+            f"done={queue.get('done_count', 0)} "
+            f"in_flight={queue.get('in_flight_count', 0)} "
+            f"exceptions={queue.get('exception_count', 0)} "
+            f"retry_wait={extended.get('retry_wait_count', 0)} "
+            f"failed={extended.get('failed_count', 0)} "
+            f"dead_letter={extended.get('dead_letter_count', 0)} "
+            f"cancelled={extended.get('cancelled_count', 0)}"
+        )
+    workers = (
+        control_plane_status.get("workers")
+        if isinstance(control_plane_status.get("workers"), dict)
+        else {}
+    )
+    if workers:
+        lines.append(
+            "  - workers: "
+            f"count={workers.get('worker_count', 0)} "
+            f"active={workers.get('active_count', 0)} "
+            f"idle={workers.get('idle_count', 0)}"
+        )
+    decision_history = (
+        control_plane_status.get("decision_history")
+        if isinstance(control_plane_status.get("decision_history"), dict)
+        else {}
+    )
+    if decision_history:
+        counts = (
+            decision_history.get("counts_by_outcome")
+            if isinstance(decision_history.get("counts_by_outcome"), dict)
+            else {}
+        )
+        counts_text = " ".join(
+            f"{markdown_scalar(k)}={v}" for k, v in counts.items()
+        )
+        lines.append(
+            "  - decisions: "
+            f"count={decision_history.get('decision_count', 0)} "
+            f"{counts_text}"
+        )
+
+
 def append_usage_summary_markdown(lines: list[str], usage: dict[str, Any]) -> None:
     usage_totals = usage.get("totals") if isinstance(usage.get("totals"), dict) else {}
     if not usage.get("available") or not usage_totals:
@@ -982,6 +1091,13 @@ def render_status_markdown(
         else {}
     )
     append_decision_freshness_summary_markdown(lines, decision_freshness)
+
+    control_plane_status = (
+        payload.get("control_plane_status")
+        if isinstance(payload.get("control_plane_status"), dict)
+        else {}
+    )
+    append_control_plane_status_markdown(lines, control_plane_status)
 
     usage = payload.get("usage_summary") if isinstance(payload.get("usage_summary"), dict) else {}
     append_usage_summary_markdown(lines, usage)
@@ -1541,6 +1657,10 @@ def append_attention_queue_item_operational_markdown(
     control_plane = item.get("control_plane") if isinstance(item.get("control_plane"), dict) else None
     if control_plane:
         lines.append(f"  - control_plane: {control_plane_policy_summary(control_plane)}")
+
+    policy_decision = item.get("policy_decision") if isinstance(item.get("policy_decision"), dict) else None
+    if policy_decision is not None:
+        append_policy_decision_markdown(lines, policy_decision)
 
     operator_question = item.get("operator_question")
     agent_command = item.get("agent_command")

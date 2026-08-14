@@ -116,6 +116,19 @@ def goal_detail(ctx):
     return objective, payload
 
 
+def _should_run(data: dict) -> bool | None:
+    """New-architecture aware run gate (see goal_policy.resolve_should_run)."""
+    pd = data.get("policy_decision")
+    if isinstance(pd, dict):
+        outcome = pd.get("outcome")
+        if outcome == "run":
+            return True
+        if outcome in ("deny", "wait"):
+            return False
+    sr = data.get("should_run")
+    return sr if isinstance(sr, bool) else None
+
+
 def print_status(ctx):
     gid = ctx.get("goal_id")
     objective, d = goal_detail(ctx)
@@ -124,7 +137,7 @@ def print_status(ctx):
     gate = d.get("gate_prompt")
     if gate:
         state = f"⚠ needs you: {gate}"
-    elif d.get("should_run") is True:
+    elif _should_run(d) is True:
         state = "▶ running"
     else:
         state = f"⏸ {d.get('state') or 'paused'}" + (f" — {d['reason']}" if d.get("reason") else "")

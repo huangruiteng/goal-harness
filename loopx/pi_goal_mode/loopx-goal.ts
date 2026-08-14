@@ -27,6 +27,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { Type } from "typebox";
 import {
+  buildDispatchArgs,
   buildQuotaArgs,
   createBindingStore,
   createEphemeralSessionIdentity,
@@ -54,6 +55,23 @@ async function probeLoopxQuota(binding: Record<string, unknown>): Promise<Record
     throw new Error("loopx quota should-run returned a non-object payload");
   }
   return decision as Record<string, unknown>;
+}
+
+// Phase 5/6: advance the event-driven Task Queue (record task_ready / enqueued
+// / dispatched audit facts and claim the next pending task). Best-effort — the
+// loop treats any failure as a silent no-op, and a disabled master switch
+// (``LOOPX_NEW_ARCHITECTURE=0``) returns a ``disabled`` marker that writes
+// nothing, preserving the legacy heartbeat path.
+async function probeEventDrivenDispatch(
+  binding: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const args = buildDispatchArgs(binding);
+  const stdout = await runLoopxCli(args, String(binding.directory || ""));
+  const payload: unknown = JSON.parse(stdout || "{}");
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("loopx codex-cli-local-scheduler-dispatch returned a non-object payload");
+  }
+  return payload as Record<string, unknown>;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -84,6 +102,7 @@ export default function (pi: ExtensionAPI) {
   // the whole instance so no old session can keep continuing.
   const loop = createGoalLoop({
     quotaProbe: probeLoopxQuota,
+    dispatchProbe: probeEventDrivenDispatch,
     sendMessage: (prompt: string) => {
       pi.sendUserMessage(prompt, { deliverAs: "followUp", triggerTurn: true });
     },

@@ -30,6 +30,7 @@ from .project_prompt import (
     shell_arg,
 )
 from .registry import registry_goals, resolve_state_file
+from .rollout_event_log import load_rollout_events, rollout_event_log_path
 from .slash_commands import build_slash_command_catalog
 from .thread_agent_binding import normalize_thread_id, resolve_thread_agent_binding
 
@@ -455,6 +456,49 @@ def _select_goal(goals: list[dict[str, Any]], goal_id: str | None) -> tuple[str,
     return "", None
 
 
+def _goal_already_closed(
+    *,
+    registry: dict[str, Any],
+    goal_id: str,
+) -> bool:
+    """Return True when the goal's rollout event log records a ``goal_closed``
+    event.
+
+    This is the reliable signal that a previous loop already derived closure.
+    Reusing a closed goal — instead of starting a fresh one — is what caused the
+    website1 "yellow -> purple" state pollution: the agent appended new todos to
+    an already-closed goal, then hand-edited the objective and Next Action. We
+    surface that here so the start-goal flow can require a fresh goal.
+    """
+    runtime_root_raw = registry.get("common_runtime_root")
+    if not runtime_root_raw:
+        return False
+    try:
+        log_path = rollout_event_log_path(Path(str(runtime_root_raw)), goal_id)
+        events = load_rollout_events(log_path)
+    except Exception:
+        return False
+    return any(e.get("event_kind") == "goal_closed" for e in events)
+
+
+def _next_goal_id_suggestion(closed_goal_id: str, known_goal_ids: list[str]) -> str:
+    """Suggest a fresh goal id derived from a closed one (``<id>-2``, ``-3``...).
+
+    Keeps the full closed id as the base and appends a ``-<n>`` suffix, so any
+    trailing digits that are NOT a sequence number (a year ``2024``, a version
+    ``3``, ...) are preserved rather than stripped. Collisions with the closed
+    goal and any sibling ids are skipped.
+    """
+    base = str(closed_goal_id)
+    known = {str(g) for g in known_goal_ids}
+    index = 2
+    while True:
+        candidate = f"{base}-{index}"
+        if candidate not in known and candidate != closed_goal_id:
+            return candidate
+        index += 1
+
+
 def inspect_bootstrap_connection(
     project: Path,
     *,
@@ -566,6 +610,24 @@ def inspect_bootstrap_connection(
             "connection_state": "state_file_missing",
             "mutation_confirmation_required": True,
             "reason": "registry goal points at a state_file that is missing",
+        }
+
+    if _goal_already_closed(registry=registry, goal_id=resolved_goal_id):
+        return {
+            **base_connection,
+            "registry_exists": True,
+            "goal_id": resolved_goal_id,
+            "goal_found": True,
+            "state_file": str(state_file),
+            "state_file_exists": True,
+            "connection_state": "goal_reuse_closed",
+            "should_start_new_goal": True,
+            "mutation_confirmation_required": True,
+            "reason": (
+                "registry goal is present but its rollout log already records a "
+                "goal_closed event; start a fresh goal instead of appending to a "
+                "closed one"
+            ),
         }
 
     return {
@@ -834,6 +896,7 @@ Planning rules:
 5. Prefer executable Agent Todo items with `task_class=advancement_task`; use User Todo only for concrete owner decisions or private-material gates.
 6. After writing todos, run `loopx refresh-state --goal-id {goal_id}`, activate the host loop if it is missing, unknown, or stale (Codex App automation, Codex CLI `/goal <task_body>`, Claude Code `/loop`, OpenCode bridge, or a custom host-loop gate), then run its typed `quota_guard` and begin the first allowed bounded segment.
 7. Enter issue-fix only when `selected_capability_route.capability_id=issue-fix`; never infer it from goal text or URLs. Run workflow-plan and feasibility before implementation, write only the admitted successor or no-follow-up, preserve private/external/destructive gates, verify reviewer requests, and reconcile PR lifecycle one PR per message.
+8. Drive execution through the event-driven scheduler, not by hand-editing files and calling `todo complete` yourself. Use `loopx codex-cli-local-scheduler-dispatch --goal-id {goal_id} --project . --agent-id <agent-id> --event-driven [--completed-todo-id <done-todo-id>] --acceptance-criteria <id>=<desc> --evidence <id>=grep=<rel-path>=<regex>`. The dispatcher recomputes READY successors, enqueues and claims for a worker, and — when the queue empties and acceptance evidence satisfies — atomically emits goal_closure_ready + goal_closed in one tick. You declare the plan and the acceptance criteria/evidence; let the dispatcher drive execution and closure.
 """
 
 
@@ -991,6 +1054,25 @@ def build_loopx_bootstrap_command_pack(
             "requires_agent_selection": True,
             "summary": identity_selection_gate.get("reason"),
             "identity_selection_gate": identity_selection_gate,
+        }
+    elif bool(inspection.get("should_start_new_goal")) and explicit_goal_start:
+        # The requested goal id is already closed (its rollout log records a
+        # goal_closed event). Reusing it appends new todos to a finished goal and
+        # forces the agent to hand-edit the objective/Next Action — the exact
+        # state pollution seen in the website1 yellow->purple session. Instead,
+        # require a fresh goal id and a fresh bootstrap before planning.
+        recommended_next_step = {
+            "kind": "goal_reuse_closed_require_new_goal",
+            "requires_user_confirmation": True,
+            "summary": (
+                f"Goal `{resolved_goal_id}` is already closed. Start a fresh goal "
+                "instead of appending to a finished one."
+            ),
+            "closed_goal_id": resolved_goal_id,
+            "suggested_new_goal_id": _next_goal_id_suggestion(
+                resolved_goal_id, known_goal_ids=[g["id"] for g in registry_goals(registry_payload or {})]
+            ),
+            "connect_command_if_needed": goal_start_bootstrap_command,
         }
     elif explicit_goal_start:
         recommended_next_step = {

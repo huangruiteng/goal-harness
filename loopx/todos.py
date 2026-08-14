@@ -8,7 +8,12 @@ from .agent_registry import registered_agent_ids_from_registry, require_register
 from .file_lock import exclusive_file_lock
 from .history import load_registry
 from .paths import resolve_runtime_root
-from .rollout_event_log import load_rollout_events, rollout_event_log_path
+from .rollout_event_log import (
+    append_rollout_event_once,
+    build_rollout_event,
+    load_rollout_events,
+    rollout_event_log_path,
+)
 from .control_plane.runtime.local_state_write_correctness import build_todo_write_correctness_dry_run_packet
 from .state_refresh import now_local, resolve_goal_state
 from .status import (
@@ -1064,6 +1069,50 @@ def add_goal_todo(
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
 
+        # Bridge todo add -> event-driven dispatch. ``add_goal_todo`` writes the
+        # markdown active-state file only; the event-driven scheduler rebuilds
+        # todo items from the rollout event log (``todo_add``/``todo_complete``)
+        # and never reads the markdown file. Without this, a todo created via
+        # ``loopx todo add`` is invisible to dispatch and the agent falls back to
+        # hand-editing + ``todo complete`` (the bypass seen in the website1 color
+        # session). Appending a public-safe ``todo_add`` event keeps the todo
+        # discoverable by ``load_todo_items_from_rollout_log``.
+        added_todo_id = add_result.get("todo_id")
+        if added and not dry_run and added_todo_id:
+            try:
+                _registry = load_registry(registry_path)
+                _runtime_root = resolve_runtime_root(
+                    _registry, None, registry_path=registry_path
+                )
+            except Exception:
+                _runtime_root = None
+            if _runtime_root is not None:
+                _log_path = rollout_event_log_path(_runtime_root, goal_id)
+                _details: dict[str, Any] = {"role": role}
+                if task_class:
+                    _details["task_class"] = str(task_class)
+                if action_kind:
+                    _details["action_kind"] = str(action_kind)
+                if normalized_unblocks_todo_id:
+                    _details["unblocks_todo_id"] = str(normalized_unblocks_todo_id)
+                if effective_excluded_agents:
+                    _details["excluded_agents"] = [
+                        str(a) for a in effective_excluded_agents
+                    ]
+                _event = build_rollout_event(
+                    goal_id=goal_id,
+                    event_kind="todo_add",
+                    todo_id=str(added_todo_id),
+                    status=str(normalized_status),
+                    agent_id=effective_agent_id or effective_claimed_by,
+                    details=_details,
+                )
+                append_rollout_event_once(
+                    _log_path,
+                    _event,
+                    identity_fields=("goal_id", "event_kind", "todo_id"),
+                )
+
     payload = {
         "ok": True,
         "dry_run": dry_run,
@@ -1830,6 +1879,37 @@ def complete_goal_todo(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
+
+        # Symmetric bridge: ``todo add`` writes a rollout ``todo_add`` event (see
+        # ``add_goal_todo``); ``todo complete`` must write a matching rollout
+        # ``todo_complete`` event so ``load_todo_items_from_rollout_log`` can
+        # derive the terminal ``done`` state from the rollout log alone. Without
+        # this, a completed todo stays ``open`` in the rollout-log projection and
+        # the Closure Evaluator forever sees "open work remaining".
+        completed_todo_id_value = update_result.get("todo_id") or todo_id
+        if changed and not dry_run and completed_todo_id_value:
+            try:
+                _registry = load_registry(registry_path)
+                _runtime_root = resolve_runtime_root(
+                    _registry, None, registry_path=registry_path
+                )
+            except Exception:
+                _runtime_root = None
+            if _runtime_root is not None:
+                _log_path = rollout_event_log_path(_runtime_root, goal_id)
+                _event = build_rollout_event(
+                    goal_id=goal_id,
+                    event_kind="todo_complete",
+                    todo_id=str(completed_todo_id_value),
+                    status=TODO_STATUS_DONE,
+                    agent_id=agent_id or effective_claimed_by,
+                )
+                append_rollout_event_once(
+                    _log_path,
+                    _event,
+                    identity_fields=("goal_id", "event_kind", "todo_id"),
+                )
+
     result = {
         "ok": True,
         "dry_run": dry_run,
