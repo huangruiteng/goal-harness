@@ -22,7 +22,9 @@ observable, gated process with three pillars:
    in parallel; episode groups share expensive setup across variants;
    replay/counterfactual/trace runtimes compare routes; typed
    `supports` / `refutes` / `leads_to` edges merge findings back into one
-   evidence topology.
+   evidence topology. Closed, evidence-backed surfaces with an explicit
+   reason to be tested together become **composition gaps** that derive
+   joint-experiment successor todos (see "Composition Frontier").
 
 **When to use it:** exploration goals that outgrow a todo list - where
 "what did we try, what worked, what is blocked" must be readable as a graph
@@ -50,7 +52,10 @@ loopx explore worker-branch-plan --goal-id <id> --harness-profile adaptive-resil
 ```
 
 Both gates are separate and default-off (see "Independent Per-Goal Opt-In
-Gates"). The detailed contract follows.
+Gates"). When closed, evidence-backed surfaces have an explicit reason to be
+tested together, the next `quota should-run` / turn packet projects a
+composition gap and can derive a joint-experiment successor todo (see
+"Composition Frontier"). The detailed contract follows.
 
 Long-running exploration goals (for example a Codex loop studying an external
 software domain through LoopX) produce results that operators want to read as
@@ -475,6 +480,52 @@ several Codex workers exploring different routes, each route managing multiple
 todos, then verified results merging back into the explore graph. Use
 `todo-branch-plan` for the smaller micro-kernel case where the branch is just
 one candidate todo.
+
+## Composition Frontier
+
+The harness also projects **composition gaps** - the explicit combined-surface
+todo derivation. When two individually covered surfaces have an
+evidence-linked reason to be tested together, LoopX preserves that untested
+relation as a gap instead of treating each surface as finished.
+
+A composition experiment is an existing open Explore `experiment` node with at
+least two outgoing `depends_on` edges to closed (`resolved` / `dead_end`),
+evidence-backed input nodes. Only explicit graph edges qualify; the projection
+never infers arbitrary node pairs, so the runtime and reviewer surface stay
+linear in the recorded graph.
+
+`project_live_explore_composition_frontier` folds this into
+`loopx_explore_composition_frontier_v0` during `quota should-run` and turn
+packets when `spawn_policy.explore_harness.enabled=true`:
+
+- `gaps[]` (`loopx_explore_composition_gap_v0`): `gap_id`,
+  `experiment_node_ref`, `input_node_refs`, status `pending|scheduled`,
+  `required_outcome=joint_experiment_result`, and a `successor_summary`
+  ("Run the bounded joint experiment: ...") with a `successor_binding` whose
+  `explore_result_node_refs` points at the experiment node.
+- `selected_gap`: the first pending gap (pending sorts before scheduled, then
+  by input count descending, then by stable gap id); at most 3 gaps are
+  projected (`MAX_PROJECTED_GAPS`).
+- A gap is closed only by an evidence-backed composition experiment or an
+  evidence-backed dismissal - not by reading context, acknowledging a packet,
+  completing an unrelated todo, or restating the same conclusion.
+
+The gap becomes a normal runnable successor: a todo bound to the experiment
+node (`--explore-result-node-ref <experiment-node>`), executed through the
+normal LoopX lifecycle. The conceptual contract is in
+[`research-exploration-control-plane-v0`](../../architecture/rfcs/research-exploration-control-plane-v0.md).
+
+Create one explicitly:
+
+```bash
+loopx explore node --goal-id <id> --title "Combine A and B" --kind experiment --status open
+loopx explore edge --goal-id <id> --from <experiment> --to A --type depends_on
+loopx explore edge --goal-id <id> --from <experiment> --to B --type depends_on
+```
+
+Once A and B are `resolved` / `dead_end` with evidence, the next quota/turn
+packet projects a pending composition gap and can derive the joint-experiment
+successor todo.
 
 ### Adaptive Resilient Harness Profile
 

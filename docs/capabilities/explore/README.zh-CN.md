@@ -9,6 +9,7 @@ LoopX Explore 是面向长程探索目标（软件研究、安全攻击面测绘
 1. **Explore Graph** —— append-only、public-safe 的证据拓扑（nodes / edges / findings）+ 有界投影、Mermaid 导出、canonical/executive 双视图展示。它回答：探索过什么、循环卡在哪里以及为什么、发现了什么。
 2. **Explore Harness** —— 默认拒绝、只读的分支规划器（`todo-branch-plan`、`worker-branch-plan`），对下一步进行排序与打包（DSpark 风格 confidence/prefix/load、`adaptive-resilient` 与 `moe-router` 配置档、资源感知 portfolio），不 claim、不 launch、不 spend。
 3. **组合面研究** —— worker lanes 并行探索多个面；episode 分组在变体之间共享昂贵的准备阶段；replay/counterfactual/trace 运行时对比路线；typed `supports` / `refutes` / `leads_to` 边把各面发现合并回同一张证据拓扑。
+   当已闭环、有证据的多个面之间存在显式理由需要组合验证时，它们会成为 **composition gap**，并衍生 joint experiment 后继 todo（见下文“Composition Frontier”）。
 
 **何时使用：** 探索目标已经超出 todo 列表能表达的范围——需要把“试过什么、什么有效、卡在哪里”读成一张图，并且下一步需要在多条并行方向上规划。
 
@@ -32,6 +33,7 @@ loopx explore worker-branch-plan --goal-id <id> --harness-profile adaptive-resil
 ```
 
 两个门控相互独立且默认关闭（见下文“每 goal 独立 Opt-In 门控”）。以下是详细契约。
+当已闭环、有证据的多个面之间存在显式理由需要组合验证时，下一次 `quota should-run` / turn packet 会投影 composition gap，并可衍生 joint experiment 后继 todo（见下文“Composition Frontier”）。
 
 长程探索目标（例如通过 LoopX 研究某个外部软件领域的 Codex loop）产生的结果，operator 希望读成**拓扑**，而不是 agent 动作日志：探索过什么、循环卡在哪里以及为什么、发现了什么。
 
@@ -238,6 +240,30 @@ planner 把这个边界折叠进 packet 的 `orchestration_gate` 节，行为如
 门是规划面的 defense-in-depth，不是运行时权威的替代：权限、quota、gates、claims、leases、spend 与状态投影无论门状态如何都归正常 LoopX 生命周期所有。`examples/explore-worker-plan-gate-smoke.py` 端到端覆盖两个 planner 的四种状态、`max_children` 上限与 CLI 默认关闭路径。
 
 当实验是关于动态分支时使用 worker-lane planner：多个 Codex worker 探索不同路线，每条路线管理多个 todos，验证后的结果合并回 explore graph。较小的微内核场景（分支只是一个候选 todo）使用 `todo-branch-plan`。
+
+## Composition Frontier（组合面实验衍生）
+
+Harness 还会投影 **composition gaps**——显式的组合面 todo 衍生。当两个单独已覆盖的面之间存在有证据关联、需要放在一起验证时，LoopX 把这段未测试关系保留为 gap，而不是把每个面当作已完结。
+
+组合实验是一个已存在的 open Explore `experiment` 节点，带有至少两条指向已闭环（`resolved` / `dead_end`）、有证据输入节点的 `depends_on` 出边。只有显式图边才合格；投影绝不推断任意节点对，因此运行时与 reviewer 面保持与已记录图线性相关。
+
+`project_live_explore_composition_frontier` 在 `quota should-run` 与 turn packets 中把它折叠成 `loopx_explore_composition_frontier_v0`（当 `spawn_policy.explore_harness.enabled=true` 时）：
+
+- `gaps[]`（`loopx_explore_composition_gap_v0`）：`gap_id`、`experiment_node_ref`、`input_node_refs`、状态 `pending|scheduled`、`required_outcome=joint_experiment_result`、`successor_summary`（“Run the bounded joint experiment: ...”），以及 `successor_binding`，其 `explore_result_node_refs` 指向实验节点。
+- `selected_gap`：第一个 pending gap（pending 排在 scheduled 之前，再按输入数降序、按稳定 gap id 排序）；最多投影 3 个 gap（`MAX_PROJECTED_GAPS`）。
+- gap 只能被有证据的组合实验或有证据的驳回关闭——不能靠读上下文、acknowledge packet、完成无关 todo 或复述同一结论关闭。
+
+gap 变成正常的可运行后继：一个绑定到实验节点的 todo（`--explore-result-node-ref <experiment-node>`），通过正常 LoopX 生命周期执行。概念契约见 [`research-exploration-control-plane-v0`](../../architecture/rfcs/research-exploration-control-plane-v0.zh-CN.md)。
+
+显式创建一个：
+
+```bash
+loopx explore node --goal-id <id> --title "Combine A and B" --kind experiment --status open
+loopx explore edge --goal-id <id> --from <experiment> --to A --type depends_on
+loopx explore edge --goal-id <id> --from <experiment> --to B --type depends_on
+```
+
+一旦 A 与 B 为 `resolved` / `dead_end` 且带证据，下一次 quota/turn packet 就会投影 pending composition gap，并可衍生 joint experiment 后继 todo。
 
 ### Adaptive Resilient Harness 配置档
 
