@@ -944,6 +944,8 @@ def test_visual_configuration_auto_create_plans_without_writes(tmp_path) -> None
     assert planned["visual_sinks"]["canonical"]["overview_whiteboard_token"] == (
         "planned-canonical-overview"
     )
+    assert planned["visual_sinks"]["canonical"]["board_style"] == "auto_flow"
+    assert planned["visual_sinks"]["canonical"]["renderer"] == "mermaid"
     assert planned["visual_sinks"]["executive"]["overview_whiteboard_token"] == (
         "planned-executive-overview"
     )
@@ -951,6 +953,68 @@ def test_visual_configuration_auto_create_plans_without_writes(tmp_path) -> None
     stored = read_lark_explore_local_config(config_path)
     assert not stored.get("visual_sinks")
     assert not stored.get("visual_sink")
+
+
+def test_visual_configuration_auto_create_reuses_existing_document(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "lark-explore.json"
+    write_lark_explore_local_config(
+        config_path,
+        {
+            "board": {
+                "base_token": "PUBLIC_FIXTURE_BASE",
+                "tables": {"nodes": "tblN", "edges": "tblE", "findings": "tblF"},
+            },
+            "visual_sinks": {
+                "canonical": {
+                    "docx_token": "doc_existing",
+                    "overview_whiteboard_token": "wb_canonical_overview",
+                    "view_role": "canonical",
+                    "projection_mode": "canonical_full",
+                    "board_style": "auto_flow",
+                    "renderer": "mermaid",
+                    "stage_boards_enabled": True,
+                    "stage_capacity": 14,
+                },
+                "executive": {
+                    "docx_token": "doc_existing",
+                    "overview_whiteboard_token": "wb_executive_overview",
+                    "view_role": "executive",
+                    "projection_mode": "executive_auto",
+                    "board_style": "auto_flow",
+                    "renderer": "mermaid",
+                    "stage_boards_enabled": False,
+                    "stage_capacity": 14,
+                },
+            },
+        },
+    )
+    calls: list[list[str]] = []
+
+    def fail_runner(command, *_args, **_kwargs):
+        calls.append(command)
+        return {"ok": False, "returncode": 1, "stderr": "should not be invoked"}
+
+    monkeypatch.setattr(
+        "loopx.extensions.lark.presentation.explore_results._run_command",
+        fail_runner,
+    )
+
+    result = configure_lark_explore_visual_sink(
+        config_path=config_path,
+        auto_create=True,
+        execute=True,
+    )
+
+    assert result["status"] == "auto_configured"
+    assert result["document"]["docx_token"] == "doc_existing"
+    assert calls == []
+    stored = read_lark_explore_local_config(config_path)
+    assert stored["visual_sinks"]["canonical"]["overview_whiteboard_token"] == (
+        "wb_canonical_overview"
+    )
 
 
 def test_visual_sync_single_sink_lane_style_falls_back_to_mermaid(

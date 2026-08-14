@@ -614,6 +614,12 @@ def configure_lark_explore_visual_sink(
                 if isinstance(stored_sinks.get("executive"), Mapping)
                 else {}
             )
+            if not document_token:
+                document_token = str(
+                    stored_canonical.get("docx_token")
+                    or stored_executive.get("docx_token")
+                    or ""
+                ).strip()
             reused_overview = (
                 document_token
                 and str(stored_canonical.get("overview_whiteboard_token") or "").strip()
@@ -728,6 +734,8 @@ def configure_lark_explore_visual_sink(
         return sink
 
     if auto_create:
+        if board_style is None:
+            style = explore_board_style(BOARD_STYLE_AUTO_FLOW)
         executive_board = overview_boards[0] if overview_boards else {}
         canonical_board = overview_boards[1] if len(overview_boards) > 1 else {}
         explicit_stage_tokens = bool(tokens)
