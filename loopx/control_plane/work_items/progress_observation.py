@@ -243,6 +243,24 @@ def typed_progress_repeat_trigger(
     }
 
 
+def _has_new_terminal_coverage(
+    current: Mapping[str, Any],
+    prior: Mapping[str, Any] | None,
+) -> bool:
+    """Compare terminal coverage semantics without treating proof churn as novelty."""
+
+    if prior is None:
+        return True
+    result_class = current["result_class"]
+    if result_class != prior.get("result_class"):
+        return True
+    if current.get("coverage_scope_id") != prior.get("coverage_scope_id"):
+        return True
+    if result_class == ProgressResultClass.EXPLORATION_EXHAUSTED.value:
+        return current.get("coverage_complete") != prior.get("coverage_complete")
+    return False
+
+
 def semantic_progress_delta(
     observation: Mapping[str, Any] | None,
     *,
@@ -284,10 +302,15 @@ def semantic_progress_delta(
             current.get("coverage_complete") is True
             and current.get("coverage_scope_id")
             and current.get("evidence_ids")
+            and _has_new_terminal_coverage(current, prior)
         ):
             delta_kinds.append("coverage_backed_exploration_exhausted")
     elif result_class == ProgressResultClass.NO_FOLLOWUP.value:
-        if current.get("coverage_scope_id") and current.get("evidence_ids"):
+        if (
+            current.get("coverage_scope_id")
+            and current.get("evidence_ids")
+            and _has_new_terminal_coverage(current, prior)
+        ):
             delta_kinds.append("coverage_backed_no_followup")
     return {
         "schema_version": "replan_semantic_delta_v0",

@@ -137,6 +137,64 @@ def test_exhaustion_requires_coverage_proof() -> None:
     assert semantic_progress_delta(complete, baseline=None)["delta_kinds"] == [
         "coverage_backed_exploration_exhausted"
     ]
+    assert semantic_progress_delta(complete, baseline=incomplete)["delta_kinds"] == [
+        "coverage_backed_exploration_exhausted"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("result_class", "terminal_fields", "delta_kind"),
+    [
+        (
+            "exploration_exhausted",
+            {"coverage_complete": True},
+            "coverage_backed_exploration_exhausted",
+        ),
+        (
+            "no_followup",
+            {},
+            "coverage_backed_no_followup",
+        ),
+    ],
+)
+def test_terminal_coverage_requires_a_semantically_new_scope(
+    result_class: str,
+    terminal_fields: dict[str, object],
+    delta_kind: str,
+) -> None:
+    baseline = normalize_progress_observation(
+        _observation(
+            result_class=result_class,
+            coverage_scope_id="scope-public-entrypoints",
+            **terminal_fields,
+        )
+    )
+    repeated = normalize_progress_observation(dict(baseline))
+    evidence_only = normalize_progress_observation(
+        _observation(
+            result_class=result_class,
+            coverage_scope_id="scope-public-entrypoints",
+            evidence_ids=["evidence-new-output"],
+            **terminal_fields,
+        )
+    )
+    new_scope = normalize_progress_observation(
+        _observation(
+            result_class=result_class,
+            coverage_scope_id="scope-public-cli",
+            **terminal_fields,
+        )
+    )
+
+    assert baseline["fingerprint"] == repeated["fingerprint"]
+    assert baseline["fingerprint"] != evidence_only["fingerprint"]
+    assert semantic_progress_delta(repeated, baseline=baseline)["accepted"] is False
+    assert (
+        semantic_progress_delta(evidence_only, baseline=baseline)["accepted"] is False
+    )
+    assert semantic_progress_delta(new_scope, baseline=baseline)["delta_kinds"] == [
+        delta_kind
+    ]
 
 
 def test_host_projects_evidence_context_and_minimal_action_packet() -> None:
