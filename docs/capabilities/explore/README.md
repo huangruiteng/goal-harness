@@ -2,12 +2,64 @@
 
 Status: supported optional capability; default-off harness execution contract.
 
+## At a Glance
+
+LoopX Explore is a supported, default-off optional capability for
+long-running exploration goals (software research, security attack-surface
+mapping, domain studies). It turns "go look around" into a bounded,
+observable, gated process with three pillars:
+
+1. **Explore Graph** - an append-only, public-safe evidence topology
+   (nodes / edges / findings) plus bounded projections, Mermaid export, and
+   canonical/executive presentation. It answers: what has been explored,
+   where the loop is blocked and why, and what was found.
+2. **Explore Harness** - deny-by-default, read-only branch planners
+   (`todo-branch-plan`, `worker-branch-plan`) that rank and bundle next
+   steps (DSpark-style confidence/prefix/load, `adaptive-resilient` and
+   `moe-router` profiles, resource-aware portfolio), without claiming,
+   launching, or spending.
+3. **Combined-surface research** - worker lanes explore multiple surfaces
+   in parallel; episode groups share expensive setup across variants;
+   replay/counterfactual/trace runtimes compare routes; typed
+   `supports` / `refutes` / `leads_to` edges merge findings back into one
+   evidence topology.
+
+**When to use it:** exploration goals that outgrow a todo list - where
+"what did we try, what worked, what is blocked" must be readable as a graph
+and where next steps should be planned across several parallel directions.
+
+**What it is not:** not a resident scheduler, not a worker launcher, not a
+process engine. Everything below is analysis or evidence unless an operator
+executes it through the normal LoopX lifecycle.
+
+## Quick Start
+
+Enable the gates, record evidence, project, and plan:
+
+```bash
+loopx configure-goal --goal-id <id> --explore-graph-enabled \
+  --explore-harness-enabled --explore-harness-profile adaptive-resilient --execute
+
+loopx explore node --goal-id <id> --title "Attack surface A" --status exploring
+loopx explore edge --goal-id <id> --from A --to B --type leads_to
+loopx explore finding --goal-id <id> --title "Key finding" --node A --status confirmed
+
+loopx explore summary --goal-id <id>
+loopx explore graph --goal-id <id> --graph-format mermaid --out explore.mmd
+loopx explore worker-branch-plan --goal-id <id> --harness-profile adaptive-resilient --worker-width 3
+```
+
+Both gates are separate and default-off (see "Independent Per-Goal Opt-In
+Gates"). The detailed contract follows.
+
 Long-running exploration goals (for example a Codex loop studying an external
 software domain through LoopX) produce results that operators want to read as
 a topology, not as an agent action log: what has been explored, where the loop
 is blocked and why, and what was found.
 
-Role boundaries, in one breath:
+## Role Boundaries
+
+In one breath:
 
 - **Explore capability (this layer)** owns the structured exploration
   EVIDENCE: a compact, public-safe, append-only node/edge/finding/blocked-
