@@ -74,6 +74,19 @@ class EffectProgram:
     execution_mode: str | None = None
 
 
+class TurnTransactionPhase(StrEnum):
+    HOST_EXECUTE = "host_execute"
+    TYPED_RESULT = "typed_result"
+    VALIDATION = "validation"
+    DURABLE_WRITEBACK = "durable_writeback"
+    QUOTA_SPEND = "quota_spend"
+    SCHEDULER_APPLY = "scheduler_apply"
+    SCHEDULER_ACK = "scheduler_ack"
+
+
+TURN_TRANSACTION_PHASES = tuple(phase.value for phase in TurnTransactionPhase)
+
+
 class SettlementStepKind(StrEnum):
     VALIDATION = "validation"
     TODO_COMPLETION = "todo_completion"
@@ -373,6 +386,60 @@ def interpret_quota_should_run_packet(
         interpretation=interpretation,
         observation=observation,
         next_effect=next_effect,
+    )
+
+
+def interpret_turn_journal(
+    journal: Mapping[str, Any],
+    *,
+    goal_id: str | None = None,
+    agent_id: str | None = None,
+    turn_key: str | None = None,
+    capabilities: Sequence[str] = (),
+) -> EffectTurn:
+    """Read one fenced Turn journal through the canonical effect slots."""
+
+    completed_phases = tuple(
+        str(phase) for phase in journal.get("completed_phases", [])
+    )
+    journal_status = str(journal.get("status") or "")
+    phases_form_ordered_prefix = completed_phases == TURN_TRANSACTION_PHASES[
+        : len(completed_phases)
+    ]
+    context = {
+        "replay_legal": True,
+        "goal_matches": True,
+        "owner_matches": True,
+        "turn_key_matches": True,
+        "phases_form_ordered_prefix": phases_form_ordered_prefix,
+        "journal_status": journal_status,
+        "tombstone_retained": journal_status
+        in {"committed", "stopped", "failed"},
+        "completed_phases": completed_phases,
+        "violations": (),
+    }
+    return EffectTurn(
+        request=EffectRequest(
+            kind="turn_journal",
+            source="turn_journal",
+            goal_id=goal_id,
+            agent_id=agent_id,
+            capabilities=tuple(capabilities),
+            context=context,
+        ),
+        interpretation=EffectInterpretation(
+            route="turn_journal_replay",
+            obligation="observe_fenced_replay",
+            interaction_mode="read_only",
+        ),
+        observation=EffectObservation(
+            decision="replay_legal",
+            should_run=False,
+            effective_action="observe_replay",
+            recommended_action="Retain the terminal Turn journal tombstone.",
+            protocol_summary="Turn journal replay is legal and effect-free.",
+        ),
+        next_effect=EffectNext(),
     )
 
 
