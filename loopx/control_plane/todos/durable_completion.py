@@ -1,0 +1,163 @@
+"""Project the durable completion continuation for the built-in Turn CLI provider.
+
+``loopx turn run-once`` completes the selected Todo through
+:func:`loopx.todos.complete_goal_todo` and must report the continuation the Todo
+lifecycle durably recorded (``successor``, ``no_followup``, or ``active_goal``)
+instead of normalizing every completion to ``active_goal``.
+
+Projection reads the persisted Todo lifecycle record only; it never trusts host
+result JSON and never creates successors from host text. Contradictory or
+dangling durable state fails closed so the typed settlement never sees a
+fabricated continuation.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Collection
+from pathlib import Path
+from typing import Any, Mapping
+
+from .active_state_editing import (
+    TODO_SECTION_HEADINGS,
+    find_todo_block,
+    section_bounds,
+    todo_blocks,
+)
+from .contract import (
+    TODO_STATUS_DONE,
+    normalize_todo_id,
+    normalize_todo_id_list,
+    normalize_todo_no_followup,
+    normalize_todo_status,
+)
+from .event_writeback import event_projection_todo_context
+
+
+def read_persisted_todo_record(
+    state_file: Path,
+    *,
+    todo_id: str,
+    registry_path: Path | None = None,
+    goal_id: str | None = None,
+) -> tuple[dict[str, Any], set[str]]:
+    """Read one durable Todo record and the goal-state Todo id universe.
+
+    Returns the parsed Todo record for ``todo_id`` together with the set of
+    Todo ids present in the persisted goal state. Like
+    ``complete_goal_todo``, the record is looked up in the active Markdown
+    blocks first and falls back to the event projection for event-sourced
+    goals. Raises ``ValueError`` when the Todo cannot be located in the
+    durable lifecycle, so the caller can fail closed instead of projecting a
+    fabricated continuation.
+    """
+    lines = state_file.read_text(encoding="utf-8").splitlines()
+    block: dict[str, Any] | None = None
+    match = find_todo_block(lines, todo_id=todo_id)
+    if match is not None:
+        _role, _section, _start, _end, block = match
+    existing_todo_ids: set[str] = set()
+    for candidate_role in TODO_SECTION_HEADINGS:
+        bounds = section_bounds(lines, candidate_role)
+        if bounds is None:
+            continue
+        start, end, _heading = bounds
+        for item in todo_blocks(lines, start, end, role=candidate_role):
+            item_todo_id = normalize_todo_id(item.get("todo_id"))
+            if item_todo_id:
+                existing_todo_ids.add(item_todo_id)
+    if block is None and registry_path is not None and goal_id is not None:
+        context = event_projection_todo_context(
+            registry_path=registry_path,
+            goal_id=goal_id,
+            state_path=state_file,
+            todo_id=todo_id,
+            role=None,
+        )
+        if context is not None:
+            block = dict(context["item"])
+            for candidate_role in ("user", "agent"):
+                summary = context["fields"].get(f"{candidate_role}_todos")
+                items = summary.get("items") if isinstance(summary, dict) else []
+                for item in items if isinstance(items, list) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    item_todo_id = normalize_todo_id(item.get("todo_id"))
+                    if item_todo_id:
+                        existing_todo_ids.add(item_todo_id)
+    if block is None:
+        normalized_todo_id = normalize_todo_id(todo_id) or todo_id
+        raise ValueError(
+            f"durable completion todo_id {normalized_todo_id!r} was not found "
+            "in persisted Todo lifecycle state"
+        )
+    return block, existing_todo_ids
+
+
+def project_durable_completion_outcome(
+    *,
+    todo: Mapping[str, Any],
+    expected_todo_id: str,
+    existing_todo_ids: Collection[str] | None = None,
+) -> dict[str, Any]:
+    """Project the typed completion continuation recorded by the Todo lifecycle.
+
+    ``todo`` is the durable Todo record re-read from persisted lifecycle state
+    after ``complete_goal_todo``. The outcome is one of:
+
+    - ``successor`` when the Todo durably declares ``successor_todo_ids``;
+      every declared successor must exist in the goal state
+      (``existing_todo_ids``) or projection fails closed;
+    - ``no_followup`` when the Todo durably records ``no_followup``;
+    - ``active_goal`` otherwise.
+
+    Raises ``ValueError`` (fail closed) when the durable record contradicts
+    itself (both ``no_followup`` and successors), when a declared successor is
+    dangling, when the Todo id does not match ``expected_todo_id``, or when the
+    Todo is not durably done.
+    """
+    normalized_expected_todo_id = normalize_todo_id(expected_todo_id)
+    if not normalized_expected_todo_id:
+        raise ValueError("durable completion requires a public Todo id")
+    durable_todo_id = normalize_todo_id(todo.get("todo_id"))
+    if durable_todo_id != normalized_expected_todo_id:
+        raise ValueError(
+            "durable completion todo_id does not match the selected Todo"
+        )
+    if normalize_todo_status(todo.get("status")) != TODO_STATUS_DONE:
+        raise ValueError(
+            "durable completion requires the selected Todo to be durably done"
+        )
+    successor_todo_ids = normalize_todo_id_list(todo.get("successor_todo_ids"))
+    no_followup = normalize_todo_no_followup(todo.get("no_followup"))
+    if no_followup is True:
+        if successor_todo_ids:
+            raise ValueError(
+                "durable completion records both no_followup and "
+                "successor_todo_ids"
+            )
+        return {
+            "todo_id": normalized_expected_todo_id,
+            "continuation": "no_followup",
+        }
+    if successor_todo_ids:
+        if existing_todo_ids is not None:
+            existing = set(existing_todo_ids)
+            missing_todo_ids = [
+                successor_todo_id
+                for successor_todo_id in successor_todo_ids
+                if successor_todo_id not in existing
+            ]
+            if missing_todo_ids:
+                raise ValueError(
+                    "durable completion declares missing successor Todo ids: "
+                    + ", ".join(missing_todo_ids)
+                )
+        return {
+            "todo_id": normalized_expected_todo_id,
+            "continuation": "successor",
+            "successor_todo_ids": successor_todo_ids,
+        }
+    return {
+        "todo_id": normalized_expected_todo_id,
+        "continuation": "active_goal",
+    }

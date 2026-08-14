@@ -1047,7 +1047,14 @@ def _typed_settlement_stage(
                 return {
                     "ok": False,
                     "appended": False,
-                    "reason": "todo lifecycle adapter returned an invalid completion outcome",
+                    "reason": str(
+                        callback_payload.get("reason")
+                        or callback_payload.get("error")
+                        or (
+                            "todo lifecycle adapter returned an invalid "
+                            "completion outcome"
+                        )
+                    ),
                 }
             return {
                 **callback_payload,

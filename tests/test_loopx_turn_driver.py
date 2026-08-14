@@ -645,12 +645,29 @@ def test_scheduler_followup_binding_preserves_turn_lineage(
     assert ack_hint["route_binding"]["source"] == "loopx_turn_plan"
 
 
-def _write_live_fixture(root: Path) -> tuple[Path, Path, Path]:
+def _write_live_fixture(
+    root: Path,
+    *,
+    todo_metadata_extra: str = "",
+    extra_agent_todo_lines: tuple[str, ...] = (),
+) -> tuple[Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     runtime.mkdir(parents=True)
     state = project / ".codex" / "goals" / "loopx-turn-fixture" / "ACTIVE_GOAL_STATE.md"
     state.parent.mkdir(parents=True)
+    agent_todo_lines = [
+        "- [ ] [P0] Advance one public fixture.",
+        "  <!-- loopx:todo todo_id=todo_fixture0001 status=open "
+        "task_class=advancement_task action_kind=fixture claimed_by=codex-fixture "
+        "priority=P0"
+        + (f" {todo_metadata_extra}" if todo_metadata_extra else "")
+        + " -->",
+        "",
+    ]
+    if extra_agent_todo_lines:
+        agent_todo_lines.extend(extra_agent_todo_lines)
+        agent_todo_lines.append("")
     state.write_text(
         "\n".join(
             [
@@ -663,9 +680,7 @@ def _write_live_fixture(root: Path) -> tuple[Path, Path, Path]:
                 "",
                 "## Agent Todo",
                 "",
-                "- [ ] [P0] Advance one public fixture.",
-                "  <!-- loopx:todo todo_id=todo_fixture0001 status=open task_class=advancement_task action_kind=fixture claimed_by=codex-fixture priority=P0 -->",
-                "",
+                *agent_todo_lines,
             ]
         ),
         encoding="utf-8",
@@ -1312,6 +1327,249 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "completed" else 7
     assert replayed_exit_code == 0, replayed
     assert replayed["replayed"] is True
     assert not any(replayed["effects"].values())
+
+
+def _completion_host_and_validation_scripts() -> tuple[str, str]:
+    host_script = """
+import json
+import pathlib
+import sys
+request = json.load(sys.stdin)
+pathlib.Path("completion-artifact.txt").write_text("completed", encoding="utf-8")
+json.dump({
+    "schema_version": "loopx_turn_result_v0",
+    "turn_key": request["turn_key"],
+    "result_kind": "validated_completion",
+    "completed_phases": ["host_execute", "typed_result"],
+    "classification": "fixture_completion",
+    "recommended_action": "Refresh the active goal after completion.",
+    "next_action": "Select the next Todo from a fresh decision.",
+    "delivery_batch_scale": "implementation",
+    "delivery_outcome": "outcome_progress",
+    "vision_unchanged_reason": "The active goal may have further work.",
+    "summary": "One public fixture completed."
+}, sys.stdout)
+"""
+    validation_script = """
+import json
+import pathlib
+import sys
+json.load(sys.stdin)
+artifact = pathlib.Path("completion-artifact.txt")
+raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "completed" else 7)
+"""
+    return host_script, validation_script
+
+
+def _turn_run_once_completion_argv(
+    project: Path,
+    runtime: Path,
+    registry: Path,
+    host_script: str,
+    validation_script: str,
+) -> list[str]:
+    return [
+        "--registry",
+        str(registry),
+        "--runtime-root",
+        str(runtime),
+        "--format",
+        "json",
+        "turn",
+        "run-once",
+        "--goal-id",
+        "loopx-turn-fixture",
+        "--agent-id",
+        "codex-fixture",
+        "--project",
+        str(project),
+        "--host-adapter-command-json",
+        json.dumps([sys.executable, "-c", host_script]),
+        "--validation-command-json",
+        json.dumps([sys.executable, "-c", validation_script]),
+        "--scan-root",
+        str(project),
+        "--no-global-sync",
+        "--execute",
+    ]
+
+
+def _turn_journal(runtime: Path) -> dict[str, object]:
+    journal_path = next(
+        (runtime / "goals" / "loopx-turn-fixture" / "turns").glob("*.json")
+    )
+    return json.loads(journal_path.read_text(encoding="utf-8"))
+
+
+def test_turn_run_once_cli_projects_declared_successor_continuation(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry = _write_live_fixture(
+        tmp_path,
+        todo_metadata_extra="successor_todo_ids=todo_fixture0002",
+        extra_agent_todo_lines=(
+            "- [ ] [P2] Continue the public fixture.",
+            "  <!-- loopx:todo todo_id=todo_fixture0002 status=open "
+            "task_class=advancement_task priority=P2 -->",
+        ),
+    )
+    host_project = tmp_path / "isolated-host-workspace"
+    host_project.mkdir()
+    host_script, validation_script = _completion_host_and_validation_scripts()
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            _turn_run_once_completion_argv(
+                host_project,
+                runtime,
+                registry,
+                host_script,
+                validation_script,
+            )
+        )
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0, payload
+    assert payload["status"] == "committed"
+    assert _turn_journal(runtime)["writeback"]["completion"] == {
+        "todo_id": "todo_fixture0001",
+        "continuation": "successor",
+        "successor_todo_ids": ["todo_fixture0002"],
+    }
+
+
+def test_turn_run_once_cli_projects_durable_no_followup_continuation(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry = _write_live_fixture(
+        tmp_path,
+        todo_metadata_extra="no_followup=true",
+    )
+    host_project = tmp_path / "isolated-host-workspace"
+    host_project.mkdir()
+    host_script, validation_script = _completion_host_and_validation_scripts()
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            _turn_run_once_completion_argv(
+                host_project,
+                runtime,
+                registry,
+                host_script,
+                validation_script,
+            )
+        )
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0, payload
+    assert payload["status"] == "committed"
+    assert _turn_journal(runtime)["writeback"]["completion"] == {
+        "todo_id": "todo_fixture0001",
+        "continuation": "no_followup",
+    }
+
+
+def test_turn_run_once_cli_fails_closed_on_dangling_declared_successor(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry = _write_live_fixture(
+        tmp_path,
+        todo_metadata_extra="successor_todo_ids=todo_missing999",
+    )
+    host_project = tmp_path / "isolated-host-workspace"
+    host_project.mkdir()
+    host_script, validation_script = _completion_host_and_validation_scripts()
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(
+            _turn_run_once_completion_argv(
+                host_project,
+                runtime,
+                registry,
+                host_script,
+                validation_script,
+            )
+        )
+
+    payload = json.loads(output.getvalue())
+    assert exit_code == 1, payload
+    assert payload["result_kind"] == "writeback_failed"
+    assert payload["receipt"]["failed_phase"] == "durable_writeback"
+    failure = payload["settlement_result"]["failure"]
+    assert failure["kind"] == "writeback_rejected"
+    assert "missing successor Todo ids: todo_missing999" in failure["reason"]
+    assert payload["effects"] == {
+        "host_invoked": True,
+        "state_written": False,
+        "quota_spent": False,
+        "scheduler_acknowledged": False,
+    }
+
+
+def test_turn_run_once_cli_replays_declared_successor_after_interruption(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry = _write_live_fixture(
+        tmp_path,
+        todo_metadata_extra="successor_todo_ids=todo_fixture0002",
+        extra_agent_todo_lines=(
+            "- [ ] [P2] Continue the public fixture.",
+            "  <!-- loopx:todo todo_id=todo_fixture0002 status=open "
+            "task_class=advancement_task priority=P2 -->",
+        ),
+    )
+    host_project = tmp_path / "isolated-host-workspace"
+    host_project.mkdir()
+    host_script, validation_script = _completion_host_and_validation_scripts()
+    argv = _turn_run_once_completion_argv(
+        host_project,
+        runtime,
+        registry,
+        host_script,
+        validation_script,
+    )
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exit_code = cli_main(argv)
+    payload = json.loads(output.getvalue())
+    assert exit_code == 0, payload
+
+    journal_path = next(
+        (runtime / "goals" / "loopx-turn-fixture" / "turns").glob("*.json")
+    )
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    # Simulate a process interruption after the durable writeback committed but
+    # before quota spend settled: the retry must re-project the same durable
+    # continuation from the persisted Todo lifecycle, not a normalized one.
+    journal["status"] = "in_progress"
+    journal["completed_phases"] = [
+        "host_execute",
+        "typed_result",
+        "validation",
+        "durable_writeback",
+    ]
+    for key in ("receipt", "quota_spend", "settlement_result", "scheduler", "reason"):
+        journal.pop(key, None)
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+
+    resumed_output = io.StringIO()
+    with contextlib.redirect_stdout(resumed_output):
+        resumed_exit_code = cli_main(
+            [
+                *argv[:-1],
+                "--resume-turn-key",
+                payload["resume_turn_key"],
+                "--execute",
+            ]
+        )
+    resumed = json.loads(resumed_output.getvalue())
+    assert resumed_exit_code == 0, resumed
+    assert resumed["status"] == "committed"
+    assert _turn_journal(runtime)["writeback"]["completion"] == {
+        "todo_id": "todo_fixture0001",
+        "continuation": "successor",
+        "successor_todo_ids": ["todo_fixture0002"],
+    }
 
 
 def test_turn_run_once_commits_independently_validated_progress(

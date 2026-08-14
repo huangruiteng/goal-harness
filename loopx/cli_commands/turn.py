@@ -13,6 +13,10 @@ from ..control_plane.quota.turn_envelope import build_turn_envelope
 from ..control_plane.runtime.status_projection_cache import (
     resolve_status_projection_cache_runtime_root,
 )
+from ..control_plane.todos.durable_completion import (
+    project_durable_completion_outcome,
+    read_persisted_todo_record,
+)
 from ..control_plane.scheduler.execution_context import (
     scheduler_execution_context_for_turn,
 )
@@ -523,6 +527,38 @@ def handle_turn_command(
                     project=None,
                     dry_run=False,
                 )
+                # Project the continuation the Todo lifecycle durably recorded,
+                # never a host-normalized continuation. Contradictory or
+                # dangling durable state fails closed before any further
+                # writeback so the typed settlement sees the truthful outcome.
+                state_file = completion.get("state_file")
+                if not isinstance(state_file, str) or not state_file:
+                    return {
+                        "ok": False,
+                        "appended": False,
+                        "reason": (
+                            "validated completion lifecycle did not report its "
+                            "durable Todo state file"
+                        ),
+                    }
+                try:
+                    durable_todo, existing_todo_ids = read_persisted_todo_record(
+                        Path(state_file),
+                        todo_id=todo_id,
+                        registry_path=registry_path,
+                        goal_id=args.goal_id,
+                    )
+                    completion_outcome = project_durable_completion_outcome(
+                        todo=durable_todo,
+                        expected_todo_id=todo_id,
+                        existing_todo_ids=existing_todo_ids,
+                    )
+                except ValueError as exc:
+                    return {
+                        "ok": False,
+                        "appended": False,
+                        "reason": f"durable completion projection failed: {exc}",
+                    }
                 refresh = writeback(
                     result,
                     completion_todo_id=todo_id,
@@ -536,10 +572,7 @@ def handle_turn_command(
                         refresh.get("appended")
                     ),
                     "classification": refresh.get("classification"),
-                    "completion": {
-                        "todo_id": completion.get("todo_id"),
-                        "continuation": "active_goal",
-                    },
+                    "completion": completion_outcome,
                 }
 
             def current_status() -> dict[str, object]:
