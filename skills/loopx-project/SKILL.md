@@ -912,10 +912,14 @@ isolated worktrees; keep the aggregate PR to `main` as the final review gate.
 When the next agent slice is not yet known, keep the bound `user_action`
 visible without converting it into a gate. If bounded no-progress evidence
 accumulates while the agent frontier is empty, follow
-`autonomous_replan_required`: create and claim a concrete runnable agent todo,
-binding it to the projected `obligation_id` with
-`--replan-obligation-id <exact-id>`. The atomic Todo mutation is the semantic
-receipt; do not add a second repair ACK. Only authoritative typed
+`autonomous_replan_required` and produce one typed semantic outcome. If the
+projected frontier owns a concrete target, create and claim that runnable agent
+todo, binding it to the projected `obligation_id` with
+`--replan-obligation-id <exact-id>`, a typed `--action-kind`, and a stable
+`--target-key` or Explore node ref. The atomic Todo mutation is the semantic
+receipt; do not add a second repair ACK. When no executable target is known,
+use the projected typed semantic or coverage-backed terminal writeback rather
+than creating a Todo whose task is merely to replan. Only authoritative typed
 terminal-closure evidence may replace that Todo writeback with explicit
 no-follow-up.
 `successor_todo_ids` records lineage only: linking successors does not suspend

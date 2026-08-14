@@ -391,6 +391,8 @@ loopx todo add \
   --goal-id <goal-id> \
   --role agent \
   --task-class advancement_task \
+  --action-kind <typed-action> \
+  --target-key <stable-execution-target> \
   --text '[P0] <bounded next slice>' \
   --claimed-by <agent-id> \
   --replan-obligation-id <current-obligation-id>
@@ -398,7 +400,9 @@ loopx todo add \
 
 成功结果返回 `host_action=end_current_heartbeat`。fine-grained host 应立即结算本轮，
 下一 heartbeat 再执行新 Todo；不需要再调用一次 `refresh-state` 来 ACK Todo。
-其他 typed observation 仍通过 action packet 给出的 `refresh-state` 模板写回。
+只有 host 已经投影出具体 bounded target 时才会生成这条命令；通用 replan 指令本身
+不能成为 Todo。目标尚未知时，仍通过 action packet 给出的 `refresh-state` 模板写回
+typed semantic delta 或 coverage-backed terminal。
 
 写时 gate 会重算与 quota 相同的完整 goal frontier。旧 ACK、读收据、prose-only
 classification 或 caller 自报 repair kind 都不能关闭新 obligation。
@@ -637,6 +641,8 @@ loopx todo add \
   --goal-id <lab-goal> \
   --role agent \
   --task-class advancement_task \
+  --action-kind validate \
+  --target-key <stable-lab-target> \
   --text '[P0] Validate the newly selected surface' \
   --claimed-by <lab-agent> \
   --replan-obligation-id <current-obligation-id>
@@ -702,9 +708,11 @@ delta = semantic_progress_delta(
 
 成功 receipt 必须携带当前 `obligation_id`，且 outcome 属于该 obligation 的
 `required_any_of`。`new_runnable_successor` 不走 `refresh-state` 的 successor 声明；
-它由 `todo add --replan-obligation-id <current>` 原子创建 Todo 与 receipt，避免“先写
-Todo、再补 ACK”的半完成状态。历史 repair ACK 只允许在 read model 中解释旧记录，
-不再是写路径。
+它由带 `--action-kind`、稳定 target 和
+`--replan-obligation-id <current>` 的 `todo add` 原子创建 Todo 与 receipt，避免“先写
+Todo、再补 ACK”的半完成状态。若没有具体 target，则只能写回其他 typed semantic
+outcome，不能创建“继续 replan”式元 Todo。历史 repair ACK 只允许在 read model 中
+解释旧记录，不再是写路径。
 
 ### 2. Vision checkpoint 防止“局部推进，目标悄悄漂移”
 
