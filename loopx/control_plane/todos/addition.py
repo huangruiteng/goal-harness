@@ -11,6 +11,7 @@ from .contract import (
     TODO_TASK_CLASS_ADVANCEMENT,
     normalize_todo_replan_obligation_id,
     normalize_todo_status,
+    replan_successor_semantic_binding,
     todo_done_for_status,
 )
 from .todo_summary import normalize_todo_text
@@ -51,6 +52,9 @@ def require_replan_successor_scope(
     task_class: str | None,
     claimed_by: str | None,
     obligation_id: str | None,
+    action_kind: str | None,
+    target_key: str | None,
+    explore_result_node_refs: list[str] | None,
 ) -> str | None:
     """Validate that an obligation binding denotes an executable successor."""
 
@@ -65,7 +69,22 @@ def require_replan_successor_scope(
             "replan_obligation_id requires an explicitly claimed agent "
             "advancement_task"
         )
-    return normalize_todo_replan_obligation_id(obligation_id)
+    if replan_successor_semantic_binding(
+        action_kind=action_kind,
+        target_key=target_key,
+        explore_result_node_refs=explore_result_node_refs,
+    ) is None:
+        raise ValueError(
+            "replan_obligation_id requires a typed action_kind and a stable "
+            "target_key or explore_result_node_ref"
+        )
+    normalized_obligation_id = normalize_todo_replan_obligation_id(obligation_id)
+    if not normalized_obligation_id:
+        raise ValueError(
+            "replan_obligation_id must use the public token shape "
+            "replan-<16 lowercase hex characters>"
+        )
+    return normalized_obligation_id
 
 
 def require_replan_successor_rebinding(

@@ -290,6 +290,15 @@ def register_explore_commands(
             "the Stage 01 compatibility fallback."
         ),
     )
+    visual.add_argument(
+        "--auto-create",
+        action="store_true",
+        help=(
+            "Create the hosting document and both overview boards "
+            "(executive topology + canonical global) on first run; stage boards "
+            "are created by feishu-sync. No manual whiteboard tokens needed."
+        ),
+    )
     visual.add_argument("--execute", action="store_true")
 
     sync = sub.add_parser(
@@ -878,6 +887,7 @@ def handle_explore_command(
                 stage_whiteboard_tokens=args.stage_whiteboard_token,
                 board_style=args.board_style,
                 view_role=args.view_role,
+                auto_create=bool(args.auto_create),
                 execute=bool(args.execute),
             )
         elif args.explore_command == "feishu-sync":

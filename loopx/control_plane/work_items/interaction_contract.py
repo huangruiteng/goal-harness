@@ -35,7 +35,6 @@ from .primary_action import (
     protocol_action_text,
     protocol_first_candidate_action as _protocol_first_candidate_action,
     protocol_monitor_action as _protocol_monitor_action,
-    protocol_replan_requires_runnable_todo as _protocol_replan_requires_runnable_todo,
 )
 from .runtime_capability_reentry import build_runtime_capability_reentry_packet
 
@@ -438,6 +437,8 @@ def _interaction_mode(payload: dict[str, Any]) -> str:
         return "monitor_due"
     if effective_action == "terminal_no_followup" or state == "terminal_no_followup":
         return "terminal_no_followup"
+    if effective_action == "peer_coordination_blocked":
+        return effective_action
     if payload.get("scoped_user_gate_fallback"):
         return "scoped_user_gate_fallback"
     if _user_gate_notification_suppressed(payload):
@@ -872,9 +873,6 @@ def interaction_next_cli_actions(
             typed_quota_guard,
         ]
     if mode == "autonomous_replan":
-        runnable_todo_writeback_required = (
-            _protocol_replan_requires_runnable_todo(payload)
-        )
         packet = (
             payload.get("replan_action_packet")
             if isinstance(payload.get("replan_action_packet"), dict)
@@ -894,12 +892,8 @@ def interaction_next_cli_actions(
             else ""
         )
         successor_boundary = "on host_action=end_current_heartbeat: stop"
-        if runnable_todo_writeback_required:
-            return (
-                [successor_command, successor_boundary]
-                if successor_command
-                else []
-            )
+        if successor_command:
+            return [successor_ref, successor_boundary]
         typed_progress_args = (
             "--progress-result-class "
             "<advanced|blocked|exploration_exhausted|no_followup> "
@@ -1068,6 +1062,7 @@ def _interaction_quiet_noop_allowed(
         "blocked_wait",
         "user_gate_cooldown_wait",
         "terminal_no_followup",
+        "peer_coordination_blocked",
         "agent_monitor_only",
         "skip",
     }

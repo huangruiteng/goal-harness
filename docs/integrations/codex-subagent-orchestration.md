@@ -176,14 +176,62 @@ loopx configure-goal \
 
 `multi_subagent` remains the compatibility name for host child-worker capacity
 and permission policy. It does not ask the user to select a run mode or agent
-hierarchy. With host child capability, `quota should-run` projects adaptive
-`task_orchestration_contract_v2`; without it, the registered-peer compatibility
-path remains `task_orchestration_contract_v1`. Dormant registered agents and
-closed, blocked, or deferred todos are not coordinator candidates.
+hierarchy. With observed host child capability, `quota should-run` may project
+adaptive `task_orchestration_contract_v2`. Without that capability, it does not
+fall back to coordinating registered peers: registration grants Todo ownership,
+not cross-agent scheduling authority.
 
 Use `--multi-subagent-feature off` to disable worker spawning. The low-level
 `--orchestration-mode` and `--spawn-allowed` flags remain available for host
 integrations.
+
+## Explicit Registered-Peer Coordination
+
+Registered peers are independent by default. LoopX never hashes the peer set or
+open Todo bundle to auto-elect a coordinator. A host that can really activate
+or resume durable peer runtimes may select one coordinator explicitly:
+
+```bash
+loopx configure-goal \
+  --goal-id example-peer-task-goal \
+  --peer-task-coordinator codex-alpha \
+  --execute
+```
+
+The selected coordinator must then report the observed host capability on each
+eligible turn:
+
+```bash
+loopx quota should-run \
+  --goal-id example-peer-task-goal \
+  --agent-id codex-alpha \
+  --available-capability peer_agent_activation
+```
+
+The contract includes only peer lanes that are currently actionable. A dormant
+or non-resumable lane is projected under `blocked_peer_lanes`; if no peer lane
+can run, the bundle has `execution_state=blocked`,
+`terminal_outcome=blocked`, and `retry_policy=material_peer_state_change_only`.
+That blocked diagnostic does not replace the coordinator's own runnable lane or
+re-arm an activation obligation on every heartbeat. If the coordinator also
+has no in-scope runnable fallback, the final interaction mode is
+`peer_coordination_blocked`: schedulers return the bundle to its owner and stop
+the recurring heartbeat until peer capability/readiness, coordinator
+configuration, or the coordinator's own work frontier materially changes.
+
+Disable registered-peer coordination without changing peer registration or
+child-worker policy:
+
+```bash
+loopx configure-goal \
+  --goal-id example-peer-task-goal \
+  --clear-peer-task-coordinator \
+  --execute
+```
+
+This opt-in grants neither cross-owner Todo mutation nor broader repository,
+publication, credential, or production authority. Read it back with
+`loopx configure-goal --goal-id example-peer-task-goal` before relying on it.
 
 ## Run History And Observation
 

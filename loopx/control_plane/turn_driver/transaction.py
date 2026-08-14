@@ -14,6 +14,7 @@ from ..effect_program import (
     SettlementPlan,
     SettlementStep,
     SettlementStepKind,
+    TURN_TRANSACTION_PHASES,
 )
 
 LOOPX_TURN_TRANSACTION_PLAN_SCHEMA_VERSION = "loopx_turn_transaction_plan_v0"
@@ -21,15 +22,7 @@ LOOPX_TURN_RESULT_SCHEMA_VERSION = "loopx_turn_result_v0"
 LOOPX_TURN_RECEIPT_SCHEMA_VERSION = "loopx_turn_receipt_v0"
 LOOPX_TURN_RECEIPT_VALIDATION_SCHEMA_VERSION = "loopx_turn_receipt_validation_v0"
 LOOPX_TURN_EXECUTION_SCHEMA_VERSION = "loopx_turn_execution_v0"
-TRANSACTION_PHASES = (
-    "host_execute",
-    "typed_result",
-    "validation",
-    "durable_writeback",
-    "quota_spend",
-    "scheduler_apply",
-    "scheduler_ack",
-)
+TRANSACTION_PHASES = TURN_TRANSACTION_PHASES
 
 
 class LoopXTurnResultKind(str, Enum):

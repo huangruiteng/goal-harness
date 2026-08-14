@@ -72,6 +72,11 @@ def build_goal_configuration_catalog(
         "--allowed-domain",
         "<bounded-domain>",
     )
+    peer_coordination = (
+        feature_summary.get("peer_task_coordination")
+        if isinstance(feature_summary.get("peer_task_coordination"), Mapping)
+        else {}
+    )
     graph_enable_args = ("--explore-graph-enabled",)
     harness_enable_args = (
         "--explore-harness-enabled",
@@ -142,6 +147,67 @@ def build_goal_configuration_catalog(
                             ["loopx", "quota", "should-run", "--goal-id", goal_id]
                         ),
                     ],
+                },
+                "documentation": {
+                    "path": "docs/integrations/codex-subagent-orchestration.md",
+                    "url": (
+                        "https://github.com/huangruiteng/loopx/blob/main/"
+                        "docs/integrations/codex-subagent-orchestration.md"
+                    ),
+                },
+            },
+            {
+                "feature_id": "peer_task_coordination",
+                "display_name": "Registered-peer task coordination",
+                "availability": "supported_explicit_opt_in",
+                "default": {"enabled": False},
+                "current": {
+                    "enabled": peer_coordination.get("enabled") is True,
+                    "coordinator_agent_id": peer_coordination.get(
+                        "coordinator_agent_id"
+                    ),
+                },
+                "required_inputs": {
+                    "registered-agent-id": (
+                        "Select one already registered peer explicitly; registration "
+                        "alone does not grant coordination authority."
+                    )
+                },
+                "consider_when": (
+                    "The host can activate or resume durable peer runtimes and one "
+                    "peer must coordinate an explicit task bundle."
+                ),
+                "effect": (
+                    "Projects peer-owned lanes only to the selected coordinator, "
+                    "subject to per-turn peer_agent_activation capability admission."
+                ),
+                "does_not": [
+                    "auto-elect a coordinator",
+                    "allow cross-owner todo mutation",
+                    "make dormant or non-resumable peer lanes executable",
+                ],
+                "commands": {
+                    "preview_enable": _configure_command(
+                        goal_id,
+                        "--peer-task-coordinator",
+                        "<registered-agent-id>",
+                    ),
+                    "apply_enable": _configure_command(
+                        goal_id,
+                        "--peer-task-coordinator",
+                        "<registered-agent-id>",
+                        execute=True,
+                    ),
+                    "preview_disable": _configure_command(
+                        goal_id,
+                        "--clear-peer-task-coordinator",
+                    ),
+                    "apply_disable": _configure_command(
+                        goal_id,
+                        "--clear-peer-task-coordinator",
+                        execute=True,
+                    ),
+                    "verify": [inspect_command],
                 },
                 "documentation": {
                     "path": "docs/integrations/codex-subagent-orchestration.md",

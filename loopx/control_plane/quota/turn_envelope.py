@@ -297,6 +297,7 @@ def _replan_action_packet(payload: Mapping[str, Any]) -> dict[str, Any] | None:
             "uncovered_frontier",
             "required_outcome",
             "allowed_terminal",
+            "bounded_frontier",
         ),
     )
     return compact or None

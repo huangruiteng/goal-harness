@@ -72,7 +72,9 @@ from .explore_visual_readback import (
     settle_visual_stage_readbacks,
 )
 from .explore_visual_styles import (
+    BOARD_STYLE_AUTO_FLOW,
     board_source_with_delivery_marker,
+    explore_board_style,
     resolve_explore_board_style,
     resolve_explore_board_style_update,
     summarize_explore_visual_sync,
@@ -468,6 +470,49 @@ def _persist_lark_explore_record_map(
     write_lark_explore_local_config(config_path, updated)
 
 
+AUTO_DOC_TITLE = "LoopX Explore 实时探索拓扑"
+AUTO_DOC_CREATE_XML = (
+    "<title>" + AUTO_DOC_TITLE + "</title>"
+    "<h1>实时探索拓扑</h1>"
+    "<p>Executive 总览画板；由 feishu-sync 自动更新。</p>"
+    '<whiteboard type="blank"></whiteboard>'
+    "<h2>LoopX Explore · Canonical 全局画板</h2>"
+    "<p>Canonical 全局画板；由 feishu-sync 自动更新。</p>"
+    '<whiteboard type="blank"></whiteboard>'
+)
+AUTO_DOC_APPEND_XML = (
+    "<h1>实时探索拓扑</h1>"
+    "<p>Executive 总览画板；由 feishu-sync 自动更新。</p>"
+    '<whiteboard type="blank"></whiteboard>'
+    "<h2>LoopX Explore · Canonical 全局画板</h2>"
+    "<p>Canonical 全局画板；由 feishu-sync 自动更新。</p>"
+    '<whiteboard type="blank"></whiteboard>'
+)
+
+
+def _created_overview_boards(command: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return newly created whiteboard blocks in document order."""
+
+    payload = command.get("json")
+    data = payload.get("data") if isinstance(payload, Mapping) else None
+    document = data.get("document") if isinstance(data, Mapping) else None
+    blocks = document.get("new_blocks") if isinstance(document, Mapping) else None
+    boards = []
+    for block in blocks or []:
+        if not isinstance(block, Mapping):
+            continue
+        block_type = str(block.get("block_type") or "")
+        block_token = str(block.get("block_token") or "").strip()
+        if block_type == "whiteboard" and block_token:
+            boards.append(
+                {
+                    "block_id": str(block.get("block_id") or "").strip() or None,
+                    "block_token": block_token,
+                }
+            )
+    return boards
+
+
 def configure_lark_explore_visual_sink(
     *,
     config_path: Path,
@@ -482,13 +527,20 @@ def configure_lark_explore_visual_sink(
     stage_whiteboard_tokens: list[str] | None = None,
     board_style: str | None = None,
     view_role: str | None = None,
+    auto_create: bool = False,
     execute: bool = False,
 ) -> dict[str, Any]:
-    """Configure an optional owner-facing whiteboard over canonical Explore data."""
+    """Configure an optional owner-facing whiteboard over canonical Explore data.
+
+    ``auto_create=True`` bootstraps the hosting document and the two overview
+    boards (executive topology + canonical global) without manual token
+    plumbing. Canonical Evidence Stage boards are created lazily by
+    ``feishu-sync`` unless explicit stage tokens are supplied.
+    """
 
     token = str(whiteboard_token or "").strip()
     document_token = str(docx_token or "").strip()
-    if not token and not document_token:
+    if not token and not document_token and not auto_create:
         raise ValueError("whiteboard_token or docx_token is required")
     valid_modes = {
         "canonical_filtered",
@@ -528,6 +580,209 @@ def configure_lark_explore_visual_sink(
         tokens = [token]
     elif token and token not in tokens:
         tokens.insert(0, token)
+
+    def _auto_failure(error: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "schema_version": "loopx_lark_explore_visual_sink_configure_v0",
+            "execute": execute,
+            "status": "auto_create_failed",
+            "config_path": str(config_path),
+            "view_role": role,
+            "error": error,
+        }
+
+    overview_boards: list[dict[str, Any]] = []
+    auto_created_document: dict[str, Any] | None = None
+    if auto_create:
+        if execute:
+            board_meta = local.get("board") if isinstance(local.get("board"), dict) else {}
+            cli_bin = str(board_meta.get("cli_bin") or DEFAULT_CLI_BIN)
+            identity = str(board_meta.get("identity") or "user")
+            stored_sinks = (
+                local.get("visual_sinks")
+                if isinstance(local.get("visual_sinks"), Mapping)
+                else {}
+            )
+            stored_canonical = (
+                stored_sinks.get("canonical")
+                if isinstance(stored_sinks.get("canonical"), Mapping)
+                else {}
+            )
+            stored_executive = (
+                stored_sinks.get("executive")
+                if isinstance(stored_sinks.get("executive"), Mapping)
+                else {}
+            )
+            if not document_token:
+                document_token = str(
+                    stored_canonical.get("docx_token")
+                    or stored_executive.get("docx_token")
+                    or ""
+                ).strip()
+            reused_overview = (
+                document_token
+                and str(stored_canonical.get("overview_whiteboard_token") or "").strip()
+                and str(stored_executive.get("overview_whiteboard_token") or "").strip()
+            )
+            if reused_overview:
+                overview_boards = [
+                    {"block_token": str(stored_executive["overview_whiteboard_token"])},
+                    {"block_token": str(stored_canonical["overview_whiteboard_token"])},
+                ]
+            elif not document_token:
+                create_command = _run_command(
+                    [
+                        cli_bin,
+                        "docs",
+                        "+create",
+                        "--as",
+                        identity,
+                        "--content",
+                        AUTO_DOC_CREATE_XML,
+                        "--format",
+                        "json",
+                    ],
+                    execute=True,
+                    runner=default_subprocess_runner,
+                )
+                if not create_command.get("ok"):
+                    return _auto_failure(_command_error(create_command))
+                document_token = str(
+                    (
+                        (create_command.get("json") or {})
+                        .get("data", {})
+                        .get("document", {})
+                        .get("document_id")
+                        or ""
+                    )
+                ).strip()
+                if not document_token:
+                    return _auto_failure(
+                        "created document did not return a document_id"
+                    )
+                overview_boards = _created_overview_boards(create_command)
+            else:
+                append_command = _run_command(
+                    [
+                        cli_bin,
+                        "docs",
+                        "+update",
+                        "--as",
+                        identity,
+                        "--doc",
+                        document_token,
+                        "--command",
+                        "append",
+                        "--content",
+                        AUTO_DOC_APPEND_XML,
+                        "--format",
+                        "json",
+                    ],
+                    execute=True,
+                    runner=default_subprocess_runner,
+                )
+                if not append_command.get("ok"):
+                    return _auto_failure(_command_error(append_command))
+                overview_boards = _created_overview_boards(append_command)
+            if len(overview_boards) < 2:
+                return _auto_failure(
+                    "auto-created document did not return both overview whiteboards"
+                )
+            auto_created_document = {
+                "docx_token": document_token,
+                "overview_boards": overview_boards,
+            }
+        else:
+            overview_boards = [
+                {"block_token": "planned-executive-overview"},
+                {"block_token": "planned-canonical-overview"},
+            ]
+
+    def _role_sink(
+        role_name: str,
+        overview_token: str | None,
+        *,
+        stage_enabled: bool,
+    ) -> dict[str, Any]:
+        mode = {
+            "canonical": "canonical_full",
+            "executive": "executive_auto",
+        }.get(role_name, projection_mode)
+        sink = {
+            "schema_version": "loopx_lark_explore_visual_sink_config_v0",
+            "whiteboard_token": token or None,
+            "docx_token": document_token or None,
+            "statuses": [str(item) for item in statuses or [] if str(item).strip()],
+            "tags": [str(item) for item in tags or [] if str(item).strip()],
+            "projection_mode": mode,
+            "include_ancestors": bool(include_ancestors),
+            "mermaid_node_limit": max(1, int(mermaid_node_limit)),
+            "stage_capacity": int(stage_capacity),
+            "board_style": style.name,
+            "renderer": style.renderer,
+            "presentation_mode": "stage_document",
+            "stage_boards_enabled": stage_enabled,
+            "stage_whiteboards": [
+                {"stage_index": index, "whiteboard_token": stage_token}
+                for index, stage_token in enumerate(tokens, start=1)
+            ],
+            "view_role": role_name,
+        }
+        if overview_token:
+            sink["overview_whiteboard_token"] = overview_token
+        return sink
+
+    if auto_create:
+        if board_style is None:
+            style = explore_board_style(BOARD_STYLE_AUTO_FLOW)
+        executive_board = overview_boards[0] if overview_boards else {}
+        canonical_board = overview_boards[1] if len(overview_boards) > 1 else {}
+        explicit_stage_tokens = bool(tokens)
+        planned_sinks: dict[str, dict[str, Any]] = {}
+        if role in {None, "canonical"}:
+            planned_sinks["canonical"] = _role_sink(
+                "canonical",
+                str(canonical_board.get("block_token") or "").strip() or None,
+                stage_enabled=True,
+            )
+            if not explicit_stage_tokens:
+                planned_sinks["canonical"]["stage_whiteboards"] = []
+        if role in {None, "executive"}:
+            planned_sinks["executive"] = _role_sink(
+                "executive",
+                str(executive_board.get("block_token") or "").strip() or None,
+                stage_enabled=explicit_stage_tokens and role == "executive",
+            )
+            if not explicit_stage_tokens or role != "executive":
+                planned_sinks["executive"]["stage_boards_enabled"] = False
+                planned_sinks["executive"]["stage_whiteboards"] = []
+        if execute:
+            updated = {
+                key: value
+                for key, value in local.items()
+                if key not in {"ok", "exists", "path", "updated_at"}
+            }
+            sinks = dict(updated.get("visual_sinks") or {})
+            sinks.update(planned_sinks)
+            updated["visual_sinks"] = sinks
+            write_lark_explore_local_config(config_path, updated)
+        return {
+            "ok": True,
+            "schema_version": "loopx_lark_explore_visual_sink_configure_v0",
+            "execute": execute,
+            "status": "auto_configured" if execute else "would_auto_create",
+            "config_path": str(config_path),
+            "view_role": role,
+            "auto_create": True,
+            "document": auto_created_document
+            or {
+                "docx_token": document_token or "planned-docx",
+                "overview_boards": overview_boards,
+            },
+            "visual_sinks": planned_sinks,
+        }
+
     visual_sink = {
         "schema_version": "loopx_lark_explore_visual_sink_config_v0",
         "whiteboard_token": token or None,
@@ -541,6 +796,7 @@ def configure_lark_explore_visual_sink(
         "board_style": style.name,
         "renderer": style.renderer,
         "presentation_mode": "stage_document",
+        "stage_boards_enabled": True,
         "stage_whiteboards": [
             {"stage_index": index, "whiteboard_token": stage_token}
             for index, stage_token in enumerate(tokens, start=1)
@@ -644,6 +900,13 @@ def sync_explore_visual_to_lark(
             "error": str(exc),
         }
     rendered_source = str(graph.get(style.source_key) or "")
+    style_fallback = False
+    if not rendered_source.strip() and style.source_key == "svg":
+        mermaid_source = str(graph.get("mermaid") or "")
+        if mermaid_source.strip():
+            style = explore_board_style(BOARD_STYLE_AUTO_FLOW)
+            rendered_source = mermaid_source
+            style_fallback = True
     if not rendered_source.strip():
         return {
             "ok": False,
@@ -735,6 +998,7 @@ def sync_explore_visual_to_lark(
         "source_revision": source_revision,
         "view_role": str(graph.get("view_role") or sink_key),
         "board_style": style.name,
+        "style_fallback": style_fallback,
         "renderer": style.renderer,
         "input_format": style.input_format,
         "docx_token": str(visual_sink.get("docx_token") or "") or None,
@@ -822,40 +1086,45 @@ def sync_explore_visuals_to_lark(
             for item in role_view.get("stage_views") or []
             if isinstance(item, Mapping)
         ]
-        configured_stages, section_commands, _, reconciliation, stage_config_error = ensure_stage_whiteboards(
-            config,
-            role=role,
-            role_sink=role_sink,
-            stage_views=stage_views,
-            config_path=config_path,
-            execute=execute,
-            runner=runner,
-            read_local_config=read_lark_explore_local_config,
-            write_local_config=write_lark_explore_local_config,
-        )
-        missing_stage_indexes = [
-            int(stage["stage_index"])
-            for stage in stage_views
-            if int(stage["stage_index"]) not in configured_stages
-        ]
-        if stage_config_error or missing_stage_indexes:
-            results[role] = {
-                "ok": False,
-                "status": "stage_whiteboards_missing",
-                "execute": execute,
-                "published": False,
-                "view_role": role,
-                "source_digest": role_bundle["source_digest"],
-                "source_revision": role_bundle["source_revision"],
-                "required_stage_count": len(stage_views),
-                "configured_stage_count": len(configured_stages),
-                "missing_stage_indexes": missing_stage_indexes,
-                "section_commands": section_commands,
-                "reconciliation": reconciliation,
-                "error": stage_config_error
-                or "configure one document section and whiteboard token for each Evidence Stage",
-            }
-            continue
+        stage_boards_enabled = bool(role_sink.get("stage_boards_enabled", True))
+        configured_stages: dict[int, dict[str, Any]] = {}
+        section_commands: list[dict[str, Any]] = []
+        reconciliation: dict[str, Any] = {}
+        if stage_boards_enabled:
+            configured_stages, section_commands, _, reconciliation, stage_config_error = ensure_stage_whiteboards(
+                config,
+                role=role,
+                role_sink=role_sink,
+                stage_views=stage_views,
+                config_path=config_path,
+                execute=execute,
+                runner=runner,
+                read_local_config=read_lark_explore_local_config,
+                write_local_config=write_lark_explore_local_config,
+            )
+            missing_stage_indexes = [
+                int(stage["stage_index"])
+                for stage in stage_views
+                if int(stage["stage_index"]) not in configured_stages
+            ]
+            if stage_config_error or missing_stage_indexes:
+                results[role] = {
+                    "ok": False,
+                    "status": "stage_whiteboards_missing",
+                    "execute": execute,
+                    "published": False,
+                    "view_role": role,
+                    "source_digest": role_bundle["source_digest"],
+                    "source_revision": role_bundle["source_revision"],
+                    "required_stage_count": len(stage_views),
+                    "configured_stage_count": len(configured_stages),
+                    "missing_stage_indexes": missing_stage_indexes,
+                    "section_commands": section_commands,
+                    "reconciliation": reconciliation,
+                    "error": stage_config_error
+                    or "configure one document section and whiteboard token for each Evidence Stage",
+                }
+                continue
         stage_results = []
         role_nodes = {
             str(node.get("node_id") or ""): node
@@ -865,62 +1134,98 @@ def sync_explore_visuals_to_lark(
         role_edges = [
             edge for edge in role_view.get("edges") or [] if isinstance(edge, Mapping)
         ]
-        for stage in stage_views:
-            stage_index = int(stage["stage_index"])
-            stage_node_ids = {str(item) for item in stage.get("node_ids") or []}
-            stage_projection = dict(role_view)
-            stage_projection["mermaid"] = str(stage.get("mermaid") or "")
-            stage_projection["svg"] = str(stage.get("svg") or "")
-            stage_projection["nodes"] = [
-                role_nodes[node_id]
-                for node_id in stage.get("node_ids") or []
-                if node_id in role_nodes
-            ]
-            stage_projection["edges"] = [
-                edge
-                for edge in role_edges
-                if str(edge.get("from_node") or "") in stage_node_ids
-                and str(edge.get("to_node") or "") in stage_node_ids
-            ]
-            stage_projection["stage"] = dict(stage)
-            stage_sink = dict(role_sink)
-            stage_sink["whiteboard_token"] = str(
-                configured_stages[stage_index].get("whiteboard_token") or ""
-            ).strip()
-            stage_result = sync_explore_visual_to_lark(
+        if stage_boards_enabled:
+            for stage in stage_views:
+                stage_index = int(stage["stage_index"])
+                stage_node_ids = {str(item) for item in stage.get("node_ids") or []}
+                stage_projection = dict(role_view)
+                stage_projection["mermaid"] = str(stage.get("mermaid") or "")
+                stage_projection["svg"] = str(stage.get("svg") or "")
+                stage_projection["nodes"] = [
+                    role_nodes[node_id]
+                    for node_id in stage.get("node_ids") or []
+                    if node_id in role_nodes
+                ]
+                stage_projection["edges"] = [
+                    edge
+                    for edge in role_edges
+                    if str(edge.get("from_node") or "") in stage_node_ids
+                    and str(edge.get("to_node") or "") in stage_node_ids
+                ]
+                stage_projection["stage"] = dict(stage)
+                stage_sink = dict(role_sink)
+                stage_sink["whiteboard_token"] = str(
+                    configured_stages[stage_index].get("whiteboard_token") or ""
+                ).strip()
+                stage_result = sync_explore_visual_to_lark(
+                    config,
+                    projection=projection,
+                    visual_sink=stage_sink,
+                    config_path=config_path,
+                    semantic_digest=role_bundle["source_digest"],
+                    display_projection=stage_projection,
+                    view_key=f"{role}_stage_{stage_index:02d}",
+                    execute=bool(execute and not readback_host_wait_exhausted),
+                    runner=runner,
+                    defer_readback=bool(execute and not readback_host_wait_exhausted),
+                )
+                if execute and readback_host_wait_exhausted:
+                    defer_visual_stage_after_host_timeout(stage_result)
+                stage_result = dict(stage_result, stage=dict(stage))
+                stage_results.append(stage_result)
+                prepublish_readback = stage_result.get("prepublish_readback")
+                if isinstance(prepublish_readback, Mapping) and prepublish_readback.get(
+                    "host_wait_exhausted"
+                ):
+                    readback_host_wait_exhausted = True
+                if (
+                    execute
+                    and stage_result.get("retryable")
+                    and stage_result.get("external_write_performed")
+                    and str(stage_sink.get("whiteboard_token") or "").strip()
+                ):
+                    stage_readback_targets.append(
+                        (stage_result, str(stage_sink["whiteboard_token"]))
+                    )
+        role_ok = all(bool(item.get("ok")) for item in stage_results)
+        role_retryable = any(bool(item.get("retryable")) for item in stage_results)
+        overview_result = None
+        overview_token = str(role_sink.get("overview_whiteboard_token") or "").strip()
+        if overview_token:
+            overview_projection = dict(role_view)
+            overview_projection.pop("stage_views", None)
+            overview_sink = dict(role_sink)
+            overview_sink["whiteboard_token"] = overview_token
+            overview_result = sync_explore_visual_to_lark(
                 config,
                 projection=projection,
-                visual_sink=stage_sink,
+                visual_sink=overview_sink,
                 config_path=config_path,
                 semantic_digest=role_bundle["source_digest"],
-                display_projection=stage_projection,
-                view_key=f"{role}_stage_{stage_index:02d}",
+                display_projection=overview_projection,
+                view_key=f"{role}_overview",
                 execute=bool(execute and not readback_host_wait_exhausted),
                 runner=runner,
                 defer_readback=bool(execute and not readback_host_wait_exhausted),
             )
             if execute and readback_host_wait_exhausted:
-                defer_visual_stage_after_host_timeout(stage_result)
-            stage_result = dict(stage_result, stage=dict(stage))
-            stage_results.append(stage_result)
-            prepublish_readback = stage_result.get("prepublish_readback")
-            if isinstance(prepublish_readback, Mapping) and prepublish_readback.get(
+                defer_visual_stage_after_host_timeout(overview_result)
+            role_ok = role_ok and bool(overview_result.get("ok"))
+            role_retryable = role_retryable or bool(overview_result.get("retryable"))
+            overview_readback = overview_result.get("prepublish_readback")
+            if isinstance(overview_readback, Mapping) and overview_readback.get(
                 "host_wait_exhausted"
             ):
                 readback_host_wait_exhausted = True
             if (
                 execute
-                and stage_result.get("retryable")
-                and stage_result.get("external_write_performed")
-                and str(stage_sink.get("whiteboard_token") or "").strip()
+                and overview_result.get("retryable")
+                and overview_result.get("external_write_performed")
             ):
-                stage_readback_targets.append(
-                    (stage_result, str(stage_sink["whiteboard_token"]))
-                )
-        role_ok = all(bool(item.get("ok")) for item in stage_results)
-        role_retryable = any(bool(item.get("retryable")) for item in stage_results)
+                stage_readback_targets.append((overview_result, overview_token))
         role_delivery_material = "|".join(
-            str(item.get("delivery_digest") or "") for item in stage_results
+            str(item.get("delivery_digest") or "")
+            for item in stage_results + ([overview_result] if overview_result else [])
         ).encode("utf-8")
         results[role] = {
             "ok": role_ok,
@@ -953,6 +1258,7 @@ def sync_explore_visuals_to_lark(
             "stage_count": len(stage_results),
             "stage_capacity": stage_capacity,
             "stages": stage_results,
+            "overview": overview_result,
             "section_commands": section_commands,
             "reconciliation": reconciliation,
             "reconciled_stage_count": sum(
@@ -1013,6 +1319,11 @@ def _visual_delivery_digests(sync_payload: Mapping[str, Any] | None) -> dict[str
         role_digest = str(view.get("delivery_digest") or "").strip()
         if role_digest:
             digests[str(role)] = role_digest
+        overview = view.get("overview")
+        if isinstance(overview, Mapping):
+            overview_digest = str(overview.get("delivery_digest") or "").strip()
+            if overview_digest:
+                digests[f"{role}_overview"] = overview_digest
         for stage in view.get("stages") or []:
             if not isinstance(stage, Mapping):
                 continue

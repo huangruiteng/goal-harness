@@ -702,3 +702,121 @@ def test_ranked_entry_rebuild_apply_receipt_requires_rollback() -> None:
             material_ref_count=89,
             top_window_size=30,
         )
+
+
+def catalog_with_entry_limit(limit: int) -> dict[str, object]:
+    return {
+        "rankings": {
+            "ranked_entries": {
+                "constraints": {"max_materials_per_entry": limit},
+            }
+        }
+    }
+
+
+def test_ranked_entry_rebuild_reads_entry_limit_from_catalog() -> None:
+    plan = build_material_ranked_entry_rebuild_plan(
+        goal_id="goal:material-example",
+        plan_id="plan:catalog-limit",
+        inventory_ref=str(inventory_packet()["inventory_ref"]),
+        source_revision="revision:42",
+        observed_at=OBSERVED_AT,
+        source_entries=[
+            {
+                "entry_ref": "entry:source",
+                "rank": 1,
+                "material_refs": [
+                    "material:a",
+                    "material:b",
+                    "material:c",
+                    "material:d",
+                ],
+            }
+        ],
+        rebuilt_entries=[
+            {
+                "source_entry_ref": "entry:source",
+                "target_rank": 1,
+                "material_refs": [
+                    "material:a",
+                    "material:b",
+                    "material:c",
+                    "material:d",
+                ],
+                "reason_code": "preserve_entry",
+            }
+        ],
+        top_window_size=1,
+        catalog=catalog_with_entry_limit(4),
+    )
+
+    assert plan["constraints"]["max_materials_per_entry"] == 4
+    assert plan["verification"]["entry_budget_verified"] is True
+
+
+def test_ranked_entry_rebuild_explicit_limit_overrides_catalog() -> None:
+    source_entries = [
+        {
+            "entry_ref": "entry:source",
+            "rank": 1,
+            "material_refs": [
+                "material:a",
+                "material:b",
+                "material:c",
+                "material:d",
+            ],
+        }
+    ]
+    with pytest.raises(ValueError, match="at most 3"):
+        build_material_ranked_entry_rebuild_plan(
+            goal_id="goal:material-example",
+            plan_id="plan:explicit-override",
+            inventory_ref=str(inventory_packet()["inventory_ref"]),
+            source_revision="revision:42",
+            observed_at=OBSERVED_AT,
+            source_entries=source_entries,
+            rebuilt_entries=[
+                {
+                    "source_entry_ref": "entry:source",
+                    "target_rank": 1,
+                    "material_refs": [
+                        "material:a",
+                        "material:b",
+                        "material:c",
+                        "material:d",
+                    ],
+                    "reason_code": "preserve_entry",
+                }
+            ],
+            top_window_size=1,
+            max_materials_per_entry=3,
+            catalog=catalog_with_entry_limit(5),
+        )
+
+
+def test_ranked_entry_rebuild_requires_catalog_constraint_when_no_override() -> None:
+    with pytest.raises(ValueError, match="max_materials_per_entry"):
+        build_material_ranked_entry_rebuild_plan(
+            goal_id="goal:material-example",
+            plan_id="plan:missing-constraint",
+            inventory_ref=str(inventory_packet()["inventory_ref"]),
+            source_revision="revision:42",
+            observed_at=OBSERVED_AT,
+            source_entries=[
+                {
+                    "entry_ref": "entry:source",
+                    "rank": 1,
+                    "material_refs": ["material:a"],
+                }
+            ],
+            rebuilt_entries=[
+                {
+                    "source_entry_ref": "entry:source",
+                    "target_rank": 1,
+                    "material_refs": ["material:a"],
+                    "reason_code": "preserve_entry",
+                }
+            ],
+            top_window_size=1,
+            catalog={"rankings": {"ranked_entries": {"constraints": {}}}},
+        )

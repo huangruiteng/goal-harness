@@ -13,6 +13,26 @@
 
 ---
 
+## Background: Derived From Artifact-Centric Business Process Management
+
+This RFC is derived from **artifact-based business process management (ABPM)**,
+the artifact-centric line of process research that models work around business
+artifacts rather than flowcharts. In ABPM, a business artifact is an entity
+with identity and an explicit lifecycle; **guard conditions** gate each state
+transition, and **milestones** are the externally meaningful progress points a
+case can reach. The Guard-Stage-Milestone (GSM) model is the best-known form of
+this semantics.
+
+LoopX already follows part of that philosophy: goals, todos, gates, evidence,
+leases, and run history are typed, and several bounded contexts (content items,
+benchmark cases, observable artifact handles) already have artifact-like
+lifecycles. What is missing is the artifact lens at the goal layer itself.
+
+This RFC adopts only the artifact-lifecycle vocabulary (milestone / guard /
+next-transition) as a read-only projection for goals. It deliberately does not
+adopt process engines, flowcharts, or a unified lifecycle abstraction; those
+are non-goals in Section 2.
+
 ## 0. An Example to Help Everyone Understand
 
 An operator opens the dashboard for a long-running benchmark-qualification

@@ -539,6 +539,34 @@ def normalize_explore_result_node_refs(value: Any) -> list[str]:
     return refs
 
 
+def replan_successor_semantic_binding(
+    *,
+    action_kind: Any,
+    target_key: Any,
+    explore_result_node_refs: Any,
+) -> dict[str, Any] | None:
+    """Return the typed executable identity of a replan successor.
+
+    An obligation id establishes causality, but it does not turn a planning
+    instruction into executable work.  A successor also needs an explicit
+    action and at least one stable target identity.
+    """
+
+    safe_action_kind = normalize_todo_action_kind(action_kind)
+    safe_target_key = compact_todo_text(target_key) or None
+    safe_explore_refs = normalize_explore_result_node_refs(
+        explore_result_node_refs
+    )
+    if not safe_action_kind or not (safe_target_key or safe_explore_refs):
+        return None
+    binding: dict[str, Any] = {"action_kind": safe_action_kind}
+    if safe_target_key:
+        binding["target_key"] = safe_target_key
+    if safe_explore_refs:
+        binding["explore_result_node_refs"] = safe_explore_refs
+    return binding
+
+
 def normalize_todo_decision_scope(value: Any) -> dict[str, str] | None:
     """Normalize the compact decision-scope metadata token.
 

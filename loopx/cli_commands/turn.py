@@ -5,6 +5,9 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+from ..capabilities.explore.composition_frontier import (
+    project_live_explore_composition_frontier,
+)
 from ..control_plane.quota.live_decision import build_live_quota_should_run_decision
 from ..control_plane.quota.turn_envelope import build_turn_envelope
 from ..control_plane.runtime.status_projection_cache import (
@@ -318,6 +321,9 @@ def handle_turn_command(
             route_source="loopx_turn_plan",
             scheduler_execution_context=scheduler_context,
             operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+            bounded_research_frontier_projector=(
+                project_live_explore_composition_frontier
+            ),
         )
         resume_identity = {
             "goal_id": args.resume_goal_id,
@@ -577,6 +583,9 @@ def handle_turn_command(
                     route_source="loopx_turn_run_once",
                     scheduler_execution_context=turn_scheduler_context,
                     operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                    bounded_research_frontier_projector=(
+                        project_live_explore_composition_frontier
+                    ),
                 )
                 hint = latest.get("scheduler_hint") if isinstance(latest.get("scheduler_hint"), dict) else {}
                 phase = hint.get("execution_phase")

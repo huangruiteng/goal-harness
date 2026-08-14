@@ -4,7 +4,10 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
-from ..control_plane.todos.contract import TODO_CONTINUATION_POLICY_VALUES
+from ..control_plane.todos.contract import (
+    TODO_CONTINUATION_POLICY_VALUES,
+    replan_successor_semantic_binding,
+)
 from ..control_plane.quota.settlement import (
     require_settlement_todo_completion,
     resolve_heartbeat_settlement_identity,
@@ -76,6 +79,15 @@ def _validated_replan_successor_obligation(
         raise ValueError(
             "--replan-obligation-id requires --role agent --task-class "
             "advancement_task and --claimed-by"
+        )
+    if replan_successor_semantic_binding(
+        action_kind=args.action_kind,
+        target_key=args.monitor_target_key,
+        explore_result_node_refs=args.explore_result_node_refs,
+    ) is None:
+        raise ValueError(
+            "--replan-obligation-id requires --action-kind and either "
+            "--target-key or --explore-result-node-ref"
         )
     registry = load_registry(registry_path)
     runtime_root = resolve_runtime_root(registry, runtime_root_arg)
@@ -185,8 +197,9 @@ def register_todo_command(
         "--replan-obligation-id",
         help=(
             "For todo add, bind one newly selected runnable advancement successor "
-            "to the exact open replan obligation. The Todo write becomes the "
-            "semantic receipt; no follow-up ACK command is required."
+            "to the exact open replan obligation. Requires --action-kind and a "
+            "stable --target-key or --explore-result-node-ref. The Todo write "
+            "becomes the semantic receipt; no follow-up ACK command is required."
         ),
     )
     todo_parser.add_argument("--status", choices=["open", "done", "blocked", "deferred"], help="For todo add/update, set the lifecycle status.")

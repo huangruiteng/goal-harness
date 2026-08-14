@@ -47,7 +47,7 @@ Current capability paths:
   external-value connector starters, beginning with body-free GitHub public
   channel metadata probes, plus gated candidate profiles such as X/browser
   social work and finance market snapshots.
-- [explore](explore/README.md): record long-running exploration results as a
+- [explore](explore/README.md)（[中文版](explore/README.zh-CN.md)）: record long-running exploration results as a
   compact topology (nodes, edges, findings) and project them into a
   Feishu/Lark Base result board and result card.
 

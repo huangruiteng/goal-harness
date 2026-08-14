@@ -185,3 +185,62 @@ def test_readable_projection_rejects_invalid_counts_lines_and_rank_gaps() -> Non
             canonical_item_count=2,
             top_window_size=1,
         )
+
+
+def catalog_with_entry_limit(limit: int) -> dict[str, object]:
+    return {
+        "rankings": {
+            "ranked_entries": {
+                "constraints": {"max_materials_per_entry": limit},
+            }
+        }
+    }
+
+
+def test_readable_projection_reads_entry_limit_from_catalog() -> None:
+    projection, receipt = build_material_readable_projection(
+        goal_id="goal:materials",
+        projection_id="projection:catalog-limit",
+        authority_revision="revision:42",
+        observed_at=OBSERVED_AT,
+        entries=[entry(1, ["m1", "m2", "m3", "m4"])],
+        expected_material_refs=["m1", "m2", "m3", "m4"],
+        canonical_item_count=4,
+        top_window_size=1,
+        catalog=catalog_with_entry_limit(4),
+    )
+
+    rendered = projection.decode("utf-8")
+    assert "Material m4" in rendered
+    assert receipt["constraints"]["max_materials_per_entry"] == 4
+
+
+def test_readable_projection_explicit_limit_overrides_catalog() -> None:
+    with pytest.raises(ValueError, match="between 1 and 3"):
+        build_material_readable_projection(
+            goal_id="goal:materials",
+            projection_id="projection:explicit-override",
+            authority_revision="revision:42",
+            observed_at=OBSERVED_AT,
+            entries=[entry(1, ["m1", "m2", "m3", "m4"])],
+            expected_material_refs=["m1", "m2", "m3", "m4"],
+            canonical_item_count=4,
+            top_window_size=1,
+            max_materials_per_entry=3,
+            catalog=catalog_with_entry_limit(5),
+        )
+
+
+def test_readable_projection_requires_catalog_constraint_when_no_override() -> None:
+    with pytest.raises(ValueError, match="max_materials_per_entry"):
+        build_material_readable_projection(
+            goal_id="goal:materials",
+            projection_id="projection:missing-constraint",
+            authority_revision="revision:42",
+            observed_at=OBSERVED_AT,
+            entries=[entry(1, ["m1"])],
+            expected_material_refs=["m1"],
+            canonical_item_count=1,
+            top_window_size=1,
+            catalog={"rankings": {"ranked_entries": {"constraints": {}}}},
+        )

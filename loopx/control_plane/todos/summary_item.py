@@ -11,6 +11,7 @@ from .contract import (
     normalize_todo_excluded_agents,
     normalize_todo_id,
     normalize_todo_required_decision_scopes,
+    normalize_todo_replan_obligation_id,
     normalize_todo_resume_when,
     normalize_todo_task_domain,
     normalize_todo_task_repository,
@@ -54,6 +55,7 @@ TODO_SUMMARY_COMPACT_FIELDS = (
     "resume_ready",
     "no_followup",
     "successor_todo_ids",
+    "replan_obligation_id",
     "target_key",
     "cadence",
     "next_due_at",
@@ -161,6 +163,13 @@ def compact_todo_summary_item(
         compact["removed_continuation_policy"] = removed_continuation_policy
     else:
         compact.pop("removed_continuation_policy", None)
+    replan_obligation_id = normalize_todo_replan_obligation_id(
+        compact.get("replan_obligation_id")
+    )
+    if replan_obligation_id:
+        compact["replan_obligation_id"] = replan_obligation_id
+    else:
+        compact.pop("replan_obligation_id", None)
     compact["task_class"] = todo_item_task_class(compact)
     if (
         compact["task_class"] == "advancement_task"

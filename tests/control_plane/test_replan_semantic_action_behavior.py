@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -60,6 +61,30 @@ def _semantic_action(
     )
 
 
+def _composition_successor_action(
+    request: Mapping[str, object],
+) -> ScriptedExecToolAction:
+    packet = _latest_quota_packet(request)
+    frontier = packet.get("bounded_research_frontier")
+    assert isinstance(frontier, Mapping)
+    selected_gap = frontier.get("selected_gap")
+    assert isinstance(selected_gap, Mapping)
+    assert selected_gap["required_outcome"] == "joint_experiment_result"
+    action = packet["replan_action_packet"]
+    assert isinstance(action, Mapping)
+    bounded = action.get("bounded_frontier")
+    assert isinstance(bounded, Mapping)
+    assert bounded["gap_id"] == selected_gap["gap_id"]
+    writeback = action.get("writeback_contract")
+    assert isinstance(writeback, Mapping)
+    command = str(writeback.get("successor_command") or "")
+    assert command
+    command_tokens = shlex.split(command)
+    assert command_tokens[0] == "loopx"
+    command_tokens[1:1] = ["--format", "json", "--registry", "ignored"]
+    return ScriptedExecToolAction(command=shlex.join(command_tokens))
+
+
 def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
     tmp_path: Path,
 ) -> None:
@@ -113,6 +138,15 @@ def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
     assert quota_packet["replan_action_packet"]["obligation_id"] == receipt[
         "replan_obligation_id"
     ]
+    assert quota_packet["replan_action_packet"]["writeback_contract"] == {}
+    assert quota_packet["interaction_contract"]["agent_channel"][
+        "primary_action"
+    ] == "produce one typed outcome from the host-projected replan action packet"
+    next_cli_actions = quota_packet["interaction_contract"]["cli_channel"][
+        "next_cli_actions"
+    ]
+    assert any("refresh-state" in action for action in next_cli_actions)
+    assert not any("successor_command" in action for action in next_cli_actions)
 
     index_path = (
         tmp_path
@@ -128,6 +162,58 @@ def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
         "surface-permission-config"
     )
     assert latest["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
+
+
+def test_real_tool_loop_selects_composition_gap_and_creates_bound_successor(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(
+        tmp_path / "oracle",
+        composition_frontier=True,
+    )
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat replan-frontier.json"),
+            ScriptedExecToolAction(command="cat fixture/permission-config.json"),
+            _composition_successor_action,
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-composition-successor-001",
+        fixture_root=tmp_path / "actor",
+        composition_frontier=True,
+    )
+
+    assert receipt["qualification_passed"] is True, receipt
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "workspace_read",
+        "workspace_read",
+        "replan_successor_create",
+    ]
+    assert receipt["selected_semantic_outcomes"] == ["new_runnable_successor"]
+    successor_reentry = receipt["successor_reentry"]
+    assert successor_reentry["selected_todo_id"].startswith("todo_")
+    assert successor_reentry["decision"] == "run"
+    assert successor_reentry["effective_action"] == "normal_run"
+    assert successor_reentry["replan_closed"] is True
+    assert successor_reentry["composition_experiment_ref"] == (
+        "experiment-permission-composition"
+    )
+    assert successor_reentry["composition_status"] == "scheduled"
+
+    quota_packet = json.loads(transport.requests[1]["messages"][-1]["content"])
+    selected_gap = quota_packet["bounded_research_frontier"]["selected_gap"]
+    assert selected_gap["experiment_node_ref"] == (
+        "experiment-permission-composition"
+    )
+    assert quota_packet["replan_action_packet"]["bounded_frontier"][
+        "experiment_node_ref"
+    ] == selected_gap["experiment_node_ref"]
 
 
 def test_action_outside_observed_frontier_is_rejected(tmp_path: Path) -> None:
@@ -253,6 +339,9 @@ def test_model_can_create_and_bind_a_real_runnable_successor(tmp_path: Path) -> 
             "loopx --format json --registry ignored todo add "
             "--goal-id replan-semantic-action-fixture --role agent "
             "--task-class advancement_task "
+            "--action-kind validate "
+            "--task-domain research "
+            "--target-key surface:permission-contract "
             "--text '[P0] Inspect the uncovered permission contract' "
             "--claimed-by codex-replan-semantic-action "
             f"--replan-obligation-id {obligation['obligation_id']}"
@@ -282,6 +371,10 @@ def test_model_can_create_and_bind_a_real_runnable_successor(tmp_path: Path) -> 
         "replan_successor_create",
     ]
     assert receipt["selected_semantic_outcomes"] == ["new_runnable_successor"]
+    successor_reentry = receipt["successor_reentry"]
+    assert successor_reentry["decision"] == "run"
+    assert successor_reentry["effective_action"] == "normal_run"
+    assert successor_reentry["replan_closed"] is True
 
 
 def test_stale_successor_obligation_is_rejected_before_todo_mutation(
@@ -302,11 +395,48 @@ def test_stale_successor_obligation_is_rejected_before_todo_mutation(
             "loopx --format json --registry ignored todo add "
             "--goal-id replan-semantic-action-fixture --role agent "
             "--task-class advancement_task "
+            "--action-kind validate --target-key surface:stale-target "
             "--text '[P0] Stale successor must not be written' "
             "--claimed-by codex-replan-semantic-action "
             "--replan-obligation-id replan-0000000000000000",
             fixture=fixture,
             turn_instance_id="stale-successor-turn",
+        )
+
+    assert state_path.read_text(encoding="utf-8") == before
+
+
+def test_untyped_successor_is_rejected_before_todo_mutation(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "fixture")
+    state_path = (
+        fixture.project_root
+        / ".codex"
+        / "goals"
+        / "replan-semantic-action-fixture"
+        / "ACTIVE_GOAL_STATE.md"
+    )
+    quota = json.loads(
+        _execute_loopx(
+            fixture.quota_guard_command,
+            fixture=fixture,
+            turn_instance_id="untyped-successor-turn",
+        )
+    )
+    obligation_id = quota["autonomous_replan_obligation"]["obligation_id"]
+    before = state_path.read_text(encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="requires --action-kind"):
+        _execute_loopx(
+            "loopx --format json --registry ignored todo add "
+            "--goal-id replan-semantic-action-fixture --role agent "
+            "--task-class advancement_task "
+            "--text '[P0] Replan again without an executable target' "
+            "--claimed-by codex-replan-semantic-action "
+            f"--replan-obligation-id {obligation_id}",
+            fixture=fixture,
+            turn_instance_id="untyped-successor-turn",
         )
 
     assert state_path.read_text(encoding="utf-8") == before

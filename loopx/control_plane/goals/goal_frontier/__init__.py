@@ -1417,6 +1417,7 @@ def build_goal_frontier_projection_context_from_status(
     agent_todo_summary: dict[str, Any] | None,
     work_lane_contract: dict[str, Any] | None,
     neutral_replan_ack_classifications: set[str],
+    agent_todo_source_items: list[dict[str, Any]] | None = None,
     registered_agent_ids: list[str] | None = None,
     goal_status: str | None = None,
     agent_profile: dict[str, Any] | None = None,
@@ -1542,6 +1543,7 @@ def build_goal_frontier_projection_context_from_status(
         agent_todo_summary,
         agent_id=agent_id,
         replan_obligation=replan_obligation,
+        agent_todo_items=agent_todo_source_items,
     )
     obligation_ack = replan_transition_ack or effective_replan_ack
     if (
@@ -1576,6 +1578,7 @@ def build_goal_frontier_projection_context_from_status(
         agent_todo_summary,
         agent_id=agent_id,
         replan_obligation=frontier_replan_obligation,
+        agent_todo_items=agent_todo_source_items,
     )
     frontier_obligation_ack = frontier_transition_ack or effective_replan_ack
     if (
@@ -1666,8 +1669,6 @@ def compact_replan_obligation(replan_obligation: dict[str, Any]) -> dict[str, An
         "triggers": replan_obligation.get("triggers") or [],
         "stop_condition": replan_obligation.get("stop_condition"),
     }
-    if replan_obligation.get("agent_todo_writeback_required") is True:
-        compact["agent_todo_writeback_required"] = True
     if replan_obligation.get("frontier_identity"):
         compact["frontier_identity"] = replan_obligation.get("frontier_identity")
     if isinstance(replan_obligation.get("replan_novelty_policy"), dict):

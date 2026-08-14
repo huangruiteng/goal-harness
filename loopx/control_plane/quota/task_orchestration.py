@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..agents.agent_scope_frontier import AgentScopeFrontierAction
-from ..agents.runtime_model import peer_work_key, select_peer_for_work
+from ..agents.runtime_model import peer_work_key
 from ..todos.contract import (
     normalize_required_capabilities,
     normalize_todo_claimed_by,
@@ -16,12 +16,44 @@ from .task_orchestration_admission import (
     build_adaptive_task_orchestration_contract,
 )
 
-
 AGENT_SCOPE_NON_EXECUTION_ACTIONS = {
     AgentScopeFrontierAction.AGENT_SCOPE_EXHAUSTED.value,
     AgentScopeFrontierAction.AGENT_SCOPE_WAIT.value,
     AgentScopeFrontierAction.REASSIGNMENT_REQUIRED.value,
 }
+PEER_AGENT_ACTIVATION_CAPABILITY = "peer_agent_activation"
+PEER_COORDINATION_BLOCKED_ACTION = "peer_coordination_blocked"
+
+
+def task_orchestration_contract_is_actionable(
+    contract: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(contract, dict):
+        return False
+    return str(contract.get("execution_state") or "ready") == "ready"
+
+
+def task_orchestration_requires_material_change_stop(
+    contract: dict[str, Any] | None,
+    *,
+    effective_action: str,
+) -> bool:
+    """Stop an explicitly coordinated peer lane that has no local fallback.
+
+    A blocked peer bundle remains useful diagnostic state, but it is not a
+    runnable obligation.  The caller supplies the already-derived agent-scope
+    action so this rule only stops a coordinator after its own runnable
+    frontier has been exhausted.
+    """
+
+    if not isinstance(contract, dict):
+        return False
+    return bool(
+        contract.get("mode") == "task_scoped_peer"
+        and contract.get("execution_state") == "blocked"
+        and contract.get("retry_policy") == "material_peer_state_change_only"
+        and effective_action in AGENT_SCOPE_NON_EXECUTION_ACTIONS
+    )
 
 
 def build_quota_work_lane_contract(
@@ -91,6 +123,7 @@ def apply_task_orchestration_contract(
     user_todo_source_items: list[dict[str, Any]] | None = None,
     available_capabilities: Any = None,
     parent_goal_id: str | None = None,
+    agent_management_projection: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     del agent_todo_summary
     contract = _task_orchestration_contract(
@@ -102,9 +135,12 @@ def apply_task_orchestration_contract(
         user_todo_source_items=user_todo_source_items,
         available_capabilities=available_capabilities,
         parent_goal_id=parent_goal_id,
+        agent_management_projection=agent_management_projection,
     )
     if not contract:
         return None, fallback_work_lane_contract
+    if not task_orchestration_contract_is_actionable(contract):
+        return contract, fallback_work_lane_contract
     return contract, _task_orchestration_work_lane_contract(contract)
 
 
@@ -113,6 +149,8 @@ def task_goal_route_hint(
     contract: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     if not contract or not isinstance(goal_route_hint, dict):
+        return goal_route_hint
+    if not task_orchestration_contract_is_actionable(contract):
         return goal_route_hint
     lanes = contract.get("eligible_child_lanes")
     if not isinstance(lanes, list):
@@ -200,6 +238,7 @@ def _task_orchestration_contract(
     user_todo_source_items: list[dict[str, Any]] | None,
     available_capabilities: Any,
     parent_goal_id: str | None,
+    agent_management_projection: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     if not isinstance(agent_identity, dict):
         return None
@@ -213,24 +252,35 @@ def _task_orchestration_contract(
         if isinstance(goal_boundary.get("orchestration"), dict)
         else {}
     )
+    available = normalize_required_capabilities(available_capabilities)
+    peer_coordination = (
+        goal_boundary.get("peer_task_coordination")
+        if isinstance(goal_boundary.get("peer_task_coordination"), dict)
+        else {}
+    )
+    configured_coordinator = normalize_todo_claimed_by(
+        peer_coordination.get("coordinator_agent_id")
+    )
+    if (
+        peer_coordination.get("enabled") is True
+        and configured_coordinator == agent_id
+    ):
+        peer_contract = _registered_peer_task_orchestration_contract(
+            agent_id=agent_id,
+            agent_identity=agent_identity,
+            raw_agent_todo_summary=raw_agent_todo_summary,
+            available_capabilities=available,
+            agent_management_projection=agent_management_projection,
+        )
+        if peer_contract:
+            return peer_contract
     if orchestration.get("mode") != "multi_subagent":
         return None
     if orchestration.get("spawn_allowed") is not True:
         return None
-    max_peers = orchestration.get("max_children")
-    if not isinstance(max_peers, int) or max_peers <= 0:
+    max_children = orchestration.get("max_children")
+    if not isinstance(max_children, int) or max_children <= 0:
         return None
-    available = normalize_required_capabilities(available_capabilities)
-    if _has_explicit_registered_peer_bundle(
-        agent_identity=agent_identity,
-        raw_agent_todo_summary=raw_agent_todo_summary,
-    ):
-        return _registered_peer_task_orchestration_contract(
-            agent_id=agent_id,
-            agent_identity=agent_identity,
-            raw_agent_todo_summary=raw_agent_todo_summary,
-            max_peers=max_peers,
-        )
     if SUBAGENT_SPAWN_CAPABILITY in available:
         return build_adaptive_task_orchestration_contract(
             agent_id=agent_id,
@@ -243,39 +293,9 @@ def _task_orchestration_contract(
             user_todo_source_items=user_todo_source_items,
             available_capabilities=available,
             parent_goal_id=parent_goal_id,
-            max_children=max_peers,
+            max_children=max_children,
         )
-    return _registered_peer_task_orchestration_contract(
-        agent_id=agent_id,
-        agent_identity=agent_identity,
-        raw_agent_todo_summary=raw_agent_todo_summary,
-        max_peers=max_peers,
-    )
-
-
-def _has_explicit_registered_peer_bundle(
-    *,
-    agent_identity: dict[str, Any],
-    raw_agent_todo_summary: dict[str, Any] | None,
-) -> bool:
-    registered_agents = set(agent_identity.get("registered_agents") or [])
-    source_items = (
-        raw_agent_todo_summary.get("items")
-        if isinstance(raw_agent_todo_summary, dict)
-        and isinstance(raw_agent_todo_summary.get("items"), list)
-        else []
-    )
-    claimed_agents = {
-        claimed_by
-        for item in source_items
-        if isinstance(item, dict)
-        and item.get("done") is not True
-        and str(item.get("status") or "open").strip().lower() == "open"
-        and str(item.get("task_class") or "") == "advancement_task"
-        for claimed_by in [normalize_todo_claimed_by(item.get("claimed_by"))]
-        if claimed_by in registered_agents
-    }
-    return len(claimed_agents) >= 2
+    return None
 
 
 def _registered_peer_task_orchestration_contract(
@@ -283,7 +303,8 @@ def _registered_peer_task_orchestration_contract(
     agent_id: str,
     agent_identity: dict[str, Any],
     raw_agent_todo_summary: dict[str, Any] | None,
-    max_peers: int,
+    available_capabilities: list[str],
+    agent_management_projection: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     source_items = (
         raw_agent_todo_summary.get("items")
@@ -307,6 +328,7 @@ def _registered_peer_task_orchestration_contract(
             not peer_agent
             or peer_agent in seen_agents
             or peer_agent not in registered_agents
+            or peer_agent == agent_id
         ):
             continue
         candidate_lanes.append(
@@ -317,12 +339,13 @@ def _registered_peer_task_orchestration_contract(
                 "task_class": item.get("task_class"),
                 "action_kind": item.get("action_kind"),
                 "title": str(item.get("title") or item.get("text") or "").strip(),
+                "resume_when": item.get("resume_when"),
+                "resume_ready": item.get("resume_ready"),
             }
         )
         seen_agents.add(peer_agent)
     if not candidate_lanes:
         return None
-    candidate_agents = [lane["agent_id"] for lane in candidate_lanes]
     assignment_key = peer_work_key(
         {
             "mode": "task_scoped_peer",
@@ -336,32 +359,67 @@ def _registered_peer_task_orchestration_contract(
         },
         fallback="task_orchestration",
     )
-    coordinator = select_peer_for_work(
-        candidate_agents,
-        work_key=assignment_key,
-    )
-    if not coordinator or agent_id != coordinator:
-        return None
-    peer_lanes = [lane for lane in candidate_lanes if lane["agent_id"] != coordinator][
-        :max_peers
-    ]
-    if not peer_lanes:
-        return None
+    activation_available = PEER_AGENT_ACTIVATION_CAPABILITY in available_capabilities
+    peer_runtime_state = _peer_runtime_state_by_agent(agent_management_projection)
+    eligible_peer_lanes: list[dict[str, Any]] = []
+    blocked_peer_lanes: list[dict[str, Any]] = []
+    for lane in candidate_lanes:
+        reason_codes: list[str] = []
+        if not activation_available:
+            reason_codes.append("peer_agent_activation_unavailable")
+        peer_state = peer_runtime_state.get(str(lane["agent_id"]))
+        if not peer_state:
+            reason_codes.append("peer_liveness_unavailable")
+        elif peer_state.get("stale_claim_hint"):
+            reason_codes.append("peer_runtime_stale")
+        elif peer_state.get("state") not in {"running", "monitoring"}:
+            reason_codes.append("peer_runtime_not_active")
+        if lane.get("resume_when") and lane.get("resume_ready") is not True:
+            reason_codes.append("peer_lane_not_resume_ready")
+        if reason_codes:
+            blocked_peer_lanes.append({**lane, "reason_codes": reason_codes})
+        else:
+            eligible_peer_lanes.append(lane)
+    execution_state = "ready" if eligible_peer_lanes else "blocked"
     return {
         "schema_version": "task_orchestration_contract_v1",
         "mode": "task_scoped_peer",
-        "coordinator_agent_id": coordinator,
+        "coordinator_agent_id": agent_id,
         "assignment_key": assignment_key,
-        "activation_required": True,
-        "activation_allowed": True,
-        "max_peer_lanes": max_peers,
-        "eligible_peer_lanes": peer_lanes,
-        "blocked_peer_lanes": [],
+        "execution_state": execution_state,
+        "activation_required": bool(eligible_peer_lanes),
+        "activation_allowed": activation_available,
+        "required_capability": PEER_AGENT_ACTIVATION_CAPABILITY,
+        "eligible_peer_lanes": eligible_peer_lanes,
+        "blocked_peer_lanes": blocked_peer_lanes,
+        "retry_policy": "material_peer_state_change_only",
+        "terminal_outcome": "blocked" if execution_state == "blocked" else None,
         "writeback_owner": "task_coordinator",
         "coordinator_obligation": (
             "activate or resume eligible peer lanes, review returned evidence, "
             "then write accepted state/todos for this task bundle"
+            if eligible_peer_lanes
+            else "peer task bundle is blocked; do not retry until peer activation "
+            "capability or peer readiness changes"
         ),
+    }
+
+
+def _peer_runtime_state_by_agent(
+    projection: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    agents = (
+        projection.get("agents")
+        if isinstance(projection, dict)
+        and isinstance(projection.get("agents"), list)
+        else []
+    )
+    return {
+        agent_id: item
+        for item in agents
+        if isinstance(item, dict)
+        for agent_id in [normalize_todo_claimed_by(item.get("agent_id"))]
+        if agent_id
     }
 
 

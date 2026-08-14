@@ -46,6 +46,7 @@ _FIXTURE_NEW_SURFACE_ID = "surface-permission-config"
 _FIXTURE_NEW_HYPOTHESIS_ID = "hypothesis-permission-default"
 _FIXTURE_NEW_PROBE_KIND = "static-contract-read"
 _FIXTURE_NEW_EVIDENCE_ID = "evidence-permission-config"
+_FIXTURE_COMPOSITION_EXPERIMENT_ID = "experiment-permission-composition"
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class _ReplanSemanticActionFixture:
     source_root: Path
     frontier_target: Path
     work_source_target: Path
+    composition_experiment_ref: str | None = None
 
 
 @dataclass
@@ -75,13 +77,18 @@ class _QualificationState:
     frontier_context_read: bool = False
     work_source_read: bool = False
     created_successor_id: str | None = None
+    successor_reentry_observation: dict[str, Any] | None = None
 
 
 def _digest(value: str) -> str:
     return digest_text(value)
 
 
-def _build_fixture(root: Path) -> _ReplanSemanticActionFixture:
+def _build_fixture(
+    root: Path,
+    *,
+    composition_frontier: bool = False,
+) -> _ReplanSemanticActionFixture:
     source_root = Path(__file__).resolve().parents[3]
     project_root = root / "project"
     runtime_root = root / "runtime"
@@ -172,43 +179,46 @@ def _build_fixture(root: Path) -> _ReplanSemanticActionFixture:
         "cadence=1d next_due_at=2999-01-01T00%3A00%3A00Z -->\n",
         encoding="utf-8",
     )
+    registry_goal: dict[str, Any] = {
+        "id": _FIXTURE_GOAL_ID,
+        "domain": "replan-semantic-action-fixture",
+        "status": "active",
+        "repo": str(project_root),
+        "state_file": str(state_relative),
+        "adapter": {
+            "kind": "fixture_connected_delivery_v0",
+            "status": "connected-delivery",
+        },
+        "coordination": {
+            "registered_agents": [_FIXTURE_AGENT_ID],
+            "agent_model": "peer_v1",
+            "agent_profiles": {
+                _FIXTURE_AGENT_ID: {
+                    "schema_version": "agent_profile_v1",
+                    "agent_id": _FIXTURE_AGENT_ID,
+                    "profile_role": "quality-qualification",
+                    "scope_summary": "Qualify one bounded semantic replan.",
+                    "default_task_classes": ["continuous_monitor"],
+                    "vision_requirement": "optional",
+                }
+            },
+        },
+        "authority_sources": [],
+        "quota": {
+            "compute": 1.0,
+            "window_hours": 24,
+            "allowed_slots": 5,
+        },
+    }
+    if composition_frontier:
+        registry_goal["spawn_policy"] = {
+            "explore_harness": {"enabled": True, "profile": "generic"}
+        }
     registry = {
         "schema_version": "0.1",
         "updated_at": "2026-08-13T00:00:00+08:00",
         "common_runtime_root": str(runtime_root),
-        "goals": [
-            {
-                "id": _FIXTURE_GOAL_ID,
-                "domain": "replan-semantic-action-fixture",
-                "status": "active",
-                "repo": str(project_root),
-                "state_file": str(state_relative),
-                "adapter": {
-                    "kind": "fixture_connected_delivery_v0",
-                    "status": "connected-delivery",
-                },
-                "coordination": {
-                    "registered_agents": [_FIXTURE_AGENT_ID],
-                    "agent_model": "peer_v1",
-                    "agent_profiles": {
-                        _FIXTURE_AGENT_ID: {
-                            "schema_version": "agent_profile_v1",
-                            "agent_id": _FIXTURE_AGENT_ID,
-                            "profile_role": "quality-qualification",
-                            "scope_summary": "Qualify one bounded semantic replan.",
-                            "default_task_classes": ["continuous_monitor"],
-                            "vision_requirement": "optional",
-                        }
-                    },
-                },
-                "authority_sources": [],
-                "quota": {
-                    "compute": 1.0,
-                    "window_hours": 24,
-                    "allowed_slots": 5,
-                },
-            }
-        ],
+        "goals": [registry_goal],
     }
     registry_text = json.dumps(registry, ensure_ascii=False, indent=2, sort_keys=True)
     for registry_path in (local_registry_path, global_registry_path):
@@ -237,16 +247,108 @@ def _build_fixture(root: Path) -> _ReplanSemanticActionFixture:
                 "evidence_ids": ["evidence-existing"],
             },
         }
-        prior_runs.append(run)
         safe_timestamp = generated_at.replace(":", "-")
-        (runs_dir / f"{safe_timestamp}.json").write_text(
+        json_path = runs_dir / f"{safe_timestamp}.json"
+        markdown_path = runs_dir / f"{safe_timestamp}.md"
+        json_path.write_text(
             json.dumps(run, sort_keys=True) + "\n",
             encoding="utf-8",
+        )
+        markdown_path.write_text("# Bounded fixture probe\n", encoding="utf-8")
+        prior_runs.append(
+            {
+                **run,
+                "json_path": str(json_path),
+                "markdown_path": str(markdown_path),
+            }
         )
     (runs_dir / "index.jsonl").write_text(
         "".join(json.dumps(run, sort_keys=True) + "\n" for run in prior_runs),
         encoding="utf-8",
     )
+
+    if composition_frontier:
+        explore_commands = (
+            (
+                "node",
+                "--node-id",
+                "surface-existing",
+                "--title",
+                "Existing closed surface",
+                "--kind",
+                "hypothesis",
+                "--status",
+                "resolved",
+                "--evidence-ref",
+                "evidence-existing",
+            ),
+            (
+                "node",
+                "--node-id",
+                _FIXTURE_NEW_SURFACE_ID,
+                "--title",
+                "Permission configuration surface",
+                "--kind",
+                "hypothesis",
+                "--status",
+                "dead_end",
+                "--evidence-ref",
+                _FIXTURE_NEW_EVIDENCE_ID,
+            ),
+            (
+                "node",
+                "--node-id",
+                _FIXTURE_COMPOSITION_EXPERIMENT_ID,
+                "--title",
+                "Jointly probe the existing and permission surfaces",
+                "--kind",
+                "experiment",
+                "--status",
+                "open",
+            ),
+            (
+                "edge",
+                "--from",
+                _FIXTURE_COMPOSITION_EXPERIMENT_ID,
+                "--to",
+                "surface-existing",
+                "--type",
+                "depends_on",
+            ),
+            (
+                "edge",
+                "--from",
+                _FIXTURE_COMPOSITION_EXPERIMENT_ID,
+                "--to",
+                _FIXTURE_NEW_SURFACE_ID,
+                "--type",
+                "depends_on",
+            ),
+        )
+        for explore_args in explore_commands:
+            execute_loopx_cli(
+                shlex.join(
+                    (
+                        "loopx",
+                        "--format",
+                        "json",
+                        "--registry",
+                        "fixture-registry",
+                        "--runtime-root",
+                        "fixture-runtime",
+                        "explore",
+                        *explore_args,
+                        "--goal-id",
+                        _FIXTURE_GOAL_ID,
+                    )
+                ),
+                source_root=source_root,
+                project_root=project_root,
+                argument_overrides={
+                    "--registry": str(global_registry_path),
+                    "--runtime-root": str(runtime_root),
+                },
+            )
 
     prompt = build_heartbeat_prompt(
         goal_id=_FIXTURE_GOAL_ID,
@@ -272,6 +374,9 @@ def _build_fixture(root: Path) -> _ReplanSemanticActionFixture:
         source_root=source_root,
         frontier_target=frontier_target,
         work_source_target=source_target,
+        composition_experiment_ref=(
+            _FIXTURE_COMPOSITION_EXPERIMENT_ID if composition_frontier else None
+        ),
     )
 
 
@@ -413,6 +518,57 @@ def _quota_behavior_observation(packet: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _successor_reentry_observation(
+    packet: Mapping[str, Any],
+    *,
+    successor_todo_id: str,
+    composition_experiment_ref: str | None,
+) -> dict[str, Any]:
+    selected_todo = packet.get("selected_todo")
+    if not isinstance(selected_todo, Mapping):
+        raise ValueError("successor_reentry_selected_todo_missing")
+    if str(selected_todo.get("todo_id") or "") != successor_todo_id:
+        raise ValueError("successor_reentry_selected_todo_mismatch")
+    if packet.get("decision") == "autonomous_replan_required" or isinstance(
+        packet.get("autonomous_replan_obligation"), Mapping
+    ):
+        raise ValueError("successor_reentry_replan_not_closed")
+    if not (
+        packet.get("decision") == "run"
+        and packet.get("effective_action") == "normal_run"
+    ):
+        raise ValueError("successor_reentry_not_runnable")
+
+    observation: dict[str, Any] = {
+        "decision": packet.get("decision"),
+        "effective_action": packet.get("effective_action"),
+        "selected_todo_id": successor_todo_id,
+        "replan_closed": True,
+    }
+    if composition_experiment_ref:
+        frontier = packet.get("bounded_research_frontier")
+        gaps = (
+            frontier.get("gaps")
+            if isinstance(frontier, Mapping)
+            and isinstance(frontier.get("gaps"), list)
+            else []
+        )
+        gap = next(
+            (
+                item
+                for item in gaps
+                if isinstance(item, Mapping)
+                and item.get("experiment_node_ref") == composition_experiment_ref
+            ),
+            None,
+        )
+        if not isinstance(gap, Mapping) or gap.get("status") != "scheduled":
+            raise ValueError("successor_reentry_composition_not_scheduled")
+        observation["composition_experiment_ref"] = composition_experiment_ref
+        observation["composition_status"] = "scheduled"
+    return observation
+
+
 def _execute_loopx(
     command: str,
     *,
@@ -538,7 +694,7 @@ def _qualification_receipt(
     passed: bool,
     failure_code: str | None,
 ) -> dict[str, Any]:
-    return _receipt(
+    receipt = _receipt(
         qualification_id=qualification_id,
         actor_ref=actor_ref,
         steps=state.steps,
@@ -549,6 +705,9 @@ def _qualification_receipt(
         local_fixture_writes_executed=True,
         read_only_host_commands_executed=state.read_only_host_commands_executed,
     )
+    if state.successor_reentry_observation is not None:
+        receipt["successor_reentry"] = state.successor_reentry_observation
+    return receipt
 
 
 def _record_tool_step(
@@ -635,6 +794,13 @@ def _handle_successor_command(command: str, state: _QualificationState) -> str:
     )
     if requested_obligation_id != expected_obligation_id:
         raise ValueError("successor_create_obligation_mismatch")
+    if state.fixture.composition_experiment_ref:
+        requested_experiment_ref = argument_value(
+            loopx_command_tokens(command) or [],
+            "--explore-result-node-ref",
+        )
+        if requested_experiment_ref != state.fixture.composition_experiment_ref:
+            raise ValueError("successor_create_composition_binding_mismatch")
     output = _execute_loopx(
         command,
         fixture=state.fixture,
@@ -667,6 +833,20 @@ def _handle_successor_command(command: str, state: _QualificationState) -> str:
         "accepted": True,
         "satisfying_outcomes": ["new_runnable_successor"],
     }
+    reentry_output = _execute_loopx(
+        state.fixture.quota_guard_command,
+        fixture=state.fixture,
+        turn_instance_id=f"{state.turn_instance_id}-successor",
+    )
+    reentry_packet = json.loads(reentry_output)
+    if not isinstance(reentry_packet, dict):
+        raise ValueError("successor_reentry_quota_invalid")
+    state.successor_reentry_observation = _successor_reentry_observation(
+        reentry_packet,
+        successor_todo_id=state.created_successor_id,
+        composition_experiment_ref=state.fixture.composition_experiment_ref,
+    )
+    state.read_only_host_commands_executed = True
     return output
 
 
@@ -742,9 +922,16 @@ _EXPECTED_BEHAVIOR_FAILURES = frozenset(
         "successor_create_before_frontier_read",
         "successor_create_before_work_source_read",
         "successor_create_obligation_mismatch",
+        "successor_create_composition_binding_mismatch",
         "repeated_successor_create",
         "successor_create_failed",
         "successor_transition_missing",
+        "successor_reentry_quota_invalid",
+        "successor_reentry_selected_todo_missing",
+        "successor_reentry_selected_todo_mismatch",
+        "successor_reentry_replan_not_closed",
+        "successor_reentry_not_runnable",
+        "successor_reentry_composition_not_scheduled",
         "quota_obligation_missing",
         "non_semantic_replan_action",
         "semantic_writeback_failed",
@@ -875,8 +1062,12 @@ class DoubaoReplanSemanticActionBehaviorActor:
         *,
         qualification_id: str,
         fixture_root: Path,
+        composition_frontier: bool = False,
     ) -> dict[str, Any]:
-        fixture = _build_fixture(fixture_root)
+        fixture = _build_fixture(
+            fixture_root,
+            composition_frontier=composition_frontier,
+        )
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",

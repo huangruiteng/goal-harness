@@ -9,6 +9,7 @@ import pytest
 from loopx.presentation.explore_views import (
     PRESENTATION_MODE_CANONICAL_ONLY,
     PRESENTATION_MODE_DUAL_VIEW,
+    _canonical_group_specs,
     _display_width,
     build_explore_presentation_bundle,
     explore_source_digest,
@@ -909,6 +910,170 @@ def test_visual_delivery_digest_changes_when_only_rendered_mermaid_changes(
     assert first["source_digest"] == changed["source_digest"]
     assert first["delivery_digest"] != changed["delivery_digest"]
     assert first["command"]["command"] != changed["command"]["command"]
+
+
+def test_canonical_group_specs_balances_stage_tail() -> None:
+    nodes = [{"node_id": f"n{i:02d}", "title": f"N{i}"} for i in range(29)]
+
+    specs = _canonical_group_specs(nodes, group_node_limit=12)
+
+    sizes = [len(spec["node_ids"]) for spec in specs]
+    assert sizes == [10, 10, 9]
+    assert [spec["order"] for spec in specs] == [0, 10, 20]
+    assert [spec["title"] for spec in specs][0].startswith("Evidence stage 01 · ")
+
+
+def test_visual_configuration_auto_create_plans_without_writes(tmp_path) -> None:
+    config_path = tmp_path / "lark-explore.json"
+    write_lark_explore_local_config(
+        config_path,
+        {
+            "board": {
+                "base_token": "PUBLIC_FIXTURE_BASE",
+                "tables": {"nodes": "tblN", "edges": "tblE", "findings": "tblF"},
+            }
+        },
+    )
+
+    planned = configure_lark_explore_visual_sink(
+        config_path=config_path,
+        auto_create=True,
+    )
+
+    assert planned["status"] == "would_auto_create"
+    assert planned["visual_sinks"]["canonical"]["overview_whiteboard_token"] == (
+        "planned-canonical-overview"
+    )
+    assert planned["visual_sinks"]["canonical"]["board_style"] == "auto_flow"
+    assert planned["visual_sinks"]["canonical"]["renderer"] == "mermaid"
+    assert planned["visual_sinks"]["executive"]["overview_whiteboard_token"] == (
+        "planned-executive-overview"
+    )
+    assert planned["visual_sinks"]["executive"]["stage_boards_enabled"] is False
+    stored = read_lark_explore_local_config(config_path)
+    assert not stored.get("visual_sinks")
+    assert not stored.get("visual_sink")
+
+
+def test_visual_configuration_auto_create_reuses_existing_document(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "lark-explore.json"
+    write_lark_explore_local_config(
+        config_path,
+        {
+            "board": {
+                "base_token": "PUBLIC_FIXTURE_BASE",
+                "tables": {"nodes": "tblN", "edges": "tblE", "findings": "tblF"},
+            },
+            "visual_sinks": {
+                "canonical": {
+                    "docx_token": "doc_existing",
+                    "overview_whiteboard_token": "wb_canonical_overview",
+                    "view_role": "canonical",
+                    "projection_mode": "canonical_full",
+                    "board_style": "auto_flow",
+                    "renderer": "mermaid",
+                    "stage_boards_enabled": True,
+                    "stage_capacity": 14,
+                },
+                "executive": {
+                    "docx_token": "doc_existing",
+                    "overview_whiteboard_token": "wb_executive_overview",
+                    "view_role": "executive",
+                    "projection_mode": "executive_auto",
+                    "board_style": "auto_flow",
+                    "renderer": "mermaid",
+                    "stage_boards_enabled": False,
+                    "stage_capacity": 14,
+                },
+            },
+        },
+    )
+    calls: list[list[str]] = []
+
+    def fail_runner(command, *_args, **_kwargs):
+        calls.append(command)
+        return {"ok": False, "returncode": 1, "stderr": "should not be invoked"}
+
+    monkeypatch.setattr(
+        "loopx.extensions.lark.presentation.explore_results._run_command",
+        fail_runner,
+    )
+
+    result = configure_lark_explore_visual_sink(
+        config_path=config_path,
+        auto_create=True,
+        execute=True,
+    )
+
+    assert result["status"] == "auto_configured"
+    assert result["document"]["docx_token"] == "doc_existing"
+    assert calls == []
+    stored = read_lark_explore_local_config(config_path)
+    assert stored["visual_sinks"]["canonical"]["overview_whiteboard_token"] == (
+        "wb_canonical_overview"
+    )
+
+
+def test_visual_sync_single_sink_lane_style_falls_back_to_mermaid(
+    tmp_path,
+) -> None:
+    projection = _complex_projection()
+    config = LarkExploreConfig(base_token="PUBLIC_FIXTURE_BASE")
+    bundle = build_explore_presentation_bundle(projection)
+    display = dict(bundle["executive"])
+    display.pop("svg", None)
+    display["mermaid"] = display.get("mermaid") or "flowchart TB\n a[\"A\"]"
+
+    result = sync_explore_visual_to_lark(
+        config,
+        projection=projection,
+        visual_sink={
+            "whiteboard_token": "wb_lane_fixture",
+            "view_role": "executive",
+            "board_style": "semantic_lane_columns",
+        },
+        config_path=tmp_path / "lark-explore.json",
+        semantic_digest=bundle["source_digest"],
+        display_projection=display,
+        view_key="executive",
+    )
+
+    assert result["ok"] is True
+    assert result["style_fallback"] is True
+    assert result["board_style"] == "auto_flow"
+    assert result["renderer"] == "mermaid"
+    assert result["input_format"] == "mermaid"
+
+
+def test_visual_sync_publishes_overview_board_without_stages(tmp_path) -> None:
+    projection = _complex_projection()
+    config = LarkExploreConfig(base_token="PUBLIC_FIXTURE_BASE")
+
+    synced = sync_explore_visuals_to_lark(
+        config,
+        projection=projection,
+        visual_sinks={
+            "executive": {
+                "whiteboard_token": "wb_executive_fixture",
+                "view_role": "executive",
+                "overview_whiteboard_token": "wb_executive_overview",
+                "stage_boards_enabled": False,
+                "stage_capacity": 14,
+            }
+        },
+        config_path=tmp_path / "lark-explore.json",
+    )
+
+    view = synced["views"]["executive"]
+    assert view["stage_count"] == 0
+    assert view["overview"]["ok"] is True
+    assert view["overview"]["view_role"] == "executive"
+    assert view["overview"]["command"]["command"].startswith(
+        "lark-cli whiteboard +update --as user --whiteboard-token wb_executive_overview"
+    )
 
 
 def test_legacy_grid_renderer_config_fails_with_migration_message(tmp_path) -> None:

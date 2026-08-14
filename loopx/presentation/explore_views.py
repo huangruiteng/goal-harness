@@ -431,22 +431,30 @@ def _canonical_group_specs(
     *,
     group_node_limit: int,
 ) -> list[dict[str, Any]]:
-    """Split stable source order into bounded evidence stages."""
+    """Split stable source order into balanced bounded evidence stages."""
 
     node_by_id = {str(node.get("node_id") or ""): node for node in nodes}
     ordered_ids = list(node_by_id)
+    if not ordered_ids:
+        return []
+    limit = max(1, int(group_node_limit))
+    group_count = (len(ordered_ids) + limit - 1) // limit
+    base, extra = divmod(len(ordered_ids), group_count)
     specs = []
-    for offset in range(0, len(ordered_ids), group_node_limit):
-        chunk = ordered_ids[offset : offset + group_node_limit]
+    offset = 0
+    for index in range(group_count):
+        size = base + (1 if index < extra else 0)
+        chunk = ordered_ids[offset : offset + size]
+        offset += size
         first_title = str(node_by_id[chunk[0]].get("title") or chunk[0])
         specs.append(
             {
                 "title": (
-                    f"Evidence stage {offset // group_node_limit + 1:02d} · "
+                    f"Evidence stage {index + 1:02d} · "
                     f"{first_title}"
                 ),
                 "node_ids": chunk,
-                "order": offset,
+                "order": offset - size,
             }
         )
     return specs

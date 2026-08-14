@@ -135,6 +135,8 @@ def refine_quota_recommended_action(
             or ""
         )
         if task_orchestration_contract
+        and str(task_orchestration_contract.get("execution_state") or "ready")
+        == "ready"
         else selected_action
     )
     if (
@@ -406,13 +408,24 @@ def _task_orchestration_effective_action(
 ) -> tuple[str, str]:
     if (
         contract
+        and str(contract.get("execution_state") or "ready") == "ready"
         and should_run
         and normal_delivery_allowed
         and effective_action == "normal_run"
     ):
+        if contract.get("mode") == "adaptive":
+            return (
+                "coordinate_task_bundle",
+                (
+                    "the task coordinator may use admitted child lanes before its "
+                    "own worker-lane delivery"
+                ),
+            )
         return (
             "coordinate_task_bundle",
-            "the deterministic task coordinator must activate or resume eligible "
-            "peer lanes before doing its own worker-lane delivery",
+            (
+                "the explicitly selected task coordinator must activate or resume "
+                "eligible peer lanes before doing its own worker-lane delivery"
+            ),
         )
     return effective_action, reason

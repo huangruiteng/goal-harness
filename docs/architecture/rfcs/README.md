@@ -7,13 +7,17 @@ defined by the implementation and stable reference contracts.
 
 ## Active Drafts
 
+- [Human Attention Wishlist v0](human-attention-wishlist-v0.md): let agents capture bounded, evidence-backed requests for optional human leverage as a non-blocking post-delivery sidecar, without changing user-gate authority, selected work, quota, or notification behavior.
+- [Human Attention Wishlist v0（中文版）](human-attention-wishlist-v0.zh-CN.md)：让 agent 把有证据、可增加价值但不阻塞当前交付的人类协作机会，作为有界的交付后 sidecar 写入；不改变 user gate 权限、选中工作、quota 或通知行为。
+- [Research Exploration Control Plane v0](research-exploration-control-plane-v0.md): evolve a typed research frontier across coverage, closure, and explicit composition experiments while keeping Explore, goal-frontier, and execution authority separate.
+- [研究型探索控制面 v0](research-exploration-control-plane-v0.zh-CN.md)：围绕 coverage、closure 与显式组合实验演进类型化研究前沿，同时保持 Explore、goal-frontier 与执行权限彼此分离。
 - [Agent Loop Effect Interpreter v0](agent-loop-effect-interpreter-v0.md): model LoopX as the effect interpreter around an agent loop, with canonical effect-request/interpretation/observation packet semantics.
 - [Agent Loop Effect Interpreter v0（中文版）](agent-loop-effect-interpreter-v0.zh-CN.md): 把 LoopX 建模为 agent loop 外围的 effect interpreter，并给出 canonical effect-request/interpretation/observation packet 语义。
 - [Agent IM, LoopX, and OpenViking collaboration v0](agent-im-openviking-collaboration-v0.md): separate runtime delivery, durable control state, and scoped context while preserving direct agent-to-LoopX interaction.
 - [Goal Channel collaboration v0](goal-channel-collaboration-v0.md): bind one external collaboration channel to one LoopX goal while preserving LoopX as the source of truth.
 - [Goal Channel 协作模型 v0](goal-channel-collaboration-v0.zh-CN.md): 将一个外部协作通道绑定到一个 LoopX goal，同时保持 LoopX 作为事实源。
 - [Shared-goal online authority and pluggable coordination provider v0](shared-goal-authority-state-provider-v0.md): a claim-only contract proof for target-scoped conflicts over one canonical coordination aggregate, atomic original-receipt replay, and per-layer persistence ownership, with NoKV as an unpromoted provider candidate ([中文版](shared-goal-authority-state-provider-v0.zh-CN.md), [validation boundary](shared-goal-authority-state-provider-v0-evidence.zh-CN.md)).
-- [Goal artifact lifecycle projection v0](goal-artifact-lifecycle-projection-v0.md): treat a goal as a business artifact with derived milestones, blocking guards, and legal next transitions, projected read-only for operators and global views ([中文版](goal-artifact-lifecycle-projection-v0.zh-CN.md)).
+- [Goal artifact lifecycle projection v0](goal-artifact-lifecycle-projection-v0.md): derived from artifact-centric business process management (ABPM / GSM milestone-guard semantics); treat a goal as a business artifact with derived milestones, blocking guards, and legal next transitions, projected read-only for operators and global views ([中文版](goal-artifact-lifecycle-projection-v0.zh-CN.md)).
 
 RFCs must not contain internal conversations, private links, local filesystem
 paths, credentials, raw transcripts, or non-public organizational context.

@@ -387,6 +387,15 @@ When `spawn_policy.mode=multi_subagent`, status exposes
 This makes the selected execution mode visible to dashboards and heartbeat
 dispatchers instead of relying on prompt text.
 
+`spawn_policy` governs ephemeral child capacity only. Registering multiple
+durable peers does not auto-elect a coordinator and does not project their
+claimed lanes to another peer. Hosts that can activate durable peer runtimes
+must separately opt in with
+`loopx configure-goal --goal-id <goal> --peer-task-coordinator <registered-agent>`
+and report `--available-capability peer_agent_activation` at quota time. Clear
+the selection with `--clear-peer-task-coordinator`; neither setting widens Todo
+ownership or repository authority.
+
 These fields are a public contract, not a runtime lock manager. The current
 lightweight runtime surface uses todo `claimed_by` as a soft owner written under
 the active-state CLI lock. Claim ids must be listed in

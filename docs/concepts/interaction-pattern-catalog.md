@@ -2180,6 +2180,8 @@ loopx todo add \
   --goal-id <goal-id> \
   --role agent \
   --task-class advancement_task \
+  --action-kind <typed-action> \
+  --target-key <stable-execution-target> \
   --text '[P0] <bounded next slice>' \
   --claimed-by <agent-id> \
   --replan-obligation-id <current-obligation-id>
@@ -2187,8 +2189,10 @@ loopx todo add \
 
 The Todo row atomically carries a semantic receipt bound to the exact current
 obligation and returns `host_action=end_current_heartbeat`; the successor runs
-on the next heartbeat rather than in the replan turn. Other typed observations
-still use the projected `refresh-state` template. Accepted outcomes are typed:
+on the next heartbeat rather than in the replan turn. This command is projected
+only when the host owns a concrete bounded target; generic planning guidance
+cannot become a successor. When no target is known, typed observations use the
+projected `refresh-state` template. Accepted outcomes are typed:
 a new surface, hypothesis, probe
 family, current runnable successor, evidence-backed blocker, coverage-backed
 terminal, or—only for vision-derived duties—a fresh evidence-linked vision path.

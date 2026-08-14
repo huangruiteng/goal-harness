@@ -112,7 +112,7 @@ def main() -> int:
         "autonomous-replan",
         replan,
         kind="autonomous_replan_required",
-        minimum="one_bounded_replan_segment",
+        minimum="one_bounded_replan_with_typed_outcome",
     )
     assert replan["stall_threshold"] == 6, replan
 
@@ -129,10 +129,9 @@ def main() -> int:
         "empty-frontier-autonomous-replan",
         empty_frontier_replan,
         kind="autonomous_replan_required",
-        minimum="one_bounded_replan_with_agent_todo_writeback",
-        contract="autonomous_replan_agent_todo_writeback",
+        minimum="one_bounded_replan_with_typed_outcome",
     )
-    assert "create a concrete runnable agent todo" in empty_frontier_replan[
+    assert "only when an executable target is known" in empty_frontier_replan[
         "contract_obligation"
     ], empty_frontier_replan
 

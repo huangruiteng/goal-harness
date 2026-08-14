@@ -595,7 +595,6 @@ def test_nonblocking_user_action_does_not_suppress_empty_frontier_replan() -> No
                 "text": "create the next runnable experiment slice",
             }
         ],
-        "agent_todo_writeback_required": True,
         "stop_condition": "stop on owner-only authority",
     }
     payload = quota_status_payload(
@@ -628,42 +627,26 @@ def test_nonblocking_user_action_does_not_suppress_empty_frontier_replan() -> No
     assert guard["execution_obligation"] == {
         "must_attempt_work": True,
         "kind": "autonomous_replan_required",
-        "minimum": "one_bounded_replan_with_agent_todo_writeback",
+        "minimum": "one_bounded_replan_with_typed_outcome",
         "notify_is_execution_gate": False,
         "stall_threshold": 2,
         "contract_obligation": (
-            "apply autonomous_replan_obligation and create a concrete runnable "
-            "agent todo; explicit terminal no-follow-up is allowed only with "
-            "closure evidence"
+            "apply autonomous_replan_obligation; create a typed concrete runnable "
+            "agent todo only when an executable target is known, otherwise record "
+            "an accepted typed semantic or coverage-backed terminal outcome"
         ),
         "reason": (
             "autonomous_replan_obligation is a machine execution contract; "
             "quiet no-op is not allowed until the replan slice is validated or blocked"
         ),
-        "contract": "autonomous_replan_agent_todo_writeback",
     }, guard
     contract = guard["interaction_contract"]
     assert contract["mode"] == "autonomous_replan", contract
     assert contract["user_channel"]["non_blocking"] is True, contract
     assert contract["agent_channel"]["must_attempt"] is True, contract
     cli_actions = contract["cli_channel"]["next_cli_actions"]
-    assert any(
-        "todo add" in action
-        and "--task-class advancement_task" in action
-        and f"--claimed-by {AGENT_ID}" in action
-        and "--agent-id" not in action
-        for action in cli_actions
-    ), cli_actions
-    assert any(
-        "--replan-obligation-id" in action
-        and "todo add" in action
-        and "--repair-delta-kind" not in action
-        for action in cli_actions
-    ), cli_actions
-    assert any(
-        "host_action=end_current_heartbeat" in action
-        for action in cli_actions
-    ), cli_actions
+    assert any("refresh-state" in action for action in cli_actions), cli_actions
+    assert not any("todo add" in action for action in cli_actions), cli_actions
 
 
 def test_blocking_user_gate_still_precedes_stalled_monitor_replan() -> None:

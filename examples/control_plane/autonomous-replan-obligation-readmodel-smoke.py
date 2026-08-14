@@ -12,7 +12,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.control_plane.work_items.autonomous_replan_obligation import (  # noqa: E402
-    autonomous_replan_obligation_from_state as direct_autonomous_replan_obligation_from_state,
     build_autonomous_replan_obligation as direct_build_autonomous_replan_obligation,
     build_autonomous_replan_obligation_payload,
 )
@@ -23,14 +22,10 @@ from loopx.control_plane.goals.goal_frontier import (  # noqa: E402
     select_autonomous_replan_obligation,
 )
 from loopx.status import (  # noqa: E402
-    AUTONOMOUS_REPLAN_SECTION_HEADINGS,
     AUTONOMOUS_REPLAN_SCHEMA_VERSION,
     AUTONOMOUS_REPLAN_STALL_THRESHOLD,
     DEAD_MONITOR_REPEAT_SCHEMA_VERSION,
     DEAD_MONITOR_REPEAT_THRESHOLD,
-    active_state_section_entries,
-    active_state_sections,
-    autonomous_replan_obligation,
     autonomous_replan_obligation_from_runs,
     build_autonomous_replan_obligation,
     public_safe_compact_text,
@@ -46,19 +41,6 @@ AGENT_TODOS = {
         }
     ]
 }
-
-STATE_TEXT = """# Goal
-
-## Next Action
-
-- Continue until no-progress streak is resolved.
-
-## Operating Lessons
-
-- Record mitigation when repeated action loop appears.
-- Keep a periodic review every few dozen runs.
-"""
-
 
 def direct(evidence: list[dict[str, object]]) -> dict[str, object] | None:
     return direct_build_autonomous_replan_obligation(
@@ -129,18 +111,6 @@ def assert_payload_builder_contract() -> None:
     )
     assert "agent_id" in unscoped_payload, unscoped_payload
     assert unscoped_payload["agent_id"] is None, unscoped_payload
-
-
-def direct_state_obligation() -> dict[str, object] | None:
-    return direct_autonomous_replan_obligation_from_state(
-        STATE_TEXT,
-        agent_todos=AGENT_TODOS,
-        section_headings=AUTONOMOUS_REPLAN_SECTION_HEADINGS,
-        section_parser=active_state_sections,
-        section_entries=active_state_section_entries,
-        public_safe_compact_text=public_safe_compact_text,
-        build_autonomous_replan_obligation=build_autonomous_replan_obligation,
-    )
 
 
 def assert_peer_latest_run_does_not_hide_agent_stall() -> None:
@@ -331,7 +301,7 @@ def main() -> int:
         dead_monitor_repeat_schema_version=DEAD_MONITOR_REPEAT_SCHEMA_VERSION,
     )
     assert empty_frontier is not None, empty_frontier
-    assert empty_frontier["agent_todo_writeback_required"] is True, empty_frontier
+    assert "agent_todo_writeback_required" not in empty_frontier, empty_frontier
     assert empty_frontier["todo_actions"][0] == {
         "action": "add",
         "role": "agent",
@@ -377,18 +347,6 @@ def main() -> int:
     assert "periodic review" in periodic["recommended_action"], periodic
 
     assert build_autonomous_replan_obligation([], agent_todos=AGENT_TODOS) is None
-
-    state_wrapper = autonomous_replan_obligation(STATE_TEXT, agent_todos=AGENT_TODOS)
-    state_direct = direct_state_obligation()
-    assert state_wrapper == state_direct, (state_wrapper, state_direct)
-    assert state_wrapper is not None, state_wrapper
-    assert state_wrapper["trigger_count"] == 3, state_wrapper
-    assert state_wrapper["agent_id"] == "codex-control-plane", state_wrapper
-    assert [item["kind"] for item in state_wrapper["triggers"]] == [
-        "no_progress_streak",
-        "repeated_action_loop",
-        "periodic_review",
-    ], state_wrapper
 
     print("autonomous-replan-obligation-readmodel-smoke ok")
     return 0

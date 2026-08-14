@@ -845,6 +845,13 @@ Item fields:
   hot-path readers do not need to scan the detailed todo sections. The richer
   top-level `user_todos`, `agent_todos`, and `quota` fields remain available
   for detailed views.
+- `goal_boundary.peer_task_coordination`: optional quota-only coordination
+  authority. It appears only when the registry explicitly selects a
+  `coordinator_agent_id`. Registered peers are otherwise independent; child
+  spawn policy never implies registered-peer coordination authority. A blocked
+  explicit bundle never displaces the coordinator's own runnable Todo; with no
+  local fallback it projects `interaction_contract.mode=peer_coordination_blocked`
+  so schedulers stop until a material coordination input changes.
 - Current routing authority: consumers should choose the current owner, gate,
   waiting party, and next action from `attention_queue.items` and its
   `project_asset`. `run_history.latest_runs` is an evidence and drill-down
@@ -1361,14 +1368,17 @@ todos remain visible, as long as the selected slice stays outside private,
 destructive, production, or owner-only authority and honors `stop_condition`.
 An open typed `user_action` remains a non-blocking notice even when no agent
 todo is currently runnable; it must not force `waiting_on=controller`. When two
-bounded stalls leave that agent frontier empty, the obligation sets
-`agent_todo_writeback_required=true`. The interaction contract then projects a
-concrete claimed `todo add --replan-obligation-id <exact-id>` action. That one
-mutation atomically records the runnable successor and its causal obligation;
-it returns `host_action=end_current_heartbeat`, and the successor runs on the
-next heartbeat. No second repair-ACK write is required. Explicit terminal
-no-follow-up may replace the new Todo only when typed coverage evidence is
-authoritative. The user reminder stays visible throughout this replan path.
+bounded stalls leave that agent frontier empty, the obligation requires one
+typed semantic outcome. When the bounded frontier already owns a
+concrete typed target, the interaction contract projects a claimed `todo add`
+with `--replan-obligation-id <exact-id>`, `--action-kind`, and a stable
+`--target-key` or Explore node ref. That one mutation atomically records the
+runnable successor and its causal obligation; it returns
+`host_action=end_current_heartbeat`, and the successor runs on the next
+heartbeat. A generic planning instruction is never compiled into a Todo. When
+no executable target is known, the packet instead requires a typed semantic or
+coverage-backed terminal writeback. No second repair-ACK write is required.
+The user reminder stays visible throughout this replan path.
 This is intended to keep monitor-only work from consuming the primary
 executable backlog, not to bypass real gates.
 `quota should-run` and `status --agent-id` may also expose

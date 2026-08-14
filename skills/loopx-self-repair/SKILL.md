@@ -108,8 +108,9 @@ Record it with normal inline `refresh-state --vision-summary
 --vision-acceptance --vision-replan-trigger` fields using the same `--agent-id`
 that ran the repair. Use `--agent-vision-json` when a generated patch is clearer
 than a command line. Replan closes only through a typed semantic observation or
-an atomic Todo transition bound with `--replan-obligation-id`; do not append a
-second `--autonomous-replan-recorded` repair ACK. A vision patch without a
+an atomic Todo transition bound with `--replan-obligation-id`, a typed
+`--action-kind`, and a stable `--target-key` or Explore node ref; do not append
+a second `--autonomous-replan-recorded` repair ACK. A vision patch without a
 runnable Todo is still useful: `quota should-run` can promote its
 `replan_trigger_summary` into `goal_frontier_projection.acceptance_gaps[]` when
 the advancement frontier is empty.

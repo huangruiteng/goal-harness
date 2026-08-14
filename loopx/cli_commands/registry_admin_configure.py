@@ -164,6 +164,18 @@ def register_configure_goal_command(subparsers: argparse._SubParsersAction) -> N
         help="Clear coordination.registered_agents.",
     )
     configure_goal_parser.add_argument(
+        "--peer-task-coordinator",
+        help=(
+            "Explicitly select one registered peer to coordinate peer-owned task "
+            "lanes. Registration alone never enables coordination."
+        ),
+    )
+    configure_goal_parser.add_argument(
+        "--clear-peer-task-coordinator",
+        action="store_true",
+        help="Disable registered-peer task coordination for this goal.",
+    )
+    configure_goal_parser.add_argument(
         "--agent-profile-json",
         dest="agent_profile_jsons",
         action="append",

@@ -8,6 +8,11 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any
 
+from ..todos.contract import (
+    normalize_todo_task_domain,
+    replan_successor_semantic_binding,
+)
+
 PROGRESS_OBSERVATION_SCHEMA_VERSION = "typed_progress_observation_v0"
 REPLAN_CONTEXT_SCHEMA_VERSION = "replan_context_v0"
 REPLAN_CONTEXT_RECEIPT_SCHEMA_VERSION = "replan_context_delivery_receipt_v0"
@@ -491,15 +496,11 @@ def build_replan_action_packet(
     *,
     goal_id: str | None = None,
     agent_id: str | None = None,
+    bounded_research_frontier: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     context = obligation.get("replan_context")
     if not isinstance(context, Mapping):
         raise TypeError("replan obligation is missing host-projected context")
-    safe_goal_id = _stable_id(goal_id, field="goal_id") or "<goal-id>"
-    safe_agent_id = (
-        _stable_id(agent_id or obligation.get("agent_id"), field="agent_id")
-        or "<agent-id>"
-    )
     todo_actions = obligation.get("todo_actions")
     todo_action = next(
         (
@@ -515,34 +516,91 @@ def build_replan_action_packet(
     successor_priority = str(todo_action.get("priority") or "P1").strip()
     if successor_priority not in {"P0", "P1", "P2", "P3", "P4"}:
         successor_priority = "P1"
-    successor_summary = str(
-        todo_action.get("text")
-        or "Select one evidence-grounded bounded successor slice."
-    ).strip()[:240]
-    successor_text = shlex.quote(
-        f"[{successor_priority}] {successor_summary}"
+    selected_gap = (
+        bounded_research_frontier.get("selected_gap")
+        if isinstance(bounded_research_frontier, Mapping)
+        and isinstance(bounded_research_frontier.get("selected_gap"), Mapping)
+        else None
     )
-    return {
+    raw_successor_binding = (
+        selected_gap.get("successor_binding")
+        if isinstance(selected_gap, Mapping)
+        and isinstance(selected_gap.get("successor_binding"), Mapping)
+        else {}
+    )
+    successor_binding = replan_successor_semantic_binding(
+        action_kind=raw_successor_binding.get("action_kind"),
+        target_key=raw_successor_binding.get("target_key"),
+        explore_result_node_refs=raw_successor_binding.get(
+            "explore_result_node_refs"
+        ),
+    )
+    writeback_contract: dict[str, Any] = {}
+    successor_summary = str(
+        (selected_gap or {}).get("successor_summary") or ""
+    ).strip()[:240]
+    if isinstance(selected_gap, Mapping) and successor_summary and successor_binding:
+        safe_goal_id = _stable_id(goal_id, field="goal_id") or "<goal-id>"
+        safe_agent_id = (
+            _stable_id(agent_id or obligation.get("agent_id"), field="agent_id")
+            or "<agent-id>"
+        )
+        successor_text = shlex.quote(
+            f"[{successor_priority}] {successor_summary}"
+        )
+        successor_ref_args = "".join(
+            f" --explore-result-node-ref {shlex.quote(ref)}"
+            for ref in successor_binding.get("explore_result_node_refs") or []
+        )
+        target_key_arg = (
+            " --target-key " + shlex.quote(str(successor_binding["target_key"]))
+            if successor_binding.get("target_key")
+            else ""
+        )
+        task_domain = normalize_todo_task_domain(
+            raw_successor_binding.get("task_domain")
+        )
+        task_domain_arg = (
+            " --task-domain " + shlex.quote(task_domain) if task_domain else ""
+        )
+        writeback_contract = {
+            "successor_command": (
+                "loopx todo add "
+                f"--goal-id {safe_goal_id} --role agent "
+                "--task-class advancement_task "
+                f"--action-kind {shlex.quote(str(successor_binding['action_kind']))}"
+                f"{task_domain_arg}{target_key_arg} "
+                f"--text {successor_text} "
+                f"--claimed-by {safe_agent_id} "
+                "--replan-obligation-id "
+                f"{obligation.get('obligation_id')}"
+                f"{successor_ref_args}"
+            ),
+            "successor_host_action": "end_current_heartbeat",
+        }
+    packet = {
         "schema_version": REPLAN_ACTION_PACKET_SCHEMA_VERSION,
         "decision": "replan_required",
         "obligation_id": obligation.get("obligation_id"),
         "uncovered_frontier": context.get("uncovered_frontier"),
         "required_outcome": "semantic_delta",
-        "writeback_contract": {
-            "successor_command": (
-                "loopx todo add "
-                f"--goal-id {safe_goal_id} --role agent "
-                "--task-class advancement_task "
-                f"--text {successor_text} "
-                f"--claimed-by {safe_agent_id} "
-                "--replan-obligation-id "
-                f"{obligation.get('obligation_id')}"
-            ),
-            "successor_host_action": "end_current_heartbeat",
-        },
+        "writeback_contract": writeback_contract,
         "allowed_terminal": [
             ProgressResultClass.EXPLORATION_EXHAUSTED.value,
             ProgressResultClass.BLOCKED.value,
             ProgressResultClass.NO_FOLLOWUP.value,
         ],
     }
+    if isinstance(selected_gap, Mapping):
+        packet["bounded_frontier"] = {
+            key: selected_gap[key]
+            for key in (
+                "schema_version",
+                "gap_id",
+                "experiment_node_ref",
+                "input_node_refs",
+                "required_outcome",
+            )
+            if key in selected_gap
+        }
+    return packet

@@ -12,7 +12,10 @@ from ...benchmark_core import compact_run_permission_policy_for_quota
 from ...boundary_authority import checkpointed_boundary_authority_summary
 from ...execution_profile import execution_profile_outcome_floor
 from ...explore_graph import compact_explore_graph_policy
-from ...orchestration import compact_orchestration_policy
+from ...orchestration import (
+    compact_orchestration_policy,
+    compact_peer_task_coordination_policy,
+)
 from ...repository_identity import resolve_project_identity
 from ..todos.contract import (
     normalize_required_capabilities,
@@ -183,6 +186,9 @@ def _registry_boundary_projection(goal: Mapping[str, Any]) -> dict[str, Any]:
         boundary["requires_parent_approval"] = [
             str(value) for value in requires_approval if str(value).strip()
         ]
+    peer_task_coordination = compact_peer_task_coordination_policy(coordination)
+    if peer_task_coordination:
+        boundary["peer_task_coordination"] = peer_task_coordination
     guards = goal.get("guards") if isinstance(goal.get("guards"), list) else []
     if guards:
         boundary["guards"] = [str(value) for value in guards if str(value).strip()]

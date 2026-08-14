@@ -104,7 +104,6 @@ def direct_active_state_todo_fields(goal: dict, *, runtime_root: Path | None = N
         parse_issue_meta_surface=status_module.parse_issue_meta_surface,
         backlog_hygiene_warning=status_module.backlog_hygiene_warning,
         completed_todo_archive_warning=status_module.completed_todo_archive_warning,
-        autonomous_replan_obligation=status_module.autonomous_replan_obligation,
         state_projection_gap_warning=status_module.state_projection_gap_warning,
     )
 

@@ -9,7 +9,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GOAL_ID = "configure-goal-fixture"
 
@@ -208,6 +207,7 @@ def main() -> int:
         features = {item["feature_id"]: item for item in catalog["features"]}
         assert set(features) == {
             "multi_subagent",
+            "peer_task_coordination",
             "explore_graph",
             "explore_harness",
             "change_quality_qualification",
@@ -216,6 +216,13 @@ def main() -> int:
             "lark_kanban_heartbeat_sync",
         }
         assert features["multi_subagent"]["current"]["enabled"] is True
+        assert features["peer_task_coordination"]["current"] == {
+            "enabled": False,
+            "coordinator_agent_id": None,
+        }
+        assert "--peer-task-coordinator" in features[
+            "peer_task_coordination"
+        ]["commands"]["preview_enable"]
         assert features["explore_graph"]["current"]["enabled"] is False
         assert features["change_quality_qualification"]["current"] == {
             "enabled": False,
@@ -403,6 +410,67 @@ def main() -> int:
         assert authority["write_scope"] == ["docs/**"], authority
         assert authority["source"] == "operator_gate_resume_contract_v0:fixture", authority
         assert authority["decision_id"] == "gate-fixture-1", authority
+        peer_coordination_preview = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--peer-task-coordinator",
+            "codex-main-control",
+        ))
+        assert peer_coordination_preview["written"] is False, (
+            peer_coordination_preview
+        )
+        assert peer_coordination_preview["after"]["peer_task_coordination"] == {
+            "enabled": True,
+            "coordinator_agent_id": "codex-main-control",
+        }
+        peer_coordination_applied = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--peer-task-coordinator",
+            "codex-main-control",
+            "--execute",
+        ))
+        assert peer_coordination_applied["written"] is True, (
+            peer_coordination_applied
+        )
+        peer_goal = goal_from_registry(registry_path)
+        assert peer_goal["coordination"]["peer_task_coordination"] == {
+            "coordinator_agent_id": "codex-main-control",
+        }
+        assert goal_boundary(peer_goal)["peer_task_coordination"] == {
+            "enabled": True,
+            "coordinator_agent_id": "codex-main-control",
+        }
+        peer_coordination_cleared = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--clear-peer-task-coordinator",
+            "--execute",
+        ))
+        assert peer_coordination_cleared["written"] is True, (
+            peer_coordination_cleared
+        )
+        assert "peer_task_coordination" not in goal_from_registry(
+            registry_path
+        )["coordination"]
+        peer_coordination_restored = payload(run_cli(
+            registry_path,
+            "configure-goal",
+            "--goal-id",
+            GOAL_ID,
+            "--peer-task-coordinator",
+            "codex-main-control",
+            "--execute",
+        ))
+        assert peer_coordination_restored["written"] is True, (
+            peer_coordination_restored
+        )
         state_file = root / "project" / ".codex/goals/configure-goal-fixture/STATE.md"
         state_before_scope_migration = state_file.read_text(encoding="utf-8")
 
@@ -586,6 +654,9 @@ def main() -> int:
         assert "configured_agent_model" in agents_cleared["changed_fields"], agents_cleared
         assert "registered_agents" not in goal_from_registry(registry_path)["coordination"], agents_cleared
         assert "agent_model" not in goal_from_registry(registry_path)["coordination"], agents_cleared
+        assert "peer_task_coordination" not in goal_from_registry(
+            registry_path
+        )["coordination"], agents_cleared
 
         scope_cleared = payload(run_cli(
             registry_path,

@@ -10,6 +10,20 @@ from loopx.control_plane.quota.task_orchestration import (
 AGENT_ID = "codex-main"
 
 
+def _peer_management(*agent_ids: str) -> dict[str, Any]:
+    return {
+        "schema_version": "agent_management_projection_v0",
+        "agents": [
+            {
+                "agent_id": agent_id,
+                "state": "running",
+                "last_activity_at": "2026-08-14T12:00:00Z",
+            }
+            for agent_id in agent_ids
+        ],
+    }
+
+
 def _todo(
     todo_id: str,
     *,
@@ -415,7 +429,7 @@ def test_admission_reports_ready_lanes_deferred_by_capacity() -> None:
     ]
 
 
-def test_explicit_registered_peer_bundle_precedes_ephemeral_host_capacity() -> None:
+def test_registered_peer_bundle_does_not_auto_elect_coordinator() -> None:
     peers = [AGENT_ID, "codex-peer-one", "codex-peer-two"]
     items = [
         {
@@ -425,7 +439,6 @@ def test_explicit_registered_peer_bundle_precedes_ephemeral_host_capacity() -> N
         for index, peer in enumerate(peers, start=1)
     ]
     summary = {"items": items}
-    contracts = []
     for agent_id in peers:
         contract, _work_lane = apply_task_orchestration_contract(
             fallback_work_lane_contract={"lane": "advancement_task"},
@@ -443,14 +456,131 @@ def test_explicit_registered_peer_bundle_precedes_ephemeral_host_capacity() -> N
             },
             agent_todo_summary=summary,
             raw_agent_todo_summary=summary,
-            available_capabilities=[],
+            available_capabilities=["subagent_spawn"],
         )
-        if contract:
-            contracts.append(contract)
+        assert contract is None
 
-    assert len(contracts) == 1
-    assert contracts[0]["schema_version"] == "task_orchestration_contract_v1"
-    assert contracts[0]["mode"] == "task_scoped_peer"
+
+def test_explicit_registered_peer_coordinator_requires_runtime_activation() -> None:
+    peers = [AGENT_ID, "codex-peer-one", "codex-peer-two"]
+    summary = {
+        "items": [
+            {**_todo("todo_primary"), "claimed_by": AGENT_ID},
+            {**_todo("todo_peer_one"), "claimed_by": "codex-peer-one"},
+            {**_todo("todo_peer_two"), "claimed_by": "codex-peer-two"},
+        ]
+    }
+
+    contract, work_lane = apply_task_orchestration_contract(
+        fallback_work_lane_contract={"lane": "advancement_task"},
+        goal_boundary={
+            "peer_task_coordination": {
+                "enabled": True,
+                "coordinator_agent_id": AGENT_ID,
+            },
+        },
+        agent_identity={
+            "agent_id": AGENT_ID,
+            "registered_agents": peers,
+        },
+        agent_todo_summary=summary,
+        raw_agent_todo_summary=summary,
+        available_capabilities=[],
+        agent_management_projection=_peer_management(
+            "codex-peer-one",
+            "codex-peer-two",
+        ),
+    )
+
+    assert contract is not None
+    assert contract["execution_state"] == "blocked"
+    assert contract["eligible_peer_lanes"] == []
+    assert [lane["reason_codes"] for lane in contract["blocked_peer_lanes"]] == [
+        ["peer_agent_activation_unavailable"],
+        ["peer_agent_activation_unavailable"],
+    ]
+    assert contract["terminal_outcome"] == "blocked"
+    assert contract["retry_policy"] == "material_peer_state_change_only"
+    assert work_lane == {"lane": "advancement_task"}
+
+
+def test_explicit_registered_peer_coordinator_projects_only_actionable_lanes() -> None:
+    peers = [AGENT_ID, "codex-peer-one", "codex-peer-two"]
+    summary = {
+        "items": [
+            {**_todo("todo_primary"), "claimed_by": AGENT_ID},
+            {**_todo("todo_peer_one"), "claimed_by": "codex-peer-one"},
+            {
+                **_todo("todo_peer_two", resume_ready=False),
+                "claimed_by": "codex-peer-two",
+            },
+        ]
+    }
+
+    contract, work_lane = apply_task_orchestration_contract(
+        fallback_work_lane_contract={"lane": "advancement_task"},
+        goal_boundary={
+            "peer_task_coordination": {
+                "enabled": True,
+                "coordinator_agent_id": AGENT_ID,
+            },
+        },
+        agent_identity={
+            "agent_id": AGENT_ID,
+            "registered_agents": peers,
+        },
+        agent_todo_summary=summary,
+        raw_agent_todo_summary=summary,
+        available_capabilities=["peer_agent_activation"],
+        agent_management_projection=_peer_management(
+            "codex-peer-one",
+            "codex-peer-two",
+        ),
+    )
+
+    assert contract is not None
+    assert contract["execution_state"] == "ready"
+    assert [lane["todo_id"] for lane in contract["eligible_peer_lanes"]] == [
+        "todo_peer_one"
+    ]
+    assert contract["blocked_peer_lanes"][0]["reason_codes"] == [
+        "peer_lane_not_resume_ready"
+    ]
+    assert work_lane["lane"] == "task_orchestration"
+
+
+def test_explicit_registered_peer_coordinator_blocks_unknown_peer_liveness() -> None:
+    peers = [AGENT_ID, "codex-peer-one"]
+    summary = {
+        "items": [
+            {**_todo("todo_primary"), "claimed_by": AGENT_ID},
+            {**_todo("todo_peer_one"), "claimed_by": "codex-peer-one"},
+        ]
+    }
+
+    contract, work_lane = apply_task_orchestration_contract(
+        fallback_work_lane_contract={"lane": "advancement_task"},
+        goal_boundary={
+            "peer_task_coordination": {
+                "enabled": True,
+                "coordinator_agent_id": AGENT_ID,
+            },
+        },
+        agent_identity={
+            "agent_id": AGENT_ID,
+            "registered_agents": peers,
+        },
+        agent_todo_summary=summary,
+        raw_agent_todo_summary=summary,
+        available_capabilities=["peer_agent_activation"],
+    )
+
+    assert contract is not None
+    assert contract["execution_state"] == "blocked"
+    assert contract["blocked_peer_lanes"][0]["reason_codes"] == [
+        "peer_liveness_unavailable"
+    ]
+    assert work_lane == {"lane": "advancement_task"}
 
 
 def test_claimed_primary_agent_coordinates_unclaimed_child_work() -> None:

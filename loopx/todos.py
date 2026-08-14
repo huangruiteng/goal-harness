@@ -900,6 +900,9 @@ def add_goal_todo(
         task_class=task_class,
         claimed_by=claimed_by,
         obligation_id=replan_obligation_id,
+        action_kind=action_kind,
+        target_key=(monitor_metadata or {}).get("target_key"),
+        explore_result_node_refs=explore_result_node_refs,
     )
     normalized_status = normalize_todo_status(status) if status else TODO_STATUS_OPEN
     if status and not normalized_status:

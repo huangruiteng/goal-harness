@@ -159,6 +159,19 @@ def _payload(
             SchedulerDisposition.TERMINAL_STOP,
             "terminal_no_followup",
         ),
+        (
+            "peer-coordination-blocked",
+            _payload(
+                mode="peer_coordination_blocked",
+                should_run=False,
+                user_required=False,
+                must_attempt=False,
+                delivery_allowed=False,
+                quiet_noop_allowed=True,
+            ),
+            SchedulerDisposition.PEER_COORDINATION_STOP,
+            "peer_coordination_blocked",
+        ),
     ],
 )
 def test_interaction_contract_drives_scheduler(
@@ -309,6 +322,30 @@ def test_terminal_contract_with_open_action_fails_closed() -> None:
         "interaction_contract.terminal_conflicts_with_open_action"
         in hint["consistency_error"]["errors"]
     )
+
+
+def test_blocked_peer_coordination_returns_to_owner_without_polling() -> None:
+    payload = _payload(
+        mode="peer_coordination_blocked",
+        should_run=False,
+        user_required=False,
+        must_attempt=False,
+        delivery_allowed=False,
+        quiet_noop_allowed=True,
+    )
+
+    hint = _app_scheduler_hint(
+        payload,
+        agent_scope_frontier_actions=AGENT_SCOPE_ACTIONS,
+    )
+
+    assert hint["action"] == "return_to_owner_until_material_change"
+    assert hint["codex_app"]["host_action"] == (
+        "pause_or_delete_current_heartbeat"
+    )
+    assert hint["codex_app"]["host_action_required"] is True
+    assert hint["unchanged_poll"]["local_scheduler"] == "stop"
+    assert hint["unchanged_poll"]["final_quota_replan_check_enabled"] is False
 
 
 def test_structurally_invalid_contract_fails_closed() -> None:

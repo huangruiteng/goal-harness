@@ -52,6 +52,7 @@ def test_generic_stall_obligation_carries_novelty_guidance() -> None:
     action = obligation["recommended_action"]
     assert "host-projected coverage ledger" in action
     assert "typed semantic delta" in action
+    assert "agent_todo_writeback_required" not in obligation
 
 
 def test_dead_monitor_obligation_reuses_the_same_repair_delta_contract() -> None:

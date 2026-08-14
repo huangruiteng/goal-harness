@@ -32,6 +32,9 @@
       },
       "coordination": {
         "agent_model": "peer_v1",
+        "peer_task_coordination": {
+          "coordinator_agent_id": "codex-alpha"
+        },
         "registered_agents": [
           "codex-alpha",
           "codex-beta",
@@ -50,7 +53,8 @@
       "next_probe": "python3 scripts/project-pre-tick.py --format json --save-run",
       "guards": [
         "registered agents are equal peers",
-        "open task participants determine the temporary coordinator",
+        "registered peers do not coordinate by default",
+        "the selected coordinator still requires observed peer_agent_activation capability",
         "repository-writing peers use independent worktrees",
         "executor exclusions cannot name the claimed peer",
         "task coordination cannot widen write or production authority"
