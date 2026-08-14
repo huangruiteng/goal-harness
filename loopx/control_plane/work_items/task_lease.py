@@ -19,6 +19,7 @@ from ...paths import resolve_runtime_root
 from ..runtime.time import now_utc as runtime_now_utc
 from ..runtime.time import parse_timestamp, utc_isoformat
 from ..todos.contract import (
+    TODO_TASK_CLASS_USER_GATE,
     normalize_required_write_scopes,
     normalize_todo_claimed_by,
     normalize_todo_excluded_agents,
@@ -276,7 +277,10 @@ def hold_task_lease_mutation_fence(
     mandatory: no effective lease is a typed error instead of a silent
     ``{"required": False}``, and a time-active lease whose owner constraint is
     no longer effective (the legacy self-disarm state) fails loudly instead of
-    letting a keyless completion through.
+    letting a keyless completion through. For a user-role ``user_gate``
+    completion that supplies no explicit lease credentials, the fence mints
+    the key itself under the same per-goal lease lock; an existing
+    time-active lease is never displaced.
     """
 
     normalized_goal_id = normalize_goal_id(goal_id)
@@ -299,6 +303,14 @@ def hold_task_lease_mutation_fence(
     handoff = handoff or {}
     handoff_mode = str(handoff.get("handoff_mode") or HANDOFF_MODE_LEGACY)
     handoff_gate_overridden = handoff.get("handoff_gate_overridden") is True
+    auto_acquire_lease = (
+        handoff_mode == HANDOFF_MODE_HARD_LEASE
+        and not handoff_gate_overridden
+        and not require_active_when_key_supplied
+        and str(todo.get("role") or "") == "user"
+        and str(todo.get("task_class") or "") == TODO_TASK_CLASS_USER_GATE
+    )
+    auto_acquired = False
     with exclusive_file_lock(
         lock_target,
         agent_id=actor_agent_id,
@@ -318,6 +330,77 @@ def hold_task_lease_mutation_fence(
                 ),
             )
             active = constraint.get("effective") is True
+
+        if (
+            auto_acquire_lease
+            and not active
+            and not (time_active and lease)
+        ):
+            # Mint the completion key under the same per-goal lease lock. A
+            # time-active lease is never displaced: if one exists but its
+            # owner constraint is no longer effective, the hard branch below
+            # keeps the loud divergence error.
+            normalized_actor = normalize_todo_claimed_by(actor_agent_id)
+            if not normalized_actor:
+                raise TaskLeaseError(
+                    "hard_lease handoff mode auto-acquire requires an "
+                    "attributed actor; provide --agent-id",
+                    code="handoff_mode_requires_lease",
+                    payload={
+                        "goal_id": normalized_goal_id,
+                        "todo_id": normalized_todo_id,
+                        "handoff_mode": handoff_mode,
+                        "lease_path": str(lease_path),
+                        "reason": "missing_actor",
+                    },
+                )
+            constraint = task_lease_owner_constraint(
+                todo,
+                owner=normalized_actor,
+                registered_agents=registered_agent_ids_from_registry(
+                    registry_path,
+                    normalized_goal_id,
+                ),
+            )
+            if constraint.get("effective") is not True:
+                raise TaskLeaseError(
+                    "hard_lease handoff mode auto-acquire rejected for "
+                    "the acting agent",
+                    code="handoff_mode_requires_lease",
+                    payload={
+                        "goal_id": normalized_goal_id,
+                        "todo_id": normalized_todo_id,
+                        "handoff_mode": handoff_mode,
+                        "lease_path": str(lease_path),
+                        "reason": str(
+                            constraint.get("reason") or "owner_not_allowed"
+                        ),
+                        "constraint": constraint,
+                    },
+                )
+            at = now_utc()
+            auto_key = requested_key or f"auto-{normalized_todo_id}"
+            updated_at = isoformat(at)
+            expires_at = isoformat(
+                at + timedelta(seconds=DEFAULT_TASK_LEASE_TTL_SECONDS)
+            )
+            lease = build_lease(
+                goal_id=normalized_goal_id,
+                todo_id=normalized_todo_id,
+                owner=normalized_actor,
+                idempotency_key=auto_key,
+                write_scopes=[],
+                acquire_ttl_seconds=DEFAULT_TASK_LEASE_TTL_SECONDS,
+                version=int((lease or {}).get("version") or 0) + 1,
+                acquired_at=updated_at,
+                updated_at=updated_at,
+                expires_at=expires_at,
+            )
+            write_lease(lease_path, lease)
+            requested_key = auto_key
+            auto_acquired = True
+            active = True
+            time_active = True
 
         if not active:
             if handoff_mode == HANDOFF_MODE_HARD_LEASE and not handoff_gate_overridden:
@@ -401,16 +484,17 @@ def hold_task_lease_mutation_fence(
                 },
             )
         assert_expected_version(lease, expected_version)
-        fence = _VerifiedTaskLeaseFence(
-            {
-                "schema_version": TASK_LEASE_SCHEMA_VERSION,
-                "required": True,
-                "active": True,
-                "owner": normalized_actor,
-                "version": lease.get("version"),
-                "execution_instance_verified": True,
-            }
-        )
+        fence_payload = {
+            "schema_version": TASK_LEASE_SCHEMA_VERSION,
+            "required": True,
+            "active": True,
+            "owner": normalized_actor,
+            "version": lease.get("version"),
+            "execution_instance_verified": True,
+        }
+        if auto_acquired:
+            fence_payload["auto_acquired"] = True
+        fence = _VerifiedTaskLeaseFence(fence_payload)
         fence.release_hook = lambda: remove_lease(lease_path)
         yield fence
 
