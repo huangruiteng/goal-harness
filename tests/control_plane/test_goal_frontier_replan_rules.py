@@ -16,6 +16,7 @@ from loopx.control_plane.goals.goal_frontier.replan_rules import (
     GoalFrontierReplanRule,
     select_goal_frontier_replan_rule,
 )
+from loopx.control_plane.todos.addition import require_replan_successor_scope
 from loopx.control_plane.todos.summary_item import compact_todo_summary_item
 
 
@@ -211,6 +212,8 @@ def test_exact_replan_successor_uses_authoritative_todo_source() -> None:
             "task_class": "advancement_task",
             "claimed_by": "current-agent",
             "replan_obligation_id": obligation_id,
+            "action_kind": "validate",
+            "target_key": "experiment:selected-bounded-slice",
         }
     )
     unrelated_display_items = [
@@ -233,6 +236,64 @@ def test_exact_replan_successor_uses_authoritative_todo_source() -> None:
     assert ack["frontier_identity"] == frontier_identity
     assert ack["semantic_delta"]["successor_todo_id"] == successor["todo_id"]
     assert ack["semantic_delta"]["outcomes"] == ["new_runnable_successor"]
+    assert ack["semantic_delta"]["successor_binding"] == {
+        "action_kind": "validate",
+        "target_key": "experiment:selected-bounded-slice",
+    }
+
+
+def test_untyped_replan_successor_cannot_close_replan() -> None:
+    obligation_id = "replan-0123456789abcdef"
+    successor = {
+        **_advancement("todo_0123456789ab", "current-agent"),
+        "replan_obligation_id": obligation_id,
+    }
+
+    ack = replan_successor_transition_ack(
+        {"first_executable_items": [successor]},
+        agent_id="current-agent",
+        replan_obligation={
+            "obligation_id": obligation_id,
+            "satisfying_semantic_outcomes": ["new_runnable_successor"],
+        },
+        agent_todo_items=[successor],
+    )
+
+    assert ack is None
+
+
+def test_replan_successor_authoring_requires_typed_action_and_target() -> None:
+    with pytest.raises(ValueError, match="typed action_kind"):
+        require_replan_successor_scope(
+            role="agent",
+            task_class="advancement_task",
+            claimed_by="current-agent",
+            obligation_id="replan-0123456789abcdef",
+            action_kind=None,
+            target_key=None,
+            explore_result_node_refs=None,
+        )
+
+    assert require_replan_successor_scope(
+        role="agent",
+        task_class="advancement_task",
+        claimed_by="current-agent",
+        obligation_id="replan-0123456789abcdef",
+        action_kind="validate",
+        target_key="experiment:selected-bounded-slice",
+        explore_result_node_refs=None,
+    ) == "replan-0123456789abcdef"
+
+    with pytest.raises(ValueError, match="16 lowercase hex"):
+        require_replan_successor_scope(
+            role="agent",
+            task_class="advancement_task",
+            claimed_by="current-agent",
+            obligation_id="replan-not-current",
+            action_kind="validate",
+            target_key="experiment:selected-bounded-slice",
+            explore_result_node_refs=None,
+        )
 
 
 def test_unrelated_actionable_todo_cannot_close_replan() -> None:

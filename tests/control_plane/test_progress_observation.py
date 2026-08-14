@@ -175,12 +175,9 @@ def test_host_projects_evidence_context_and_minimal_action_packet() -> None:
         "writeback_contract",
         "allowed_terminal",
     }
-    assert "--replan-obligation-id replan-0123456789abcdef" in packet[
-        "writeback_contract"
-    ]["successor_command"]
-    assert "<bounded next slice>" not in packet["writeback_contract"][
-        "successor_command"
+    assert packet["writeback_contract"] == {}
+    assert packet["allowed_terminal"] == [
+        "exploration_exhausted",
+        "blocked",
+        "no_followup",
     ]
-    assert packet["writeback_contract"]["successor_host_action"] == (
-        "end_current_heartbeat"
-    )

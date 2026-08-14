@@ -628,8 +628,8 @@ def assert_replan_beats_monitor_quiet_skip() -> None:
     assert "deferred_ready=0 acceptance_gaps=0" in markdown, markdown
     assert "autonomous_replan_decision: decision=autonomous_replan_required" in markdown, markdown
     assert (
-        "interaction_agent_action: select one bounded next slice; prefer "
-        "replan_action_packet.writeback_contract.successor_command"
+        "interaction_agent_action: produce one typed outcome from the "
+        "host-projected replan action packet"
         in markdown
     ), markdown
     repeat_guard = build_quota_should_run(payload, goal_id=GOAL_ID, agent_id=SIDE_AGENT)
@@ -779,14 +779,12 @@ def assert_replan_preserves_current_agent_runnable_frontier() -> None:
     assert lane_action["selected_by"] == "current_agent_claimed_todo", guard
     assert lane_action["preserves_goal_next_action"] is True, guard
     primary_action = guard["interaction_contract"]["agent_channel"]["primary_action"]
-    assert "select one bounded next slice" in primary_action, guard
-    assert "replan_action_packet.writeback_contract.successor_command" in (
-        primary_action
+    assert primary_action == (
+        "produce one typed outcome from the host-projected replan action packet"
     ), guard
     cli_actions = guard["interaction_contract"]["cli_channel"]["next_cli_actions"]
-    assert cli_actions[0] == (
-        "execute replan_action_packet.writeback_contract.successor_command"
-    ), guard
+    assert any("refresh-state" in action for action in cli_actions), guard
+    assert not any("successor_command" in action for action in cli_actions), guard
     frontier = guard["goal_frontier_projection"]["remaining_advancement_frontier"]
     assert frontier["current_agent_claimed_advancement_count"] == 1, guard
     assert guard["goal_route_hint"]["current_agent_next_action"]["todo_id"] == (

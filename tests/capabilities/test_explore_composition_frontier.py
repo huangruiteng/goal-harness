@@ -203,6 +203,9 @@ def test_replan_successor_binds_obligation_and_joint_experiment() -> None:
     assert command[command.index("--explore-result-node-ref") + 1] == (
         EXPERIMENT_ID
     )
+    assert command[command.index("--action-kind") + 1] == "joint_probe"
+    assert command[command.index("--task-domain") + 1] == "research"
+    assert command[command.index("--target-key") + 1] == EXPERIMENT_ID
     assert packet["bounded_frontier"]["required_outcome"] == (
         "joint_experiment_result"
     )

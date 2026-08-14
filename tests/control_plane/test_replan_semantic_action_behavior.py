@@ -138,6 +138,15 @@ def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
     assert quota_packet["replan_action_packet"]["obligation_id"] == receipt[
         "replan_obligation_id"
     ]
+    assert quota_packet["replan_action_packet"]["writeback_contract"] == {}
+    assert quota_packet["interaction_contract"]["agent_channel"][
+        "primary_action"
+    ] == "produce one typed outcome from the host-projected replan action packet"
+    next_cli_actions = quota_packet["interaction_contract"]["cli_channel"][
+        "next_cli_actions"
+    ]
+    assert any("refresh-state" in action for action in next_cli_actions)
+    assert not any("successor_command" in action for action in next_cli_actions)
 
     index_path = (
         tmp_path
@@ -330,6 +339,9 @@ def test_model_can_create_and_bind_a_real_runnable_successor(tmp_path: Path) -> 
             "loopx --format json --registry ignored todo add "
             "--goal-id replan-semantic-action-fixture --role agent "
             "--task-class advancement_task "
+            "--action-kind validate "
+            "--task-domain research "
+            "--target-key surface:permission-contract "
             "--text '[P0] Inspect the uncovered permission contract' "
             "--claimed-by codex-replan-semantic-action "
             f"--replan-obligation-id {obligation['obligation_id']}"
@@ -383,11 +395,48 @@ def test_stale_successor_obligation_is_rejected_before_todo_mutation(
             "loopx --format json --registry ignored todo add "
             "--goal-id replan-semantic-action-fixture --role agent "
             "--task-class advancement_task "
+            "--action-kind validate --target-key surface:stale-target "
             "--text '[P0] Stale successor must not be written' "
             "--claimed-by codex-replan-semantic-action "
             "--replan-obligation-id replan-0000000000000000",
             fixture=fixture,
             turn_instance_id="stale-successor-turn",
+        )
+
+    assert state_path.read_text(encoding="utf-8") == before
+
+
+def test_untyped_successor_is_rejected_before_todo_mutation(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "fixture")
+    state_path = (
+        fixture.project_root
+        / ".codex"
+        / "goals"
+        / "replan-semantic-action-fixture"
+        / "ACTIVE_GOAL_STATE.md"
+    )
+    quota = json.loads(
+        _execute_loopx(
+            fixture.quota_guard_command,
+            fixture=fixture,
+            turn_instance_id="untyped-successor-turn",
+        )
+    )
+    obligation_id = quota["autonomous_replan_obligation"]["obligation_id"]
+    before = state_path.read_text(encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="requires --action-kind"):
+        _execute_loopx(
+            "loopx --format json --registry ignored todo add "
+            "--goal-id replan-semantic-action-fixture --role agent "
+            "--task-class advancement_task "
+            "--text '[P0] Replan again without an executable target' "
+            "--claimed-by codex-replan-semantic-action "
+            f"--replan-obligation-id {obligation_id}",
+            fixture=fixture,
+            turn_instance_id="untyped-successor-turn",
         )
 
     assert state_path.read_text(encoding="utf-8") == before

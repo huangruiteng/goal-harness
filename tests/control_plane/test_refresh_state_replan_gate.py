@@ -372,6 +372,7 @@ def _state_with_replan_successor(
                 "  <!-- loopx:todo todo_id=todo_rotated_replan_successor "
                 f"status={status} task_class=advancement_task "
                 f"claimed_by={AGENT_ID} "
+                "action_kind=inspect target_key=surface%3Aselected-bounded-slice "
                 f"replan_obligation_id={obligation_id} "
                 "updated_at=2026-08-13T11%3A28%3A00%2B08%3A00 -->"
             ),

@@ -265,7 +265,9 @@ def test_turn_envelope_compacts_replan_help_without_losing_successor_execution()
     source = _full_decision()
     successor_command = (
         "loopx todo add --goal-id fixture-goal --role agent "
-        "--task-class advancement_task --text '[P0] next slice' "
+        "--task-class advancement_task --action-kind validate "
+        "--target-key experiment:fixture-next-slice "
+        "--text '[P0] next slice' "
         "--claimed-by codex-fixture "
         "--replan-obligation-id replan-0123456789abcdef"
     )

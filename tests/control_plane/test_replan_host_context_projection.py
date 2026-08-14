@@ -120,24 +120,16 @@ def test_quota_delivers_coverage_context_and_minimal_replan_action() -> None:
         "obligation_id": obligation["obligation_id"],
         "uncovered_frontier": context["uncovered_frontier"],
         "required_outcome": "semantic_delta",
-        "writeback_contract": {
-            "successor_command": action["writeback_contract"][
-                "successor_command"
-            ],
-            "successor_host_action": "end_current_heartbeat",
-        },
+        "writeback_contract": {},
         "allowed_terminal": [
             "exploration_exhausted",
             "blocked",
             "no_followup",
         ],
     }
-    assert "--goal-id replan-context-goal" in action["writeback_contract"][
-        "successor_command"
-    ]
-    assert obligation["obligation_id"] in action["writeback_contract"][
-        "successor_command"
-    ]
+    assert payload["interaction_contract"]["agent_channel"][
+        "primary_action"
+    ] == "produce one typed outcome from the host-projected replan action packet"
 
 
 def test_manual_evidence_read_receipt_cannot_close_replan() -> None:
