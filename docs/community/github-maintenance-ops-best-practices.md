@@ -166,7 +166,95 @@ revising approved content invalidates the approval.
 - Public materials must not leak internal context: no private links, raw
   logs, credentials, or unapproved internal metrics.
 
-## 5. Reusable Playbook
+## 5. Getting Started
+
+### 5.1 Minimal setup
+
+Requirements are Python 3.11+ plus `curl` and `tar`. Install without cloning,
+then connect from your project root:
+
+```bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+loopx doctor
+
+cd /path/to/your-project
+loopx connect
+loopx start-goal --guided --project . --goal-text "Your long-running objective"
+```
+
+Keep `.loopx/`, `.codex/goals/`, and `.local/` ignored. From your agent host,
+drive the goal with `/loopx <task>` (Codex App/CLI), `/loopx` + `/loop`
+(Claude Code), the goal bridge (OpenCode), or the Pi goal extension.
+
+### 5.2 Command cheat sheet
+
+```text
+loopx status                    # goal/registry health and next action
+loopx todo list --goal-id <id>  # project todos
+loopx quota should-run          # should this registered agent act now?
+loopx todo claim                # who owns this slice?
+loopx todo update               # what changed?
+loopx refresh-state             # what should the next turn see?
+loopx quota spend-slot          # account for a completed, validated slice
+```
+
+Capability entries:
+
+```text
+loopx issue-fix workflow-plan                      # plan an issue fix route
+/loopx Fix https://github.com/owner/repo/issues/123
+loopx content-ops queue-status --item-json <item>  # content pipeline queue
+loopx value-connectors source-map --format json    # connector-first source map
+```
+
+### 5.3 Your first continuous monitor
+
+A maintenance monitor is just a typed todo with a cadence. Example: scan public
+mentions weekly and update an adoption inventory:
+
+```bash
+loopx todo add --goal-id <goal-id> --project . --role agent \
+  --claimed-by <your-agent-id> --task-class continuous_monitor \
+  --action-kind github_mention_scan --target-key github-mention-scan \
+  --cadence 7d --next-due-at "2026-08-22T10:00:00+08:00" \
+  --expires-at "2027-08-15T10:00:00+08:00" \
+  --continuation-policy same_agent_non_delivery \
+  --text "[P2] 每周扫描仓库公开提及，分类并更新采纳清单"
+```
+
+Heartbeat automation picks the monitor up on its due date. Each run records
+evidence on the same todo; a material change creates a follow-up todo, and a
+no-change run stays a quiet no-op instead of forcing progress.
+
+### 5.4 Enable issue-to-PR automation
+
+From a connected agent host, point the issue-fix loop at one public issue:
+
+```text
+/loopx Fix https://github.com/owner/repo/issues/123
+```
+
+The capability builds feasibility, repository-context, reviewer, validation,
+and PR-lifecycle packets, and assigns one explicit route:
+`fix_pr` / `comment_only` / `triage_only`. The host agent may create or update
+a PR only when LoopX state records that authority and repository policy allows
+it; merge remains a separate decision unless explicitly authorized.
+
+### 5.5 Optional content-ops pipeline
+
+For creator/operator workflows, start with the connector source map, then
+project the item queue:
+
+```bash
+loopx value-connectors source-map --format json
+loopx content-ops queue-status --item-json path/to/item.json --format json
+```
+
+Items move through source → angle → draft → feedback → publish gate →
+readback, and publishing stays blocked until an explicit owner decision.
+
+## 6. Reusable Playbook
 
 1. Weekly: scan public mentions, update the adoption inventory through a PR.
 2. Per incoming issue/PR: classify, tag, and route; drive fixable issues
@@ -178,7 +266,7 @@ revising approved content invalidates the approval.
 5. Per social idea: build a public-safe source map, draft through the
    content-ops pipeline, gate on owner approval, publish, read back.
 
-## 6. Evidence Index
+## 7. Evidence Index
 
 - Ecosystem adoption inventory:
   [`ecosystem-adoption.md`](ecosystem-adoption.md)

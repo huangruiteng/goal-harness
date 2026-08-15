@@ -135,7 +135,91 @@ fork 与衍生评估按计划执行。对每个有价值的来源，在作者自
 - 公开材料不泄漏内部语境：无私有链接、raw logs、凭据或未经批准的内部
    指标。
 
-## 5. 可复用 Playbook
+## 5. 上手
+
+### 5.1 最小接入
+
+要求 Python 3.11+ 与 `curl`、`tar`。无需 clone，先安装再在项目根目录接入：
+
+```bash
+curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+loopx doctor
+
+cd /path/to/your-project
+loopx connect
+loopx start-goal --guided --project . --goal-text "你的长程目标"
+```
+
+保持 `.loopx/`、`.codex/goals/`、`.local/` 忽略。接入后从宿主 agent 用
+`/loopx <task>`（Codex App/CLI）、`/loopx` + `/loop`（Claude Code）、goal
+bridge（OpenCode）或 Pi goal 扩展驱动目标。
+
+### 5.2 指令速查
+
+```text
+loopx status                    # goal/registry 健康与下一步
+loopx todo list --goal-id <id>  # 项目 todos
+loopx quota should-run          # 这个 agent 现在该动吗
+loopx todo claim                # 谁拥有这个切片
+loopx todo update               # 发生了什么变化
+loopx refresh-state             # 下一轮应该看到什么
+loopx quota spend-slot          # 结算一个完成并验证过的切片
+```
+
+能力入口：
+
+```text
+loopx issue-fix workflow-plan                      # 规划 issue 修复路线
+/loopx Fix https://github.com/owner/repo/issues/123
+loopx content-ops queue-status --item-json <item>  # 内容管线队列
+loopx value-connectors source-map --format json    # connector-first source map
+```
+
+### 5.3 建第一个 continuous monitor
+
+维护 monitor 就是一个带 cadence 的类型化 todo。示例：每周扫描公开提及并
+更新采纳清单：
+
+```bash
+loopx todo add --goal-id <goal-id> --project . --role agent \
+  --claimed-by <your-agent-id> --task-class continuous_monitor \
+  --action-kind github_mention_scan --target-key github-mention-scan \
+  --cadence 7d --next-due-at "2026-08-22T10:00:00+08:00" \
+  --expires-at "2027-08-15T10:00:00+08:00" \
+  --continuation-policy same_agent_non_delivery \
+  --text "[P2] 每周扫描仓库公开提及，分类并更新采纳清单"
+```
+
+Heartbeat automation 会在到期时拾起这个 monitor。每次运行把 evidence 写回
+同一条 todo；material 变化生成跟进 todo，无变化时保持 quiet no-op，不硬推。
+
+### 5.4 启用 issue→PR 自动化
+
+从已接入的宿主 agent 指向一条公开 issue：
+
+```text
+/loopx Fix https://github.com/owner/repo/issues/123
+```
+
+能力会构建 feasibility、仓库上下文、reviewer、validation 与 PR lifecycle
+packet，并给出一条明确路线：`fix_pr` / `comment_only` / `triage_only`。
+宿主 agent 只有在 LoopX 状态记录了该权限且仓库策略允许时才能创建/更新
+PR；merge 始终是独立决策，除非显式授权。
+
+### 5.5 可选内容运营管线
+
+创作者/运营工作流先拿 source map，再投影 item 队列：
+
+```bash
+loopx value-connectors source-map --format json
+loopx content-ops queue-status --item-json path/to/item.json --format json
+```
+
+item 走 source → angle → draft → feedback → publish gate → readback，
+发布前始终被显式 owner 决策挡住。
+
+## 6. 可复用 Playbook
 
 1. 每周：扫描公开提及，通过 PR 更新采纳清单。
 2. 每条进入的 issue/PR：分类、打 tag、路由；可修复的 issue 走 issue-fix
@@ -146,7 +230,7 @@ fork 与衍生评估按计划执行。对每个有价值的来源，在作者自
 5. 每个社媒想法：建 public-safe source map，走 content-ops 管线，owner
    审批后发布，再回读。
 
-## 6. 证据索引
+## 7. 证据索引
 
 - 生态采纳清单：[`ecosystem-adoption.md`](ecosystem-adoption.zh-CN.md)
 - TypeScript 迁移 RFC：issue
