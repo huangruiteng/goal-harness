@@ -20,6 +20,13 @@ the order of the `--item-json` inputs; windows live in item approval and deliver
 intent records. See
 [`content_ops_queue_projection_v0`](../../reference/protocols/content-ops-queue-v0.md).
 
+The built-in layout template library moves reusable presentation rules out of
+writing skills. `template-list` and `template-show` expose four generic visual
+systems; `layout-plan` records typed page roles before
+rendering; `layout-check` rejects sparse, overcrowded, overflowing, colliding,
+or role-incomplete page sets. See
+[`content_ops_layout_plan_v0`](../../reference/protocols/content-ops-layout-v0.md).
+
 ## Implemented Surface
 
 | Layer | Current path |
@@ -28,6 +35,7 @@ intent records. See
 | CLI entry | `loopx content-ops ...` |
 | Protocol docs | `docs/reference/protocols/content-ops-surface-v0.md` |
 | Queue projection | `docs/reference/protocols/content-ops-queue-v0.md` |
+| Layout contract | `docs/reference/protocols/content-ops-layout-v0.md` |
 | Smoke | `examples/content-ops-*-smoke.py` |
 
 ## Safe Defaults
@@ -40,6 +48,7 @@ intent records. See
 - Revising approved content invalidates the approval and any delivery intent.
 - Provider delivery and readback receipts must match the approved revision and
   digest; the lifecycle helper performs no external write.
+- Layout acceptance never implies content approval or publishing authority.
 
 ## Connector-First Ops Pattern
 

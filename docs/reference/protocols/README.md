@@ -76,6 +76,7 @@ scanning a chronological list.
 - [`x_public_channel_ops_v0`](x-public-channel-ops-v0.md): X public channel operations v0
 - [`content_ops_item_v0`](content-ops-item-lifecycle-v0.md): provider-neutral content item lifecycle v0
 - [`content_ops_queue_projection_v0`](content-ops-queue-v0.md): read-only managed content queue projection v0
+- [`content_ops_layout_plan_v0`](content-ops-layout-v0.md): typed content layout plan, template library, and acceptance check v0
 
 ## Quality, Review, And Release
 
