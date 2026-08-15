@@ -4,7 +4,7 @@
 
 <img src="docs/assets/loopx-social-preview.png" alt="LoopX loop engineering social preview banner" width="560">
 
-**The open, provider-neutral, stateful control plane for long-running agents.**
+**The open, provider-neutral, stateful control plane for long-horizon agents.**
 
 <sub>Runs on top of any agent harness — Codex App, Claude Code, Cursor, dsh, or your own — providing long-horizon state, semantic decisions, governance, recovery, and human-agent collaboration. Objectives, gates, todos, evidence, quota, and handoffs stay stable while the harness executes bounded turns.</sub>
 
@@ -27,7 +27,7 @@ decisions about what happens next, governance, recovery, and human-agent
 collaboration that keep long-running work reviewable, restartable, and easier
 to hand off across turns, tools, and agents.
 
-**Loop engineering for long-running AI agents and peer agent teams.**
+**Loop engineering for long-horizon AI agents and peer agent teams.**
 
 > Keep the loop moving. Keep the judgment human.
 
