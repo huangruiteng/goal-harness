@@ -47,11 +47,15 @@ RUNTIME_EXECUTION_ROUTING_RULE = (
     "Normal turns use CLI `interaction_contract`; use `loopx-project` for "
     "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
 )
-CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE = """
-
-Native Codex `/goal` owns its blocked state. At the matching
-`scheduler_hint.unchanged_poll` limit, rerun quota once. If the same blocking
-condition remains for the third consecutive Goal turn and no meaningful progress
-is possible, call `update_goal` with `status=blocked`. This stops native Goal
-continuation without spending or completing LoopX. Only user `/goal resume`
-reactivates it; rerun quota after resume."""
+HOST_LOOP_QUOTA_DISPATCH_RULE = (
+    "Run quota; execute `interaction_contract` next—no detours."
+)
+HOST_LOOP_TODO_CLOSEOUT_RULE = (
+    "Nontrivial done -> successor todo or explicit no-follow-up."
+)
+CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE = (
+    "\n\nNative Codex `/goal` owns blocked state. Recheck quota at the "
+    "`scheduler_hint.unchanged_poll` limit. Third identical blocked turn with no "
+    "progress: call `update_goal` with `status=blocked`; no spend or LoopX "
+    "completion. Only user `/goal resume` reactivates it; rerun quota after resume."
+)

@@ -10,6 +10,8 @@ from .rules import (
     DEFAULT_PERMISSION_RULE,
     HEARTBEAT_NOTIFICATION_RULE_SHORT,
     HEARTBEAT_VISION_WRITEBACK_RULE_SHORT,
+    HOST_LOOP_QUOTA_DISPATCH_RULE,
+    HOST_LOOP_TODO_CLOSEOUT_RULE,
     RUNTIME_CAPABILITY_PROJECTION_THIN_RULE,
     RUNTIME_EXECUTION_ROUTING_RULE,
     SCHEDULER_HINT_APPLICATION_RULE,
@@ -17,6 +19,25 @@ from .rules import (
     SCHEDULER_HINT_THIN_RULE,
     USER_TODO_FINAL_MESSAGE_RULE,
 )
+
+
+def _render_compact_policy_tail(
+    *,
+    material_queue_rule: str,
+    permission_rule: str,
+    include_default_permission: bool = False,
+) -> str:
+    parts = [
+        "No learning queue unless asked."
+        if material_queue_rule == DEFAULT_MATERIAL_QUEUE_RULE
+        else material_queue_rule
+    ]
+    if permission_rule != DEFAULT_PERMISSION_RULE:
+        parts.append(permission_rule)
+    elif include_default_permission:
+        parts.append("No permission asks in a trusted session.")
+    return " ".join(parts)
+
 
 def render_heartbeat_task_body(
     *,
@@ -433,11 +454,10 @@ def render_visible_goal_task_body(
         goal_id=goal_id,
         active_state=active_state,
         host_preamble=(
-            "in this visible\nCodex `/goal` task. This is an interactive goal "
-            "loop, not a heartbeat automation:\ndo not create/update an "
-            "automation, apply RRULE cadence, or invent `LOOPX_TURN`."
+            "in this visible Codex `/goal`. It is interactive, not a heartbeat "
+            "automation: no automation/RRULE/`LOOPX_TURN`."
         ),
-        completion_subject="visible\nGoal",
+        completion_subject="visible Goal",
         pr_review_pre_quota_command=pr_review_pre_quota_command,
         quota_guard_command=quota_guard_command,
         quota_spend_command=quota_spend_command,
@@ -479,10 +499,10 @@ def render_traex_visible_goal_task_body(
         goal_id=goal_id,
         active_state=active_state,
         host_preamble=(
-            "in this visible\nTraeX `/goal` task. The visible TraeX Goal owns "
-            "interactive continuation."
+            "in this visible\nTraeX `/goal` task; its Goal owns interactive "
+            "continuation."
         ),
-        completion_subject="visible\nGoal",
+        completion_subject="visible Goal",
         pr_review_pre_quota_command=pr_review_pre_quota_command,
         quota_guard_command=quota_guard_command,
         quota_spend_command=quota_spend_command,
@@ -513,41 +533,42 @@ def _render_goal_task_body(
         if pr_review_pre_quota_command
         else ""
     )
+    policy_tail = _render_compact_policy_tail(
+        material_queue_rule=material_queue_rule,
+        permission_rule=permission_rule,
+        include_default_permission=True,
+    )
     return f"""Advance LoopX goal `{goal_id}` from `{active_state}` {host_preamble}
 {scope_block}
 
 {RUNTIME_EXECUTION_ROUTING_RULE}
 
-At every continuation, inspect LoopX state/status and the repository. {prequota_block}Run
-`{quota_guard_command}` and follow its `interaction_contract`.
+At each continuation inspect LoopX state/status/repo. {prequota_block}{HOST_LOOP_QUOTA_DISPATCH_RULE}
+Guard: `{quota_guard_command}`.
 
-If `should_run=false`, do no delivery work and do not spend quota. Surface only a
-concrete user action/gate in Chinese when the contract requires `NOTIFY`; otherwise
-wait quietly.{host_wait_rule}
+`should_run=false`: no delivery/spend; surface a concrete Chinese action/gate only
+for `user_channel.notify=NOTIFY`, otherwise wait.{host_wait_rule}
 
-If `should_run=true`, choose the highest-priority in-scope unblocked agent todo.
-Honor claims/leases, blocker-push and recovery obligations. Before dependent work,
-persist material scope/acceptance/non-goal changes in current evidence and the next
-todo. Complete one bounded segment inside this same Goal; a segment is progress, not
-a new Goal boundary. Keep this activation across phases, steers, and code revisions
-until terminal; do not create a successor host Goal merely to continue the
-registered objective. Validate the segment; write public-safe evidence, critic, and
-next action back to LoopX. A non-trivial completion needs a successor todo or an
-explicit no-follow-up rationale. After validated writeback, replace all three
-accountable-refresh placeholders with this turn's actual classification, batch
-scale, and outcome; never default or upgrade them to
-`multi_surface` / `outcome_progress`. Then refresh the accountable progress
-record before spending:
+`should_run=true`: take the highest-priority in-scope unblocked agent todo; honor
+claims/leases and blocker-push/recovery obligations. Before dependencies, persist changed
+scope/acceptance/non-goal evidence and next todo. One bounded segment stays in this
+same Goal: a segment is progress, not a new Goal boundary. Reuse this activation
+across phases/revisions until terminal; do not create a successor host Goal merely to
+continue. Validate/write public-safe evidence, critic, and next action.
+{HOST_LOOP_TODO_CLOSEOUT_RULE}
+
+Use actual classification/scale/outcome only; never default or upgrade them to
+`multi_surface` / `outcome_progress`; refresh the accountable progress record before
+spending:
 `{progress_refresh_state_command}`. Then spend exactly once against that refresh:
 `{quota_spend_command}`.
 
-Do not spend for gates, waits, dry runs, failed preflight, no-op inspection, or
-duplicate accounting. Stop for private/company material, credentials, destructive
-git, unauthorized production, or repository review rules. Complete this {completion_subject} only when LoopX reports terminal success with no follow-up; otherwise keep the
-current gate or next safe action explicit.
+No spend: gate/wait/dry-run/preflight failure/no-op/duplicate. Stop: private/company
+material, credentials, destructive git, unauthorized production, or repo rules.
+Complete this {completion_subject} only on LoopX terminal success with no follow-up; else
+keep the gate or next action explicit.
 
-{material_queue_rule}
-{permission_rule}"""
+{policy_tail}"""
 def render_ark_managed_agent_goal_task_body(
     *,
     goal_id: str,
@@ -580,9 +601,8 @@ def render_ark_managed_agent_goal_task_body(
         goal_id=goal_id,
         active_state=active_state,
         host_preamble=(
-            "in one Goal\nactivation. The Goal runtime owns continuation and "
-            "inner iterations. This is a\ngoal loop, not automation; do not "
-            "invoke LoopX Turn."
+            "in one Goal activation. The Goal runtime owns continuation and inner "
+            "iterations. This is a goal loop, not automation; do not invoke LoopX Turn."
         ),
         completion_subject="Goal",
         pr_review_pre_quota_command=pr_review_pre_quota_command,
@@ -613,11 +633,9 @@ def render_thin_heartbeat_task_body(
     brief_prompt_command: str,
     thin_prompt_command: str,
 ) -> str:
-    permission_tail = "" if permission_rule == DEFAULT_PERMISSION_RULE else f" {permission_rule}"
-    material_sentence = (
-        "Do not consume learning queue unless asked."
-        if material_queue_rule == DEFAULT_MATERIAL_QUEUE_RULE
-        else material_queue_rule
+    policy_tail = _render_compact_policy_tail(
+        material_queue_rule=material_queue_rule,
+        permission_rule=permission_rule,
     )
     scope_sentence = f"\n{agent_scope_instruction}" if agent_scope_instruction else ""
     quota_guard_instruction = (
@@ -644,7 +662,7 @@ def render_thin_heartbeat_task_body(
 {RUNTIME_EXECUTION_ROUTING_RULE}
 {scope_sentence}
 
-Run quota; execute `interaction_contract` next—no detours.
+{HOST_LOOP_QUOTA_DISPATCH_RULE}
 `LOOPX_TURN=<current_time_iso>`; reuse.
 {pr_review_pre_quota_instruction}{quota_guard_instruction}.
 {HEARTBEAT_NOTIFICATION_RULE_SHORT}
@@ -656,8 +674,8 @@ Done->todo/rationale; guard receipt; 2 stalls->replan.
 
 P0 blocked: safe P1/P2; monitor quiet/no-spend.
 
-No project branches; {material_sentence} Stop: private material, credentials,
-destructive git, unauthorized prod{permission_tail}"""
+No project branches; {policy_tail} Stop: private material, credentials,
+destructive git, unauthorized prod."""
 def render_heartbeat_generator_inputs_markdown(payload: dict[str, Any]) -> str:
     interface_budget = payload.get("interface_budget") if isinstance(payload.get("interface_budget"), dict) else {}
     lines = [
