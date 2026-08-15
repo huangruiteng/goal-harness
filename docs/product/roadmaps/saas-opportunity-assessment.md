@@ -86,6 +86,129 @@ A managed offering is worth building only if it passes all four tests:
 The fourth test matters most. A dashboard with no measurable effect on long
 running work is an interface feature, not a durable SaaS business.
 
+## Commercial Comparables: Value Capture, Not Stars
+
+Public evidence checked on 2026-08-15 shows four different value-capture
+models, not four equivalent startups. GitHub stars establish distribution and
+category attention. They do not establish revenue, retention, gross margin, or
+enterprise willingness to pay.
+
+| Project | Public commercial evidence | Value-capture path | Current assessment | Lesson for LoopX |
+| --- | --- | --- | --- | --- |
+| Letta | The company [raised a $10M seed round in 2024](https://www.prnewswire.com/news-releases/berkeley-ai-research-lab-spinout-letta-raises-10m-seed-financing-led-by-felicis-to-build-ai-with-memory-302257004.html). Its current [API plan](https://docs.letta.com/pricing) charges a base subscription, active-agent usage, tool execution, and model usage; team and enterprise tiers add sharing, access control, SSO, and support. A [vendor case study](https://www.letta.com/case-studies/bilt/) reports more than one million agents in production at Bilt. | Hosted stateful agents, execution, collaboration, and enterprise control | Real pricing and production signals around persistent agent state. Public audited ARR is not available, and the Bilt evidence is vendor-reported. | Durable state can be a billable primitive when it is operated continuously and tied to production workloads. |
+| Mastra | Mastra [announced a $22M Series A and $35M total funding in April 2026](https://mastra.ai/blog/series-a). Its [pricing](https://mastra.ai/pricing) combines a $250/month team tier with metered observability, compute, memory, storage, retention, enterprise support, and a flat-fee self-hosted enterprise option. | Open framework plus hosted platform, operations, and enterprise deployment | The strongest public standalone platform signal in this comparison. Funding, named customer stories, and packaging are meaningful, but they are not disclosed revenue. | An open developer framework can expand into a managed operations surface if the paid layer owns reliability, retention, evaluation, and delivery. |
+| AgentScope | AgentScope is an Apache-2.0 project authored by the [Alibaba Tongyi Lab SysML team](https://github.com/agentscope-ai/agentscope/blob/main/pyproject.toml), not a separately disclosed startup. It deploys into Alibaba Cloud surfaces, while [AgentRun](https://www.alibabacloud.com/help/en/functioncompute/what-is-agentrun) sells serverless runtime, sandbox, model governance, observability, and cost management and explicitly integrates AgentScope. | Cloud consumption, ecosystem pull-through, and platform retention | Potentially high strategic value inside Alibaba Cloud, but no meaningful standalone AgentScope valuation or revenue unit is publicly separable. | A widely adopted OSS framework can create substantial platform value while most direct economic capture accrues to the surrounding cloud. |
+| CAMEL / Eigent | [CAMEL-AI](https://www.camel-ai.org/about) creates multi-agent research and category awareness. The related Eigent application [reports more than $250K revenue within three months of launch](https://www.eigent.ai/about), and lists [annual-plan equivalents of $19.90 and $99.99 per month plus enterprise deployment](https://www.eigent.ai/pricing). Its terms also allow a separate [commercial production license and professional services](https://www.eigent.ai/terms-of-use). | End-user application subscriptions, enterprise license, private deployment, and services | Early but concrete application monetization. The revenue number is company-reported, short-window, and not proof of durable recurring revenue. | Research and OSS attention can convert through an opinionated application, but the application layer has a different sales motion and margin structure from infrastructure. |
+
+Three conclusions follow.
+
+First, commercial value does not follow the star ranking. Mastra currently has
+the strongest public capital and packaged-platform signal; Letta has the
+clearest production case for stateful agents; AgentScope may create large
+embedded cloud value without becoming a standalone company; CAMEL converts
+research attention through a separate application product.
+
+Second, the recurring pattern is open distribution followed by a scarce paid
+surface: operated state, observability and deployment, cloud consumption, or a
+packaged domain application. Open source is compatible with revenue when the
+paid product removes operational and organizational burden rather than hiding
+the protocol.
+
+Third, LoopX's architectural position is an upper-layer combination of the
+first two patterns: Letta-like durable state plus Mastra-like managed
+operations, generalized across heterogeneous runtimes. The differentiated
+product is not a larger framework. It is the semantic control plane that keeps
+goal, authority, planning, supervision, evidence, recovery, and handoff
+coherent across agents and runs. The comparison validates the monetization
+shape; LoopX still has to validate repeat demand for this distinct layer.
+
+## Vertical Digital Employees And Digital Teams
+
+The application category is no longer hypothetical, but it is not yet a
+mature autonomous-labor market either.
+
+- BNY's [2025 annual report](https://www.bny.com/content/dam/bnymellon/documents/pdf/investor-relations/annual-report-2025.pdf)
+  reports 160 enterprise AI solutions in production and 134 "digital
+  employees," defined as multi-agent systems operating autonomously alongside
+  human colleagues. This is direct evidence that a regulated enterprise can
+  make the digital-employee concept an organizational unit rather than a demo.
+- Microsoft's [2025 Work Trend Index](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/final/en-us/microsoft-product-and-services/ai/pdf/executive-summary-work-trend-index-annual-report.pdf),
+  based on 31,000 workers in 31 countries, reports that 45% of leaders treat
+  expanding capacity with digital labor as a near-term priority and 46% say
+  their companies already use agents to automate workflows or processes. This
+  measures intent and self-reported adoption, not verified production ROI.
+- McKinsey's [2025 global survey](https://www.mckinsey.com/capabilities/quantumblack/our-insights/the-state-of-ai?lang=en)
+  is the useful counterweight: 23% report scaling an agentic system somewhere
+  and another 39% are experimenting, yet no individual function exceeds 10%
+  scaling and enterprise-wide EBIT impact remains uncommon. The gap is not
+  awareness; it is productionization and workflow redesign.
+- A field study of 5,179 customer-support workers found a [14% average
+  productivity increase](https://www.nber.org/papers/w31161) from generative AI
+  assistance. This validates task-level economics, especially for less
+  experienced workers, but it studied an assistant rather than an autonomous
+  digital employee.
+- AWS made [multi-agent collaboration generally available](https://aws.amazon.com/blogs/machine-learning/amazon-bedrock-announces-general-availability-of-multi-agent-collaboration/)
+  in 2025 and documents supervisor-led use across finance, retail, fraud,
+  support, healthcare, and agriculture. This proves that multi-agent
+  orchestration is becoming a platform primitive; vendor examples alone do
+  not prove that every workflow benefits from multiple agents.
+- Gartner's [failure forecast](https://www.gartner.com/en/newsroom/press-releases/2025-06-25-gartner-predicts-over-40-percent-of-agentic-ai-projects-will-be-canceled-by-end-of-2027)
+  predicts that more than 40% of agentic projects will be canceled by the end
+  of 2027 because of cost, unclear value, or weak risk controls. The same note
+  predicts agentic functions in 33% of enterprise applications by 2028. The
+  market can grow rapidly while undifferentiated projects fail rapidly.
+
+### The Product Unit
+
+A vertical digital employee should not mean "a prompt with a job title." It is
+a governed role contract with:
+
+- durable identity and a named human outcome owner;
+- bounded tools, data, authority, quota, and escalation policy;
+- explicit goals, plans, acceptance criteria, and service expectations;
+- evidence, decision, and action history that can be reviewed later;
+- recovery and handoff behavior when a run, model, machine, or operator
+  changes.
+
+A digital team is several such role contracts sharing goals and evidence while
+retaining distinct authority. It adds explicit claims and handoffs, team-level
+budgets and acceptance, and supervisor scheduling, recovery, and replanning.
+The supervisor coordinates recorded authority; it does not become a hidden
+executive.
+
+This definition maps directly to LoopX's semantic contracts. A domain pack can
+package role-specific tools, evaluation, review, and escalation. The open
+Kernel keeps the state and authority protocol portable. A paid Managed
+Semantic Control Plane keeps the employee or team continuously available,
+recoverable, observable, and governed.
+
+### Application Outlook And Wedge Order
+
+The ratings below are strategic inferences from the public evidence above,
+not market-size forecasts.
+
+| Workflow | Market readiness | LoopX fit | Why it can pay | Primary gate | Recommended LoopX position |
+| --- | --- | --- | --- | --- | --- |
+| Customer and employee service | High | Medium | High task volume, clear resolution, latency, deflection, and quality metrics | Real-time latency, safe escalation, and existing platform competition | Integrate as the long-running evidence, policy, and recovery layer rather than compete first as a contact-center runtime |
+| Software engineering, SRE, and IT operations | High | Very high | Work spans repositories, incidents, reviews, machines, and multiple days; failed continuation is expensive | Reliable acceptance, environment isolation, and human merge or production authority | First-party design-partner wedge for Team Cloud and Managed Control Plane |
+| Research, experimentation, and lab operations | Medium-high | Very high | Hypotheses, negative results, evidence lineage, quotas, and repeated experiments naturally require durable semantic state | Domain evaluation and connection to instruments, datasets, or compute | First-party wedge for research groups and technical startups; sell reproducibility, supervision, and recovery |
+| Finance, procurement, order-to-cash, and other back-office operations | Medium-high | High | Multi-system workflows have measurable cycle time, exception rate, and audit cost | ERP integration, permissions, privacy, and approval boundaries | BYOC design partners with narrow workflows and explicit human gates |
+| Legal, healthcare, and regulated professional work | Medium | High over time | High review and compliance cost make evidence and authority valuable | Liability, domain accuracy, data residency, and professional sign-off | Human-led digital team first; enter through governed review and evidence packs, not autonomous final decisions |
+| Cross-functional digital team | Early | Highest destination | Several specialized agents can own a persistent outcome instead of isolated tasks | Cross-role authority, conflict handling, shared acceptance, and accountable escalation | Long-term product destination after single-role recurrence and recovery are proven |
+
+The near-term sales message should therefore be **governed capacity for one
+valuable workflow**, not "replace a department with AI." The initial contract
+can combine a workspace or workflow fee, active managed employees, retained
+evidence, supervisor work, and enterprise delivery. Outcome-linked pricing may
+be added only where the outcome is attributable and auditable.
+
+The order also matters. Software, SRE, research, and technical operations are
+closest to LoopX's existing community and expose the exact long-horizon
+failures its control plane solves. Back-office and regulated workflows can
+produce higher contract values, but should follow through BYOC and domain
+partners after authority, evidence, deletion, and recovery behavior are
+proven. Digital teams are the expansion path, not the first SKU.
+
 ## Product Ladder
 
 The following directions are not four independent SaaS products. They are an
@@ -274,16 +397,23 @@ isolation, support load, and unit economics are proven.
 Each phase is independently shippable and creates evidence for the next. No
 phase requires betting the open-source project on the full hosted end state.
 
-## Market Reference Points
+## Evidence Boundary
 
-- [Letta pricing](https://www.letta.com/pricing) demonstrates active-agent,
-  execution, team, and enterprise metering around persistent agent state.
-- [Mastra pricing](https://mastra.ai/pricing) demonstrates usage, retention,
-  team, and enterprise packaging around an open agent development platform.
+The comparisons in this note intentionally separate different kinds of public
+evidence:
 
-These references show that buyers can understand hosted state, operations, and
-governance as paid surfaces. They do not prove demand for LoopX's distinct
-semantic control-plane contract.
+- financing validates investor conviction and operating runway, not product
+  retention or revenue;
+- a published price validates a monetization surface, not the number of paying
+  customers;
+- vendor case studies validate named deployments as reported by the vendor and
+  customer, not independently audited ROI;
+- enterprise surveys validate attention and stated adoption, not demand for
+  LoopX's distinct semantic control-plane contract.
+
+The evidence is strong enough to justify design-partner work and a measured
+commercial thesis. It is not strong enough to skip LoopX's own recurrence,
+outcome, willingness-to-pay, and unit-economics gates.
 
 ## Relation To Existing Docs
 
