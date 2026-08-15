@@ -636,6 +636,14 @@ def handle_content_ops_command(
             "mode": "content-ops",
             "error": str(exc),
         }
-        renderer = render_content_ops_private_connector_gate_markdown
+        if args.content_ops_command in {
+            "template-list",
+            "template-show",
+            "layout-plan",
+            "layout-check",
+        }:
+            renderer = render_layout_packet_markdown
+        else:
+            renderer = render_content_ops_private_connector_gate_markdown
     print_payload(payload, output_format(args), renderer)
     return 0 if payload.get("ok") else 1

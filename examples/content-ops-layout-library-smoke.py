@@ -76,6 +76,16 @@ def main() -> int:
     assert template["template"]["canvas"] == {"width": 1440, "height": 1920}
     assert template["template"]["density"]["default_min"] == 0.66
 
+    missing_template = _run(
+        "content-ops",
+        "template-show",
+        "--template-id",
+        "missing-template",
+        check=False,
+    )
+    assert missing_template["ok"] is False, missing_template
+    assert "unknown content-ops layout template" in missing_template["error"]
+
     plan_packet = _run(
         "content-ops",
         "layout-plan",
