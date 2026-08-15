@@ -1,0 +1,68 @@
+{
+  "schema_version": "content_ops_layout_template_catalog_v0",
+  "templates": [
+    {
+      "template_id": "light-serif-longform",
+      "title": "Light serif longform",
+      "intent": "Dense analytical stories with a calm editorial rhythm and one argument per page.",
+      "canvas": {"width": 1440, "height": 1920},
+      "safe_area": {"top_ratio": 0.08, "bottom_ratio": 0.08},
+      "density": {
+        "default_min": 0.66,
+        "default_max": 0.94,
+        "role_overrides": {
+          "cover": {"min": 0.48, "max": 0.82},
+          "closing": {"min": 0.56, "max": 0.88}
+        }
+      },
+      "default_required_roles": ["cover", "argument", "evidence"],
+      "default_closing_role": "closing",
+      "page_archetypes": ["editorial-cover", "argument-stack", "evidence-notes", "mechanism-flow", "synthesis-close"],
+      "style_tokens": {
+        "background": "#F4F0E7",
+        "text": "#171717",
+        "muted": "#5D5A54",
+        "accent": "#B14B35",
+        "heading_family": "serif",
+        "body_family": "sans-serif",
+        "decoration": "rules-and-indexes"
+      }
+    },
+    {
+      "template_id": "monochrome-editorial",
+      "title": "Monochrome editorial",
+      "intent": "High-contrast technical commentary with restrained diagrams and evidence labels.",
+      "canvas": {"width": 1440, "height": 1800},
+      "safe_area": {"top_ratio": 0.07, "bottom_ratio": 0.07},
+      "density": {"default_min": 0.62, "default_max": 0.93, "role_overrides": {"cover": {"min": 0.44, "max": 0.80}}},
+      "default_required_roles": ["cover", "argument", "evidence"],
+      "default_closing_role": "closing",
+      "page_archetypes": ["type-cover", "numbered-argument", "source-ledger", "comparison-grid", "closing-statement"],
+      "style_tokens": {"background": "#F8F8F5", "text": "#111111", "muted": "#666666", "accent": "#111111", "heading_family": "sans-serif", "body_family": "sans-serif", "decoration": "hairlines-and-numerals"}
+    },
+    {
+      "template_id": "product-brief",
+      "title": "Product brief",
+      "intent": "Compact product reasoning with explicit problem, mechanism, boundary, and takeaway blocks.",
+      "canvas": {"width": 1440, "height": 1800},
+      "safe_area": {"top_ratio": 0.07, "bottom_ratio": 0.07},
+      "density": {"default_min": 0.60, "default_max": 0.91, "role_overrides": {"cover": {"min": 0.42, "max": 0.78}, "boundary": {"min": 0.52, "max": 0.88}}},
+      "default_required_roles": ["cover", "mechanism", "boundary"],
+      "default_closing_role": "closing",
+      "page_archetypes": ["product-cover", "problem-mechanism", "three-part-brief", "boundary-box", "decision-close"],
+      "style_tokens": {"background": "#F5F3ED", "text": "#181818", "muted": "#60605A", "accent": "#D4633A", "heading_family": "sans-serif", "body_family": "sans-serif", "decoration": "flat-blocks"}
+    },
+    {
+      "template_id": "control-plane-hybrid",
+      "title": "Control-plane hybrid",
+      "intent": "Technical narratives that combine prose, state transitions, gates, and executable-looking artifacts.",
+      "canvas": {"width": 1440, "height": 1800},
+      "safe_area": {"top_ratio": 0.07, "bottom_ratio": 0.07},
+      "density": {"default_min": 0.64, "default_max": 0.93, "role_overrides": {"cover": {"min": 0.45, "max": 0.80}, "mechanism": {"min": 0.58, "max": 0.90}}},
+      "default_required_roles": ["cover", "mechanism", "evidence", "boundary"],
+      "default_closing_role": "closing",
+      "page_archetypes": ["system-cover", "state-lanes", "effect-program", "evidence-ledger", "operator-close"],
+      "style_tokens": {"background": "#111418", "text": "#F4F0E8", "muted": "#9DA4AB", "accent": "#F08A5D", "heading_family": "sans-serif", "body_family": "sans-serif", "decoration": "state-lines-and-code"}
+    }
+  ]
+}

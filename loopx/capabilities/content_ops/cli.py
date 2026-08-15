@@ -18,6 +18,13 @@ from .item_lifecycle import (
     render_content_ops_item_packet_markdown,
     render_content_ops_queue_status_markdown,
 )
+from .layout import (
+    build_layout_plan_packet,
+    build_layout_template_catalog_packet,
+    build_layout_template_packet,
+    check_layout_packet,
+    render_layout_packet_markdown,
+)
 from .surface import (
     build_content_ops_chatview_report_packet,
     build_content_ops_exploration_plan_packet,
@@ -61,6 +68,19 @@ def _parse_path_counts(values: list[str]) -> dict[str, int]:
         path, raw_count = value.split("=", 1)
         counts[path.strip()] = int(raw_count.strip())
     return counts
+
+
+def _parse_layout_pages(page_values: list[str]) -> list[dict[str, object]]:
+    pages: list[dict[str, object]] = []
+    for value in page_values:
+        parts = value.split(":", 2)
+        if len(parts) != 3 or not all(part.strip() for part in parts):
+            raise ValueError("--page must use PAGE_ID:ROLE:SUBJECT_ID")
+        page_id, role, subject_id = (part.strip() for part in parts)
+        pages.append(
+            {"page_id": page_id, "role": role, "subject_id": subject_id}
+        )
+    return pages
 
 
 def register_content_ops_commands(
@@ -417,6 +437,57 @@ def register_content_ops_commands(
         default="2026-08-10T00:00:00Z",
         help="Public-safe generated_at timestamp for the queue projection.",
     )
+    template_list_parser = content_ops_sub.add_parser(
+        "template-list",
+        help="List the built-in public-safe content layout template library.",
+    )
+    add_subcommand_format(template_list_parser)
+    template_show_parser = content_ops_sub.add_parser(
+        "template-show",
+        help="Show one built-in content layout template and its acceptance rules.",
+    )
+    add_subcommand_format(template_show_parser)
+    template_show_parser.add_argument("--template-id", required=True)
+    layout_plan_parser = content_ops_sub.add_parser(
+        "layout-plan",
+        help="Build a typed page-role plan before rendering content assets.",
+    )
+    add_subcommand_format(layout_plan_parser)
+    layout_plan_parser.add_argument("--item-id", required=True)
+    layout_plan_parser.add_argument("--template-id", required=True)
+    layout_plan_parser.add_argument(
+        "--page",
+        action="append",
+        required=True,
+        help="Planned page as PAGE_ID:ROLE:SUBJECT_ID; repeat in reading order.",
+    )
+    layout_plan_parser.add_argument(
+        "--required-role",
+        action="append",
+        default=[],
+        help="Required typed role; repeat to override the template defaults.",
+    )
+    layout_plan_parser.add_argument(
+        "--closing-role",
+        default=None,
+        help="Required role for the final page; defaults to the template rule.",
+    )
+    layout_plan_parser.add_argument("--generated-at", required=True)
+    layout_check_parser = content_ops_sub.add_parser(
+        "layout-check",
+        help="Check rendered-page measurements against a typed layout plan.",
+    )
+    add_subcommand_format(layout_check_parser)
+    layout_check_parser.add_argument(
+        "--plan-json",
+        required=True,
+        help="Path to content_ops_layout_plan_v0 or its packet wrapper.",
+    )
+    layout_check_parser.add_argument(
+        "--measurement-json",
+        required=True,
+        help="Path to provider-produced content_ops_layout_measurement_v0.",
+    )
 
 
 def handle_content_ops_command(
@@ -527,6 +598,28 @@ def handle_content_ops_command(
                 generated_at=args.generated_at,
             )
             renderer = render_content_ops_queue_status_markdown
+        elif args.content_ops_command == "template-list":
+            payload = build_layout_template_catalog_packet()
+            renderer = render_layout_packet_markdown
+        elif args.content_ops_command == "template-show":
+            payload = build_layout_template_packet(args.template_id)
+            renderer = render_layout_packet_markdown
+        elif args.content_ops_command == "layout-plan":
+            payload = build_layout_plan_packet(
+                item_id=args.item_id,
+                template_id=args.template_id,
+                pages=_parse_layout_pages(args.page),
+                required_roles=args.required_role,
+                closing_role=args.closing_role,
+                generated_at=args.generated_at,
+            )
+            renderer = render_layout_packet_markdown
+        elif args.content_ops_command == "layout-check":
+            payload = check_layout_packet(
+                _load_json_object(args.plan_json),
+                _load_json_object(args.measurement_json),
+            )
+            renderer = render_layout_packet_markdown
         else:
             raise ValueError(
                 "content-ops requires `preview`, `exploration-plan`, "
@@ -534,7 +627,8 @@ def handle_content_ops_command(
                 "`observe-public-handle`, `project-private-connector-gate`, "
                 "`aggregate-packets`, `project-chatview-report`, or "
                 "`walkthrough-artifact`, `item-create`, `item-transition`, "
-                "or `queue-status`"
+                "`queue-status`, `template-list`, `template-show`, "
+                "`layout-plan`, or `layout-check`"
             )
     except Exception as exc:
         payload = {

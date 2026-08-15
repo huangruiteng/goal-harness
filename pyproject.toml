@@ -37,6 +37,7 @@ include = ["loopx*"]
 
 [tool.setuptools.package-data]
 "loopx.capabilities.auto_research" = ["worker_skill/SKILL.md"]
+"loopx.capabilities.content_ops" = ["templates/*.json"]
 "loopx.extensions.lark" = ["extension.toml"]
 "loopx.extensions.openviking_periodic_report" = ["extension.toml"]
 "loopx.extensions.openviking_semantic_preference" = ["extension.toml"]
