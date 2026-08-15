@@ -330,6 +330,42 @@ def test_goal_hosts_share_narrow_runtime_skill_routing(
     assert "do not create a successor host Goal merely to continue" in task_body
 
 
+def test_goal_hosts_reuse_thin_dispatch_and_stay_compact() -> None:
+    shared_rules = (
+        "Run quota; execute `interaction_contract` next—no detours.",
+        "No learning queue unless asked.",
+    )
+    common = {
+        "goal_id": "goal-prompt-composition-fixture",
+        "thin": True,
+        "agent_id": "codex-main-control",
+        "agent_scopes": ["visible goal delivery lane"],
+        "registered_agents": ["codex-main-control"],
+    }
+    generic = build_heartbeat_prompt(
+        **common,
+        runtime_profile="codex_app_heartbeat",
+    )
+    goal_hosts = [
+        build_heartbeat_prompt(**common, runtime_profile="codex_app_ssh_goal"),
+        build_heartbeat_prompt(**common, runtime_profile="codex_cli"),
+        build_heartbeat_prompt(**common, runtime_profile="ark_managed_agent_goal"),
+        build_heartbeat_prompt(
+            **common,
+            runtime_profile="generic_cli",
+            visible_goal_host="traex-cli",
+        ),
+    ]
+
+    for rule in shared_rules:
+        assert rule in generic["task_body"]
+    for payload in goal_hosts:
+        for rule in shared_rules:
+            assert rule in payload["task_body"]
+        assert payload["interface_budget"]["budget_char_count"] <= 2_800
+        assert payload["interface_budget"]["within_budget"] is True
+
+
 def test_native_codex_goal_wait_rule_matches_blocked_resume_contract() -> None:
     ssh_body = build_heartbeat_prompt(
         goal_id="ssh-wait-fixture",

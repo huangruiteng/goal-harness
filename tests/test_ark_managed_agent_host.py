@@ -74,8 +74,7 @@ def test_goal_prompt_is_one_transport_independent_activation() -> None:
     assert "invoke LoopX Turn" in normalized
     assert "a segment is progress, not a new Goal boundary" in normalized
     assert (
-        "Keep this activation across phases, steers, and code revisions until "
-        "terminal"
+        "Reuse this activation across phases/revisions until terminal"
     ) in normalized
     assert "do not create a successor host Goal merely to continue" in normalized
     assert (
@@ -83,11 +82,11 @@ def test_goal_prompt_is_one_transport_independent_activation() -> None:
         "lifecycle/registry and `loopx-self-repair` for runtime/projection drift."
         in normalized
     )
-    assert "choose the highest-priority in-scope unblocked agent todo" in normalized
-    assert "Honor claims/leases, blocker-push and recovery obligations" in normalized
+    assert "take the highest-priority in-scope unblocked agent todo" in normalized
+    assert "claims/leases and blocker-push/recovery obligations" in normalized
     assert (
-        "Before dependent work, persist material scope/acceptance/non-goal changes "
-        "in current evidence and the next todo"
+        "Before dependencies, persist changed scope/acceptance/non-goal evidence "
+        "and next todo"
     ) in normalized
     assert "refresh the accountable progress record before spending" in normalized
 
