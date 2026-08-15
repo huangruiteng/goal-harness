@@ -70,6 +70,7 @@ a longer onboarding path.
 - [Contributor tasks](../CONTRIBUTOR_TASKS.md)
 - [Governance](../GOVERNANCE.md)
 - [Authors and contributors](../AUTHORS.md)
+- [Licensing and the v0.4.8 transition](project/licensing.md)
 - [Project history](project/history.md)
 - [Name and marks](../TRADEMARKS.md)
 

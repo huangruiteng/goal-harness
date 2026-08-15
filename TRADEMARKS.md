@@ -36,16 +36,18 @@ Please do not use the LoopX name or marks:
 - in a confusingly similar logo or visual identity that obscures who operates
   or maintains the offering.
 
-Forks may retain the notices required by the MIT License and may accurately
-state their relationship to LoopX. A materially modified distribution should
-use its own primary name and make the lack of official project endorsement
-clear.
+Forks must retain the notices required by the applicable software license and
+may accurately state their relationship to LoopX. A materially modified
+distribution should use its own primary name and make the lack of official
+project endorsement clear.
 
 ## Copyright License And Project Identity
 
-The [MIT License](LICENSE) grants copyright permissions for the code and
-documentation. It does not grant permission to misrepresent the source of a
-distribution or imply project endorsement.
+The [Apache License 2.0](LICENSE) grants copyright and patent permissions for
+the code and documentation subject to its terms. Historical MIT terms are
+preserved in [LICENSE-MIT](LICENSE-MIT). Neither software license grants
+permission to misrepresent the source of a distribution or imply project
+endorsement.
 
 For a proposed use that may look official, open a GitHub issue before launch.
 Do not put credentials, private evidence, or embargoed security details in that

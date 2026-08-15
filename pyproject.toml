@@ -8,8 +8,8 @@ version = "0.4.7"
 description = "A lightweight Loop Engineering control plane for long-running agent goals."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
-license-files = ["LICENSE"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "LICENSE-MIT"]
 authors = [{ name = "LoopX contributors" }]
 dependencies = []
 

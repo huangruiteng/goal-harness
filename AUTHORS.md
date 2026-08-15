@@ -29,10 +29,15 @@ in [GOVERNANCE.md](GOVERNANCE.md), not by authorship volume.
 
 ## Attribution And License
 
-LoopX is distributed under the [MIT License](LICENSE), with copyright held by
-LoopX contributors for their respective contributions. This attribution file
-does not transfer copyright, require copyright assignment, or alter the
-license.
+LoopX's unified open source core is distributed under the
+[Apache License 2.0](LICENSE) beginning with `v0.4.8`, with copyright held by
+LoopX contributors for their respective contributions. Releases through
+`v0.4.7` retain their original MIT terms, whose license text and copyright
+notice are preserved in [LICENSE-MIT](LICENSE-MIT). See the
+[licensing policy](docs/project/licensing.md) for the transition boundary.
+
+This attribution file does not transfer copyright, require copyright
+assignment, or alter either license.
 
 Corrections to creator or contributor attribution are welcome as a pull
 request with public evidence.

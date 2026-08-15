@@ -110,6 +110,15 @@ made.>
 detail with direct PR links. Repeat the persisted-state migration decision
 explicitly.>
 
+## Licensing
+
+<Include this group when the release changes licensing. For `v0.4.8`, state
+that the unified open source core moves to Apache-2.0, releases through
+`v0.4.7` remain MIT, the historical notice is retained, Apache-2.0 continues
+to permit commercial use, and the explicit patent framework supports future
+enterprise and ecosystem collaboration without manufacturing retroactive
+patent grants from historical MIT contributors. Link `docs/project/licensing.md`.>
+
 <!--
 Include this section only when the tag range contains eligible contributors
 other than @huangruiteng. Keep founder stewardship out of this community-only
@@ -208,6 +217,14 @@ loopx doctor
 ### 文档与兼容性
 
 <中文摘要与 PR 链接。>
+
+### 许可证
+
+<当版本改变许可证时镜像英文 Licensing。`v0.4.8` 必须明确：统一开源 core
+切换为 Apache-2.0；`v0.4.7` 及更早版本永久保持 MIT；保留历史 notice；
+Apache-2.0 不限制商业使用；显式专利框架服务于未来企业与生态协作，但不会让
+历史 MIT 贡献凭空产生追溯性的完整 Apache 专利授权。链接
+`docs/project/licensing.md`。>
 
 <!-- 英文存在 Community Contributors 时，保留同一人员、PR 和贡献范围。 -->
 
