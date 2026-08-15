@@ -2,8 +2,9 @@
 
 LoopX uses the Apache License 2.0 as the primary license for its unified open
 source core beginning with `v0.4.8`. The complete current license is in
-[`LICENSE`](../../LICENSE), and the attribution notices distributed with the
-project are in [`NOTICE`](../../NOTICE).
+[`LICENSE`](https://github.com/huangruiteng/loopx/blob/main/LICENSE), and the
+attribution notices distributed with the project are in
+[`NOTICE`](https://github.com/huangruiteng/loopx/blob/main/NOTICE).
 
 ## Version Boundary
 
@@ -12,9 +13,10 @@ project are in [`NOTICE`](../../NOTICE).
 - Beginning with `v0.4.8`, the unified LoopX open source core is distributed
   under Apache-2.0.
 - The previous MIT license text and its copyright notice are preserved
-  verbatim in [`LICENSE-MIT`](../../LICENSE-MIT). They continue to document
-  and govern the rights already granted for historical MIT releases and
-  portions first distributed under those terms.
+  verbatim in
+  [`LICENSE-MIT`](https://github.com/huangruiteng/loopx/blob/main/LICENSE-MIT).
+  They continue to document and govern the rights already granted for
+  historical MIT releases and portions first distributed under those terms.
 
 Changing the license of a current distribution does not revoke or narrow the
 permissions already granted for an earlier release. Users may continue to use
@@ -41,7 +43,8 @@ Unless a contributor explicitly states otherwise before submission, future
 contributions accepted into LoopX are submitted under Apache-2.0, as described
 by section 5 of that license. Each commit in a pull request must also carry a
 Developer Certificate of Origin 1.1 sign-off. See
-[`CONTRIBUTING.md`](../../CONTRIBUTING.md) and [`DCO`](../../DCO) for the exact
+[`CONTRIBUTING.md`](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTING.md)
+and [`DCO`](https://github.com/huangruiteng/loopx/blob/main/DCO) for the exact
 workflow and certification.
 
 No contributor license agreement or copyright assignment is introduced by
@@ -57,8 +60,9 @@ they are not part of this repository's Apache-2.0 core distribution.
 
 Apache-2.0 itself permits commercial use, modification, and distribution
 subject to its terms. The separate project-name and logo guidance in
-[`TRADEMARKS.md`](../../TRADEMARKS.md) still applies; the software license does
-not create endorsement or trademark rights.
+[`TRADEMARKS.md`](https://github.com/huangruiteng/loopx/blob/main/TRADEMARKS.md)
+still applies; the software license does not create endorsement or trademark
+rights.
 
 This document explains the project's public licensing policy and is not legal
 advice.
