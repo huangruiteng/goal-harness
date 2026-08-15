@@ -516,6 +516,8 @@ deeper documents and versioned protocols.
 - [Authors and Contributors](AUTHORS.md)
 - [Project History](docs/project/history.md)
 - [Name and Marks](TRADEMARKS.md)
+- [Ecosystem Adoption](docs/community/ecosystem-adoption.md) - integrations,
+  sampling, and derivatives we observe and track
 
 ## Partner Projects
 
