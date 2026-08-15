@@ -167,11 +167,10 @@ def assert_contributor_task_board_is_current() -> None:
     for required in (
         "The four canonical global manager CLI commands are shipped",
         "`/loop-goal-summary` remains host-only and outside this contributor slice",
-        "GH-C61 | cli | Done",
-        "A shared typed Effect Program now drives quota, Turn, and task-lease settlement",
+        "A shared typed Effect Program drives quota, Turn, task-lease, and todo-completion settlement",
         "The scheduler remains outside settlement",
-        "do not force pure decision logic into Kleisli form",
-        "do not force pure decision logic into Kleisli form or extract a shared executor without shared execution ownership",
+        "M7 parity fixtures, a read-only journal lens, and a shared typed settlement receipt-chain driver are shipped",
+        "do not extract a shared executor until two adapters share execution ownership",
     ):
         assert required in tasks, required
     for stale in (
@@ -181,6 +180,10 @@ def assert_contributor_task_board_is_current() -> None:
         "global risks and goal summary stay host-only",
         "Add one negative fixture proving fail-closed legacy upgrade",
         "| GH-C82 |",
+        "| GH-C59 |",
+        "| GH-C61 |",
+        "| GH-C83 |",
+        "| GH-C84 |",
     ):
         assert stale not in tasks, stale
 
