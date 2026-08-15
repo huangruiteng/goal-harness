@@ -81,6 +81,37 @@ Choose focused smokes and broader canaries by change risk; do not run every
 public smoke or a live model call for every patch. The quality guide explains
 the CI, local/manual, and release-only boundaries.
 
+## License And DCO Sign-Off
+
+LoopX's unified open source core is licensed under the
+[Apache License 2.0](LICENSE). Unless you explicitly state otherwise before
+submission, contributions accepted into this repository are submitted under
+Apache-2.0 without additional terms or conditions. LoopX does not require a
+copyright assignment or contributor license agreement.
+
+Every pull-request commit must certify the
+[Developer Certificate of Origin 1.1](DCO) by including a sign-off trailer:
+
+```text
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+Create that trailer with Git's `-s` option:
+
+```bash
+git commit -s -m "feat: describe the change"
+```
+
+The name and email must identify the person making the certification and must
+be information you are permitted to publish in the permanent Git history. If a
+commit is missing the trailer, amend it with `git commit --amend -s` or use an
+interactive rebase to sign the affected commits, then update the pull-request
+branch. The `DCO` pull-request check rejects unsigned commits.
+
+Releases through `v0.4.7` remain under their original MIT terms. See the
+[licensing and v0.4.8 transition policy](docs/project/licensing.md) for the
+historical notice, patent-grant boundary, and open-core scope.
+
 ## Experimental Features
 
 Use `loopx/experiments/<experiment-id>/` for an opt-in prototype that does not

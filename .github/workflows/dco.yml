@@ -1,0 +1,40 @@
+name: DCO
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  signoff:
+    name: Sign-off
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out pull-request history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require a DCO trailer on every commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=0
+          while IFS= read -r commit; do
+            if ! git show -s --format=%B "${commit}" |
+              grep -Eq '^Signed-off-by: [^<]+ <[^<>[:space:]]+@[^<>[:space:]]+>$'; then
+              echo "::error::Commit ${commit} is missing a valid Signed-off-by trailer."
+              missing=1
+            fi
+          done < <(git rev-list --reverse "${BASE_SHA}..${HEAD_SHA}")
+
+          if [[ "${missing}" -ne 0 ]]; then
+            echo "Add the DCO certification with: git commit --amend -s"
+            exit 1
+          fi
