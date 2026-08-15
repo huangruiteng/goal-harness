@@ -1,5 +1,7 @@
 # Ecosystem Adoption and Derivatives
 
+> [简体中文](ecosystem-adoption.zh-CN.md)
+
 LoopX is being sampled, integrated, and re-implemented by other open-source
 projects. This page is a factual, public-safe inventory of what we observe.
 

@@ -464,7 +464,7 @@ loopx check \
 - [Authors and Contributors](AUTHORS.md)
 - [Project History](docs/project/history.md)
 - [Name and Marks](TRADEMARKS.md)
-- [生态采用清单](docs/community/ecosystem-adoption.md) - 我们观察并持续追踪的
+- [生态采用清单](docs/community/ecosystem-adoption.zh-CN.md) - 我们观察并持续追踪的
   真实集成、采样借鉴与衍生周边
 
 ## 合作伙伴项目
