@@ -83,8 +83,12 @@ It combines four layers with clear boundaries:
   reviewer route, PR lifecycle, and outcome;
 - the agent runtime provides understanding, coding, and execution.
 
-The core promise: `/loopx Fix <issue-url>` is not "generate a patch"; it is a
-loop that survives model switches, CI waits, and review round-trips.
+The core promise: the capability is driven from a long-running maintenance
+goal, not from one command. The goal keeps selecting candidates, producing
+focused PRs, monitoring their lifecycle, and resuming the next issue.
+`/loopx Fix <issue-url>` seeds one candidate; feasibility, PR lifecycle, and
+outcome persist in domain state across turns, model switches, CI waits, and
+review round-trips.
 
 Public evidence: the
 [issue-fix capability documentation](../capabilities/issue-fix/README.md) and
@@ -210,8 +214,25 @@ loopx value-connectors source-map --format json    # connector-first source map
 
 ### 5.3 Your first continuous monitor
 
-A maintenance monitor is just a typed todo with a cadence. Example: scan public
-mentions weekly and update an adoption inventory:
+A maintenance monitor is just a typed todo with a cadence. These are the
+monitors actually running on this repository today, split by operating loop.
+
+| Loop | Monitor (`target_key`) | Cadence | What it does |
+| --- | --- | --- | --- |
+| Maintenance | GitHub issue intake (`github-open-issue-intake`) | 6h | Classify and route newly opened issues |
+| Maintenance | Open PR review queue (`github:huangruiteng/loopx:open-pr-review-queue`) | 3m | Scan the PR queue; review only when gates pass |
+| Maintenance | Public smoke quality repair (`github:huangruiteng/loopx:public-smoke-quality`) | 15m | Detect and repair public-smoke failures |
+| Maintenance | Non-benchmark quality watch (`public-nonbenchmark-quality-watch`) | 6h | Watch quality regressions outside benchmarks |
+| Maintenance | Repository quality (`repository-quality-monitor`) | 14d | README first screen, quickstart, public-boundary scan |
+| Maintenance | Community feedback funnel (`community-feedback-funnel`) | 14d | Align feedback entries and triage |
+| Maintenance | Collaboration/showcase tracker (`collaboration-showcase-candidate-tracker`) | 14d | Track collaboration and showcase candidates |
+| Ecosystem | GitHub mention scan (`github-loopx-mention-scan`) | 7d | Scan public mentions; update the adoption inventory via PR |
+| Ecosystem | Fork contribution outreach (`github-loopx-fork-outreach-scan`) | 7d | Evaluate forks/derivatives; send upstream PR invitations |
+| Ecosystem | Content-ops cadence (`loopx-x-content-ops-cadence`) | 1d | Manage the content pipeline rhythm |
+| Ecosystem | X profile readback (`x-profile-public-readback`) | 7d | Read back the public X profile |
+| Ecosystem | X distribution funnel (`x-public-distribution-funnel`) | 7d | Observe the X distribution funnel |
+
+Full copy-ready example for the ecosystem mention scan:
 
 ```bash
 loopx todo add --goal-id <goal-id> --project . --role agent \
@@ -223,23 +244,44 @@ loopx todo add --goal-id <goal-id> --project . --role agent \
   --text "[P2] 每周扫描仓库公开提及，分类并更新采纳清单"
 ```
 
+And the fork-outreach scan that runs next to it:
+
+```bash
+loopx todo add --goal-id <goal-id> --project . --role agent \
+  --claimed-by <your-agent-id> --task-class continuous_monitor \
+  --action-kind github_loopx_fork_contribution_outreach \
+  --target-key github-loopx-fork-outreach-scan \
+  --cadence 7d --next-due-at "2026-08-22T10:30:00+08:00" \
+  --expires-at "2027-08-15T10:00:00+08:00" \
+  --continuation-policy same_agent_non_delivery \
+  --text "[P2] 每周评估 fork/衍生项目可吸收能力，有价值来源发上游 PR 邀请"
+```
+
 Heartbeat automation picks the monitor up on its due date. Each run records
 evidence on the same todo; a material change creates a follow-up todo, and a
 no-change run stays a quiet no-op instead of forcing progress.
 
-### 5.4 Enable issue-to-PR automation
+### 5.4 Enable goal-driven issue-to-PR automation
 
-From a connected agent host, point the issue-fix loop at one public issue:
+Issue-fix is a goal loop, not a one-shot command. Start a maintenance goal, or
+use the active repository goal, whose objective is to keep fixing public
+issues and following each PR to its terminal state:
 
 ```text
-/loopx Fix https://github.com/owner/repo/issues/123
+/loopx 持续修复仓库公开 issue：选择可修复候选，产出 focused PR，
+跟进 CI 与 review 到 merged/closed，再接下一个 issue
 ```
 
-The capability builds feasibility, repository-context, reviewer, validation,
-and PR-lifecycle packets, and assigns one explicit route:
-`fix_pr` / `comment_only` / `triage_only`. The host agent may create or update
-a PR only when LoopX state records that authority and repository policy allows
-it; merge remains a separate decision unless explicitly authorized.
+`/loopx Fix https://github.com/owner/repo/issues/123` seeds one candidate into
+that goal. The capability builds feasibility, repository-context, reviewer,
+validation, and PR-lifecycle packets and assigns one explicit route:
+`fix_pr` / `comment_only` / `triage_only`. The same domain state accumulates
+feasibility, PR lifecycle, and outcome across multiple issues; a merged or
+closed PR resumes the next candidate instead of stopping the loop.
+
+The host agent may create or update a PR only when LoopX state records that
+authority and repository policy allows it; merge remains a separate decision
+unless explicitly authorized.
 
 ### 5.5 Optional content-ops pipeline
 

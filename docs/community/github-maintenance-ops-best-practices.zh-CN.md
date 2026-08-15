@@ -67,8 +67,10 @@ issue-fix 能力把一条公开 issue 变成小而聚焦、验证充分、可审
   lifecycle 与 outcome；
 - Agent 运行时提供理解、编码与执行。
 
-核心承诺：`/loopx Fix <issue-url>` 不是"生成一个 patch"，而是一个能跨越
-模型切换、CI 等待和 review 往返持续工作的循环。
+核心承诺：该能力由长程维护 goal 驱动，而不是一条命令。goal 持续选择候选、
+产出 focused PR、观察 PR lifecycle，并接续下一个 issue。
+`/loopx Fix <issue-url>` 只是种下一个候选；feasibility、PR lifecycle 与
+outcome 持久化在垂域状态里，跨越 turn、模型切换、CI 等待和 review 往返。
 
 公开证据：[issue-fix 能力文档](../capabilities/issue-fix/README.zh-CN.md)、
 showcase 附录中的 OpenViking pilot。
@@ -178,8 +180,25 @@ loopx value-connectors source-map --format json    # connector-first source map
 
 ### 5.3 建第一个 continuous monitor
 
-维护 monitor 就是一个带 cadence 的类型化 todo。示例：每周扫描公开提及并
-更新采纳清单：
+维护 monitor 就是一个带 cadence 的类型化 todo。下表是本仓库当前实际在跑的
+监控，按运营循环分组：
+
+| 循环 | 监控（`target_key`） | cadence | 做什么 |
+| --- | --- | --- | --- |
+| 维护 | GitHub issue intake（`github-open-issue-intake`） | 6h | 新 issue 分类并路由 |
+| 维护 | Open PR review queue（`github:huangruiteng/loopx:open-pr-review-queue`） | 3m | 扫 PR 队列，门禁通过才评审 |
+| 维护 | Public smoke quality repair（`github:huangruiteng/loopx:public-smoke-quality`） | 15m | 发现并修复 public smoke 失败 |
+| 维护 | Non-benchmark quality watch（`public-nonbenchmark-quality-watch`） | 6h | 观察 benchmark 之外的质量回归 |
+| 维护 | Repository quality（`repository-quality-monitor`） | 14d | README 首屏、quickstart、公开边界扫描 |
+| 维护 | Community feedback funnel（`community-feedback-funnel`） | 14d | 反馈入口与 triage 对齐 |
+| 维护 | Collaboration/showcase tracker（`collaboration-showcase-candidate-tracker`） | 14d | 跟踪合作与 showcase 候选 |
+| 生态 | GitHub mention scan（`github-loopx-mention-scan`） | 7d | 扫描公开提及，通过 PR 更新采纳清单 |
+| 生态 | Fork contribution outreach（`github-loopx-fork-outreach-scan`） | 7d | 评估 fork/衍生，发上游 PR 邀请 |
+| 生态 | Content-ops cadence（`loopx-x-content-ops-cadence`） | 1d | 管理内容管线节奏 |
+| 生态 | X profile readback（`x-profile-public-readback`） | 7d | 回读公开 X 主页 |
+| 生态 | X distribution funnel（`x-public-distribution-funnel`） | 7d | 观察 X 分发漏斗 |
+
+可直接复制的生态提及扫描示例：
 
 ```bash
 loopx todo add --goal-id <goal-id> --project . --role agent \
@@ -191,19 +210,38 @@ loopx todo add --goal-id <goal-id> --project . --role agent \
   --text "[P2] 每周扫描仓库公开提及，分类并更新采纳清单"
 ```
 
+旁边的 fork outreach 扫描：
+
+```bash
+loopx todo add --goal-id <goal-id> --project . --role agent \
+  --claimed-by <your-agent-id> --task-class continuous_monitor \
+  --action-kind github_loopx_fork_contribution_outreach \
+  --target-key github-loopx-fork-outreach-scan \
+  --cadence 7d --next-due-at "2026-08-22T10:30:00+08:00" \
+  --expires-at "2027-08-15T10:00:00+08:00" \
+  --continuation-policy same_agent_non_delivery \
+  --text "[P2] 每周评估 fork/衍生项目可吸收能力，有价值来源发上游 PR 邀请"
+```
+
 Heartbeat automation 会在到期时拾起这个 monitor。每次运行把 evidence 写回
 同一条 todo；material 变化生成跟进 todo，无变化时保持 quiet no-op，不硬推。
 
-### 5.4 启用 issue→PR 自动化
+### 5.4 启用 goal 驱动的 issue→PR 自动化
 
-从已接入的宿主 agent 指向一条公开 issue：
+issue-fix 是 goal 循环，不是一次性命令。先建一个维护 goal（或复用当前仓库
+goal），目标设为持续修复公开 issue 并把每条 PR 跟进到终态：
 
 ```text
-/loopx Fix https://github.com/owner/repo/issues/123
+/loopx 持续修复仓库公开 issue：选择可修复候选，产出 focused PR，
+跟进 CI 与 review 到 merged/closed，再接下一个 issue
 ```
 
-能力会构建 feasibility、仓库上下文、reviewer、validation 与 PR lifecycle
-packet，并给出一条明确路线：`fix_pr` / `comment_only` / `triage_only`。
+`/loopx Fix https://github.com/owner/repo/issues/123` 只是往该 goal 种下一个
+候选。能力会构建 feasibility、仓库上下文、reviewer、validation 与 PR
+lifecycle packet，并给出一条明确路线：`fix_pr` / `comment_only` /
+`triage_only`。同一份垂域状态跨多个 issue 累积 feasibility、PR lifecycle 与
+outcome；一条 PR merged/closed 后自动接续下一个候选，而不是停掉循环。
+
 宿主 agent 只有在 LoopX 状态记录了该权限且仓库策略允许时才能创建/更新
 PR；merge 始终是独立决策，除非显式授权。
 
