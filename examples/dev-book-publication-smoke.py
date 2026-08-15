@@ -12,8 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BOOK = REPO_ROOT / "docs" / "book"
 CONTROL_PLANE_COURSE = REPO_ROOT / "docs" / "development" / "control-plane-course"
 MKDOCS = REPO_ROOT / "mkdocs.yaml"
-MKDOCS_ZH = REPO_ROOT / "mkdocs.book.zh.yaml"
-MKDOCS_EN = REPO_ROOT / "mkdocs.book.en.yaml"
+MKDOCS_ZH = BOOK / "mkdocs.zh.yaml"
+MKDOCS_EN = BOOK / "mkdocs.en.yaml"
 BRAND_STYLES = REPO_ROOT / "docs" / "stylesheets" / "loopx.css"
 HOMEPAGE = REPO_ROOT / "apps" / "presentation" / "site" / "src" / "App.tsx"
 
@@ -149,6 +149,8 @@ def main() -> int:
     args = parser.parse_args()
 
     assert not (BOOK / "labs").exists(), "Dev Book publication must not include Labs"
+    assert not (REPO_ROOT / "mkdocs.book.zh.yaml").exists()
+    assert not (REPO_ROOT / "mkdocs.book.en.yaml").exists()
 
     mkdocs = read(MKDOCS)
     assert "book/chapters/" not in mkdocs
@@ -163,14 +165,16 @@ def main() -> int:
     zh_config = read(MKDOCS_ZH)
     en_config = read(MKDOCS_EN)
     for config in (zh_config, en_config):
-        assert "INHERIT: mkdocs.yaml" in config
+        assert "INHERIT: ../../mkdocs.yaml" in config
         assert config.index("scheme: slate") < config.index("scheme: default")
         assert "navigation.sections" in config
         assert "navigation.expand" not in config
-    assert "docs_dir: docs/book" in zh_config
+    assert "docs_dir: ." in zh_config
+    assert "site_dir: ../../output/docs-book-zh" in zh_config
     assert "language: zh" in zh_config
     assert "en/**" in zh_config
-    assert "docs_dir: docs/book/en" in en_config
+    assert "docs_dir: en" in en_config
+    assert "site_dir: ../../output/docs-book-en" in en_config
     assert "language: en" in en_config
     assert "中文:" not in en_config
 
