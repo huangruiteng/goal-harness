@@ -22,6 +22,8 @@ defined by the implementation and stable reference contracts.
 - [Goal artifact lifecycle projection v0](goal-artifact-lifecycle-projection-v0.md): derived from artifact-centric business process management (ABPM / GSM milestone-guard semantics); treat a goal as a business artifact with derived milestones, blocking guards, and legal next transitions, projected read-only for operators and global views ([中文版](goal-artifact-lifecycle-projection-v0.zh-CN.md)).
 - [Post-Outcome Memory Utility Attribution v0](post-outcome-memory-utility-attribution-v0.md): attribute bounded, evidence-tiered utility to recalled memory after verified outcomes, without turning retrieval, model judgment, or a global evaluator into authority.
 - [结果后记忆效用归因 v0](post-outcome-memory-utility-attribution-v0.zh-CN.md)：在可验证结果之后，对召回记忆做有界、分证据等级的效用归因，同时避免让召回、模型判断或全局评估器变成新的权限来源。
+- [TypeScript Control-Plane Migration v0](typescript-control-plane-migration-v0.md): contract-first, parity-gated, block-by-block migration from Python to TypeScript over the event store, parity-fixture layer, and CLI boundary; Python remains canonical during the transition.
+- [TypeScript 控制面迁移 v0](typescript-control-plane-migration-v0.zh-CN.md)：契约优先、parity 门禁、逐块迁移；基于事件存储、parity fixture 层与 CLI 边界从 Python 渐进迁移到 TypeScript，过渡期内 Python 保持权威实现。
 
 RFCs must not contain internal conversations, private links, local filesystem
 paths, credentials, raw transcripts, or non-public organizational context.
