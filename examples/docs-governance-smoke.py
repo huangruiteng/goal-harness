@@ -192,6 +192,8 @@ def main() -> int:
     docs_index = read("docs/README.md")
     root_readme = read("README.md")
     root_readme_zh = read("README.zh-CN.md")
+    governance = read(".github/GOVERNANCE.md")
+    support = read(".github/SUPPORT.md")
     auto_research_command_path = read("docs/guides/auto-research-command-path.md")
     codex_cli_tui_loop = read("docs/product/runtimes/codex-cli/codex-cli-tui-loop.md")
     project_agent_contract = read("docs/project-agent-todo-contract.md")
@@ -200,6 +202,29 @@ def main() -> int:
     compact_codex_cli_tui_loop = compact(codex_cli_tui_loop)
     compact_project_agent_contract = compact(project_agent_contract)
     compact_status_contract = compact(status_contract)
+
+    for retired_root_policy in (
+        "GOVERNANCE.md",
+        "MAINTAINERS.md",
+        "SECURITY.md",
+        "SUPPORT.md",
+        "COMMUNICATIONS.md",
+    ):
+        assert not (REPO_ROOT / retired_root_policy).exists(), retired_root_policy
+    for governance_contract in (
+        "## Subsystem Maintainers",
+        "### Lark Integration",
+        "### Shared Host Integration Seams",
+        "### Changing A Subsystem Appointment",
+    ):
+        assert governance_contract in governance, governance_contract
+    for support_contract in (
+        "## Choose A Channel",
+        "## Official Publication Sources",
+        "## Account Authenticity",
+        "## Make A Useful Request",
+    ):
+        assert support_contract in support, support_contract
 
     for required in [
         "## Choose Your Path",
@@ -247,7 +272,7 @@ def main() -> int:
             "docs/update-notes/README.md",
         ],
         "Project and Community": [
-            "GOVERNANCE.md",
+            ".github/GOVERNANCE.md",
             "CONTRIBUTING.md",
             "CONTRIBUTOR_TASKS.md",
             "AUTHORS.md",

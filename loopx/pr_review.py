@@ -408,7 +408,7 @@ def _file_area(path: str) -> str:
         "CHANGELOG.md",
         "LICENSE",
         "CODE_OF_CONDUCT.md",
-        "SECURITY.md",
+        ".github/SECURITY.md",
     }:
         return "public_entry_or_policy"
     if path.startswith(".github/workflows/"):

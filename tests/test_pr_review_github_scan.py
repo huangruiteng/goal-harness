@@ -97,3 +97,9 @@ def test_pr_list_failed_check_lookup_leaves_rollup_absent(monkeypatch) -> None:
     )
     rows = scan["pull_requests"]
     assert all("statusCheckRollup" not in row for row in rows)
+
+
+def test_security_policy_keeps_public_entry_classification_after_move() -> None:
+    assert pr_review_module._file_area(".github/SECURITY.md") == (
+        "public_entry_or_policy"
+    )
