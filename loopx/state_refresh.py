@@ -62,6 +62,10 @@ from .history import (
 from .control_plane.runtime.local_state_write_correctness import build_local_state_write_correctness_dry_run_packet
 from .paths import resolve_runtime_root
 from .control_plane.goals.goal_vision import normalize_goal_vision_update
+from .control_plane.goals.vision_checkpoint import (
+    build_vision_checkpoint,
+    normalize_vision_unchanged_reason,
+)
 from .control_plane.goals.goal_frontier import latest_agent_vision_from_runs
 from .registry import registry_goals, resolve_state_file
 from .runtime import validate_goal_id_path_segment
@@ -74,6 +78,9 @@ from .control_plane.todos.contract import (
     normalize_todo_claimed_by,
 )
 from .control_plane.todos.active_state_todo_parser import parse_active_state_todos
+from .control_plane.todos.completion_validation_accountability import (
+    require_accountable_completion_validation,
+)
 
 DEFAULT_REFRESH_CLASSIFICATION = "state_refreshed"
 DEFAULT_REFRESH_ACTION = "inspect refreshed active goal state and continue the next bounded progress segment"
@@ -89,13 +96,6 @@ BULLET_PREFIX_RE = re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)")
 CHECKBOX_PREFIX_RE = re.compile(r"^\[(?P<mark>[ xX])\]\s+")
 ACTIVE_STATE_NEXT_ACTION_UPDATE_SCHEMA_VERSION = "active_state_next_action_update_v0"
 REPAIR_NOOP_SCHEMA_VERSION = "repair_noop_v0"
-VISION_CHECKPOINT_SCHEMA_VERSION = "vision_checkpoint_v0"
-VISION_CHECKPOINT_MATERIAL_OUTCOMES = {
-    "outcome_gap",
-    "outcome_progress",
-    "primary_goal_outcome",
-}
-VISION_UNCHANGED_REASON_LIMIT = 240
 
 
 def now_local() -> str:
@@ -201,85 +201,6 @@ def _noop_classification_for(classification: str) -> str:
     if "repair" in normalized and "replan" not in normalized:
         return "repair_noop"
     return "replan_noop"
-
-
-def build_vision_checkpoint(
-    *,
-    agent_id: str | None,
-    agent_vision: dict[str, Any] | None,
-    existing_agent_vision: dict[str, Any] | None,
-    vision_unchanged_reason: str | None,
-    delivery_outcome: str | None,
-    active_state_next_action_update: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Return the explicit vision closeout decision for this refresh run."""
-
-    triggers: list[dict[str, Any]] = []
-    if delivery_outcome in VISION_CHECKPOINT_MATERIAL_OUTCOMES:
-        triggers.append(
-            {
-                "kind": "material_delivery_outcome",
-                "delivery_outcome": delivery_outcome,
-            }
-        )
-    if active_state_next_action_update and active_state_next_action_update.get("would_update"):
-        triggers.append({"kind": "durable_next_action_update"})
-
-    unchanged = normalize_vision_unchanged_reason(vision_unchanged_reason)
-
-    required = bool(triggers or unchanged)
-    if agent_vision:
-        decision = "patched"
-        satisfied = True
-    elif unchanged and existing_agent_vision:
-        decision = "unchanged_with_reason"
-        satisfied = True
-    elif unchanged:
-        decision = "missing_required"
-        satisfied = False
-    elif required:
-        decision = "missing_required"
-        satisfied = False
-    else:
-        decision = "not_required"
-        satisfied = True
-
-    checkpoint: dict[str, Any] = {
-        "schema_version": VISION_CHECKPOINT_SCHEMA_VERSION,
-        "agent_id": agent_id,
-        "required": required,
-        "satisfied": satisfied,
-        "decision": decision,
-        "triggers": triggers,
-    }
-    if agent_vision:
-        checkpoint["agent_vision_state"] = agent_vision.get("state")
-    if unchanged and existing_agent_vision:
-        checkpoint["unchanged_reason"] = unchanged
-        checkpoint["agent_vision_state"] = existing_agent_vision.get("state")
-    elif unchanged:
-        checkpoint["missing_baseline"] = True
-        checkpoint["rejected_unchanged_reason"] = unchanged
-    if not satisfied:
-        checkpoint["required_resolution"] = ["write_vision_patch"]
-        if not checkpoint.get("missing_baseline"):
-            checkpoint["required_resolution"].append("record_unchanged_reason")
-    return checkpoint
-
-
-def normalize_vision_unchanged_reason(value: str | None) -> str:
-    """Normalize and validate a vision closeout reason before state mutation."""
-
-    unchanged = " ".join(str(value or "").strip().split())
-    if not unchanged:
-        return ""
-    validate_public_safe_text("vision_unchanged_reason", unchanged)
-    if len(unchanged) > VISION_UNCHANGED_REASON_LIMIT:
-        raise ValueError(
-            "vision_unchanged_reason exceeds "
-            f"{VISION_UNCHANGED_REASON_LIMIT} chars"
-        )
-    return unchanged
 
 
 def next_action_section_bounds(lines: list[str]) -> tuple[int, int] | None:
@@ -1052,6 +973,12 @@ def refresh_state_run(
         raise FileNotFoundError(f"state file does not exist: {resolved_state_file}")
     state_text = resolved_state_file.read_text(encoding="utf-8")
     expected_write_state_text = state_text
+    if normalized_delivery_outcome in ACCOUNTABLE_DELIVERY_OUTCOMES:
+        require_accountable_completion_validation(
+            state_text,
+            todo_id=(settlement_identity.todo_id if settlement_identity else None),
+            agent_id=normalized_agent_id or None,
+        )
     normalized_next_action = normalize_next_action_text(next_action) if next_action else None
     registered_agents = registered_agents_for_goal(registry_goal)
     known_agents = {agent for agent in registered_agents if agent}

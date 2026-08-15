@@ -33,6 +33,7 @@ from .settlement import (
     settlement_result_payload,
 )
 from .settlement_workspace_causality import completed_todo_workspace_causality
+from .settlement_validation import completion_validation_spend_error
 from .spend_sources import DEFAULT_SLOT_SPEND_SOURCE, VALID_SLOT_SPEND_SOURCES
 
 QUOTA_SLOT_SPENT_CLASSIFICATION = "quota_slot_spent"
@@ -45,10 +46,18 @@ QuotaStatusBuilder = Callable[..., dict[str, Any]]
 def _todo_binding_error(
     *,
     source: str,
+    status_payload: dict[str, Any],
+    goal_id: str,
     before: dict[str, Any],
     requested_todo_id: str | None,
+    agent_id: str | None,
     settlement_identity: SettlementIdentity | None = None,
 ) -> str | None:
+    selected = (
+        before.get("selected_todo")
+        if isinstance(before.get("selected_todo"), dict)
+        else {}
+    )
     if settlement_identity is not None:
         if requested_todo_id != settlement_identity.todo_id:
             return (
@@ -56,8 +65,13 @@ def _todo_binding_error(
                 f"expected {settlement_identity.todo_id} but received "
                 f"{requested_todo_id or 'missing'}"
             )
-        return None
-    selected = before.get("selected_todo") if isinstance(before.get("selected_todo"), dict) else {}
+        return completion_validation_spend_error(
+            status_payload,
+            goal_id=goal_id,
+            todo_id=requested_todo_id,
+            agent_id=agent_id,
+            selected_todo=selected,
+        )
     selected_todo_id = normalize_todo_id(selected.get("todo_id"))
     if requested_todo_id and selected_todo_id and requested_todo_id != selected_todo_id:
         return (
@@ -75,7 +89,13 @@ def _todo_binding_error(
             f"quota spend requires --todo-id {selected_todo_id} for heartbeat "
             "delivery so the accounted turn is bound to the selected todo"
         )
-    return None
+    return completion_validation_spend_error(
+        status_payload,
+        goal_id=goal_id,
+        todo_id=requested_todo_id,
+        agent_id=agent_id,
+        selected_todo=selected,
+    )
 
 
 def _resolve_preview_settlement(
@@ -369,8 +389,11 @@ def build_quota_slot_preview_for_decision(
         }
     binding_error = _todo_binding_error(
         source=source,
+        status_payload=status_payload,
+        goal_id=safe_goal_id,
         before=before,
         requested_todo_id=normalized_todo_id,
+        agent_id=safe_requested_agent_id,
         settlement_identity=settlement_identity,
     )
     if binding_error:

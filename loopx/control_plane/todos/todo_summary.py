@@ -43,6 +43,7 @@ from .contract import (
     normalize_todo_task_class,
     todo_done_for_status,
 )
+from .completion_validation_projection import project_completion_validation_authority
 from .handoff_gate import build_todo_handoff_gate_states
 from .handoff_note import attach_todo_handoff_note
 from .projection import (
@@ -331,7 +332,7 @@ def structured_todo_item(
         index=index,
         text=text,
     )
-    normalized = dict(item)
+    normalized = project_completion_validation_authority(item)
     normalized.update(
         {
             "schema_version": TODO_ITEM_SCHEMA_VERSION,
@@ -497,6 +498,7 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "completed_at",
         "updated_at",
         "superseded_by",
+        "completion_validation_required",
     ):
         if item.get(key) is not None:
             compact[key] = item.get(key)
