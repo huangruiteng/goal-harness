@@ -1,0 +1,14 @@
+# Repository governance files remain owned by the lead maintainer.
+/.github/CODEOWNERS @huangruiteng
+/GOVERNANCE.md @huangruiteng
+/MAINTAINERS.md @huangruiteng
+
+# Lark integration review routing.
+/loopx/extensions/lark/** @huangruiteng @steven-kid
+/loopx/cli_commands/lark_*.py @huangruiteng @steven-kid
+/docs/capabilities/lark-*.md @huangruiteng @steven-kid
+/docs/integrations/lark-*.md @huangruiteng @steven-kid
+/examples/lark-* @huangruiteng @steven-kid
+/examples/lark_extension_test_support.py @huangruiteng @steven-kid
+/examples/control_plane/lark-* @huangruiteng @steven-kid
+/tests/extensions/test_lark_*.py @huangruiteng @steven-kid

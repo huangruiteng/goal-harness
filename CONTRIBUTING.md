@@ -147,9 +147,11 @@ See the [LoopX Turn protocol](docs/reference/protocols/loopx-turn-v0.md) and the
 
 Repository roles and decision authority are defined in
 [GOVERNANCE.md](GOVERNANCE.md). Creator and contributor attribution is recorded
-in [AUTHORS.md](AUTHORS.md) and the public Git history. Contribution does not
-automatically grant merge or release authority, and an agent or automation
-identity is not a human maintainer.
+in [AUTHORS.md](AUTHORS.md), while path-scoped maintenance and preferred review
+assignments are recorded in [MAINTAINERS.md](MAINTAINERS.md). The public Git
+history records individual contributions. Contribution does not automatically
+grant merge or release authority, and an agent or automation identity is not a
+human maintainer.
 
 When naming or packaging a fork, integration, or hosted service, follow the
 project's [name and marks guidance](TRADEMARKS.md).
