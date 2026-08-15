@@ -171,6 +171,26 @@ references. If such context was already pushed, stop normal delivery, run
 LoopX self-repair, clean the current public heads, and record any remaining
 PR-ref or cached-view cleanup as an explicit user/support gate.
 
+Treat every surface of a public change request as public content, including its
+title, description, source branch, commit subjects and bodies, reviews,
+comments, check annotations, changed-path names, screenshots, and linked
+artifacts. Before pushing, opening, reviewing, or updating one, scan the exact
+candidate diff and the metadata that will be published for private platform or
+benchmark codenames, organization or person identities, private hosts and
+repositories, internal links, credentials, and local operating context. A name
+being present in an ignored local artifact or private upstream does not grant
+permission to repeat it on a public surface.
+
+Generalize private implementation provenance into provider-neutral product or
+host language. Keep exact private term mappings and denylists only in ignored
+owner-local state; public policy, fixtures, and cleanup descriptions must state
+the reusable boundary without reproducing the private terms. If private context
+has already reached a public change request, immediately sanitize every mutable
+surface without quoting the term in the cleanup change. Record immutable paths,
+commit history, provider caches, or third-party copies as an explicit
+owner/support cleanup gate rather than pretending that a metadata edit erased
+them.
+
 ## PR Review Comments
 
 When the user asks the agent to review a GitHub PR, treat PR feedback as a
