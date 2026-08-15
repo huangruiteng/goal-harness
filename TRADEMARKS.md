@@ -55,4 +55,4 @@ issue. Ask a maintainer for a private contact path without including the
 sensitive details.
 
 Changes to this guidance require maintainer review under
-[GOVERNANCE.md](GOVERNANCE.md).
+[Governance](.github/GOVERNANCE.md).

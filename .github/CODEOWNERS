@@ -1,7 +1,6 @@
 # Repository governance files remain owned by the lead maintainer.
 /.github/CODEOWNERS @huangruiteng
-/GOVERNANCE.md @huangruiteng
-/MAINTAINERS.md @huangruiteng
+/.github/GOVERNANCE.md @huangruiteng
 
 # Lark integration review routing.
 /loopx/extensions/lark/** @huangruiteng @steven-kid

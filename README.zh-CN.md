@@ -459,7 +459,7 @@ loopx check \
 
 ### 项目与社区
 
-- [Project Governance](GOVERNANCE.md)
+- [Project Governance](.github/GOVERNANCE.md)
 - [Contributing](CONTRIBUTING.md)与[Contributor Tasks](CONTRIBUTOR_TASKS.md)
 - [Authors and Contributors](AUTHORS.md)
 - [Project History](docs/project/history.md)
@@ -487,8 +487,7 @@ agent 项目里的反馈：控制面帮到了哪里、哪里太重，哪些 gate
 - 参与社区讨论：可加入 [Discord 社区](https://discord.gg/XmGgQyCFZd)，也可在
   下方直接加入飞书群或通过微信申请入群。
 
-渠道分工与支持边界见 [Support](SUPPORT.md)，官方发布源见
-[Communications](COMMUNICATIONS.md)。
+渠道分工、支持边界和官方发布源见 [Support](.github/SUPPORT.md)。
 
 <p align="center">
   <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX 飞书开发群二维码" width="280"></a>
@@ -504,7 +503,7 @@ agent 项目里的反馈：控制面帮到了哪里、哪里太重，哪些 gate
 [Contributing](CONTRIBUTING.md)，尤其是 public/private 边界、smoke 保留规则和
 benchmark 证据边界。
 
-项目角色与维护权限见 [Governance](GOVERNANCE.md)，创建者与贡献者归属见
+项目角色与维护权限见 [Governance](.github/GOVERNANCE.md)，创建者与贡献者归属见
 [Authors and Contributors](AUTHORS.md)，关键公开演进见
 [Project History](docs/project/history.md)，名称与标识使用见
 [Name and Marks](TRADEMARKS.md)。

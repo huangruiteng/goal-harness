@@ -68,5 +68,5 @@ public [release archive](https://github.com/huangruiteng/loopx/releases).
 
 See [AUTHORS.md](https://github.com/huangruiteng/loopx/blob/main/AUTHORS.md) for
 creator and contributor attribution and
-[GOVERNANCE.md](https://github.com/huangruiteng/loopx/blob/main/GOVERNANCE.md)
+[Governance](https://github.com/huangruiteng/loopx/blob/main/.github/GOVERNANCE.md)
 for the current maintainer model.

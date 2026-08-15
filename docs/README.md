@@ -68,7 +68,7 @@ a longer onboarding path.
 
 - [Contributing](../CONTRIBUTING.md)
 - [Contributor tasks](../CONTRIBUTOR_TASKS.md)
-- [Governance](../GOVERNANCE.md)
+- [Governance](../.github/GOVERNANCE.md)
 - [Authors and contributors](../AUTHORS.md)
 - [Licensing and the v0.4.8 transition](project/licensing.md)
 - [Project history](project/history.md)

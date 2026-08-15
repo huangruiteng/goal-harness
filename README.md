@@ -511,7 +511,7 @@ deeper documents and versioned protocols.
 
 ### Project and Community
 
-- [Project Governance](GOVERNANCE.md)
+- [Project Governance](.github/GOVERNANCE.md)
 - [Contributing](CONTRIBUTING.md) and [Contributor Tasks](CONTRIBUTOR_TASKS.md)
 - [Authors and Contributors](AUTHORS.md)
 - [Project History](docs/project/history.md)
@@ -543,8 +543,8 @@ or handoffs disappeared from view.
 - Join the [Discord community](https://discord.gg/XmGgQyCFZd), or use Lark or
   WeChat below.
 
-See [Support](SUPPORT.md) for channel routing and service boundaries, and
-[Communications](COMMUNICATIONS.md) for official publication sources.
+See [Support](.github/SUPPORT.md) for channel routing, service boundaries, and
+official publication sources.
 
 <p align="center">
   <a href="docs/assets/loopx-lark-developer-group.png"><img src="docs/assets/loopx-lark-developer-group.png" alt="LoopX Lark developer group QR code" width="280"></a>
@@ -559,7 +559,8 @@ See [Support](SUPPORT.md) for channel routing and service boundaries, and
 External contributors should start with
 [Contributor Tasks](CONTRIBUTOR_TASKS.md) for public, claimable work and
 [Contributing](CONTRIBUTING.md) for setup, validation, and boundary rules.
-Project roles and public history are recorded in [Governance](GOVERNANCE.md),
+Project roles and public history are recorded in
+[Governance](.github/GOVERNANCE.md),
 [Authors and Contributors](AUTHORS.md), and
 [Project History](docs/project/history.md).
 

@@ -25,7 +25,7 @@ periodic snapshot.
 Automation or agent identities may appear in commit provenance. They should not
 be interpreted as human contributors or maintainers unless a human is also
 identified by the public contribution record. Maintainer authority is defined
-in [GOVERNANCE.md](GOVERNANCE.md), not by authorship volume.
+in [Governance](.github/GOVERNANCE.md), not by authorship volume.
 
 ## Attribution And License
 
