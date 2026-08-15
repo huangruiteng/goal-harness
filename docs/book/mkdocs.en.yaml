@@ -1,9 +1,9 @@
-INHERIT: mkdocs.yaml
+INHERIT: ../../mkdocs.yaml
 
 site_name: LoopX · Developer Book
 site_url: https://huangruiteng.github.io/loopx/docs/book/en/
-docs_dir: docs/book/en
-site_dir: output/docs-book-en
+docs_dir: en
+site_dir: ../../output/docs-book-en
 edit_uri: edit/main/docs/book/en/
 
 theme:
