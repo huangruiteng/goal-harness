@@ -17,7 +17,14 @@ def test_visible_goal_keeps_final_todo_nonterminal_until_spend() -> None:
     )
     refresh = "refresh the accountable progress record before spending"
     spend = "Then spend exactly once against that refresh"
+    readback = "Rerun the same guard read-only"
+    terminal_readback = (
+        "Complete visible Goal only on `should_run=false` + terminal "
+        "no-follow-up"
+    )
 
     assert task_body.index(terminal_rule) < task_body.index(refresh)
     assert task_body.index(refresh) < task_body.index(spend)
+    assert task_body.index(spend) < task_body.index(readback)
+    assert terminal_readback in task_body
     assert payload["interface_budget"]["within_budget"] is True

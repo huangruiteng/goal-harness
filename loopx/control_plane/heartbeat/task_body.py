@@ -552,21 +552,21 @@ for `user_channel.notify=NOTIFY`, otherwise wait.{host_wait_rule}
 
 `should_run=true`: take highest-priority unblocked in-scope todo; honor
 claims/leases and blocker-push/recovery obligations. Before dependencies, persist changed
-scope/acceptance/non-goal evidence and next todo. One bounded segment stays in this
-same Goal: a segment is progress, not a new Goal boundary. Reuse this activation
-across phases/revisions until terminal; do not create a successor host Goal merely to
-continue. Validate/write public-safe evidence, critic, and next action.
+scope/acceptance/non-goal evidence and next todo. Keep work bounded: a segment is
+progress, not a new Goal boundary. Reuse this Goal until terminal; do not create a
+successor host Goal merely to continue.
+Validate/write public-safe evidence, critic, and next action.
 {HOST_LOOP_TODO_CLOSEOUT_RULE}
 
 Use actual classification/scale/outcome only; never default or upgrade them to
 `multi_surface` / `outcome_progress`; refresh the accountable progress record
 before spending: `{progress_refresh_state_command}`. Then spend exactly once
 against that refresh; no pipe/retry: `{quota_spend_command}`.
+Rerun the same guard read-only. Complete {completion_subject} only on
+`should_run=false` + terminal no-follow-up; otherwise obey its next action.
 
 No spend: gate/wait/dry-run/preflight failure/no-op/duplicate. Stop: private/company
 material, credentials, destructive git, unauthorized production, or repo rules.
-Complete {completion_subject} only on LoopX terminal success with no follow-up; else
-keep the gate or next action explicit.
 
 {policy_tail}"""
 def render_ark_managed_agent_goal_task_body(
