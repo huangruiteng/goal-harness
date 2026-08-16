@@ -27,14 +27,36 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeTransport:
-    def __init__(self, *, goal_objective: str = "Finish the task.") -> None:
+    def __init__(
+        self,
+        *,
+        goal_objective: str = "Finish the task.",
+        skill_names: tuple[str, ...] = (),
+        skill_errors: tuple[dict[str, str], ...] = (),
+        skill_cwd: str | None = None,
+    ) -> None:
         self.goal_objective = goal_objective
+        self.skill_names = skill_names
+        self.skill_errors = skill_errors
+        self.skill_cwd = skill_cwd
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def request(self, method: str, params: Mapping[str, Any]) -> Mapping[str, Any]:
         self.calls.append((method, dict(params)))
         if method == "initialize":
             return {"serverInfo": {"name": "fake"}}
+        if method == "skills/list":
+            return {
+                "data": [
+                    {
+                        "cwd": self.skill_cwd or params["cwds"][0],
+                        "errors": list(self.skill_errors),
+                        "skills": [
+                            {"name": name, "enabled": True} for name in self.skill_names
+                        ],
+                    }
+                ]
+            }
         if method == "thread/start":
             return {"thread": {"id": "thread-1"}}
         if method == "thread/goal/set":
@@ -199,6 +221,53 @@ def test_non_positive_or_boolean_token_budget_fails_before_transport(
 def test_goal_identity_mismatch_fails_closed() -> None:
     with pytest.raises(NativeGoalProtocolError, match="goal_objective_mismatch"):
         start_native_goal_turn(FakeTransport(goal_objective="Different"), _config())
+
+
+def test_required_skills_are_proven_before_thread_start() -> None:
+    transport = FakeTransport(skill_names=("loopx", "loopx-project", "other"))
+
+    turn = start_native_goal_turn(
+        transport,
+        _config(required_skill_ids=("loopx", "loopx-project")),
+    )
+
+    methods = [method for method, _ in transport.calls]
+    assert methods[:4] == ["initialize", "initialized", "skills/list", "thread/start"]
+    assert turn.required_skill_ids == ("loopx", "loopx-project")
+    assert turn.discovered_required_skill_ids == ("loopx", "loopx-project")
+    assert turn.skill_catalog_count == 3
+    receipt = compact_native_goal_receipt(turn)
+    assert receipt["required_skills_discovered"] is True
+    assert receipt["skill_error_count"] == 0
+
+
+def test_missing_or_invalid_required_skills_fail_before_thread_start() -> None:
+    missing = FakeTransport(skill_names=("loopx",))
+    with pytest.raises(NativeGoalProtocolError, match="required_skills_missing"):
+        start_native_goal_turn(
+            missing,
+            _config(required_skill_ids=("loopx", "loopx-project")),
+        )
+    assert [method for method, _ in missing.calls][-1] == "skills/list"
+
+    invalid = FakeTransport(
+        skill_names=("loopx",),
+        skill_errors=({"message": "invalid", "path": "/redacted"},),
+    )
+    with pytest.raises(NativeGoalProtocolError, match="skills_list_errors:1"):
+        start_native_goal_turn(
+            invalid,
+            _config(required_skill_ids=("loopx",)),
+        )
+    assert [method for method, _ in invalid.calls][-1] == "skills/list"
+
+    wrong_cwd = FakeTransport(skill_names=("loopx",), skill_cwd="/wrong-cwd")
+    with pytest.raises(NativeGoalProtocolError, match="skills_list_cwd_mismatch"):
+        start_native_goal_turn(
+            wrong_cwd,
+            _config(required_skill_ids=("loopx",)),
+        )
+    assert [method for method, _ in wrong_cwd.calls][-1] == "skills/list"
 
 
 def test_terminal_event_preserves_failed_turn_status() -> None:

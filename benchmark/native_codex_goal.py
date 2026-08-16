@@ -25,8 +25,19 @@ from loopx.capabilities.benchmark_toolkit.native_codex_goal import (
     start_native_goal_turn,
     wait_native_goal_turn,
 )
+from loopx.capabilities.benchmark_toolkit.native_codex_profile import (
+    NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS,
+    NativeCodexProfile,
+    NativeCodexProfileError,
+    compact_native_codex_profile_receipt,
+    inspect_native_codex_profile,
+    install_native_codex_profile,
+)
 
 __all__ = [
+    "NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS",
+    "NativeCodexProfile",
+    "NativeCodexProfileError",
     "NativeGoalConfig",
     "NativeGoalEventTransport",
     "NativeGoalProtocolError",
@@ -34,7 +45,10 @@ __all__ = [
     "NativeGoalTurn",
     "StdioNativeGoalTransport",
     "attach_native_goal",
+    "compact_native_codex_profile_receipt",
     "compact_native_goal_receipt",
+    "inspect_native_codex_profile",
+    "install_native_codex_profile",
     "observe_native_goal_event",
     "probe_native_goal_process",
     "refresh_native_goal_status",

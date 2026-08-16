@@ -1,0 +1,409 @@
+"""Formal LoopX installation profile for isolated native Codex Goal runs.
+
+Benchmark runners should not hand-copy LoopX skills or point Codex at an
+arbitrary source checkout.  This module prepares an isolated local release by
+calling LoopX's shipped installer, then verifies the installed CLI and skill
+readback before the profile can be used by an app-server process.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from ...skill_install_readback import (
+    PACKAGED_HOST_SKILL_IDS,
+    SKILL_INSTALL_READBACK_FILENAME,
+    inspect_skill_install_readback,
+)
+
+NATIVE_CODEX_PROFILE_SCHEMA_VERSION = "loopx_native_codex_goal_profile_v0"
+NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS = (
+    "loopx",
+    *PACKAGED_HOST_SKILL_IDS,
+)
+_SAFE_RELEASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+_INSTALL_ENV_PASSTHROUGH = (
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "PATH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TERM",
+    "TZ",
+)
+
+
+class NativeCodexProfileError(RuntimeError):
+    """The isolated profile did not prove a formal LoopX installation."""
+
+
+@dataclass(frozen=True)
+class NativeCodexProfile:
+    """Verified paths and public-safe identity for one isolated installation."""
+
+    root: Path
+    home: Path
+    codex_home: Path
+    skills_dir: Path
+    bin_dir: Path
+    cli_bin: Path
+    release_root: Path
+    source_revision: str
+    source_clean: bool
+    skills_digest: str
+    required_skill_ids: tuple[str, ...]
+    materialized_skill_ids: tuple[str, ...]
+
+
+def _digest_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def _resolved_executable(value: str | None) -> str:
+    requested = value or sys.executable
+    resolved = shutil.which(requested) if not os.path.isabs(requested) else requested
+    if not resolved or not Path(resolved).is_file():
+        raise NativeCodexProfileError("profile_python_executable_missing")
+    return str(Path(resolved).resolve(strict=True))
+
+
+def _normalized_skill_ids(values: Sequence[str]) -> tuple[str, ...]:
+    normalized = tuple(
+        sorted({str(value).strip() for value in values if str(value).strip()})
+    )
+    if not normalized:
+        raise ValueError("required_skill_ids must be non-empty")
+    return normalized
+
+
+def _manifest_source_is_clean(source: Mapping[str, Any]) -> bool:
+    if source.get("git_dirty") is False:
+        return True
+    return bool(
+        source.get("git_dirty") is None
+        and (
+            source.get("revision_kind") == "archive_sha256"
+            or (source.get("kind") == "github_archive" and source.get("archive_sha256"))
+        )
+    )
+
+
+def _source_clean_preflight(source_root: Path) -> bool | None:
+    """Return clean, dirty, or unproven without mutating the install target."""
+
+    try:
+        top_level = subprocess.run(
+            ["git", "-C", str(source_root), "rev-parse", "--show-toplevel"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        top_level = None
+    if top_level is not None and top_level.returncode == 0:
+        try:
+            repository_root = Path(top_level.stdout.strip()).resolve(strict=True)
+        except OSError:
+            return None
+        if repository_root != source_root:
+            return None
+        status = subprocess.run(
+            ["git", "-C", str(source_root), "status", "--porcelain"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if status.returncode != 0:
+            return None
+        return not bool(status.stdout.strip())
+
+    try:
+        release_manifest = json.loads(
+            (source_root / "release.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    release_source = (
+        release_manifest.get("source")
+        if isinstance(release_manifest, dict)
+        and isinstance(release_manifest.get("source"), dict)
+        else {}
+    )
+    return True if _manifest_source_is_clean(release_source) else None
+
+
+def _profile_paths(profile_root: Path, release_id: str) -> dict[str, Path]:
+    root = profile_root.expanduser().resolve()
+    return {
+        "root": root,
+        "home": root / "home",
+        "codex_home": root / "codex-home",
+        "skills_dir": root / "codex-home" / "skills",
+        "bin_dir": root / "bin",
+        "cli_bin": root / "bin" / "loopx",
+        "release_root": root / "releases" / release_id,
+        "man_root": root / "man",
+        "shell_profile": root / "home" / ".profile",
+    }
+
+
+def _formal_install_environment(
+    *,
+    paths: Mapping[str, Path],
+    python_executable: str,
+    release_id: str,
+    base_env: Mapping[str, str] | None,
+) -> dict[str, str]:
+    source = os.environ if base_env is None else base_env
+    env = {key: str(source[key]) for key in _INSTALL_ENV_PASSTHROUGH if source.get(key)}
+    env.setdefault("PATH", os.defpath)
+    env.update(
+        {
+            "HOME": str(paths["home"]),
+            "SHELL": "/bin/sh",
+            "CODEX_HOME": str(paths["codex_home"]),
+            "LOOPX_PYTHON": python_executable,
+            "LOOPX_PROMOTE_DEFAULT": "1",
+            "LOOPX_INSTALL_CANARY": "0",
+            "LOOPX_BIN_DIR": str(paths["bin_dir"]),
+            "LOOPX_RELEASES_DIR": str(paths["release_root"].parent),
+            "LOOPX_RELEASE_ID": release_id,
+            "LOOPX_MAN_ROOT": str(paths["man_root"]),
+            "LOOPX_MAN_DIR": str(paths["man_root"] / "man1"),
+            "LOOPX_SHELL_PROFILE": str(paths["shell_profile"]),
+            "LOOPX_SKILLS_DIR": str(paths["skills_dir"]),
+            # The fixed installer already materializes the generated `$loopx`
+            # entry skill.  Extra slash-command surfaces are irrelevant to a
+            # non-interactive Goal worker and would mutate that tree after its
+            # installer readback was written.
+            "LOOPX_INSTALL_SLASH_COMMANDS": "0",
+            "LOOPX_INSTALL_OPENCODE": "0",
+            "LOOPX_INSTALL_CLAUDE": "0",
+            "LOOPX_SKILL_DEDUPE_OTHER_ROOT": "0",
+        }
+    )
+    return env
+
+
+def _doctor_payload(
+    *, cli_bin: Path, paths: Mapping[str, Path], env: Mapping[str, str]
+) -> dict[str, Any]:
+    doctor_env = dict(env)
+    doctor_env["PATH"] = f"{paths['bin_dir']}{os.pathsep}{env.get('PATH', os.defpath)}"
+    completed = subprocess.run(
+        [str(cli_bin), "--format", "json", "doctor", "--agent-type", "codex-app-ssh"],
+        cwd=paths["root"],
+        env=doctor_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode:
+        raise NativeCodexProfileError(
+            "profile_doctor_failed:"
+            f"returncode={completed.returncode}:stderr_sha256={_digest_text(completed.stderr)}"
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise NativeCodexProfileError("profile_doctor_invalid_json") from exc
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        raise NativeCodexProfileError("profile_doctor_not_ready")
+    if payload.get("agent_type") != "codex-app-ssh":
+        raise NativeCodexProfileError("profile_doctor_host_surface_mismatch")
+    if (payload.get("skill_delivery") or {}).get("status") != "ready":
+        raise NativeCodexProfileError("profile_doctor_skill_delivery_not_ready")
+    return payload
+
+
+def inspect_native_codex_profile(
+    profile_root: str | Path,
+    *,
+    source_root: str | Path | None = None,
+    release_id: str = "native-goal-profile",
+    required_skill_ids: Sequence[str] = NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS,
+    base_env: Mapping[str, str] | None = None,
+    require_clean_source: bool = True,
+) -> NativeCodexProfile:
+    """Verify one existing profile without repairing or reinstalling it."""
+
+    if not _SAFE_RELEASE_ID.fullmatch(release_id):
+        raise ValueError("release_id must be a safe directory name")
+    required = _normalized_skill_ids(required_skill_ids)
+    paths = _profile_paths(Path(profile_root), release_id)
+    release_root = paths["release_root"]
+    cli_bin = paths["cli_bin"]
+    if not release_root.is_dir() or not cli_bin.exists():
+        raise NativeCodexProfileError("formal_install_outputs_missing")
+    try:
+        resolved_cli = cli_bin.resolve(strict=True)
+        resolved_release = release_root.resolve(strict=True)
+    except OSError as exc:
+        raise NativeCodexProfileError("formal_install_outputs_unreadable") from exc
+    if resolved_release not in resolved_cli.parents:
+        raise NativeCodexProfileError("profile_cli_not_release_snapshot")
+
+    expected_source = Path(source_root).expanduser().resolve() if source_root else None
+    skill_readback = inspect_skill_install_readback(
+        skills_dir=paths["skills_dir"],
+        required_skill_ids=required,
+        source_root=expected_source,
+    )
+    if skill_readback.get("ready") is not True:
+        status = re.sub(r"[^A-Za-z0-9_.:-]", "_", str(skill_readback.get("status")))
+        raise NativeCodexProfileError(f"profile_skill_readback_not_ready:{status}")
+
+    manifest_path = paths["skills_dir"] / SKILL_INSTALL_READBACK_FILENAME
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise NativeCodexProfileError("profile_skill_manifest_unreadable") from exc
+    skills = manifest.get("skills") if isinstance(manifest, dict) else None
+    skills_digest = skills.get("digest") if isinstance(skills, dict) else None
+    source_revision = skill_readback.get("source_revision")
+    if not isinstance(skills_digest, str) or not isinstance(source_revision, str):
+        raise NativeCodexProfileError("profile_identity_missing")
+
+    env = _formal_install_environment(
+        paths=paths,
+        python_executable=_resolved_executable(None),
+        release_id=release_id,
+        base_env=base_env,
+    )
+    doctor = _doctor_payload(cli_bin=cli_bin, paths=paths, env=env)
+    release_manifest = (doctor.get("release_manifest") or {}).get("manifest") or {}
+    release_source = release_manifest.get("source") or {}
+    doctor_revision = release_source.get("git_commit") or release_source.get(
+        "archive_sha256"
+    )
+    if doctor_revision and str(doctor_revision) != source_revision:
+        raise NativeCodexProfileError("profile_doctor_source_revision_mismatch")
+    skill_source = manifest.get("source") if isinstance(manifest, dict) else {}
+    if not isinstance(skill_source, dict):
+        skill_source = {}
+    source_clean = _manifest_source_is_clean(
+        skill_source
+    ) and _manifest_source_is_clean(release_source)
+    if require_clean_source and not source_clean:
+        raise NativeCodexProfileError("profile_source_not_clean")
+
+    return NativeCodexProfile(
+        root=paths["root"],
+        home=paths["home"],
+        codex_home=paths["codex_home"],
+        skills_dir=paths["skills_dir"],
+        bin_dir=paths["bin_dir"],
+        cli_bin=cli_bin,
+        release_root=release_root,
+        source_revision=source_revision,
+        source_clean=source_clean,
+        skills_digest=skills_digest,
+        required_skill_ids=required,
+        materialized_skill_ids=tuple(
+            skill_readback.get("materialized_skill_ids") or ()
+        ),
+    )
+
+
+def install_native_codex_profile(
+    source_root: str | Path,
+    profile_root: str | Path,
+    *,
+    python_executable: str | None = None,
+    release_id: str = "native-goal-profile",
+    required_skill_ids: Sequence[str] = NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS,
+    base_env: Mapping[str, str] | None = None,
+    require_clean_source: bool = True,
+) -> NativeCodexProfile:
+    """Create and verify an isolated profile through ``install-local.sh``.
+
+    The target must be absent or empty.  The helper never repairs a partial
+    profile because silently mixing installation revisions would invalidate a
+    benchmark treatment.
+    """
+
+    if not _SAFE_RELEASE_ID.fullmatch(release_id):
+        raise ValueError("release_id must be a safe directory name")
+    source = Path(source_root).expanduser().resolve(strict=True)
+    installer = source / "scripts" / "install-local.sh"
+    if not installer.is_file():
+        raise NativeCodexProfileError("formal_installer_missing")
+    target = Path(profile_root).expanduser()
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        raise NativeCodexProfileError("profile_root_not_empty")
+    if require_clean_source:
+        source_clean = _source_clean_preflight(source)
+        if source_clean is False:
+            raise NativeCodexProfileError("profile_source_not_clean")
+        if source_clean is None:
+            raise NativeCodexProfileError("profile_source_cleanliness_unproven")
+    target.mkdir(parents=True, exist_ok=True)
+    paths = _profile_paths(target, release_id)
+    paths["home"].mkdir(parents=True, exist_ok=True)
+    env = _formal_install_environment(
+        paths=paths,
+        python_executable=_resolved_executable(python_executable),
+        release_id=release_id,
+        base_env=base_env,
+    )
+    completed = subprocess.run(
+        [str(installer)],
+        cwd=source,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode:
+        raise NativeCodexProfileError(
+            "formal_installer_failed:"
+            f"returncode={completed.returncode}:stderr_sha256={_digest_text(completed.stderr)}"
+        )
+    return inspect_native_codex_profile(
+        target,
+        source_root=source,
+        release_id=release_id,
+        required_skill_ids=required_skill_ids,
+        base_env=base_env,
+        require_clean_source=require_clean_source,
+    )
+
+
+def compact_native_codex_profile_receipt(profile: NativeCodexProfile) -> dict[str, Any]:
+    """Return a path-free receipt suitable for benchmark result metadata."""
+
+    return {
+        "schema_version": NATIVE_CODEX_PROFILE_SCHEMA_VERSION,
+        "host_surface": "codex-app-ssh",
+        "install_mode": "formal_local_release",
+        "cli_release_snapshot": True,
+        "source_revision": profile.source_revision,
+        "source_clean": profile.source_clean,
+        "skills_digest": profile.skills_digest,
+        "required_skill_ids": list(profile.required_skill_ids),
+        "materialized_skill_ids": list(profile.materialized_skill_ids),
+        "skill_readback_ready": True,
+        "doctor_ready": True,
+    }
+
+
+__all__ = [
+    "NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS",
+    "NATIVE_CODEX_PROFILE_SCHEMA_VERSION",
+    "NativeCodexProfile",
+    "NativeCodexProfileError",
+    "compact_native_codex_profile_receipt",
+    "inspect_native_codex_profile",
+    "install_native_codex_profile",
+]
