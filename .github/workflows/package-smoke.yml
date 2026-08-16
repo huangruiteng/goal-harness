@@ -1,0 +1,44 @@
+name: Package Smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/package-smoke.yml"
+      - "packages/loopx-repo-health/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/package-smoke.yml"
+      - "packages/loopx-repo-health/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repo-health:
+    name: loopx-repo-health
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Compile package modules
+        run: >-
+          python -m py_compile
+          packages/loopx-repo-health/src/loopx_repo_health/*.py
+
+      - name: Run offline contract smoke
+        run: >-
+          python
+          packages/loopx-repo-health/smoke/repo_health_snapshot_smoke.py

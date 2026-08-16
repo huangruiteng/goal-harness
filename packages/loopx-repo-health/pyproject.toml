@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loopx-repo-health"
+version = "0.1.0"
+description = "Public-safe GitHub repo-health snapshot provider for LoopX"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+loopx-repo-health = "loopx_repo_health.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "error": false,
+        "ok": {
+          "const": true
+        }
+      },
+      "required": [
+        "request_schema_version",
+        "result"
+      ]
+    },
+    {
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "request_schema_version": false,
+        "result": false
+      },
+      "required": [
+        "error"
+      ]
+    }
+  ],
+  "properties": {
+    "doctor": {
+      "const": "ok",
+      "type": "string"
+    },
+    "error": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "extension_id": {
+      "const": "loopx-repo-health"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "request_schema_version": {
+      "const": "loopx_repo_health_request_v0"
+    },
+    "result": {
+      "additionalProperties": false,
+      "properties": {
+        "captured_at": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "counts": {
+          "additionalProperties": false,
+          "properties": {
+            "contributors": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "forks": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "issues_total": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "open_issues": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "prs_total": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "releases": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stars": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "watchers": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "stars",
+            "forks",
+            "watchers",
+            "open_issues",
+            "releases",
+            "contributors",
+            "prs_total",
+            "issues_total"
+          ],
+          "type": "object"
+        },
+        "evidence": {
+          "type": "object"
+        },
+        "latency": {
+          "properties": {
+            "first_response_p25_min": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "first_response_p75_min": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "pr_merge_p25_min": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "pr_merge_p75_min": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "pr_merge_p25_min",
+            "pr_merge_p75_min",
+            "first_response_p25_min",
+            "first_response_p75_min"
+          ],
+          "type": "object"
+        },
+        "repo": {
+          "properties": {
+            "created_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "license": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "pushed_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "owner",
+            "name",
+            "license",
+            "created_at",
+            "pushed_at"
+          ],
+          "type": "object"
+        },
+        "schema_version": {
+          "const": "repo_health_snapshot_v0"
+        },
+        "star_timeline_weekly": {
+          "items": {
+            "properties": {
+              "stars": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "week": {
+                "pattern": "^[0-9]{4}-W[0-9]{2}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "week",
+              "stars"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "traffic_14d": {
+          "properties": {
+            "clones": {
+              "properties": {
+                "count": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "uniques": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "count",
+                "uniques"
+              ],
+              "type": "object"
+            },
+            "views": {
+              "properties": {
+                "count": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "uniques": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "count",
+                "uniques"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "views",
+            "clones"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "captured_at",
+        "repo",
+        "counts",
+        "traffic_14d",
+        "latency",
+        "star_timeline_weekly"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "loopx_repo_health_response_v0"
+    }
+  },
+  "required": [
+    "ok",
+    "schema_version",
+    "extension_id"
+  ],
+  "type": "object"
+}
