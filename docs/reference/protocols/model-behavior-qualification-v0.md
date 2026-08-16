@@ -246,13 +246,18 @@ stochastic output.
 ## Actual-Default Scenario Portfolio
 
 `actual_default_model_behavior_portfolio_v0` is the regular low-frequency live
-suite. Its selected-Todo, required-vision replan, scoped-gate successor, and
-capability-bridge repair scenarios start from the shipped thin Codex App
+suite. Its selected-Todo, terminal-settlement, required-vision replan,
+scoped-gate successor, and capability-bridge repair scenarios start from the
+shipped thin Codex App
 heartbeat task and let the model call the real `quota should-run` CLI. The
 capability scenario also wraps that task body in the trigger envelope carrying
 the heartbeat time, matching the Codex App input that makes `LOOPX_TURN`
-reusable. The first requires a real read-only action against the
-selected Todo target; the second requires the exact agent-scoped evidence-log
+reusable. The first requires a real read-only action against the selected Todo
+target. The terminal-settlement scenario requires the model to validate a real
+fixture artifact, then follow the quota-projected `durable_writeback ->
+quota_spend -> terminal_closeout` sequence under one stable effect identity; a
+premature no-follow-up or spend-before-writeback fails. The replan scenario
+requires the exact agent-scoped evidence-log
 context projected by a hermetic typed-repeat replan state, then a real
 frontier/source read and either a typed `refresh-state` delta or one
 obligation-bound successor `todo add`; the third requires a
@@ -266,33 +271,35 @@ scenarios still feed the live actor the same default full quota packet consumed
 by Codex App automation, because their current proof is packet interpretation
 rather than tool execution. Onboarding scenarios use the shipped guided-
 onboarding packet. The suite does not introduce a third model protocol or
-retain a retired product arm. Its fixed catalog covers nine core decisions:
+retain a retired product arm. Its fixed catalog covers ten core decisions:
 
 1. the normal guided onboarding packet selects `connect_if_needed`;
 2. an unresolved agent identity selects `select_agent_identity`;
 3. multiple goals select `select_goal` before any mutation;
 4. real quota selects the exact Todo and the model executes its bounded target
    action instead of merely repeating its id;
-5. the selected peer identity matches the todo claim in the model-facing route;
-6. `same_agent_non_delivery` keeps the successor with the completing peer;
-7. a final human gate selects `ask_user` and forbids normal delivery;
-8. a healthy onboarding postcondition selects `continue_validation`;
-9. a missing executable todo with an actionable projection selects
+5. a final validated Todo is written back and spent before no-follow-up makes
+   the Goal terminal, with committed receipts for every phase;
+6. the selected peer identity matches the todo claim in the model-facing route;
+7. `same_agent_non_delivery` keeps the successor with the completing peer;
+8. a final human gate selects `ask_user` and forbids normal delivery;
+9. a healthy onboarding postcondition selects `continue_validation`;
+10. a missing executable todo with an actionable projection selects
    `repair_projection`.
 
 It also carries three control-plane composition decisions. These are not wider
 snapshots; each packet is generated through the production quota, interaction,
 and scheduler paths and deliberately contains competing signals:
 
-10. two equivalent typed observations select autonomous replan; quota
+11. two equivalent typed observations select autonomous replan; quota
     host-projects the compact evidence ledger, the model reads the real
     uncovered frontier/source, and it persists a semantic delta. A runnable
     successor is one exact-obligation Todo transition with an immediate turn
     boundary, not a read-plus-ACK sequence;
-11. an open user notice coexists with a ready deferred successor, so the model
+12. an open user notice coexists with a ready deferred successor, so the model
     must surface the notice and execute the successor replan rather than treat
     every `user_action_required` value as a blocking gate;
-12. unavailable capability blocks the visible advancement, while an incomplete
+13. unavailable capability blocks the visible advancement, while an incomplete
     monitor schedule remains as a fallback, so the agent must verify the
     capability at the blocked Todo's real callsite and re-enter quota in the
     same heartbeat rather than create a repair Todo, wait on or update the
@@ -300,12 +307,12 @@ and scheduler paths and deliberately contains competing signals:
 
 Three compaction scenarios exercise the actual default CLI projection:
 
-13. an over-budget packet preserves its selected todo and execute route after
+14. an over-budget packet preserves its selected todo and execute route after
     repeated candidate, warning, and peer diagnostics move to cold paths;
-14. the same selected-work contract is presented once cleanly and once with
+15. the same selected-work contract is presented once cleanly and once with
     over-budget omitted diagnostics, and both must produce the same hard
     behavior fields;
-15. the same blocking user gate is presented cleanly and with over-budget
+16. the same blocking user gate is presented cleanly and with over-budget
     omitted diagnostics, and both must still select `ask_user`.
 
 The portfolio evaluates four bounded contrast groups over those scenario
@@ -317,7 +324,7 @@ contracts before projection or provider spend.
 
 Every scenario declares its own deterministic source oracle and runs exactly
 twice. The oracle validates exact source semantics before provider spend. The
-four real-tool scenarios then prove their complete state-to-action paths:
+five real-tool scenarios then prove their complete state-to-action paths:
 hermetic Goal state, production heartbeat prompt, real quota output, model-
 selected tool action, real readback, and a bounded semantic receipt. The
 remaining live turn
@@ -331,18 +338,17 @@ action-signature tests; explicit pair/corpus mode retains TurnEnvelope and
 semantic-contract extraction when a packet differential is the thing under
 test. All attempts must align. Actor or transport errors are not retried
 automatically; the portfolio fails closed and stops further calls. The catalog
-still has 30 bounded scenario attempts. Because each of the four real-tool
-scenario attempts may need up to six provider turns, the maximum regular run
-is 70 provider turns.
+has 32 bounded scenario attempts. With the bounded per-scenario tool budgets,
+the maximum regular run is 86 provider turns.
 Generic full-versus-candidate pair mode remains available only
 for temporary sensitive differentials or explicit stable-versus-candidate
 outcome claims, not as a permanent regular-behavior baseline.
 
-The selected-Todo, replan semantic-action, scoped-gate successor, and capability-
-bridge repair gates share only proven mechanics:
+The selected-Todo, terminal-settlement, replan semantic-action, scoped-gate
+successor, and capability-bridge repair gates share only proven mechanics:
 ordinary exec-tool decoding, bounded LoopX argv extraction, and isolated CLI
 execution. Their Goal fixtures, legal action state machines, and semantic
-oracles remain scenario-owned. This keeps four real call sites from copying
+oracles remain scenario-owned. This keeps five real call sites from copying
 transport plumbing without turning unrelated behavior into a parameter-heavy
 generic runner.
 
