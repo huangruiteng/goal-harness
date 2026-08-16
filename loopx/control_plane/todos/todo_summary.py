@@ -60,6 +60,10 @@ from .projection import (
     todo_priority_rank as projection_todo_priority_rank,
     todo_projection_sort_key as projection_todo_projection_sort_key,
 )
+from .succession_warning import (
+    TODO_SUCCESSION_WARNING_REASON_CODE,
+    TODO_SUCCESSION_WARNING_SCHEMA_VERSION,
+)
 from ..work_items.project_asset import build_project_asset_todo_summary
 from .user_gate import open_user_gate_todo_items
 
@@ -75,7 +79,6 @@ MAX_COMPLETED_SUCCESSION_WARNING_ITEMS = 5
 MAX_RECENT_COMPLETED_ADVANCEMENT_ITEMS = MAX_TODO_VISIBILITY_LANE_ITEMS
 
 TODO_ITEM_SCHEMA_VERSION = "todo_item_v0"
-TODO_SUCCESSION_WARNING_SCHEMA_VERSION = "todo_succession_warning_v0"
 TODO_SOURCE_PROOF_SCHEMA_VERSION = "todo_source_proof_v0"
 TODO_CLOSURE_INTENT_SCHEMA_VERSION = "todo_closure_intent_v0"
 TODO_TERMINAL_CLOSURE_PROOF_SCHEMA_VERSION = "todo_terminal_closure_proof_v0"
@@ -1434,12 +1437,13 @@ def compact_todo_group(
         summary["completed_without_successor_items"] = compact_gap_items
         summary["todo_succession_warning"] = {
             "schema_version": TODO_SUCCESSION_WARNING_SCHEMA_VERSION,
-            "reason_code": "completed_advancement_without_successor",
+            "reason_code": TODO_SUCCESSION_WARNING_REASON_CODE,
             "count": len(successor_gap_items),
             "items": compact_gap_items,
             "recommended_action": (
-                "record no_followup=true on completed tracked work, "
-                "or add/link a successor todo before closing the slice"
+                "run loopx todo complete --no-follow-up for the completed Todo, "
+                "or add/link a successor Todo before closing the slice; do not "
+                "invent a user gate"
             ),
         }
     if lanes.active_next_action_items:
