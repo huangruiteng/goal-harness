@@ -98,6 +98,7 @@ nav:
       - Authority Sources: operations/authority-source-registration.md
   - Capabilities:
       - capabilities/README.md
+      - Benchmark Toolkit: capabilities/benchmark-toolkit/README.md
       - Issue Fix: capabilities/issue-fix/README.md
       - Change Quality: capabilities/change-quality/README.md
       - Explore: capabilities/explore/README.md
