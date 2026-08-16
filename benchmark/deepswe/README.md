@@ -105,6 +105,21 @@ policy, or score authority. Those remain explicit runner responsibilities. A
 separate `process_cwd` is useful when the Goal-visible `cwd` exists only inside
 the runner's mount namespace.
 
+The treatment also needs three independent product-path proofs:
+
+1. a Goal body generated for the `codex_app_ssh_goal` profile;
+2. LoopX skills installed into the exact `CODEX_HOME` used by app-server;
+3. the LoopX release-snapshot CLI named by that Goal body.
+
+Prepare the latter two with
+`benchmark_toolkit.native_codex_profile.install_native_codex_profile`. Do not copy
+`SKILL.md` files into a runner image. Bind prompt generation to the returned
+`profile.cli_bin`, pass `profile.codex_home` to app-server, and set
+`NativeGoalConfig.required_skill_ids=profile.required_skill_ids`. The runtime then
+uses `skills/list` before thread creation and fails before model work unless Codex
+actually discovers the installed skill set. A filesystem check alone is not
+treatment-fidelity evidence.
+
 ## Authority and anti-cheating
 
 Both arms receive the same task-visible filesystem, network, sandbox, approval
@@ -130,6 +145,8 @@ Before each launch, a no-agent preflight must prove:
 - model, effort, time, token, concurrency, and retry envelope;
 - answer/verifier denial and cross-trial isolation;
 - no-upload and no-submission policy;
+- formal installed LoopX CLI and skill readback from the pinned revision;
+- real app-server discovery of the required LoopX skills;
 - worker-before-verifier ordering;
 - compact result and terminal-closeout destinations.
 
