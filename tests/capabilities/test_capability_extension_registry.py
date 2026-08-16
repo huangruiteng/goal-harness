@@ -23,6 +23,7 @@ from loopx.extensions.runtime import (
 )
 
 BUILTIN_IDS = [
+    "benchmark-toolkit",
     "integration-branch-reconcile",
     "change-quality-qualification",
     "pull-request-review",
@@ -39,6 +40,21 @@ BUILTIN_IDS = [
     "explore",
     "auto-research",
 ]
+
+
+def test_benchmark_toolkit_catalog_exposes_integrity_boundary() -> None:
+    capability = build_capability_detail_packet("benchmark-toolkit")["capability"]
+
+    assert capability["provider_id"] == "loopx-core"
+    assert capability["entry_command"] == "loopx benchmark --help"
+    assert any(
+        "integrity-qualification" in command["command"]
+        for command in capability["commands"]
+    )
+    assert any(
+        protocol["schema_version"] == "benchmark_integrity_qualification_v0"
+        for protocol in capability["implemented_protocols"]
+    )
 
 
 def _write_manifest(

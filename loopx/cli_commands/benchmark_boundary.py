@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -13,7 +15,10 @@ from ..benchmark_core import (
     build_split_control_remote_executor_runner_batch,
     filter_public_benchmark_artifact_paths,
 )
-
+from ..capabilities.benchmark_toolkit import (
+    BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
+    build_benchmark_integrity_qualification,
+)
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -24,8 +29,21 @@ OutputFormat = Callable[[argparse.Namespace], str]
 BENCHMARK_BOUNDARY_COMMANDS = {
     "classify-artifacts",
     "candidate-source-boundary",
+    "integrity-qualification",
     "split-control-execution-seam",
 }
+
+
+def _read_json_object(path_text: str, label: str) -> dict[str, object]:
+    raw = (
+        sys.stdin.read()
+        if path_text == "-"
+        else Path(path_text).expanduser().read_text(encoding="utf-8")
+    )
+    loaded = json.loads(raw)
+    if not isinstance(loaded, dict):
+        raise TypeError(f"{label} must contain a JSON object")
+    return loaded
 
 
 def render_benchmark_artifact_path_filter_markdown(payload: dict[str, object]) -> str:
@@ -69,6 +87,32 @@ def render_benchmark_candidate_source_boundary_markdown(payload: dict[str, objec
         lines.append("- Blocked reasons: " + reasons)
     if payload.get("next_action"):
         lines.append(f"- Next action: {payload.get('next_action')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_benchmark_integrity_qualification_markdown(
+    payload: dict[str, object],
+) -> str:
+    lines = [
+        "# Benchmark Integrity Qualification",
+        "",
+        f"- Schema: `{payload.get('schema_version')}`",
+        f"- Classification: `{payload.get('classification')}`",
+        f"- Integrity qualified: `{payload.get('integrity_qualified')}`",
+        f"- Score claim eligible: `{payload.get('score_claim_eligible')}`",
+        f"- Benchmark cheating detected: `{payload.get('benchmark_cheating_detected')}`",
+    ]
+    blockers = payload.get("blockers")
+    if isinstance(blockers, list) and blockers:
+        lines.append("- Blockers: " + ", ".join(f"`{item}`" for item in blockers))
+    counts = payload.get("evidence_counts")
+    if isinstance(counts, dict):
+        nonzero = {key: value for key, value in counts.items() if value}
+        if nonzero:
+            lines.append(
+                "- Evidence counts: "
+                + ", ".join(f"`{key}`={value}" for key, value in nonzero.items())
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -198,6 +242,43 @@ def register_benchmark_boundary_commands(
         nargs="+",
         help="Candidate-selection source paths to classify without reading.",
     )
+
+    benchmark_integrity_parser = benchmark_subparsers.add_parser(
+        "integrity-qualification",
+        help=(
+            "Reduce a private ATIF trajectory plus runner isolation attestation "
+            "to a public-safe, fail-closed benchmark integrity receipt."
+        ),
+    )
+    add_subcommand_format(benchmark_integrity_parser)
+    benchmark_integrity_parser.add_argument(
+        "--trajectory-json",
+        required=True,
+        help="Private local ATIF trajectory JSON. Its path and raw content are never emitted.",
+    )
+    benchmark_integrity_parser.add_argument(
+        "--runtime-attestation-json",
+        required=True,
+        help="Runner-owned benchmark_runtime_integrity_attestation_v0 JSON object.",
+    )
+    benchmark_integrity_parser.add_argument(
+        "--policy-json",
+        help="Optional benchmark_integrity_policy_v0 with additional denied markers.",
+    )
+    benchmark_integrity_parser.add_argument(
+        "--sensitive-value-env",
+        action="append",
+        default=[],
+        help=(
+            "Environment variable whose value must not appear in the trajectory. "
+            "Repeat as needed; names and values are not emitted."
+        ),
+    )
+    benchmark_integrity_parser.add_argument(
+        "--require-qualified",
+        action="store_true",
+        help="Return non-zero when the integrity receipt is not qualified.",
+    )
     benchmark_candidate_source_parser.add_argument(
         "--adapter-kind",
         default="default",
@@ -286,14 +367,65 @@ def handle_benchmark_boundary_command(
             return 1
         return 0
 
+    if args.benchmark_command == "integrity-qualification":
+        try:
+            trajectory = _read_json_object(args.trajectory_json, "--trajectory-json")
+            attestation = _read_json_object(
+                args.runtime_attestation_json,
+                "--runtime-attestation-json",
+            )
+            policy = (
+                _read_json_object(args.policy_json, "--policy-json")
+                if args.policy_json
+                else None
+            )
+            sensitive_values: list[str] = []
+            for env_name in args.sensitive_value_env:
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", env_name):
+                    raise ValueError("sensitive value environment name is invalid")
+                value = os.environ.get(env_name)
+                if not value:
+                    raise ValueError("sensitive value environment variable is missing")
+                sensitive_values.append(value)
+            payload = build_benchmark_integrity_qualification(
+                trajectory=trajectory,
+                runtime_attestation=attestation,
+                policy=policy,
+                sensitive_values=sensitive_values,
+            )
+        except (OSError, UnicodeError, TypeError, ValueError):
+            payload = {
+                "ok": False,
+                "schema_version": BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
+                "classification": "trajectory_audit_input_invalid",
+                "integrity_qualified": False,
+                "integrity_countable": False,
+                "score_claim_eligible": False,
+                "score_claim_countable": False,
+                "matched_pair_countable": False,
+                "benchmark_cheating_detected": False,
+                "blockers": ["benchmark_integrity_input_invalid"],
+                "public_boundary": {
+                    "raw_content_recorded": False,
+                    "input_paths_recorded": False,
+                    "sensitive_values_recorded": False,
+                },
+            }
+        print_payload(
+            payload,
+            output_format(args),
+            render_benchmark_integrity_qualification_markdown,
+        )
+        if not payload.get("ok"):
+            return 1
+        if args.require_qualified and not payload.get("integrity_qualified"):
+            return 1
+        return 0
+
     def read_json_arg(path_text: str | None, label: str) -> dict[str, object]:
         if not path_text:
             return {}
-        raw = sys.stdin.read() if path_text == "-" else Path(path_text).expanduser().read_text(encoding="utf-8")
-        loaded = json.loads(raw)
-        if not isinstance(loaded, dict):
-            raise ValueError(f"{label} must contain a JSON object")
-        return loaded
+        return _read_json_object(path_text, label)
 
     try:
         readiness = read_json_arg(args.readiness_json, "--readiness-json")
@@ -341,7 +473,7 @@ def handle_benchmark_boundary_command(
             "upload_invoked": False,
             "submit_invoked": False,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - existing compact boundary reducer.
         payload = {
             "ok": False,
             "dry_run": True,
