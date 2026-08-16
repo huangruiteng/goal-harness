@@ -11,6 +11,7 @@ status_port="${LOOPX_STATUS_PORT:-8766}"
 status_limit="${LOOPX_STATUS_LIMIT:-80}"
 status_contract_min_version="${LOOPX_STATUS_CONTRACT_MIN_VERSION:-2}"
 dashboard_port="${LOOPX_DASHBOARD_PORT:-5174}"
+chat_port="${LOOPX_CHAT_PORT:-8767}"
 host="${LOOPX_DASHBOARD_HOST:-127.0.0.1}"
 label_prefix="${LOOPX_LAUNCH_LABEL_PREFIX:-com.loopx}"
 
@@ -19,8 +20,10 @@ launch_agents_dir="$HOME/Library/LaunchAgents"
 logs_dir="$HOME/Library/Logs/loopx"
 status_label="$label_prefix.status"
 dashboard_label="$label_prefix.dashboard"
+chat_label="$label_prefix.chat"
 status_plist="$launch_agents_dir/$status_label.plist"
 dashboard_plist="$launch_agents_dir/$dashboard_label.plist"
+chat_plist="$launch_agents_dir/$chat_label.plist"
 control_plane_write_api_enabled=false
 
 usage() {
@@ -29,6 +32,7 @@ Usage: $0 [--enable-control-plane-write-api] install|uninstall|start|stop|restar
 
 Installs user-level macOS LaunchAgents for:
   - LoopX global status feed: http://$host:$status_port/status.json
+  - LoopX Chat and Lark:      http://$host:$chat_port/
   - LoopX dashboard:          http://$host:$dashboard_port/
 
 Default mode is read-only for control-plane settings. Pass
@@ -45,6 +49,7 @@ Environment overrides:
   LOOPX_STATUS_LIMIT
   LOOPX_STATUS_CONTRACT_MIN_VERSION
   LOOPX_DASHBOARD_PORT
+  LOOPX_CHAT_PORT
   LOOPX_DASHBOARD_HOST
   LOOPX_LAUNCH_LABEL_PREFIX
 EOF
@@ -57,6 +62,10 @@ xml_escape() {
     -e 's/>/\&gt;/g' \
     -e 's/"/\&quot;/g' \
     <<<"$1"
+}
+
+shell_quote() {
+  printf '%q' "$1"
 }
 
 require_macos() {
@@ -92,6 +101,15 @@ resolve_python_command() {
   fi
 }
 
+resolve_optional_command() {
+  local command_name="$1"
+  if command -v "$command_name" >/dev/null 2>&1; then
+    command -v "$command_name"
+  else
+    printf '%s\n' "$command_name"
+  fi
+}
+
 check_inputs() {
   [[ -d "$dashboard_dir" ]] || {
     echo "Dashboard directory not found: $dashboard_dir" >&2
@@ -104,16 +122,31 @@ check_inputs() {
 }
 
 write_plists() {
-  local status_command python_command path_prefix status_shell dashboard_shell control_plane_write_arg
+  local status_command python_command codex_command claude_command lark_cli_command
+  local path_prefix command_path command_dir status_shell chat_shell dashboard_shell control_plane_write_arg
   status_command="$(resolve_status_command)"
   python_command="$(resolve_python_command)"
-  path_prefix="$bin_dir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  codex_command="$(resolve_optional_command codex)"
+  claude_command="$(resolve_optional_command claude)"
+  lark_cli_command="$(resolve_optional_command lark-cli)"
+  path_prefix="$bin_dir"
+  for command_path in "$codex_command" "$claude_command" "$lark_cli_command"; do
+    if [[ "$command_path" == /* ]]; then
+      command_dir="$(dirname "$command_path")"
+      case ":$path_prefix:" in
+        *":$command_dir:"*) ;;
+        *) path_prefix="$path_prefix:$command_dir" ;;
+      esac
+    fi
+  done
+  path_prefix="$path_prefix:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   control_plane_write_arg=""
   if [[ "$control_plane_write_api_enabled" == "true" ]]; then
     control_plane_write_arg=" --enable-control-plane-write-api"
   fi
-  status_shell="export PATH=\"$(xml_escape "$path_prefix"):\$PATH\"; exec \"$(xml_escape "$status_command")\" --registry \"$(xml_escape "$registry")\" serve-status --global-registry --host \"$(xml_escape "$host")\" --port \"$(xml_escape "$status_port")\" --limit \"$(xml_escape "$status_limit")\"$control_plane_write_arg"
-  dashboard_shell="export PATH=\"$(xml_escape "$path_prefix"):\$PATH\"; exec \"$(xml_escape "$python_command")\" -m http.server \"$(xml_escape "$dashboard_port")\" --bind \"$(xml_escape "$host")\" --directory \"$(xml_escape "$dashboard_dist_dir")\""
+  status_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") serve-status --global-registry --host $(shell_quote "$host") --port $(shell_quote "$status_port") --limit $(shell_quote "$status_limit")$control_plane_write_arg"
+  chat_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") chat --global-registry --host $(shell_quote "$host") --port $(shell_quote "$chat_port") --codex-bin $(shell_quote "$codex_command") --claude-bin $(shell_quote "$claude_command") --no-open"
+  dashboard_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$python_command") -m http.server $(shell_quote "$dashboard_port") --bind $(shell_quote "$host") --directory $(shell_quote "$dashboard_dist_dir")"
 
   mkdir -p "$launch_agents_dir" "$logs_dir"
 
@@ -129,7 +162,7 @@ write_plists() {
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>$status_shell</string>
+    <string>$(xml_escape "$status_shell")</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -141,6 +174,34 @@ write_plists() {
   <string>$logs_dir/status.out.log</string>
   <key>StandardErrorPath</key>
   <string>$logs_dir/status.err.log</string>
+</dict>
+</plist>
+EOF
+
+  cat >"$chat_plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$chat_label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>$(xml_escape "$chat_shell")</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>$logs_dir/chat.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>$logs_dir/chat.err.log</string>
 </dict>
 </plist>
 EOF
@@ -157,7 +218,7 @@ EOF
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>$dashboard_shell</string>
+    <string>$(xml_escape "$dashboard_shell")</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -189,11 +250,13 @@ bootstrap_one() {
 
 start_agents() {
   bootstrap_one "$status_label" "$status_plist"
+  bootstrap_one "$chat_label" "$chat_plist"
   bootstrap_one "$dashboard_label" "$dashboard_plist"
 }
 
 stop_agents() {
   bootout_one "$dashboard_label" "$dashboard_plist"
+  bootout_one "$chat_label" "$chat_plist"
   bootout_one "$status_label" "$status_plist"
 }
 
@@ -236,9 +299,13 @@ print_status() {
   launchctl print "gui/$uid/$dashboard_label" >/dev/null 2>&1 \
     && echo "- $dashboard_label: loaded" \
     || echo "- $dashboard_label: not loaded"
+  launchctl print "gui/$uid/$chat_label" >/dev/null 2>&1 \
+    && echo "- $chat_label: loaded" \
+    || echo "- $chat_label: not loaded"
   echo
   echo "URLs:"
   echo "- dashboard: http://$host:$dashboard_port/"
+  echo "- Chat:      http://$host:$chat_port/"
   echo "- status:    http://$host:$status_port/status.json"
   print_status_contract_health
   echo
@@ -247,6 +314,8 @@ print_status() {
   echo "- $logs_dir/status.err.log"
   echo "- $logs_dir/dashboard.out.log"
   echo "- $logs_dir/dashboard.err.log"
+  echo "- $logs_dir/chat.out.log"
+  echo "- $logs_dir/chat.err.log"
 }
 
 main() {
@@ -260,11 +329,11 @@ main() {
       ;;
     uninstall)
       stop_agents
-      rm -f "$status_plist" "$dashboard_plist"
+      rm -f "$status_plist" "$dashboard_plist" "$chat_plist"
       print_status
       ;;
     start)
-      [[ -f "$status_plist" && -f "$dashboard_plist" ]] || {
+      [[ -f "$status_plist" && -f "$dashboard_plist" && -f "$chat_plist" ]] || {
         echo "LaunchAgents are not installed; run: $0 install" >&2
         exit 1
       }

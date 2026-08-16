@@ -21,7 +21,14 @@ from ..heartbeat_prequota import (
     render_heartbeat_pre_quota_markdown,
     run_heartbeat_pre_quota,
 )
+from ..chat_server import (
+    DEFAULT_CHAT_HOST,
+    DEFAULT_CHAT_PORT,
+    serve_chat,
+)
+from ..chat_endpoints import AgentEndpointRegistry
 from ..control_plane.scheduler.execution_context import SchedulerRuntimeProfile
+from ..dashboard_launcher import launch_dashboard
 from ..history import load_registry
 from ..paths import resolve_runtime_root
 from ..presentation.renderers.status_markdown import render_status_markdown
@@ -77,6 +84,9 @@ AddFormat = Callable[[argparse.ArgumentParser], None]
 
 SUPPORT_CONTROL_COMMANDS = {
     "backup-state",
+    "chat",
+    "chat-endpoint",
+    "dashboard",
     "heartbeat-prequota",
     "heartbeat-prompt",
     "promotion-gate",
@@ -437,6 +447,89 @@ def register_support_control_commands(
     )
     serve_status_parser.add_argument("--verbose", action="store_true", help="Print HTTP request logs.")
 
+    chat_parser = subparsers.add_parser(
+        "chat",
+        help="Open the local Goal Studio and review Agent-proposed LoopX Todos.",
+    )
+    chat_parser.add_argument("--goal-id", help="Goal to select when the local workspace opens.")
+    chat_parser.add_argument("--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host.")
+    chat_parser.add_argument("--port", type=int, default=DEFAULT_CHAT_PORT)
+    chat_parser.add_argument(
+        "--codex-bin",
+        default="codex",
+        help="Codex CLI executable used for the read-only app-server session.",
+    )
+    chat_parser.add_argument(
+        "--claude-bin",
+        default="claude",
+        help="Claude Code CLI executable used for read-only Agent sessions.",
+    )
+    chat_parser.add_argument(
+        "--startup-timeout-seconds",
+        type=float,
+        default=30.0,
+        help="Maximum seconds allowed for Codex app-server startup and handshake.",
+    )
+    chat_parser.add_argument(
+        "--idle-timeout-seconds",
+        type=float,
+        default=180.0,
+        help="Maximum seconds without an upstream event before interrupting the active turn.",
+    )
+    chat_parser.add_argument(
+        "--hard-timeout-seconds",
+        type=float,
+        default=900.0,
+        help="Absolute maximum seconds for one Agent turn.",
+    )
+    chat_parser.add_argument(
+        "--assets-dir",
+        help="Optional LoopX Chat web bundle directory. Defaults to packaged assets.",
+    )
+    chat_parser.add_argument(
+        "--scan-root",
+        default=default_public_scan_root(),
+        help="Public files used by the underlying status projection.",
+    )
+    chat_parser.add_argument(
+        "--scan-path",
+        action="append",
+        default=[],
+        help="Specific public file or directory to scan. Repeatable.",
+    )
+    chat_parser.add_argument("--limit", type=int, default=20)
+    chat_parser.add_argument(
+        "--global-registry",
+        action="store_true",
+        help="Use the shared global registry even when the command runs in a project directory.",
+    )
+    chat_parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Start the local server without opening a browser.",
+    )
+    chat_parser.add_argument("--verbose", action="store_true", help="Print HTTP request logs.")
+
+    chat_endpoint_parser = subparsers.add_parser(
+        "chat-endpoint",
+        help="Manage owner-local ACP Agent bindings used by LoopX Chat.",
+    )
+    add_subcommand_format(chat_endpoint_parser)
+    chat_endpoint_parser.add_argument("action", choices=("list", "add", "remove"))
+    chat_endpoint_parser.add_argument(
+        "--config",
+        help="Private JSON endpoint definition used by the add action.",
+    )
+    chat_endpoint_parser.add_argument(
+        "--agent-id",
+        help="Custom Agent id used by the remove action.",
+    )
+
+    subparsers.add_parser(
+        "dashboard",
+        help="Start the local LoopX dashboard, status service, and Chat service.",
+    )
+
 
 def handle_support_control_command(
     args: argparse.Namespace,
@@ -448,6 +541,54 @@ def handle_support_control_command(
 ) -> int | None:
     if args.command not in SUPPORT_CONTROL_COMMANDS:
         return None
+
+    if args.command == "chat-endpoint":
+        try:
+            registry = load_registry(registry_path) if registry_path.exists() else {}
+            runtime_root = resolve_runtime_root(
+                registry,
+                args.runtime_root,
+                registry_path=registry_path,
+            )
+            endpoints = AgentEndpointRegistry(runtime_root / "chat")
+            if args.action == "add":
+                if not args.config:
+                    raise ValueError("--config is required for chat-endpoint add")
+                config_path = Path(args.config).expanduser().resolve()
+                definition = json.loads(config_path.read_text(encoding="utf-8"))
+                if not isinstance(definition, dict):
+                    raise ValueError("Agent endpoint config must be a JSON object")
+                endpoint = endpoints.upsert(definition)
+                payload: dict[str, object] = {
+                    "ok": True,
+                    "schema_version": "loopx_chat_endpoint_binding_v1",
+                    "action": "added",
+                    "endpoint": endpoint.public_summary(),
+                }
+            elif args.action == "remove":
+                if not args.agent_id:
+                    raise ValueError("--agent-id is required for chat-endpoint remove")
+                deleted = endpoints.delete(args.agent_id)
+                payload = {
+                    "ok": deleted,
+                    "schema_version": "loopx_chat_endpoint_binding_v1",
+                    "action": "removed" if deleted else "not_found",
+                    "agent_id": args.agent_id,
+                }
+            else:
+                payload = {
+                    "ok": True,
+                    "schema_version": "loopx_chat_endpoint_list_v1",
+                    "endpoints": [endpoint.public_summary() for endpoint in endpoints.list()],
+                }
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "schema_version": "loopx_chat_endpoint_binding_v1",
+                "error": str(exc),
+            }
+        print_payload(payload, args.format, lambda item: json.dumps(item, ensure_ascii=False, indent=2))
+        return 0 if payload.get("ok") else 1
 
     if args.command == "backup-state":
         try:
@@ -801,6 +942,56 @@ def handle_support_control_command(
                 "registry": str(status_registry_path if "status_registry_path" in locals() else registry_path),
                 "runtime_root": args.runtime_root,
                 "error": str(exc),
+            }
+            print_payload(payload, args.format, render_status_markdown)
+            return 1
+        return 0
+
+    if args.command == "dashboard":
+        try:
+            return launch_dashboard()
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "schema_version": "loopx_dashboard_start_v0",
+                "error": str(exc),
+            }
+            print_payload(payload, args.format, render_status_markdown)
+            return 1
+
+    if args.command == "chat":
+        try:
+            chat_registry_path = explicit_global_registry(args.runtime_root) if args.global_registry else registry_path
+            scan_roots = [Path(item).expanduser() for item in args.scan_path]
+            if not scan_roots:
+                scan_roots = [Path(args.scan_root).expanduser()]
+            serve_chat(
+                registry_path=chat_registry_path,
+                runtime_root_override=args.runtime_root,
+                scan_roots=scan_roots,
+                limit=max(0, args.limit),
+                host=args.host,
+                port=args.port,
+                goal_id=args.goal_id,
+                codex_bin=args.codex_bin,
+                claude_bin=args.claude_bin,
+                startup_timeout_sec=max(0.1, float(args.startup_timeout_seconds)),
+                idle_timeout_sec=max(0.1, float(args.idle_timeout_seconds)),
+                hard_timeout_sec=max(0.1, float(args.hard_timeout_seconds)),
+                assets_dir=Path(args.assets_dir).expanduser() if args.assets_dir else None,
+                open_browser=not bool(args.no_open),
+                verbose=bool(args.verbose),
+            )
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "schema_version": "loopx_chat_start_v0",
+                "error": str(exc),
+                "gate": {
+                    "kind": "host_tool_gate",
+                    "summary": "LoopX Chat could not start on this host.",
+                    "next_action": "Resolve the reported local host capability, then retry loopx chat.",
+                },
             }
             print_payload(payload, args.format, render_status_markdown)
             return 1

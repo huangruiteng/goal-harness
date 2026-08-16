@@ -305,12 +305,17 @@ def onboarding_next_action(
     accept_onboarding_agent_todos: bool,
     begin_autonomous_advance: bool,
     codex_app_heartbeat: str,
+    include_connection_validation: bool = True,
 ) -> str:
     if not onboarding_scan:
-        validation_action = onboarding_connection_validation_action(adapter_kind)
+        validation_action = (
+            onboarding_connection_validation_action(adapter_kind)
+            if include_connection_validation
+            else None
+        )
         if validation_action:
             return validation_action["text"]
-        return "Initial routing is owned by the connected domain adapter."
+        return "Review the first Goal Todo and advance only within its declared execution boundary."
     need_heartbeat_choice = codex_app_heartbeat == "ask"
     if not accept_onboarding_agent_todos or not begin_autonomous_advance or need_heartbeat_choice:
         asks: list[str] = []
@@ -359,10 +364,15 @@ def apply_onboarding_todos_to_state(
     accept_onboarding_agent_todos: bool,
     begin_autonomous_advance: bool,
     codex_app_heartbeat: str,
+    include_connection_validation: bool = True,
 ) -> str:
     if not onboarding_scan:
         lines = text.splitlines()
-        action = onboarding_connection_validation_action(adapter_kind)
+        action = (
+            onboarding_connection_validation_action(adapter_kind)
+            if include_connection_validation
+            else None
+        )
         if action:
             add_todo_to_lines(
                 lines,
@@ -435,6 +445,7 @@ def render_state_markdown(
     accept_onboarding_agent_todos: bool = False,
     begin_autonomous_advance: bool = False,
     codex_app_heartbeat: str = "ask",
+    include_connection_validation: bool = True,
 ) -> str:
     safe_objective = objective.replace('"', '\\"')
     profile_summary = execution_profile_summary(execution_profile)
@@ -451,6 +462,7 @@ def render_state_markdown(
         accept_onboarding_agent_todos=accept_onboarding_agent_todos,
         begin_autonomous_advance=begin_autonomous_advance,
         codex_app_heartbeat=codex_app_heartbeat,
+        include_connection_validation=include_connection_validation,
     )
     state_text = f"""---
 status: active
@@ -515,6 +527,7 @@ adapter_id: {goal_id}
         accept_onboarding_agent_todos=accept_onboarding_agent_todos,
         begin_autonomous_advance=begin_autonomous_advance,
         codex_app_heartbeat=codex_app_heartbeat,
+        include_connection_validation=include_connection_validation,
     )
 
 
@@ -556,6 +569,7 @@ def build_goal_entry(
     allowed_domains: list[str],
     write_scope: list[str],
     execution_profile: dict[str, Any] | None,
+    display_name: str | None = None,
 ) -> dict[str, Any]:
     authority_sources = []
     if goal_doc:
@@ -568,6 +582,7 @@ def build_goal_entry(
         )
     return {
         "id": goal_id,
+        **({"display_name": display_name} if display_name else {}),
         "domain": domain,
         "status": "active",
         "role": role,
@@ -667,6 +682,8 @@ def bootstrap_project(
     onboarding_max_status_paths: int = 12,
     onboarding_max_top_level_files: int = 24,
     preserve_todos: bool = False,
+    display_name: str | None = None,
+    include_connection_validation: bool = True,
     force: bool,
     dry_run: bool,
     sync_global: bool,
@@ -729,6 +746,7 @@ def bootstrap_project(
         allowed_domains=allowed_domains or [],
         write_scope=write_scope or [],
         execution_profile=execution_profile,
+        display_name=display_name,
     )
     registry, registry_goal_action = merge_goal(registry, goal_entry, force=force)
 
@@ -898,6 +916,7 @@ def bootstrap_project(
                     accept_onboarding_agent_todos=accept_onboarding_agent_todos,
                     begin_autonomous_advance=begin_autonomous_advance,
                     codex_app_heartbeat=codex_app_heartbeat,
+                    include_connection_validation=include_connection_validation,
                 ),
                 encoding="utf-8",
             )

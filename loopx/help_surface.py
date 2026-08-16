@@ -65,6 +65,14 @@ COMMAND_GROUPS: list[dict[str, object]] = [
         "commands": [
             {"command": "loopx status", "purpose": "Show goals, gates, attention queue, and next action."},
             {
+                "command": "loopx dashboard",
+                "purpose": "Start the local dashboard, status service, and Agent Chat service with one command.",
+            },
+            {
+                "command": "loopx chat --goal-id <goal-id>",
+                "purpose": "Open Goal Studio, ask the read-only Agent for a bounded Todo, and approve its preview before writeback.",
+            },
+            {
                 "command": "loopx diagnose --goal-id <goal-id>",
                 "purpose": "Build a compact evidence packet when behavior is surprising.",
             },
@@ -245,6 +253,7 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "archive-runtime",
         "backup-state",
         "capability",
+        "chat-endpoint",
         "codex-cli-bounded-visible-pilot-adapter",
         "codex-cli-exec-handoff",
         "codex-cli-local-driver-plan",
@@ -261,6 +270,7 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "configure-goal",
         "content-ops",
         "decision-context",
+        "dash",
         "material-lifecycle",
         "demo",
         "dreaming",

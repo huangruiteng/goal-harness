@@ -43,6 +43,7 @@ loopx-openviking-semantic-preference = "loopx.extensions.openviking_semantic_pre
 include = ["loopx*"]
 
 [tool.setuptools.package-data]
+"loopx" = ["web/chat/*.html", "web/chat/assets/*"]
 "*" = ["README.md", "README.zh-CN.md", "docs/*.md", "docs/protocols/*.md"]
 "loopx.capabilities.auto_research" = ["worker_skill/SKILL.md"]
 "loopx.capabilities.content_ops" = ["templates/*.json"]
