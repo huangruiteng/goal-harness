@@ -12,3 +12,6 @@ contact_links:
   - name: Contributor task board
     url: https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTOR_TASKS.md
     about: Start here for public, claimable work.
+  - name: Current technical directions
+    url: https://github.com/huangruiteng/loopx/blob/main/docs/project/technical-directions.md
+    about: Understand active programs, maturity, ownership boundaries, and promotion gates.

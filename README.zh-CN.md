@@ -433,6 +433,33 @@ loopx check \
   --scan-path examples/
 ```
 
+## 当前技术方向
+
+LoopX 当前有三个活跃战略计划和一个架构与研究孵化器。这些内容用于表达方向，
+不是交付承诺；`main`、已发布 artifact 和 stable reference contract 仍然定义真实
+已交付行为。
+
+- **长程 Benchmark 与证据：**在互补 benchmark 环境中建立可复现的能力证据，
+  并开展受控的机制研究。
+  [方向 Tracker](https://github.com/huangruiteng/loopx/issues/3243)
+- **Operator Surface 与 IM Integration：**建设 operator workspace、session
+  record 与有界协作表面；当前在专用 integration branch 孵化，由 `@maxliux5`
+  作为 implementation lead。
+  [方向 Tracker](https://github.com/huangruiteng/loopx/issues/3244)
+- **Shared Goal Authority 与跨 Host 协作：**为显式共享 goal 提供
+  provider-neutral 协调；NoKV 是尚未晋级的 provider candidate，而不是新的控制面
+  权威。
+  [方向 Tracker](https://github.com/huangruiteng/loopx/issues/3245)
+- **架构与研究孵化器：**以明确不同的成熟度推进 Effect Program hardening、
+  TypeScript parity migration、hierarchical stride、research exploration、human
+  attention、artifact lifecycle 与 memory utility。
+  [方向 Tracker](https://github.com/huangruiteng/loopx/issues/3246)
+
+完整阶段、promotion gate、贡献者安全切片和 ownership 边界见
+[当前技术方向地图](docs/project/technical-directions.zh-CN.md)；社区讨论使用置顶的
+[GitHub Discussion](https://github.com/huangruiteng/loopx/discussions/2851)。核心控制面
+可靠性继续作为这些计划共同的底座。
+
 ## 进阶文档
 
 按当前任务选择入口；[线上文档](https://huangruiteng.github.io/loopx/docs/)
@@ -494,6 +521,7 @@ loopx check \
 
 ### 项目与社区
 
+- [当前技术方向](docs/project/technical-directions.zh-CN.md)
 - [Project Governance](.github/GOVERNANCE.md)
 - [Contributing](CONTRIBUTING.md)与[Contributor Tasks](CONTRIBUTOR_TASKS.md)
 - [Authors and Contributors](AUTHORS.md)
@@ -563,8 +591,9 @@ integration 和进阶路径仍是 optional、default-off 或 experimental。Loop
 获得 credential，不会替用户批准 destructive / production action，不会在未授权时
 公开发布，也不会把未经验证的 run 当成成功证据。
 
-下一阶段会继续改善安装与 host packaging、扩展 typed runtime adapter、加强重复公开
-Loop 的 terminal acceptance、补足独立采用与 outcome evidence，并打磨管理面。
+当前投入按[技术方向地图](docs/project/technical-directions.zh-CN.md)组织：长程
+benchmark 证据、operator surface 与 IM integration、shared-goal 跨 host 协作，以及
+明确分阶段的架构与研究孵化器。
 
 ## Star 趋势
 

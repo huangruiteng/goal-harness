@@ -5,8 +5,10 @@ contributions are small, reviewable, and tied to a public task or clear bug.
 
 ## Find Work
 
-Start with [CONTRIBUTOR_TASKS.md](CONTRIBUTOR_TASKS.md). It lists public work
-that is useful, claimable, and safe to discuss in the repository.
+Start with the [current technical directions](docs/project/technical-directions.md)
+to understand the active programs and their maturity, then use
+[CONTRIBUTOR_TASKS.md](CONTRIBUTOR_TASKS.md) to find public work that is useful,
+claimable, and safe to discuss in the repository.
 
 If you do not see a matching task:
 

@@ -482,6 +482,36 @@ loopx check \
   --scan-path examples/
 ```
 
+## Current Technical Directions
+
+LoopX has three active strategic programs plus an architecture and research
+incubator. These are direction signals, not delivery promises; `main`, released
+artifacts, and stable reference contracts remain the source of shipped truth.
+
+- **Long-Horizon Benchmarks and Evidence:** reproducible capability evidence
+  and controlled mechanism research across complementary benchmark
+  environments. [Direction tracker](https://github.com/huangruiteng/loopx/issues/3243)
+- **Operator Surface and IM Integration:** an operator workspace, session
+  records, and bounded collaboration surfaces, currently incubating on a
+  dedicated integration branch with `@maxliux5` as implementation lead.
+  [Direction tracker](https://github.com/huangruiteng/loopx/issues/3244)
+- **Shared Goal Authority and Cross-host Coordination:** provider-neutral
+  coordination for explicitly shared goals, with NoKV as an unpromoted
+  provider candidate rather than a new control-plane authority.
+  [Direction tracker](https://github.com/huangruiteng/loopx/issues/3245)
+- **Architecture and Research Incubator:** Effect Program hardening,
+  TypeScript parity migration, hierarchical stride, research exploration,
+  human attention, artifact lifecycle, and memory utility work at explicitly
+  different maturity levels.
+  [Direction tracker](https://github.com/huangruiteng/loopx/issues/3246)
+
+Read the canonical
+[Technical Directions map](docs/project/technical-directions.md) for stages,
+promotion gates, contributor-safe cuts, and ownership boundaries. Use the
+pinned [GitHub Discussion](https://github.com/huangruiteng/loopx/discussions/2851)
+for community discussion. Core control-plane reliability continues as the
+shared foundation beneath these programs.
+
 ## Advanced Documentation
 
 Start with the path that matches your current task. Use the hosted
@@ -551,6 +581,7 @@ deeper documents and versioned protocols.
 
 ### Project and Community
 
+- [Current Technical Directions](docs/project/technical-directions.md)
 - [Project Governance](.github/GOVERNANCE.md)
 - [Contributing](CONTRIBUTING.md) and [Contributor Tasks](CONTRIBUTOR_TASKS.md)
 - [Authors and Contributors](AUTHORS.md)
@@ -627,10 +658,10 @@ or experimental. LoopX does not grant credentials, approve destructive or
 production actions, publish on a user's behalf without authorization, or turn
 an unverified run into evidence of success.
 
-The next milestones are simpler installation and host packaging, broader typed
-runtime adapters, stronger terminal acceptance across repeated public loops,
-independent adoption and outcome evidence, and a more polished management
-surface.
+Current investment is organized through the
+[Technical Directions map](docs/project/technical-directions.md): long-horizon
+benchmark evidence, operator surface and IM integration, shared-goal cross-host
+coordination, and an explicitly staged architecture and research incubator.
 
 ## Star History
 

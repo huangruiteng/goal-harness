@@ -17,7 +17,10 @@ channels.
 
 Public contributor work belongs on the
 [Contributor Task Board](../CONTRIBUTOR_TASKS.md) or in the contributor-task
-issue form. Pull requests should follow
+issue form. The
+[Technical Directions map](../docs/project/technical-directions.md) explains
+which programs are active and what maturity or promotion gate applies. Pull
+requests should follow
 [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Official Publication Sources
@@ -26,7 +29,9 @@ issue form. Pull requests should follow
   authoritative source for published versions and release notes.
 - [GitHub Discussions: Announcements](https://github.com/huangruiteng/loopx/discussions/categories/announcements)
   is the authoritative source for project announcements that are not tied to
-  one release.
+  one release. The pinned
+  [Current technical directions and known limitations](https://github.com/huangruiteng/loopx/discussions/2851)
+  post is the community-facing projection of the versioned repository map.
 - [GitHub Security Advisories](https://github.com/huangruiteng/loopx/security/advisories)
   is the authoritative source for coordinated vulnerability disclosures.
 

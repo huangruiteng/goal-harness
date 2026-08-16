@@ -37,54 +37,37 @@ into a mirror of maintainer scratch state.
 5. If a task is `Maintainer-owned`, do not duplicate the work. Ask whether
    there is a public helper slice instead.
 
-## Project Development Direction
+## Current Technical Directions
 
-LoopX is becoming a management surface for long-running agent work: the control
-plane owns verified state transitions, typed settlement, and public evidence,
-while operators and contributors interact through compact read models and
-bounded commands. Pick work that advances one of the directions below; avoid
-parallel abstractions or a second source of truth.
+The canonical [Technical Directions map](docs/project/technical-directions.md)
+explains outcomes, maturity, ownership boundaries, and promotion gates. This
+board lists bounded work; it does not redefine those directions.
 
-1. **From control-plane library to management surface.** Make kernel objects
-   (work items, owners, decisions, evidence, budgets, risk, next actions)
-   legible through dashboards, global manager commands, and showcase
-   walkthroughs. Prefer synthetic, provider-neutral surfaces; public first
-   viewports stay maintainer-preview work.
-2. **Effect Program runtime maturity.** A shared typed Effect Program now
-   drives quota, Turn, task-lease, and todo-completion settlement, and the
-   turn driver is the second consumer of the settlement algebra. M7 parity
-   fixtures, a read-only journal lens, and a shared typed settlement
-   receipt-chain driver are shipped. The next milestone is negative coverage
-   on the shared driver (receipt-chain drift, replay identity) and a second
-   adapter consuming the same plan/receipt algebra. Only then may a shared
-   executor be extracted, and only if two adapters share execution ownership.
-3. **Verified state transitions.** "done" must mean verified, not claimed:
-   wire caller-approved `validation_command` into self-reported completion
-   (#3082), keep typed receipts for writeback and spend, and make replay
-   safe under lease fencing (#3074).
-4. **Operator observability.** Give operators per-goal token/cost/duration and
-   legible governance (who can act, who must approve, what was spent) from
-   existing compact projections (#3085); do not create a second ledger.
-5. **Contributor and operator experience.** Make first-run onboarding durable
-   (#3092), complete the canonical read-only global command set, keep CLI
-   output budget-aware and readable (#2881), and close the release docs
-   timeline gap.
-6. **Maintainability.** Keep hot modules bounded, ratchet debt low, and smokes
-   deterministic (no wall-clock oracles). Extract cohesive rule groups into
-   bounded modules; never into generic helper layers.
+| Direction | Current stage | Contributor entry | Boundary |
+| --- | --- | --- | --- |
+| Long-Horizon Benchmarks and Evidence | Active research | [#3243](https://github.com/huangruiteng/loopx/issues/3243) | Work on public-safe fixtures, treatment integrity, reducers, and docs; live cases and scoring remain maintainer-owned. |
+| Operator Surface and IM Integration | Incubating on `frontend-control-plane-im-prototype-rfc` | [#3244](https://github.com/huangruiteng/loopx/issues/3244) | State the target base branch; UI remains a projection and promotion to `main` is staged. |
+| Shared Goal Authority and Cross-host Coordination | Draft contract / provider qualification | [#3245](https://github.com/huangruiteng/loopx/issues/3245) | Start provider-neutral and file-backed; NoKV is an unpromoted candidate, not authority. |
+| Architecture and Research Incubator | Mixed by RFC | [#3246](https://github.com/huangruiteng/loopx/issues/3246) | Read the per-exploration stage; an RFC alone does not make implementation claimable. |
+
+Core control-plane reliability remains the shared shipped foundation. Effect
+Program hardening, verified transitions, recovery, observability,
+maintainability, and contributor experience continue through the focused rows
+below and the existing `control-plane` label.
 
 ## Priority Queue
 
-| Priority | Slice | Issue / PR | Status |
-| --- | --- | --- | --- |
-| P0 | Wire caller-approved `validation_command` into the remaining self-report entry points | #3082 | Available |
-| P0 | Typed settlement receipt-chain negatives on the shared driver; Turn fencing review still open | #3074, #3199 | Available |
-| P1 | Security-boundary mutation coverage beyond the shipped negative fixtures | #3137-#3140 | Available |
-| P1 | Codex CLI timeout recovery cannot resume the session observed by the failed Turn | #3228 | Available |
-| P1 | Per-goal token/cost/duration dashboard projection | #3085 | Needs design |
-| P1 | One budget-aware CLI output ergonomics slice | #2881 | Needs design |
-| P2 | Release docs timeline v0.2.6 -> v0.4.7 | GH-C04 | Available |
-| P2 | CLI ownership and hot-module extraction | GH-C06 | Available |
+| Priority | Direction | Slice | Issue / PR | Status |
+| --- | --- | --- | --- | --- |
+| P0 | Core hardening | Wire caller-approved `validation_command` into the remaining self-report entry points | #3082 | Available |
+| P0 | Core hardening | Complete exact-head review of remote execution and terminal writeback fencing | #3074 | Claimed |
+| P1 | Core hardening | Recover the session observed by a failed Codex CLI Turn without weakening drift checks | #3228 | Available |
+| P1 | Benchmark evidence | Split one deterministic adapter-fidelity or treatment-integrity fixture | #3243 | Needs design |
+| P1 | Operator surface / IM | Split one projection or session-contract characterization unit from the incubation branch | #3244 | Needs design |
+| P1 | Shared coordination | Define the first provider-neutral, file-backed `claim_work` parity slice | #3245 | Needs design |
+| P1 | Core hardening | One budget-aware CLI output ergonomics slice | #2881 | Needs design |
+| P2 | Project docs | Release docs timeline v0.2.6 -> v0.4.7 | GH-C04 | Available |
+| P2 | Maintainability | CLI ownership and hot-module extraction | GH-C06 | Available |
 
 ## Product Manager Cut
 

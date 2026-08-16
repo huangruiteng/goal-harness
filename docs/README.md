@@ -15,6 +15,7 @@ material available without putting all of it on one page.
 | Run or recover a long-lived goal | [Operations](operations/README.md) | [Integration guide](integration.md) |
 | Understand the control plane | [Architecture](architecture.md) | [Concepts](concepts/README.md) |
 | Connect an agent runtime or provider | [Integrations](integrations/README.md) | [Extensions and capabilities](reference/extensions.md) |
+| See what contributors are building now | [Current technical directions](project/technical-directions.md) | [Contributor tasks](../CONTRIBUTOR_TASKS.md) |
 | Build or review LoopX | [Developer guide](development/README.md) | [Testing and quality](development/testing-and-quality.md) |
 | Inspect real outcomes | [Showcases](showcases/README.md) | [Research and evidence](research/README.md) |
 
@@ -66,6 +67,7 @@ a longer onboarding path.
 
 ## Project And Community
 
+- [Current technical directions](project/technical-directions.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Contributor tasks](../CONTRIBUTOR_TASKS.md)
 - [Governance](../.github/GOVERNANCE.md)

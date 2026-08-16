@@ -169,7 +169,7 @@ def assert_contributor_task_board_is_current() -> None:
         "`/loop-goal-summary` remains host-only and outside this contributor slice",
         "A shared typed Effect Program drives quota, Turn, task-lease, and todo-completion settlement",
         "The scheduler remains outside settlement",
-        "M7 parity fixtures, a read-only journal lens, and a shared typed settlement receipt-chain driver are shipped",
+        "M7 parity fixtures plus a read-only journal inspection/`interpret_turn_journal` lens shipped",
         "do not extract a shared executor until two adapters share execution ownership",
     ):
         assert required in tasks, required
@@ -186,6 +186,82 @@ def assert_contributor_task_board_is_current() -> None:
         "| GH-C84 |",
     ):
         assert stale not in tasks, stale
+
+
+def assert_technical_direction_governance_is_current() -> None:
+    direction = read("docs/project/technical-directions.md")
+    direction_zh = read("docs/project/technical-directions.zh-CN.md")
+    rfc_index = read("docs/architecture/rfcs/README.md")
+    tasks = read("CONTRIBUTOR_TASKS.md")
+    issue_template = read(".github/ISSUE_TEMPLATE/contributor-task.yml")
+    pr_template = read(".github/PULL_REQUEST_TEMPLATE.md")
+    governance = read(".github/GOVERNANCE.md")
+
+    for required in (
+        "Long-Horizon Benchmarks and Evidence",
+        "Operator Surface and IM Integration",
+        "Shared Goal Authority and Cross-host Coordination",
+        "Architecture and Research Incubator",
+        "Stable Foundation: Control-Plane Reliability",
+        "frontend-control-plane-im-prototype-rfc",
+        "@maxliux5",
+        "NoKV is an unpromoted optional provider candidate",
+        "#3243",
+        "#3244",
+        "#3245",
+        "#3246",
+    ):
+        assert required in direction, required
+
+    for required in (
+        "长程 Benchmark 与证据",
+        "Operator Surface 与 IM Integration",
+        "Shared Goal Authority 与跨 Host 协作",
+        "架构与研究孵化器",
+        "稳定基础：控制面可靠性",
+        "frontend-control-plane-im-prototype-rfc",
+        "@maxliux5",
+        "NoKV 是位于 LoopX authority 之后",
+        "#3243",
+        "#3244",
+        "#3245",
+        "#3246",
+    ):
+        assert required in direction_zh, required
+
+    for required in (
+        "## Accepted Architecture",
+        "## Active Research Programs",
+        "## Drafts Under Review",
+        "## Draft Integration Proposals",
+        "Current Technical Directions",
+    ):
+        assert required in rfc_index, required
+    assert "## Active Drafts" not in rfc_index
+
+    for required in (
+        "Long-Horizon Benchmarks and Evidence",
+        "Operator Surface and IM Integration",
+        "Shared Goal Authority and Cross-host Coordination",
+        "Architecture and Research Incubator",
+    ):
+        assert required in tasks, required
+
+    for content in (issue_template, pr_template):
+        for required in (
+            "Long-horizon benchmark evidence",
+            "Operator surface and IM integration",
+            "Shared Goal Authority and cross-host coordination",
+            "Architecture and research incubator",
+        ):
+            assert required in content, required
+
+    for required in (
+        "## Technical Direction Governance",
+        "direction/*",
+        "does not override merged runtime and stable reference contracts",
+    ):
+        assert required in governance, required
 
 
 def main() -> int:
@@ -240,6 +316,7 @@ def main() -> int:
         "reference/README.md",
         "showcases/README.md",
         "development/testing-and-quality.md",
+        "project/technical-directions.md",
     ]:
         assert required in docs_index, required
 
@@ -272,6 +349,7 @@ def main() -> int:
             "docs/update-notes/README.md",
         ],
         "Project and Community": [
+            "docs/project/technical-directions.md",
             ".github/GOVERNANCE.md",
             "CONTRIBUTING.md",
             "CONTRIBUTOR_TASKS.md",
@@ -286,7 +364,10 @@ def main() -> int:
         "集成与扩展": navigation_contracts["Integrate and Extend"],
         "构建与评审 LoopX": navigation_contracts["Build and Review LoopX"],
         "查看结果与证据": navigation_contracts["Inspect Outcomes"],
-        "项目与社区": navigation_contracts["Project and Community"],
+        "项目与社区": [
+            "docs/project/technical-directions.zh-CN.md",
+            *navigation_contracts["Project and Community"][1:],
+        ],
     }
     for readme, contracts in (
         (root_readme, navigation_contracts),
@@ -347,6 +428,8 @@ def main() -> int:
         "docs/research/long-horizon-agent-benchmarks/README.md",
         "docs/showcases/README.md",
         "docs/product/runtimes/codex-cli/codex-cli-tui-loop.md",
+        "docs/project/technical-directions.md",
+        "docs/project/technical-directions.zh-CN.md",
     ]:
         assert (REPO_ROOT / path).is_file(), path
 
@@ -382,6 +465,7 @@ def main() -> int:
     assert_local_doc_links_resolve()
     assert_effect_interpreter_docs_are_canonical()
     assert_contributor_task_board_is_current()
+    assert_technical_direction_governance_is_current()
 
     collaboration_rfc = read(
         "docs/architecture/rfcs/agent-im-openviking-collaboration-v0.md"

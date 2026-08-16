@@ -11,45 +11,50 @@ not need these documents to start LoopX.
 
 1. Read [Contributing](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTING.md) for repository boundaries and the
    pull-request checklist.
-2. Follow the [Developer Book](/loopx/docs/book/) for the curated external
+2. Read [Current technical directions](../project/technical-directions.md) to
+   choose an active program, understand its maturity, and find its tracker.
+3. Follow the [Developer Book](/loopx/docs/book/) for the curated external
    learning path from control-plane foundations to project onboarding and
    developer contributions.
-3. Follow the [control-plane developer course](control-plane-course/README.md)
+4. Follow the [control-plane developer course](control-plane-course/README.md)
    for an eleven-lecture, code-led path through the real CLI, state machine, and
    layered quality gates.
-4. Read [Testing and quality](testing-and-quality.md) before changing agent-facing
+5. Read [Testing and quality](testing-and-quality.md) before changing agent-facing
    output, scheduler decisions, todo/gate semantics, onboarding, or release
    promotion.
-5. Use [What counts as a good smoke](good-smokes.md) before adding, retaining,
+6. Use [What counts as a good smoke](good-smokes.md) before adding, retaining,
    or consolidating a public smoke.
-6. Use [Architecture](../architecture.md) and the
+7. Use [Architecture](../architecture.md) and the
    [core control-plane graphs](../product/core-control-plane/README.md) to find
    the bounded context that owns the behavior.
-7. Check [Public/private boundaries](../public-private-boundary.md) before adding
+8. Check [Public/private boundaries](../public-private-boundary.md) before adding
    fixtures, examples, evidence, or provider-backed evaluation.
-8. Follow the [documentation layout policy](documentation-layout.md) before
+9. Follow the [documentation layout policy](documentation-layout.md) before
    adding or moving public documentation.
 
 1. 先阅读[贡献指南](https://github.com/huangruiteng/loopx/blob/main/CONTRIBUTING.md)，了解仓库边界和 PR 检查项。
-2. 按顺序阅读[开发者手册](/loopx/docs/book/)，从控制面基础到项目接入和开发者贡献。
-3. 按顺序学习[控制面开发者 11 讲](control-plane-course/README.md)，沿真实 CLI、
+2. 阅读[当前技术方向](../project/technical-directions.zh-CN.md)，选择活跃计划、了解
+   成熟度并找到对应 tracker。
+3. 按顺序阅读[开发者手册](/loopx/docs/book/)，从控制面基础到项目接入和开发者贡献。
+4. 按顺序学习[控制面开发者 11 讲](control-plane-course/README.md)，沿真实 CLI、
    状态机、核心函数和分层质量门禁建立代码心智模型。
-4. 修改 agent-facing 输出、调度决策、todo/gate 语义、新用户接入或发布流程前，
+5. 修改 agent-facing 输出、调度决策、todo/gate 语义、新用户接入或发布流程前，
    阅读[测试与质量体系](testing-and-quality.md)。
-5. 新增、保留或合并公开 smoke 前，阅读
+6. 新增、保留或合并公开 smoke 前，阅读
    [什么是好的 Smoke](good-smokes.md)。
-6. 通过[架构文档](../architecture.md)和
+7. 通过[架构文档](../architecture.md)和
    [控制面核心图](../product/core-control-plane/README.md)定位真正拥有该行为的
    bounded context。
-7. 添加 fixture、示例、证据或模型测试前，检查
+8. 添加 fixture、示例、证据或模型测试前，检查
    [公开/私有边界](../public-private-boundary.md)。
-8. 新增或移动公开文档前，遵循
+9. 新增或移动公开文档前，遵循
    [文档布局规则](documentation-layout.md)。
 
 ## Core References / 核心参考
 
 | Area / 领域 | Reference / 文档 |
 | --- | --- |
+| Current strategic programs / 当前战略方向 | [Technical directions](../project/technical-directions.md) · [中文](../project/technical-directions.zh-CN.md) |
 | Curated learning path / 开发者学习路径 | [Developer Book](/loopx/docs/book/) |
 | Control-plane code reading / 控制面代码领读 | [Eleven-lecture developer course](control-plane-course/README.md) |
 | Quality layers and commands / 质量分层与命令 | [Testing and quality](testing-and-quality.md) |

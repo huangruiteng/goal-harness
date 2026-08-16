@@ -150,6 +150,35 @@ releases, and boundary decisions.
 - When consensus is not reached, the lead maintainer records the decision and
   rationale in the relevant issue or pull request.
 
+## Technical Direction Governance
+
+The versioned
+[Current Technical Directions](../docs/project/technical-directions.md) page is
+the canonical map of active strategic programs, maturity, contribution routes,
+and promotion gates. The pinned
+[GitHub Discussion](https://github.com/huangruiteng/loopx/discussions/2851) is
+its community-facing projection; an issue, Discussion, RFC, or integration
+branch does not override merged runtime and stable reference contracts.
+
+Each strategic direction has one long-lived tracking issue. Trackers record
+outcomes, boundaries, implementation leads, material decisions, and links to
+bounded work. They are not themselves blanket implementation authorization.
+A claimable change should have a separate issue or public task-board row with
+an explicit smallest slice, base branch, non-goals, and validation plan.
+
+A material change to a direction's stage, scope, implementation lead,
+integration branch, or promotion gate requires a pull request updating the
+canonical map. The RFC index and contributor task board should change in the
+same pull request when their routing changes. Maintainers update the pinned
+Discussion after merge and should not maintain an independent roadmap body
+there.
+
+The `direction/*` labels route discovery and review. They do not grant
+authority, promise delivery, or imply that a Draft or Research item is ready
+for implementation. Recognition as an implementation lead records current
+public work; it is separate from repository write access, subsystem maintainer
+appointment, and repository-wide maintainer authority.
+
 ## Becoming A Maintainer
 
 Maintainers are selected from contributors who have shown sustained technical

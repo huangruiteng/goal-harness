@@ -14,6 +14,20 @@ body:
       description: Use the board ID if one exists, such as GH-C01, or a short area name.
       placeholder: "GH-C01 or area: docs"
   - type: dropdown
+    id: direction
+    attributes:
+      label: Technical direction
+      description: Choose the closest current program. This routes discussion; it does not make a draft implementation-ready.
+      options:
+        - Core control-plane hardening
+        - Long-horizon benchmark evidence
+        - Operator surface and IM integration
+        - Shared Goal Authority and cross-host coordination
+        - Architecture and research incubator
+        - Unsure; maintainer triage needed
+    validations:
+      required: true
+  - type: dropdown
     id: intent
     attributes:
       label: Intent
@@ -42,6 +56,14 @@ body:
 
         Out of scope:
         - ...
+    validations:
+      required: true
+  - type: input
+    id: target_base
+    attributes:
+      label: Intended base branch
+      description: Usually main. Name an integration branch when the direction tracker requires one.
+      placeholder: "main or frontend-control-plane-im-prototype-rfc"
     validations:
       required: true
   - type: textarea

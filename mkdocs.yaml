@@ -116,6 +116,7 @@ nav:
       - Contracts: reference/contracts/README.md
   - Development:
       - development/README.md
+      - Technical Directions: project/technical-directions.md
       - Testing And Quality: development/testing-and-quality.md
       - Documentation Layout: development/documentation-layout.md
       - Benchmark Workflow: development/benchmark-developer-workflow.md
