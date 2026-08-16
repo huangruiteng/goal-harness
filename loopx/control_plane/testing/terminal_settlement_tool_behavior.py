@@ -31,7 +31,7 @@ from .selected_todo_tool_behavior import bounded_workspace_read_plan
 TERMINAL_SETTLEMENT_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION = (
     "terminal_settlement_tool_behavior_receipt_v0"
 )
-TERMINAL_SETTLEMENT_TOOL_BEHAVIOR_MAX_CALLS = 7
+TERMINAL_SETTLEMENT_TOOL_BEHAVIOR_MAX_CALLS = 10
 
 TERMINAL_SETTLEMENT_FIXTURE_GOAL_ID = "terminal-settlement-fixture"
 TERMINAL_SETTLEMENT_FIXTURE_AGENT_ID = "codex-terminal-settlement"
@@ -98,6 +98,10 @@ def _build_fixture(root: Path) -> _TerminalSettlementFixture:
             {
                 "schema_version": "terminal_settlement_proof_v0",
                 "bounded_delivery_validated": True,
+                "classification": "validated_progress",
+                "delivery_batch_scale": "single_surface",
+                "delivery_outcome": "outcome_progress",
+                "evidence": "fixture-settlement-proof",
                 "follow_up_required": False,
             },
             ensure_ascii=False,
@@ -480,7 +484,12 @@ class DoubaoTerminalSettlementToolBehaviorActor:
                     "content": (
                         "You are Codex running one LoopX heartbeat. Follow the "
                         "production heartbeat task and choose each next action "
-                        "from the latest tool result. Use one command per tool call."
+                        "from the latest tool result. The exec tool's current "
+                        "workspace is the connected goal project root, so task "
+                        "paths are directly addressable. Use one command per tool "
+                        "call. After validation, fill the quota-projected writeback "
+                        "placeholders from the proof's typed fields and follow the "
+                        "ordered settlement plan."
                     ),
                 },
                 {"role": "user", "content": fixture.task_body},

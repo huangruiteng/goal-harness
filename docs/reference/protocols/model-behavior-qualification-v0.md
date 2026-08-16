@@ -339,7 +339,7 @@ semantic-contract extraction when a packet differential is the thing under
 test. All attempts must align. Actor or transport errors are not retried
 automatically; the portfolio fails closed and stops further calls. The catalog
 has 32 bounded scenario attempts. With the bounded per-scenario tool budgets,
-the maximum regular run is 86 provider turns.
+the maximum regular run is 92 provider turns.
 Generic full-versus-candidate pair mode remains available only
 for temporary sensitive differentials or explicit stable-versus-candidate
 outcome claims, not as a permanent regular-behavior baseline.
