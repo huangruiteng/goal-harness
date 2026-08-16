@@ -822,6 +822,7 @@ def check_contract(
     limit: int,
     allow_missing_registry: bool = False,
     goal_id_filter: str | None = None,
+    include_public_boundary_scan: bool = True,
 ) -> dict[str, Any]:
     error_diagnostics: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -930,31 +931,44 @@ def check_contract(
                 if not emitted_check:
                     warnings.append(_index_duplicate_warning(item.get("id"), raw, unique, duplicate_summary))
 
-    boundary = scan_public_boundary(scan_roots, registry=registry)
-    if boundary.get("ok"):
-        checks.append(f"public boundary scan clean: {boundary.get('scanned_files')} files")
+    if include_public_boundary_scan:
+        boundary = scan_public_boundary(scan_roots, registry=registry)
+        public_boundary_scan = {
+            "state": "completed",
+            "ok": bool(boundary.get("ok")),
+            "scanned_files": int(boundary.get("scanned_files") or 0),
+        }
+        if boundary.get("ok"):
+            checks.append(f"public boundary scan clean: {boundary.get('scanned_files')} files")
+        else:
+            for hit in boundary.get("hits") or []:
+                add_global_error("public_boundary_violation", str(hit))
+        if boundary.get("skipped_private_state_files"):
+            checks.append(
+                "private state scan skipped: "
+                f"{len(boundary.get('skipped_private_state_files') or [])} local-private files"
+            )
+        if boundary.get("allowed_hits"):
+            checks.append(
+                "public boundary policy allowed: "
+                f"{len(boundary.get('allowed_hits') or [])} private_doc_url hits"
+            )
+        warnings.extend(str(item) for item in boundary.get("private_state_git_warnings") or [])
+        if boundary.get("credential_reference_hits"):
+            checks.append(
+                "credential references downgraded: "
+                f"{len(boundary.get('credential_reference_hits') or [])} non-literal hits"
+            )
+        warnings.extend(
+            f"unreadable file skipped: {item}" for item in boundary.get("unreadable_files") or []
+        )
     else:
-        for hit in boundary.get("hits") or []:
-            add_global_error("public_boundary_violation", str(hit))
-    if boundary.get("skipped_private_state_files"):
-        checks.append(
-            "private state scan skipped: "
-            f"{len(boundary.get('skipped_private_state_files') or [])} local-private files"
-        )
-    if boundary.get("credential_reference_hits"):
-        checks.append(
-            "credential references downgraded: "
-            f"{len(boundary.get('credential_reference_hits') or [])} non-literal hits"
-        )
-    if boundary.get("allowed_hits"):
-        checks.append(
-            "public boundary policy allowed: "
-            f"{len(boundary.get('allowed_hits') or [])} private_doc_url hits"
-        )
-    warnings.extend(str(item) for item in boundary.get("private_state_git_warnings") or [])
-    warnings.extend(
-        f"unreadable file skipped: {item}" for item in boundary.get("unreadable_files") or []
-    )
+        public_boundary_scan = {
+            "state": "deferred",
+            "reason": "status_hot_path",
+            "recommended_action": "run `loopx check` before publishing",
+        }
+        checks.append("public boundary scan deferred for status hot path")
     error_views = contract_error_views(error_diagnostics)
     errors = error_views["errors"]
 
@@ -971,6 +985,7 @@ def check_contract(
         **error_views,
         "warnings": warnings,
         "checks": checks,
+        "public_boundary_scan": public_boundary_scan,
     }
     return project_contract_health_for_goal(payload, goal_id=goal_id_filter)
 

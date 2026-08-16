@@ -1,0 +1,504 @@
+from __future__ import annotations
+
+import json
+import queue
+import shutil
+import subprocess
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+from .chat import (
+    CHAT_AGENT_RESPONSE_SCHEMA_VERSION,
+    CHAT_REVIEW_CLOSE_TAG,
+    CHAT_REVIEW_OPEN_TAG,
+    VisibleResponseStreamFilter,
+    parse_agent_response,
+)
+
+
+class CodexChatAgentError(RuntimeError):
+    def __init__(self, message: str, *, gate: dict[str, str], error_code: str = "host_gate") -> None:
+        super().__init__(message)
+        self.gate = gate
+        self.error_code = error_code
+
+
+class CodexChatTimeoutError(CodexChatAgentError):
+    pass
+
+
+def _host_tool_gate(summary: str, next_action: str) -> dict[str, str]:
+    return {
+        "kind": "host_tool_gate",
+        "summary": summary,
+        "next_action": next_action,
+    }
+
+
+def _approval_gate(summary: str) -> dict[str, str]:
+    return {
+        "kind": "approval_gate",
+        "summary": summary,
+        "next_action": "Review the request in the active host before continuing.",
+    }
+
+
+def _reader(stream: Any, messages: "queue.Queue[dict[str, Any] | Exception]") -> None:
+    try:
+        for line in stream:
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except Exception as exc:  # pragma: no cover - defensive transport path.
+                messages.put(exc)
+                continue
+            if isinstance(payload, dict):
+                messages.put(payload)
+    finally:
+        messages.put(EOFError("Codex app-server stream closed"))
+
+
+def _extract_id(result: dict[str, Any], container: str, fallback: str) -> str:
+    nested = result.get(container)
+    if isinstance(nested, dict):
+        value = nested.get("id") or nested.get(fallback)
+        return str(value or "")
+    return str(result.get(fallback) or "")
+
+
+def _event_turn_id(message: dict[str, Any]) -> str:
+    params = message.get("params")
+    if not isinstance(params, dict):
+        return ""
+    turn = params.get("turn")
+    if isinstance(turn, dict):
+        return str(turn.get("id") or turn.get("turnId") or "")
+    return str(params.get("turnId") or "")
+
+
+def _event_thread_id(message: dict[str, Any]) -> str:
+    params = message.get("params")
+    return str(params.get("threadId") or "") if isinstance(params, dict) else ""
+
+
+def _agent_item_text(message: dict[str, Any]) -> str:
+    params = message.get("params")
+    if not isinstance(params, dict):
+        return ""
+    item = params.get("item")
+    if not isinstance(item, dict) or item.get("type") != "agentMessage":
+        return ""
+    content = item.get("content")
+    if isinstance(content, list):
+        return "".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") in {"text", "outputText"}
+        )
+    return str(item.get("text") or "")
+
+
+def _turn_prompt(
+    user_message: str,
+    *,
+    context_summary: str = "",
+    execution_mode: bool = False,
+) -> str:
+    envelope = {
+        "schema_version": CHAT_AGENT_RESPONSE_SCHEMA_VERSION,
+        "message": "Short answer for the operator.",
+        "proposals": [
+            {
+                "kind": "todo",
+                "text": "One bounded Todo.",
+                "priority": "P1",
+                "rationale": "Why this is the next safe step.",
+            }
+        ],
+        "gate": None,
+    }
+    role = (
+        "You are the execution agent for a confirmed LoopX Task. Work only from the project root. "
+        "Execute the operator task now. Inspect the repository, edit files, and run focused validation as needed. "
+        "Use the existing branch and worktree. Commit or push only when the operator task explicitly requests it. "
+        "Keep changes bounded to the confirmed Task and stop at any permission, identity, or destructive-operation gate. "
+        if execution_mode
+        else
+        "You are the planning agent inside LoopX Chat. Work only from the project root. "
+    )
+    planning_limits = (
+        "Use read-only repository commands only when the operator explicitly asks for repository facts or when evidence is required to answer accurately. "
+        "Do not use tools for ordinary conversation, exact-wording requests, or status questions that can be answered from the supplied LoopX context. "
+        "Do not edit files, mutate LoopX state, create commits, send messages, or request elevated access. "
+        if not execution_mode
+        else ""
+    )
+    return (
+        role
+        + "The operator message below is the current task. Answer it directly and do not replace it "
+        + "with an autonomous project task. "
+        + planning_limits
+        + "When the operator requests a durable Goal, Todo, Agent binding, heartbeat, monitor, gate, or correction change, "
+        "describe the bounded proposal clearly so LoopX can route it through typed preview and explicit apply. "
+        "Never claim the change has been written without a verified control-plane receipt. "
+        "If you encounter an identity, approval, or host-tool gate, stop and describe it in gate. "
+        "Reply in Chinese unless the operator asks for another language. Keep proposals bounded and reviewable. "
+        "Do not expose chain-of-thought, tool narration, intended steps, or scratch work. "
+        "First write the complete operator-facing answer as ordinary text. Start with the conclusion, "
+        "use short sentences or lines so the answer can stream, and include at most five actionable items. "
+        "Then append exactly one machine-readable envelope whose message field repeats that complete answer. "
+        "Do not write anything after the closing tag. Use these tags and shape:\n"
+        f"{CHAT_REVIEW_OPEN_TAG}{json.dumps(envelope, ensure_ascii=False)}{CHAT_REVIEW_CLOSE_TAG}\n\n"
+        + (f"LoopX context (supporting context only):\n{context_summary.strip()}\n\n" if context_summary.strip() else "")
+        + f"Operator user message:\n{user_message.strip()}"
+    )
+
+
+@dataclass
+class CodexChatAgentSession:
+    process: subprocess.Popen[str]
+    messages: "queue.Queue[dict[str, Any] | Exception]"
+    thread_id: str
+    work_dir: Path
+    context_summary: str = ""
+    execution_mode: bool = False
+    response_timeout_sec: float = 30.0
+    idle_timeout_sec: float = 180.0
+    hard_timeout_sec: float = 900.0
+    next_request_id: int = 5
+    current_turn_id: str = ""
+    _pending_events: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    _write_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _request_id_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @classmethod
+    def start(
+        cls,
+        *,
+        codex_bin: str,
+        work_dir: Path,
+        goal_id: str,
+        objective: str,
+        response_timeout_sec: float = 30.0,
+        idle_timeout_sec: float = 180.0,
+        hard_timeout_sec: float = 900.0,
+        resume_thread_id: str | None = None,
+        execution_mode: bool = False,
+    ) -> "CodexChatAgentSession":
+        resolved = shutil.which(codex_bin)
+        if not resolved:
+            raise CodexChatAgentError(
+                "Codex executable is unavailable",
+                gate=_host_tool_gate(
+                    "Codex host tool is unavailable for LoopX Chat.",
+                    "Install or select a working Codex CLI, then start LoopX Chat again.",
+                ),
+            )
+        root = work_dir.resolve()
+        try:
+            process = subprocess.Popen(
+                [resolved, "app-server", "--listen", "stdio://"],
+                cwd=str(root),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+        except OSError as exc:
+            raise CodexChatAgentError(
+                "Codex app-server could not start",
+                gate=_host_tool_gate(
+                    "Codex app-server could not start for LoopX Chat.",
+                    "Verify the Codex CLI installation and app-server support.",
+                ),
+            ) from exc
+
+        messages: "queue.Queue[dict[str, Any] | Exception]" = queue.Queue()
+        assert process.stdout is not None
+        reader = threading.Thread(target=_reader, args=(process.stdout, messages), daemon=True)
+        reader.start()
+        session = cls(
+            process=process,
+            messages=messages,
+            thread_id="",
+            work_dir=root,
+            context_summary=f"{goal_id}: {objective}".strip(),
+            response_timeout_sec=response_timeout_sec,
+            idle_timeout_sec=idle_timeout_sec,
+            hard_timeout_sec=hard_timeout_sec,
+            execution_mode=execution_mode,
+        )
+        try:
+            session._request(
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": "loopx_chat",
+                        "title": "LoopX Chat",
+                        "version": "0.1.0",
+                    },
+                    "capabilities": {"experimentalApi": True},
+                },
+                request_id=1,
+            )
+            session._notify("initialized", {})
+            thread_result = session._request(
+                "thread/resume" if resume_thread_id else "thread/start",
+                {
+                    **({"threadId": resume_thread_id, "excludeTurns": True} if resume_thread_id else {}),
+                    "cwd": str(root),
+                    "sandbox": "workspace-write" if execution_mode else "read-only",
+                    "approvalPolicy": "never",
+                },
+                request_id=2,
+            )
+            session.thread_id = _extract_id(thread_result, "thread", "threadId")
+            if not session.thread_id:
+                raise session._runtime_error("Codex app-server did not return a thread id.")
+            if resume_thread_id and session.thread_id != resume_thread_id:
+                raise session._runtime_error("Codex app-server resumed an unexpected thread.")
+            # Chat keeps its Goal binding in LoopX's local Session state and supplies
+            # that public-safe context in each Turn prompt. Codex Goal mode is reserved
+            # for autonomous execution; enabling it here causes conversational messages
+            # to be treated as continuation ticks instead of the current user task.
+            session.next_request_id = 3
+            return session
+        except Exception:
+            session.close()
+            raise
+
+    def _runtime_error(self, summary: str) -> CodexChatAgentError:
+        return CodexChatAgentError(
+            summary,
+            gate=_host_tool_gate(
+                summary,
+                "Check the Codex app-server host capability, then retry the session.",
+            ),
+        )
+
+    def _write(self, payload: dict[str, Any]) -> None:
+        if self.process.stdin is None:
+            raise self._runtime_error("Codex app-server input stream is closed.")
+        try:
+            with self._write_lock:
+                self.process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                self.process.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            raise self._runtime_error("Codex app-server input stream closed unexpectedly.") from exc
+
+    def _notify(self, method: str, params: dict[str, Any]) -> None:
+        self._write({"method": method, "params": params})
+
+    def _next_message(self, *, deadline: float) -> dict[str, Any]:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._runtime_error("Codex app-server timed out.")
+            try:
+                message = self.messages.get(timeout=min(0.5, remaining))
+            except queue.Empty:
+                continue
+            if isinstance(message, EOFError):
+                raise self._runtime_error("Codex app-server closed before completing the request.")
+            if isinstance(message, Exception):
+                raise self._runtime_error("Codex app-server returned an unreadable response.")
+            return message
+
+    def _check_server_gate(self, message: dict[str, Any]) -> None:
+        if message.get("id") is not None and message.get("method"):
+            raise CodexChatAgentError(
+                "Codex app-server requested host approval",
+                gate=_approval_gate("Codex requested host approval during a read-only chat turn."),
+            )
+
+    def _request(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        request_id: int | None = None,
+    ) -> dict[str, Any]:
+        if request_id is None:
+            request_id = self.next_request_id
+            self.next_request_id += 1
+        self._write({"id": request_id, "method": method, "params": params})
+        deadline = time.monotonic() + self.response_timeout_sec
+        while True:
+            message = self._next_message(deadline=deadline)
+            if message.get("id") == request_id:
+                if message.get("error"):
+                    raise self._runtime_error(f"Codex app-server rejected {method}.")
+                result = message.get("result")
+                return result if isinstance(result, dict) else {}
+            self._check_server_gate(message)
+            self._pending_events.append(message)
+
+    def interrupt(self, turn_id: str | None = None) -> None:
+        selected_turn_id = str(turn_id or self.current_turn_id or "")
+        if not selected_turn_id:
+            return
+        with self._request_id_lock:
+            request_id = self.next_request_id
+            self.next_request_id += 1
+        self._write(
+            {
+                "id": request_id,
+                "method": "turn/interrupt",
+                "params": {"threadId": self.thread_id, "turnId": selected_turn_id},
+            }
+        )
+
+    def send(
+        self,
+        user_message: str,
+        *,
+        attachments: list[dict[str, Any]] | None = None,
+        on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        text = " ".join(str(user_message or "").split())
+        if not text:
+            raise ValueError("user message is required")
+        with self._request_id_lock:
+            request_id = self.next_request_id
+            self.next_request_id += 1
+        turn_input: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": _turn_prompt(
+                    text,
+                    context_summary=self.context_summary,
+                    execution_mode=self.execution_mode,
+                ),
+            }
+        ]
+        for attachment in attachments or []:
+            image_url = str(attachment.get("data_url") or "")
+            if image_url:
+                turn_input.append({"type": "image", "url": image_url, "detail": "auto"})
+        turn_result = self._request(
+            "turn/start",
+            {
+                "threadId": self.thread_id,
+                "input": turn_input,
+                "cwd": str(self.work_dir),
+                "approvalPolicy": "never",
+            },
+            request_id=request_id,
+        )
+        turn_id = _extract_id(turn_result, "turn", "turnId")
+        self.current_turn_id = turn_id
+        if on_event:
+            on_event("turn.started", {"upstream_turn_id": turn_id})
+        parts: list[str] = []
+        display_filter = VisibleResponseStreamFilter(protected_paths=[self.work_dir])
+        visible_delta_count = 0
+        pending = self._pending_events
+        self._pending_events = []
+        started_at = time.monotonic()
+        last_activity_at = started_at
+        while True:
+            now = time.monotonic()
+            if now - started_at >= self.hard_timeout_sec:
+                raise self._timeout_error("hard_timeout", "Codex Chat turn reached its hard time limit.")
+            if now - last_activity_at >= self.idle_timeout_sec:
+                raise self._timeout_error("idle_timeout", "Codex Chat turn stopped producing activity.")
+            deadline = min(started_at + self.hard_timeout_sec, last_activity_at + self.idle_timeout_sec)
+            try:
+                message = pending.pop(0) if pending else self._next_message(deadline=deadline)
+            except CodexChatAgentError:
+                now = time.monotonic()
+                if now - started_at >= self.hard_timeout_sec:
+                    raise self._timeout_error(
+                        "hard_timeout",
+                        "Codex Chat turn reached its hard time limit.",
+                    )
+                if now - last_activity_at >= self.idle_timeout_sec:
+                    raise self._timeout_error(
+                        "idle_timeout",
+                        "Codex Chat turn stopped producing activity.",
+                    )
+                raise
+            last_activity_at = time.monotonic()
+            self._check_server_gate(message)
+            event_thread_id = _event_thread_id(message)
+            event_turn_id = _event_turn_id(message)
+            if event_thread_id and event_thread_id != self.thread_id:
+                continue
+            if message.get("method") == "turn/started" and event_turn_id:
+                turn_id = event_turn_id
+                self.current_turn_id = turn_id
+            if event_turn_id and turn_id and event_turn_id != turn_id:
+                continue
+            method = str(message.get("method") or "")
+            params = message.get("params")
+            if on_event:
+                phase = {
+                    "turn/started": "正在连接 Agent",
+                    "item/started": "正在读取 Goal 上下文",
+                    "item/completed": "已完成一项检查",
+                    "turn/completed": "正在整理回答",
+                }.get(method)
+                if phase:
+                    on_event("agent.phase", {"label": phase, "method": method})
+            if method == "item/agentMessage/delta" and isinstance(params, dict):
+                delta = params.get("delta")
+                if isinstance(delta, str):
+                    parts.append(delta)
+                    visible = display_filter.feed(delta)
+                    if visible and on_event:
+                        visible_delta_count += 1
+                        on_event("answer.delta", {"text": visible})
+            elif method == "item/completed":
+                item_text = _agent_item_text(message)
+                if item_text and not parts:
+                    parts.append(item_text)
+                    visible = display_filter.feed(item_text)
+                    if visible and on_event:
+                        visible_delta_count += 1
+                        on_event("answer.delta", {"text": visible})
+            elif method == "turn/completed":
+                break
+            elif method == "error":
+                raise self._runtime_error("Codex app-server reported a turn error.")
+        visible_tail = display_filter.finish()
+        if visible_tail and on_event:
+            visible_delta_count += 1
+            on_event("answer.delta", {"text": visible_tail})
+        raw_response = "".join(parts)
+        response = parse_agent_response(raw_response, protected_paths=[self.work_dir])
+        if on_event:
+            if CHAT_REVIEW_OPEN_TAG not in raw_response or CHAT_REVIEW_CLOSE_TAG not in raw_response:
+                on_event("protocol.warning", {"error_code": "missing_review_envelope"})
+            if visible_delta_count == 0:
+                on_event("answer.delta", {"text": str(response.get("message") or "")})
+            on_event("answer.final", {"response": response})
+        self.current_turn_id = ""
+        return response
+
+    def _timeout_error(self, error_code: str, summary: str) -> CodexChatTimeoutError:
+        return CodexChatTimeoutError(
+            summary,
+            error_code=error_code,
+            gate=_host_tool_gate(summary, "Interrupt the turn or retry in the same session."),
+        )
+
+    def close(self) -> None:
+        if self.process.poll() is not None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=2)
+
+    def __enter__(self) -> "CodexChatAgentSession":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
