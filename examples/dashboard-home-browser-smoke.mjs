@@ -881,23 +881,25 @@ async function installChatApiFixture(page, { activeTurn = false } = {}) {
 async function captureHomeVisualAcceptance(page, url, label) {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForSelector('[data-testid="personal-goal-home"]', { timeout: 10_000 });
-  const composerPlaceholder = await page.locator('[data-testid="personal-manager-composer"]').getAttribute("placeholder");
-  if (composerPlaceholder !== "问问 Goals，或交代一个任务…") {
+  const composer = page.getByLabel("向 LoopX 发送消息");
+  const composerPlaceholder = await composer.getAttribute("placeholder");
+  if (composerPlaceholder !== "问问 LoopX 管家，或描述一个新 Goal…") {
     throw new Error(`${label} Manager composer placeholder changed: ${composerPlaceholder}`);
   }
-  const composerForm = page.locator(".personal-manager-composer");
+  const composerForm = page.locator(".personal-channel-composer");
   const composerBox = await composerForm.boundingBox();
-  if (!composerBox || composerBox.height > 76) {
+  if (!composerBox || composerBox.height > 84) {
     throw new Error(`${label} composer regressed from the compact single-row layout: ${JSON.stringify(composerBox)}`);
   }
-  const composerAgentBox = await composerForm.getByRole("button", { name: /切换当前 Agent/ }).boundingBox();
-  if (!composerAgentBox || composerAgentBox.width < 72) {
+  const composerAgentBox = await composerForm.locator("span").first().boundingBox();
+  if (!composerAgentBox || composerAgentBox.width < 40) {
     throw new Error(`${label} composer Agent selector is visually truncated: ${JSON.stringify(composerAgentBox)}`);
   }
   if (await composerForm.locator(".personal-composer-tools > span").count()) {
     throw new Error(`${label} composer rendered a duplicate Goal context chip.`);
   }
-  const sendButtonBackground = await composerForm.locator('[data-testid="personal-manager-send"]').evaluate((element) =>
+  const sendButton = composerForm.getByRole("button", { name: "发送" });
+  const sendButtonBackground = await sendButton.evaluate((element) =>
     getComputedStyle(element).backgroundColor
   );
   if (sendButtonBackground === "rgba(0, 0, 0, 0)" || sendButtonBackground === "transparent") {
@@ -912,11 +914,15 @@ async function captureHomeVisualAcceptance(page, url, label) {
 
   const isMobile = label === "mobile";
   if (!isMobile) {
-    await page.getByRole("button", { name: "Agent 在做什么？" }).click();
-    const projectedAnswer = page.locator(".personal-manager-message.is-assistant").last();
+    await page.getByRole("button", { name: "将“我现在该做什么”填入编辑框" }).click();
+    if (await composer.inputValue() !== "我现在该做什么？") {
+      throw new Error("Manager advice shortcut did not prepare the expected editable draft.");
+    }
+    await sendButton.click();
+    const projectedAnswer = page.locator(".personal-manager-conversation-tray .is-assistant").last();
     await projectedAnswer.waitFor({ state: "visible", timeout: 10_000 });
     const projectedAnswerText = await projectedAnswer.innerText();
-    for (const text of ["LoopX 管家", "LoopX 状态投影"]) {
+    for (const text of ["LoopX 管家", "先处理", "请确认 owner 选项 A/B 的取舍"]) {
       if (!projectedAnswerText.includes(text)) {
         throw new Error(`Manager projection answer missing truthful attribution: ${text}`);
       }
@@ -925,33 +931,37 @@ async function captureHomeVisualAcceptance(page, url, label) {
       throw new Error(`Manager projection answer exposed a raw Goal id: ${projectedAnswerText}`);
     }
 
-    await page.locator('[data-testid="personal-agent-trigger"]').click();
-    await page.locator('[data-testid="personal-agent-option"]').filter({ hasText: "仅查状态" }).click();
-    const composer = page.locator('[data-testid="personal-manager-composer"]');
+    const agentSelect = page.getByLabel("选择 Agent");
+    const agentOptions = await agentSelect.locator("option").allTextContents();
+    for (const text of ["Codex", "仅查状态"]) {
+      if (!agentOptions.some((option) => option.includes(text))) {
+        throw new Error(`${label} Agent selector missing: ${text}`);
+      }
+    }
+    await agentSelect.selectOption("status-only");
     await composer.fill("当前健康状态");
-    await page.locator('[data-testid="personal-manager-send"]').click();
-    const statusOnlyAnswer = page.locator(".personal-manager-message.is-assistant").last();
+    await sendButton.click();
+    const statusOnlyAnswer = page.locator(".personal-manager-conversation-tray .is-assistant").last();
     const statusOnlyAnswerText = await statusOnlyAnswer.innerText();
-    for (const text of ["仅查状态", "LoopX 状态投影 · 仅查状态"]) {
+    for (const text of ["仅查状态", "当前需要关注这些健康问题"]) {
       if (!statusOnlyAnswerText.includes(text)) {
         throw new Error(`Status-only answer missing attribution: ${text}`);
       }
     }
     await page.reload({ waitUntil: "networkidle" });
-    const persistedAgent = await page.locator('[data-testid="personal-agent-trigger"]').innerText();
-    if (!persistedAgent.includes("仅查状态")) {
+    const persistedAgent = await page.getByLabel("选择 Agent").inputValue();
+    if (persistedAgent !== "status-only") {
       throw new Error(`Manager Agent selection did not persist per Chat: ${persistedAgent}`);
     }
-    await page.locator('[data-testid="personal-agent-trigger"]').click();
-    await page.locator('[data-testid="personal-agent-option"]').filter({ hasText: "Codex" }).first().click();
+    await page.getByLabel("选择 Agent").selectOption("codex");
   }
 
-  const goalList = page.locator('[data-testid="personal-goal-list"]');
+  const goalList = page.locator(".personal-goal-list");
   if (isMobile) {
     if (await goalList.isVisible()) {
       throw new Error("Mobile home should show Manager Chat without stacking the Goal list.");
     }
-    await page.getByRole("button", { name: "打开 Goals" }).click();
+    await page.getByRole("button", { name: "打开 Goal 导航" }).click();
     await goalList.waitFor({ state: "visible", timeout: 10_000 });
     await page.screenshot({
       path: resolve(visualOutputDir, `${label}-goals.png`),
@@ -960,71 +970,169 @@ async function captureHomeVisualAcceptance(page, url, label) {
     });
   }
 
-  const goalRow = page.locator('[data-testid="personal-goal-row"]').first();
+  const goalRow = goalList.locator(".personal-goal-link").first();
+  const selectedGoalTitle = (await goalRow.innerText()).split("\n")[0]?.trim();
   await goalRow.click();
-  const goalSummary = page.locator('[data-testid="personal-goal-summary"]');
+  const goalTabs = page.getByRole("navigation", { name: "Goal 视图" });
+  await goalTabs.waitFor({ state: "visible", timeout: 10_000 });
+  const goalHeaderText = await page.locator(".personal-channel-header").innerText();
+  for (const text of [selectedGoalTitle, "Codex", "Chat", "Tasks", "Files"]) {
+    if (text && !goalHeaderText.includes(text)) {
+      throw new Error(`${label} Goal header missing: ${text}`);
+    }
+  }
+  const goalComposerPlaceholder = await page.getByLabel("向 LoopX 发送消息").getAttribute("placeholder");
+  if (!goalComposerPlaceholder?.includes(selectedGoalTitle)) {
+    throw new Error(`${label} Goal composer lost its Goal context: ${goalComposerPlaceholder}`);
+  }
+
+  await goalTabs.getByRole("button", { name: "Tasks" }).click();
+  const taskBoard = page.locator(".personal-task-kanban");
+  await taskBoard.waitFor({ state: "visible", timeout: 10_000 });
+  const taskBoardText = await taskBoard.innerText();
+  for (const text of ["待确认", "待执行 / 进行中", "定时与持续", "已完成", "请确认 owner 选项 A/B 的取舍", "推进与 owner 决策独立的 safe side path"]) {
+    if (!taskBoardText.includes(text)) {
+      throw new Error(`${label} Tasks projection missing: ${text}`);
+    }
+  }
+  const taskBoardBox = await taskBoard.boundingBox();
+  const currentComposerBox = await page.locator(".personal-channel-composer").boundingBox();
+  if (!taskBoardBox || !currentComposerBox || taskBoardBox.y >= currentComposerBox.y) {
+    throw new Error(`${label} Tasks view is obscured by the composer: tasks=${JSON.stringify(taskBoardBox)} composer=${JSON.stringify(currentComposerBox)}`);
+  }
+  await taskBoard.getByText("请确认 owner 选项 A/B 的取舍；未确认前不推进 gated route。", { exact: true }).click();
+  const attentionDrawer = page.getByRole("dialog");
+  await attentionDrawer.waitFor({ state: "visible", timeout: 10_000 });
+  const attentionText = await attentionDrawer.innerText();
+  for (const text of ["正在阻塞 Agent", selectedGoalTitle, "原因", "证据", "查看影响并决定"]) {
+    if (text && !attentionText.includes(text)) {
+      throw new Error(`${label} Needs You detail missing: ${text}`);
+    }
+  }
+  const closeAttention = page.getByRole("button", { name: new RegExp(`关闭详情：返回${selectedGoalTitle}`) });
+  if (!await closeAttention.evaluate((element) => document.activeElement === element)) {
+    throw new Error(`${label} Needs You detail did not receive focus.`);
+  }
+  await closeAttention.click();
+
+  await taskBoard.getByText("推进与 owner 决策独立的 safe side path，输出公开可复现证据。", { exact: true }).click();
+  const todoDrawer = page.getByRole("dialog");
+  await todoDrawer.waitFor({ state: "visible", timeout: 10_000 });
+  const todoText = await todoDrawer.innerText();
+  for (const text of [selectedGoalTitle, "Owner", "状态", "依赖", "下一转换", "操作", "标记完成"]) {
+    if (text && !todoText.includes(text)) {
+      throw new Error(`${label} Todo lineage detail missing: ${text}`);
+    }
+  }
+  await page.getByRole("button", { name: new RegExp(`关闭详情：返回${selectedGoalTitle}`) }).click();
+
+  await goalTabs.getByRole("button", { name: "Files" }).click();
+  await page.getByText("Files & Outputs", { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+  const filesText = await page.locator(".personal-object-list").innerText();
+  if (!filesText.includes("最近验证") || !filesText.includes(selectedGoalTitle)) {
+    throw new Error(`${label} Files projection lost its public-safe summary or Goal lineage: ${filesText}`);
+  }
+  await page.locator(".personal-object-list").getByRole("button").first().click();
+  const outputDrawer = page.getByRole("dialog");
+  await outputDrawer.waitFor({ state: "visible", timeout: 10_000 });
+  const outputText = await outputDrawer.innerText();
+  for (const text of ["产出详情", selectedGoalTitle, "Run", "Agent"]) {
+    if (text && !outputText.includes(text)) {
+      throw new Error(`${label} run evidence detail missing: ${text}`);
+    }
+  }
+  if (!(await outputDrawer.getByLabel("公开安全产出预览").count()) && !outputText.includes("此产出没有可用的公开安全内联预览")) {
+    throw new Error(`${label} output detail omitted both its public-safe preview and an explicit unavailable state.`);
+  }
+  await page.getByRole("button", { name: new RegExp(`关闭详情：返回${selectedGoalTitle}`) }).click();
+
+  await goalTabs.getByRole("button", { name: "Chat" }).click();
+  const chatPaneText = await page.locator(".personal-channel-scroll").innerText();
+  if (!chatPaneText.includes("Codex")) {
+    throw new Error(`${label} Goal Chat does not expose the owning Agent.`);
+  }
+  const goalSummary = page.locator(".personal-channel-header");
   await goalSummary.waitFor({ state: "visible", timeout: 10_000 });
   const goalSummaryText = await goalSummary.innerText();
-  const missingGoalSummary = ["Codex", "计划进度", "Agent Todo"]
+  const missingGoalSummary = [selectedGoalTitle, "Codex", "Chat", "Tasks", "Files"]
     .filter((text) => !goalSummaryText.includes(text));
   if (missingGoalSummary.length) {
     throw new Error(`${label} Goal Chat projection missing labels: ${missingGoalSummary.join(", ")}`);
   }
-  const planRows = page.locator('[data-testid="personal-agent-plan-card"] [data-source-todo-id]');
+  await goalTabs.getByRole("button", { name: "Tasks" }).click();
+  const planRows = page.locator(".personal-task-card");
   if (await planRows.count() === 0) {
     throw new Error(`${label} Goal Chat plan did not preserve Todo lineage.`);
   }
-  const runEvidence = page.locator('[data-testid="personal-run-evidence-card"]');
+  await goalTabs.getByRole("button", { name: "Chat" }).click();
+  const runEvidence = page.locator(".personal-output-row").first();
   await runEvidence.waitFor({ state: "visible", timeout: 10_000 });
-  if (!await runEvidence.getAttribute("data-source-generated-at")) {
+  if (!await runEvidence.locator("time").getAttribute("datetime") && !(await runEvidence.locator("time").innerText()).trim()) {
     throw new Error(`${label} Goal Chat run evidence did not preserve run lineage.`);
   }
-  const decisionText = await page.locator('[data-testid="personal-needs-you"]').innerText();
-  for (const text of ["请确认 owner 选项 A/B 的取舍", "稍后", "回复 Agent"]) {
+  const needsYou = page.locator(".personal-attention-row").first();
+  const decisionText = await needsYou.innerText();
+  for (const text of ["请确认 owner 选项 A/B 的取舍", "需要你"]) {
     if (!decisionText.includes(text)) {
       throw new Error(`${label} Goal Chat decision card missing: ${text}`);
     }
   }
-  const decisionBox = await page.locator('[data-testid="personal-needs-you"]').boundingBox();
-  const goalComposerBox = await page.locator(".personal-manager-composer").boundingBox();
+  if (!isMobile && !/(阻塞|待处理)/u.test(decisionText)) {
+    throw new Error(`${label} Goal Chat decision card omitted its actionable status: ${decisionText}`);
+  }
+  const decisionBox = await needsYou.boundingBox();
+  const goalComposerBox = await page.locator(".personal-channel-composer").boundingBox();
   if (!decisionBox || !goalComposerBox || decisionBox.y + decisionBox.height > goalComposerBox.y + 2) {
     throw new Error(`${label} needs-you card is obscured by the composer: decision=${JSON.stringify(decisionBox)} composer=${JSON.stringify(goalComposerBox)}`);
   }
-  const executionText = await page.locator(".personal-projection-author").innerText();
+  const executionText = await page.locator(".personal-channel-header").innerText();
   if (!executionText.includes("Codex")) {
     throw new Error(`${label} Goal Chat does not expose the owning Agent.`);
   }
 
-  const agentTrigger = page.locator('[data-testid="personal-agent-trigger"]');
-  await agentTrigger.click();
-  const agentMenu = page.locator('[data-testid="personal-agent-menu"]');
-  await agentMenu.waitFor({ state: "visible", timeout: 10_000 });
-  const agentMenuText = await agentMenu.innerText();
-  for (const text of ["Codex", "仅查状态", "来自本地 Agent Endpoint", "密钥仅由后端环境读取"]) {
+  const agentTrigger = page.getByLabel("选择 Agent");
+  const agentMenu = agentTrigger.locator("option");
+  const agentMenuText = (await agentMenu.allTextContents()).join("\n");
+  for (const text of ["Codex", "仅查状态"]) {
     if (!agentMenuText.includes(text)) {
       throw new Error(`${label} Agent selector missing: ${text}`);
     }
   }
-  if (isMobile) {
-    const menuBox = await agentMenu.boundingBox();
-    if (!menuBox || menuBox.y < 400) {
-      throw new Error(`Mobile Agent selector is not positioned as a bottom sheet: ${JSON.stringify(menuBox)}`);
+  if (/token|secret|key|密钥/iu.test(agentMenuText)) {
+    throw new Error(`${label} Agent selector leaked credential-oriented text: ${agentMenuText}`);
+  }
+  const unavailableOptions = agentMenu.filter({ hasText: "不可用" });
+  for (let index = 0; index < await unavailableOptions.count(); index += 1) {
+    if (!await unavailableOptions.nth(index).isDisabled()) {
+      throw new Error(`${label} unavailable Agent option remained selectable.`);
     }
   }
-  await page.keyboard.press("Escape");
+  if (isMobile) {
+    const menuBox = await agentTrigger.boundingBox();
+    if (!menuBox || menuBox.x < 0 || menuBox.x + menuBox.width > await page.evaluate(() => window.innerWidth)) {
+      throw new Error(`Mobile Agent selector is outside the viewport: ${JSON.stringify(menuBox)}`);
+    }
+  }
 
-  await page.locator('[data-testid="personal-running-details-trigger"]').click();
-  const runningDetails = page.locator('[data-testid="personal-running-details"]');
+  await page.locator(".personal-run-row").first().click();
+  const runningDetails = page.getByRole("dialog");
   await runningDetails.waitFor({ state: "visible", timeout: 10_000 });
+  const closeDetails = page.getByRole("button", { name: new RegExp(`关闭详情：返回${selectedGoalTitle}`) });
+  if (!await closeDetails.evaluate((element) => document.activeElement === element)) {
+    throw new Error(`${label} running details did not receive focus.`);
+  }
   const runningDetailsText = await runningDetails.innerText();
-  for (const text of ["Goal 进度", "影响", "建议", "负责人", "完整 Todo 投影", "Agent 运行记录", "证据与状态源"]) {
+  for (const text of ["执行 Session", "执行过程与结果", "详情与操作", "Goal", "进度", "运行记录", "本次运行产出"]) {
     if (!runningDetailsText.includes(text)) {
       throw new Error(`${label} running details missing: ${text}`);
     }
   }
-  const closeDetails = page.getByRole("button", { name: "关闭运行详情" });
-  if (!await closeDetails.evaluate((element) => document.activeElement === element)) {
-    throw new Error(`${label} running details did not receive focus.`);
+  await runningDetails.getByRole("tab", { name: "详情与操作" }).click();
+  const executionDetailsText = await runningDetails.innerText();
+  for (const text of ["会话状态", "可恢复", "与 Codex 纠偏", "更多运行操作"]) {
+    if (!executionDetailsText.includes(text)) {
+      throw new Error(`${label} Session operations missing: ${text}`);
+    }
   }
   await closeDetails.click();
 
@@ -1036,23 +1144,23 @@ async function captureHomeVisualAcceptance(page, url, label) {
   });
 
   if (!isMobile) {
-    await page.locator('[data-testid="personal-goal-row"]').nth(1).click();
+    await goalList.locator(".personal-goal-link").nth(1).click();
     await goalSummary.waitFor({ state: "visible", timeout: 10_000 });
-    if (await page.locator('[data-testid="personal-needs-you"]').count()) {
+    if (await page.locator(".personal-attention-row").count()) {
       throw new Error("Healthy Goal Chat rendered an empty user-action card.");
     }
-    const healthyChatText = await page.locator(".personal-chat-pane").innerText();
+    const healthyChatText = await page.locator(".personal-channel-scroll").innerText();
     for (const text of ["完整 Todo 投影", "Agent 运行记录", "证据与状态源", "quota_slot_spent"]) {
       if (healthyChatText.includes(text)) {
         throw new Error(`Healthy Goal Chat leaked advanced details: ${text}`);
       }
     }
 
-    await page.locator('[data-testid="personal-goal-row"]').filter({ hasText: "LoopX meta" }).click();
-    await page.getByRole("button", { name: "查看原因" }).click();
+    await goalList.locator(".personal-goal-link").filter({ hasText: "LoopX meta" }).click();
+    await page.getByRole("button", { name: "Goal 详情" }).click();
     await runningDetails.waitFor({ state: "visible", timeout: 10_000 });
     const repairDetailsText = await runningDetails.innerText();
-    for (const text of ["需要关注", "可见进度可能已经过期", "刷新 LoopX 状态，确认当前进度仍然有效", "Codex"]) {
+    for (const text of ["Goal 详情", "需修复", "刷新 LoopX 状态，确认当前进度仍然有效", "Execution Session"]) {
       if (!repairDetailsText.includes(text)) {
         throw new Error(`Repair running details missing: ${text}`);
       }
@@ -1060,7 +1168,7 @@ async function captureHomeVisualAcceptance(page, url, label) {
     if (repairDetailsText.includes("refresh-state") || repairDetailsText.includes("latest_run")) {
       throw new Error(`Repair Goal leaked machine text: ${repairDetailsText}`);
     }
-    await page.getByRole("button", { name: "关闭运行详情" }).click();
+    await page.getByRole("button", { name: /关闭详情：返回LoopX meta/ }).click();
   }
 }
 
@@ -1099,16 +1207,16 @@ async function main() {
 
     const body = await page.locator("body").innerText();
     const required = [
-      "Goals",
+      "GOALS",
       "LoopX 管家",
-      "2 项需要你",
+      "需要你",
       "Showcase user gate safe side path",
       "Showcase creator operator",
       "Showcase side agent self iteration",
       "LoopX meta",
-      "我现在该做什么？",
-      "哪些 Goal 在等我？",
-      "Agent 在做什么？",
+      "询问下一步",
+      "向 Agent 获取进度报告",
+      "配置定时检查",
       "Codex",
     ];
     const missing = required.filter((text) => !body.includes(text));
@@ -1155,10 +1263,10 @@ async function main() {
     await installChatApiFixture(recoveryPage, { activeTurn: true });
     try {
       await recoveryPage.goto(`${baseUrl}/?statusUrl=/${fixtureName}`, { waitUntil: "networkidle" });
-      const recoveredAnswer = recoveryPage.locator(".personal-manager-message.is-assistant").last();
+      const recoveredAnswer = recoveryPage.locator(".personal-manager-conversation-tray .is-assistant").last();
       await recoveredAnswer.waitFor({ state: "visible", timeout: 10_000 });
       const recoveredText = await recoveredAnswer.innerText();
-      for (const text of ["恢复中的回答。", "恢复的 Codex 会话"]) {
+      for (const text of ["恢复中的回答。", "Codex"]) {
         if (!recoveredText.includes(text)) {
           throw new Error(`Active Turn recovery did not render ${text}: ${recoveredText}`);
         }
@@ -1392,10 +1500,6 @@ async function main() {
         const personalHome = page.locator('[data-testid="personal-goal-home"]');
         await personalHome.waitFor({ state: "visible", timeout: 10_000 });
         await page.waitForTimeout(300);
-        const sourceLabel = await page.locator('[data-testid="personal-source-label"]').innerText();
-        if (sourceLabel !== "示例") {
-          throw new Error(`Explicit example selection did not remain stable: ${sourceLabel}`);
-        }
         if (new URL(page.url()).searchParams.get("statusUrl")) {
           throw new Error("Explicit example selection did not clear the requested status URL.");
         }
