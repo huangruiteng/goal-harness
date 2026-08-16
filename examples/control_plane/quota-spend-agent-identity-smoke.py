@@ -26,6 +26,7 @@ from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
 from loopx.control_plane.work_items.interaction_contract import (  # noqa: E402
     interaction_next_cli_actions,
 )
+from loopx.benchmark_trajectory import normalized_loopx_cli_call  # noqa: E402
 from loopx.quota import (  # noqa: E402
     build_quota_monitor_poll_event,
     build_quota_slot_spend_event,
@@ -62,6 +63,28 @@ def run_quota(root: Path, registry_path: Path, runtime: Path, *args: str) -> tup
     )
     assert result.stdout, result.stderr
     return json.loads(result.stdout), result.returncode
+
+
+def is_state_or_accounting_command(action: str) -> bool:
+    call = normalized_loopx_cli_call(action, round_index=1)
+    subcommands = tuple(call["subcommands"])
+    return subcommands[:1] == ("refresh-state",) or subcommands in {
+        ("quota", "monitor-poll"),
+        ("quota", "spend-slot"),
+        ("quota", "should-run"),
+    }
+
+
+def assert_state_or_accounting_command_classification() -> None:
+    assert is_state_or_accounting_command(
+        "loopx --format json refresh-state --goal-id fixture-goal"
+    )
+    assert is_state_or_accounting_command(
+        "loopx --registry fixture.json quota spend-slot --goal-id fixture-goal"
+    )
+    assert not is_state_or_accounting_command(
+        "loopx status --goal-id refresh-state"
+    )
 
 
 def assert_monitor_poll_event_carries_agent_id(agent_id: str) -> None:
@@ -179,10 +202,7 @@ def assert_interaction_cli_actions_preserve_agent_id(agent_id: str) -> None:
         state_or_accounting_commands = [
             action
             for action in actions
-            if "loopx refresh-state" in action
-            or "loopx quota monitor-poll" in action
-            or "loopx quota spend-slot" in action
-            or "loopx --format json quota should-run" in action
+            if is_state_or_accounting_command(action)
         ]
         assert state_or_accounting_commands, (mode, actions)
         assert all(
@@ -333,6 +353,7 @@ def main() -> int:
     fixture = load_quota_plan_fixture()
     agent_id = fixture.SCOPED_AGENT_ID
 
+    assert_state_or_accounting_command_classification()
     assert_monitor_poll_event_carries_agent_id(agent_id)
     assert_monitor_poll_next_cli_action_preserves_agent_id(agent_id)
     assert_interaction_cli_actions_preserve_agent_id(agent_id)
@@ -370,7 +391,7 @@ def main() -> int:
         state_or_accounting_actions = [
             action
             for action in scoped_actions
-            if "loopx refresh-state" in action or "loopx quota spend-slot" in action
+            if is_state_or_accounting_command(action)
         ]
         assert state_or_accounting_actions, scoped_actions
         assert all(
