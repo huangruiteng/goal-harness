@@ -5,9 +5,13 @@
 ### Worktree And PR Gate
 
 For any tracked repository change beyond a trivial typo fix, create or use a
-dedicated clean `git worktree` on a `codex/` branch from latest `origin/main`
-before editing files. Do not implement changes directly in a dirty primary
-worktree, even when the task starts by inspecting that dirty tree.
+dedicated clean `git worktree` on a `codex/` branch. Use latest `origin/main`
+unless the user explicitly names an integration or release branch; in that
+case, fetch that branch and use its latest remote head as both the worktree
+baseline and pull-request base. Before pushing, verify the merge base and PR
+base so unrelated `main` history cannot leak into a stacked integration PR.
+Do not implement changes directly in a dirty primary worktree, even when the
+task starts by inspecting that dirty tree.
 
 When a dirty worktree contains potentially valuable changes, first classify it
 read-only, then copy or reapply the valuable subset into the dedicated clean
