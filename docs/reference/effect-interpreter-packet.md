@@ -159,6 +159,28 @@ existing `guided_transaction.ordered_steps` value onto `EffectProgram`:
 This is still a read-only lens. The executor remains host-driven until a
 LoopX runtime caller owns multi-step execution.
 
+## Terminal Closeout Ordering
+
+The settlement plan keeps final Goal closure distinct from ordinary Todo
+continuation. Its ordered contract is:
+
+```text
+validation -> durable_writeback -> quota_spend -> terminal_closeout?
+```
+
+`terminal_closeout` is conditional: it is present only when the validated
+completion declares `no_followup`. Ordinary successor completion remains a
+Todo-lifecycle action and does not pretend to be a terminal settlement step.
+The final closeout must prove the same effect identity and matching writeback
+and spend receipts before it may make the Goal terminal.
+
+This order is deliberate. Completing the final Todo first would make strict
+terminal guards reject the spend that accounts for the same material effect.
+The repair is not an after-terminal spend exception: terminal state remains
+strict, and the closeout moves after spend. If closeout fails, its journaled
+receipt may be retried without repeating writeback or spend. Scheduler apply
+and ACK remain host handoffs outside this settlement chain.
+
 ## Relationship To State Machines
 
 Each state family is an interpretation table over this lens:

@@ -173,6 +173,7 @@ result = (
     validate(identity)
     .bind(writeback)
     .bind(spend)
+    .bind(terminal_closeout)  # conditional no-followup only
 )
 ```
 
@@ -187,8 +188,8 @@ effect 不再执行。
 
 | Adapter | 有序链 | 执行与结算边界 |
 |---|---|---|
-| Codex App / CLI quota | validation -> optional Todo completion -> durable writeback -> quota spend | quota 构建 data-encoded CLI plan，并从 event/run receipt 复核原始 turn identity；host scheduler 留在 settlement 外 |
-| Isolated turn driver | validation -> durable writeback -> quota spend | turn driver 拥有 in-process callbacks 和 journal checkpoint；重放从合法 phase prefix 继续 |
+| Codex App / CLI quota | validation -> durable writeback -> quota spend -> conditional terminal closeout | quota 构建 data-encoded CLI plan，并从 event/run receipt 复核原始 turn identity；只有 final no-followup 在 spend 后关闭 Goal，host scheduler 留在 settlement 外 |
+| Isolated turn driver | validation -> durable writeback -> quota spend -> conditional terminal closeout | turn driver 拥有 in-process callbacks 和 journal checkpoint；terminal closeout 失败时只重放 closeout，不重复 writeback/spend |
 | Task-lease acquire | validation -> durable lease write | task-lease 模块继续拥有 owner eligibility、conflict、file lock 和 CAS；adapter 只负责 typed orchestration |
 
 这也是“quota 的 Effect Program 是否继承 core”的准确答案：它复用并 re-export
@@ -205,9 +206,15 @@ executor 会隐藏 owner，而不是减少重复知识。当前共享层只统�
 Effect Program 的价值落在四条可复核不变量上：
 
 1. **同一 identity**：一条 settlement 的所有 receipts 使用同一个 `effect_id`。
-2. **有序提交**：没有 durable writeback receipt，就不能进入 spend。
+2. **有序提交**：没有 durable writeback receipt 就不能 spend；没有 matching spend
+   receipt 就不能提交 terminal no-followup closeout。
 3. **失败短路**：某一步失败后，不允许出现后续外部 effect。
 4. **可重放、至多一次**：已提交 prefix 可以恢复，但同一 identity 不重复结算。
+
+普通 successor completion 仍是 Todo bounded context 的 lifecycle action，可以在
+settlement 前建立下一条 runnable frontier；它不是 terminal closeout。只有 final
+`no_followup` 会改变 Goal 的终态，因此必须放到 matching spend 后。这样无需放宽
+`terminal_no_followup` 守卫，也不会出现“先终止、再给终态 effect 补 spend”的例外。
 
 测试不是从当前输出生成 golden，而是用独立语义 oracle 检查三类 adapter：
 

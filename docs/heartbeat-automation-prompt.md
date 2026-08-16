@@ -674,7 +674,8 @@ For every automatic heartbeat turn, the agent-facing checklist is:
 11. Start bounded self-repair/replan if 2 consecutive eligible turns are only
    repeated no-progress status loops. Cancel or pause instead of spending only
    if that repair path is itself stuck for 2 more eligible turns.
-12. Nontrivial done -> successor todo or no-follow-up rationale.
+12. Ordinary completion links a successor before settlement. Final no-follow-up
+    completion happens only after the accountable refresh and matching spend receipt.
 13. Plans/top todos/route changes need LoopX todo / Next Action
    writeback or a no-writeback rationale.
 14. Treat routine public commit, push, and PR creation as autonomous after clean

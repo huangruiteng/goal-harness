@@ -370,12 +370,16 @@ Stop or narrow M7 when any kill criterion holds:
   `SettlementReceipt`, typed failure kinds, and receipt-preserving
   `SettlementResult.bind`.
 - The default Codex App / CLI quota path builds one typed settlement plan and
-  binds validation, optional Todo completion, durable writeback, and quota
-  spend to the original turn effect identity (#3016, #3033, #3034).
+  binds validation, durable writeback, quota spend, and conditional terminal
+  closeout to the original turn effect identity. Final `no_followup` is a
+  post-spend effect; ordinary successor completion remains Todo-lifecycle
+  work (#3016, #3033, #3034).
 - The isolated turn driver consumes the same plan, identity, receipt, failure,
   replay, and short-circuit algebra through its local callback executor
-  (#3020, #3023). Its loop controller derives continuation from the committed
-  receipt chain rather than a second settlement truth (#3024).
+  (#3020, #3023). It journals terminal closeout separately so a failed closeout
+  retries without repeating writeback or spend. Its loop controller derives
+  continuation from the committed receipt chain rather than a second
+  settlement truth (#3024).
 - Task-lease acquisition is the first bounded non-Turn core adoption. Its
   adapter binds validation to the existing atomic lease write while pure
   eligibility, conflict, file-lock, and CAS rules remain task-lease-owned
@@ -430,7 +434,7 @@ Stop or narrow M7 when any kill criterion holds:
 | Isolated turn-driver closeout | Adopted | Same algebra; local callback executor and journal remain turn-driver-owned |
 | Task-lease acquire | Bounded adoption | Validation and durable write share the core algebra; eligibility, conflicts, locking, CAS, and persistence remain task-lease-owned |
 | Turn continuation | Adopted as a consumer | Pure controller reads the committed receipt chain; it does not execute host effects |
-| Todo completion, `refresh-state`, quota spend | Adopted only as settlement steps | Their domain lifecycle and persistence reducers remain in their bounded contexts |
+| Todo completion, `refresh-state`, quota spend | Bounded adoption | Ordinary completion stays Todo-owned; refresh/spend form the base settlement, and final `no_followup` is a conditional post-spend closeout |
 | Goal vision and replan checkpoints | Selective typed qualification | Causal evidence and completion-chain checkpoints are shared invariants; vision policy is not moved into the settlement executor |
 | Capability gates, user gates, monitor selection | Keep domain-local | These are decision state machines unless a future change proves duplicated external-effect settlement |
 | Scheduler apply, ACK, cadence, failure hint | Outside settlement | Host-owned effects stay data-encoded and are never hidden behind the agent executor |
@@ -550,11 +554,13 @@ the original effect identity rather than bind to a newly selected successor.
 
 M7.2: replace the core settlement truth with one typed plan/receipt algebra. A
 plan step must carry a stable kind, owner, precondition, idempotency identity,
-and expected receipt. First, make the default Codex App path bind completion,
-refresh, and spend to the original quota-turn effect identity instead of a
-fresh Todo selection. Then make the isolated turn driver consume the same
-algebra. Each replacement PR must delete its corresponding manual command or
-settlement truth. Raw mappings and free-form CLI commands may remain
+and expected receipt. The default Codex App path and isolated turn driver bind
+validation, durable writeback, quota spend, and conditional terminal closeout
+to the original quota-turn effect identity. Ordinary successor completion may
+advance the Todo frontier before settlement, but final `no_followup` is applied
+only after matching writeback and spend receipts; no terminal-guard exception
+is allowed. Each replacement PR must delete its corresponding manual command
+or settlement truth. Raw mappings and free-form CLI commands may remain
 compatibility payloads, but they are not the semantic execution contract. The
 composition must satisfy the identity, associativity, short-circuit, replay,
 and ordering properties defined above, keep cancellation, permission denial,

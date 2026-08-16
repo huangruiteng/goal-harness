@@ -278,8 +278,8 @@ M7 只有在至少产生一个下列最终 effect 时才有理由存在：
 
 - `EffectRequest`、`EffectInterpretation`、`EffectObservation`、`EffectNext` 和 `EffectTurn` 作为 canonical slots。
 - 核心层已经拥有 settlement algebra：`SettlementIdentity`、`SettlementPlan`、`SettlementReceipt`、typed failure kinds，以及保留 receipt 的 `SettlementResult.bind`。
-- 默认 Codex App / CLI quota 路径构建一份 typed settlement plan，把 validation、可选 Todo completion、durable writeback 和 quota spend 绑定到原始 turn effect identity（#3016、#3033、#3034）。
-- 隔离 turn driver 通过自己的 callback executor 消费同一套 plan、identity、receipt、failure、replay 和 short-circuit algebra（#3020、#3023）；loop controller 从已提交 receipt chain 派生 continuation，不再维护第二份 settlement truth（#3024）。
+- 默认 Codex App / CLI quota 路径构建一份 typed settlement plan，把 validation、durable writeback、quota spend 和 conditional terminal closeout 绑定到原始 turn effect identity。final `no_followup` 是 spend 后 effect；普通 successor completion 仍属于 Todo lifecycle（#3016、#3033、#3034）。
+- 隔离 turn driver 通过自己的 callback executor 消费同一套 plan、identity、receipt、failure、replay 和 short-circuit algebra（#3020、#3023）；terminal closeout 单独写入 journal，因此 closeout 失败只重试 closeout，不重复 writeback/spend；loop controller 从已提交 receipt chain 派生 continuation，不再维护第二份 settlement truth（#3024）。
 - Task-lease acquire 是第一个有界采用该 algebra 的非 Turn 核心路径。adapter 把 validation 绑定到现有原子 lease write；纯 eligibility、conflict、file-lock 和 CAS 规则仍由 task-lease bounded context 持有（#3091、#3095）。
 - Scheduler apply、ACK、failure writeback 和 cadence 仍是 agent-owned settlement 之外的数据化 host handoff。
 - `interpret_quota_should_run_packet` 与 `interpret_turn_result_packet` 继续作为 packet lens；`EffectProgram` 和 `effect_program_from_ordered_steps` 继续为 bootstrap 与本地 scheduler construction 提供兼容的 ordered-step reader。
@@ -307,7 +307,7 @@ M7 只有在至少产生一个下列最终 effect 时才有理由存在：
 | 隔离 turn-driver closeout | 已采用 | 共享同一 algebra；local callback executor 与 journal 仍归 turn driver 所有 |
 | Task-lease acquire | 有界采用 | validation 与 durable write 共享 core algebra；eligibility、conflict、locking、CAS 和 persistence 仍归 task lease 所有 |
 | Turn continuation | 作为 consumer 采用 | pure controller 读取已提交 receipt chain，不执行 host effect |
-| Todo completion、`refresh-state`、quota spend | 仅作为 settlement step 采用 | 各自的 domain lifecycle 与 persistence reducer 保留在 bounded context |
+| Todo completion、`refresh-state`、quota spend | 有界采用 | 普通 completion 保持 Todo-owned；refresh/spend 组成基础 settlement，final `no_followup` 是 conditional post-spend closeout |
 | Goal vision 与 replan checkpoint | 选择性 typed qualification | causal evidence 与完成链 checkpoint 是共享 invariant；vision policy 不进入 settlement executor |
 | Capability gate、user gate、monitor selection | 保持 domain-local | 除非未来证明存在重复 external-effect settlement，否则它们仍是 decision state machine |
 | Scheduler apply、ACK、cadence、failure hint | settlement 之外 | host-owned effect 保持数据化，不隐藏到 agent executor 后面 |
@@ -371,7 +371,7 @@ M7.0：盘点真实多步 runtime 候选。选中的核心是从稳定 quota dec
 
 M7.1：在添加 protocol 前刻画选中的 vertical slice。为合法与非法 transition、部分执行、重试、取消、权限拒绝、预算拒绝和结算捕获 parity fixtures。durable transfer 必须包含 writeback 和 scheduler handoff 时的 cancellation、host execution 和 quota spend 时的 permission denial，以及 writeback 后的 spend-budget rejection。该阶段保留当前 runtime behavior，包括 M7.2 预期修复的任何 split projection。还必须刻画默认 Codex App selection-drift seam：选中 Todo 完成后，writeback 推进 frontier 时，spend 仍必须结算原始 effect identity，而不是绑定到新选中的 successor。
 
-M7.2：用一个 typed plan/receipt algebra 替换核心 settlement truth。plan step 必须携带稳定 kind、owner、precondition、idempotency identity 和 expected receipt。首先让默认 Codex App path 把 completion、refresh 和 spend 绑定到原始 quota-turn effect identity，而不是新的 Todo selection。然后让隔离 turn driver 消费同一 algebra。每个 replacement PR 都必须删除对应的 manual command 或 settlement truth。Raw mappings 和 free-form CLI commands 可以保留为 compatibility payloads，但不是语义执行合同。组合必须满足上文定义的 identity、associativity、short-circuit、replay 和 ordering 性质，保持 cancellation、permission denial 和 budget rejection 可区分，并让 scheduler apply 或 ACK 留在 agent-owned settlement boundary 之外。
+M7.2：用一个 typed plan/receipt algebra 替换核心 settlement truth。plan step 必须携带稳定 kind、owner、precondition、idempotency identity 和 expected receipt。默认 Codex App path 与隔离 turn driver 把 validation、durable writeback、quota spend 和 conditional terminal closeout 绑定到原始 quota-turn effect identity。普通 successor completion 可以在 settlement 前推进 Todo frontier；final `no_followup` 只有在 matching writeback/spend receipt 后才提交，不能增加 terminal guard 例外。每个 replacement PR 都必须删除对应的 manual command 或 settlement truth。Raw mappings 和 free-form CLI commands 可以保留为 compatibility payloads，但不是语义执行合同。组合必须满足上文定义的 identity、associativity、short-circuit、replay 和 ordering 性质，保持 cancellation、permission denial 和 budget rejection 可区分，并让 scheduler apply 或 ACK 留在 agent-owned settlement boundary 之外。
 
 M7.3：在两个 M7.2 adapter 都消费经过验证的 plan/receipt 语义后，比较它们的执行所有权。只有在删除重复编排且不跨越 Codex App agent/host boundary 时，才抽取最小的共享 executor 或 Kleisli-like bind protocol。不要增加 registry 或通用组合框架。`quota should-run` 可以从同一个 canonical decision plan 派生 packet 和 effect projection，但更早构造 `EffectTurn` 本身不是验收条件。如果两个 caller 只共享 algebra 而不共享 executor boundary，用结构化 no-follow-up decision 关闭 M7.3，并保留各自的 local executor。
 
