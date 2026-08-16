@@ -1,8 +1,24 @@
 # Benchmark Toolkit
 
 `benchmark-toolkit` is LoopX's built-in, provider-neutral surface for permission,
-artifact, and integrity boundaries around agent benchmark experiments. It does not
-own benchmark-family runners, result ledgers, or scoring adapters.
+artifact, integrity, and reusable agent-runtime boundaries around benchmark
+experiments. It does not own benchmark-family runners, result ledgers, or scoring
+adapters.
+
+## Native Codex Goal runtime
+
+Benchmark adapters that use the Codex app-server Goal API should import
+`loopx.capabilities.benchmark_toolkit.native_codex_goal`. The module provides the
+real stdio JSON-RPC process transport, the ordered Goal transaction, terminal event
+correlation, post-turn Goal readback, and a public-safe receipt. A runner supplies
+its own isolated process command, environment, sandbox policy, task bridge, and
+timeouts; it should not copy the Goal state machine.
+
+The runnable source example is
+[`benchmark/deepswe/run_native_codex_goal.py`](../../../benchmark/deepswe/run_native_codex_goal.py).
+Its `--preflight-only` mode proves a live Codex initialize/thread/Goal attachment
+without invoking a model. Full mode starts one turn and waits for a correlated
+terminal event before post-turn Goal readback.
 
 The toolkit borrows the useful contracts already established by modern benchmark
 runners: an ATIF-compatible agent trajectory, a separately owned verifier phase,

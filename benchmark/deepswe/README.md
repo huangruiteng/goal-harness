@@ -49,8 +49,54 @@ initialize(experimentalApi=true)
 `turn/start` acceptance is not completion. The benchmark host must continue
 serving any environment bridge while it drains app-server events. If the
 response turn id and event-stream turn id differ, the event-stream id becomes
-canonical. The minimal transaction and receipt reducer are implemented in
-[`../native_codex_goal.py`](../native_codex_goal.py).
+canonical. The installed transaction, stdio transport, event reducer, and
+receipt live in
+[`benchmark_toolkit.native_codex_goal`](../../loopx/capabilities/benchmark_toolkit/native_codex_goal.py).
+[`../native_codex_goal.py`](../native_codex_goal.py) is intentionally only a
+compatibility import, so runner code and examples cannot drift into a second
+implementation.
+
+### Real Codex connection
+
+The runnable example calls `codex app-server --listen stdio:// --enable goals`,
+performs the transaction above, and prints only a compact receipt. Keep the
+objective and task in files so raw text is not duplicated into command history:
+
+```bash
+python benchmark/deepswe/run_native_codex_goal.py \
+  --cwd <task-worktree> \
+  --objective-file <objective.txt> \
+  --task-file <task.txt> \
+  --model <model-route>
+```
+
+Use `--preflight-only` to verify initialize, thread creation, and Goal
+attachment without starting a model turn. A benchmark adapter can reuse the
+same runtime directly while keeping its environment bridge active in another
+task:
+
+```python
+from loopx.capabilities.benchmark_toolkit.native_codex_goal import (
+    NativeGoalConfig,
+    run_native_goal_process,
+)
+
+turn = run_native_goal_process(
+    NativeGoalConfig(
+        cwd=task_worktree,
+        objective=objective,
+        task_instruction=instruction,
+        model=model,
+        sandbox_policy=runner_owned_sandbox_policy,
+    ),
+    process_command=runner_owned_isolated_app_server_command,
+    process_env=runner_owned_environment,
+    goal_timeout_sec=timeout_seconds,
+)
+```
+
+The imported runtime owns no evaluator access, task command bridge, credential
+policy, or score authority. Those remain explicit runner responsibilities.
 
 ## Authority and anti-cheating
 
