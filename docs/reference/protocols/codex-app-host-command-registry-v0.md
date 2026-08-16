@@ -11,7 +11,7 @@ This contract sits above:
   `/loopx` status entry and `/loopx <goal text>` start entry.
 - [`global_manager_command_v0`](global-manager-command-v0.md) for read-only
   `/loopx-global-*` manager commands.
-- [`pr_review_command_v0`](pr-review-command-v0.md) for the `/loopx-pr-review`
+- [`pr_review_command_v0`](../../../loopx/capabilities/pr_review_queue/README.md) for the `/loopx-pr-review`
   review queue command.
 - [`host_integration_surface_v0`](host-integration-surface-v0.md) for general
   host lifecycle reads and controlled writes.

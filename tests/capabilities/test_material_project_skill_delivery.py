@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import loopx.project_skill_delivery as project_skill_delivery
+import loopx.capabilities.project_skill_delivery.core as project_skill_delivery
 from loopx.capabilities.material_lifecycle.project_skill import (
     MATERIAL_SKILL_MANAGED_MARKER,
     install_project_material_skill,
@@ -13,7 +13,7 @@ from loopx.capabilities.material_lifecycle.project_skill import (
     project_material_skill_target,
     uninstall_project_material_skill,
 )
-from loopx.project_skill_delivery import (
+from loopx.capabilities.project_skill_delivery import (
     install_project_skill,
     inspect_project_skill,
     project_skill_target,

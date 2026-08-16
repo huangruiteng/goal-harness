@@ -31,8 +31,8 @@ from loopx.capabilities.issue_fix.metadata_preview import (  # noqa: E402
 )
 
 
-DOC = ROOT / "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md"
-README = ROOT / "docs/capabilities/issue-fix/README.md"
+DOC = ROOT / "loopx/capabilities/issue_fix/docs/protocols/issue-fix-workflow-contract-v0.md"
+README = ROOT / "loopx/capabilities/issue_fix/README.md"
 LOOPX_GOAL_COMMAND = ROOT / "docs" / "reference" / "protocols" / "loopx-goal-command-v0.md"
 
 PRIVATE_PATTERNS = [

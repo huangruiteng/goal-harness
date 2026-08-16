@@ -9,7 +9,7 @@ Current groups:
 - [Protocol contracts](protocols/README.md)
 - [Extensions and capabilities](extensions.md): outcome contracts, provider
   registration, extension packaging, readiness, and lifecycle boundaries.
-- [Project skill delivery](project-skill-delivery.md): release-owned,
+- [Project skill delivery](../../loopx/capabilities/project_skill_delivery/README.md): release-owned,
   project-local skill discovery and managed-copy lifecycle.
 
 High-traffic read paths:

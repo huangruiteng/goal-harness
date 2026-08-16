@@ -11,7 +11,7 @@ PROTOCOL = ROOT / "docs/reference/protocols/multi-agent-visible-launcher-v0.md"
 THREE_LAYER = ROOT / "docs/reference/protocols/multi-agent-three-layer-minimality-v0.md"
 LOCAL_PLAN = ROOT / "docs/reference/protocols/local-agent-launch-plan-v1.md"
 AUTO_RESEARCH_PROFILE = ROOT / "docs/reference/protocols/auto-research-role-profile-v0.md"
-AUTO_RESEARCH_GUIDE = ROOT / "docs/guides/auto-research-command-path.md"
+AUTO_RESEARCH_GUIDE = ROOT / "loopx/capabilities/auto_research/README.md"
 PROTOCOL_INDEX = ROOT / "docs/reference/protocols/README.md"
 DOCS_INDEX = ROOT / "docs/README.md"
 

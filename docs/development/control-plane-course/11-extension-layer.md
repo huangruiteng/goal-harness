@@ -969,13 +969,13 @@ kernel 代码、supervisor 为什么不能借扩展层获得 durable leader auth
 ## 代码阅读路线
 
 1. `loopx/configure_goal.py` 和配置 catalog
-2. `docs/capabilities/explore/README.md`
+2. `loopx/capabilities/explore/README.md`
 3. `loopx/capabilities/explore/`
 4. `docs/product/domain-capability-packs.md`
 5. `loopx/domain_packs/ml_experiment.py`
 6. `docs/reference/protocols/multi-agent-three-layer-minimality-v0.md`
 7. `loopx/control_plane/agents/multi_agent/`
-8. `docs/guides/auto-research-command-path.md`
+8. `loopx/capabilities/auto_research/README.md`
 9. `loopx/capabilities/auto_research/preset.py`
 10. `docs/reference/protocols/peer-supervisor-v0.md`
 

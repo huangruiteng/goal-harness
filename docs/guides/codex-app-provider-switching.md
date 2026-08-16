@@ -4,7 +4,7 @@
 
 这是一份面向操作者的本地环境 runbook，不是 LoopX capability。它解决一个具体问题：在同一个 Codex App 前端下，把不同的模型 provider 映射到同一个模型 slug，并保持 session、配置、思考过程和工具能力稳定。
 
-LoopX 的 capability 目录要求至少存在一个真实 CLI entrypoint 和一个 smoke test。这份 runbook 目前没有独立 CLI 或可验证的 capability 产物，因此属于 `docs/guides/` 下的操作知识；只有当其中的切换机制被抽象成可安装、可测试的适配器时，才适合升级到 `docs/integrations/` 或 `docs/capabilities/`。
+LoopX 的 capability 目录要求至少存在一个真实 CLI entrypoint 和一个 smoke test。这份 runbook 目前没有独立 CLI 或可验证的 capability 产物，因此属于 `docs/guides/` 下的操作知识；只有当其中的切换机制被抽象成可安装、可测试的适配器时，才适合升级到 `docs/integrations/`，或成为 `loopx/capabilities/<capability>/` 下的 package-owned contract。
 
 ## 目标
 

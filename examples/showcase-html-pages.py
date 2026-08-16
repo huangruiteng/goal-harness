@@ -221,7 +221,7 @@ CASE_DETAILS = {
                 "对用户有价值的是反馈不再停在评论区：它会进入一个有 owner、有复现、有分支修复、有验证、有 review handoff 的闭环。公开证据只证明这条闭环和边界，不把 raw issue body、私有 timeline 或本地路径带进页面。",
             ],
             "evidence": [
-                ("产品入口", "`docs/capabilities/issue-fix/README.md` 声明 `loopx issue-fix ...`、content-ops bridge、protocol docs 和 smoke；入口面向维护者的真实动作是把反馈转成可执行修复包。"),
+                ("产品入口", "`loopx/capabilities/issue_fix/README.md` 声明 `loopx issue-fix ...`、content-ops bridge、protocol docs 和 smoke；入口面向维护者的真实动作是把反馈转成可执行修复包。"),
                 ("工作流协议", "`issue_fix_workflow_contract_v0` 明确 metadata preview、intake classification、workflow plan、todo writeback、caller repo branch、validation、PR review packet 和 gate handling。"),
                 ("可执行闭环", "`issue_fix_acceptance_loop_v0` 包含 acceptance fixture、repo-branch fixture 和 caller-approved repo branch mode。"),
                 ("验证面", "focused smokes 保护 metadata preview、content-ops intake、workflow plan、workflow contract、acceptance loop 和端到端 workflow 的关键边界。"),
@@ -237,9 +237,9 @@ CASE_DETAILS = {
                 "用户不需要把每个 review comment 手动改写成 agent prompt，也不会把原始 issue body 或本地路径泄漏进公开 artifact。",
             ],
             "source_refs": [
-                ("capability README", "docs/capabilities/issue-fix/README.md"),
-                ("workflow contract", "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md"),
-                ("acceptance loop", "docs/capabilities/issue-fix/protocols/issue-fix-acceptance-loop-v0.md"),
+                ("capability README", "loopx/capabilities/issue_fix/README.md"),
+                ("workflow contract", "loopx/capabilities/issue_fix/docs/protocols/issue-fix-workflow-contract-v0.md"),
+                ("acceptance loop", "loopx/capabilities/issue_fix/docs/protocols/issue-fix-acceptance-loop-v0.md"),
                 ("workflow smoke", "examples/issue-fix-workflow-plan-smoke.py"),
                 ("acceptance smoke", "examples/issue-fix-acceptance-loop-smoke.py"),
             ],
@@ -250,7 +250,7 @@ CASE_DETAILS = {
                 "The user-facing value is that feedback no longer sits in a comment thread: it enters a loop with an owner, repro path, branch-local fix, validation, and review handoff. The public evidence proves the loop and its boundaries without exposing raw issue bodies, private timelines, or local paths.",
             ],
             "evidence": [
-                ("Product entry", "`docs/capabilities/issue-fix/README.md` names `loopx issue-fix ...`, the content-ops bridge, protocol docs, and smokes; the maintainer-facing action is turning feedback into an executable fix packet."),
+                ("Product entry", "`loopx/capabilities/issue_fix/README.md` names `loopx issue-fix ...`, the content-ops bridge, protocol docs, and smokes; the maintainer-facing action is turning feedback into an executable fix packet."),
                 ("Workflow contract", "`issue_fix_workflow_contract_v0` defines metadata preview, intake classification, workflow plan, todo writeback, caller repo branch, validation, PR review packet, and gate handling."),
                 ("Executable loop", "`issue_fix_acceptance_loop_v0` includes the acceptance fixture, repo-branch fixture, and caller-approved repo branch mode."),
                 ("Validation surface", "Focused smokes protect the key boundaries for metadata preview, content-ops intake, workflow plan, workflow contract, acceptance loop, and end-to-end workflow behavior."),
@@ -266,9 +266,9 @@ CASE_DETAILS = {
                 "The user does not need to rewrite every review comment as an agent prompt, and raw issue bodies or local paths do not leak into the public artifact.",
             ],
             "source_refs": [
-                ("capability README", "docs/capabilities/issue-fix/README.md"),
-                ("workflow contract", "docs/capabilities/issue-fix/protocols/issue-fix-workflow-contract-v0.md"),
-                ("acceptance loop", "docs/capabilities/issue-fix/protocols/issue-fix-acceptance-loop-v0.md"),
+                ("capability README", "loopx/capabilities/issue_fix/README.md"),
+                ("workflow contract", "loopx/capabilities/issue_fix/docs/protocols/issue-fix-workflow-contract-v0.md"),
+                ("acceptance loop", "loopx/capabilities/issue_fix/docs/protocols/issue-fix-acceptance-loop-v0.md"),
                 ("workflow smoke", "examples/issue-fix-workflow-plan-smoke.py"),
                 ("acceptance smoke", "examples/issue-fix-acceptance-loop-smoke.py"),
             ],

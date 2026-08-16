@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from loopx.project_skill_delivery import (
+from loopx.capabilities.project_skill_delivery import (
     PROJECT_SKILL_MANAGED_MARKER,
     PROJECT_SKILL_SCOPE,
     PROJECT_SKILL_SCOPE_FILE,

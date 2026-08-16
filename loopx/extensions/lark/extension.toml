@@ -21,6 +21,15 @@ doctor_args = ["--doctor"]
 required_permissions = []
 timeout_seconds = 30
 
+[documentation]
+source_root = "loopx/extensions/lark"
+site_root = "integrations/lark-provider"
+canonical = "README.md"
+
+[[documentation.aliases]]
+source = "docs/lark-event-inbox.md"
+site = "capabilities/lark-event-inbox.md"
+
 [[provides]]
 id = "lark-event-inbox"
 kind = "event_inbox"

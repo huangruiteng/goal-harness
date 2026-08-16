@@ -175,7 +175,7 @@ schema 和 proposal 属于 pack，最终是否执行仍由 Kernel 判断。
 一小时分享讲到这条边界即可。需要设计新 pack 时，再深入
 [第 4 讲：Core State、Domain State 与 Runtime Artifact](04-state-substrate.md#core-statedomain-state-与-runtime-artifact)、
 [Domain Capability Packs](../../product/domain-capability-packs.md)和
-[Issue-Fix State Kernel × Domain State 案例](../../capabilities/issue-fix/state-kernel-domain-state-case-study.zh-CN.md)。
+[Issue-Fix State Kernel × Domain State 案例](../../../loopx/capabilities/issue_fix/docs/state-kernel-domain-state-case-study.zh-CN.md)。
 
 所以 LoopX 不是一个包办所有推理的“大 Agent”。它更像一个长期控制内核：领域层提供
 可判定事实，host 执行 bounded Turn，Kernel 维护跨 Turn 仍需成立的身份、权限、证据和
@@ -1585,7 +1585,7 @@ happy-path smoke。
 9. [Goal / Vision / Replan Contract](../../reference/protocols/goal-vision-replan-contract-v0.md)
 10. [Core Control-Plane State Machine](../../product/core-control-plane/state-machine.md)
 11. [Domain Capability Packs](../../product/domain-capability-packs.md)
-12. [Issue-Fix State Kernel × Domain State 案例](../../capabilities/issue-fix/state-kernel-domain-state-case-study.zh-CN.md)
+12. [Issue-Fix State Kernel × Domain State 案例](../../../loopx/capabilities/issue_fix/docs/state-kernel-domain-state-case-study.zh-CN.md)
 
 ## 课后检查
 

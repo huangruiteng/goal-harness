@@ -17,7 +17,7 @@ Use this with:
 
 - [Multi-agent visible launcher v0](../reference/protocols/multi-agent-visible-launcher-v0.md)
 - [Three-layer minimality contract](../reference/protocols/multi-agent-three-layer-minimality-v0.md)
-- [Auto-research command path](auto-research-command-path.md)
+- [Auto-research command path](../../loopx/capabilities/auto_research/README.md)
 
 ## Layer Rule
 

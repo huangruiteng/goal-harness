@@ -567,7 +567,7 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
     product_entry_payload = build_catalog_canary_plan(
         changed_files=[
             "README.md",
-            "docs/capabilities/issue-fix/README.md",
+            "loopx/capabilities/issue_fix/README.md",
             "docs/update-notes/README.md",
             "loopx/capabilities/content_ops/surface.py",
             "scripts/update_notes_release_job.py",

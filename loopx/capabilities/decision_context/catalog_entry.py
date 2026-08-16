@@ -10,6 +10,11 @@ DECISION_CONTEXT_CATALOG_ENTRY: dict[str, Any] = {
     "origin": "builtin",
     "visibility": "public",
     "provider_id": "loopx-core",
+    "documentation": {
+        "source_root": "loopx/capabilities/decision_context",
+        "site_root": "capabilities/decision-context",
+        "canonical": "README.md",
+    },
     "title": "Goal-scoped decision evidence, review, and outcome contract",
     "status": "experimental",
     "default_enabled": False,

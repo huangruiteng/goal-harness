@@ -43,9 +43,10 @@ loopx-openviking-semantic-preference = "loopx.extensions.openviking_semantic_pre
 include = ["loopx*"]
 
 [tool.setuptools.package-data]
+"*" = ["README.md", "README.zh-CN.md", "docs/*.md", "docs/protocols/*.md"]
 "loopx.capabilities.auto_research" = ["worker_skill/SKILL.md"]
 "loopx.capabilities.content_ops" = ["templates/*.json"]
-"loopx.extensions.lark" = ["extension.toml"]
+"loopx.extensions.lark" = ["extension.toml", "README.md", "docs/*.md"]
 "loopx.extensions.openviking_periodic_report" = ["extension.toml"]
 "loopx.extensions.openviking_semantic_preference" = ["extension.toml"]
 "loopx.opencode_goal_mode" = ["*.js", "*.mjs", "README.md"]

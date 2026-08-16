@@ -59,7 +59,7 @@ a longer onboarding path.
   external-system adapters.
 - [Reference](reference/README.md): stable contracts and versioned protocols.
 - [Development](development/README.md): contributor workflows and quality gates.
-- [Capabilities](capabilities/README.md): outcome-owned capability surfaces.
+- [Capabilities](../loopx/capabilities/README.md): outcome-owned capability surfaces.
 - [Showcases](showcases/README.md): public-safe cases and reproducible demos.
 - [Research](research/README.md): public evidence and benchmark investigations.
 - [Update notes](update-notes/README.md): current public progress notes.

@@ -259,10 +259,10 @@ def build_goal_configuration_catalog(
                     ],
                 },
                 "documentation": {
-                    "path": "docs/capabilities/explore/README.md",
+                    "path": "loopx/capabilities/explore/README.md",
                     "url": (
                         "https://github.com/huangruiteng/loopx/blob/main/"
-                        "docs/capabilities/explore/README.md"
+                        "loopx/capabilities/explore/README.md"
                     ),
                 },
             },
@@ -312,10 +312,10 @@ def build_goal_configuration_catalog(
                     ],
                 },
                 "documentation": {
-                    "path": "docs/capabilities/explore/README.md",
+                    "path": "loopx/capabilities/explore/README.md",
                     "url": (
                         "https://github.com/huangruiteng/loopx/blob/main/"
-                        "docs/capabilities/explore/README.md"
+                        "loopx/capabilities/explore/README.md"
                     ),
                 },
             },
@@ -395,10 +395,10 @@ def build_goal_configuration_catalog(
                     ],
                 },
                 "documentation": {
-                    "path": "docs/capabilities/change-quality/README.md",
+                    "path": "loopx/capabilities/change_quality/README.md",
                     "url": (
                         "https://github.com/huangruiteng/loopx/blob/main/"
-                        "docs/capabilities/change-quality/README.md"
+                        "loopx/capabilities/change_quality/README.md"
                     ),
                 },
             },
@@ -478,10 +478,10 @@ def build_goal_configuration_catalog(
                     ],
                 },
                 "documentation": {
-                    "path": "docs/reference/protocols/reward-memory-architecture-v0.md",
+                    "path": "loopx/capabilities/reward_memory/README.md",
                     "url": (
                         "https://github.com/huangruiteng/loopx/blob/main/"
-                        "docs/reference/protocols/reward-memory-architecture-v0.md"
+                        "loopx/capabilities/reward_memory/README.md"
                     ),
                 },
             },
@@ -549,10 +549,10 @@ def build_goal_configuration_catalog(
                     ],
                 },
                 "documentation": {
-                    "path": "docs/capabilities/lark-event-inbox.md",
+                    "path": "loopx/extensions/lark/docs/lark-event-inbox.md",
                     "url": (
                         "https://github.com/huangruiteng/loopx/blob/main/"
-                        "docs/capabilities/lark-event-inbox.md"
+                        "loopx/extensions/lark/docs/lark-event-inbox.md"
                     ),
                 },
             },

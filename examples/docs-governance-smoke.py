@@ -68,7 +68,7 @@ MOVED_PATHS = {
         "codex-cli-long-run-regression.md"
     ),
     "docs/project-skill-delivery.md": (
-        "docs/reference/project-skill-delivery.md"
+        "loopx/capabilities/project_skill_delivery/README.md"
     ),
 }
 
@@ -270,7 +270,7 @@ def main() -> int:
     root_readme_zh = read("README.zh-CN.md")
     governance = read(".github/GOVERNANCE.md")
     support = read(".github/SUPPORT.md")
-    auto_research_command_path = read("docs/guides/auto-research-command-path.md")
+    auto_research_command_path = read("loopx/capabilities/auto_research/README.md")
     codex_cli_tui_loop = read("docs/product/runtimes/codex-cli/codex-cli-tui-loop.md")
     project_agent_contract = read("docs/project-agent-todo-contract.md")
     status_contract = read("docs/status-data-contract.md")
@@ -389,8 +389,8 @@ def main() -> int:
     for deep_link in [
         "docs/development/benchmark-developer-workflow.md",
         "docs/product/foundations/project-level-reward-model.md",
-        "docs/reference/protocols/reward-memory-architecture-v0.md",
-        "docs/reference/protocols/reward-memory-architecture-v0.zh-CN.md",
+        "loopx/capabilities/reward_memory/README.md",
+        "loopx/capabilities/reward_memory/README.zh-CN.md",
     ]:
         assert deep_link not in advanced_docs
         assert deep_link not in advanced_docs_zh
@@ -418,7 +418,7 @@ def main() -> int:
         "docs/development/documentation-layout.md",
         "docs/development/testing-and-quality.md",
         "docs/guides/README.md",
-        "docs/guides/auto-research-command-path.md",
+        "loopx/capabilities/auto_research/README.md",
         "docs/guides/multi-agent-product-recipe.md",
         "docs/integrations/README.md",
         "docs/reference/README.md",

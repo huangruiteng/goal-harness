@@ -91,7 +91,7 @@ outcome persist in domain state across turns, model switches, CI waits, and
 review round-trips.
 
 Public evidence: the
-[issue-fix capability documentation](../capabilities/issue-fix/README.md) and
+[issue-fix capability documentation](../../loopx/capabilities/issue_fix/README.md) and
 the OpenViking pilot recorded in the showcase appendix.
 
 ## 3. Best Practices
@@ -316,8 +316,8 @@ readback, and publishing stays blocked until an explicit owner decision.
   [#3225](https://github.com/huangruiteng/loopx/issues/3225), RFC PR
   [#3226](https://github.com/huangruiteng/loopx/pull/3226)
 - Issue-fix capability:
-  [`docs/capabilities/issue-fix/README.md`](../capabilities/issue-fix/README.md)
+  [`loopx/capabilities/issue_fix/README.md`](../../loopx/capabilities/issue_fix/README.md)
 - Content-ops capability:
-  [`docs/capabilities/content-ops/README.md`](../capabilities/content-ops/README.md)
+  [`loopx/capabilities/content_ops/README.md`](../../loopx/capabilities/content_ops/README.md)
 - Releases v0.4.5 through v0.4.7:
   [releases](https://github.com/huangruiteng/loopx/releases)

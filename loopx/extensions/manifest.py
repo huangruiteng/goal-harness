@@ -6,6 +6,8 @@ import re
 import tomllib
 from typing import Any
 
+from ..capabilities.documentation import normalize_documentation_contract
+
 
 EXTENSION_MANIFEST_SCHEMA_VERSION = "loopx_extension_manifest_v0"
 LOOPX_EXTENSION_API_VERSION = 1
@@ -63,6 +65,17 @@ def _string_list(record: Mapping[str, Any], key: str, *, context: str) -> list[s
     ):
         raise ValueError(f"{context} requires `{key}` to be an array of strings")
     return [item.strip() for item in value]
+
+
+def _documentation_contract(
+    raw: Mapping[str, Any],
+    *,
+    context: str,
+) -> dict[str, Any] | None:
+    value = raw.get("documentation")
+    if value is None:
+        return None
+    return normalize_documentation_contract(value, context=context)
 
 
 def _presentation_text(
@@ -306,6 +319,7 @@ def load_extension_manifest(path: str | Path) -> dict[str, Any]:
         runtime=runtime,
         context=context,
     )
+    documentation = _documentation_contract(raw, context=context)
     provided = raw.get("provides", [])
     implemented = raw.get("implements", [])
     if not isinstance(provided, list):
@@ -334,6 +348,11 @@ def load_extension_manifest(path: str | Path) -> dict[str, Any]:
         capability["visibility"] = str(item.get("visibility", "public")).strip()
         capability["provider_id"] = extension_id
         capability["provider_version"] = version
+        if documentation is not None:
+            capability["documentation"] = {
+                **documentation,
+                "aliases": [dict(alias) for alias in documentation["aliases"]],
+            }
         capabilities.append(capability)
 
     implementations: list[dict[str, Any]] = []
@@ -382,4 +401,5 @@ def load_extension_manifest(path: str | Path) -> dict[str, Any]:
         "implementations": implementations,
         "runtime": runtime,
         "presentation_surfaces": presentation_surfaces,
+        "documentation": documentation,
     }

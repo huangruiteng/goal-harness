@@ -510,7 +510,7 @@ Keep three layers separate:
 project-managed delivery, and goal-scoped activation**. The global installer
 keeps their canonical source in the LoopX release but does not publish either
 skill under `~/.codex/skills`. The generic lifecycle and host-surface contract is documented in
-[Project Skill Delivery](../reference/project-skill-delivery.md). Enable discovery only
+[Project Skill Delivery](../../loopx/capabilities/project_skill_delivery/README.md). Enable discovery only
 for a connected project:
 
 ```bash

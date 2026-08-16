@@ -1,0 +1,31 @@
+from .core import (
+    PROJECT_SKILL_MANAGED_MARKER,
+    PROJECT_SKILL_MARKER_SCHEMA_VERSION,
+    PROJECT_SKILL_SCOPE,
+    PROJECT_SKILL_SCOPE_FILE,
+    PROJECT_SKILL_SURFACES,
+    PROJECT_SKILL_SURFACE_ROOTS,
+    canonical_project_skill_source,
+    discover_project_scoped_skill_ids,
+    install_project_skill,
+    inspect_project_skill,
+    project_skill_digest,
+    project_skill_target,
+    uninstall_project_skill,
+)
+
+__all__ = [
+    "PROJECT_SKILL_MANAGED_MARKER",
+    "PROJECT_SKILL_MARKER_SCHEMA_VERSION",
+    "PROJECT_SKILL_SCOPE",
+    "PROJECT_SKILL_SCOPE_FILE",
+    "PROJECT_SKILL_SURFACES",
+    "PROJECT_SKILL_SURFACE_ROOTS",
+    "canonical_project_skill_source",
+    "discover_project_scoped_skill_ids",
+    "install_project_skill",
+    "inspect_project_skill",
+    "project_skill_digest",
+    "project_skill_target",
+    "uninstall_project_skill",
+]

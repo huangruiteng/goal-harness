@@ -56,6 +56,12 @@ theme:
 
 plugins:
   - search
+  - gen-files:
+      scripts:
+        - docs/gen_capability_pages.py
+
+hooks:
+  - docs/rewrite_capability_links.py
 
 markdown_extensions:
   - attr_list
@@ -85,7 +91,6 @@ nav:
       - Newcomer Command Path: guides/newcomer-command-path.md
       - Minimal Custom Runtime Example: guides/minimal-custom-runtime-example.md
       - Custom Runner Integration: guides/custom-agent-runner-integration.md
-      - Auto Research Command Path: guides/auto-research-command-path.md
   - Concepts:
       - concepts/README.md
       - Interaction Patterns: concepts/interaction-pattern-catalog.md
@@ -101,13 +106,24 @@ nav:
       - Benchmark Toolkit: capabilities/benchmark-toolkit/README.md
       - Issue Fix: capabilities/issue-fix/README.md
       - Change Quality: capabilities/change-quality/README.md
+      - Pull Request Review: capabilities/pull-request-review/README.md
+      - Integration Branch: capabilities/integration-branch/README.md
+      - Project Skill Delivery: capabilities/project-skill-delivery/README.md
       - Explore: capabilities/explore/README.md
+      - Auto Research: capabilities/auto-research/README.md
+      - Decision Context: capabilities/decision-context/README.md
+      - Agent Turn Recall: capabilities/agent-turn-recall/README.md
+      - Semantic Preference: capabilities/semantic-preference/README.md
+      - Reward Memory: capabilities/reward-memory/README.md
       - Material Lifecycle: capabilities/material-lifecycle/README.md
+      - Periodic Report: capabilities/periodic-report/README.md
+      - Content Operations: capabilities/content-ops/README.md
       - Value Connectors: capabilities/value-connectors/README.md
   - Integrations:
       - integrations/README.md
       - Worker Bridge: integrations/worker-bridge-install-contract.md
       - Lark Kanban: integrations/lark-kanban-control-plane-adapter.md
+      - Lark Provider: integrations/lark-provider/README.md
       - Runtime Connector Catalog: integrations/runtime-connector-catalog.md
   - Reference:
       - reference/README.md

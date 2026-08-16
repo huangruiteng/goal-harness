@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+from typing import Any
+
+
+PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
+    "id": "pull-request-review",
+    "origin": "builtin",
+    "visibility": "public",
+    "provider_id": "loopx-core",
+    "documentation": {
+        "source_root": "loopx/capabilities/pr_review_queue",
+        "site_root": "capabilities/pull-request-review",
+        "canonical": "README.md",
+        "aliases": [
+            {
+                "source": "README.md",
+                "site": "reference/protocols/pr-review-command-v0.md",
+            },
+        ],
+    },
+    "title": "Autonomous pull-request review queue",
+    "status": "active-preview",
+    "default_enabled": False,
+    "real_world_anchor": "maintainer review of a changing public GitHub PR queue",
+    "user_value": (
+        "Turn one complete open-PR observation into a deterministic exact-head "
+        "review candidate without repeating unchanged work or granting review writes."
+    ),
+    "entry_command": (
+        "loopx pr-review --repo <owner/repo> --state open "
+        "--autonomous-observation --format json"
+    ),
+    "commands": [
+        {
+            "command": (
+                "loopx pr-review --repo <owner/repo> --state open "
+                "--autonomous-observation --format json"
+            ),
+            "purpose": "Observe one complete public PR queue and emit at most one exact-head candidate.",
+            "write_boundary": "public GitHub metadata read only; no review, comment, todo, push, or merge write",
+        },
+        {
+            "command": (
+                "loopx pr-review --repo <owner/repo> --state open "
+                "--autonomous-observation --previous-observation-json "
+                "<previous.json> [--handled-exact-head NUMBER@HEAD_OID] "
+                "--format json"
+            ),
+            "purpose": "Classify a complete queue and advance from explicitly handled exact heads to the next unhandled candidate.",
+            "write_boundary": "reads one caller-supplied local observation; emits a preview only and grants no external authority",
+        },
+    ],
+    "implemented_protocols": [
+        {
+            "schema_version": "pull_request_review_execution_contract_v1",
+            "module": "loopx.capabilities.pr_review_queue.review_contract",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+        {
+            "schema_version": "pull_request_review_plan_v1",
+            "module": "loopx.capabilities.pr_review_queue.review_contract",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+        {
+            "schema_version": "pull_request_review_result_v1",
+            "module": "loopx.capabilities.pr_review_queue.review_contract",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+        {
+            "schema_version": "pull_request_review_queue_observation_v0",
+            "module": "loopx.capabilities.pr_review_queue.core",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+        {
+            "schema_version": "pull_request_review_candidate_v0",
+            "module": "loopx.capabilities.pr_review_queue.core",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+        {
+            "schema_version": "pull_request_review_todo_preview_v0",
+            "module": "loopx.capabilities.pr_review_queue.core",
+            "doc": "loopx/capabilities/pr_review_queue/README.md",
+        },
+    ],
+    "smokes": [
+        "python -m pytest tests/capabilities/test_pr_review_queue.py -q",
+        "python3 examples/pr-review-command-smoke.py",
+    ],
+    "docs": ["loopx/capabilities/pr_review_queue/README.md"],
+    "boundaries": [
+        "The shared execution contract owns review depth, evidence completeness, exact-head freshness, symbol-map, walkthrough, validation, failure, and code-volume requirements; host skills only route and publish it.",
+        "A queue is observed only when result_completeness.complete=true; partial or failed reads are not_observed and never count as unchanged.",
+        "Fingerprints cover exact head, review decision, check state, draft state, and mergeability for every open PR.",
+        "One observation emits at most one exact-head advancement Todo preview; unchanged observations emit no duplicate candidate and may advance only from an explicit handled exact-head cursor.",
+        "The capability reuses the existing pr-review GitHub scan and normalized packet; it does not add a second provider or capture review bodies and logs.",
+        "Candidate selection grants no GitHub review, comment, push, merge, quota, or Todo-write authority; those remain with their existing policy surfaces.",
+    ],
+    "next_real_step": (
+        "Persist one observation fingerprint in a continuous-monitor Todo, "
+        "observe a changed head, and materialize exactly one candidate through normal Todo authority."
+    ),
+}

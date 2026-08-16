@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Collection
 
-from loopx.project_skill_delivery import PROJECT_SKILL_SURFACES
+from loopx.capabilities.project_skill_delivery import PROJECT_SKILL_SURFACES
 
 from .architecture import build_material_lifecycle_architecture_packet
 from .project_skill import (

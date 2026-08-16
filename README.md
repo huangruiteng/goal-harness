@@ -120,7 +120,7 @@ LoopX's creator uses this path as an
 [OpenViking contributor](https://github.com/volcengine/OpenViking/pulls?q=is%3Apr+author%3Ahuangruiteng).
 The represented public contribution sequence spans more than 200 elapsed hours
 from its first PR creation to the latest represented review or update. The
-[Issue-Fix capability](docs/capabilities/issue-fix/README.md) keeps rolling
+[Issue-Fix capability](loopx/capabilities/issue_fix/README.md) keeps rolling
 repository context, revision-stamped fix knowledge, and reviewer-facing
 preferences separate; linked PRs plus current checkout source and tests remain
 authoritative.
@@ -155,7 +155,7 @@ This screenshot comes from LoopX's built-in exact-KNN demo. The public task,
 editable and protected files, deterministic CPU evaluator, and dev/held-out
 commands all live in this repository. Follow the
 [showcase walkthrough](docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md)
-or the [command path](docs/guides/auto-research-command-path.md) to reproduce the
+or the [command path](loopx/capabilities/auto_research/README.md) to reproduce the
 workflow; it is a demo result, not a production research claim.
 
 ### Used In Real Projects
@@ -292,7 +292,7 @@ boundaries rather than interchangeable kinds of plugin:
 | Boundary | Meaning | Go deeper |
 | --- | --- | --- |
 | **Kernel** | Owns durable goal, todo, gate, evidence, quota, recovery, and scheduling truth. | [Architecture](docs/architecture.md) |
-| **Capability** | Defines a stable, provider-neutral contract for producing one bounded, verifiable caller outcome from LoopX state. | [Capability catalog](docs/capabilities/README.md) |
+| **Capability** | Defines a stable, provider-neutral contract for producing one bounded, verifiable caller outcome from LoopX state. | [Capability catalog](loopx/capabilities/README.md) |
 | **Provider** | Calls an external system or local implementation and returns bounded observations, effect results, and readback. | [Provider responsibilities](docs/reference/extensions.md#runtime-responsibilities) |
 | **Extension** | Packages and operates an optional provider through explicit install, readiness, enable, upgrade, disable, and rollback lifecycle. | [Extension lifecycle](docs/reference/extensions.md#runtime-lifecycle) |
 
@@ -325,8 +325,8 @@ evidence → recovery; continuation → governance.
 | Agent runtime bridges | Keeps Codex App, Codex CLI, Claude Code, and generic workers aligned with the same guard. | `loopx heartbeat-prompt`, `loopx codex-cli-bootstrap-message`, `loopx worker-bridge` |
 | Operator surfaces | Renders compact status without making the browser the state authority. | `loopx serve-status`, [dashboard](apps/presentation/dashboard/README.md) |
 | External projections | Projects todos and gates into collaboration surfaces while LoopX remains authoritative. | `loopx lark-kanban`, [Lark Kanban adapter](docs/integrations/lark-kanban-control-plane-adapter.md) |
-| Domain capabilities | Packages repeatable work lanes such as issue fixing, content operations, value connector planning, ML experiment advice, benchmark evidence, and Explore. | `loopx issue-fix`, `loopx content-ops`, `loopx value-connectors`, `loopx ml-experiment`, `loopx benchmark`, [Explore](docs/capabilities/explore/README.md) |
-| Experimental context learning | Lets named registered agents trial provider-neutral Reward Memory through ignored, default-off project configuration. OpenViking is one provider option, not a global dependency. | `loopx reward-memory experiment-status`, [Reward Memory architecture](docs/reference/protocols/reward-memory-architecture-v0.md) |
+| Domain capabilities | Packages repeatable work lanes such as issue fixing, content operations, value connector planning, ML experiment advice, benchmark evidence, and Explore. | `loopx issue-fix`, `loopx content-ops`, `loopx value-connectors`, `loopx ml-experiment`, `loopx benchmark`, [Explore](loopx/capabilities/explore/README.md) |
+| Experimental context learning | Lets named registered agents trial provider-neutral Reward Memory through ignored, default-off project configuration. OpenViking is one provider option, not a global dependency. | `loopx reward-memory experiment-status`, [Reward Memory architecture](loopx/capabilities/reward_memory/README.md) |
 | Governance patterns | Captures reusable routing, gate, evidence, projection, and planning shapes. | [interaction patterns](docs/concepts/interaction-pattern-catalog.md), [state model](docs/state-interaction-model.md) |
 
 The shipped primitives include lifetime goals, concrete user gates, audited safe
@@ -342,17 +342,17 @@ write boundary:
 
 | You need to... | Capability | Start with |
 | --- | --- | --- |
-| Turn a public issue into a reviewable, evidence-backed change | [Issue Fix](docs/capabilities/issue-fix/README.md) | `loopx capability show issue-fix --format json` |
-| Qualify the exact final diff before delivery | [Change Quality](docs/capabilities/change-quality/README.md) | `loopx capability show change-quality-qualification --format json` |
-| Preserve a changing stack of already reviewed branches | [Integration Branch](docs/capabilities/integration-branch/README.md) | `loopx capability show integration-branch-reconcile --format json` |
-| Explore uncertain research without losing hypotheses and findings | [Explore](docs/capabilities/explore/README.md) | `loopx capability show explore --format json` |
-| Rebase decisions on current evidence and verified outcomes | [Decision Context](docs/capabilities/decision-context/README.md) | `loopx capability show decision-context --format json` |
-| Produce scheduled or progress-triggered reports with receipts | [Periodic Report](docs/capabilities/periodic-report/README.md) | `loopx capability show periodic-report --format json` |
+| Turn a public issue into a reviewable, evidence-backed change | [Issue Fix](loopx/capabilities/issue_fix/README.md) | `loopx capability show issue-fix --format json` |
+| Qualify the exact final diff before delivery | [Change Quality](loopx/capabilities/change_quality/README.md) | `loopx capability show change-quality-qualification --format json` |
+| Preserve a changing stack of already reviewed branches | [Integration Branch](loopx/capabilities/integration_branch/README.md) | `loopx capability show integration-branch-reconcile --format json` |
+| Explore uncertain research without losing hypotheses and findings | [Explore](loopx/capabilities/explore/README.md) | `loopx capability show explore --format json` |
+| Rebase decisions on current evidence and verified outcomes | [Decision Context](loopx/capabilities/decision_context/README.md) | `loopx capability show decision-context --format json` |
+| Produce scheduled or progress-triggered reports with receipts | [Periodic Report](loopx/capabilities/periodic_report/README.md) | `loopx capability show periodic-report --format json` |
 
 Run `loopx capability list --format json` for the authoritative catalog in the
 installed release. A capability detail reports its user value, maturity,
 provider readiness, entry commands, write boundaries, protocols, and durable
-validation. Browse the [human-readable capability index](docs/capabilities/README.md)
+validation. Browse the [human-readable capability index](loopx/capabilities/README.md)
 to choose by outcome; use [Extensions and Capabilities](docs/reference/extensions.md)
 when installing or building a provider.
 
@@ -392,7 +392,7 @@ Safe presets cover daily triage, changelog drafts, and PR watching. The
 one-command research path coordinates proposer, executor, and
 evaluator/promoter roles while keeping quota and evidence visible. See the
 [beginner preset guide](docs/product/foundations/beginner-loop-presets.md) and
-[Auto Research command path](docs/guides/auto-research-command-path.md).
+[Auto Research command path](loopx/capabilities/auto_research/README.md).
 
 ```bash
 loopx preset list
@@ -415,8 +415,8 @@ quickstart and activation contract are documented in
 Explore is supported, optional, and default-off. It works best when a task has
 a measurable offline evaluation, baseline, treatment, and guardrails; it is not
 a substitute for production approval. Start with the
-[Explore capability](docs/capabilities/explore/README.md) and its
-[Lark presentation mapping](docs/capabilities/explore/README.md#presentation-sink-lark-mapping).
+[Explore capability](loopx/capabilities/explore/README.md) and its
+[Lark presentation mapping](loopx/capabilities/explore/README.md#presentation-sink-lark-mapping).
 
 ### Review Agent Work
 

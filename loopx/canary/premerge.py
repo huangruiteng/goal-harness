@@ -83,7 +83,6 @@ CHANGE_QUALITY_TOKENS = (
     "skills/loopx-change-quality/",
     "tests/capabilities/test_change_quality.py",
     "examples/change-quality-qualification-smoke.py",
-    "docs/capabilities/change-quality/",
 )
 INHERITED_BASELINE_COMMANDS = (
     "control-plane-maintainability-ratchet-smoke.py",

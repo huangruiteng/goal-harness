@@ -59,7 +59,6 @@ CONTROL_PLANE_QUALIFICATION_PROFILES: tuple[dict[str, Any], ...] = (
             "skills/loopx-change-quality/",
             "tests/capabilities/test_change_quality.py",
             "examples/change-quality-qualification-smoke.py",
-            "docs/capabilities/change-quality/",
         ),
         "checks": [
             {

@@ -74,5 +74,5 @@ def test_content_ops_catalog_declares_social_provider() -> None:
     assert protocols[CONTENT_OPS_SOCIAL_BROWSER_X_PROVIDER_SCHEMA_VERSION] == {
         "schema_version": CONTENT_OPS_SOCIAL_BROWSER_X_PROVIDER_SCHEMA_VERSION,
         "module": SOCIAL_BROWSER_X_PROVIDER_MODULE,
-        "doc": "docs/capabilities/content-ops/README.md",
+        "doc": "loopx/capabilities/content_ops/README.md",
     }

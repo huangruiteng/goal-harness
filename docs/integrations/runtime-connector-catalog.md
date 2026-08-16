@@ -134,7 +134,7 @@ maintainer's local automation:
 - [Heartbeat automation prompt](../heartbeat-automation-prompt.md)
 - [Host integration surface v0](../reference/protocols/host-integration-surface-v0.md)
 - [Computer-use runtime connector v0](../reference/protocols/computer-use-runtime-connector-v0.md)
-- [Value connectors](../capabilities/value-connectors/README.md)
+- [Value connectors](../../loopx/capabilities/value_connectors/README.md)
 - [Session runtime to LoopX projection v0](../reference/protocols/session-runtime-loopx-projection-v0.md)
 - [Worker bridge install contract](worker-bridge-install-contract.md)
 - [Quota allocation](../quota-allocation.md)

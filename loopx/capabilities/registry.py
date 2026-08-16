@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
+from .documentation import normalize_documentation_contract
+
 
 CAPABILITY_ORIGINS = frozenset({"builtin", "extension"})
 CAPABILITY_VISIBILITIES = frozenset({"public", "internal"})
@@ -109,6 +111,39 @@ class CapabilityRegistry:
         normalized["origin"] = origin
         normalized["visibility"] = visibility
         normalized["provider_id"] = provider_id
+        documentation_value = record.get("documentation")
+        if documentation_value is None:
+            if origin == "builtin" and visibility == "public":
+                raise ValueError(
+                    f"{context} requires package-owned documentation metadata"
+                )
+        else:
+            documentation = normalize_documentation_contract(
+                documentation_value,
+                context=context,
+            )
+            normalized["documentation"] = documentation
+            canonical_doc = (
+                f"{documentation['source_root']}/{documentation['canonical']}"
+            )
+            documentation_route = (
+                f"{documentation['site_root']}/{documentation['canonical']}"
+            )
+            normalized["canonical_doc"] = canonical_doc
+            normalized["documentation_route"] = documentation_route
+            docs = record.get("docs", [])
+            if not isinstance(docs, list) or any(
+                not isinstance(item, str) or not item.strip() for item in docs
+            ):
+                raise ValueError(f"{context} requires `docs` to be an array of paths")
+            normalized["docs"] = [
+                canonical_doc,
+                *[
+                    item.strip()
+                    for item in docs
+                    if item.strip() != canonical_doc
+                ],
+            ]
         self._records[capability_id] = normalized
 
     def register_implementation(self, implementation: Mapping[str, Any]) -> None:

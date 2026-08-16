@@ -108,7 +108,7 @@ LoopX 的创建者以
 [OpenViking contributor](https://github.com/volcengine/OpenViking/pulls?q=is%3Apr+author%3Ahuangruiteng)
 身份把这条路径用于持续的 issue-to-PR 修复。图中公开贡献序列从首个 PR 创建到
 最后一次所示 review 或 update，跨越 200+ 小时。
-[Issue-Fix 能力说明](docs/capabilities/issue-fix/README.zh-CN.md)把 rolling
+[Issue-Fix 能力说明](loopx/capabilities/issue_fix/README.zh-CN.md)把 rolling
 repository context、带 revision 的修复知识和 reviewer-facing preference
 分开管理；所链接 PR 与当前 checkout 的源码、测试始终具有最高权威。
 
@@ -137,7 +137,7 @@ todo、quota、证据与 targeted wake 同屏可见。**
 这张截图来自 LoopX 内置的 exact-KNN demo。公开 task、可编辑与受保护文件、
 deterministic CPU evaluator、dev / held-out 命令均在仓库内。可按
 [showcase walkthrough](docs/product/use-cases/auto-research/decentralized-auto-research-showcase.md)
-或 [command path](docs/guides/auto-research-command-path.md)复现工作流；它是 demo
+或 [command path](loopx/capabilities/auto_research/README.md)复现工作流；它是 demo
 结果，不是生产研究结论。
 
 ### 真实项目中的使用
@@ -264,7 +264,7 @@ LoopX 显式保留架构边界，使同一个受治理结果在更换 Agent harn
 | 边界 | 含义 | 深入阅读 |
 | --- | --- | --- |
 | **Kernel** | 持有持久化 goal、todo、gate、evidence、quota、恢复和调度事实。 | [核心架构](docs/architecture.md) |
-| **Capability** | 定义稳定、provider-neutral 的合同，从 LoopX 状态交付一个有界、可验证的调用者结果。 | [Capability 目录](docs/capabilities/README.md) |
+| **Capability** | 定义稳定、provider-neutral 的合同，从 LoopX 状态交付一个有界、可验证的调用者结果。 | [Capability 目录](loopx/capabilities/README.md) |
 | **Provider** | 调用外部系统或本地实现，返回有界 observation、effect result 和 readback。 | [Provider 运行责任](docs/reference/extensions.md#runtime-responsibilities) |
 | **Extension** | 通过显式安装、readiness、启用、升级、停用和回滚生命周期交付可选 Provider。 | [Extension 生命周期](docs/reference/extensions.md#runtime-lifecycle) |
 
@@ -295,8 +295,8 @@ Kernel 把控制面归结为五个用户可以直接行动的问题。每个问�
 | Agent runtime bridge | 让 Codex App、Codex CLI、Claude Code 和 generic worker 服从同一 guard。 | `loopx heartbeat-prompt`、`loopx codex-cli-bootstrap-message`、`loopx worker-bridge` |
 | Operator surface | 呈现紧凑状态，但不让浏览器成为状态事实源。 | `loopx serve-status`、[Dashboard](apps/presentation/dashboard/README.md) |
 | External projection | 把 todo / gate 投影到协作表面，同时保持 LoopX 权威。 | `loopx lark-kanban`、[Lark Kanban adapter](docs/integrations/lark-kanban-control-plane-adapter.md) |
-| Domain capability | 打包 Issue Fix、内容运营、value connector、ML 实验、benchmark 与 Explore 等可重复泳道。 | `loopx issue-fix`、`loopx content-ops`、`loopx value-connectors`、`loopx ml-experiment`、`loopx benchmark`、[Explore](docs/capabilities/explore/README.md) |
-| 实验性上下文学习 | 通过 ignored、默认关闭的项目配置，为明确注册的 agent 试用 provider-neutral Reward Memory；OpenViking 是 provider 之一，不是全局依赖。 | `loopx reward-memory experiment-status`、[Reward Memory 中文架构](docs/reference/protocols/reward-memory-architecture-v0.zh-CN.md) |
+| Domain capability | 打包 Issue Fix、内容运营、value connector、ML 实验、benchmark 与 Explore 等可重复泳道。 | `loopx issue-fix`、`loopx content-ops`、`loopx value-connectors`、`loopx ml-experiment`、`loopx benchmark`、[Explore](loopx/capabilities/explore/README.md) |
+| 实验性上下文学习 | 通过 ignored、默认关闭的项目配置，为明确注册的 agent 试用 provider-neutral Reward Memory；OpenViking 是 provider 之一，不是全局依赖。 | `loopx reward-memory experiment-status`、[Reward Memory 中文架构](loopx/capabilities/reward_memory/README.zh-CN.md) |
 | Governance pattern | 沉淀可复用的 routing、gate、evidence、projection 和 planning 形状。 | [Interaction Pattern Catalog](docs/concepts/interaction-pattern-catalog.md)、[State Model](docs/state-interaction-model.md) |
 
 这些能力共同提供 lifetime goal、具体 user gate、经过审计的安全侧路、平级 todo
@@ -310,16 +310,16 @@ Capability 把上述通用原语组成 outcome-owned 工作泳道。先按结果
 
 | 你需要…… | Capability | 从这里开始 |
 | --- | --- | --- |
-| 把公开 issue 推进为可审查、有证据的变更 | [Issue Fix](docs/capabilities/issue-fix/README.zh-CN.md) | `loopx capability show issue-fix --format json` |
-| 在交付前对精确 final diff 做质量验收 | [Change Quality](docs/capabilities/change-quality/README.md) | `loopx capability show change-quality-qualification --format json` |
-| 维护由多个已审查分支组成、持续变化的集成栈 | [Integration Branch](docs/capabilities/integration-branch/README.md) | `loopx capability show integration-branch-reconcile --format json` |
-| 在不丢失假设和发现的前提下探索不确定研究问题 | [Explore](docs/capabilities/explore/README.zh-CN.md) | `loopx capability show explore --format json` |
-| 基于当前证据和已验证结果重新建立决策上下文 | [Decision Context](docs/capabilities/decision-context/README.zh-CN.md) | `loopx capability show decision-context --format json` |
-| 生成带 receipt 的定时或进展触发报告 | [Periodic Report](docs/capabilities/periodic-report/README.md) | `loopx capability show periodic-report --format json` |
+| 把公开 issue 推进为可审查、有证据的变更 | [Issue Fix](loopx/capabilities/issue_fix/README.zh-CN.md) | `loopx capability show issue-fix --format json` |
+| 在交付前对精确 final diff 做质量验收 | [Change Quality](loopx/capabilities/change_quality/README.md) | `loopx capability show change-quality-qualification --format json` |
+| 维护由多个已审查分支组成、持续变化的集成栈 | [Integration Branch](loopx/capabilities/integration_branch/README.md) | `loopx capability show integration-branch-reconcile --format json` |
+| 在不丢失假设和发现的前提下探索不确定研究问题 | [Explore](loopx/capabilities/explore/README.zh-CN.md) | `loopx capability show explore --format json` |
+| 基于当前证据和已验证结果重新建立决策上下文 | [Decision Context](loopx/capabilities/decision_context/README.zh-CN.md) | `loopx capability show decision-context --format json` |
+| 生成带 receipt 的定时或进展触发报告 | [Periodic Report](loopx/capabilities/periodic_report/README.md) | `loopx capability show periodic-report --format json` |
 
 运行 `loopx capability list --format json`，读取当前安装版本的权威目录。Capability
 详情包含用户价值、成熟度、Provider readiness、入口命令、写入边界、协议和持久
-验证。可从[人类可读 Capability 索引](docs/capabilities/README.md)按结果选择；安装或
+验证。可从[人类可读 Capability 索引](loopx/capabilities/README.md)按结果选择；安装或
 开发 Provider 时，再进入[Extension 与 Capability](docs/reference/extensions.md)。
 
 ### 四种运行责任
@@ -357,7 +357,7 @@ Dependency Sweeper 需要明确授权、隔离 worktree、verifier、quota/cost 
 review。Auto Research 通过 proposer、executor、evaluator/promoter 协作，同时保持
 quota 和证据可见。详见
 [入门 Preset 指南](docs/product/foundations/beginner-loop-presets.md)和
-[Auto Research Command Path](docs/guides/auto-research-command-path.md)。
+[Auto Research Command Path](loopx/capabilities/auto_research/README.md)。
 
 ```bash
 loopx preset list
@@ -377,8 +377,8 @@ LoopX 可以根据 validated receipt、fresh quota state 和 provider-neutral bu
 
 Explore 正式支持、可选、默认关闭。它适合具有可量化 offline eval、baseline、
 treatment 和 guardrail 的任务，不替代生产审批。先读
-[Explore Capability](docs/capabilities/explore/README.md)及其
-[Lark Presentation Mapping](docs/capabilities/explore/README.md#presentation-sink-lark-mapping)。
+[Explore Capability](loopx/capabilities/explore/README.md)及其
+[Lark Presentation Mapping](loopx/capabilities/explore/README.md#presentation-sink-lark-mapping)。
 
 ### 审阅 Agent 工作
 

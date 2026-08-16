@@ -419,7 +419,7 @@ that the proposed LoopX contract is already qualified for default-on use.
 
 ## 14. Relationship to existing contracts
 
-- [Reward Memory Architecture v0](../../reference/protocols/reward-memory-architecture-v0.md)
+- [Reward Memory Architecture v0](../../../loopx/capabilities/reward_memory/README.md)
   remains the stable recall, application, and lifecycle owner. This RFC proposes
   a later attribution seam and Stage 5 semantic repair.
 - [Peer Supervisor v0](../../reference/protocols/peer-supervisor-v0.md) supplies

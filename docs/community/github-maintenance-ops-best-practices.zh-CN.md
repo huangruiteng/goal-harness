@@ -72,7 +72,7 @@ issue-fix 能力把一条公开 issue 变成小而聚焦、验证充分、可审
 `/loopx Fix <issue-url>` 只是种下一个候选；feasibility、PR lifecycle 与
 outcome 持久化在垂域状态里，跨越 turn、模型切换、CI 等待和 review 往返。
 
-公开证据：[issue-fix 能力文档](../capabilities/issue-fix/README.zh-CN.md)、
+公开证据：[issue-fix 能力文档](../../loopx/capabilities/issue_fix/README.zh-CN.md)、
 showcase 附录中的 OpenViking pilot。
 
 ## 3. 最佳实践
@@ -275,8 +275,8 @@ item 走 source → angle → draft → feedback → publish gate → readback�
   [#3225](https://github.com/huangruiteng/loopx/issues/3225)、RFC PR
   [#3226](https://github.com/huangruiteng/loopx/pull/3226)
 - Issue-fix 能力：
-  [`docs/capabilities/issue-fix/README.zh-CN.md`](../capabilities/issue-fix/README.zh-CN.md)
+  [`loopx/capabilities/issue_fix/README.zh-CN.md`](../../loopx/capabilities/issue_fix/README.zh-CN.md)
 - Content-ops 能力：
-  [`docs/capabilities/content-ops/README.md`](../capabilities/content-ops/README.md)
+  [`loopx/capabilities/content_ops/README.md`](../../loopx/capabilities/content_ops/README.md)
 - v0.4.5 至 v0.4.7：
   [releases](https://github.com/huangruiteng/loopx/releases)

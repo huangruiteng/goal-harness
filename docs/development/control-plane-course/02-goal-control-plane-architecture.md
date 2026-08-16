@@ -238,8 +238,8 @@ observation fingerprint 抑制 unchanged poll。它保存紧凑事实和已验�
 issue body、raw check log、凭据或本地路径。GitHub 仍是权威来源，Domain State 只负责让
 下一轮不必从聊天里重建领域连续性。
 
-完整案例见 [Issue-Fix 能力](../../capabilities/issue-fix/README.zh-CN.md) 和
-[State Kernel × Domain State 案例](../../capabilities/issue-fix/state-kernel-domain-state-case-study.zh-CN.md)。
+完整案例见 [Issue-Fix 能力](../../../loopx/capabilities/issue_fix/README.zh-CN.md) 和
+[State Kernel × Domain State 案例](../../../loopx/capabilities/issue_fix/docs/state-kernel-domain-state-case-study.zh-CN.md)。
 
 ## Showcase B：Multi-Agent Auto Research
 
@@ -423,7 +423,7 @@ Reward Memory 可以帮助回忆历史失败模式或偏好，仍不能替代当
 authority 或 release receipt。
 
 公开的实现入口见 [Domain Capability Packs](../../product/domain-capability-packs.md) 与
-[Explore Capability](../../capabilities/explore/README.md)。
+[Explore Capability](../../../loopx/capabilities/explore/README.md)。
 
 ## 三个 Showcase 共同揭示的架构
 

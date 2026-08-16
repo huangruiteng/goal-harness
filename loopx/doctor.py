@@ -19,7 +19,7 @@ from .control_plane.runtime.promotion_readiness import (
 )
 from .install_contract import NO_CLONE_INSTALL_URL
 from .paths import DEFAULT_RUNTIME_ROOT, global_registry_path
-from .project_skill_delivery import discover_project_scoped_skill_ids
+from .capabilities.project_skill_delivery import discover_project_scoped_skill_ids
 from .registry_writability import probe_registry_write_path
 from .release_manifest import load_release_manifest, release_version_tag
 from .skill_install_readback import (

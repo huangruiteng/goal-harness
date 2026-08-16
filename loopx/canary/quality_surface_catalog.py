@@ -57,7 +57,7 @@ QUALITY_SURFACE_CATALOG: tuple[dict[str, Any], ...] = (
         ],
         "semantic_oracle": {
             "source_kind": "specification",
-            "refs": ["docs/capabilities/change-quality/README.md"],
+            "refs": ["loopx/capabilities/change_quality/README.md"],
             "independence_rationale": (
                 "The public policy defines independent safe-fix and strict-receipt "
                 "controls plus exact final-diff identity before implementation hashing "

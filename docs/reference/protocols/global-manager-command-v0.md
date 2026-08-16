@@ -56,7 +56,7 @@ command: it starts one project goal, plans ranked todos, writes them in order,
 and then enters the quota-gated automation flow.
 
 Related repo-review command: `/loopx-pr-review` is covered by
-[`pr_review_command_v0`](pr-review-command-v0.md). It is read-only and helps a
+[`pr_review_command_v0`](../../../loopx/capabilities/pr_review_queue/README.md). It is read-only and helps a
 human review open and merged PRs in the caller's current project or an explicit
 `--repo owner/repo` target; it does not approve, comment, merge, or spend quota.
 

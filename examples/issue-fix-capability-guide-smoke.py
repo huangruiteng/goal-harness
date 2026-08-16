@@ -8,21 +8,21 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENGLISH_GUIDE = ROOT / "docs/capabilities/issue-fix/README.md"
-CHINESE_GUIDE = ROOT / "docs/capabilities/issue-fix/README.zh-CN.md"
-CAPABILITY_INDEX = ROOT / "docs/capabilities/README.md"
+ENGLISH_GUIDE = ROOT / "loopx/capabilities/issue_fix/README.md"
+CHINESE_GUIDE = ROOT / "loopx/capabilities/issue_fix/README.zh-CN.md"
+CAPABILITY_INDEX = ROOT / "loopx/capabilities/README.md"
 ENGLISH_README = ROOT / "README.md"
 CHINESE_README = ROOT / "README.zh-CN.md"
 REVIEWER_PROTOCOL = (
     ROOT
-    / "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-recommendation-v0.md"
+    / "loopx/capabilities/issue_fix/docs/protocols/issue-fix-reviewer-recommendation-v0.md"
 )
 REVIEWER_REQUEST_PROTOCOL = (
-    ROOT / "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-request-v0.md"
+    ROOT / "loopx/capabilities/issue_fix/docs/protocols/issue-fix-reviewer-request-v0.md"
 )
 REVIEWER_NOTIFICATION_SINK_PROTOCOL = (
     ROOT
-    / "docs/capabilities/issue-fix/protocols/issue-fix-reviewer-notification-sinks-v0.md"
+    / "loopx/capabilities/issue_fix/docs/protocols/issue-fix-reviewer-notification-sinks-v0.md"
 )
 
 PRIVATE_PATTERNS = (
@@ -61,10 +61,10 @@ def main() -> int:
     assert chinese.startswith("# Issue-Fix 能力")
     assert "[中文](README.zh-CN.md)" in english
     assert "[English](README.md)" in chinese
-    assert "[issue-fix](issue-fix/README.md)" in capability_index
-    assert "[中文](issue-fix/README.zh-CN.md)" in capability_index
-    assert "docs/capabilities/issue-fix/README.md" in english_readme
-    assert "docs/capabilities/issue-fix/README.zh-CN.md" in chinese_readme
+    assert "[issue-fix](issue_fix/README.md)" in capability_index
+    assert "[中文](issue_fix/README.zh-CN.md)" in capability_index
+    assert "loopx/capabilities/issue_fix/README.md" in english_readme
+    assert "loopx/capabilities/issue_fix/README.zh-CN.md" in chinese_readme
 
     shared_markers = (
         "issue_fix_repository_context_input_v0",

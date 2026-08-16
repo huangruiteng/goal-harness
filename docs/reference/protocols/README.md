@@ -41,8 +41,8 @@ scanning a chronological list.
 - [`peer_supervisor_v0`](peer-supervisor-v0.md): Peer supervisor v0
 - [`periodic_report_v0`](periodic-report-v0.md): Periodic report v0
 - [`review_batch_v0`](review-batch-v0.md): Review batch v0
-- [`reward_memory_architecture_v0`](reward-memory-architecture-v0.md): Reward memory architecture v0
-- [`reward_memory_architecture_v0`](reward-memory-architecture-v0.zh-CN.md): Reward memory architecture v0 (中文)
+- [`reward_memory_architecture_v0`](../../../loopx/capabilities/reward_memory/README.md): Reward memory architecture v0
+- [`reward_memory_architecture_v0`](../../../loopx/capabilities/reward_memory/README.zh-CN.md): Reward memory architecture v0 (中文)
 - [`reward_memory_corpus_registry_v0`](reward-memory-corpus-registry-v0.md): Reward memory corpus registry v0
 - [`trajectory_hygiene_v0`](trajectory-hygiene-v0.md): Trajectory hygiene v0
 
@@ -81,5 +81,5 @@ scanning a chronological list.
 ## Quality, Review, And Release
 
 - [`model_behavior_qualification_v0`](model-behavior-qualification-v0.md): Model behavior qualification v0
-- [`pr_review_command_v0`](pr-review-command-v0.md): PR review command v0
+- [`pr_review_command_v0`](../../../loopx/capabilities/pr_review_queue/README.md): PR review command v0
 - [`release_outcome_baseline_v0`](release-outcome-baseline-v0.md): Release outcome baseline v0

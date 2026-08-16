@@ -145,7 +145,7 @@ from .cli_rollout import (
     append_benchmark_run_rollout_event,
     append_cli_rollout_event,
 )
-from .project_skill_cli import (
+from .capabilities.project_skill_delivery.cli import (
     handle_project_skill_command,
     register_project_skill_commands,
 )

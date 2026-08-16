@@ -320,7 +320,7 @@ v0 拒绝。成本过高，而且 replay 本身可能偏离原始 policy state�
 
 ## 14. 与现有协议的关系
 
-- [Reward Memory Architecture v0](../../reference/protocols/reward-memory-architecture-v0.md) 仍是稳定的 recall、application 与 lifecycle owner；本 RFC 只提议增加后续 attribution seam，并修复 Stage 5 语义。
+- [Reward Memory Architecture v0](../../../loopx/capabilities/reward_memory/README.md) 仍是稳定的 recall、application 与 lifecycle owner；本 RFC 只提议增加后续 attribution seam，并修复 Stage 5 语义。
 - [Peer Supervisor v0](../../reference/protocols/peer-supervisor-v0.md) 提供 equal-peer、public-safe、proposal-only 的 authority 边界。
 - [Agent IM, LoopX, and OpenViking collaboration v0](agent-im-openviking-collaboration-v0.md) 保持 LoopX 对 goal、authority 与 evidence 负责，OpenViking 对 context 与 recall 负责。
 - [Human Attention Wishlist v0](human-attention-wishlist-v0.md) 仍然是对可选人类增量帮助的 non-blocking request。只有当人类输入确实有增量价值时，utility uncertainty 才成为 wish；它不会自动变成 gate。

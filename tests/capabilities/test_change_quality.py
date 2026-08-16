@@ -27,7 +27,7 @@ from loopx.capabilities.change_quality.result import (
 )
 from loopx.cli import main
 from loopx.configure_goal import configure_goal
-from loopx.project_skill_delivery import (
+from loopx.capabilities.project_skill_delivery import (
     install_project_skill,
     inspect_project_skill,
 )
