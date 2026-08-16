@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from loopx.capabilities.benchmark_toolkit.native_codex_profile import (
     compact_native_codex_profile_receipt,
     inspect_native_codex_profile,
     install_native_codex_profile,
+    native_codex_app_server_environment,
     native_codex_profile_environment,
     render_native_codex_goal_prompt,
 )
@@ -83,6 +85,35 @@ def main() -> int:
             require_clean_source=not args.allow_dirty_source,
         )
         profile_receipt = compact_native_codex_profile_receipt(profile)
+        provider_key = "LOOPX_BENCHMARK_PROVIDER_SENTINEL"
+        unrelated_key = "LOOPX_BENCHMARK_UNRELATED_SENTINEL"
+        sentinel_env = {
+            **os.environ,
+            provider_key: "provider-sentinel",
+            unrelated_key: "unrelated-sentinel",
+        }
+        default_profile_env = native_codex_profile_environment(
+            profile, base_env=sentinel_env
+        )
+        app_server_env = native_codex_app_server_environment(
+            profile,
+            provider_env_key=provider_key,
+            base_env=sentinel_env,
+        )
+        provider_environment_receipt = {
+            "default_environment_credential_free": provider_key
+            not in default_profile_env,
+            "declared_provider_value_admitted": app_server_env.get(provider_key)
+            == "provider-sentinel",
+            "unrelated_value_excluded": unrelated_key not in app_server_env,
+            "raw_values_recorded": False,
+        }
+        if not all(
+            value is True
+            for key, value in provider_environment_receipt.items()
+            if key != "raw_values_recorded"
+        ):
+            raise SystemExit("profile provider environment boundary failed")
         project = Path(raw) / "project"
         project.mkdir()
         registry = project / ".loopx" / "registry.json"
@@ -190,6 +221,7 @@ def main() -> int:
                 "profile": profile_receipt,
                 "goal_prompt": prompt_receipt,
                 "app_server": app_server_receipt,
+                "provider_environment": provider_environment_receipt,
                 "public_boundary": {
                     "local_paths_recorded": False,
                     "credentials_recorded": False,
