@@ -168,7 +168,8 @@ def _jq_projection(chat_id: str) -> str:
         '{schema_version:"lark_event_inbox_event_v0",'
         "event_id:(.event_id // .message_id),message_id:.message_id,"
         "create_time:.create_time,content:.content,sender_id:.sender_id,"
-        "chat_id:.chat_id}"
+        "chat_id:.chat_id,root_id:.root_id,parent_id:.parent_id,"
+        "mentions:(.mentions // [])}"
     )
 
 
