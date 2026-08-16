@@ -6,11 +6,11 @@ from enum import StrEnum
 from typing import Any, Generic, TypeVar, cast
 
 
-# Keep the established wire ids while moving their implementation to the
-# core-owned algebra shared by quota and Turn adapters.
+# Identity remains stable while the plan and receipt versions advance with the
+# typed terminal-closeout step shared by quota and Turn adapters.
 SETTLEMENT_IDENTITY_SCHEMA_VERSION = "quota_settlement_identity_v0"
-SETTLEMENT_PLAN_SCHEMA_VERSION = "quota_settlement_plan_v0"
-SETTLEMENT_RECEIPT_SCHEMA_VERSION = "quota_settlement_receipt_v0"
+SETTLEMENT_PLAN_SCHEMA_VERSION = "quota_settlement_plan_v1"
+SETTLEMENT_RECEIPT_SCHEMA_VERSION = "quota_settlement_receipt_v1"
 
 
 @dataclass(frozen=True)
@@ -102,9 +102,9 @@ class TurnJournalViolation(StrEnum):
 
 class SettlementStepKind(StrEnum):
     VALIDATION = "validation"
-    TODO_COMPLETION = "todo_completion"
     DURABLE_WRITEBACK = "durable_writeback"
     QUOTA_SPEND = "quota_spend"
+    TERMINAL_CLOSEOUT = "terminal_closeout"
 
 
 class SettlementFailureKind(StrEnum):
@@ -114,6 +114,7 @@ class SettlementFailureKind(StrEnum):
     WRITEBACK_MISSING = "writeback_missing"
     WRITEBACK_REJECTED = "writeback_rejected"
     QUOTA_SPEND_REJECTED = "quota_spend_rejected"
+    TERMINAL_CLOSEOUT_REJECTED = "terminal_closeout_rejected"
     CANCELLED = "cancelled"
     PERMISSION_DENIED = "permission_denied"
     BUDGET_REJECTED = "budget_rejected"

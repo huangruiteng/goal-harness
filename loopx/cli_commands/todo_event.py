@@ -63,6 +63,7 @@ def append_todo_rollout_event(
             "changed": bool(payload.get("changed")),
             "added": bool(payload.get("added")),
             "already_exists": bool(payload.get("already_exists")),
+            "no_followup": bool(getattr(args, "no_follow_up", False)),
             "mutation_authority": payload.get("mutation_authority"),
             "replan_transition": payload.get("replan_transition"),
             "settlement_effect_id": (

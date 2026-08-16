@@ -103,6 +103,7 @@ def test_turn_plan_projects_ready_route_without_side_effects() -> None:
         "validation",
         "durable_writeback",
         "quota_spend",
+        "terminal_closeout",
     ]
     for step in settlement_plan["ordered_steps"]:
         assert step["owner"]

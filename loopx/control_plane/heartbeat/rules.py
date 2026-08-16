@@ -54,7 +54,8 @@ HOST_LOOP_QUOTA_DISPATCH_RULE = (
     "Run quota; execute `interaction_contract` next—no detours."
 )
 HOST_LOOP_TODO_CLOSEOUT_RULE = (
-    "Done -> successor todo; final -> refresh/spend before no-follow-up completion."
+    "Done -> successor first; final -> accountable refresh, spend, then "
+    "no-follow-up completion."
 )
 CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE = (
     "\n\nNative Codex `/goal` owns blocked state. Recheck quota at the "

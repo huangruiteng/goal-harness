@@ -53,7 +53,7 @@ __all__ = [
     "find_settlement_writeback",
     "infer_persisted_heartbeat_settlement_identity",
     "require_settlement_spend",
-    "require_settlement_todo_completion",
+    "require_settlement_terminal_closeout",
     "require_settlement_writeback",
     "resolve_heartbeat_settlement_identity",
     "resolve_settlement_delivery_workspace_causality",
@@ -329,7 +329,7 @@ def find_settlement_step_event(
     return None
 
 
-def require_settlement_todo_completion(
+def require_settlement_terminal_closeout(
     runtime_root: Path,
     identity: SettlementIdentity,
 ) -> SettlementResult[dict[str, Any]]:
@@ -338,11 +338,13 @@ def require_settlement_todo_completion(
         identity,
         event_kind="todo_complete",
     )
-    if receipt_event is None:
+    details_value = receipt_event.get("details") if receipt_event else None
+    details = details_value if isinstance(details_value, Mapping) else {}
+    if receipt_event is None or details.get("no_followup") is not True:
         return SettlementResult.failed(
             kind=SettlementFailureKind.RECEIPT_MISSING,
-            step_kind=SettlementStepKind.TODO_COMPLETION,
-            reason="matching Todo completion receipt is missing",
+            step_kind=SettlementStepKind.TERMINAL_CLOSEOUT,
+            reason="matching terminal no-follow-up closeout receipt is missing",
         )
     event_id = str(receipt_event.get("event_id") or "").strip()
     return SettlementResult.pure(
@@ -350,7 +352,7 @@ def require_settlement_todo_completion(
         receipts=(
             settlement_receipt(
                 identity,
-                step_kind=SettlementStepKind.TODO_COMPLETION,
+                step_kind=SettlementStepKind.TERMINAL_CLOSEOUT,
                 source_ref=f"rollout_event:{event_id}" if event_id else None,
             ),
         ),

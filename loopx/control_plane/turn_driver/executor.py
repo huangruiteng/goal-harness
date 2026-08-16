@@ -15,6 +15,7 @@ from ...authority import validate_public_safe_text
 from ...file_lock import LockAcquireTimeoutError, exclusive_file_lock
 from ...runtime import validate_goal_id_path_segment
 from ..effect_program import (
+    SettlementResult,
     SettlementStepKind,
     interpret_turn_journal,
     interpret_turn_result_packet,
@@ -24,14 +25,18 @@ from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
 from .driver import selected_turn_todo
-from .settlement import execute_turn_driver_settlement
+from .settlement import (
+    completion_writeback_outcome,
+    execute_turn_driver_settlement,
+    execute_verified_turn_terminal_closeout,
+    terminal_closeout_requirement,
+)
 from .transaction import (
     LOOPX_TURN_EXECUTION_SCHEMA_VERSION,
     LOOPX_TURN_RESULT_SCHEMA_VERSION,
     TRANSACTION_PHASES,
     LoopXTurnResultKind,
     build_loopx_turn_transaction_plan,
-    require_loopx_turn_completion_outcome,
     validate_loopx_turn_receipt,
 )
 
@@ -81,6 +86,8 @@ HOST_RESULT_FIELDS = {
 
 Writeback = Callable[[dict[str, Any]], dict[str, Any]]
 CompletionWriteback = Callable[[dict[str, Any]], dict[str, Any]]
+CompletionIntent = Callable[[dict[str, Any]], dict[str, Any]]
+TerminalCloseout = Callable[[dict[str, Any]], dict[str, Any]]
 Spend = Callable[[], dict[str, Any]]
 Scheduler = Callable[[dict[str, Any]], dict[str, Any]]
 HostRunner = Callable[[Mapping[str, Any]], dict[str, Any]]
@@ -250,7 +257,7 @@ def validate_loopx_turn_host_result(
     plan: Mapping[str, Any],
     value: Mapping[str, Any],
     *,
-    completion_writeback_configured: bool = False,
+    completion_lifecycle_configured: bool = False,
 ) -> dict[str, Any]:
     result = dict(value)
     errors: list[str] = []
@@ -272,7 +279,7 @@ def validate_loopx_turn_host_result(
         errors.append("unsupported host result kind")
     if (
         kind is LoopXTurnResultKind.VALIDATED_COMPLETION
-        and not completion_writeback_configured
+        and not completion_lifecycle_configured
     ):
         errors.append("validated_completion requires a todo lifecycle adapter")
     if (
@@ -839,7 +846,7 @@ def _host_result_stage(
     *,
     host_runner: HostRunner | None,
     argv: Sequence[str] | None,
-    completion_writeback_configured: bool,
+    completion_lifecycle_configured: bool,
     project: Path,
     timeout_seconds: float,
     journal: dict[str, Any],
@@ -897,7 +904,7 @@ def _host_result_stage(
     validation = validate_loopx_turn_host_result(
         plan,
         result or {},
-        completion_writeback_configured=completion_writeback_configured,
+        completion_lifecycle_configured=completion_lifecycle_configured,
     )
     if not validation.get("ok"):
         failure = _host_failure(
@@ -1032,26 +1039,6 @@ def _task_validation_stage(
     return completed_phases, None
 
 
-def _completion_writeback_outcome(
-    payload: Mapping[str, Any],
-    *,
-    plan: Mapping[str, Any],
-) -> dict[str, Any] | None:
-    completion = payload.get("completion")
-    if not isinstance(completion, Mapping):
-        return None
-    envelope = plan.get("turn_envelope")
-    selected_todo = selected_turn_todo(envelope) if isinstance(envelope, Mapping) else {}
-    expected_todo_id = str(selected_todo.get("todo_id") or "")
-    try:
-        return require_loopx_turn_completion_outcome(
-            completion,
-            expected_todo_id=expected_todo_id,
-        )
-    except ValueError:
-        return None
-
-
 def _ensure_turn_settlement_plan(
     plan: Mapping[str, Any],
     transaction_plan: dict[str, Any],
@@ -1104,6 +1091,8 @@ def _typed_settlement_stage(
     effects: dict[str, bool],
     writeback: Writeback,
     completion_writeback: CompletionWriteback | None,
+    completion_intent: CompletionIntent | None,
+    terminal_closeout: TerminalCloseout | None,
     spend: Spend,
     scheduler: Scheduler,
 ) -> dict[str, Any]:
@@ -1114,12 +1103,43 @@ def _typed_settlement_stage(
     )
     _ensure_turn_settlement_plan(plan, transaction_plan)
 
+    terminal_closeout_required = False
+    completion_intent_error: str | None = None
+    if result.get("result_kind") == LoopXTurnResultKind.VALIDATED_COMPLETION.value:
+        if (
+            completion_writeback is None
+            or completion_intent is None
+            or terminal_closeout is None
+        ):
+            raise ValueError(
+                "validated_completion requires intent, lifecycle writeback, "
+                "and terminal closeout adapters"
+            )
+        terminal_closeout_required, completion_intent_error = (
+            terminal_closeout_requirement(
+                plan=plan,
+                result=result,
+                journal=journal,
+                completion_intent=completion_intent,
+            )
+        )
+
     def writeback_effect() -> Mapping[str, Any]:
-        if result.get("result_kind") == LoopXTurnResultKind.VALIDATED_COMPLETION.value:
+        if completion_intent_error:
+            return {
+                "ok": False,
+                "appended": False,
+                "reason": completion_intent_error,
+            }
+        if (
+            result.get("result_kind")
+            == LoopXTurnResultKind.VALIDATED_COMPLETION.value
+            and not terminal_closeout_required
+        ):
             if completion_writeback is None:
                 raise ValueError("validated_completion requires a todo lifecycle adapter")
             callback_payload = completion_writeback(result)
-            completion_outcome = _completion_writeback_outcome(
+            completion_outcome = completion_writeback_outcome(
                 callback_payload,
                 plan=plan,
             )
@@ -1182,6 +1202,44 @@ def _typed_settlement_stage(
         checkpoint=checkpoint,
         committed_effect_id=_journal_committed_effect_id(journal),
     )
+    settlement_state = settlement_result.value
+    if settlement_result.failure is None and terminal_closeout_required:
+        assert terminal_closeout is not None
+
+        def terminal_checkpoint(payload: Mapping[str, Any]) -> None:
+            compact = {
+                **_compact_callback(payload),
+                **(
+                    {"completion": payload["completion"]}
+                    if isinstance(payload.get("completion"), Mapping)
+                    else {}
+                ),
+            }
+            journal["terminal_closeout"] = compact
+            journal["writeback"] = {
+                **_mapping(journal.get("writeback")),
+                "completion": compact.get("completion"),
+            }
+            _write_journal(journal_path, journal)
+
+        terminal_result = execute_verified_turn_terminal_closeout(
+            transaction_plan,
+            plan=plan,
+            committed_payload=(
+                journal.get("terminal_closeout")
+                if isinstance(journal.get("terminal_closeout"), Mapping)
+                else None
+            ),
+            closeout=lambda: terminal_closeout(result),
+            checkpoint=terminal_checkpoint,
+            committed_effect_id=_journal_committed_effect_id(journal),
+        )
+        settlement_result = SettlementResult(
+            value=settlement_state if terminal_result.failure is None else None,
+            receipts=(*settlement_result.receipts, *terminal_result.receipts),
+            failure=terminal_result.failure,
+        )
+
     journal["settlement_result"] = settlement_result_payload(settlement_result)
     if settlement_result.failure is not None:
         failure_step = settlement_result.failure.step_kind
@@ -1191,6 +1249,8 @@ def _typed_settlement_stage(
             else LoopXTurnResultKind.WRITEBACK_FAILED
             if failure_step is SettlementStepKind.DURABLE_WRITEBACK
             else LoopXTurnResultKind.QUOTA_SPEND_FAILED
+            if failure_step is SettlementStepKind.QUOTA_SPEND
+            else LoopXTurnResultKind.TERMINAL_CLOSEOUT_FAILED
         )
         completed_phases = list(journal.get("completed_phases") or completed_phases)
         failure = _host_failure(
@@ -1269,6 +1329,8 @@ def run_loopx_turn_once(
     task_validator: TaskValidator | None = None,
     writeback: Writeback | None = None,
     completion_writeback: CompletionWriteback | None = None,
+    completion_intent: CompletionIntent | None = None,
+    terminal_closeout: TerminalCloseout | None = None,
     spend: Spend | None = None,
     scheduler: Scheduler | None = None,
 ) -> dict[str, Any]:
@@ -1360,7 +1422,14 @@ def run_loopx_turn_once(
             request,
             host_runner=host_runner,
             argv=argv,
-            completion_writeback_configured=completion_writeback is not None,
+            completion_lifecycle_configured=all(
+                callback is not None
+                for callback in (
+                    completion_writeback,
+                    completion_intent,
+                    terminal_closeout,
+                )
+            ),
             project=project,
             timeout_seconds=timeout_seconds,
             journal=journal,
@@ -1392,6 +1461,8 @@ def run_loopx_turn_once(
             effects=effects,
             writeback=writeback,
             completion_writeback=completion_writeback,
+            completion_intent=completion_intent,
+            terminal_closeout=terminal_closeout,
             spend=spend,
             scheduler=scheduler,
         )

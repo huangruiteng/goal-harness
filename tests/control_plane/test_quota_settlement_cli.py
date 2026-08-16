@@ -273,7 +273,7 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     assert complete["settlement_result"]["ok"] is True
     assert [
         receipt["step_kind"] for receipt in complete["settlement_result"]["receipts"]
-    ] == ["validation", "todo_completion"]
+    ] == ["validation"]
     successor_id = complete["next_todos"][0]["todo_id"]
     assert successor_id != TODO_ID
     complete_replay_rc, complete_replay = _run_cli(
@@ -543,7 +543,7 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
         "reason": "explicit_non_delivery_without_repository_writes",
     }
 
-    complete_rc, complete = _run_cli(
+    premature_rc, premature = _run_cli(
         registry_path,
         runtime,
         "todo",
@@ -557,7 +557,8 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
         "read-only characterization validated",
         "--no-follow-up",
     )
-    assert complete_rc == 0, complete
+    assert premature_rc == 1, premature
+    assert "requires matching writeback and quota spend receipts" in premature["error"]
 
     conflict_rc, conflict = _run_cli(
         registry_path,
@@ -624,6 +625,31 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert replay["idempotent_replay"] is True
     assert _spend_run_count(runtime) == 1
 
+    complete_rc, complete = _run_cli(
+        registry_path,
+        runtime,
+        "todo",
+        "complete",
+        "--goal-id",
+        GOAL_ID,
+        *binding,
+        "--claimed-by",
+        AGENT_ID,
+        "--evidence",
+        "read-only characterization validated",
+        "--no-follow-up",
+    )
+    assert complete_rc == 0, complete
+    assert [
+        receipt["step_kind"]
+        for receipt in complete["settlement_result"]["receipts"]
+    ] == [
+        "validation",
+        "durable_writeback",
+        "quota_spend",
+        "terminal_closeout",
+    ]
+
 
 def test_legacy_read_only_workspace_mismatch_fails_then_corrects_from_todo_contract(
     tmp_path: Path,
@@ -665,7 +691,10 @@ def test_legacy_read_only_workspace_mismatch_fails_then_corrects_from_todo_contr
         "complete",
         "--goal-id",
         GOAL_ID,
-        *binding,
+        "--todo-id",
+        TODO_ID,
+        "--agent-id",
+        AGENT_ID,
         "--claimed-by",
         AGENT_ID,
         "--evidence",

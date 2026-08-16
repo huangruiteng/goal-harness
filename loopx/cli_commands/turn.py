@@ -14,6 +14,7 @@ from ..control_plane.runtime.status_projection_cache import (
     resolve_status_projection_cache_runtime_root,
 )
 from ..control_plane.todos.durable_completion import (
+    project_durable_completion_intent,
     project_durable_completion_outcome,
     read_persisted_todo_record,
 )
@@ -36,7 +37,7 @@ from ..control_plane.turn_driver import (
 from ..quota import spend_quota_slot
 from ..state_refresh import refresh_state_run
 from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
-from ..todos import complete_goal_todo, update_goal_todo
+from ..todos import complete_goal_todo, resolve_todo_state_path, update_goal_todo
 from .lark_inbox import build_lark_operator_inbox_urgency_projector
 
 PrintPayload = Callable[
@@ -581,7 +582,31 @@ def handle_turn_command(
                     sync_global=not bool(args.no_global_sync),
                 )
 
-            def completion_writeback(result: dict[str, object]) -> dict[str, object]:
+            def completion_intent(_result: dict[str, object]) -> dict[str, object]:
+                todo_id = str(selected_todo.get("todo_id") or "")
+                if not todo_id:
+                    raise ValueError(
+                        "validated_completion requires one selected todo for lifecycle writeback"
+                    )
+                _state_project, state_file = resolve_todo_state_path(
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                    project=None,
+                    state_file=None,
+                )
+                durable_todo, existing_todo_ids = read_persisted_todo_record(
+                    state_file,
+                    todo_id=todo_id,
+                    registry_path=registry_path,
+                    goal_id=args.goal_id,
+                )
+                return project_durable_completion_intent(
+                    todo=durable_todo,
+                    expected_todo_id=todo_id,
+                    existing_todo_ids=existing_todo_ids,
+                )
+
+            def todo_completion(result: dict[str, object]) -> dict[str, object]:
                 todo_id = str(selected_todo.get("todo_id") or "")
                 if not todo_id:
                     raise ValueError(
@@ -634,20 +659,34 @@ def handle_turn_command(
                         "appended": False,
                         "reason": f"durable completion projection failed: {exc}",
                     }
+                return {
+                    "ok": bool(completion.get("ok")),
+                    # A completed Todo is idempotent under Turn replay: after an
+                    # interrupted journal write, the retry may observe it done.
+                    "appended": bool(completion.get("completed")) and bool(
+                        completion.get("changed")
+                        or completion.get("idempotent_replay")
+                    ),
+                    "completion": completion_outcome,
+                }
+
+            def completion_writeback(result: dict[str, object]) -> dict[str, object]:
+                completion = todo_completion(result)
+                if not completion.get("ok"):
+                    return completion
+                todo_id = str(selected_todo.get("todo_id") or "")
                 refresh = writeback(
                     result,
                     completion_todo_id=todo_id,
                     completion_turn_key=str(result["turn_key"]),
                 )
                 return {
-                    "ok": bool(completion.get("ok")) and bool(refresh.get("ok")),
-                    # A completed Todo is idempotent under Turn replay: after an
-                    # interrupted journal write, the retry may observe it done.
-                    "appended": bool(completion.get("completed")) and bool(
+                    "ok": bool(refresh.get("ok")),
+                    "appended": bool(completion.get("appended")) and bool(
                         refresh.get("appended")
                     ),
                     "classification": refresh.get("classification"),
-                    "completion": completion_outcome,
+                    "completion": completion["completion"],
                 }
 
             def current_status() -> dict[str, object]:
@@ -732,6 +771,8 @@ def handle_turn_command(
                 task_validator=task_validator,
                 writeback=writeback if args.execute else None,
                 completion_writeback=completion_writeback if args.execute else None,
+                completion_intent=completion_intent if args.execute else None,
+                terminal_closeout=todo_completion if args.execute else None,
                 spend=spend if args.execute else None,
                 scheduler=scheduler if args.execute else None,
             )

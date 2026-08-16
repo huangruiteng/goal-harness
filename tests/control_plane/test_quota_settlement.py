@@ -8,6 +8,7 @@ import pytest
 from loopx.control_plane import effect_program as core_effect_program
 from loopx.control_plane.effect_program import (
     SettlementFailureKind,
+    SettlementIdentity,
     SettlementReceipt,
     SettlementResult,
     SettlementStepKind,
@@ -15,6 +16,7 @@ from loopx.control_plane.effect_program import (
 from loopx.control_plane.quota import effect_program as quota_effect_program
 from loopx.control_plane.quota.settlement import (
     build_codex_app_settlement_plan,
+    require_settlement_terminal_closeout,
     resolve_heartbeat_settlement_identity,
     settlement_step_command,
 )
@@ -78,6 +80,39 @@ def _append_guard_receipt(
         + "\n",
         encoding="utf-8",
     )
+
+
+def test_terminal_closeout_receipt_rejects_ordinary_completion_event(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    identity = SettlementIdentity(GOAL_ID, AGENT_ID, TODO_ID, TURN_ID)
+    path = rollout_event_log_path(runtime_root, GOAL_ID)
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "loopx_rollout_event_v0",
+                "event_id": "event-ordinary-completion",
+                "event_kind": "todo_complete",
+                "goal_id": GOAL_ID,
+                "agent_id": AGENT_ID,
+                "run_id": TURN_ID,
+                "details": {
+                    "settlement_effect_id": identity.effect_id,
+                    "no_followup": False,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = require_settlement_terminal_closeout(runtime_root, identity)
+
+    assert result.failure is not None
+    assert result.failure.kind is SettlementFailureKind.RECEIPT_MISSING
+    assert result.failure.step_kind is SettlementStepKind.TERMINAL_CLOSEOUT
 
 
 def test_settlement_result_satisfies_left_and_right_identity() -> None:
@@ -166,14 +201,14 @@ def test_codex_app_plan_projects_one_identity_across_settlement_steps() -> None:
     assert plan["identity"]["turn_instance_id"] == "${LOOPX_TURN:?}"
     assert [step["kind"] for step in plan["ordered_steps"]] == [
         "validation",
-        "todo_completion",
         "durable_writeback",
         "quota_spend",
+        "terminal_closeout",
     ]
     for kind in (
-        SettlementStepKind.TODO_COMPLETION,
         SettlementStepKind.DURABLE_WRITEBACK,
         SettlementStepKind.QUOTA_SPEND,
+        SettlementStepKind.TERMINAL_CLOSEOUT,
     ):
         command = settlement_step_command(plan, kind)
         assert command is not None

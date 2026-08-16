@@ -208,8 +208,7 @@ If the result says `should_run=true`:
    `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate --blocks-agent <agent-id>`
    or `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_action`.
    Use `--role agent` for project-agent follow-up work.
-   For non-trivial feature slices, complete the current todo only after adding
-   a successor todo, or include a compact no-follow-up rationale.
+   {HOST_LOOP_TODO_CLOSEOUT_RULE}
    For the full field contract, see `docs/project-agent-todo-contract.md` in
    the LoopX checkout.
 8. After validation/writeback, use actual class/scale/outcome; never default or
@@ -301,7 +300,7 @@ If `should_run=true`: fetch compact; use `status --limit 3` and
 `handoff_delivery_contract`; do 1 bounded segment/batch when
 `execution_obligation.must_attempt_work=true`; if recovery, run
 ranker/cross-domain evidence recovery or blocker writeback;
-validate/writeback/todos; done->successor/rationale. Progress(actual,no upgrade):
+validate/writeback/todos; {HOST_LOOP_TODO_CLOSEOUT_RULE} Progress(actual,no upgrade):
 `{progress_refresh_state_command}`
 Spend:
 `{quota_spend_command}`
@@ -406,8 +405,8 @@ If `should_run=true`:
    private/company material, credentials, destructive git, production, or review rules.
 8. Validate; write files/validation/critic/next action to active state;
    use `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate|user_action`
-   for owner todos and `--role agent` for agent todos, not prose. Nontrivial done ->
-   successor todo or no-follow-up rationale.
+   for owner todos and `--role agent` for agent todos, not prose.
+   {HOST_LOOP_TODO_CLOSEOUT_RULE}
 9. Account actual validated class/scale/outcome; never default/upgrade. Then
    refresh and spend:
 

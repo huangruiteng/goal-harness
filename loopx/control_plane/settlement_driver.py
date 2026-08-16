@@ -248,6 +248,8 @@ def _callback_failure_kind(
 ) -> SettlementFailureKind:
     if step_kind is SettlementStepKind.DURABLE_WRITEBACK:
         return SettlementFailureKind.WRITEBACK_REJECTED
+    if step_kind is SettlementStepKind.TERMINAL_CLOSEOUT:
+        return SettlementFailureKind.TERMINAL_CLOSEOUT_REJECTED
     if "budget" in reason.casefold():
         return SettlementFailureKind.BUDGET_REJECTED
     return SettlementFailureKind.QUOTA_SPEND_REJECTED

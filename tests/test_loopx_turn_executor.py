@@ -455,6 +455,18 @@ def test_adaptive_completion_upgrades_legacy_plan_with_primary_todo_identity(
         task_validator=_passing_validator,
         writeback=lambda _result: {"ok": True, "appended": True},
         completion_writeback=completion_writeback,
+        completion_intent=lambda _result: {
+            "todo_id": "todo_fixture0001",
+            "continuation": "active_goal",
+        },
+        terminal_closeout=lambda _result: {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "no_followup",
+            },
+        },
         spend=lambda: calls.__setitem__("spend", calls["spend"] + 1)
         or {"ok": True, "appended": True},
         scheduler=lambda _spend: calls.__setitem__(
@@ -543,6 +555,18 @@ def test_validated_completion_commits_once_with_lifecycle_outcome(
         "task_validator": _passing_validator,
         "writeback": writeback,
         "completion_writeback": completion_writeback,
+        "completion_intent": lambda _result: {
+            "todo_id": "todo_fixture0001",
+            "continuation": "active_goal",
+        },
+        "terminal_closeout": lambda _result: {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "no_followup",
+            },
+        },
         "spend": spend,
         "scheduler": scheduler,
     }
@@ -587,6 +611,18 @@ def test_invalid_completion_outcome_fails_closed_without_spending(
         task_validator=_passing_validator,
         writeback=writeback,
         completion_writeback=completion_writeback,
+        completion_intent=lambda _result: {
+            "todo_id": "todo_other",
+            "continuation": "active_goal",
+        },
+        terminal_closeout=lambda _result: {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "no_followup",
+            },
+        },
         spend=lambda: calls.__setitem__("spend", calls["spend"] + 1) or {
             "ok": True,
             "appended": True,
@@ -599,7 +635,141 @@ def test_invalid_completion_outcome_fails_closed_without_spending(
     assert payload["receipt"]["result_kind"] == "writeback_failed"
     assert payload["receipt"]["failed_phase"] == "durable_writeback"
     assert payload["settlement_result"]["failure"]["kind"] == "writeback_rejected"
-    assert calls == {"completion": 1, "spend": 0, "scheduler": 0}
+    assert calls == {"completion": 0, "spend": 0, "scheduler": 0}
+
+
+def test_terminal_closeout_runs_only_after_matching_spend_receipt(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    events: list[str] = []
+
+    payload = run_loopx_turn_once(
+        plan,
+        host_runner=lambda _request: _host_result(
+            plan,
+            kind="validated_completion",
+        ),
+        project=tmp_path,
+        runtime_root=tmp_path / "runtime",
+        goal_id="fixture-goal",
+        timeout_seconds=5,
+        execute=True,
+        task_validator=_passing_validator,
+        writeback=lambda _result: events.append("writeback")
+        or {"ok": True, "appended": True},
+        completion_writeback=lambda _result: pytest.fail(
+            "terminal completion must not use the pre-spend lifecycle callback"
+        ),
+        completion_intent=lambda _result: {
+            "todo_id": "todo_fixture0001",
+            "continuation": "no_followup",
+        },
+        spend=lambda: events.append("spend")
+        or {"ok": True, "appended": True},
+        terminal_closeout=lambda _result: events.append("terminal_closeout")
+        or {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "no_followup",
+            },
+        },
+        scheduler=lambda _spend: events.append("scheduler")
+        or {"completed": True, "acknowledged": True},
+    )
+
+    assert payload["status"] == "committed"
+    assert events == ["writeback", "spend", "terminal_closeout", "scheduler"]
+    assert [
+        receipt["step_kind"]
+        for receipt in payload["settlement_result"]["receipts"]
+    ] == ["validation", "durable_writeback", "quota_spend", "terminal_closeout"]
+    assert payload["todo_completion"] == {
+        "todo_id": "todo_fixture0001",
+        "continuation": "no_followup",
+    }
+
+
+def test_terminal_closeout_lost_receipt_retries_without_repeating_effects(
+    tmp_path: Path,
+) -> None:
+    plan = _plan()
+    calls = {
+        "writeback": 0,
+        "spend": 0,
+        "terminal_attempt": 0,
+        "terminal_mutation": 0,
+        "scheduler": 0,
+    }
+    terminal_committed = False
+
+    def terminal_closeout(_result: dict[str, object]) -> dict[str, object]:
+        nonlocal terminal_committed
+        calls["terminal_attempt"] += 1
+        if not terminal_committed:
+            terminal_committed = True
+            calls["terminal_mutation"] += 1
+            return {
+                "ok": False,
+                "appended": False,
+                "reason": "terminal closeout receipt was interrupted",
+            }
+        return {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "no_followup",
+            },
+        }
+
+    common = {
+        "host_runner": lambda _request: _host_result(
+            plan,
+            kind="validated_completion",
+        ),
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "task_validator": _passing_validator,
+        "writeback": lambda _result: calls.__setitem__(
+            "writeback", calls["writeback"] + 1
+        )
+        or {"ok": True, "appended": True},
+        "completion_writeback": lambda _result: pytest.fail(
+            "terminal completion must not use the pre-spend lifecycle callback"
+        ),
+        "completion_intent": lambda _result: {
+            "todo_id": "todo_fixture0001",
+            "continuation": "no_followup",
+        },
+        "spend": lambda: calls.__setitem__("spend", calls["spend"] + 1)
+        or {"ok": True, "appended": True},
+        "terminal_closeout": terminal_closeout,
+        "scheduler": lambda _spend: calls.__setitem__(
+            "scheduler", calls["scheduler"] + 1
+        )
+        or {"completed": True, "acknowledged": True},
+    }
+
+    failed = run_loopx_turn_once(plan, **common)
+    recovered = run_loopx_turn_once(plan, retry_failed=True, **common)
+
+    assert failed["result_kind"] == "terminal_closeout_failed"
+    assert failed["receipt"]["failed_phase"] == "terminal_closeout"
+    assert failed["effects"]["quota_spent"] is True
+    assert recovered["status"] == "committed"
+    assert calls == {
+        "writeback": 1,
+        "spend": 1,
+        "terminal_attempt": 2,
+        "terminal_mutation": 1,
+        "scheduler": 1,
+    }
 
 
 def test_validated_completion_recovers_after_writeback_without_repeating_completion(
@@ -644,6 +814,18 @@ def test_validated_completion_recovers_after_writeback_without_repeating_complet
         "task_validator": _passing_validator,
         "writeback": lambda _result: {"ok": True, "appended": True},
         "completion_writeback": completion_writeback,
+        "completion_intent": lambda _result: {
+            "todo_id": "todo_fixture0001",
+            "continuation": "active_goal",
+        },
+        "terminal_closeout": lambda _result: {
+            "ok": True,
+            "appended": True,
+            "completion": {
+                "todo_id": "todo_fixture0001",
+                "continuation": "no_followup",
+            },
+        },
         "scheduler": scheduler,
     }
     with pytest.raises(SystemExit):

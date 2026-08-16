@@ -115,6 +115,44 @@ def project_durable_completion_outcome(
     dangling, when the Todo id does not match ``expected_todo_id``, or when the
     Todo is not durably done.
     """
+    return _project_durable_completion(
+        todo=todo,
+        expected_todo_id=expected_todo_id,
+        existing_todo_ids=existing_todo_ids,
+        require_done=True,
+    )
+
+
+def project_durable_completion_intent(
+    *,
+    todo: Mapping[str, Any],
+    expected_todo_id: str,
+    existing_todo_ids: Collection[str] | None = None,
+) -> dict[str, Any]:
+    """Project the declared continuation before applying lifecycle closeout.
+
+    Turn settlement uses this read-only projection to distinguish an ordinary
+    completion from the terminal ``no_followup`` effect.  It validates the same
+    continuation invariants as :func:`project_durable_completion_outcome` but
+    deliberately accepts an open Todo so terminal mutation can be deferred
+    until matching writeback and spend receipts exist.
+    """
+
+    return _project_durable_completion(
+        todo=todo,
+        expected_todo_id=expected_todo_id,
+        existing_todo_ids=existing_todo_ids,
+        require_done=False,
+    )
+
+
+def _project_durable_completion(
+    *,
+    todo: Mapping[str, Any],
+    expected_todo_id: str,
+    existing_todo_ids: Collection[str] | None,
+    require_done: bool,
+) -> dict[str, Any]:
     normalized_expected_todo_id = normalize_todo_id(expected_todo_id)
     if not normalized_expected_todo_id:
         raise ValueError("durable completion requires a public Todo id")
@@ -123,7 +161,7 @@ def project_durable_completion_outcome(
         raise ValueError(
             "durable completion todo_id does not match the selected Todo"
         )
-    if normalize_todo_status(todo.get("status")) != TODO_STATUS_DONE:
+    if require_done and normalize_todo_status(todo.get("status")) != TODO_STATUS_DONE:
         raise ValueError(
             "durable completion requires the selected Todo to be durably done"
         )

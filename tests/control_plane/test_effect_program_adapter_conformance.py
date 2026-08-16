@@ -17,13 +17,14 @@ from loopx.control_plane.effect_program import (
 from loopx.control_plane.quota.settlement import (
     build_codex_app_settlement_plan,
     require_settlement_spend,
-    require_settlement_todo_completion,
+    require_settlement_terminal_closeout,
     require_settlement_writeback,
     resolve_heartbeat_settlement_identity,
 )
 from loopx.control_plane.turn_driver.settlement import (
     TurnSettlementState,
     execute_turn_driver_settlement,
+    execute_turn_terminal_closeout,
 )
 from loopx.control_plane.turn_driver.transaction import (
     TRANSACTION_PHASES,
@@ -67,6 +68,7 @@ def _append_event(
     event_id: str,
     event_kind: str,
     effect_id: str,
+    no_followup: bool = False,
 ) -> None:
     path = rollout_event_log_path(runtime_root, GOAL_ID)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,6 +82,7 @@ def _append_event(
         "details": {
             "todo_id": TODO_ID,
             "settlement_effect_id": effect_id,
+            "no_followup": no_followup,
         },
     }
     with path.open("a", encoding="utf-8") as handle:
@@ -157,6 +160,7 @@ def _run_quota_adapter(runtime_root: Path, scenario: str) -> AdapterObservation:
         event_id="event-completion",
         event_kind="todo_complete",
         effect_id=identity.effect_id,
+        no_followup=True,
     )
     include_writeback = scenario != "writeback_failure"
     if include_writeback:
@@ -182,13 +186,13 @@ def _run_quota_adapter(runtime_root: Path, scenario: str) -> AdapterObservation:
 
     calls: list[SettlementStepKind] = []
 
-    def completion(
+    def terminal_closeout(
         resolved: SettlementIdentity,
     ) -> SettlementResult[SettlementIdentity]:
-        calls.append(SettlementStepKind.TODO_COMPLETION)
+        calls.append(SettlementStepKind.TERMINAL_CLOSEOUT)
         return _preserve_identity(
             resolved,
-            require_settlement_todo_completion(runtime_root, resolved),
+            require_settlement_terminal_closeout(runtime_root, resolved),
         )
 
     def writeback(
@@ -215,9 +219,9 @@ def _run_quota_adapter(runtime_root: Path, scenario: str) -> AdapterObservation:
             todo_id=TODO_ID,
             turn_instance_id=TURN_ID,
         )
-        .bind(completion)
         .bind(writeback)
         .bind(spend)
+        .bind(terminal_closeout)
     )
     return AdapterObservation(result, tuple(calls), plan)
 
@@ -255,7 +259,7 @@ def _run_turn_adapter(_runtime_root: Path, scenario: str) -> AdapterObservation:
             }
         return {"ok": True, "appended": True}
 
-    result: SettlementResult[TurnSettlementState] = execute_turn_driver_settlement(
+    base_result: SettlementResult[TurnSettlementState] = execute_turn_driver_settlement(
         runtime_plan,
         transaction_phases=TRANSACTION_PHASES,
         completed_phases=TRANSACTION_PHASES[:3],
@@ -265,6 +269,20 @@ def _run_turn_adapter(_runtime_root: Path, scenario: str) -> AdapterObservation:
         spend=lambda: effect(SettlementStepKind.QUOTA_SPEND),
         checkpoint=lambda _step, _payload, _phases: None,
     )
+    if base_result.failure is not None:
+        result = base_result
+    else:
+        terminal_result = execute_turn_terminal_closeout(
+            runtime_plan,
+            committed_payload=None,
+            closeout=lambda: effect(SettlementStepKind.TERMINAL_CLOSEOUT),
+            checkpoint=lambda _payload: None,
+        )
+        result = SettlementResult(
+            value=base_result.value if terminal_result.failure is None else None,
+            receipts=(*base_result.receipts, *terminal_result.receipts),
+            failure=terminal_result.failure,
+        )
     return AdapterObservation(result, tuple(calls), settlement_plan)
 
 
@@ -395,17 +413,16 @@ ADAPTERS = (
         run=_run_quota_adapter,
         success_receipts=(
             SettlementStepKind.VALIDATION,
-            SettlementStepKind.TODO_COMPLETION,
             SettlementStepKind.DURABLE_WRITEBACK,
             SettlementStepKind.QUOTA_SPEND,
+            SettlementStepKind.TERMINAL_CLOSEOUT,
         ),
         success_calls=(
-            SettlementStepKind.TODO_COMPLETION,
             SettlementStepKind.DURABLE_WRITEBACK,
             SettlementStepKind.QUOTA_SPEND,
+            SettlementStepKind.TERMINAL_CLOSEOUT,
         ),
         calls_before_writeback_failure=(
-            SettlementStepKind.TODO_COMPLETION,
             SettlementStepKind.DURABLE_WRITEBACK,
         ),
     ),
@@ -416,10 +433,12 @@ ADAPTERS = (
             SettlementStepKind.VALIDATION,
             SettlementStepKind.DURABLE_WRITEBACK,
             SettlementStepKind.QUOTA_SPEND,
+            SettlementStepKind.TERMINAL_CLOSEOUT,
         ),
         success_calls=(
             SettlementStepKind.DURABLE_WRITEBACK,
             SettlementStepKind.QUOTA_SPEND,
+            SettlementStepKind.TERMINAL_CLOSEOUT,
         ),
         calls_before_writeback_failure=(SettlementStepKind.DURABLE_WRITEBACK,),
     ),
@@ -548,16 +567,16 @@ def test_semantic_oracle_kills_effect_program_mutations(
         _assert_semantic_settlement(adapter, mutation.mutate(observation))
 
 
-def test_semantic_oracle_rejects_out_of_protocol_failure(tmp_path: Path) -> None:
+def test_semantic_oracle_rejects_failure_that_skips_receipt_prefix(tmp_path: Path) -> None:
     adapter = next(adapter for adapter in ADAPTERS if adapter.name == "turn_driver")
     observation = adapter.run(tmp_path / adapter.name, "writeback_failure")
     failure = observation.result.failure
     assert failure is not None
-    mutated_failure = replace(failure, step_kind=SettlementStepKind.TODO_COMPLETION)
+    mutated_failure = replace(failure, step_kind=SettlementStepKind.TERMINAL_CLOSEOUT)
     mutated_result = replace(observation.result, failure=mutated_failure)
     mutated = replace(observation, result=mutated_result)
 
-    with pytest.raises(AssertionError, match="outside the settlement protocol"):
+    with pytest.raises(AssertionError, match="receipt prefix crosses"):
         _assert_semantic_settlement(adapter, mutated)
 
 

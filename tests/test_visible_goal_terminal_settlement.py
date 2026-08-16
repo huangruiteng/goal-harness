@@ -12,8 +12,8 @@ def test_visible_goal_keeps_final_todo_nonterminal_until_spend() -> None:
     task_body = " ".join(payload["task_body"].split())
 
     terminal_rule = (
-        "Done -> successor todo; final -> refresh/spend before no-follow-up "
-        "completion."
+        "Done -> successor first; final -> accountable refresh, spend, then "
+        "no-follow-up completion."
     )
     refresh = "refresh the accountable progress record before spending"
     spend = "Then spend exactly once against that refresh"

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from loopx.control_plane.todos.durable_completion import (
+    project_durable_completion_intent,
     project_durable_completion_outcome,
     read_persisted_todo_record,
 )
@@ -53,6 +54,21 @@ def test_projects_declared_successor_continuation() -> None:
 def test_projects_durable_no_followup_continuation() -> None:
     outcome = project_durable_completion_outcome(
         todo={**TODO_DONE, "no_followup": True},
+        expected_todo_id="todo_fixture0001",
+    )
+    assert outcome == {
+        "todo_id": "todo_fixture0001",
+        "continuation": "no_followup",
+    }
+
+
+def test_projects_terminal_intent_without_premature_completion() -> None:
+    outcome = project_durable_completion_intent(
+        todo={
+            "todo_id": "todo_fixture0001",
+            "status": "open",
+            "no_followup": True,
+        },
         expected_todo_id="todo_fixture0001",
     )
     assert outcome == {

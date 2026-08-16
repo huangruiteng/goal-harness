@@ -9,7 +9,9 @@ from ..control_plane.todos.contract import (
     replan_successor_semantic_binding,
 )
 from ..control_plane.quota.settlement import (
-    require_settlement_todo_completion,
+    require_settlement_spend,
+    require_settlement_terminal_closeout,
+    require_settlement_writeback,
     resolve_heartbeat_settlement_identity,
     settlement_result_payload,
 )
@@ -720,6 +722,7 @@ def handle_todo_command(
         elif args.todo_command == "complete":
             validate_todo_complete_options(args)
             settlement_result = None
+            settlement_identity = None
             completion_turn_key = None
             if getattr(args, "turn_instance_id", None):
                 runtime_root = resolve_runtime_root(
@@ -737,7 +740,27 @@ def handle_todo_command(
                     raise ValueError(settlement_result.failure.reason)
                 if settlement_result.value is None:
                     raise ValueError("turn-scoped Todo completion has no identity")
-                completion_turn_key = settlement_result.value.effect_id
+                identity = settlement_result.value
+                settlement_identity = identity
+                if args.no_follow_up:
+                    settlement_result = settlement_result.bind(
+                        lambda resolved: require_settlement_writeback(
+                            runtime_root,
+                            resolved,
+                        )
+                    ).bind(
+                        lambda _writeback: require_settlement_spend(
+                            runtime_root,
+                            identity,
+                        )
+                    )
+                    if settlement_result.failure is not None:
+                        raise ValueError(
+                            "terminal no-follow-up closeout requires matching "
+                            "writeback and quota spend receipts: "
+                            + settlement_result.failure.reason
+                        )
+                completion_turn_key = identity.effect_id
             payload = complete_goal_todo(
                 registry_path=registry_path,
                 goal_id=args.goal_id,
@@ -769,8 +792,8 @@ def handle_todo_command(
                 **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )
-            if settlement_result is not None and settlement_result.value is not None:
-                payload["settlement_identity"] = settlement_result.value.as_dict()
+            if settlement_identity is not None:
+                payload["settlement_identity"] = settlement_identity.as_dict()
                 payload["settlement_result"] = settlement_result_payload(
                     settlement_result
                 )
@@ -875,22 +898,21 @@ def handle_todo_command(
             load_registry(registry_path),
             runtime_root_arg,
         )
-        guard_result = resolve_heartbeat_settlement_identity(
-            runtime_root,
-            goal_id=args.goal_id,
-            agent_id=args.agent_id,
-            todo_id=args.todo_id,
-            turn_instance_id=getattr(args, "turn_instance_id", None),
-        )
-        identity = guard_result.value
-        if identity is None:
-            settlement_result = guard_result
-        else:
-            settlement_result = guard_result.bind(
-                lambda resolved: require_settlement_todo_completion(
+        if args.no_follow_up and settlement_identity is not None:
+            assert settlement_result is not None
+            settlement_result = settlement_result.bind(
+                lambda _spend: require_settlement_terminal_closeout(
                     runtime_root,
-                    resolved,
+                    settlement_identity,
                 )
+            )
+        else:
+            settlement_result = resolve_heartbeat_settlement_identity(
+                runtime_root,
+                goal_id=args.goal_id,
+                agent_id=args.agent_id,
+                todo_id=args.todo_id,
+                turn_instance_id=getattr(args, "turn_instance_id", None),
             )
         payload["settlement_result"] = settlement_result_payload(
             settlement_result

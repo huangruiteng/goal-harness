@@ -62,10 +62,10 @@ def build_codex_app_settlement_plan(
     quoted_turn = _quoted_turn_ref(turn_instance_id_ref)
     todo_arg = f" --todo-id {shlex.quote(todo_id)}"
     turn_arg = f" --turn-instance-id {quoted_turn}"
-    completion = (
+    terminal_closeout = (
         f"loopx todo complete --goal-id {shlex.quote(goal_id)}{todo_arg}"
         f"{lifecycle_actor_args}{turn_arg} --evidence '<validated evidence>'"
-        " [--successor-todo-id <todo_id> | --no-follow-up]"
+        " --no-follow-up"
     )
     writeback = (
         f"loopx refresh-state --goal-id {shlex.quote(goal_id)} "
@@ -88,15 +88,6 @@ def build_codex_app_settlement_plan(
                 expected_receipt="validation_receipt",
             ),
             SettlementStep(
-                kind=SettlementStepKind.TODO_COMPLETION,
-                owner="agent",
-                precondition="validated result closes the selected Todo",
-                idempotency_key_ref=effect_ref,
-                expected_receipt="todo_completion_receipt",
-                command_template=completion,
-                conditional=True,
-            ),
-            SettlementStep(
                 kind=SettlementStepKind.DURABLE_WRITEBACK,
                 owner="agent",
                 precondition="validation succeeded",
@@ -111,6 +102,18 @@ def build_codex_app_settlement_plan(
                 idempotency_key_ref=effect_ref,
                 expected_receipt="quota_spend_receipt",
                 command_template=spend,
+            ),
+            SettlementStep(
+                kind=SettlementStepKind.TERMINAL_CLOSEOUT,
+                owner="agent",
+                precondition=(
+                    "the selected Todo is final with no runnable successor and "
+                    "matching writeback and quota spend receipts exist"
+                ),
+                idempotency_key_ref=effect_ref,
+                expected_receipt="terminal_closeout_receipt",
+                command_template=terminal_closeout,
+                conditional=True,
             ),
         ),
     )
