@@ -243,6 +243,30 @@ def _redacted_command_shape(command: str) -> dict[str, Any]:
     loopx_suffix = tokens[loopx_index:] if loopx_index >= 0 else []
     command_path, command_action = _command_path(loopx_suffix)
     operators = {";", "&&", "||", "|"}
+    executable = Path(tokens[0]).name if tokens else ""
+    operation_allowlist = {
+        "cat",
+        "find",
+        "git",
+        "grep",
+        "head",
+        "jq",
+        "ls",
+        "pwd",
+        "python",
+        "python3",
+        "rg",
+        "sed",
+        "stat",
+        "test",
+    }
+    python_module = (
+        tokens[2]
+        if executable in {"python", "python3"}
+        and len(tokens) > 2
+        and tokens[1] == "-m"
+        else None
+    )
     return {
         "parseable": bool(tokens),
         "token_count_bucket": min(len(tokens), 12),
@@ -253,6 +277,15 @@ def _redacted_command_shape(command: str) -> dict[str, Any]:
             if tokens and Path(tokens[0]).name in {"bash", "sh", "zsh"}
             else "workspace"
         ),
+        "workspace_operation": (
+            executable if executable in operation_allowlist else "other"
+        ),
+        "git_operation": (
+            tokens[1]
+            if executable == "git" and len(tokens) > 1
+            else None
+        ),
+        "python_module": python_module,
         "contains_loopx": loopx_index >= 0,
         "loopx_command_path": command_path if loopx_index >= 0 else None,
         "loopx_command_action": command_action if loopx_index >= 0 else None,
