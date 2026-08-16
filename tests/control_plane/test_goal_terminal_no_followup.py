@@ -363,3 +363,49 @@ def test_no_followup_does_not_hide_open_vision_acceptance() -> None:
     assert decision["goal_frontier_projection"]["acceptance_gaps"][0]["kind"] == (
         "vision_acceptance_gap"
     )
+
+
+def test_structured_terminal_settlement_ignores_stale_next_action_repair() -> None:
+    parsed = _closed_todo_sources()
+    status = quota_status_payload(
+        goal_id="goal-terminal-test",
+        status="active",
+        recommended_action="Stop; the bounded goal is complete.",
+        active_state_next_action="Inspect an obsolete frontier.",
+        user_todos=parsed["user_todos"],
+        agent_todos=parsed["agent_todos"],
+        latest_runs=[
+            {
+                "classification": "bounded_terminal_closeout",
+                "generated_at": "2026-08-13T12:00:00+08:00",
+                "agent_vision": {
+                    "schema_version": "goal_vision_replan_contract_v0",
+                    "state": "no_followup",
+                    "vision_patch": {
+                        "acceptance_summary": "The bounded goal is complete."
+                    },
+                    "path_delta": {
+                        "outcome": "stop",
+                        "evidence_refs": ["evidence:terminal-coverage"],
+                    },
+                },
+            }
+        ],
+        item_extra={
+            "state_projection_gap": {
+                "schema_version": "state_projection_gap_v0",
+                "kind": "state_projection_gap",
+                "requires_todo_expansion": True,
+                "agent_open_count": 0,
+                "user_open_count": 0,
+                "target_roles": ["agent"],
+            }
+        },
+    )
+
+    decision = build_quota_should_run(status, goal_id="goal-terminal-test")
+
+    assert decision["decision"] == "skip"
+    assert decision["effective_action"] == "terminal_no_followup"
+    assert decision["goal_frontier_projection"]["acceptance_gaps"] == []
+    assert "state_projection_gap_repair" not in decision
