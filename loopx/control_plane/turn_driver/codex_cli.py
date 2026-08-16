@@ -143,8 +143,11 @@ def _store_codex_cli_session(
     )
     temporary = Path(temporary_name)
     try:
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        handle = os.fdopen(descriptor, "w", encoding="utf-8")
+        descriptor = -1
+        with handle:
             json.dump(
                 {
                     "schema_version": CODEX_CLI_SESSION_SCHEMA_VERSION,
@@ -161,6 +164,8 @@ def _store_codex_cli_session(
         os.replace(temporary, path)
         path.chmod(0o600)
     finally:
+        if descriptor >= 0:
+            os.close(descriptor)
         temporary.unlink(missing_ok=True)
 
 
@@ -480,7 +485,10 @@ def run_codex_cli_host(
                     lineage=lineage,
                     session_id=observed_session[0],
                 )
-            raise BuiltInHostError("codex_cli_timeout")
+            raise BuiltInHostError(
+                "codex_cli_timeout",
+                recovery_kind=("resume_session" if observed_session else None),
+            )
         category = failure_categories[0] if failure_categories else "exit_nonzero"
         if returncode != 0 and category in SESSION_INVALIDATING_FAILURE_CATEGORIES:
             _discard_codex_cli_session(runtime_root, lineage=lineage)

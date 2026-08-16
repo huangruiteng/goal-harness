@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,17 @@ def _plan() -> dict[str, object]:
             "compaction": {"within_budget": True},
         },
         host="generic-cli",
+        execution_mode="isolated-headless",
+    )
+
+
+def _codex_plan() -> dict[str, object]:
+    plan = _plan()
+    envelope = plan["turn_envelope"]
+    assert isinstance(envelope, dict)
+    return build_loopx_turn_plan(
+        envelope,
+        host="codex-cli",
         execution_mode="isolated-headless",
     )
 
@@ -339,6 +351,100 @@ def test_run_once_explicitly_retries_failed_host_without_duplicate_effects(tmp_p
     assert replayed["replayed"] is True
     assert recovered["status"] == "committed"
     assert calls == {"host": 2, "writeback": 1, "spend": 1, "scheduler": 1}
+
+
+def test_run_once_resumes_session_observed_by_recoverable_failed_turn(
+    tmp_path: Path,
+) -> None:
+    plan = _codex_plan()
+    calls = {"host": 0, "writeback": 0, "spend": 0, "scheduler": 0}
+    session_actions: list[str] = []
+    writeback, spend, scheduler = _callbacks(calls)
+
+    def host(request: dict[str, object]) -> dict[str, object]:
+        calls["host"] += 1
+        session = request["session"]
+        assert isinstance(session, dict)
+        session_actions.append(str(session["action"]))
+        if calls["host"] == 1:
+            raise BuiltInHostError(
+                "codex_cli_timeout",
+                recovery_kind="resume_session",
+            )
+        return _host_result(plan)
+
+    def session_binding(
+        _turn_envelope: Mapping[str, object],
+    ) -> dict[str, object]:
+        return {
+            "schema_version": "loopx_turn_session_binding_v0",
+            "goal_id": "fixture-goal",
+            "agent_id": "codex-fixture",
+            "todo_id": "todo_fixture0001",
+        }
+
+    common = {
+        "host_runner": host,
+        "session_binding_resolver": session_binding,
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "task_validator": _passing_validator,
+        "writeback": writeback,
+        "spend": spend,
+        "scheduler": scheduler,
+    }
+
+    failed = run_loopx_turn_once(plan, **common)
+    recovered = run_loopx_turn_once(plan, retry_failed=True, **common)
+
+    assert failed["reason"] == "codex_cli_timeout"
+    assert recovered["status"] == "committed"
+    assert session_actions == ["start_new", "resume"]
+    assert calls == {"host": 2, "writeback": 1, "spend": 1, "scheduler": 1}
+
+
+def test_run_once_recoverable_failed_turn_rejects_session_identity_drift(
+    tmp_path: Path,
+) -> None:
+    plan = _codex_plan()
+    calls = {"host": 0, "writeback": 0, "spend": 0, "scheduler": 0}
+    writeback, spend, scheduler = _callbacks(calls)
+
+    def host(_request: dict[str, object]) -> dict[str, object]:
+        calls["host"] += 1
+        raise BuiltInHostError(
+            "codex_cli_timeout",
+            recovery_kind="resume_session",
+        )
+
+    common = {
+        "host_runner": host,
+        "session_binding_resolver": lambda _turn_envelope: {
+            "schema_version": "loopx_turn_session_binding_v0",
+            "goal_id": "fixture-goal",
+            "agent_id": "codex-fixture",
+            "todo_id": "todo_from_another_turn",
+        },
+        "project": tmp_path,
+        "runtime_root": tmp_path / "runtime",
+        "goal_id": "fixture-goal",
+        "timeout_seconds": 5,
+        "execute": True,
+        "task_validator": _passing_validator,
+        "writeback": writeback,
+        "spend": spend,
+        "scheduler": scheduler,
+    }
+
+    failed = run_loopx_turn_once(plan, **common)
+    with pytest.raises(ValueError, match="session binding does not match"):
+        run_loopx_turn_once(plan, retry_failed=True, **common)
+
+    assert failed["reason"] == "codex_cli_timeout"
+    assert calls == {"host": 1, "writeback": 0, "spend": 0, "scheduler": 0}
 
 
 def test_run_once_commits_once_and_replays_without_duplicate_effects(tmp_path: Path) -> None:

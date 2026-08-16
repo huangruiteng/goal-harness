@@ -193,6 +193,45 @@ def _session_plan(
     }, None
 
 
+def reconcile_failed_turn_session_request(
+    request: Mapping[str, Any],
+    *,
+    session_binding: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Re-authorize a journaled host request against one current binding."""
+
+    envelope = _mapping(request.get("turn_envelope"))
+    selected_todo = selected_turn_todo(envelope)
+    lineage = _turn_lineage(envelope, selected_todo=selected_todo)
+    session, session_error = _session_plan(
+        route=LoopXTurnRoute.READY_FOR_HOST,
+        lineage=lineage,
+        session_binding=session_binding,
+    )
+    if session_error:
+        raise ValueError(f"failed-Turn recovery {session_error}")
+    if session.get("action") != "resume":
+        raise ValueError(
+            "failed-Turn recovery requires a compatible persisted session binding"
+        )
+
+    planned_session = _mapping(request.get("session"))
+    planned_action = str(planned_session.get("action") or "")
+    if planned_action not in {"start_new", "resume"}:
+        raise ValueError(
+            "failed-Turn recovery requires a start_new or resume session action"
+        )
+    if planned_action == "resume":
+        return dict(request)
+    return {
+        **request,
+        "session": {
+            **session,
+            "binding_status": "failed_turn_recovery",
+        },
+    }
+
+
 def _child_host_operations(
     envelope: Mapping[str, Any],
     *,

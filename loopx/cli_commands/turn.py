@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from ..capabilities.explore.composition_frontier import (
     project_live_explore_composition_frontier,
@@ -744,8 +745,11 @@ def handle_turn_command(
                 }
 
             host_runner = None
+            session_binding_resolver = None
             if args.host == "codex-cli":
-                def run_built_in_host(request: dict[str, object]) -> dict[str, object]:
+                def run_built_in_host(
+                    request: Mapping[str, Any],
+                ) -> dict[str, Any]:
                     return run_codex_cli_host(
                         request,
                         runtime_root=runtime_root,
@@ -758,10 +762,18 @@ def handle_turn_command(
 
                 host_runner = run_built_in_host
 
+                def resolve_built_in_session_binding(
+                    turn_envelope: Mapping[str, Any],
+                ) -> dict[str, str] | None:
+                    return codex_cli_session_binding(runtime_root, turn_envelope)
+
+                session_binding_resolver = resolve_built_in_session_binding
+
             payload = run_loopx_turn_once(
                 payload,
                 host_argv=raw_argv,
                 host_runner=host_runner,
+                session_binding_resolver=session_binding_resolver,
                 project=project,
                 runtime_root=runtime_root,
                 goal_id=args.goal_id,

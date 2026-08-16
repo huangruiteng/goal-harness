@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ from loopx.control_plane.turn_driver import (
     run_loopx_turn_once,
 )
 from loopx.control_plane.turn_driver.codex_cli import _store_codex_cli_session
+from loopx.control_plane.turn_driver.executor import BuiltInHostError
 from loopx.control_plane.quota.live_decision import bind_scheduler_followup_cli_routes
 from loopx.todos import complete_goal_todo
 
@@ -352,6 +354,30 @@ def test_codex_session_binding_uses_adaptive_primary_todo(
         tmp_path,
         lineage=lineage,
         session_id="session-primary",
+    )
+
+    assert codex_cli_session_binding(tmp_path, envelope) == {
+        "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+        **lineage,
+    }
+
+
+def test_codex_session_store_falls_back_when_fchmod_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delattr(os, "fchmod", raising=False)
+    envelope = _envelope()
+    lineage = {
+        "goal_id": "fixture-goal",
+        "agent_id": "codex-fixture",
+        "todo_id": "todo_fixture0001",
+    }
+
+    _store_codex_cli_session(
+        tmp_path,
+        lineage=lineage,
+        session_id="session-without-fchmod",
     )
 
     assert codex_cli_session_binding(tmp_path, envelope) == {
@@ -1880,3 +1906,102 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
     assert "Run one revised public fixture check" in state
     if result_kind != "validated_progress":
         assert f"LoopX%20Turn%20{result_kind}" in state
+
+
+def test_turn_run_once_cli_resumes_session_from_recoverable_failed_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project, runtime, registry = _write_live_fixture(tmp_path)
+    session_available = False
+    session_actions: list[str] = []
+
+    def fake_session_binding(
+        _runtime_root: Path,
+        _turn_envelope: dict[str, object],
+    ) -> dict[str, str] | None:
+        if not session_available:
+            return None
+        return {
+            "schema_version": LOOPX_TURN_SESSION_BINDING_SCHEMA_VERSION,
+            "goal_id": "loopx-turn-fixture",
+            "agent_id": "codex-fixture",
+            "todo_id": "todo_fixture0001",
+        }
+
+    def fake_codex_host(
+        request: dict[str, object],
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        nonlocal session_available
+        session = request["session"]
+        assert isinstance(session, dict)
+        session_actions.append(str(session["action"]))
+        if len(session_actions) == 1:
+            session_available = True
+            raise BuiltInHostError(
+                "codex_cli_timeout",
+                recovery_kind="resume_session",
+            )
+        return {
+            "schema_version": "loopx_turn_result_v0",
+            "turn_key": request["turn_key"],
+            "result_kind": "wait",
+            "completed_phases": ["host_execute", "typed_result"],
+        }
+
+    monkeypatch.setattr(
+        "loopx.cli_commands.turn.codex_cli_session_binding",
+        fake_session_binding,
+    )
+    monkeypatch.setattr(
+        "loopx.cli_commands.turn.run_codex_cli_host",
+        fake_codex_host,
+    )
+    argv = [
+        "--registry",
+        str(registry),
+        "--runtime-root",
+        str(runtime),
+        "--format",
+        "json",
+        "turn",
+        "run-once",
+        "--goal-id",
+        "loopx-turn-fixture",
+        "--agent-id",
+        "codex-fixture",
+        "--host",
+        "codex-cli",
+        "--project",
+        str(project),
+        "--scan-root",
+        str(project),
+        "--no-global-sync",
+        "--execute",
+    ]
+
+    failed_output = io.StringIO()
+    with contextlib.redirect_stdout(failed_output):
+        failed_exit_code = cli_main(argv)
+    failed = json.loads(failed_output.getvalue())
+
+    recovered_output = io.StringIO()
+    with contextlib.redirect_stdout(recovered_output):
+        recovered_exit_code = cli_main(
+            [
+                *argv[:-1],
+                "--resume-turn-key",
+                failed["resume_turn_key"],
+                "--retry-failed-turn",
+                "--execute",
+            ]
+        )
+    recovered = json.loads(recovered_output.getvalue())
+
+    assert failed_exit_code == 1
+    assert failed["reason"] == "codex_cli_timeout"
+    assert recovered_exit_code == 0, recovered
+    assert recovered["status"] == "stopped"
+    assert recovered["quota_slot_spend_count"] == 0
+    assert session_actions == ["start_new", "resume"]
