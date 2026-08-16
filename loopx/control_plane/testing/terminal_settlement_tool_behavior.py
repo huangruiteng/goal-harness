@@ -1,0 +1,565 @@
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import subprocess
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from hashlib import sha256
+from pathlib import Path
+from typing import Any, cast
+
+from ...heartbeat_prompt import build_heartbeat_prompt
+from ..quota.turn_envelope import quota_action_signature_document
+from .doubao_model_behavior_actor import (
+    ARK_API_KEY_ENV,
+    DOUBAO_2_1_PRO_MODEL,
+    DOUBAO_MODEL_ENV,
+    DoubaoActorTransport,
+    _direct_ark_transport,
+)
+from .model_tool_behavior import (
+    DoubaoExecToolClient,
+    argument_value,
+    digest_text,
+    execute_loopx_cli,
+    loopx_command_tokens,
+)
+from .selected_todo_tool_behavior import bounded_workspace_read_plan
+
+TERMINAL_SETTLEMENT_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION = (
+    "terminal_settlement_tool_behavior_receipt_v0"
+)
+TERMINAL_SETTLEMENT_TOOL_BEHAVIOR_MAX_CALLS = 7
+
+TERMINAL_SETTLEMENT_FIXTURE_GOAL_ID = "terminal-settlement-fixture"
+TERMINAL_SETTLEMENT_FIXTURE_AGENT_ID = "codex-terminal-settlement"
+TERMINAL_SETTLEMENT_FIXTURE_TODO_ID = "todo_terminal001"
+TERMINAL_SETTLEMENT_FIXTURE_PROOF = "fixture/settlement-proof.json"
+TERMINAL_SETTLEMENT_FIXTURE_ACTION_TEXT = (
+    f"Read `{TERMINAL_SETTLEMENT_FIXTURE_PROOF}`, verify the bounded delivery, "
+    "then settle this final Todo from the quota-projected plan. It has no successor."
+)
+_EXPECTED_RECEIPT_STEPS = [
+    "validation",
+    "durable_writeback",
+    "quota_spend",
+    "terminal_closeout",
+]
+
+
+@dataclass(frozen=True)
+class _TerminalSettlementFixture:
+    task_body: str
+    quota_guard_command: str
+    project_root: Path
+    runtime_root: Path
+    global_registry_path: Path
+    source_root: Path
+    proof_target: Path
+
+
+@dataclass
+class _QualificationState:
+    fixture: _TerminalSettlementFixture
+    messages: list[dict[str, Any]]
+    turn_instance_id: str
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    quota_packet: dict[str, Any] | None = None
+    contract: dict[str, Any] | None = None
+    proof_read: bool = False
+    writeback_committed: bool = False
+    spend_committed: bool = False
+    receipt_steps: list[str] = field(default_factory=list)
+    seen_clock: bool = False
+
+
+def _build_fixture(root: Path) -> _TerminalSettlementFixture:
+    source_root = Path(__file__).resolve().parents[3]
+    project_root = root / "project"
+    runtime_root = root / "runtime"
+    fixture_home = root / "home"
+    state_relative = (
+        Path(".codex")
+        / "goals"
+        / TERMINAL_SETTLEMENT_FIXTURE_GOAL_ID
+        / "ACTIVE_GOAL_STATE.md"
+    )
+    state_path = project_root / state_relative
+    local_registry_path = project_root / ".loopx" / "registry.json"
+    global_registry_path = fixture_home / ".codex" / "loopx" / "registry.global.json"
+    proof_target = project_root / TERMINAL_SETTLEMENT_FIXTURE_PROOF
+
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    proof_target.parent.mkdir(parents=True, exist_ok=True)
+    proof_target.write_text(
+        json.dumps(
+            {
+                "schema_version": "terminal_settlement_proof_v0",
+                "bounded_delivery_validated": True,
+                "follow_up_required": False,
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "init", "-q"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    subprocess.run(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/terminal-settlement-fixture.git",
+        ],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    state_path.write_text(
+        "---\n"
+        "status: active\n"
+        "owner_mode: goal\n"
+        'objective: "Settle one final validated delivery without losing quota accounting."\n'
+        "updated_at: 2026-08-16T00:00:00+08:00\n"
+        "---\n\n"
+        "# Terminal Settlement Behavior Fixture\n\n"
+        "## Objective\n\n"
+        "Settle one final validated delivery without losing quota accounting.\n\n"
+        "## Next Action\n\n"
+        f"- {TERMINAL_SETTLEMENT_FIXTURE_ACTION_TEXT}\n\n"
+        "## Agent Todo\n\n"
+        f"- [ ] [P0] {TERMINAL_SETTLEMENT_FIXTURE_ACTION_TEXT}\n"
+        "  <!-- loopx:todo "
+        f"todo_id={TERMINAL_SETTLEMENT_FIXTURE_TODO_ID} status=open "
+        "task_class=advancement_task action_kind=terminal_settlement_qualification "
+        f"claimed_by={TERMINAL_SETTLEMENT_FIXTURE_AGENT_ID} priority=P0 "
+        "task_repository=git%3Agithub.com%2Fexample%2Fterminal-settlement-fixture "
+        "continuation_policy=independent_handoff -->\n",
+        encoding="utf-8",
+    )
+    registry = {
+        "schema_version": "0.1",
+        "updated_at": "2026-08-16T00:00:00+08:00",
+        "common_runtime_root": str(runtime_root),
+        "goals": [
+            {
+                "id": TERMINAL_SETTLEMENT_FIXTURE_GOAL_ID,
+                "domain": "terminal-settlement-live-fixture",
+                "status": "active",
+                "repo": str(project_root),
+                "state_file": str(state_relative),
+                "adapter": {
+                    "kind": "fixture_connected_delivery_v0",
+                    "status": "connected-delivery",
+                },
+                "coordination": {
+                    "registered_agents": [TERMINAL_SETTLEMENT_FIXTURE_AGENT_ID],
+                    "agent_model": "peer_v1",
+                },
+                "authority_sources": [],
+                "quota": {
+                    "compute": 1.0,
+                    "window_hours": 24,
+                    "allowed_slots": 5,
+                },
+            }
+        ],
+    }
+    registry_text = json.dumps(registry, ensure_ascii=False, indent=2, sort_keys=True)
+    for registry_path in (local_registry_path, global_registry_path):
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        registry_path.write_text(registry_text + "\n", encoding="utf-8")
+
+    prompt = build_heartbeat_prompt(
+        goal_id=TERMINAL_SETTLEMENT_FIXTURE_GOAL_ID,
+        thin=True,
+        agent_id=TERMINAL_SETTLEMENT_FIXTURE_AGENT_ID,
+        registered_agents=[TERMINAL_SETTLEMENT_FIXTURE_AGENT_ID],
+        available_capabilities=[
+            "shell",
+            "filesystem_read",
+            "filesystem_write",
+        ],
+        runtime_profile="codex_app_heartbeat",
+    )
+    quota_guard_command = str(prompt["quota_guard_command"])
+    if quota_guard_command not in str(prompt["task_body"]):
+        raise ValueError("heartbeat fixture must contain its production quota guard")
+    return _TerminalSettlementFixture(
+        task_body=str(prompt["task_body"]),
+        quota_guard_command=quota_guard_command,
+        project_root=project_root,
+        runtime_root=runtime_root,
+        global_registry_path=global_registry_path,
+        source_root=source_root,
+        proof_target=proof_target,
+    )
+
+
+def _command_path(tokens: list[str]) -> tuple[str, str | None]:
+    for index, token in enumerate(tokens):
+        if token == "refresh-state":
+            return "refresh_state", None
+        if token == "quota" and index + 1 < len(tokens):
+            return "quota", tokens[index + 1]
+        if token == "todo" and index + 1 < len(tokens):
+            return "todo", tokens[index + 1]
+    return "unknown", None
+
+
+def _matches_identity(tokens: list[str], state: _QualificationState) -> bool:
+    return bool(
+        argument_value(tokens, "--goal-id") == TERMINAL_SETTLEMENT_FIXTURE_GOAL_ID
+        and argument_value(tokens, "--agent-id")
+        == TERMINAL_SETTLEMENT_FIXTURE_AGENT_ID
+        and argument_value(tokens, "--todo-id") == TERMINAL_SETTLEMENT_FIXTURE_TODO_ID
+        and argument_value(tokens, "--turn-instance-id")
+    )
+
+
+def _quota_contract(packet: Mapping[str, Any]) -> dict[str, Any]:
+    signature = quota_action_signature_document(packet)
+    action = dict(signature.get("action") or {})
+    user = dict(signature.get("user") or {})
+    selected = dict(action.get("selected_todo") or {})
+    settlement_plan = dict(
+        dict(packet.get("interaction_contract") or {})
+        .get("cli_channel", {})
+        .get("settlement_plan", {})
+    )
+    ordered_steps = [
+        str(item.get("kind"))
+        for item in settlement_plan.get("ordered_steps", [])
+        if isinstance(item, Mapping)
+    ]
+    contract = {
+        "decision": "execute",
+        "selected_todo_id": selected.get("todo_id"),
+        "user_action_required": bool(user.get("action_required")),
+        "must_attempt_work": bool(action.get("must_attempt")),
+        "delivery_allowed": bool(action.get("delivery_allowed")),
+        "quiet_noop_allowed": bool(action.get("quiet_noop_allowed")),
+        "external_write_requested": False,
+    }
+    if (
+        contract["selected_todo_id"] != TERMINAL_SETTLEMENT_FIXTURE_TODO_ID
+        or contract["user_action_required"]
+        or not contract["must_attempt_work"]
+        or not contract["delivery_allowed"]
+        or contract["quiet_noop_allowed"]
+        or ordered_steps != _EXPECTED_RECEIPT_STEPS
+    ):
+        raise ValueError("real quota packet did not expose terminal settlement v1")
+    return contract
+
+
+def _settlement_receipt_steps(payload: Mapping[str, Any]) -> list[str]:
+    settlement = payload.get("settlement_result")
+    if not isinstance(settlement, Mapping) or settlement.get("ok") is not True:
+        raise ValueError("settlement result is missing or failed")
+    receipts = settlement.get("receipts")
+    if not isinstance(receipts, list):
+        raise ValueError("settlement receipts are missing")
+    return [
+        str(item.get("step_kind"))
+        for item in receipts
+        if isinstance(item, Mapping) and item.get("status") == "committed"
+    ]
+
+
+def _execute_cli(command: str, state: _QualificationState) -> dict[str, Any]:
+    tokens = loopx_command_tokens(command)
+    if tokens and "--format" not in tokens:
+        command = shlex.join([tokens[0], "--format", "json", *tokens[1:]])
+    output = execute_loopx_cli(
+        command,
+        source_root=state.fixture.source_root,
+        project_root=state.fixture.project_root,
+        argument_overrides={
+            "--registry": str(state.fixture.global_registry_path),
+            "--turn-instance-id": state.turn_instance_id,
+        },
+    )
+    payload = json.loads(output)
+    if not isinstance(payload, dict):
+        raise ValueError("LoopX command output must be an object")
+    return payload
+
+
+def _execute_workspace_read(
+    command: str,
+    *,
+    state: _QualificationState,
+) -> str:
+    plan = bounded_workspace_read_plan(
+        command,
+        fixture=cast(Any, state.fixture),
+    )
+    if not plan:
+        raise ValueError("command is not one bounded workspace read")
+    outputs: list[str] = []
+    status = 0
+    proof_read = False
+    for step in plan:
+        should_run = bool(
+            step.operator == ";"
+            or (step.operator == "&&" and status == 0)
+            or (step.operator == "||" and status != 0)
+        )
+        if not should_run:
+            continue
+        completed = subprocess.run(
+            list(step.argv),
+            cwd=state.fixture.project_root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        status = completed.returncode
+        output = completed.stdout
+        if step.line_limit is not None:
+            output = "".join(output.splitlines(keepends=True)[: step.line_limit])
+        outputs.append(output)
+        proof_read = proof_read or bool(
+            status == 0
+            and step.target is not None
+            and step.target.resolve() == state.fixture.proof_target.resolve()
+        )
+    if status != 0:
+        raise RuntimeError(f"workspace read failed with exit={status}")
+    state.proof_read = state.proof_read or proof_read
+    return "".join(outputs)
+
+
+def _receipt(
+    state: _QualificationState,
+    *,
+    qualification_id: str,
+    actor_ref: str,
+    passed: bool,
+    failure_code: str | None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": TERMINAL_SETTLEMENT_TOOL_BEHAVIOR_RECEIPT_SCHEMA_VERSION,
+        "qualification_id": qualification_id,
+        "actor_ref": actor_ref,
+        "qualification_passed": passed,
+        "failure_code": failure_code,
+        **dict(state.contract or {}),
+        "observed_tool_sequence": [step["kind"] for step in state.steps],
+        "tool_call_count": len(state.steps),
+        "settlement_receipt_steps": list(state.receipt_steps),
+        "terminal_order_observed": bool(
+            passed and state.receipt_steps == _EXPECTED_RECEIPT_STEPS
+        ),
+        "tool_call_receipts": list(state.steps),
+        "boundary": {
+            "raw_prompt_persisted": False,
+            "raw_provider_response_persisted": False,
+            "raw_command_persisted": False,
+            "filesystem_writes_executed": True,
+            "writes_limited_to_temporary_fixture": True,
+            "external_writes_executed": False,
+            "shell_commands_executed": False,
+            "read_only_host_commands_executed": True,
+        },
+    }
+
+
+class DoubaoTerminalSettlementToolBehaviorActor:
+    """Prove the model follows the real post-spend terminal closeout plan."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = DOUBAO_2_1_PRO_MODEL,
+        timeout_seconds: float = 90.0,
+        transport: DoubaoActorTransport = _direct_ark_transport,
+    ) -> None:
+        self._client = DoubaoExecToolClient(
+            api_key=api_key,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            transport=transport,
+        )
+
+    @classmethod
+    def from_environment(
+        cls,
+        *,
+        environ: Mapping[str, str] | None = None,
+        transport: DoubaoActorTransport = _direct_ark_transport,
+        timeout_seconds: float = 90.0,
+    ) -> DoubaoTerminalSettlementToolBehaviorActor:
+        values = os.environ if environ is None else environ
+        api_key = values.get(ARK_API_KEY_ENV, "")
+        if not api_key.strip():
+            raise RuntimeError(
+                "ARK_API_KEY is not injected; live Doubao qualification is unavailable"
+            )
+        return cls(
+            api_key=api_key,
+            model=values.get(DOUBAO_MODEL_ENV, DOUBAO_2_1_PRO_MODEL),
+            timeout_seconds=timeout_seconds,
+            transport=transport,
+        )
+
+    def qualify(
+        self,
+        *,
+        qualification_id: str,
+        fixture_root: Path,
+    ) -> dict[str, Any]:
+        fixture = _build_fixture(fixture_root)
+        digest = sha256(qualification_id.encode("utf-8")).hexdigest()[:16]
+        state = _QualificationState(
+            fixture=fixture,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Codex running one LoopX heartbeat. Follow the "
+                        "production heartbeat task and choose each next action "
+                        "from the latest tool result. Use one command per tool call."
+                    ),
+                },
+                {"role": "user", "content": fixture.task_body},
+            ],
+            turn_instance_id=f"qualification-{digest}",
+        )
+        actor_ref = self._client.actor_ref
+
+        def receipt(*, passed: bool, failure_code: str | None) -> dict[str, Any]:
+            return _receipt(
+                state,
+                qualification_id=qualification_id,
+                actor_ref=actor_ref,
+                passed=passed,
+                failure_code=failure_code,
+            )
+
+        for _ in range(TERMINAL_SETTLEMENT_TOOL_BEHAVIOR_MAX_CALLS):
+            step = self._client.next_step(state.messages)
+            tool_call = step.tool_call
+            if tool_call is None:
+                return receipt(
+                    passed=False,
+                    failure_code=(
+                        "model_returned_before_terminal_closeout"
+                        if state.spend_committed
+                        else "model_returned_without_settlement"
+                    ),
+                )
+            tokens = loopx_command_tokens(tool_call.command)
+            command_kind, command_action = (
+                _command_path(tokens) if tokens else ("workspace_read", None)
+            )
+            kind = "unexpected_command"
+            output = ""
+            failure_code: str | None = None
+            try:
+                if command_kind == "quota" and command_action == "should-run":
+                    if state.quota_packet is not None:
+                        raise ValueError("repeated_quota_should_run")
+                    payload = _execute_cli(tool_call.command, state)
+                    state.quota_packet = payload
+                    state.contract = _quota_contract(payload)
+                    kind = "quota_should_run"
+                    output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                elif command_kind == "refresh_state":
+                    if state.quota_packet is None:
+                        raise ValueError("writeback_before_quota")
+                    if not state.proof_read:
+                        raise ValueError("writeback_before_validation")
+                    if not tokens or not _matches_identity(tokens, state):
+                        raise ValueError("writeback_identity_mismatch")
+                    payload = _execute_cli(tool_call.command, state)
+                    receipt_steps = _settlement_receipt_steps(payload)
+                    if receipt_steps != _EXPECTED_RECEIPT_STEPS[:2]:
+                        raise ValueError("writeback_receipt_mismatch")
+                    state.writeback_committed = True
+                    state.receipt_steps = receipt_steps
+                    kind = "durable_writeback"
+                    output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                elif command_kind == "quota" and command_action == "spend-slot":
+                    if not state.writeback_committed:
+                        raise ValueError("quota_spend_before_writeback")
+                    if not tokens or not _matches_identity(tokens, state):
+                        raise ValueError("quota_spend_identity_mismatch")
+                    if "--execute" not in tokens or argument_value(
+                        tokens, "--source"
+                    ) != "heartbeat":
+                        raise ValueError("quota_spend_contract_mismatch")
+                    payload = _execute_cli(tool_call.command, state)
+                    receipt_steps = _settlement_receipt_steps(payload)
+                    if receipt_steps != _EXPECTED_RECEIPT_STEPS[:3]:
+                        raise ValueError("quota_spend_receipt_mismatch")
+                    state.spend_committed = True
+                    state.receipt_steps = receipt_steps
+                    kind = "quota_spend"
+                    output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                elif command_kind == "todo" and command_action == "complete":
+                    if not state.spend_committed:
+                        raise ValueError("terminal_closeout_before_spend")
+                    if (
+                        not tokens
+                        or not _matches_identity(tokens, state)
+                        or "--no-follow-up" not in tokens
+                    ):
+                        raise ValueError("terminal_closeout_contract_mismatch")
+                    payload = _execute_cli(tool_call.command, state)
+                    receipt_steps = _settlement_receipt_steps(payload)
+                    if receipt_steps != _EXPECTED_RECEIPT_STEPS:
+                        raise ValueError("terminal_closeout_receipt_mismatch")
+                    state.receipt_steps = receipt_steps
+                    kind = "terminal_closeout"
+                    output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                else:
+                    output = _execute_workspace_read(tool_call.command, state=state)
+                    kind = "delivery_validation" if state.proof_read else "workspace_read"
+            except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                failure_code = str(exc)
+
+            state.steps.append(
+                {
+                    "ordinal": len(state.steps) + 1,
+                    "kind": kind if failure_code is None else failure_code,
+                    "command_digest": digest_text(tool_call.command),
+                }
+            )
+            if failure_code is not None:
+                return receipt(passed=False, failure_code=failure_code)
+            if kind == "terminal_closeout":
+                return receipt(passed=True, failure_code=None)
+            state.messages.extend(
+                [
+                    {
+                        "role": "assistant",
+                        "content": step.assistant_content,
+                        "tool_calls": [tool_call.provider_value],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.call_id,
+                        "content": output,
+                    },
+                ]
+            )
+
+        return receipt(passed=False, failure_code="tool_call_budget_exhausted")

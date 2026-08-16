@@ -524,8 +524,13 @@ def execute_loopx_cli(
     )
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
+        bounded_detail = (
+            detail
+            if len(detail) <= 1_000
+            else detail[:500] + "\n...\n" + detail[-500:]
+        )
         raise RuntimeError(
             "LoopX CLI command failed with "
-            f"exit={completed.returncode}: {detail[-500:]}"
+            f"exit={completed.returncode}: {bounded_detail}"
         )
     return completed.stdout

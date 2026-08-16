@@ -65,6 +65,12 @@ from loopx.control_plane.testing.selected_todo_tool_behavior import (
 from loopx.control_plane.testing.selected_todo_tool_behavior import (
     _build_fixture as _build_selected_fixture,
 )
+from loopx.control_plane.testing.terminal_settlement_tool_behavior import (
+    DoubaoTerminalSettlementToolBehaviorActor,
+)
+from loopx.control_plane.testing.terminal_settlement_tool_behavior import (
+    _build_fixture as _build_terminal_settlement_fixture,
+)
 
 
 def _scenario_inputs(
@@ -219,6 +225,22 @@ def _capability_monitor_repair_actor(_: str) -> dict[str, Any]:
     )
 
 
+def _terminal_settlement_actor(_: str) -> dict[str, Any]:
+    return _passing_tool_receipt(
+        "terminal_settlement_tool_behavior_receipt_v0",
+        selected_todo_id="todo_terminal001",
+        user_action_required=False,
+        delivery_allowed=True,
+        terminal_order_observed=True,
+        settlement_receipt_steps=[
+            "validation",
+            "durable_writeback",
+            "quota_spend",
+            "terminal_closeout",
+        ],
+    )
+
+
 def run_actual_default_model_behavior_portfolio(
     *args: Any,
     **kwargs: Any,
@@ -230,6 +252,10 @@ def run_actual_default_model_behavior_portfolio(
     kwargs.setdefault(
         "capability_monitor_repair_actor",
         _capability_monitor_repair_actor,
+    )
+    kwargs.setdefault(
+        "terminal_settlement_actor",
+        _terminal_settlement_actor,
     )
     return _run_actual_default_model_behavior_portfolio(*args, **kwargs)
 
@@ -306,6 +332,52 @@ def _capability_reentry_action(
     payload = _latest_tool_payload(request)
     reentry = payload["runtime_capability_reentry"]
     return ScriptedExecToolAction(str(reentry["candidates"][0]["command"]))
+
+
+def _terminal_writeback_action(
+    request: Mapping[str, Any],
+) -> ScriptedExecToolAction:
+    payload = _latest_tool_payload(request)
+    command = payload["interaction_contract"]["cli_channel"]["next_cli_actions"][0]
+    return ScriptedExecToolAction(
+        command=(
+            command.replace("<validated_progress>", "terminal_settlement_validated")
+            .replace("<scale>", "single_surface")
+            .replace("<outcome>", "outcome_progress")
+            .replace('"${LOOPX_TURN:?}"', "turn-portfolio-terminal")
+        )
+    )
+
+
+def _terminal_spend_action(request: Mapping[str, Any]) -> ScriptedExecToolAction:
+    payload = _latest_tool_payload(request)
+    command = payload["interaction_contract"]["cli_channel"]["next_cli_actions"][1]
+    return ScriptedExecToolAction(
+        command=command.replace(
+            '"${LOOPX_TURN:?}"',
+            "turn-portfolio-terminal",
+        )
+    )
+
+
+def _terminal_closeout_action(
+    request: Mapping[str, Any],
+) -> ScriptedExecToolAction:
+    payload = _latest_tool_payload(request)
+    steps = payload["interaction_contract"]["cli_channel"]["settlement_plan"][
+        "ordered_steps"
+    ]
+    command = next(
+        item["command_template"]
+        for item in steps
+        if item["kind"] == "terminal_closeout"
+    )
+    return ScriptedExecToolAction(
+        command=command.replace(
+            '"${LOOPX_TURN:?}"',
+            "turn-portfolio-terminal",
+        ).replace("'<validated evidence>'", "'fixture-settlement-proof'")
+    )
 
 
 def _scoped_gate_final_action(
@@ -395,11 +467,32 @@ def _real_tool_actors(root: Path) -> dict[str, Any]:
             fixture_root=fixture_root / "actor",
         )
 
+    def terminal_settlement_actor(run_id: str) -> Mapping[str, Any]:
+        fixture_root = run_root("terminal-settlement", run_id)
+        fixture = _build_terminal_settlement_fixture(fixture_root / "oracle")
+        transport = ScriptedDoubaoExecTransport(
+            [
+                ScriptedExecToolAction(fixture.quota_guard_command),
+                ScriptedExecToolAction("cat fixture/settlement-proof.json"),
+                _terminal_writeback_action,
+                _terminal_spend_action,
+                _terminal_closeout_action,
+            ]
+        )
+        return DoubaoTerminalSettlementToolBehaviorActor(
+            api_key="test-only-placeholder",
+            transport=transport,
+        ).qualify(
+            qualification_id=run_id,
+            fixture_root=fixture_root / "actor",
+        )
+
     return {
         "selected_todo_actor": selected_todo_actor,
         "replan_semantic_action_actor": replan_semantic_action_actor,
         "scoped_gate_successor_actor": scoped_gate_successor_actor,
         "capability_monitor_repair_actor": capability_monitor_repair_actor,
+        "terminal_settlement_actor": terminal_settlement_actor,
     }
 
 
@@ -733,10 +826,11 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
         "replan_tool",
         "scoped_gate_tool",
         "capability_repair_tool",
+        "terminal_settlement_tool",
     }
 
     assert catalog["topology"] == "actual_default_one_arm"
-    assert len(catalog["scenarios"]) == 15
+    assert len(catalog["scenarios"]) == 16
     assert all(
         scenario["packet_view"]
         == (
@@ -759,6 +853,7 @@ def test_catalog_declares_independent_bounded_repeat_policy() -> None:
         "turn_required_vision_replan",
         "turn_scoped_gate_successor_replan",
         "turn_capability_monitor_repair",
+        "turn_terminal_settlement",
     }
     assert {
         contrast["contrast_id"] for contrast in catalog["contrasts"]
@@ -912,10 +1007,10 @@ def test_portfolio_turn_actor_reads_actual_default_packet_without_semantic_echo(
     )
 
     assert result["qualification_passed"] is True
-    assert result["scenario_count"] == 15
+    assert result["scenario_count"] == 16
     assert result["contrast_count"] == 4
-    assert result["actor_call_budget"] == 30
-    assert result["actor_call_count"] == 30
+    assert result["actor_call_budget"] == 32
+    assert result["actor_call_count"] == 32
     assert result["failure_count"] == 0
     assert result["skip_count"] == 0
     assert result["contrast_failure_count"] == 0
@@ -946,7 +1041,7 @@ def test_portfolio_real_tool_scenarios_choose_from_latest_quota_result(
     assert result["qualification_passed"] is True
     boundary = result["boundary"]
     assert boundary["tools_enabled"] is True
-    assert boundary["tool_enabled_scenario_count"] == 4
+    assert boundary["tool_enabled_scenario_count"] == 5
     assert boundary["packet_interpretation_scenario_count"] == 11
     assert boundary["automatic_retries"] is False
     assert boundary["raw_model_responses_persisted"] is False
@@ -956,6 +1051,7 @@ def test_portfolio_real_tool_scenarios_choose_from_latest_quota_result(
         "turn_required_vision_replan",
         "turn_scoped_gate_successor_replan",
         "turn_capability_monitor_repair",
+        "turn_terminal_settlement",
     }
     for scenario in result["scenarios"]:
         if scenario["scenario_id"] in tool_scenarios:

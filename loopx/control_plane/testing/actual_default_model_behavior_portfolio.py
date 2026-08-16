@@ -57,6 +57,7 @@ _TOOL_ACTOR_KINDS = frozenset(
         "replan_tool",
         "scoped_gate_tool",
         "capability_repair_tool",
+        "terminal_settlement_tool",
     }
 )
 _TURN_ACTOR_KINDS = frozenset({"turn", *_TOOL_ACTOR_KINDS})
@@ -106,6 +107,14 @@ _SCENARIOS = (
         "turn_tool",
         None,
         "execute",
+    ),
+    _ScenarioSpec(
+        "turn_terminal_settlement",
+        "terminal_settlement_tool",
+        None,
+        "execute",
+        "effect_program_settlement",
+        ("writeback", "quota_spend", "terminal_closeout", "receipt_identity"),
     ),
     _ScenarioSpec(
         "turn_peer_agent_identity",
@@ -473,6 +482,29 @@ def _selected_todo_scenario_source() -> dict[str, Any]:
     return payload
 
 
+def _terminal_settlement_scenario_source() -> dict[str, Any]:
+    payload = _turn_scenario_source(human_gate=False)
+    payload["selected_todo"] = {
+        **dict(payload["selected_todo"]),
+        "todo_id": "todo_terminal001",
+        "text": (
+            "Read `fixture/settlement-proof.json`, verify the bounded delivery, "
+            "then settle this final Todo from the quota-projected plan. "
+            "It has no successor."
+        ),
+    }
+    payload["recommended_action"] = payload["selected_todo"]["text"]
+    payload["interaction_contract"] = build_interaction_contract(
+        payload,
+        available_capabilities=[
+            "shell",
+            "filesystem_read",
+            "filesystem_write",
+        ],
+    )
+    return payload
+
+
 def build_quota_hot_path_compaction_regression_source() -> dict[str, Any]:
     """Build a coherent over-budget turn whose cold diagnostics are removable."""
 
@@ -618,6 +650,7 @@ def _build_actual_default_model_behavior_scenario_sources(
     packets.update(
         {
             "turn_selected_todo": _selected_todo_scenario_source(),
+            "turn_terminal_settlement": _terminal_settlement_scenario_source(),
             "turn_peer_agent_identity": _turn_scenario_source(
                 human_gate=False,
                 agent_id="codex-portfolio-reviewer",
@@ -866,6 +899,14 @@ def _scenario_contract(
         raise ValueError(
             "selected-todo source must match the real-action fixture contract"
         )
+    if spec.scenario_id == "turn_terminal_settlement" and (
+        contract.get("selected_todo_id") != "todo_terminal001"
+        or "settlement-proof.json"
+        not in str(dict(source_packet.get("selected_todo") or {}).get("text") or "")
+    ):
+        raise ValueError(
+            "terminal-settlement source must select the final settlement fixture"
+        )
     if spec.scenario_id in {
         "turn_peer_agent_identity",
         "turn_same_agent_continuation",
@@ -1054,6 +1095,7 @@ def _scenario_result(
     replan_semantic_action_actor: Callable[[str], Mapping[str, Any]],
     scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
     capability_monitor_repair_actor: Callable[[str], Mapping[str, Any]],
+    terminal_settlement_actor: Callable[[str], Mapping[str, Any]],
 ) -> tuple[dict[str, Any], bool, list[dict[str, Any]]]:
     receipt_digests: list[str] = []
     observed_routes: list[str] = []
@@ -1065,6 +1107,13 @@ def _scenario_result(
         try:
             if spec.actor_kind == "turn_tool":
                 receipt = dict(selected_todo_actor(run_id))
+                if receipt.get("qualification_passed") is not True:
+                    failure_codes.append(
+                        str(receipt.get("failure_code") or "tool_behavior_failed")
+                    )
+                observed_route = str(receipt.get("decision") or "")
+            elif spec.actor_kind == "terminal_settlement_tool":
+                receipt = dict(terminal_settlement_actor(run_id))
                 if receipt.get("qualification_passed") is not True:
                     failure_codes.append(
                         str(receipt.get("failure_code") or "tool_behavior_failed")
@@ -1201,6 +1250,7 @@ def run_actual_default_model_behavior_portfolio(
     replan_semantic_action_actor: Callable[[str], Mapping[str, Any]],
     scoped_gate_successor_actor: Callable[[str], Mapping[str, Any]],
     capability_monitor_repair_actor: Callable[[str], Mapping[str, Any]],
+    terminal_settlement_actor: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Run the fixed low-frequency one-arm portfolio with bounded receipts."""
     expected_ids = {spec.scenario_id for spec in _SCENARIOS}
@@ -1262,6 +1312,7 @@ def run_actual_default_model_behavior_portfolio(
             replan_semantic_action_actor=replan_semantic_action_actor,
             scoped_gate_successor_actor=scoped_gate_successor_actor,
             capability_monitor_repair_actor=capability_monitor_repair_actor,
+            terminal_settlement_actor=terminal_settlement_actor,
         )
         actor_call_count += int(result["repeats_completed"])
         if actor_error:

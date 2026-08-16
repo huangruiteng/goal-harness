@@ -14,28 +14,31 @@ if sys.path[0] != repo_root_text:
     sys.path.insert(0, repo_root_text)
 
 # The candidate checkout must win over any installed LoopX package.
-from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (
+from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (  # noqa: E402
     build_actual_default_model_behavior_scenario_inputs,
     run_actual_default_model_behavior_portfolio,
 )
-from loopx.control_plane.testing.capability_monitor_repair_tool_behavior import (
+from loopx.control_plane.testing.capability_monitor_repair_tool_behavior import (  # noqa: E402
     DoubaoCapabilityMonitorRepairToolBehaviorActor,
 )
-from loopx.control_plane.testing.doubao_model_behavior_actor import (
+from loopx.control_plane.testing.doubao_model_behavior_actor import (  # noqa: E402
     DoubaoModelBehaviorActor,
     DoubaoOnboardingModelBehaviorActor,
 )
-from loopx.control_plane.testing.release_commit_qualification import (
+from loopx.control_plane.testing.release_commit_qualification import (  # noqa: E402
     collect_release_source_identity,
 )
-from loopx.control_plane.testing.replan_semantic_action_behavior import (
+from loopx.control_plane.testing.replan_semantic_action_behavior import (  # noqa: E402
     DoubaoReplanSemanticActionBehaviorActor,
 )
-from loopx.control_plane.testing.scoped_gate_successor_tool_behavior import (
+from loopx.control_plane.testing.scoped_gate_successor_tool_behavior import (  # noqa: E402
     DoubaoScopedGateSuccessorToolBehaviorActor,
 )
-from loopx.control_plane.testing.selected_todo_tool_behavior import (
+from loopx.control_plane.testing.selected_todo_tool_behavior import (  # noqa: E402
     DoubaoSelectedTodoToolBehaviorActor,
+)
+from loopx.control_plane.testing.terminal_settlement_tool_behavior import (  # noqa: E402
+    DoubaoTerminalSettlementToolBehaviorActor,
 )
 
 
@@ -81,6 +84,11 @@ def main() -> int:
             timeout_seconds=args.timeout_seconds
         )
     )
+    terminal_settlement_actor = (
+        DoubaoTerminalSettlementToolBehaviorActor.from_environment(
+            timeout_seconds=args.timeout_seconds
+        )
+    )
     with TemporaryDirectory(prefix="loopx-doubao-live-") as temp_dir:
         temp_root = Path(temp_dir)
 
@@ -112,6 +120,13 @@ def main() -> int:
                 fixture_root=temp_root / "capability-monitor-repair" / run_digest,
             )
 
+        def qualify_terminal_settlement(run_id: str) -> dict[str, object]:
+            run_digest = sha256(run_id.encode("utf-8")).hexdigest()[:16]
+            return terminal_settlement_actor.qualify(
+                qualification_id=run_id,
+                fixture_root=temp_root / "terminal-settlement" / run_digest,
+            )
+
         sources, packets = build_actual_default_model_behavior_scenario_inputs(
             temp_root / "portfolio"
         )
@@ -125,6 +140,7 @@ def main() -> int:
             replan_semantic_action_actor=qualify_replan_semantic_action,
             scoped_gate_successor_actor=qualify_scoped_gate_successor,
             capability_monitor_repair_actor=qualify_capability_monitor_repair,
+            terminal_settlement_actor=qualify_terminal_settlement,
         )
     result["source"] = source
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
