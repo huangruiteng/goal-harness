@@ -57,8 +57,6 @@
     "totals": {
       "events_24h": 20,
       "events_7d": 20,
-      "benchmark_runs_24h": 0,
-      "benchmark_runs_7d": 0,
       "by_class_24h": {
         "accounting": 11,
         "decision": 0,
@@ -79,8 +77,6 @@
         "goal_id": "loopx-meta",
         "events_24h": 20,
         "events_7d": 20,
-        "benchmark_runs_24h": 0,
-        "benchmark_runs_7d": 0,
         "by_class_24h": {
           "accounting": 11,
           "decision": 0,
@@ -96,8 +92,7 @@
           "work": 9
         },
         "latest_event_class": "accounting",
-        "latest_event_at": "2026-07-06T14:37:32+08:00",
-        "latest_benchmark_run": null
+        "latest_event_at": "2026-07-06T14:37:32+08:00"
       }
     ]
   },
@@ -293,7 +288,7 @@
         "task_class": "advancement_task",
         "action_kind": "skillsbench_goal_start_remote_rerun",
         "claimed_by": "codex-main-control",
-        "evidence": "PR #894 merged db7a5c6b; validation: py_compile, examples/skillsbench-benchmark-run-smoke.py, examples/skillsbench-host-local-launch-plan-smoke.py; main synced clean. Next: rerun a setup-stable SkillsBench bad/uncertain…",
+        "evidence": "A prior benchmark adapter change was validated before the legacy surface was archived. Current research uses the RFC-linked benchmark workspace and toolkit boundary smokes.",
         "note": "2026-06-29: fixed host-local ACP idle/no-output root cause in PR #894. ACP protocol tool_call_count=0 is now distinguished from reverse-channel task-facing bridge activity; repeated codex_exec_bridge_idle_timeout withou…",
         "updated_at": "2026-06-29T19:40:32+08:00"
       },
@@ -796,7 +791,7 @@
               "task_class": "advancement_task",
               "action_kind": "skillsbench_goal_start_remote_rerun",
               "claimed_by": "codex-main-control",
-              "evidence": "PR #894 merged db7a5c6b; validation: py_compile, examples/skillsbench-benchmark-run-smoke.py, examples/skillsbench-host-local-launch-plan-smoke.py; main synced clean. Next: rerun a setup-stable SkillsBench bad/uncertain…",
+              "evidence": "A prior benchmark adapter change was validated before the legacy surface was archived. Current research uses the RFC-linked benchmark workspace and toolkit boundary smokes.",
               "note": "2026-06-29: fixed host-local ACP idle/no-output root cause in PR #894. ACP protocol tool_call_count=0 is now distinguished from reverse-channel task-facing bridge activity; repeated codex_exec_bridge_idle_timeout withou…",
               "updated_at": "2026-06-29T19:40:32+08:00"
             },

@@ -36,12 +36,6 @@ class StatusRuntimeSummaryContext:
     compact_run: StatusCallback
     quota_status: StatusCallback
     parse_timestamp: StatusCallback
-    compact_benchmark_run: StatusCallback
-    compact_benchmark_result: StatusCallback
-    compact_benchmark_comparison: StatusCallback
-    compact_benchmark_learning_ledger: StatusCallback
-    compact_benchmark_experiment_report: StatusCallback
-    compact_active_user_assisted_pilot: StatusCallback
     run_has_external_evidence_watch_signal: StatusCallback
     decision_classifications: set[str]
     evidence_classifications: set[str]
@@ -66,12 +60,6 @@ def event_ledger_event_class(
 ) -> str:
     return _event_ledger_event_class_read_model(
         run,
-        compact_benchmark_run=context.compact_benchmark_run,
-        compact_benchmark_result=context.compact_benchmark_result,
-        compact_benchmark_comparison=context.compact_benchmark_comparison,
-        compact_benchmark_learning_ledger=context.compact_benchmark_learning_ledger,
-        compact_benchmark_experiment_report=context.compact_benchmark_experiment_report,
-        compact_active_user_assisted_pilot=context.compact_active_user_assisted_pilot,
         run_has_external_evidence_watch_signal=context.run_has_external_evidence_watch_signal,
         decision_classifications=context.decision_classifications,
         evidence_classifications=context.evidence_classifications,
@@ -122,7 +110,6 @@ def build_status_runtime_summaries(
             history,
             parse_timestamp=context.parse_timestamp,
             event_class_for_run=event_class_for_run,
-            compact_benchmark_run=context.compact_benchmark_run,
         ),
         "promotion_readiness_summary": build_promotion_readiness_summary(
             history,

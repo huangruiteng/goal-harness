@@ -483,7 +483,7 @@ def _combined_user_frontier_guard(*, user_task_class: str) -> dict:
         status="deferred",
         title="Run the release outcome baseline.",
         task_class="advancement_task",
-        action_kind="release_outcome_baseline_qualification",
+        action_kind="release_evidence_qualification",
         claimed_by=AGENT_ID,
         required_capabilities=["benchmark_runner"],
         resume_when="capacity_available:benchmark_runner",

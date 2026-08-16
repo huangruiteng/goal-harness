@@ -66,7 +66,7 @@ def assert_profiles_come_from_catalog_matrix() -> None:
         "frontstage-rollout",
         "auto-research-demo",
         "catalog-canary-contract",
-        "benchmark-adapter-readiness",
+        "benchmark-toolkit-boundary",
     } <= domain_profile_ids, payload
     domain_profiles = {profile["id"]: profile for profile in payload["domain_profiles"]}
     state_write_commands = [
@@ -778,18 +778,18 @@ def assert_pr_release_and_refactor_profiles_select() -> None:
 
 def assert_explicit_profile_can_include_deep_checks() -> None:
     payload = build_catalog_canary_plan(
-        profiles=["benchmark-adapter-readiness"],
+        profiles=["benchmark-toolkit-boundary"],
         include_deep_checks=True,
         max_checks_per_profile=4,
     )
     assert payload["profile_count"] == 0, payload
     assert payload["domain_profile_count"] == 1, payload
     profile = payload["domain_profiles"][0]
-    assert profile["id"] == "benchmark-adapter-readiness", profile
+    assert profile["id"] == "benchmark-toolkit-boundary", profile
     assert profile["deep_checks_included"] is True, profile
     commands = payload["commands"]
     assert (
-        "python3 examples/terminal-bench-adapter-readiness-characterization-smoke.py"
+        "python3 examples/benchmark-run-permission-policy-smoke.py"
         in commands
     ), payload
     assert any(check["tier"] == "deep" for check in profile["checks"]), profile
@@ -797,18 +797,18 @@ def assert_explicit_profile_can_include_deep_checks() -> None:
     assert "owner-review necessity/risk packet" in payload["note"], payload
 
 
-def assert_terminal_bench_adapter_changes_select_readiness_smoke() -> None:
+def assert_benchmark_toolkit_changes_select_boundary_smoke() -> None:
     payload = build_catalog_canary_plan(
-        changed_files=["loopx/benchmark_adapters/terminal_bench.py"],
-        surfaces=["terminal-bench adapter preflight no-submit cli bridge"],
+        changed_files=["loopx/capabilities/benchmark_toolkit/integrity.py"],
+        surfaces=["benchmark toolkit integrity no-submit boundary"],
         max_checks_per_profile=3,
     )
     profiles = {profile["id"]: profile for profile in payload["domain_profiles"]}
-    assert "benchmark-adapter-readiness" in profiles, payload
-    profile = profiles["benchmark-adapter-readiness"]
+    assert "benchmark-toolkit-boundary" in profiles, payload
+    profile = profiles["benchmark-toolkit-boundary"]
     commands = [check["command"] for check in profile["checks"]]
     assert (
-        "python3 examples/terminal-bench-adapter-readiness-characterization-smoke.py"
+        "python3 examples/benchmark-run-permission-policy-smoke.py"
         in commands
     ), profile
     assert all(check["tier"] == "default" for check in profile["checks"]), profile
@@ -843,7 +843,7 @@ def assert_catalog_canary_selects_own_profile_not_benchmark() -> None:
     )
     domain_profiles = {profile["id"]: profile for profile in payload["domain_profiles"]}
     assert "catalog-canary-contract" in domain_profiles, payload
-    assert "benchmark-adapter-readiness" not in domain_profiles, payload
+    assert "benchmark-toolkit-boundary" not in domain_profiles, payload
     commands = payload["commands"]
     assert "python3 examples/canary/catalog-planner-smoke.py" in commands, payload
     assert "python3 examples/canary/catalog-run-e2e-smoke.py" in commands, payload
@@ -973,7 +973,7 @@ def assert_git_diff_selector_covers_pr_and_worktree_changes(tmp_dir: Path) -> No
     assert payload["selection_inputs"]["changed_files"] == selector["changed_files"], payload
     domain_profile_ids = {profile["id"] for profile in payload["domain_profiles"]}
     assert "catalog-canary-contract" in domain_profile_ids, payload
-    assert "benchmark-adapter-readiness" not in domain_profile_ids, payload
+    assert "benchmark-toolkit-boundary" not in domain_profile_ids, payload
     assert "python3 examples/canary/catalog-planner-smoke.py" in payload["commands"], payload
 
 
@@ -1111,7 +1111,7 @@ def main() -> int:
     assert_scheduler_ack_route_profile_keeps_independent_checks()
     assert_pr_release_and_refactor_profiles_select()
     assert_explicit_profile_can_include_deep_checks()
-    assert_terminal_bench_adapter_changes_select_readiness_smoke()
+    assert_benchmark_toolkit_changes_select_boundary_smoke()
     assert_explicit_catalog_profile_id_selects_family_profile()
     assert_catalog_canary_selects_own_profile_not_benchmark()
     assert_catalog_canary_deep_profile_includes_pytest_facade()

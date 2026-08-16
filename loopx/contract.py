@@ -254,7 +254,6 @@ def _index_duplicate_summary(index_path: Path) -> dict[str, Any]:
         return {
             "duplicate_rows": 0,
             "reward_overlay_rows": 0,
-            "structured_artifact_bundle_rows": 0,
             "unexpected_duplicate_rows": 0,
             "repairable_duplicate_rows": 0,
             "artifact_identity_collision_rows": 0,
@@ -274,7 +273,6 @@ def _index_duplicate_summary(index_path: Path) -> dict[str, Any]:
             groups.setdefault(index_identity(item), []).append(item)
 
     reward_overlay_rows = 0
-    structured_artifact_bundle_rows = 0
     unexpected_duplicate_rows = 0
     repairable_duplicate_rows = 0
     artifact_identity_collision_rows = 0
@@ -287,8 +285,6 @@ def _index_duplicate_summary(index_path: Path) -> dict[str, Any]:
         duplicate_kind = duplicate_classification.get("duplicate_kind")
         if duplicate_kind == "reward_overlay":
             reward_overlay_rows += duplicate_rows
-        elif duplicate_kind == "structured_artifact_bundle":
-            structured_artifact_bundle_rows += duplicate_rows
         elif duplicate_classification.get("repairable"):
             unexpected_duplicate_rows += duplicate_rows
             repairable_duplicate_rows += duplicate_rows
@@ -298,9 +294,8 @@ def _index_duplicate_summary(index_path: Path) -> dict[str, Any]:
             artifact_identity_collision_groups += 1
 
     return {
-        "duplicate_rows": reward_overlay_rows + structured_artifact_bundle_rows + unexpected_duplicate_rows,
+        "duplicate_rows": reward_overlay_rows + unexpected_duplicate_rows,
         "reward_overlay_rows": reward_overlay_rows,
-        "structured_artifact_bundle_rows": structured_artifact_bundle_rows,
         "unexpected_duplicate_rows": unexpected_duplicate_rows,
         "repairable_duplicate_rows": repairable_duplicate_rows,
         "artifact_identity_collision_rows": artifact_identity_collision_rows,
@@ -322,7 +317,6 @@ def _index_duplicate_warning(
     artifact_collision_rows = int(duplicate_summary.get("artifact_identity_collision_rows") or 0)
     artifact_collision_groups = int(duplicate_summary.get("artifact_identity_collision_groups") or 0)
     reward_overlay_rows = int(duplicate_summary.get("reward_overlay_rows") or 0)
-    structured_artifact_bundle_rows = int(duplicate_summary.get("structured_artifact_bundle_rows") or 0)
     if unexpected_rows:
         detail_parts.append(f"unexpected={unexpected_rows}")
     if repairable_rows:
@@ -333,8 +327,6 @@ def _index_duplicate_warning(
         detail_parts.append(f"artifact_collision_rows={artifact_collision_rows}")
     if reward_overlay_rows:
         detail_parts.append(f"reward_overlays={reward_overlay_rows}")
-    if structured_artifact_bundle_rows:
-        detail_parts.append(f"structured_artifact_bundles={structured_artifact_bundle_rows}")
     if not detail_parts and raw > unique:
         detail_parts.append(f"duplicates={raw - unique}")
     detail = f" {' '.join(detail_parts)}" if detail_parts else ""
@@ -920,12 +912,6 @@ def check_contract(
                     checks.append(
                         f"{item.get('id')}: reward overlay rows raw={raw} unique={unique} "
                         f"overlays={duplicate_summary.get('reward_overlay_rows')}"
-                    )
-                if duplicate_summary.get("structured_artifact_bundle_rows"):
-                    emitted_check = True
-                    checks.append(
-                        f"{item.get('id')}: structured artifact bundle rows raw={raw} unique={unique} "
-                        f"bundles={duplicate_summary.get('structured_artifact_bundle_rows')}"
                     )
                 if not emitted_check:
                     warnings.append(_index_duplicate_warning(item.get("id"), raw, unique, duplicate_summary))

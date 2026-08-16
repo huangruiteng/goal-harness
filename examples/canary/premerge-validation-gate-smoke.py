@@ -135,7 +135,7 @@ def assert_agent_facing_cli_change_selects_output_qualification() -> None:
 
 def assert_benchmark_sensitive_change_blocks_self_merge() -> None:
     payload = build_premerge_validation_gate(
-        changed_files=["loopx/benchmark_adapters/skillsbench.py"],
+        changed_files=["loopx/capabilities/benchmark_toolkit/integrity.py"],
         execute=False,
     )
     assert "benchmark_sensitive" in payload["classification"]["surfaces"], payload

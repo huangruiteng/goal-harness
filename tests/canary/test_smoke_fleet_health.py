@@ -30,11 +30,12 @@ def test_static_health_is_compact_and_classifies_cadence() -> None:
 
     assert payload["ok"] is True
     assert payload["ready"] is False
-    assert payload["inventory_count"] >= 500
+    assert payload["inventory_count"] > 0
     assert payload["cadence_counts"]["daily_full_public"] == payload["inventory_count"]
     assert payload["cadence_counts"]["pr_fast"] == 1
     assert payload["cadence_counts"]["catalog_canary"] > 0
     assert payload["cadence_counts"]["release_gate"] > 0
+    assert payload["targeted_owner_count"] > 0
     assert payload["owner_gap_count"] > 0
     assert payload["workflow_contract"]["missing_scripts"] == []
     assert payload["contract_reuse"]["semantic_duplicate_inference"] == "manual_review_required"

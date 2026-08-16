@@ -76,9 +76,9 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
             {
                 "generated_at": GENERATED_AT,
                 "goal_id": GOAL_ID,
-                "classification": "benchmark_run_v0",
+                "classification": "evidence_observation_v0",
                 "recommended_action": "preserve existing artifact",
-                "health_check": "benchmark_run_v0 compact event public-safe",
+                "health_check": "compact evidence event public-safe",
                 "json_path": str(existing_json),
                 "markdown_path": str(existing_markdown),
             },

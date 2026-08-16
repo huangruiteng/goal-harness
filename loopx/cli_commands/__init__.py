@@ -8,42 +8,6 @@ Command modules expose two small functions:
 The top-level CLI keeps global options, registry fallback, and dispatch order.
 """
 
-from .agents_last_exam import (
-    handle_agents_last_exam_command,
-    register_agents_last_exam_commands,
-)
-from .agents_last_exam_baked_input import (
-    handle_agents_last_exam_baked_input_command,
-    register_agents_last_exam_baked_input_commands,
-)
-from .agents_last_exam_host_codex import (
-    handle_agents_last_exam_host_codex_command,
-    register_agents_last_exam_host_codex_commands,
-)
-from .agents_last_exam_local_plan import (
-    handle_agents_last_exam_local_plan_command,
-    register_agents_last_exam_local_plan_commands,
-)
-from .agents_last_exam_launch_dry_run import (
-    handle_agents_last_exam_launch_dry_run_command,
-    register_agents_last_exam_launch_dry_run_commands,
-)
-from .agents_last_exam_runner_source import (
-    handle_agents_last_exam_runner_source_command,
-    register_agents_last_exam_runner_source_commands,
-)
-from .agents_last_exam_task_material import (
-    handle_agents_last_exam_task_material_command,
-    register_agents_last_exam_task_material_commands,
-)
-from .agents_last_exam_validation_gate import (
-    handle_agents_last_exam_validation_gate_command,
-    register_agents_last_exam_validation_gate_commands,
-)
-from .agentissue_runner_flow import (
-    handle_agentissue_runner_flow_command,
-    register_agentissue_runner_flow_commands,
-)
 from .turn import handle_turn_command, register_turn_commands
 from .host_mode_plan import (
     handle_host_mode_plan_command,
@@ -56,28 +20,6 @@ from .benchmark_boundary import (
 from .benchmark_dispatch import (
     handle_benchmark_command,
     register_benchmark_command_group,
-)
-from .benchmark_review_lifecycle import (
-    handle_benchmark_review_lifecycle_command,
-    register_benchmark_review_lifecycle_commands,
-)
-from .benchmark_run_ledger import (
-    handle_benchmark_run_ledger_command,
-    register_benchmark_run_ledger_commands,
-)
-from .benchmark_run_ledger_case_analysis import (
-    handle_benchmark_run_ledger_case_analysis_command,
-    register_benchmark_run_ledger_case_analysis_commands,
-)
-from .benchmark_run_ledger_maintenance import (
-    handle_benchmark_run_ledger_maintenance_command,
-)
-from .benchmark_run_ledger_maintenance_registration import (
-    register_benchmark_run_ledger_maintenance_commands,
-)
-from .benchmark_run_ledger_parity import (
-    handle_benchmark_run_ledger_parity_command,
-    register_benchmark_run_ledger_parity_commands,
 )
 from .bootstrap_connect import (
     handle_bootstrap_connect_command,
@@ -177,37 +119,15 @@ from .support_control import (
     register_support_control_commands,
 )
 from .task_lease import handle_task_lease_command, register_task_lease_command
-from .terminal_bench_adapter import (
-    handle_terminal_bench_adapter_command,
-    register_terminal_bench_adapter_commands,
-)
-from .terminal_bench_environment_result import (
-    handle_terminal_bench_environment_result_command,
-    register_terminal_bench_environment_result_commands,
-)
 from .todo import handle_todo_command, register_todo_command
 from .version import handle_version_command, register_version_command
 from .worker_bridge import handle_worker_bridge_command, register_worker_bridge_commands
 
 __all__ = [
-    "handle_agents_last_exam_command",
-    "handle_agents_last_exam_baked_input_command",
-    "handle_agents_last_exam_host_codex_command",
-    "handle_agents_last_exam_launch_dry_run_command",
-    "handle_agents_last_exam_local_plan_command",
-    "handle_agents_last_exam_runner_source_command",
-    "handle_agents_last_exam_task_material_command",
-    "handle_agents_last_exam_validation_gate_command",
-    "handle_agentissue_runner_flow_command",
     "handle_turn_command",
     "handle_host_mode_plan_command",
     "handle_benchmark_boundary_command",
     "handle_benchmark_command",
-    "handle_benchmark_review_lifecycle_command",
-    "handle_benchmark_run_ledger_command",
-    "handle_benchmark_run_ledger_case_analysis_command",
-    "handle_benchmark_run_ledger_maintenance_command",
-    "handle_benchmark_run_ledger_parity_command",
     "handle_bootstrap_connect_command",
     "handle_canary_command",
     "handle_capability_command",
@@ -267,29 +187,13 @@ __all__ = [
     "handle_summary_all_command",
     "handle_support_control_command",
     "handle_task_lease_command",
-    "handle_terminal_bench_adapter_command",
-    "handle_terminal_bench_environment_result_command",
     "handle_todo_command",
     "handle_version_command",
     "handle_worker_bridge_command",
-    "register_agents_last_exam_commands",
-    "register_agents_last_exam_baked_input_commands",
-    "register_agents_last_exam_host_codex_commands",
-    "register_agents_last_exam_launch_dry_run_commands",
-    "register_agents_last_exam_local_plan_commands",
-    "register_agents_last_exam_runner_source_commands",
-    "register_agents_last_exam_task_material_commands",
-    "register_agents_last_exam_validation_gate_commands",
-    "register_agentissue_runner_flow_commands",
     "register_turn_commands",
     "register_host_mode_plan_command",
     "register_benchmark_boundary_commands",
     "register_benchmark_command_group",
-    "register_benchmark_review_lifecycle_commands",
-    "register_benchmark_run_ledger_commands",
-    "register_benchmark_run_ledger_case_analysis_commands",
-    "register_benchmark_run_ledger_maintenance_commands",
-    "register_benchmark_run_ledger_parity_commands",
     "register_bootstrap_connect_command",
     "register_canary_commands",
     "register_capability_commands",
@@ -326,8 +230,6 @@ __all__ = [
     "register_status_commands",
     "register_support_control_commands",
     "register_task_lease_command",
-    "register_terminal_bench_adapter_commands",
-    "register_terminal_bench_environment_result_commands",
     "register_todo_command",
     "register_version_command",
     "register_worker_bridge_commands",

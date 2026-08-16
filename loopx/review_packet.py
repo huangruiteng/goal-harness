@@ -23,7 +23,6 @@ from .control_plane.handoff.delivery_contract import (
 from .handoff_budget import build_handoff_interface_budget
 
 
-BENCHMARK_REPORT_CHAIN_MAP_DOC = "benchmark-report-chain-map-v0.md"
 LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(^|[\s`'\"=:(])(?:/[A-Za-z0-9._-]+(?:/[^\s`'\",)]+)+|[A-Za-z]:[\\/][^\s`'\",)]+)"
 )
@@ -266,243 +265,10 @@ def handoff_followthrough_summary(item: dict[str, Any] | None) -> str | None:
     streak = readiness.get("post_handoff_small_scale_streak")
     streak_text = f", small_streak={streak}" if isinstance(streak, int) else ""
     suffix = f", at={generated_at}" if generated_at else ""
-    benchmark = latest_run.get("benchmark_run_summary") if isinstance(latest_run.get("benchmark_run_summary"), dict) else {}
-    benchmark_text = ""
-    if benchmark:
-        progress = benchmark.get("progress") if isinstance(benchmark.get("progress"), dict) else {}
-        trials = benchmark.get("trials") if isinstance(benchmark.get("trials"), list) else []
-        reward = None
-        if trials and isinstance(trials[0], dict):
-            reward_map = trials[0].get("reward") if isinstance(trials[0].get("reward"), dict) else {}
-            reward = reward_map.get("reward")
-        benchmark_parts = [
-            f"benchmark={benchmark.get('benchmark_id') or 'unknown'}",
-            f"runner={benchmark.get('source_runner') or 'unknown'}",
-        ]
-        if progress:
-            benchmark_parts.append(
-                f"completed={progress.get('n_completed_trials', 0)}/{progress.get('n_total_trials', 0)}"
-            )
-        if reward is not None:
-            benchmark_parts.append(f"reward={reward}")
-        benchmark_text = "; " + ", ".join(benchmark_parts)
-    benchmark_result = (
-        latest_run.get("benchmark_result_summary")
-        if isinstance(latest_run.get("benchmark_result_summary"), dict)
-        else {}
-    )
-    benchmark_result_text = ""
-    if benchmark_result:
-        official = (
-            benchmark_result.get("official_task_score")
-            if isinstance(benchmark_result.get("official_task_score"), dict)
-            else {}
-        )
-        control = (
-            benchmark_result.get("control_plane_score")
-            if isinstance(benchmark_result.get("control_plane_score"), dict)
-            else {}
-        )
-        result_parts = [
-            f"result={benchmark_result.get('task_id') or 'unknown'}",
-        ]
-        if official.get("value") is not None:
-            result_parts.append(f"official={official.get('value')}")
-        if control.get("value") is not None:
-            result_parts.append(f"control={control.get('value')}")
-        if control.get("schema_version"):
-            result_parts.append(f"schema={control.get('schema_version')}")
-        benchmark_result_text = "; " + ", ".join(result_parts)
-    benchmark_comparison = (
-        latest_run.get("benchmark_comparison_summary")
-        if isinstance(latest_run.get("benchmark_comparison_summary"), dict)
-        else {}
-    )
-    benchmark_comparison_text = ""
-    if benchmark_comparison:
-        comparison_parts = [
-            f"comparison={benchmark_comparison.get('comparison_id') or benchmark_comparison.get('task_id') or 'unknown'}",
-        ]
-        if benchmark_comparison.get("official_task_score_delta") is not None:
-            comparison_parts.append(f"official_delta={benchmark_comparison.get('official_task_score_delta')}")
-        if benchmark_comparison.get("control_plane_score_delta") is not None:
-            comparison_parts.append(f"control_delta={benchmark_comparison.get('control_plane_score_delta')}")
-        if benchmark_comparison.get("both_success") is not None:
-            comparison_parts.append(f"both_success={benchmark_comparison.get('both_success')}")
-        benchmark_comparison_text = "; " + ", ".join(comparison_parts)
-    benchmark_decision = (
-        latest_run.get("benchmark_comparison_decision_note")
-        if isinstance(latest_run.get("benchmark_comparison_decision_note"), dict)
-        else {}
-    )
-    benchmark_decision_text = ""
-    if benchmark_decision:
-        decision_parts = [
-            f"decision={benchmark_decision.get('decision') or 'unknown'}",
-            f"layer={benchmark_decision.get('evidence_layer') or 'unknown'}",
-        ]
-        benchmark_decision_text = "; " + ", ".join(decision_parts)
-    benchmark_learning_ledger = (
-        latest_run.get("benchmark_learning_ledger_summary")
-        if isinstance(latest_run.get("benchmark_learning_ledger_summary"), dict)
-        else {}
-    )
-    benchmark_learning_text = ""
-    if benchmark_learning_ledger:
-        learning_parts = [
-            f"learning={benchmark_learning_ledger.get('learning_status') or 'unknown'}",
-        ]
-        routing = (
-            benchmark_learning_ledger.get("routing")
-            if isinstance(benchmark_learning_ledger.get("routing"), dict)
-            else {}
-        )
-        gate = (
-            benchmark_learning_ledger.get("learning_quota_gate")
-            if isinstance(benchmark_learning_ledger.get("learning_quota_gate"), dict)
-            else {}
-        )
-        if benchmark_learning_ledger.get("repair_candidates"):
-            learning_parts.append(
-                f"repair={','.join(str(item) for item in benchmark_learning_ledger.get('repair_candidates')[:2])}"
-            )
-        if gate.get("spend_allowed") is not None:
-            learning_parts.append(f"spend_allowed={gate.get('spend_allowed')}")
-        if routing.get("next_allowed_action"):
-            learning_parts.append(f"next={routing.get('next_allowed_action')}")
-        benchmark_learning_text = "; " + ", ".join(learning_parts)
-    worker_bridge_health = (
-        latest_run.get("worker_bridge_ingest_health_note")
-        if isinstance(latest_run.get("worker_bridge_ingest_health_note"), dict)
-        else {}
-    )
-    worker_bridge_health_text = ""
-    if worker_bridge_health:
-        health_parts = [
-            f"worker_bridge_health={worker_bridge_health.get('health_state') or 'unknown'}",
-            f"layer={worker_bridge_health.get('evidence_layer') or 'unknown'}",
-        ]
-        if worker_bridge_health.get("next_action"):
-            health_parts.append(f"next={worker_bridge_health.get('next_action')}")
-        worker_bridge_health_text = "; " + ", ".join(health_parts)
-    benchmark_report = (
-        latest_run.get("benchmark_experiment_report_summary")
-        if isinstance(latest_run.get("benchmark_experiment_report_summary"), dict)
-        else {}
-    )
-    benchmark_report_text = ""
-    if benchmark_report:
-        benchmark_report_readiness = (
-            latest_run.get("benchmark_experiment_report_readiness_note")
-            if isinstance(latest_run.get("benchmark_experiment_report_readiness_note"), dict)
-            else {}
-        )
-        benchmark_report_replay = (
-            latest_run.get("benchmark_experiment_report_replay_decision")
-            if isinstance(latest_run.get("benchmark_experiment_report_replay_decision"), dict)
-            else {}
-        )
-        identity = (
-            benchmark_report.get("experiment_identity")
-            if isinstance(benchmark_report.get("experiment_identity"), dict)
-            else {}
-        )
-        next_decision = (
-            benchmark_report.get("next_decision")
-            if isinstance(benchmark_report.get("next_decision"), dict)
-            else {}
-        )
-        negative = (
-            benchmark_report.get("negative_results")
-            if isinstance(benchmark_report.get("negative_results"), dict)
-            else {}
-        )
-        layers = (
-            negative.get("negative_evidence_layers")
-            if isinstance(negative.get("negative_evidence_layers"), list)
-            else []
-        )
-        report_parts = [
-            f"report={identity.get('report_id') or identity.get('task_slice') or 'unknown'}",
-        ]
-        if next_decision.get("decision"):
-            report_parts.append(f"report_decision={next_decision.get('decision')}")
-        if benchmark_report_readiness.get("readiness"):
-            report_parts.append(f"readiness={benchmark_report_readiness.get('readiness')}")
-        if benchmark_report_readiness.get("next_run_authorization"):
-            report_parts.append(f"next_run={benchmark_report_readiness.get('next_run_authorization')}")
-        if benchmark_report_replay.get("replay_decision"):
-            report_parts.append(f"replay={benchmark_report_replay.get('replay_decision')}")
-        if benchmark_report_replay.get("next_run_mode"):
-            report_parts.append(f"mode={benchmark_report_replay.get('next_run_mode')}")
-        if benchmark_report_replay:
-            report_parts.append(f"chain_map={BENCHMARK_REPORT_CHAIN_MAP_DOC}")
-        if layers:
-            report_parts.append(f"negative_layers={','.join(str(layer) for layer in layers[:2])}")
-        benchmark_report_text = "; " + ", ".join(report_parts)
     return compact_packet_text(
-        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}{benchmark_text}{benchmark_result_text}{benchmark_comparison_text}{benchmark_decision_text}{benchmark_learning_text}{worker_bridge_health_text}{benchmark_report_text}",
+        f"post_handoff_run={classification}, scale={scale}{streak_text}{suffix}",
         limit=440,
     )
-
-
-def benchmark_report_chain_handoff(item: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(item, dict):
-        return None
-    readiness = item.get("handoff_readiness") if isinstance(item.get("handoff_readiness"), dict) else {}
-    latest_run = (
-        readiness.get("post_handoff_latest_run")
-        if isinstance(readiness.get("post_handoff_latest_run"), dict)
-        else {}
-    )
-    if not latest_run:
-        return None
-    replay = (
-        latest_run.get("benchmark_experiment_report_replay_decision")
-        if isinstance(latest_run.get("benchmark_experiment_report_replay_decision"), dict)
-        else {}
-    )
-    if not replay:
-        return None
-    report = (
-        latest_run.get("benchmark_experiment_report_summary")
-        if isinstance(latest_run.get("benchmark_experiment_report_summary"), dict)
-        else {}
-    )
-    readiness_note = (
-        latest_run.get("benchmark_experiment_report_readiness_note")
-        if isinstance(latest_run.get("benchmark_experiment_report_readiness_note"), dict)
-        else {}
-    )
-    identity = report.get("experiment_identity") if isinstance(report.get("experiment_identity"), dict) else {}
-    negative = report.get("negative_results") if isinstance(report.get("negative_results"), dict) else {}
-    next_decision = report.get("next_decision") if isinstance(report.get("next_decision"), dict) else {}
-    replay_layers = replay.get("negative_evidence_layers")
-    negative_layers = negative.get("negative_evidence_layers")
-    layers = replay_layers if isinstance(replay_layers, list) else negative_layers if isinstance(negative_layers, list) else []
-    must_not_claim = replay.get("must_not_claim")
-    if not isinstance(must_not_claim, list):
-        must_not_claim = readiness_note.get("must_not_claim") if isinstance(readiness_note.get("must_not_claim"), list) else []
-    return {
-        "schema_version": "benchmark_report_chain_handoff_v0",
-        "surface": "status_review_packet_only",
-        "chain_map": BENCHMARK_REPORT_CHAIN_MAP_DOC,
-        "source_run": {
-            "generated_at": latest_run.get("generated_at"),
-            "classification": latest_run.get("classification"),
-            "delivery_batch_scale": latest_run.get("delivery_batch_scale"),
-            "delivery_outcome": latest_run.get("delivery_outcome"),
-        },
-        "report_id": replay.get("report_id") or identity.get("report_id"),
-        "task_slice": replay.get("task_slice") or identity.get("task_slice"),
-        "report_decision": next_decision.get("decision"),
-        "readiness": replay.get("readiness") or readiness_note.get("readiness"),
-        "authorization": replay.get("authorization") or readiness_note.get("next_run_authorization"),
-        "replay_decision": replay.get("replay_decision"),
-        "next_run_mode": replay.get("next_run_mode"),
-        "negative_evidence_layers": [str(layer) for layer in layers if str(layer).strip()],
-        "must_not_claim": [str(claim) for claim in must_not_claim if str(claim).strip()],
-    }
 
 
 def authority_material_summary(goal: dict[str, Any] | None) -> str | None:
@@ -875,7 +641,6 @@ def build_review_packet(
     member_summary = agent_member_summary(item)
     authority_summary = authority_material_summary(goal)
     followthrough_summary = handoff_followthrough_summary(item)
-    chain_handoff = benchmark_report_chain_handoff(item)
     delivery_contract = handoff_delivery_contract(item)
     delivery_contract_text = handoff_delivery_contract_summary(delivery_contract)
     required_reads = project_agent_required_reads(goal_id, item)
@@ -998,7 +763,6 @@ def build_review_packet(
         "agent_member_summary": member_summary,
         "authority_summary": authority_summary,
         "handoff_followthrough_summary": followthrough_summary,
-        "benchmark_report_chain_handoff": chain_handoff,
         "handoff_delivery_contract": delivery_contract,
         "project_agent_required_reads": required_reads,
         "handoff_interface_budget": handoff_interface_budget,

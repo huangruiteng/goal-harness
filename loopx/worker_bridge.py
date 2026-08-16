@@ -17,9 +17,6 @@ DEFAULT_WORKER_BRIDGE_ACTIVE_USER_MOUNT_TARGET = "/loopx-active-user"
 DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON = (
     DEFAULT_WORKER_BRIDGE_TRACE_DIR + "/loopx-counter-trace.jsonl"
 )
-DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON = (
-    DEFAULT_WORKER_BRIDGE_TRACE_DIR + "/loopx-worker-benchmark-run.json"
-)
 DEFAULT_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL = (
     DEFAULT_WORKER_BRIDGE_TRACE_DIR + "/loopx-active-user-interventions.jsonl"
 )
@@ -36,10 +33,6 @@ DEFAULT_ACTIVE_USER_SIMULATOR_OUTPUT_SCHEMA_JSON = (
 DEFAULT_WORKER_BRIDGE_PYTHON_BIN = "python3"
 DEFAULT_WORKER_BRIDGE_MODULE = "loopx.cli"
 WORKER_BRIDGE_PYTHON_RUNTIME_POLICY = "ensure_python3_before_worker_cli_bridge"
-WORKER_BRIDGE_OUTCOME_SCHEMA_VERSION = "loopx_worker_bridge_outcome_v0"
-WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION = (
-    "loopx_worker_benchmark_run_writeback_contract_v0"
-)
 ACTIVE_USER_INTERVENTION_CHANNEL_CONTRACT_VERSION = (
     "loopx_active_user_intervention_channel_contract_v0"
 )
@@ -69,46 +62,7 @@ ACTIVE_USER_SIMULATOR_NO_ORACLE_AUDIT_KEYS = (
     "private_material_visible",
     "solution_patch_visible",
 )
-DEFAULT_WORKER_BRIDGE_CLI_CALL_MINIMUM = 1
-DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS = 900.0
-DEFAULT_WORKER_BRIDGE_SOURCE_RUNNER = "worker_bridge_runner"
-DEFAULT_WORKER_BRIDGE_BENCHMARK_ID = "worker-bridge-sample@v0"
-DEFAULT_WORKER_BRIDGE_JOB_NAME = "loopx_worker_bridge_sample"
 DEFAULT_WORKER_BRIDGE_MODE = "codex_loopx_active_worker"
-DEFAULT_WORKER_BRIDGE_WORKER_MODE = "codex_loopx_cli"
-DEFAULT_WORKER_BRIDGE_TASK_ID = "worker-bridge-sample"
-DEFAULT_WORKER_BRIDGE_TRIAL_NAME = "worker-bridge-sample-worker"
-WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_TOP_LEVEL_FIELDS = (
-    "schema_version",
-    "source_runner",
-    "benchmark_id",
-    "job_name",
-    "mode",
-    "worker_mode",
-    "real_run",
-    "submit_eligible",
-    "leaderboard_evidence",
-    "official_task_score",
-    "validation_scope",
-    "progress",
-    "validation",
-    "claim_boundary",
-    "trials",
-)
-WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_FIXED_FIELDS = {
-    "real_run": True,
-    "submit_eligible": False,
-    "leaderboard_evidence": False,
-}
-WORKER_BRIDGE_BENCHMARK_RUN_FORBIDDEN_PUBLIC_FIELDS = (
-    "raw_paths",
-    "raw_logs",
-    "raw_trace",
-    "raw_task_prompt",
-    "raw_sessions",
-    "credential_values",
-    "auth_values",
-)
 ACTIVE_USER_PUBLIC_TEXT_FORBIDDEN_MARKERS = (
     "/" + "Users/",
     "/" + "tmp/",
@@ -207,84 +161,6 @@ def build_worker_bridge_python_runtime_preflight_command(
     )
 
 
-def build_worker_bridge_benchmark_run_writeback_contract(
-    *,
-    benchmark_run_json: str = DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
-    counter_trace_json: str = DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
-    classification: str = "<classification>",
-) -> dict[str, Any]:
-    """Build the worker-facing compact benchmark_run writeback contract.
-
-    This is deliberately schema guidance, not a task-specific report. It gives
-    an isolated worker enough shape to write a compactor-safe payload before
-    calling `history append-benchmark-run`, without exposing raw traces or
-    benchmark-private paths in public artifacts.
-    """
-
-    return {
-        "schema_version": WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION,
-        "benchmark_run_schema_version": "benchmark_run_v0",
-        "benchmark_run_json": benchmark_run_json,
-        "counter_trace_json": counter_trace_json,
-        "classification": classification,
-        "required_top_level_fields": list(
-            WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_TOP_LEVEL_FIELDS
-        ),
-        "required_fixed_fields": dict(
-            WORKER_BRIDGE_BENCHMARK_RUN_REQUIRED_FIXED_FIELDS
-        ),
-        "required_validation_flags": [
-            "validation_scope",
-            "bridge_connected",
-            "case_success_claimed",
-            "official_verifier_validation_present",
-            "worker_bridge_trace_observed",
-            "worker_cli_call_threshold_met",
-            "runner_return_completed_or_blocker_recorded",
-            "official_score_completed_or_not_claimed",
-            "no_leaderboard_upload_requested",
-            "paths_redacted",
-            "raw_trace_excluded",
-            "side_effect_audit_passed",
-        ],
-        "validation_scope_contract": {
-            "field": "validation_scope",
-            "recommended_values": [
-                "worker_bridge_connectivity",
-                "environment_ready",
-                "worker_case_success",
-                "official_verifier_result",
-            ],
-            "connectivity_is_not_case_success": True,
-            "legacy_unscoped_passed_validation_is_ambiguous": True,
-        },
-        "claim_boundary_required_fields": [
-            "bridge_connectivity_claim_allowed",
-            "case_success_claim_allowed",
-            "official_score_claim_allowed",
-            "leaderboard_claim_allowed",
-            "forbidden_claims",
-        ],
-        "forbidden_public_fields": list(
-            WORKER_BRIDGE_BENCHMARK_RUN_FORBIDDEN_PUBLIC_FIELDS
-        ),
-        "retry_policy": {
-            "on_append_benchmark_run_schema_rejected": (
-                "rewrite_minimal_benchmark_run_v0_and_retry_once"
-            ),
-            "retry_payload_source": "compact_counters_only",
-            "do_not_retry_with_raw_logs_or_raw_paths": True,
-        },
-        "public_boundary": {
-            "no_upload": True,
-            "submit_eligible": False,
-            "leaderboard_evidence": False,
-            "raw_trace_excluded": True,
-            "raw_paths_redacted": True,
-        },
-    }
-
-
 def _coerce_public_safe_worker_text(
     value: str,
     *,
@@ -310,7 +186,6 @@ def build_active_user_intervention_channel_contract(
     module: str = DEFAULT_WORKER_BRIDGE_MODULE,
     feed_jsonl: str = DEFAULT_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL,
     observation_json: str = DEFAULT_WORKER_BRIDGE_ACTIVE_USER_OBSERVATION_JSON,
-    benchmark_run_json: str = DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
     counter_trace_json: str = DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
     classification: str = "active_user_observe_checkpoint",
     min_interval_seconds: int = 300,
@@ -339,7 +214,6 @@ def build_active_user_intervention_channel_contract(
         "--worker-start-seq <worker-start-seq> "
         f"--observation-json {shlex.quote(observation_json)} "
         f"--counter-trace-json {shlex.quote(counter_trace_json)} "
-        f"--benchmark-run-json {shlex.quote(benchmark_run_json)} "
         f"--classification {shlex.quote(classification)} "
         "--format json"
     )
@@ -359,7 +233,6 @@ def build_active_user_intervention_channel_contract(
         "mode": "audited_external_update_loop",
         "feed_jsonl": feed_jsonl,
         "observation_json": observation_json,
-        "benchmark_run_json": benchmark_run_json,
         "counter_trace_json": counter_trace_json,
         "worker_observe_command": observe_command,
         "simulator_append_command": simulator_append_command,
@@ -887,7 +760,7 @@ def build_worker_bridge_interaction_counters_from_trace(
         "loopx_cli_calls": loopx_cli_calls,
         "trace_row_count": len(trace_rows or []),
         "state_reads": loopx_cli_calls.get("active_user_observe", 0),
-        "state_writes": loopx_cli_calls.get("append_benchmark_run", 0),
+        "state_writes": 0,
         "raw_trace_recorded": False,
         "raw_paths_recorded": False,
     }
@@ -900,7 +773,6 @@ def build_worker_bridge_install_contract(
     python_bin: str = DEFAULT_WORKER_BRIDGE_PYTHON_BIN,
     module: str = DEFAULT_WORKER_BRIDGE_MODULE,
     scan_path: str | None = None,
-    benchmark_run_json: str = DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
     counter_trace_json: str = DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
     classification: str = "<classification>",
     active_user_host_dir: str | None = None,
@@ -908,12 +780,12 @@ def build_worker_bridge_install_contract(
 ) -> dict[str, Any]:
     """Build a runner-agnostic worker bridge/install contract.
 
-    The contract is intentionally declarative. A benchmark runner can translate
+    The contract is intentionally declarative. An executor can translate
     `mounts` and `agent_kwargs` into its own container or worker launch surface.
     """
 
     registry_arg = f"{runtime_root}/registry.global.json"
-    scan_path_arg = scan_path or f"{project_root}/loopx/benchmark.py"
+    scan_path_arg = scan_path or f"{project_root}/loopx"
     command_prefix = build_worker_bridge_command_prefix(
         project_root=project_root,
         python_bin=python_bin,
@@ -930,13 +802,6 @@ def build_worker_bridge_install_contract(
         mount_target = active_user_mount_target.rstrip("/")
         active_user_feed_jsonl = f"{mount_target}/loopx-active-user-interventions.jsonl"
         active_user_observation_json = f"{mount_target}/loopx-active-user-observation.json"
-    benchmark_run_writeback_contract = (
-        build_worker_bridge_benchmark_run_writeback_contract(
-            benchmark_run_json=benchmark_run_json,
-            counter_trace_json=counter_trace_json,
-            classification=classification,
-        )
-    )
     active_user_intervention_channel_contract = (
         build_active_user_intervention_channel_contract(
             project_root=project_root,
@@ -945,7 +810,6 @@ def build_worker_bridge_install_contract(
             module=module,
             feed_jsonl=active_user_feed_jsonl,
             observation_json=active_user_observation_json,
-            benchmark_run_json=benchmark_run_json,
             counter_trace_json=counter_trace_json,
             classification=classification,
         )
@@ -978,11 +842,6 @@ def build_worker_bridge_install_contract(
             "loopx_registry_arg": registry_arg,
             "loopx_runtime_root_arg": runtime_root,
             "loopx_scan_path": scan_path_arg,
-            "loopx_benchmark_run_json": benchmark_run_json,
-            "loopx_benchmark_run_schema_version": "benchmark_run_v0",
-            "loopx_benchmark_run_writeback_contract": (
-                WORKER_BRIDGE_BENCHMARK_RUN_WRITEBACK_CONTRACT_VERSION
-            ),
             "loopx_counter_trace_json": counter_trace_json,
             "loopx_classification": classification,
             "loopx_active_user_feed_jsonl": (
@@ -998,13 +857,11 @@ def build_worker_bridge_install_contract(
                 ACTIVE_USER_INTERVENTION_CHANNEL_SURFACE
             ),
         },
-        "benchmark_run_writeback_contract": benchmark_run_writeback_contract,
         "active_user_intervention_channel_contract": (
             active_user_intervention_channel_contract
         ),
         "trace": {
             "counter_trace_json": counter_trace_json,
-            "benchmark_run_json": benchmark_run_json,
             "active_user_feed_jsonl": active_user_intervention_channel_contract[
                 "feed_jsonl"
             ],
@@ -1028,408 +885,6 @@ def _coerce_non_negative_int(value: int, *, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{field} must be a non-negative integer")
     return value
-
-
-def _coerce_optional_non_negative_float(
-    value: int | float | None,
-    *,
-    field: str,
-) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
-        raise ValueError(f"{field} must be a non-negative number")
-    return float(value)
-
-
-def build_worker_bridge_outcome(
-    *,
-    worker_loopx_cli_call_total: int = 0,
-    counter_trace_present: bool = False,
-    runner_return_completed: bool = False,
-    official_score_completed: bool = False,
-    official_score_value: int | float | None = None,
-    interrupted: bool = False,
-    interrupt_reason: str = "",
-    wall_time_seconds: int | float | None = None,
-    wall_time_limit_seconds: int | float = DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS,
-    required_worker_loopx_cli_call_total_min: int = DEFAULT_WORKER_BRIDGE_CLI_CALL_MINIMUM,
-    side_effect_audit_passed: bool = True,
-) -> dict[str, Any]:
-    """Summarize worker bridge evidence and runner-return state.
-
-    The outcome is public-safe by construction: it records compact counts,
-    booleans, and policy labels only, never argv, paths, raw logs, prompts, or
-    credential surfaces.
-    """
-
-    cli_total = _coerce_non_negative_int(
-        worker_loopx_cli_call_total,
-        field="worker_loopx_cli_call_total",
-    )
-    required_cli_total = _coerce_non_negative_int(
-        required_worker_loopx_cli_call_total_min,
-        field="required_worker_loopx_cli_call_total_min",
-    )
-    wall_time = _coerce_optional_non_negative_float(
-        wall_time_seconds,
-        field="wall_time_seconds",
-    )
-    wall_time_limit = _coerce_optional_non_negative_float(
-        wall_time_limit_seconds,
-        field="wall_time_limit_seconds",
-    )
-    if wall_time_limit is None or wall_time_limit <= 0:
-        raise ValueError("wall_time_limit_seconds must be greater than zero")
-    if official_score_completed and official_score_value is None:
-        raise ValueError("official_score_value is required when official_score_completed=true")
-    if not official_score_completed and official_score_value is not None:
-        raise ValueError("official_score_value requires official_score_completed=true")
-
-    worker_bridge_verified = bool(counter_trace_present) and cli_total >= required_cli_total
-    official_case_success = bool(official_score_completed and official_score_value)
-    runner_return_status = (
-        "completed"
-        if runner_return_completed
-        else "interrupted_after_worker_bridge_success"
-        if interrupted and worker_bridge_verified
-        else "pending_after_worker_bridge_success"
-        if worker_bridge_verified
-        else "worker_bridge_evidence_missing"
-    )
-    official_score_status = (
-        "completed"
-        if official_score_completed
-        else "blocked_pending_runner_return"
-        if worker_bridge_verified and not runner_return_completed
-        else "not_ready"
-    )
-    labels: list[str] = []
-    if worker_bridge_verified:
-        labels.append("worker_bridge_install_verified")
-    else:
-        labels.append("worker_bridge_install_unverified")
-    if not runner_return_completed:
-        labels.append("runner_return_pending")
-    if interrupted:
-        labels.append("controller_interrupt")
-    if not official_score_completed:
-        labels.append("official_score_pending")
-
-    next_action = (
-        "ingest official runner score and close benchmark_run_v0"
-        if runner_return_completed and official_score_completed
-        else "finish runner return or record a runner-return blocker with the same outcome policy"
-        if worker_bridge_verified
-        else "recheck worker bridge install before another active worker sample"
-    )
-    reason = interrupt_reason.strip() or (
-        "controller_wall_time_policy"
-        if interrupted
-        else "runner_return_pending"
-    )
-
-    return {
-        "ok": True,
-        "schema_version": WORKER_BRIDGE_OUTCOME_SCHEMA_VERSION,
-        "bridge_surface": WORKER_BRIDGE_SURFACE,
-        "worker_bridge_verified": worker_bridge_verified,
-        "runner_return_status": runner_return_status,
-        "official_score_status": official_score_status,
-        "worker_loopx_cli_call_total": cli_total,
-        "required_worker_loopx_cli_call_total_min": required_cli_total,
-        "counter_trace_present": bool(counter_trace_present),
-        "runner_return_completed": bool(runner_return_completed),
-        "official_score_completed": bool(official_score_completed),
-        "official_score_value": official_score_value,
-        "side_effect_audit_passed": bool(side_effect_audit_passed),
-        "wall_time_policy": {
-            "schema_version": "loopx_worker_bridge_wall_time_policy_v0",
-            "kind": "controller_interrupt_after_worker_bridge_evidence_no_runner_return",
-            "wall_time_seconds": wall_time,
-            "wall_time_limit_seconds": wall_time_limit,
-            "interrupted": bool(interrupted),
-            "interrupt_reason": reason,
-            "changes_official_benchmark_timeout": False,
-            "changes_official_task_resources": False,
-            "leaderboard_claim_allowed": False,
-        },
-        "failure_attribution_labels": labels,
-        "claim_boundary": {
-            "public_claim_allowed": (
-                "worker bridge install verified by compact in-worker CLI counts"
-                if worker_bridge_verified
-                else "worker bridge install not yet verified"
-            ),
-            "bridge_connectivity_claim_allowed": worker_bridge_verified,
-            "case_success_claim_allowed": official_case_success,
-            "official_score_claim_allowed": bool(official_score_completed),
-            "leaderboard_claim_allowed": False,
-            "forbidden_claims": [
-                *([] if official_score_completed else ["official_reward_complete"]),
-                *([] if official_case_success else ["case_success"]),
-                "leaderboard_ready",
-                "uplift_over_baseline",
-                "raw_trace_public",
-            ],
-        },
-        "next_action": next_action,
-        "trace_publicness": "compact_counts_only_no_raw_trace",
-        "raw_paths_recorded": False,
-        "raw_trace_recorded": False,
-        "credential_values_recorded": False,
-    }
-
-
-def build_worker_bridge_benchmark_run(
-    *,
-    source_runner: str = DEFAULT_WORKER_BRIDGE_SOURCE_RUNNER,
-    benchmark_id: str = DEFAULT_WORKER_BRIDGE_BENCHMARK_ID,
-    job_name: str = DEFAULT_WORKER_BRIDGE_JOB_NAME,
-    mode: str = DEFAULT_WORKER_BRIDGE_MODE,
-    worker_mode: str = DEFAULT_WORKER_BRIDGE_WORKER_MODE,
-    task_id: str = DEFAULT_WORKER_BRIDGE_TASK_ID,
-    trial_name: str = DEFAULT_WORKER_BRIDGE_TRIAL_NAME,
-    official_score_kind: str | None = None,
-    worker_loopx_cli_call_total: int = 0,
-    counter_trace_present: bool = False,
-    runner_return_completed: bool = False,
-    official_score_completed: bool = False,
-    official_score_value: int | float | None = None,
-    interrupted: bool = False,
-    interrupt_reason: str = "",
-    wall_time_seconds: int | float | None = None,
-    wall_time_limit_seconds: int | float = DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS,
-    required_worker_loopx_cli_call_total_min: int = DEFAULT_WORKER_BRIDGE_CLI_CALL_MINIMUM,
-    side_effect_audit_passed: bool = True,
-) -> dict[str, Any]:
-    """Build the public-safe worker-side benchmark_run_v0 writeback payload."""
-
-    outcome = build_worker_bridge_outcome(
-        worker_loopx_cli_call_total=worker_loopx_cli_call_total,
-        counter_trace_present=counter_trace_present,
-        runner_return_completed=runner_return_completed,
-        official_score_completed=official_score_completed,
-        official_score_value=official_score_value,
-        interrupted=interrupted,
-        interrupt_reason=interrupt_reason,
-        wall_time_seconds=wall_time_seconds,
-        wall_time_limit_seconds=wall_time_limit_seconds,
-        required_worker_loopx_cli_call_total_min=(
-            required_worker_loopx_cli_call_total_min
-        ),
-        side_effect_audit_passed=side_effect_audit_passed,
-    )
-    score_kind = official_score_kind or (
-        "sample_private_no_upload"
-        if official_score_completed
-        else "worker_bridge_runner_return_blocker"
-    )
-    official_score: dict[str, Any] = {"kind": score_kind}
-    if official_score_completed:
-        official_score["value"] = official_score_value
-        official_score["passed"] = bool(official_score_value)
-
-    runner_closed = bool(runner_return_completed)
-    official_case_success = bool(official_score_completed and official_score_value)
-    official_verifier_status = (
-        "passed"
-        if official_case_success
-        else "failed"
-        if official_score_completed
-        else "pending"
-    )
-    validation_scope = (
-        "official_verifier_result"
-        if official_score_completed
-        else "worker_bridge_connectivity"
-    )
-    claim_boundary = {
-        "public_claim_allowed": (
-            "official verifier result"
-            if official_score_completed
-            else "worker bridge install verified by compact in-worker CLI counts"
-            if outcome["worker_bridge_verified"]
-            else "worker bridge install not yet verified"
-        ),
-        "bridge_connectivity_claim_allowed": bool(outcome["worker_bridge_verified"]),
-        "case_success_claim_allowed": official_case_success,
-        "official_score_claim_allowed": bool(official_score_completed),
-        "leaderboard_claim_allowed": False,
-        "forbidden_claims": [
-            "leaderboard_ready",
-            "uplift_over_baseline",
-            "raw_trace_public",
-            *([] if official_score_completed else ["official_reward_complete"]),
-            *([] if official_case_success else ["case_success"]),
-        ],
-    }
-    progress = {
-        "n_total_trials": 1,
-        "n_completed_trials": 1 if runner_closed else 0,
-        "n_errored_trials": 0,
-        "n_running_trials": 0 if runner_closed or interrupted else 1,
-        "n_pending_trials": 0,
-        "n_cancelled_trials": 1 if interrupted and not runner_closed else 0,
-        "n_retries": 0,
-    }
-    trial: dict[str, Any] = {
-        "task_id": task_id,
-        "trial_name": trial_name,
-        "source": benchmark_id,
-        "exception_type": (
-            "none"
-            if runner_closed
-            else "runner_return_pending_after_worker_bridge_success"
-            if outcome["worker_bridge_verified"]
-            else "worker_bridge_evidence_missing"
-        ),
-        "trajectory_present": False,
-        "verifier_reward_present": bool(official_score_completed),
-        "artifact_manifest_present": False,
-        "trial_result_present": runner_closed,
-    }
-    if official_score_completed:
-        trial["reward"] = {"reward": official_score_value}
-
-    return {
-        "ok": True,
-        "schema_version": "benchmark_run_v0",
-        "source_runner": source_runner,
-        "benchmark_id": benchmark_id,
-        "job_name": job_name,
-        "mode": mode,
-        "worker_mode": worker_mode,
-        "real_run": True,
-        "submit_eligible": False,
-        "leaderboard_evidence": False,
-        "trace_publicness": "compact_counts_only_no_raw_trace",
-        "loopx_worker_cli_bridge_available": True,
-        "loopx_worker_cli_bridge_trace_observed": bool(counter_trace_present),
-        "worker_loopx_cli_call_total": outcome["worker_loopx_cli_call_total"],
-        "required_worker_loopx_cli_call_total_min": (
-            outcome["required_worker_loopx_cli_call_total_min"]
-        ),
-        "official_task_score": official_score,
-        "validation_scope": validation_scope,
-        "bridge_connectivity_claim_allowed": bool(outcome["worker_bridge_verified"]),
-        "case_success_claimed": official_case_success,
-        "official_verifier_validation_present": bool(official_score_completed),
-        "official_case_success": official_case_success,
-        "progress": progress,
-        "worker_bridge_outcome": outcome,
-        "claim_boundary": claim_boundary,
-        "validation": {
-            "validation_scope": validation_scope,
-            "bridge_connected": bool(outcome["worker_bridge_verified"]),
-            "bridge_connectivity_claim_allowed": bool(outcome["worker_bridge_verified"]),
-            "case_success_claimed": official_case_success,
-            "case_success_claim_kind": (
-                "official_verifier_score_positive" if official_case_success else "none"
-            ),
-            "official_verifier_validation_present": bool(official_score_completed),
-            "official_verifier_status": official_verifier_status,
-            "official_case_success": official_case_success,
-            "worker_bridge_trace_observed": bool(counter_trace_present),
-            "worker_cli_call_threshold_met": outcome["worker_bridge_verified"],
-            "runner_return_completed_or_blocker_recorded": (
-                runner_closed or outcome["worker_bridge_verified"]
-            ),
-            "official_score_completed_or_not_claimed": (
-                bool(official_score_completed) or not runner_closed
-            ),
-            "no_leaderboard_upload_requested": True,
-            "paths_redacted": True,
-            "raw_trace_excluded": True,
-            "side_effect_audit_passed": bool(side_effect_audit_passed),
-        },
-        "trials": [trial],
-        "stop_conditions": [
-            "do_not_upload_or_submit_leaderboard",
-            "do_not_record_raw_trace_or_paths",
-            "do_not_claim_official_reward_complete_without_official_score",
-        ],
-        "case_semantics_changed_by_harness": True,
-        "loopx_inside_case": True,
-        "official_score_comparable_to_native_codex": False,
-        "model_plus_harness_pair": True,
-        "control_plane_score_applicable": True,
-    }
-
-
-def worker_bridge_cli_call_total_from_interaction_counters(
-    interaction_counters: dict[str, Any],
-) -> int:
-    """Read worker LoopX CLI call total from compact benchmark counters."""
-
-    calls = interaction_counters.get("loopx_cli_calls")
-    if not isinstance(calls, dict):
-        return 0
-    total = calls.get("total")
-    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
-        return 0
-    return total
-
-
-def build_worker_bridge_benchmark_run_from_counters(
-    interaction_counters: dict[str, Any],
-    *,
-    counter_trace_present: bool,
-    source_runner: str = DEFAULT_WORKER_BRIDGE_SOURCE_RUNNER,
-    benchmark_id: str = DEFAULT_WORKER_BRIDGE_BENCHMARK_ID,
-    job_name: str = DEFAULT_WORKER_BRIDGE_JOB_NAME,
-    mode: str = DEFAULT_WORKER_BRIDGE_MODE,
-    worker_mode: str = DEFAULT_WORKER_BRIDGE_WORKER_MODE,
-    task_id: str = DEFAULT_WORKER_BRIDGE_TASK_ID,
-    trial_name: str = DEFAULT_WORKER_BRIDGE_TRIAL_NAME,
-    interrupted: bool = False,
-    interrupt_reason: str = "",
-    wall_time_seconds: int | float | None = None,
-    wall_time_limit_seconds: int | float = DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS,
-    side_effect_audit_passed: bool = True,
-) -> dict[str, Any]:
-    """Build a generic worker-side benchmark_run_v0 from compact counters."""
-
-    return build_worker_bridge_benchmark_run(
-        source_runner=source_runner,
-        benchmark_id=benchmark_id,
-        job_name=job_name,
-        mode=mode,
-        worker_mode=worker_mode,
-        task_id=task_id,
-        trial_name=trial_name,
-        worker_loopx_cli_call_total=(
-            worker_bridge_cli_call_total_from_interaction_counters(
-                interaction_counters
-            )
-        ),
-        counter_trace_present=counter_trace_present,
-        interrupted=interrupted,
-        interrupt_reason=interrupt_reason,
-        wall_time_seconds=wall_time_seconds,
-        wall_time_limit_seconds=wall_time_limit_seconds,
-        side_effect_audit_passed=side_effect_audit_passed,
-    )
-
-
-def write_worker_bridge_benchmark_run_file(
-    path: str | Path | None,
-    payload: dict[str, Any],
-) -> bool:
-    """Write compact worker-side benchmark_run_v0 without raw traces or paths."""
-
-    if not path:
-        return False
-    output_path = Path(path)
-    try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(payload, ensure_ascii=True, sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    except OSError:
-        return False
-    return True
 
 
 def render_worker_bridge_install_contract_markdown(payload: dict[str, Any]) -> str:
@@ -1499,46 +954,6 @@ def render_worker_bridge_install_contract_markdown(payload: dict[str, Any]) -> s
             f"- latest_trigger: `{latest.get('trigger')}`",
             f"- official_score_claim_allowed: `{boundary.get('official_score_claim_allowed')}`",
             f"- direct_codex_chat_injection: `{boundary.get('direct_codex_chat_injection')}`",
-            f"- next_action: `{payload.get('next_action')}`",
-        ]
-        return "\n".join(lines) + "\n"
-
-    if payload.get("schema_version") == "benchmark_run_v0":
-        outcome = payload.get("worker_bridge_outcome") or {}
-        progress = payload.get("progress") or {}
-        lines = [
-            "# LoopX Worker Bridge Benchmark Run",
-            "",
-            f"- schema_version: `{payload.get('schema_version')}`",
-            f"- benchmark_id: `{payload.get('benchmark_id')}`",
-            f"- mode: `{payload.get('mode')}`",
-            f"- worker_mode: `{payload.get('worker_mode')}`",
-            f"- worker_bridge_verified: `{outcome.get('worker_bridge_verified')}`",
-            f"- runner_return_status: `{outcome.get('runner_return_status')}`",
-            f"- official_score_status: `{outcome.get('official_score_status')}`",
-            f"- worker_loopx_cli_call_total: `{outcome.get('worker_loopx_cli_call_total')}`",
-            f"- n_completed_trials: `{progress.get('n_completed_trials')}`",
-            f"- submit_eligible: `{payload.get('submit_eligible')}`",
-        ]
-        return "\n".join(lines) + "\n"
-
-    if payload.get("schema_version") == WORKER_BRIDGE_OUTCOME_SCHEMA_VERSION:
-        policy = payload.get("wall_time_policy") or {}
-        lines = [
-            "# LoopX Worker Bridge Outcome",
-            "",
-            f"- ok: `{payload.get('ok')}`",
-            f"- schema_version: `{payload.get('schema_version')}`",
-            f"- bridge_surface: `{payload.get('bridge_surface')}`",
-            f"- worker_bridge_verified: `{payload.get('worker_bridge_verified')}`",
-            f"- runner_return_status: `{payload.get('runner_return_status')}`",
-            f"- official_score_status: `{payload.get('official_score_status')}`",
-            f"- worker_loopx_cli_call_total: `{payload.get('worker_loopx_cli_call_total')}`",
-            f"- required_worker_loopx_cli_call_total_min: `{payload.get('required_worker_loopx_cli_call_total_min')}`",
-            f"- counter_trace_present: `{payload.get('counter_trace_present')}`",
-            f"- interrupted: `{policy.get('interrupted')}`",
-            f"- wall_time_limit_seconds: `{policy.get('wall_time_limit_seconds')}`",
-            f"- changes_official_benchmark_timeout: `{policy.get('changes_official_benchmark_timeout')}`",
             f"- next_action: `{payload.get('next_action')}`",
         ]
         return "\n".join(lines) + "\n"

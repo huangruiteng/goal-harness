@@ -82,12 +82,8 @@ FAMILY_CHECKS: dict[str, list[dict[str, str]]] = {
     ],
     "Evidence Lifecycle": [
         {
-            "command": "python3 examples/benchmark-run-ledger-smoke.py",
-            "reason": "checks compact benchmark/run evidence without raw logs",
-        },
-        {
-            "command": "python3 examples/benchmark-case-analysis-smoke.py",
-            "reason": "checks reusable case-analysis projections from compact artifacts",
+            "command": "python3 examples/benchmark-candidate-source-boundary-smoke.py",
+            "reason": "guards raw/private candidate source exclusion",
         },
         {
             "command": "python3 examples/benchmark-artifact-path-filter-smoke.py",
@@ -371,8 +367,8 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
             "refactor",
             "quota.py",
             "status.py",
-            "terminal_bench.py",
-            "skillsbench",
+            "benchmark/",
+            "benchmark_toolkit",
             "loopx/",
             "examples/",
             "scripts/",
@@ -1293,35 +1289,28 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
         ],
     },
     {
-        "id": "benchmark-adapter-readiness",
-        "title": "Benchmark adapter readiness",
-        "purpose": "Check public adapter contracts and evidence boundaries without launching benchmark jobs by default.",
+        "id": "benchmark-toolkit-boundary",
+        "title": "Benchmark toolkit boundary",
+        "purpose": "Check provider-neutral permission, artifact, candidate-source, and integrity boundaries without launching jobs.",
         "catalog_families": ["Evidence Lifecycle", "State And Boundary", "Work Routing"],
         "trigger_hints": (
             "benchmark",
-            "benchmark adapter",
-            "benchmark runner",
-            "benchmark ledger",
-            "skillsbench",
-            "terminal-bench",
-            "loopx/benchmark",
-            "loopx/benchmark_case_state.py",
+            "benchmark toolkit",
+            "benchmark research",
+            "loopx/capabilities/benchmark_toolkit",
+            "benchmark/",
             "examples/benchmark",
         ),
         "checks": [
             {
-                "command": "python3 examples/terminal-bench-adapter-readiness-characterization-smoke.py",
+                "command": "python3 examples/benchmark-run-permission-policy-smoke.py",
                 "tier": "default",
-                "reason": (
-                    "characterizes Terminal-Bench preflight, no-submit boundary, "
-                    "CLI bridge/access packet, and benchmark_run builders without "
-                    "launching benchmark jobs"
-                ),
+                "reason": "guards explicit execution and publication permission policy",
             },
             {
-                "command": "python3 examples/benchmark-core-adapter-contract-smoke.py",
+                "command": "python3 examples/benchmark-candidate-source-boundary-smoke.py",
                 "tier": "default",
-                "reason": "checks shared benchmark adapter contract behavior",
+                "reason": "guards candidate selection against raw and private sources",
             },
             {
                 "command": "python3 examples/benchmark-artifact-path-filter-smoke.py",
@@ -1329,9 +1318,9 @@ CURRENT_REPO_PROFILES: tuple[dict[str, Any], ...] = (
                 "reason": "guards raw/private benchmark artifact path exclusion",
             },
             {
-                "command": "python3 examples/skillsbench-benchmark-run-smoke.py",
+                "command": "python3 -m pytest -q tests/capabilities/test_benchmark_toolkit.py",
                 "tier": "deep",
-                "reason": "runs the heavier SkillsBench integration smoke only when explicitly requested",
+                "reason": "checks integrity qualification and fail-closed public boundaries",
             },
         ],
     },

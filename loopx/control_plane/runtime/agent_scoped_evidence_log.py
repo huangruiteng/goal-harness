@@ -35,7 +35,6 @@ def _safe_rollout_event_row(event: Mapping[str, Any]) -> dict[str, Any]:
         "todo_id",
         "classification",
         "delivery_outcome",
-        "benchmark_id",
         "case_id",
         "run_id",
     ):

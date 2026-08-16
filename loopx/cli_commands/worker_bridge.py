@@ -14,11 +14,9 @@ from ..worker_bridge import (
     DEFAULT_ACTIVE_USER_SIMULATOR_PROMPT_JSON,
     DEFAULT_WORKER_BRIDGE_ACTIVE_USER_FEED_JSONL,
     DEFAULT_WORKER_BRIDGE_ACTIVE_USER_OBSERVATION_JSON,
-    DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
     DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
     DEFAULT_WORKER_BRIDGE_MODULE,
     DEFAULT_WORKER_BRIDGE_PYTHON_BIN,
-    DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS,
     LOOPX_PROJECT_ROOT_PLACEHOLDER,
     LOOPX_RUNTIME_ROOT_PLACEHOLDER,
     append_worker_bridge_counter_trace_row,
@@ -26,16 +24,10 @@ from ..worker_bridge import (
     build_active_user_intervention,
     build_active_user_intervention_channel_contract,
     build_active_user_intervention_from_simulator_output,
-    build_worker_bridge_benchmark_run,
-    build_worker_bridge_benchmark_run_from_counters,
     build_worker_bridge_install_contract,
-    build_worker_bridge_interaction_counters_from_trace,
-    build_worker_bridge_outcome,
-    load_worker_bridge_counter_trace_file,
     observe_active_user_intervention_feed,
     render_worker_bridge_install_contract_markdown,
     write_active_user_observation_file,
-    write_worker_bridge_benchmark_run_file,
 )
 
 
@@ -51,71 +43,8 @@ WORKER_BRIDGE_COMMANDS = {
     "active-user-intervention",
     "active-user-observe",
     "active-user-simulator-output",
-    "benchmark-run",
     "contract",
-    "outcome",
 }
-
-
-def _add_worker_bridge_outcome_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--worker-cli-call-total",
-        type=int,
-        default=0,
-        help="Compact count of in-worker LoopX CLI calls.",
-    )
-    parser.add_argument(
-        "--required-worker-cli-call-total-min",
-        type=int,
-        default=1,
-        help="Minimum worker CLI call count required to claim bridge verification.",
-    )
-    parser.add_argument(
-        "--counter-trace-present",
-        action="store_true",
-        help="Whether a compact worker counter trace was observed.",
-    )
-    parser.add_argument(
-        "--runner-return-completed",
-        action="store_true",
-        help="Whether the runner returned a completed case result.",
-    )
-    parser.add_argument(
-        "--official-score-completed",
-        action="store_true",
-        help="Whether an official task score is available.",
-    )
-    parser.add_argument(
-        "--official-score-value",
-        type=float,
-        help="Official task score value when --official-score-completed is set.",
-    )
-    parser.add_argument(
-        "--interrupted",
-        action="store_true",
-        help="Whether the controller interrupted the worker run.",
-    )
-    parser.add_argument(
-        "--interrupt-reason",
-        default="",
-        help="Public-safe interrupt reason label.",
-    )
-    parser.add_argument(
-        "--wall-time-seconds",
-        type=float,
-        help="Observed wall time in seconds, if available.",
-    )
-    parser.add_argument(
-        "--wall-time-limit-seconds",
-        type=float,
-        default=DEFAULT_WORKER_BRIDGE_WALL_TIME_LIMIT_SECONDS,
-        help="Controller wall-time limit for this worker bridge outcome.",
-    )
-    parser.add_argument(
-        "--side-effect-audit-failed",
-        action="store_true",
-        help="Mark the side-effect audit as failed.",
-    )
 
 
 def register_worker_bridge_commands(
@@ -158,12 +87,7 @@ def register_worker_bridge_commands(
     )
     worker_bridge_contract_parser.add_argument(
         "--scan-path",
-        help="Container-visible public scan path. Defaults to the LoopX benchmark module.",
-    )
-    worker_bridge_contract_parser.add_argument(
-        "--benchmark-run-json",
-        default=DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
-        help="Worker-visible benchmark_run_v0 JSON write path.",
+        help="Container-visible public scan path. Defaults to the LoopX package.",
     )
     worker_bridge_contract_parser.add_argument(
         "--counter-trace-json",
@@ -175,60 +99,6 @@ def register_worker_bridge_commands(
         default="<classification>",
         help="Classification label for worker-side compact writeback.",
     )
-
-    worker_bridge_outcome_parser = worker_bridge_sub.add_parser(
-        "outcome",
-        help="Render compact worker bridge evidence and runner-return outcome.",
-    )
-    add_subcommand_format(worker_bridge_outcome_parser)
-    _add_worker_bridge_outcome_args(worker_bridge_outcome_parser)
-
-    worker_bridge_benchmark_run_parser = worker_bridge_sub.add_parser(
-        "benchmark-run",
-        help="Render a worker-side benchmark_run_v0 writeback payload.",
-    )
-    add_subcommand_format(worker_bridge_benchmark_run_parser)
-    worker_bridge_benchmark_run_parser.add_argument(
-        "--source-runner",
-        default="worker_bridge_runner",
-        help="Public-safe runner label for the worker-side benchmark_run_v0 payload.",
-    )
-    worker_bridge_benchmark_run_parser.add_argument(
-        "--benchmark-id",
-        default="worker-bridge-sample@v0",
-        help="Public-safe benchmark id.",
-    )
-    worker_bridge_benchmark_run_parser.add_argument(
-        "--job-name",
-        default="loopx_worker_bridge_sample",
-        help="Public-safe job name.",
-    )
-    worker_bridge_benchmark_run_parser.add_argument(
-        "--mode",
-        dest="worker_bridge_benchmark_mode",
-        default="codex_loopx_active_worker",
-        help="Benchmark treatment mode.",
-    )
-    worker_bridge_benchmark_run_parser.add_argument(
-        "--worker-mode",
-        default="codex_loopx_cli",
-        help="Worker mode label.",
-    )
-    worker_bridge_benchmark_run_parser.add_argument(
-        "--task-id",
-        default="worker-bridge-sample",
-        help="Public-safe task id.",
-    )
-    worker_bridge_benchmark_run_parser.add_argument(
-        "--trial-name",
-        default="worker-bridge-sample-worker",
-        help="Public-safe trial name.",
-    )
-    worker_bridge_benchmark_run_parser.add_argument(
-        "--official-score-kind",
-        help="Official score kind label. Defaults to a blocker or sample-success label.",
-    )
-    _add_worker_bridge_outcome_args(worker_bridge_benchmark_run_parser)
 
     active_user_contract_parser = worker_bridge_sub.add_parser(
         "active-user-contract",
@@ -270,11 +140,6 @@ def register_worker_bridge_commands(
         "--counter-trace-json",
         default=DEFAULT_WORKER_BRIDGE_COUNTER_TRACE_JSON,
         help="Worker-visible compact counter trace JSONL path.",
-    )
-    active_user_contract_parser.add_argument(
-        "--benchmark-run-json",
-        default=DEFAULT_WORKER_BRIDGE_BENCHMARK_RUN_JSON,
-        help="Worker-visible compact benchmark_run checkpoint JSON path.",
     )
     active_user_contract_parser.add_argument(
         "--classification",
@@ -420,10 +285,6 @@ def register_worker_bridge_commands(
         help="Optional worker counter trace JSONL path to append active_user_observe.",
     )
     active_user_observe_parser.add_argument(
-        "--benchmark-run-json",
-        help="Optional compact worker benchmark_run checkpoint JSON path to write.",
-    )
-    active_user_observe_parser.add_argument(
         "--goal-id",
         default="worker-bridge-active-user",
         help="Compact goal id label for optional counter/checkpoint writeback.",
@@ -437,16 +298,6 @@ def register_worker_bridge_commands(
         "--classification",
         default="active_user_observe_checkpoint",
         help="Compact classification label for optional counter/checkpoint writeback.",
-    )
-    active_user_observe_parser.add_argument(
-        "--task-id",
-        default="worker-bridge-active-user",
-        help="Compact task id label for optional benchmark_run checkpoint.",
-    )
-    active_user_observe_parser.add_argument(
-        "--trial-name",
-        default="worker-bridge-active-user-observe-checkpoint",
-        help="Compact trial name for optional benchmark_run checkpoint.",
     )
 
 
@@ -465,7 +316,7 @@ def handle_worker_bridge_command(
             "mode": "worker-bridge",
             "error": (
                 "worker-bridge requires a subcommand; use `contract`, "
-                "`outcome`, `benchmark-run`, `active-user-contract`, "
+                "`active-user-contract`, "
                 "`active-user-codex-simulator-contract`, "
                 "`active-user-intervention`, `active-user-simulator-output`, "
                 "or `active-user-observe`."
@@ -486,49 +337,8 @@ def handle_worker_bridge_command(
                 python_bin=args.python_bin,
                 module=args.module,
                 scan_path=args.scan_path,
-                benchmark_run_json=args.benchmark_run_json,
                 counter_trace_json=args.counter_trace_json,
                 classification=args.classification,
-            )
-        elif args.worker_bridge_command == "outcome":
-            payload = build_worker_bridge_outcome(
-                worker_loopx_cli_call_total=args.worker_cli_call_total,
-                counter_trace_present=bool(args.counter_trace_present),
-                runner_return_completed=bool(args.runner_return_completed),
-                official_score_completed=bool(args.official_score_completed),
-                official_score_value=args.official_score_value,
-                interrupted=bool(args.interrupted),
-                interrupt_reason=args.interrupt_reason,
-                wall_time_seconds=args.wall_time_seconds,
-                wall_time_limit_seconds=args.wall_time_limit_seconds,
-                required_worker_loopx_cli_call_total_min=(
-                    args.required_worker_cli_call_total_min
-                ),
-                side_effect_audit_passed=not bool(args.side_effect_audit_failed),
-            )
-        elif args.worker_bridge_command == "benchmark-run":
-            payload = build_worker_bridge_benchmark_run(
-                source_runner=args.source_runner,
-                benchmark_id=args.benchmark_id,
-                job_name=args.job_name,
-                mode=args.worker_bridge_benchmark_mode,
-                worker_mode=args.worker_mode,
-                task_id=args.task_id,
-                trial_name=args.trial_name,
-                official_score_kind=args.official_score_kind,
-                worker_loopx_cli_call_total=args.worker_cli_call_total,
-                counter_trace_present=bool(args.counter_trace_present),
-                runner_return_completed=bool(args.runner_return_completed),
-                official_score_completed=bool(args.official_score_completed),
-                official_score_value=args.official_score_value,
-                interrupted=bool(args.interrupted),
-                interrupt_reason=args.interrupt_reason,
-                wall_time_seconds=args.wall_time_seconds,
-                wall_time_limit_seconds=args.wall_time_limit_seconds,
-                required_worker_loopx_cli_call_total_min=(
-                    args.required_worker_cli_call_total_min
-                ),
-                side_effect_audit_passed=not bool(args.side_effect_audit_failed),
             )
         elif args.worker_bridge_command == "active-user-contract":
             payload = build_active_user_intervention_channel_contract(
@@ -538,7 +348,6 @@ def handle_worker_bridge_command(
                 module=args.module,
                 feed_jsonl=args.feed_jsonl,
                 observation_json=args.observation_json,
-                benchmark_run_json=args.benchmark_run_json,
                 counter_trace_json=args.counter_trace_json,
                 classification=args.classification,
                 min_interval_seconds=args.min_interval_seconds,
@@ -610,40 +419,6 @@ def handle_worker_bridge_command(
                             "worker_observation_proof"
                         ),
                     )
-                )
-            if args.benchmark_run_json:
-                trace_rows = load_worker_bridge_counter_trace_file(
-                    args.counter_trace_json
-                )
-                interaction_counters = build_worker_bridge_interaction_counters_from_trace(
-                    trace_rows
-                )
-                checkpoint = build_worker_bridge_benchmark_run_from_counters(
-                    interaction_counters,
-                    counter_trace_present=bool(trace_rows),
-                    source_runner="worker_bridge_active_user_observe",
-                    benchmark_id="worker-bridge-active-user@v0",
-                    job_name="loopx_active_user_observe_checkpoint",
-                    mode=args.bridge_mode,
-                    task_id=args.task_id,
-                    trial_name=args.trial_name,
-                )
-                checkpoint["worker_bridge_checkpoint"] = {
-                    "schema_version": "loopx_worker_bridge_checkpoint_v0",
-                    "checkpoint_kind": "active_user_observe",
-                    "interrupted": False,
-                    "trace_row_count": len(trace_rows),
-                    "raw_trace_recorded": False,
-                    "raw_paths_recorded": False,
-                }
-                payload["benchmark_run_checkpoint_written"] = (
-                    write_worker_bridge_benchmark_run_file(
-                        args.benchmark_run_json,
-                        checkpoint,
-                    )
-                )
-                payload["benchmark_run_checkpoint_schema_version"] = checkpoint.get(
-                    "schema_version"
                 )
     except Exception as exc:
         payload = {

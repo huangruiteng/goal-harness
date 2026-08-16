@@ -74,53 +74,24 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-reserved-run-path-") as raw_tmp:
         root = Path(raw_tmp)
         registry_path = write_registry(root)
-        original_history_now = history.now_local
         original_refresh_now = state_refresh.now_local
-        history.now_local = lambda: FIXED_TIME
         state_refresh.now_local = lambda: FIXED_TIME
         try:
             payloads = [
-                history.append_benchmark_result(
-                    registry_path=registry_path,
-                    runtime_root_override=None,
-                    goal_id=GOAL_ID,
-                    benchmark_result={"schema_version": "benchmark_result_v0", "case": "fixture"},
-                    dry_run=False,
-                ),
-                history.append_benchmark_comparison(
-                    registry_path=registry_path,
-                    runtime_root_override=None,
-                    goal_id=GOAL_ID,
-                    benchmark_comparison={
-                        "schema_version": "benchmark_comparison_v0",
-                        "comparison_id": "fixture-comparison",
-                    },
-                    dry_run=False,
-                ),
-                history.append_benchmark_learning_ledger(
-                    registry_path=registry_path,
-                    runtime_root_override=None,
-                    goal_id=GOAL_ID,
-                    benchmark_learning_ledger={
-                        "schema_version": "benchmark_learning_ledger_v0",
-                        "task_id": "fixture-task",
-                    },
-                    dry_run=False,
-                ),
                 state_refresh.refresh_state_run(
                     registry_path=registry_path,
                     runtime_root_override=None,
                     goal_id=GOAL_ID,
                     project=None,
                     state_file=None,
-                    classification="reserved_run_path_refresh",
+                    classification=f"reserved_run_path_refresh_{suffix}",
                     recommended_action="continue reserved run path validation",
                     dry_run=False,
                     sync_global=False,
-                ),
+                )
+                for suffix in ("a", "b", "c", "d")
             ]
         finally:
-            history.now_local = original_history_now
             state_refresh.now_local = original_refresh_now
 
         identities = [artifact_identity(payload) for payload in payloads]

@@ -65,12 +65,10 @@ PUBLIC_BOUNDARY_TOKENS = (
     ".github/",
 )
 BENCHMARK_SENSITIVE_TOKENS = (
-    "loopx/benchmark",
+    "benchmark/",
+    "loopx/capabilities/benchmark_toolkit/",
+    "deprecate/benchmark-legacy/",
     "loopx/worker_bridge.py",
-    "scripts/skillsbench",
-    "scripts/terminal_bench",
-    "examples/skillsbench",
-    "examples/terminal-bench",
     "examples/benchmark",
 )
 LARK_KANBAN_TOKENS = (

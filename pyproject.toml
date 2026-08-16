@@ -53,17 +53,16 @@ include = ["loopx*"]
 "loopx.opencode2_goal_mode" = ["*.mjs", "README.md"]
 "loopx.pi_goal_mode" = ["*.ts", "*.mjs", "README.md"]
 
+[tool.pytest.ini_options]
+norecursedirs = ["deprecate"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
 files = [
-  "loopx/claude_goal_baseline.py",
-  "loopx/benchmarks/read_models/benchmark_run_execution_contract.py",
-  "loopx/benchmarks/read_models/benchmark_run_failure.py",
   "loopx/control_plane/__init__.py",
   "loopx/control_plane/quota/effect_program.py",
   "loopx/control_plane/quota/states.py",
-  "loopx/control_plane/runtime/active_user_assisted_pilot.py",
   "loopx/control_plane/runtime/event_store_migration_bridge.py",
   "loopx/control_plane/runtime/time.py",
   "loopx/control_plane/runtime/trajectory_hygiene.py",

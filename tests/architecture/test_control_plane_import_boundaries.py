@@ -12,7 +12,6 @@ SCRIPTS_ROOT = REPOSITORY_ROOT / "scripts"
 CONTROL_PLANE_ROOT = PACKAGE_ROOT / "control_plane"
 EXPERIMENT_ROOT = PACKAGE_ROOT / "experiments"
 EXPERIMENT_PREFIX = "loopx.experiments"
-BENCHMARK_READ_MODELS_ROOT = PACKAGE_ROOT / "benchmarks" / "read_models"
 STATUS_MODULE = PACKAGE_ROOT / "status.py"
 QUOTA_MODULE = PACKAGE_ROOT / "quota.py"
 PUBLIC_CONTRACT_ROOTS = (
@@ -206,26 +205,6 @@ def test_core_does_not_import_experiments() -> None:
     assert not forbidden_edges, (
         "stable LoopX code must not depend on opt-in experiments; "
         f"unexpected edges: {sorted(forbidden_edges)}"
-    )
-
-
-def test_benchmark_read_models_stay_out_of_control_plane_runtime() -> None:
-    runtime_root = CONTROL_PLANE_ROOT / "runtime"
-    misplaced = sorted(
-        str(path.relative_to(PACKAGE_ROOT))
-        for path in (
-            *runtime_root.glob("benchmark_*.py"),
-            *runtime_root.glob("skillsbench_*.py"),
-        )
-    )
-
-    assert BENCHMARK_READ_MODELS_ROOT.is_dir()
-    assert (BENCHMARK_READ_MODELS_ROOT / "benchmark_projection.py").is_file()
-    assert (BENCHMARK_READ_MODELS_ROOT / "goal_start_control_score.py").is_file()
-    assert not (runtime_root / "goal_start_control_score.py").exists()
-    assert not misplaced, (
-        "benchmark-specific read models belong to loopx.benchmarks.read_models, "
-        f"not the generic control-plane runtime: {misplaced}"
     )
 
 

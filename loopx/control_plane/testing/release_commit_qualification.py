@@ -33,7 +33,6 @@ REQUIRED_QUALIFICATION_IDS = (
     "public_boundary",
     "doubao_actual_default",
 )
-OUTCOME_QUALIFICATION_ID = "release_outcome_baseline"
 EXPECTED_RESULT_SCHEMA_BY_QUALIFICATION = {
     "pytest": "pytest_summary_v0",
     "ruff": "ruff_summary_v0",
@@ -43,7 +42,6 @@ EXPECTED_RESULT_SCHEMA_BY_QUALIFICATION = {
     "install_upgrade_host": "release_install_upgrade_host_summary_v0",
     "public_boundary": "loopx_public_boundary_check_v0",
     "doubao_actual_default": "actual_default_model_behavior_portfolio_v0",
-    OUTCOME_QUALIFICATION_ID: "release_outcome_baseline_v0",
 }
 
 _HEX_ID_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -59,7 +57,7 @@ _SOURCE_FIELDS = {
     "package_version",
     "version_tag",
 }
-_CLAIM_FIELDS = {"long_horizon_outcome_uplift"}
+_CLAIM_FIELDS: set[str] = set()
 _CHECK_FIELDS = {
     "schema_version",
     "source",
@@ -344,70 +342,10 @@ def _validate_doubao(value: Any) -> tuple[dict[str, Any], list[str]]:
     return normalized, [] if valid else ["doubao_actual_default_failed"]
 
 
-def _validate_outcome(
-    value: Any,
-    *,
-    git_commit: str,
-) -> tuple[dict[str, Any], list[str]]:
-    summary = _summary(
-        value,
-        qualification_id=OUTCOME_QUALIFICATION_ID,
-        allowed={
-            "decision",
-            "eligible_for_owner_review",
-            "candidate_ref",
-            "distinct_case_count",
-            "paired_attempt_count",
-            "regression_count",
-            "evidence_gap_count",
-        },
-    )
-    decision = _token(summary.get("decision"), field="release_outcome_baseline.decision")
-    candidate_ref = _token(
-        summary.get("candidate_ref"), field="release_outcome_baseline.candidate_ref"
-    )
-    eligible = _boolean(
-        summary.get("eligible_for_owner_review"),
-        field="release_outcome_baseline.eligible_for_owner_review",
-    )
-    distinct_cases = _positive_int(
-        summary.get("distinct_case_count"),
-        field="release_outcome_baseline.distinct_case_count",
-    )
-    attempts = _positive_int(
-        summary.get("paired_attempt_count"),
-        field="release_outcome_baseline.paired_attempt_count",
-    )
-    regressions = _non_negative_int(
-        summary.get("regression_count"), field="release_outcome_baseline.regression_count"
-    )
-    gaps = _non_negative_int(
-        summary.get("evidence_gap_count"),
-        field="release_outcome_baseline.evidence_gap_count",
-    )
-    valid = bool(
-        decision == "owner_review_required"
-        and eligible
-        and candidate_ref == f"git:{git_commit}"
-        and regressions == 0
-        and gaps == 0
-    )
-    normalized = {
-        "decision": decision,
-        "eligible_for_owner_review": eligible,
-        "candidate_ref": candidate_ref,
-        "distinct_case_count": distinct_cases,
-        "paired_attempt_count": attempts,
-        "regression_count": regressions,
-        "evidence_gap_count": gaps,
-    }
-    return normalized, [] if valid else ["release_outcome_baseline_failed"]
-
-
 _SummaryValidator = Callable[[Any], tuple[dict[str, Any], list[str]]]
 
 
-def _validator(qualification_id: str, *, git_commit: str) -> _SummaryValidator:
+def _validator(qualification_id: str) -> _SummaryValidator:
     validators: dict[str, _SummaryValidator] = {
         "pytest": _validate_pytest,
         "ruff": lambda value: _zero_count_summary(
@@ -421,9 +359,6 @@ def _validator(qualification_id: str, *, git_commit: str) -> _SummaryValidator:
         "install_upgrade_host": _validate_install_upgrade_host,
         "public_boundary": _validate_public_boundary,
         "doubao_actual_default": _validate_doubao,
-        OUTCOME_QUALIFICATION_ID: lambda value: _validate_outcome(
-            value, git_commit=git_commit
-        ),
     }
     return validators[qualification_id]
 
@@ -455,9 +390,7 @@ def _normalize_check(
             f"qualifications.{qualification_id}.result_schema_version must be "
             f"{expected_result_schema}"
         )
-    summary, summary_issues = _validator(
-        qualification_id, git_commit=candidate["git_commit"]
-    )(value.get("summary"))
+    summary, summary_issues = _validator(qualification_id)(value.get("summary"))
     source_mismatches = []
     for field in _SOURCE_FIELDS:
         if source[field] != candidate[field]:
@@ -498,21 +431,15 @@ def build_exact_release_commit_qualification(
     if not isinstance(claims, Mapping):
         raise ValueError("manifest.claims must be an object")
     _exact_fields(claims, _CLAIM_FIELDS, field="manifest.claims")
-    outcome_claimed = _boolean(
-        claims.get("long_horizon_outcome_uplift"),
-        field="manifest.claims.long_horizon_outcome_uplift",
-    )
     raw_qualifications = manifest.get("qualifications")
     if not isinstance(raw_qualifications, Mapping):
         raise ValueError("manifest.qualifications must be an object")
-    allowed_ids = set(REQUIRED_QUALIFICATION_IDS) | {OUTCOME_QUALIFICATION_ID}
+    allowed_ids = set(REQUIRED_QUALIFICATION_IDS)
     unknown_ids = sorted(set(raw_qualifications) - allowed_ids)
     if unknown_ids:
         raise ValueError(f"manifest.qualifications contains unknown ids: {unknown_ids}")
 
     required_ids = list(REQUIRED_QUALIFICATION_IDS)
-    if outcome_claimed:
-        required_ids.append(OUTCOME_QUALIFICATION_ID)
     missing = sorted(set(required_ids) - set(raw_qualifications))
     normalized_checks: dict[str, Any] = {}
     failures: list[str] = []
@@ -552,17 +479,12 @@ def build_exact_release_commit_qualification(
         "automatic_release_promotion_allowed": False,
         "candidate": candidate,
         "observed_source": observed,
-        "claims": {"long_horizon_outcome_uplift": outcome_claimed},
+        "claims": {},
         "required_qualification_ids": required_ids,
         "completed_qualification_ids": sorted(normalized_checks),
         "missing_qualification_ids": missing,
         "qualification_failures": sorted(set(failures)),
         "source_mismatches": sorted(set(source_mismatches)),
-        "outcome_baseline_requirement": (
-            "required_for_declared_outcome_uplift"
-            if outcome_claimed
-            else "not_required_without_outcome_uplift_claim"
-        ),
         "qualifications": normalized_checks,
         "read_boundary": {
             "manifest_only": True,
@@ -637,7 +559,6 @@ def render_exact_release_commit_qualification_markdown(payload: dict[str, Any]) 
         f"- git_commit: `{candidate.get('git_commit')}`",
         f"- git_tree: `{candidate.get('git_tree')}`",
         f"- package: `{candidate.get('version_tag')}`",
-        f"- outcome_baseline: `{payload.get('outcome_baseline_requirement')}`",
         f"- automatic_release_promotion_allowed: `{payload.get('automatic_release_promotion_allowed')}`",
         "",
         "## Qualifications",

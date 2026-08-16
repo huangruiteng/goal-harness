@@ -117,30 +117,8 @@ from .control_plane.runtime.status_classifications import (
     HANDOFF_READY_CLASSIFICATIONS,
     USER_OR_CONTROLLER_CLASSIFICATIONS,
 )
-from .benchmarks.read_models.benchmark_comparison import (
-    benchmark_comparison_decision_note as _benchmark_comparison_decision_note_read_model,
-    compact_benchmark_comparison as _compact_benchmark_comparison_read_model,
-)
-from .benchmarks.read_models.benchmark_experiment_report import (
-    benchmark_experiment_report_readiness_note,
-    benchmark_experiment_report_replay_decision,
-    compact_benchmark_experiment_report,
-)
-from .benchmarks.read_models.benchmark_learning_ledger import (
-    compact_benchmark_learning_ledger,
-)
-from .benchmarks.read_models.benchmark_result import compact_benchmark_result
-from .benchmarks.read_models.skillsbench_post_run_debug import (
-    build_skillsbench_post_run_debug_gate,  # noqa: F401
-)
 from .control_plane.runtime.public_safety import (
     public_safe_compact_text,
-)
-from .control_plane.runtime.active_user_assisted_pilot import (
-    compact_active_user_assisted_pilot as _compact_active_user_assisted_pilot_read_model,
-)
-from .control_plane.runtime.run_ingest_health import (
-    worker_bridge_ingest_health_note,
 )
 from .control_plane.runtime.time import parse_timestamp
 from .control_plane.runtime.decision_freshness import (
@@ -236,7 +214,6 @@ from .control_plane.todos.projection import (
 
 
 _PUBLIC_COMPAT_REEXPORTS = {
-    "build_skillsbench_post_run_debug_gate": "loopx.benchmarks.read_models.skillsbench_post_run_debug",
     "DREAMING_ADVISORY_CLASSIFICATIONS": "loopx.control_plane.runtime.status_classifications",
     "TODO_PROJECTION_DETAIL_POINTER_SCHEMA_VERSION": "loopx.control_plane.work_items.project_asset",
     "TODO_PROJECTION_VIEW_SCHEMA_VERSION": "loopx.control_plane.work_items.project_asset",
@@ -278,9 +255,6 @@ MONITOR_DISPLAY_FALLBACK_ACTION = (
     "No immediate agent work; keep the monitor quiet until a material monitor "
     "transition, regression, or concrete blocker appears."
 )
-BENCHMARK_RUN_SCHEMA_VERSION = "benchmark_run_v0"
-MAX_BENCHMARK_RUN_TRIALS = 3
-MAX_BENCHMARK_RUN_LIST_ITEMS = 5
 STATUS_CONTRACT_SCHEMA_VERSION = 2
 MINIMUM_DASHBOARD_STATUS_CONTRACT_SCHEMA_VERSION = 2
 STATUS_CONTRACT_RELOAD_HINT = "scripts/macos-dashboard-launchagent.sh restart"
@@ -680,20 +654,6 @@ def compact_post_handoff_run(run: dict[str, Any], profile: dict[str, Any] | None
     return _attach_run_summary_projections_read_model(
         compact,
         run,
-        compact_benchmark_run=compact_benchmark_run,
-        worker_bridge_ingest_health_note=worker_bridge_ingest_health_note,
-        compact_benchmark_result=compact_benchmark_result,
-        compact_benchmark_comparison=_compact_benchmark_comparison_read_model,
-        benchmark_comparison_decision_note=_benchmark_comparison_decision_note_read_model,
-        compact_benchmark_learning_ledger=compact_benchmark_learning_ledger,
-        compact_benchmark_experiment_report=compact_benchmark_experiment_report,
-        benchmark_experiment_report_readiness_note=(
-            benchmark_experiment_report_readiness_note
-        ),
-        benchmark_experiment_report_replay_decision=(
-            benchmark_experiment_report_replay_decision
-        ),
-        compact_active_user_assisted_pilot=_compact_active_user_assisted_pilot_read_model,
         compact_session_runtime_projection_from_run=(
             compact_session_runtime_projection_from_run
         ),
@@ -1218,30 +1178,6 @@ def build_attention_queue(
     return queue
 
 
-def _compact_benchmark_post_launch_materialization(value: Any) -> dict[str, Any] | None:
-    from .benchmarks.read_models.benchmark_status_runner import (
-        _compact_benchmark_post_launch_materialization as _impl,
-    )
-
-    return _impl(value)
-
-
-def compact_benchmark_post_launch_materialization(value: Any) -> dict[str, Any] | None:
-    from .benchmarks.read_models.benchmark_status_runner import (
-        compact_benchmark_post_launch_materialization as _impl,
-    )
-
-    return _impl(value)
-
-
-def compact_benchmark_run(run: dict[str, Any]) -> dict[str, Any] | None:
-    from .benchmarks.read_models.benchmark_status_runner import (
-        compact_benchmark_run as _impl,
-    )
-
-    return _impl(run)
-
-
 def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     compact = _compact_run_base_read_model(
         run,
@@ -1261,16 +1197,6 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     return _attach_run_summary_projections_read_model(
         compact,
         run,
-        compact_benchmark_run=compact_benchmark_run,
-        worker_bridge_ingest_health_note=worker_bridge_ingest_health_note,
-        compact_benchmark_result=compact_benchmark_result,
-        compact_benchmark_comparison=_compact_benchmark_comparison_read_model,
-        benchmark_comparison_decision_note=_benchmark_comparison_decision_note_read_model,
-        compact_benchmark_learning_ledger=compact_benchmark_learning_ledger,
-        compact_benchmark_experiment_report=compact_benchmark_experiment_report,
-        benchmark_experiment_report_readiness_note=benchmark_experiment_report_readiness_note,
-        benchmark_experiment_report_replay_decision=benchmark_experiment_report_replay_decision,
-        compact_active_user_assisted_pilot=_compact_active_user_assisted_pilot_read_model,
         compact_session_runtime_projection_from_run=compact_session_runtime_projection_from_run,
     )
 
@@ -1299,12 +1225,6 @@ def build_status_runtime_summary_context() -> StatusRuntimeSummaryContext:
         compact_run=compact_run,
         quota_status=quota_status,
         parse_timestamp=parse_timestamp,
-        compact_benchmark_run=compact_benchmark_run,
-        compact_benchmark_result=compact_benchmark_result,
-        compact_benchmark_comparison=_compact_benchmark_comparison_read_model,
-        compact_benchmark_learning_ledger=compact_benchmark_learning_ledger,
-        compact_benchmark_experiment_report=compact_benchmark_experiment_report,
-        compact_active_user_assisted_pilot=_compact_active_user_assisted_pilot_read_model,
         run_has_external_evidence_watch_signal=run_has_external_evidence_watch_signal,
         decision_classifications=EVENT_LEDGER_DECISION_CLASSIFICATIONS,
         evidence_classifications=EVENT_LEDGER_EVIDENCE_CLASSIFICATIONS,

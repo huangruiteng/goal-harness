@@ -140,11 +140,7 @@ from .cli_commands.opencode2_goal_worker import (
     handle_opencode2_goal_worker_command,
     register_opencode2_goal_worker_command,
 )
-from .cli_rollout import (
-    append_benchmark_result_rollout_event,
-    append_benchmark_run_rollout_event,
-    append_cli_rollout_event,
-)
+from .cli_rollout import append_cli_rollout_event
 from .capabilities.project_skill_delivery.cli import (
     handle_project_skill_command,
     register_project_skill_commands,
@@ -642,10 +638,8 @@ def main(argv: list[str] | None = None) -> int:
 
     benchmark_result = handle_benchmark_command(
         args,
-        registry_path=registry_path,
         print_payload=print_payload,
         output_format=output_format,
-        append_benchmark_run_rollout_event=append_benchmark_run_rollout_event,
     )
     if benchmark_result is not None:
         return benchmark_result
@@ -655,8 +649,6 @@ def main(argv: list[str] | None = None) -> int:
             registry_path=registry_path,
             runtime_root_arg=args.runtime_root,
             print_payload=print_payload,
-            append_benchmark_run_rollout_event=append_benchmark_run_rollout_event,
-            append_benchmark_result_rollout_event=append_benchmark_result_rollout_event,
         )
 
     project_lifecycle_result = handle_project_lifecycle_command(

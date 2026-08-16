@@ -15,8 +15,6 @@ ROLLOUT_EVENT_SUMMARY_SCHEMA_VERSION = "loopx_rollout_event_summary_v0"
 DEFAULT_ROLLOUT_EVENT_LOG_NAME = "rollout-event-log.jsonl"
 
 ROLLOUT_EVENT_KINDS = {
-    "benchmark_launch",
-    "benchmark_status",
     "codex_session_observed",
     "capability_gap",
     "compact_blocker",
@@ -42,7 +40,6 @@ ROLLOUT_EVENT_KINDS = {
 }
 
 PRIVATE_SOURCE_KINDS = {
-    "benchmark_run_dir",
     "codex_sessions_jsonl",
     "local_runtime_state",
     "private_runner_artifact",
@@ -203,7 +200,6 @@ def build_rollout_event(
     event_kind: str,
     agent_id: str | None = None,
     todo_id: str | None = None,
-    benchmark_id: str | None = None,
     case_id: str | None = None,
     run_id: str | None = None,
     lane_id: str | None = None,
@@ -235,7 +231,7 @@ def build_rollout_event(
     """Build a public-safe append-only LoopX rollout event.
 
     The event records lifecycle metadata only. It intentionally keeps raw Codex
-    sessions, benchmark logs, task text, trajectories, credentials, and absolute
+    sessions, runner logs, task text, trajectories, credentials, and absolute
     local paths out of the payload.
     """
 
@@ -278,7 +274,6 @@ def build_rollout_event(
     optional_scalars = {
         "agent_id": agent_id,
         "todo_id": todo_id,
-        "benchmark_id": benchmark_id,
         "case_id": case_id,
         "run_id": run_id,
         "status": status,
@@ -465,7 +460,6 @@ def _safe_event_view(event: Mapping[str, Any]) -> dict[str, Any]:
         "status",
         "agent_id",
         "todo_id",
-        "benchmark_id",
         "case_id",
         "run_id",
         "lane",

@@ -456,10 +456,8 @@ def assert_parallel_jobs_execute_and_preserve_report_order() -> None:
 
 def assert_parallel_jobs_keep_marked_smokes_serial() -> None:
     sensitive_scripts = {
-        "skillsbench-app-server-goal-worker-smoke.py": (
-            "short fake-worker transport deadlines"
-        ),
-        "codex-cli-long-run-benchmark-smoke.py": "timing-sensitive long-horizon",
+        "issue-fix-acceptance-loop-smoke.py": "temporary git repositories",
+        "issue-fix-workflow-e2e-smoke.py": "temporary git repository",
     }
     for script, expected_reason in sensitive_scripts.items():
         reason = canary_runner._serial_smoke_reason(

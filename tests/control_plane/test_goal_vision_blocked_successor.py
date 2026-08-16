@@ -163,7 +163,7 @@ def _cross_domain_wait_status_payload() -> dict:
         text="[P2] Resume this agent's release qualification successor.",
         status="deferred",
         priority="P2",
-        action_kind="release_outcome_baseline_qualification",
+        action_kind="release_evidence_qualification",
         claimed_by=AGENT_ID,
         required_capabilities=["benchmark_runner"],
         resume_when="capacity_available:benchmark_runner",
@@ -187,7 +187,7 @@ def _cross_domain_wait_status_payload() -> dict:
                         "continuous_monitor",
                     ],
                     "vision_requirement": "required",
-                    "preferred_action_kinds": ["release_outcome_baseline_*"],
+                    "preferred_action_kinds": ["release_evidence_*"],
                     "avoid_action_kinds": ["benchmark_runner_*"],
                 }
             },
