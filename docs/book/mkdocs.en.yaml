@@ -6,6 +6,12 @@ docs_dir: en
 site_dir: ../../output/docs-book-en
 edit_uri: edit/main/docs/book/en/
 
+# Capability pages belong to the root docs site. Keep this inherited config on
+# the Developer Book's own source tree.
+plugins:
+  - search
+hooks: []
+
 theme:
   name: material
   language: en

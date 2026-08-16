@@ -9,6 +9,12 @@ edit_uri: edit/main/docs/book/
 exclude_docs: |
   en/**
 
+# Capability pages belong to the root docs site. Keep this inherited config on
+# the Developer Book's own source tree.
+plugins:
+  - search
+hooks: []
+
 theme:
   name: material
   language: zh
