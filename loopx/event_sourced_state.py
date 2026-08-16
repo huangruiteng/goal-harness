@@ -821,6 +821,7 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
             "completed_at",
             "updated_at",
             "no_followup",
+            "completion_turn_key",
         ):
             if payload.get(key) is not None:
                 todo[key] = compact_text(payload[key])
@@ -945,6 +946,7 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         **monitor_metadata,
         note=item.get("note"),
         evidence=item.get("evidence"),
+        completion_turn_key=item.get("completion_turn_key"),
         reason=item.get("reason"),
         completed_at=item.get("completed_at"),
         updated_at=item.get("updated_at"),

@@ -72,6 +72,7 @@ TODO_SUMMARY_COMPACT_FIELDS = (
     "route_key",
     "completed_at",
     "updated_at",
+    "completion_turn_key",
     "superseded_by",
     "handoff_note",
 )

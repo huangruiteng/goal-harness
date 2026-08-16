@@ -28,6 +28,11 @@ def append_todo_rollout_event(
     append_cli_rollout_event: RolloutEventAppender,
 ) -> None:
     turn_instance_id = getattr(args, "turn_instance_id", None)
+    terminal_closeout = bool(
+        turn_instance_id
+        and args.todo_command == "complete"
+        and getattr(args, "no_follow_up", False)
+    )
     if (
         not payload.get("ok")
         or payload.get("dry_run")
@@ -42,7 +47,11 @@ def append_todo_rollout_event(
         agent_id=args.agent_id or args.claimed_by,
         todo_id=args.todo_id or str(payload.get("todo_id") or "").strip() or None,
         run_id=turn_instance_id,
-        status=str(payload.get("status") or args.todo_command or "").strip(),
+        status=(
+            "terminal_no_followup"
+            if terminal_closeout
+            else str(payload.get("status") or args.todo_command or "").strip()
+        ),
         summary=(
             f"todo {args.todo_command} recorded for "
             f"{payload.get('todo_id') or args.todo_id or 'unstructured todo'}"
@@ -73,7 +82,14 @@ def append_todo_rollout_event(
             ),
         },
         idempotency_fields=(
-            ["goal_id", "event_kind", "agent_id", "todo_id", "run_id"]
+            [
+                "goal_id",
+                "event_kind",
+                "agent_id",
+                "todo_id",
+                "run_id",
+                *(["status"] if terminal_closeout else []),
+            ]
             if turn_instance_id
             else None
         ),

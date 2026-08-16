@@ -33,6 +33,8 @@ from .contract import (
     normalize_todo_continuation_policy,
     normalize_todo_excluded_agents,
     normalize_todo_id,
+    normalize_todo_id_list,
+    normalize_todo_no_followup,
     normalize_todo_task_repository,
     todo_done_for_status,
 )
@@ -335,7 +337,23 @@ def complete_event_projected_goal_todo(
     effective_claimed_by = claimed_by or normalize_todo_claimed_by(item.get("claimed_by"))
     store = AppendOnlyStateEventStore(Path(context["event_log_path"]))
     already_done = todo_done_for_status(str(item.get("status") or TODO_STATUS_OPEN))
-    if already_done:
+    terminal_upgrade_requested = (
+        str(item.get("status") or "") == TODO_STATUS_DONE
+        and no_followup
+        and normalize_todo_no_followup(item.get("no_followup")) is not True
+    )
+    if terminal_upgrade_requested:
+        existing_turn_key = str(item.get("completion_turn_key") or "")
+        if not completion_turn_key or completion_turn_key != existing_turn_key:
+            raise ValueError(
+                "todo terminal closeout requires the original completion_turn_key"
+            )
+        if normalize_todo_id_list(item.get("successor_todo_ids")):
+            raise ValueError(
+                "todo terminal closeout cannot replace an existing successor"
+            )
+    terminal_upgrade = terminal_upgrade_requested
+    if already_done and not terminal_upgrade:
         return {
             "ok": True,
             "dry_run": dry_run,
@@ -421,10 +439,9 @@ def complete_event_projected_goal_todo(
         successor_todo_ids,
         [item.get("todo_id") for item in next_results],
     )
-    completion_payload: dict[str, Any] = {
-        "completed_at": updated_at,
-        "updated_at": updated_at,
-    }
+    completion_payload: dict[str, Any] = {"updated_at": updated_at}
+    if not already_done:
+        completion_payload["completed_at"] = updated_at
     if evidence:
         completion_payload["evidence"] = evidence
     if completion_turn_key:
@@ -451,7 +468,7 @@ def complete_event_projected_goal_todo(
         producer="loopx.todo.complete",
         actor_agent_id=actor_agent_id,
     )
-    if not already_done and not dry_run:
+    if (not already_done or terminal_upgrade) and not dry_run:
         store.append(completion_event)
 
     result = {
@@ -466,8 +483,8 @@ def complete_event_projected_goal_todo(
         "status": TODO_STATUS_DONE,
         "status_changed": not already_done,
         "text_changed": False,
-        "metadata_updated": not already_done,
-        "changed": (not already_done) or bool(next_results),
+        "metadata_updated": (not already_done) or terminal_upgrade,
+        "changed": (not already_done) or terminal_upgrade or bool(next_results),
         "claimed_by": normalize_todo_claimed_by(effective_claimed_by),
         "task_class": item.get("task_class"),
         "action_kind": item.get("action_kind"),

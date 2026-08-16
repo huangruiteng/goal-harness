@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from .contract import TODO_STATUS_DONE
+from .contract import (
+    TODO_STATUS_DONE,
+    normalize_todo_id_list,
+    normalize_todo_no_followup,
+)
 
 
 def completed_todo_replay(
@@ -11,6 +15,7 @@ def completed_todo_replay(
     goal_id: str,
     todo_id: str,
     completion_turn_key: str | None,
+    no_followup: bool,
     handoff_mode: str,
     mutation_authority: dict[str, Any],
     state_file: str,
@@ -23,7 +28,9 @@ def completed_todo_replay(
     of the original completion result. This local replay therefore is not a
     durable operation receipt and must not be presented as Stage 2 proof.
     Original effect markers such as a lease fence or handoff-gate override are
-    intentionally absent because this branch performs neither effect.
+    intentionally absent because this branch performs neither effect. A
+    same-turn request may return ``None`` only to append the missing terminal
+    no-follow-up state; it cannot replace a successor or cross a turn fence.
     """
 
     if str(todo.get("status") or "") != TODO_STATUS_DONE:
@@ -33,6 +40,19 @@ def completed_todo_replay(
         raise ValueError(
             "todo is already completed under a different completion_turn_key"
         )
+    terminal_upgrade = (
+        no_followup and normalize_todo_no_followup(todo.get("no_followup")) is not True
+    )
+    if terminal_upgrade:
+        if not completion_turn_key or completion_turn_key != existing_turn_key:
+            raise ValueError(
+                "todo terminal closeout requires the original completion_turn_key"
+            )
+        if normalize_todo_id_list(todo.get("successor_todo_ids")):
+            raise ValueError(
+                "todo terminal closeout cannot replace an existing successor"
+            )
+        return None
     return {
         "ok": True,
         "dry_run": dry_run,

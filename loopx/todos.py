@@ -1701,7 +1701,7 @@ def complete_goal_todo(
             todo=completion_todo,
             goal_id=goal_id,
             todo_id=todo_id,
-            completion_turn_key=completion_turn_key,
+            completion_turn_key=completion_turn_key, no_followup=no_followup,
             handoff_mode=completion_handoff["handoff_mode"],
             mutation_authority=mutation_authority,
             state_file=str(resolved_state_file),
