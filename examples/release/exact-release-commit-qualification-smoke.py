@@ -15,6 +15,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from loopx import __version__  # noqa: E402
+from loopx.control_plane.testing.actual_default_model_behavior_portfolio import (  # noqa: E402
+    ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_COUNT,
+    ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS,
+    ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT,
+)
 from loopx.control_plane.testing.release_commit_qualification import (  # noqa: E402
     EXPECTED_RESULT_SCHEMA_BY_QUALIFICATION,
     REQUIRED_QUALIFICATION_IDS,
@@ -59,11 +64,14 @@ def summary(qualification_id: str) -> dict[str, object]:
         "doubao_actual_default": {
             "model_id": "doubao-seed-1.6",
             "topology": "actual_default_one_arm",
-            "scenario_count": 15,
-            "contrast_count": 4,
+            "scenario_count": ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT,
+            "contrast_count": ACTUAL_DEFAULT_MODEL_BEHAVIOR_CONTRAST_COUNT,
             "contrast_failure_count": 0,
-            "repeats_per_scenario": 2,
-            "actor_call_count": 30,
+            "repeats_per_scenario": ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS,
+            "actor_call_count": (
+                ACTUAL_DEFAULT_MODEL_BEHAVIOR_SCENARIO_COUNT
+                * ACTUAL_DEFAULT_MODEL_BEHAVIOR_REPEAT_ATTEMPTS
+            ),
             "failure_count": 0,
             "skip_count": 0,
             "qualification_passed": True,
