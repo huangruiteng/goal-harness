@@ -11,9 +11,41 @@ Benchmark adapters that use the Codex app-server Goal API should import
 `loopx.capabilities.benchmark_toolkit.native_codex_goal`. The module provides the
 real stdio JSON-RPC process transport, the ordered Goal transaction, terminal event
 correlation, Goal-status polling across automatic continuation turns, and a
-public-safe receipt. A runner supplies its own isolated process command,
-environment, sandbox policy, task bridge, and timeout; it should not copy the
-Goal state machine.
+public-safe receipt. A runner supplies its environment, sandbox policy, task bridge,
+and timeout; it should not copy the Goal state machine.
+
+On Linux, a host-side runner may use `native_codex_isolation` to build the isolated
+process command. Its synthetic root contains a read-only system runtime, fresh
+`/proc`, `/run`, and `/tmp`, runner-created work children, one explicitly selected
+task workspace at the returned `host-visible` alias, and an optional formal LoopX
+profile at its verified absolute path. The surrounding host root, original task
+path, ambient host `/tmp`, nested host mounts, symlinked work children, and
+`/proc/1/root` escape path are absent. The helper requires unprivileged user, mount,
+and PID namespaces plus `pivot_root` and fails closed when its roots overlap.
+
+```python
+from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (
+    build_native_codex_isolation_envelope,
+)
+
+envelope = build_native_codex_isolation_envelope(
+    executable="codex",
+    process_args=["app-server", "--listen", "stdio://", "--enable", "goals"],
+    work_dir=runner_work_dir,
+    private_root=controller_private_root,
+    workspace_source=task_workspace,
+    profile_root=profile.root,
+)
+# Pass envelope.process_command to probe_native_goal_process or
+# run_native_goal_process_until_terminal, and use envelope.workspace_alias as cwd.
+```
+
+This is a filesystem/process envelope, not a complete benchmark sandbox. It grants
+no model credential, task-command bridge, shell-network policy, evaluator denial,
+cross-trial denial, verifier ordering, upload, submission, or scoring authority.
+The runner must still attest those boundaries independently. Platforms without the
+required Linux namespace primitives must use an equivalent runner-owned isolation
+boundary instead of silently falling back to the ambient host.
 
 The runnable source example is
 [`benchmark/deepswe/run_native_codex_goal.py`](../../../benchmark/deepswe/run_native_codex_goal.py).
