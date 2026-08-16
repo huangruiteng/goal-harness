@@ -6,12 +6,55 @@ from pathlib import Path
 import pytest
 
 from loopx.capabilities.benchmark_toolkit.native_codex_profile import (
+    NativeCodexGoalPrompt,
     NativeCodexProfile,
     NativeCodexProfileError,
+    compact_native_codex_goal_prompt_receipt,
     compact_native_codex_profile_receipt,
     inspect_native_codex_profile,
     install_native_codex_profile,
+    render_native_codex_goal_prompt,
 )
+
+
+def _fake_profile(tmp_path: Path, *, bind_cli: bool = True) -> NativeCodexProfile:
+    root = tmp_path / "profile"
+    cli = root / "bin" / "loopx"
+    cli.parent.mkdir(parents=True)
+    task_body = (
+        'f"Use {cli} with \\"$HOME/.codex/loopx/registry.global.json\\"."'
+        if bind_cli
+        else '"No installed CLI reference."'
+    )
+    cli.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import sys\n"
+        "cli = sys.argv[sys.argv.index('--cli-bin') + 1]\n"
+        f"task_body = {task_body}\n"
+        "print(json.dumps({\n"
+        "    'ok': True,\n"
+        "    'runtime_profile': 'codex_app_ssh_goal',\n"
+        "    'interface_budget': {'within_budget': True},\n"
+        "    'task_body': task_body,\n"
+        "}))\n",
+        encoding="utf-8",
+    )
+    cli.chmod(0o755)
+    return NativeCodexProfile(
+        root=root,
+        home=root / "home",
+        codex_home=root / "codex-home",
+        skills_dir=root / "codex-home/skills",
+        bin_dir=root / "bin",
+        cli_bin=cli,
+        release_root=root / "releases/native-goal-profile",
+        source_revision="a" * 40,
+        source_clean=True,
+        skills_digest="b" * 64,
+        required_skill_ids=("loopx", "loopx-project"),
+        materialized_skill_ids=("loopx", "loopx-project"),
+    )
 
 
 def test_compact_profile_receipt_excludes_local_paths() -> None:
@@ -37,6 +80,52 @@ def test_compact_profile_receipt_excludes_local_paths() -> None:
     assert receipt["source_clean"] is True
     assert receipt["skill_readback_ready"] is True
     assert "/private" not in rendered
+
+
+def test_installed_cli_renders_and_rebinds_the_real_goal_prompt(tmp_path: Path) -> None:
+    profile = _fake_profile(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime_registry = project / ".loopx/runtime/registry.global.json"
+
+    prompt = render_native_codex_goal_prompt(
+        profile,
+        project_root=project,
+        goal_id="goal-1",
+        agent_id="agent-1",
+        runtime_registry_path=runtime_registry,
+        base_env={"PATH": "/usr/bin:/bin"},
+    )
+
+    assert isinstance(prompt, NativeCodexGoalPrompt)
+    assert str(profile.cli_bin) in prompt.task_body
+    assert str(runtime_registry.resolve()) in prompt.task_body
+    assert "$HOME/.codex/loopx/registry.global.json" not in prompt.task_body
+    receipt = compact_native_codex_goal_prompt_receipt(prompt)
+    rendered = json.dumps(receipt, sort_keys=True)
+    assert receipt["installed_cli_bound"] is True
+    assert receipt["runtime_registry_bound"] is True
+    assert str(tmp_path) not in rendered
+
+
+def test_goal_prompt_fails_when_output_does_not_bind_installed_cli(
+    tmp_path: Path,
+) -> None:
+    profile = _fake_profile(tmp_path, bind_cli=False)
+    project = tmp_path / "project"
+    project.mkdir()
+
+    with pytest.raises(
+        NativeCodexProfileError,
+        match="goal_prompt_installed_cli_not_bound",
+    ):
+        render_native_codex_goal_prompt(
+            profile,
+            project_root=project,
+            goal_id="goal-1",
+            agent_id="agent-1",
+            base_env={"PATH": "/usr/bin:/bin"},
+        )
 
 
 def test_profile_inspection_fails_closed_on_missing_install(tmp_path: Path) -> None:

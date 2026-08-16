@@ -27,10 +27,12 @@ from ...skill_install_readback import (
 )
 
 NATIVE_CODEX_PROFILE_SCHEMA_VERSION = "loopx_native_codex_goal_profile_v0"
+NATIVE_CODEX_GOAL_PROMPT_SCHEMA_VERSION = "loopx_native_codex_goal_prompt_v0"
 NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS = (
     "loopx",
     *PACKAGED_HOST_SKILL_IDS,
 )
+_DEFAULT_GLOBAL_REGISTRY_TOKEN = "$HOME/.codex/loopx/registry.global.json"
 _SAFE_RELEASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _INSTALL_ENV_PASSTHROUGH = (
     "LANG",
@@ -66,6 +68,19 @@ class NativeCodexProfile:
     materialized_skill_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class NativeCodexGoalPrompt:
+    """A Goal body rendered by the verified release-snapshot CLI."""
+
+    task_body: str
+    task_body_sha256: str
+    task_body_chars: int
+    runtime_profile: str
+    source_revision: str
+    installed_cli_bound: bool
+    runtime_registry_bound: bool
+
+
 def _digest_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
@@ -78,12 +93,12 @@ def _resolved_executable(value: str | None) -> str:
     return str(Path(resolved).resolve(strict=True))
 
 
-def _normalized_skill_ids(values: Sequence[str]) -> tuple[str, ...]:
+def _normalized_ids(values: Sequence[str], *, field: str) -> tuple[str, ...]:
     normalized = tuple(
         sorted({str(value).strip() for value in values if str(value).strip()})
     )
     if not normalized:
-        raise ValueError("required_skill_ids must be non-empty")
+        raise ValueError(f"{field} must be non-empty")
     return normalized
 
 
@@ -196,6 +211,150 @@ def _formal_install_environment(
     return env
 
 
+def native_codex_profile_environment(
+    profile: NativeCodexProfile,
+    *,
+    base_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Build the minimal environment shared by profile CLI and Codex processes."""
+
+    source = os.environ if base_env is None else base_env
+    env = {key: str(source[key]) for key in _INSTALL_ENV_PASSTHROUGH if source.get(key)}
+    inherited_path = env.get("PATH", os.defpath)
+    env.update(
+        {
+            "HOME": str(profile.home),
+            "CODEX_HOME": str(profile.codex_home),
+            "PATH": f"{profile.bin_dir}{os.pathsep}{inherited_path}",
+        }
+    )
+    return env
+
+
+def render_native_codex_goal_prompt(
+    profile: NativeCodexProfile,
+    *,
+    project_root: str | Path,
+    goal_id: str,
+    agent_id: str,
+    registry_path: str | Path | None = None,
+    runtime_root: str | Path | None = None,
+    runtime_registry_path: str | Path | None = None,
+    available_capabilities: Sequence[str] = ("shell", "filesystem_write"),
+    base_env: Mapping[str, str] | None = None,
+    timeout_sec: float = 30,
+) -> NativeCodexGoalPrompt:
+    """Render the real thin visible-Goal body with the installed profile CLI."""
+
+    project = Path(project_root).expanduser().resolve(strict=True)
+    if not project.is_dir():
+        raise NativeCodexProfileError("goal_prompt_project_not_directory")
+    if not goal_id.strip() or not agent_id.strip():
+        raise ValueError("goal_id and agent_id must be non-empty")
+    if timeout_sec <= 0:
+        raise ValueError("timeout_sec must be positive")
+    capabilities = _normalized_ids(
+        available_capabilities,
+        field="available_capabilities",
+    )
+    registry = (
+        Path(registry_path).expanduser()
+        if registry_path is not None
+        else project / ".loopx" / "registry.json"
+    ).resolve()
+    runtime = (
+        Path(runtime_root).expanduser()
+        if runtime_root is not None
+        else project / ".loopx" / "runtime"
+    ).resolve()
+    command = [
+        str(profile.cli_bin),
+        "--registry",
+        str(registry),
+        "--runtime-root",
+        str(runtime),
+        "--format",
+        "json",
+        "heartbeat-prompt",
+        "--thin",
+        "--goal-id",
+        goal_id,
+        "--agent-id",
+        agent_id,
+    ]
+    for capability in capabilities:
+        command.extend(("--available-capability", capability))
+    command.extend(
+        (
+            "--runtime-profile",
+            "codex_app_ssh_goal",
+            "--cli-bin",
+            str(profile.cli_bin),
+        )
+    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=project,
+            env=native_codex_profile_environment(profile, base_env=base_env),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise NativeCodexProfileError("goal_prompt_cli_timeout") from exc
+    if completed.returncode:
+        raise NativeCodexProfileError(
+            "goal_prompt_cli_failed:"
+            f"returncode={completed.returncode}:stderr_sha256={_digest_text(completed.stderr)}"
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise NativeCodexProfileError("goal_prompt_cli_invalid_json") from exc
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        raise NativeCodexProfileError("goal_prompt_cli_not_ready")
+    if payload.get("runtime_profile") != "codex_app_ssh_goal":
+        raise NativeCodexProfileError("goal_prompt_runtime_profile_mismatch")
+    interface_budget = payload.get("interface_budget")
+    if (
+        not isinstance(interface_budget, dict)
+        or interface_budget.get("within_budget") is not True
+    ):
+        raise NativeCodexProfileError("goal_prompt_interface_budget_invalid")
+    task_body = payload.get("task_body")
+    if not isinstance(task_body, str) or not task_body.strip():
+        raise NativeCodexProfileError("goal_prompt_task_body_missing")
+    installed_cli = str(profile.cli_bin)
+    installed_cli_bound = installed_cli in task_body
+    if not installed_cli_bound:
+        raise NativeCodexProfileError("goal_prompt_installed_cli_not_bound")
+
+    runtime_registry_bound = runtime_registry_path is None
+    if runtime_registry_path is not None:
+        runtime_registry = str(Path(runtime_registry_path).expanduser().resolve())
+        if _DEFAULT_GLOBAL_REGISTRY_TOKEN not in task_body:
+            raise NativeCodexProfileError("goal_prompt_default_registry_token_missing")
+        task_body = task_body.replace(_DEFAULT_GLOBAL_REGISTRY_TOKEN, runtime_registry)
+        runtime_registry_bound = (
+            runtime_registry in task_body
+            and _DEFAULT_GLOBAL_REGISTRY_TOKEN not in task_body
+        )
+        if not runtime_registry_bound:
+            raise NativeCodexProfileError("goal_prompt_runtime_registry_not_bound")
+
+    return NativeCodexGoalPrompt(
+        task_body=task_body,
+        task_body_sha256=hashlib.sha256(task_body.encode("utf-8")).hexdigest(),
+        task_body_chars=len(task_body),
+        runtime_profile="codex_app_ssh_goal",
+        source_revision=profile.source_revision,
+        installed_cli_bound=installed_cli_bound,
+        runtime_registry_bound=runtime_registry_bound,
+    )
+
+
 def _doctor_payload(
     *, cli_bin: Path, paths: Mapping[str, Path], env: Mapping[str, str]
 ) -> dict[str, Any]:
@@ -240,7 +399,7 @@ def inspect_native_codex_profile(
 
     if not _SAFE_RELEASE_ID.fullmatch(release_id):
         raise ValueError("release_id must be a safe directory name")
-    required = _normalized_skill_ids(required_skill_ids)
+    required = _normalized_ids(required_skill_ids, field="required_skill_ids")
     paths = _profile_paths(Path(profile_root), release_id)
     release_root = paths["release_root"]
     cli_bin = paths["cli_bin"]
@@ -398,12 +557,36 @@ def compact_native_codex_profile_receipt(profile: NativeCodexProfile) -> dict[st
     }
 
 
+def compact_native_codex_goal_prompt_receipt(
+    prompt: NativeCodexGoalPrompt,
+) -> dict[str, Any]:
+    """Return prompt provenance without exposing the Goal body or local paths."""
+
+    return {
+        "schema_version": NATIVE_CODEX_GOAL_PROMPT_SCHEMA_VERSION,
+        "prompt_source": "formal_profile_cli",
+        "runtime_profile": prompt.runtime_profile,
+        "source_revision": prompt.source_revision,
+        "task_body_sha256": prompt.task_body_sha256,
+        "task_body_chars": prompt.task_body_chars,
+        "installed_cli_bound": prompt.installed_cli_bound,
+        "runtime_registry_bound": prompt.runtime_registry_bound,
+        "raw_task_body_recorded": False,
+        "local_paths_recorded": False,
+    }
+
+
 __all__ = [
+    "NATIVE_CODEX_GOAL_PROMPT_SCHEMA_VERSION",
     "NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS",
     "NATIVE_CODEX_PROFILE_SCHEMA_VERSION",
+    "NativeCodexGoalPrompt",
     "NativeCodexProfile",
     "NativeCodexProfileError",
+    "compact_native_codex_goal_prompt_receipt",
     "compact_native_codex_profile_receipt",
     "inspect_native_codex_profile",
     "install_native_codex_profile",
+    "native_codex_profile_environment",
+    "render_native_codex_goal_prompt",
 ]
