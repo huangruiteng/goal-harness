@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import shlex
+
+from loopx.cli import build_parser
 from loopx.cli_commands.status import attach_agent_lane_next_actions
 from loopx.control_plane.agents.agent_lane_recommendation import (
     scope_status_item_to_agent_lane,
@@ -645,7 +648,28 @@ def test_nonblocking_user_action_does_not_suppress_empty_frontier_replan() -> No
     assert contract["user_channel"]["non_blocking"] is True, contract
     assert contract["agent_channel"]["must_attempt"] is True, contract
     cli_actions = contract["cli_channel"]["next_cli_actions"]
-    assert any("refresh-state" in action for action in cli_actions), cli_actions
+    refresh_action = next(action for action in cli_actions if "refresh-state" in action)
+    assert "--progress-surface-id <surface-id>" in refresh_action
+    assert "--progress-hypothesis-id <hypothesis-id>" in refresh_action
+    assert "--progress-probe-kind <probe-kind>" in refresh_action
+    assert "--progress-evidence-id <evidence-id>" in refresh_action
+    assert "typed-progress-identifiers-and-evidence" not in refresh_action
+    assert refresh_action.startswith("loopx --format json refresh-state ")
+    assert "--delivery-batch-scale" not in refresh_action
+    assert "--delivery-outcome" not in refresh_action
+    rendered_action = (
+        refresh_action.replace(
+            "<advanced|blocked|exploration_exhausted|no_followup>",
+            "advanced",
+        )
+        .replace("<surface-id>", "surface-new")
+        .replace("<hypothesis-id>", "hypothesis-new")
+        .replace("<probe-kind>", "probe-new")
+        .replace("<evidence-id>", "evidence-new")
+    )
+    parsed = build_parser().parse_args(shlex.split(rendered_action)[1:])
+    assert parsed.command == "refresh-state"
+    assert parsed.progress_result_class == "advanced"
     assert not any("todo add" in action for action in cli_actions), cli_actions
 
 

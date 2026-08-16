@@ -38,7 +38,8 @@ SELECTED_TODO_TOOL_FIXTURE_TODO_ID = "todo_portfolio001"
 _SELECTED_TARGET = "fixture/selected-lane.json"
 _DECOY_TARGET = "fixture/deferred-lane.json"
 SELECTED_TODO_TOOL_FIXTURE_ACTION_TEXT = (
-    f"Inspect `{_SELECTED_TARGET}` and verify its lane contract."
+    f"Read only `{_SELECTED_TARGET}`; use its self-contained JSON to verify "
+    "the selected lane contract."
 )
 _READ_ONLY_PREFLIGHT_COMMANDS = {
     "pwd",
@@ -369,11 +370,19 @@ def _metadata_pipeline_step(
         fixture.global_registry_path.resolve(),
         (fixture.project_root / ".loopx" / "registry.json").resolve(),
     }
-    if target not in allowed_registries:
+    if target in allowed_registries:
+        return BoundedWorkspaceReadStep(
+            "metadata",
+            ("head", "-n", str(limit), str(target)),
+            operator=operator,
+        )
+    content_target = _resolve_project_path(left[1], fixture=fixture)
+    if content_target is None:
         return None
     return BoundedWorkspaceReadStep(
-        "metadata",
-        ("head", "-n", str(limit), str(target)),
+        "content",
+        ("head", "-n", str(limit), str(content_target)),
+        target=content_target,
         operator=operator,
     )
 
@@ -581,12 +590,20 @@ def _discovery_tokens(
                 return None
             index += 2
             continue
-        if (
+        path_pattern_index: int | None = None
+        next_index: int | None = None
+        if token == "-path" and index + 1 < len(tokens):
+            path_pattern_index = index + 1
+            next_index = index + 2
+        elif (
             token == "-not"
             and index + 2 < len(tokens)
             and tokens[index + 1] == "-path"
         ):
-            pattern = tokens[index + 2]
+            path_pattern_index = index + 2
+            next_index = index + 3
+        if path_pattern_index is not None and next_index is not None:
+            pattern = tokens[path_pattern_index]
             if (
                 not pattern
                 or len(pattern.encode("utf-8")) > 128
@@ -594,7 +611,7 @@ def _discovery_tokens(
                 or ".." in Path(pattern).parts
             ):
                 return None
-            index += 3
+            index = next_index
             continue
         return None
     argv = [executable, str(root), *tokens[2:]]
@@ -869,7 +886,13 @@ class DoubaoSelectedTodoToolBehaviorActor:
                 "content": (
                     "You are Codex running one LoopX heartbeat. Follow the "
                     "heartbeat task and use the available shell tool when needed. "
-                    "Choose each next action from the latest tool result."
+                    "The shell working directory is the connected goal project "
+                    "root; resolve relative paths from the selected Todo there. "
+                    "Choose each next action from the latest tool result. After "
+                    "quota, execute the exact action in selected_todo.text directly. "
+                    "When it names one file, read only that file; do not discover, "
+                    "compare, or inspect other targets. After that selected Todo "
+                    "tool succeeds, call no more tools."
                 ),
             },
             {"role": "user", "content": fixture.task_body},

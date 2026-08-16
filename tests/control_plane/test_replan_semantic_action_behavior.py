@@ -4,9 +4,11 @@ import json
 import shlex
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+import loopx.control_plane.testing.replan_semantic_action_behavior as replan_behavior
 from loopx.control_plane.testing.model_tool_behavior import (
     ScriptedAssistantAction,
     ScriptedDoubaoExecTransport,
@@ -156,8 +158,19 @@ def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
         "read_only_host_commands_executed": True,
     }
 
+    system_prompt = transport.requests[0]["messages"][0]["content"]
+    assert "`cat` only the exact path named in active_state_next_action" in system_prompt
+    assert "`cat` only the source_ref returned by that target" in system_prompt
+    assert "interaction_contract.cli_channel.next_cli_actions[0]" in system_prompt
+    assert "Do not use ls, find, rg, or paged help" in system_prompt
+    assert "exactly `loopx refresh-state --help` once" in system_prompt
+    assert "execute the projected typed writeback" in system_prompt
+    assert "execute exactly one loopx refresh-state command" in system_prompt
+    assert "do not create a Todo, chain commands, or combine actions" in system_prompt
+
     quota_packet = json.loads(transport.requests[2]["messages"][-1]["content"])
     assert quota_packet.get("required_reads") in (None, [])
+    assert "successor Todo" not in quota_packet["active_state_next_action"]
     assert quota_packet["autonomous_replan_obligation"]["replan_context"][
         "delivery_receipt"
     ]["status"] == "delivered"
@@ -188,6 +201,130 @@ def test_real_tool_loop_chooses_and_persists_semantic_replan_action(
         "surface-permission-config"
     )
     assert latest["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
+
+
+def test_semantic_cli_execution_failure_retains_command_kind(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat replan-frontier.json"),
+            ScriptedExecToolAction(command="cat fixture/permission-config.json"),
+            _semantic_action,
+        ]
+    )
+    original_execute = replan_behavior._execute_loopx
+
+    def fail_semantic_writeback(command: str, **kwargs: Any) -> str:
+        if "refresh-state" in command:
+            raise RuntimeError("synthetic CLI execution failure")
+        return original_execute(command, **kwargs)
+
+    monkeypatch.setattr(replan_behavior, "_execute_loopx", fail_semantic_writeback)
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-semantic-action-cli-failure",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "semantic_replan_writeback_execution_failed"
+    assert receipt["observed_tool_sequence"][-1] == "semantic_replan_writeback"
+
+
+def test_real_tool_loop_allows_bounded_refresh_state_help(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat replan-frontier.json"),
+            ScriptedExecToolAction(command="cat fixture/permission-config.json"),
+            ScriptedExecToolAction(
+                command="loopx refresh-state --help 2>&1 | head -60"
+            ),
+            _semantic_action,
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-bounded-refresh-state-help",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True, receipt
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "workspace_read",
+        "workspace_read",
+        "refresh_state_help",
+        "semantic_replan_writeback",
+    ]
+    assert receipt["semantic_action_accepted"] is True
+
+
+def test_real_tool_loop_preserves_projected_targets_through_content_pipelines(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(
+                command="cat replan-frontier.json 2>/dev/null | head -200"
+            ),
+            ScriptedExecToolAction(
+                command="cat fixture/permission-config.json | head -200"
+            ),
+            _semantic_action,
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-bounded-content-pipelines",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True, receipt
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "workspace_read",
+        "workspace_read",
+        "semantic_replan_writeback",
+    ]
+    assert receipt["semantic_action_accepted"] is True
+
+
+def test_refresh_state_help_requires_projected_frontier_reads(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport(
+        [
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="loopx refresh-state --help"),
+        ]
+    )
+    receipt = DoubaoReplanSemanticActionBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="replan-help-before-frontier",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "refresh_state_help_before_frontier_read"
 
 
 def test_model_exits_after_replan_confirms_goal_coverage_is_exhausted(

@@ -74,6 +74,7 @@ class _QualificationState:
     semantic_delta: dict[str, Any] | None = None
     seen_quota: bool = False
     seen_clock: bool = False
+    seen_refresh_state_help: bool = False
     read_only_host_commands_executed: bool = False
     frontier_context_read: bool = False
     work_source_read: bool = False
@@ -174,10 +175,7 @@ def _build_fixture(
         else (
             f"Read `{_FIXTURE_FRONTIER_FILE}`, inspect the selected uncovered "
             "entry's `source_ref`, then persist the typed result through "
-            "refresh-state. If replan creates a successor Todo, bind the current "
-            "replan obligation in that same Todo add; when the command returns "
-            "host_action=end_current_heartbeat, end this heartbeat and do not "
-            "execute the successor until the next heartbeat."
+            "refresh-state."
         )
     )
     fixture_agent_todo = (
@@ -670,6 +668,37 @@ def _bounded_workspace_read_plan(
     return bounded_workspace_read_plan(command, fixture=fixture)
 
 
+def _bounded_refresh_state_help_limit(command: str) -> int | None:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    if len(tokens) < 3 or Path(tokens[0]).name != "loopx":
+        return None
+    if tokens[1:3] != ["refresh-state", "--help"]:
+        return None
+    remainder = tokens[3:]
+    if remainder[:3] == ["2", ">&", "1"]:
+        remainder = remainder[3:]
+    if not remainder:
+        return 200
+    if remainder[:2] != ["|", "head"]:
+        return None
+    if len(remainder) == 3 and remainder[2].startswith("-"):
+        limit_text = remainder[2][1:]
+    elif len(remainder) == 4 and remainder[2] == "-n":
+        limit_text = remainder[3]
+    else:
+        return None
+    if not limit_text.isdigit():
+        return None
+    limit = int(limit_text)
+    return limit if 1 <= limit <= 200 else None
+
+
 def _execute_workspace_read(
     command: str,
     *,
@@ -837,6 +866,24 @@ def _handle_workspace_read(command: str, state: _QualificationState) -> str:
     state.work_source_read = state.work_source_read or read_work_source
     state.read_only_host_commands_executed = True
     return output
+
+
+def _handle_refresh_state_help(
+    state: _QualificationState,
+    *,
+    line_limit: int,
+) -> str:
+    _require_observed_frontier(state, prefix="refresh_state_help")
+    if state.seen_refresh_state_help:
+        raise ValueError("repeated_refresh_state_help")
+    output = execute_loopx_cli(
+        "loopx refresh-state --help",
+        source_root=state.fixture.source_root,
+        project_root=state.fixture.project_root,
+    )
+    state.seen_refresh_state_help = True
+    state.read_only_host_commands_executed = True
+    return "\n".join(output.splitlines()[:line_limit]) + "\n"
 
 
 def _expected_obligation_id(state: _QualificationState) -> str:
@@ -1007,6 +1054,12 @@ def _dispatch_behavior_command(
         return _handle_clock_command(clock_output, state), "clock", False
     if _bounded_workspace_read_plan(command, fixture=state.fixture) is not None:
         return _handle_workspace_read(command, state), "workspace_read", False
+    if (help_limit := _bounded_refresh_state_help_limit(command)) is not None:
+        return (
+            _handle_refresh_state_help(state, line_limit=help_limit),
+            "refresh_state_help",
+            False,
+        )
     if _is_replan_successor_create(command):
         return _handle_successor_command(command, state), "replan_successor_create", True
     if (observation := _progress_observation_from_command(command)) is not None:
@@ -1020,6 +1073,28 @@ def _dispatch_behavior_command(
     raise ValueError("unexpected_command")
 
 
+def _behavior_command_kind(
+    command: str,
+    state: _QualificationState,
+) -> str:
+    """Classify a proposed command before its handler can fail."""
+
+    if _is_quota_guard(command):
+        return "quota_should_run"
+    if _clock_output(command) is not None:
+        return "clock"
+    if _bounded_workspace_read_plan(command, fixture=state.fixture) is not None:
+        return "workspace_read"
+    if _bounded_refresh_state_help_limit(command) is not None:
+        return "refresh_state_help"
+    if _is_replan_successor_create(command):
+        return "replan_successor_create"
+    tokens = loopx_command_tokens(command) or []
+    if "refresh-state" in tokens:
+        return "semantic_replan_writeback"
+    return "unexpected_command"
+
+
 _EXPECTED_BEHAVIOR_FAILURES = frozenset(
     {
         "repeated_quota_should_run",
@@ -1028,6 +1103,10 @@ _EXPECTED_BEHAVIOR_FAILURES = frozenset(
         "semantic_action_before_frontier_read",
         "semantic_action_before_work_source_read",
         "semantic_action_misses_uncovered_frontier",
+        "refresh_state_help_before_quota",
+        "refresh_state_help_before_frontier_read",
+        "refresh_state_help_before_work_source_read",
+        "repeated_refresh_state_help",
         "successor_create_before_quota",
         "successor_create_before_frontier_read",
         "successor_create_before_work_source_read",
@@ -1098,12 +1177,13 @@ def _run_qualification_loop(
                 passed=False,
                 failure_code="model_returned_without_semantic_action",
             )
-        kind = "unexpected_command"
+        kind = _behavior_command_kind(tool_call.command, state)
         try:
-            output, kind, completed = _dispatch_behavior_command(
+            output, dispatched_kind, completed = _dispatch_behavior_command(
                 tool_call.command,
                 state,
             )
+            kind = dispatched_kind
         except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
             _record_tool_step(state, kind=kind, command=tool_call.command)
             return _qualification_receipt(
@@ -1194,7 +1274,16 @@ class DoubaoReplanSemanticActionBehaviorActor:
                     "root; relative paths in the active-state action resolve there. "
                     "Treat the quota packet as the control-plane authority. Complete "
                     "one bounded in-scope action and persist its result through the "
-                    "real LoopX CLI."
+                    "real LoopX CLI. After quota, `cat` only the exact path named "
+                    "in active_state_next_action, then `cat` only the source_ref "
+                    "returned by that target, and fill and execute "
+                    "interaction_contract.cli_channel.next_cli_actions[0]. Do not "
+                    "use ls, find, rg, or paged help. If refresh-state syntax is "
+                    "still unclear, run exactly `loopx refresh-state --help` once, "
+                    "then execute the projected typed writeback. This scenario has "
+                    "a direct refresh-state outcome: execute exactly one loopx "
+                    "refresh-state command; do not create a Todo, chain commands, "
+                    "or combine actions."
                 ),
             },
             {"role": "user", "content": fixture.task_body},

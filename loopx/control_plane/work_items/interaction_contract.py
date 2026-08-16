@@ -943,14 +943,16 @@ def interaction_next_cli_actions(
         typed_progress_args = (
             "--progress-result-class "
             "<advanced|blocked|exploration_exhausted|no_followup> "
-            "<typed-progress-identifiers-and-evidence>"
+            "--progress-surface-id <surface-id> "
+            "--progress-hypothesis-id <hypothesis-id> "
+            "--progress-probe-kind <probe-kind> "
+            "--progress-evidence-id <evidence-id>"
         )
         refresh_command = (
-            f"loopx refresh-state --goal-id {goal_id} "
+            f"loopx --format json refresh-state --goal-id {goal_id} "
             "--progress-scope agent_lane "
             "--classification bounded_replan_progress "
-            f"{typed_progress_args} "
-            "--delivery-batch-scale <scale> --delivery-outcome <outcome>"
+            f"{typed_progress_args}"
             f"{settlement_args}{scoped_cli_args}"
         )
         return [

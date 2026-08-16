@@ -70,8 +70,14 @@ def test_real_tool_loop_executes_action_selected_by_real_quota(
             "role": "system",
             "content": (
                 "You are Codex running one LoopX heartbeat. Follow the heartbeat "
-                "task and use the available shell tool when needed. Choose each "
-                "next action from the latest tool result."
+                "task and use the available shell tool when needed. The shell "
+                "working directory is the connected goal project root; resolve "
+                "relative paths from the selected Todo there. Choose each next "
+                "action from the latest tool result. After quota, execute the exact "
+                "action in selected_todo.text directly. When it names one file, "
+                "read only that file; do not discover, compare, or inspect other "
+                "targets. After that selected Todo tool succeeds, call no more "
+                "tools."
             ),
         },
         {"role": "user", "content": fixture.task_body},
@@ -172,6 +178,68 @@ def test_tool_loop_allows_bounded_discovery_with_safe_path_exclusion(
     ]
 
 
+def test_tool_loop_allows_bounded_discovery_with_positive_path_filter(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        (
+            'ls -la && find . -name "selected-lane.json" '
+            '-path "*/fixture/*" 2>/dev/null'
+        ),
+        "cat fixture/selected-lane.json",
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-positive-path-filter",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
+        "workspace_read",
+        "selected_action",
+    ]
+
+
+def test_tool_loop_rejects_absolute_positive_path_filter(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        'find . -path "/etc/*"',
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-reject-absolute-path-filter",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "unexpected_command"
+
+
 def test_tool_loop_allows_bounded_discovery_pipeline_before_action(
     tmp_path: Path,
 ) -> None:
@@ -204,6 +272,37 @@ def test_tool_loop_allows_bounded_discovery_pipeline_before_action(
     assert receipt["observed_tool_sequence"] == [
         "quota_should_run",
         "workspace_read",
+        "selected_action",
+    ]
+
+
+def test_tool_loop_allows_bounded_selected_content_pipeline(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    commands = [
+        fixture.quota_guard_command.replace('"${LOOPX_TURN:?}"', "turn-001"),
+        "cat fixture/selected-lane.json 2>/dev/null | head -200",
+    ]
+    call_count = 0
+
+    def transport(**_: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        command = commands[call_count]
+        call_count += 1
+        return _tool_response(f"call-{call_count}", command)
+
+    receipt = DoubaoSelectedTodoToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=transport,
+    ).qualify(
+        qualification_id="selected-todo-bounded-content-pipeline",
+        fixture_root=tmp_path / "actor",
+    )
+
+    assert receipt["qualification_passed"] is True
+    assert receipt["observed_tool_sequence"] == [
+        "quota_should_run",
         "selected_action",
     ]
 
