@@ -187,7 +187,7 @@ def main() -> int:
                     required_skill_ids=profile.required_skill_ids,
                 ),
                 codex_bin=codex_bin,
-                process_env=native_codex_profile_environment(profile),
+                process_env=app_server_env,
                 process_cwd=str(project),
                 response_timeout_sec=30,
             )
