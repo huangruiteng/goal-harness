@@ -24,7 +24,13 @@ from ..effect_program import (
 from ..goals.goal_vision import normalize_goal_vision_packet
 from ..work_items.delivery_batch_scale import require_delivery_batch_scale
 from ..work_items.delivery_outcome import require_delivery_outcome
-from .driver import reconcile_failed_turn_session_request, selected_turn_todo
+from .driver import selected_turn_todo
+from .session_recovery import (
+    SessionBindingResolver,
+    build_host_recovery_record,
+    reconcile_failed_turn_retry_request,
+    require_host_recovery_kind,
+)
 from .settlement import (
     completion_writeback_outcome,
     execute_turn_driver_settlement,
@@ -49,8 +55,6 @@ HOST_ARG_MAX_COUNT = 32
 HOST_ARG_MAX_CHARS = 1_024
 HOST_AGENT_VISION_JSON_MAX_CHARS = 3_200
 HOST_PATH_DELTA_MODES = {"", "unchanged", "material_replan"}
-HOST_RECOVERY_SCHEMA_VERSION = "loopx_turn_host_recovery_v0"
-HOST_RECOVERY_KINDS = {"resume_session"}
 HOST_RESULT_TEXT_LIMITS = (
     ("classification", 120),
     ("recommended_action", 1_200),
@@ -93,10 +97,6 @@ TerminalCloseout = Callable[[dict[str, Any]], dict[str, Any]]
 Spend = Callable[[], dict[str, Any]]
 Scheduler = Callable[[dict[str, Any]], dict[str, Any]]
 HostRunner = Callable[[Mapping[str, Any]], dict[str, Any]]
-SessionBindingResolver = Callable[
-    [Mapping[str, Any]],
-    Mapping[str, Any] | None,
-]
 TaskValidator = Callable[
     [Mapping[str, Any], Mapping[str, Any]],
     Mapping[str, Any],
@@ -107,8 +107,8 @@ class BuiltInHostError(RuntimeError):
     """A public-safe built-in host failure classification."""
 
     def __init__(self, reason: str, *, recovery_kind: str | None = None) -> None:
-        if recovery_kind is not None and recovery_kind not in HOST_RECOVERY_KINDS:
-            raise ValueError("unsupported built-in host recovery kind")
+        if recovery_kind is not None:
+            require_host_recovery_kind(recovery_kind)
         super().__init__(reason)
         self.reason = reason
         self.recovery_kind = recovery_kind
@@ -858,37 +858,6 @@ def _execution_payload(
     }
 
 
-def _reconcile_failed_turn_retry_request(
-    request: Mapping[str, Any],
-    journal: Mapping[str, Any],
-    *,
-    session_binding_resolver: SessionBindingResolver | None,
-) -> dict[str, Any]:
-    recovery = _mapping(journal.get("host_recovery"))
-    if not recovery:
-        return dict(request)
-    if recovery.get("schema_version") != HOST_RECOVERY_SCHEMA_VERSION:
-        raise ValueError("failed-Turn host recovery has an unsupported schema")
-    if recovery.get("kind") not in HOST_RECOVERY_KINDS:
-        raise ValueError("failed-Turn host recovery has an unsupported kind")
-    receipt = _mapping(journal.get("receipt"))
-    if receipt.get("failed_phase") != "host_execute":
-        raise ValueError("failed-Turn session recovery requires a host execution failure")
-    if session_binding_resolver is None:
-        raise ValueError("failed-Turn session recovery has no binding resolver")
-    envelope = _mapping(request.get("turn_envelope"))
-    try:
-        session_binding = session_binding_resolver(envelope)
-    except Exception:  # noqa: BLE001 - provider boundary fails closed
-        raise ValueError(
-            "failed-Turn recovery session binding could not be resolved"
-        ) from None
-    return reconcile_failed_turn_session_request(
-        request,
-        session_binding=session_binding,
-    )
-
-
 def _host_result_stage(
     plan: Mapping[str, Any],
     request: Mapping[str, Any],
@@ -937,10 +906,7 @@ def _host_result_stage(
             )
             recovery_kind = host_observation.get("recovery_kind")
             if recovery_kind is not None:
-                journal["host_recovery"] = {
-                    "schema_version": HOST_RECOVERY_SCHEMA_VERSION,
-                    "kind": recovery_kind,
-                }
+                journal["host_recovery"] = build_host_recovery_record(recovery_kind)
             else:
                 journal.pop("host_recovery", None)
             _write_journal(journal_path, journal)
@@ -1446,7 +1412,7 @@ def run_loopx_turn_once(
                 effects=empty_effects,
             )
         if journal and journal.get("status") == "failed":
-            request = _reconcile_failed_turn_retry_request(
+            request = reconcile_failed_turn_retry_request(
                 request,
                 journal,
                 session_binding_resolver=session_binding_resolver,
