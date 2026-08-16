@@ -226,6 +226,9 @@ If the result says `should_run=true`:
    {quota_spend_command}
    ```
 
+   If spend output is ambiguous, verify with read-only quota status; never
+   rerun.
+
    Do not append spend for quiet `should_run=false` skips, preflight failures,
    pure dry-run previews, or duplicate accounting attempts. If
    `should_run=false` but `safe_bypass_allowed=true` and you actually completed

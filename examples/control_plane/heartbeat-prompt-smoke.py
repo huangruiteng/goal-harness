@@ -833,6 +833,7 @@ def main() -> int:
         "--delivery-outcome <ACTUAL_DELIVERY_OUTCOME>",
         "Never default or upgrade smaller/preparatory work",
         "append exactly one",
+        "If spend output is ambiguous, verify with read-only quota status; never rerun.",
         "Do not append spend for quiet should_run=false skips, preflight failures, pure dry-run previews, or duplicate accounting attempts",
         "safe_bypass_allowed=true and you actually completed a bounded safe-bypass step",
         "safe_bypass_kind=outcome_floor_recovery",

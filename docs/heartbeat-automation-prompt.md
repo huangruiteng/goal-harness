@@ -485,6 +485,9 @@ If the result says should_run=true:
 
    loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --todo-id <SELECTED_TODO_ID> --slots 1 --source heartbeat --execute
 
+   Run it exactly once as rendered; no pipe/filter/retry. If spend output is
+   ambiguous, verify with read-only quota status; never rerun.
+
    If the automation reserves a coarser fixed interval, set `--slots` to the
    number of scheduler minutes consumed by that completed turn.
 
@@ -615,9 +618,10 @@ critic / next action; for non-trivial feature slices, create a successor todo
 or write a compact no-follow-up rationale; append one accountable
 `refresh-state --delivery-outcome outcome_progress`, then exactly one
 `loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --todo-id <SELECTED_TODO_ID> --slots 1 --source heartbeat --execute`
-event for the completed turn. Only an optional state-only refresh belongs after
-spend. Use `--slots 1` for minute-based heartbeats; for coarser intervals,
-spend the scheduler minutes consumed by that turn.
+event for the completed turn; run it as rendered, without pipes or filters,
+and never rerun it. Only an optional state-only refresh belongs after spend.
+Use `--slots 1` for minute-based heartbeats; for coarser intervals, spend the
+scheduler minutes consumed by that turn.
 ```
 
 ## Agent Checklist
