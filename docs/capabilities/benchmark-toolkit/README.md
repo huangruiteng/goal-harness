@@ -78,6 +78,10 @@ filesystem or namespace permission boundary, so missing attestation fails closed
 Likewise, the attestation alone cannot prove what tool calls actually occurred; both
 evidence channels are required.
 
+`benchmark_id`, `case_id`, and a custom policy's `policy_id` are public labels, not
+paths. Path-like values fail closed and are emitted only as `redacted`, so a runner
+cannot move an operator directory into the public receipt through identifier fields.
+
 Benchmark-specific private roots can be added without committing them through an
 ignored `benchmark_integrity_policy_v0` file:
 

@@ -133,6 +133,70 @@ def test_shell_network_flags_do_not_bypass_integrity_scan() -> None:
     assert receipt["evidence_counts"]["external_network_request"] == 1
 
 
+@pytest.mark.parametrize("field", ["benchmark_id", "case_id"])
+def test_path_like_attestation_labels_fail_closed_without_leaking(
+    field: str,
+) -> None:
+    private_path = "/Users/private-user/.local/benchmark/case-1"
+    attestation = _attestation()
+    attestation[field] = private_path
+
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(),
+        runtime_attestation=attestation,
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt[field] == "redacted"
+    assert f"runtime_attestation_{field}_path_like" in receipt["blockers"]
+    assert private_path not in json.dumps(receipt, sort_keys=True)
+
+
+def test_path_like_policy_id_fails_closed_without_leaking() -> None:
+    private_path = "C:\\Users\\private-user\\policy.json"
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(),
+        runtime_attestation=_attestation(),
+        policy={
+            "schema_version": BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION,
+            "policy_id": private_path,
+        },
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt["policy_id"] == "redacted"
+    assert "integrity_policy_id_path_like" in receipt["blockers"]
+    assert private_path not in json.dumps(receipt, sort_keys=True)
+
+
+def test_bare_sensitive_filename_does_not_match_unrelated_path_basename() -> None:
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(command="git apply /home/me/reference.patch"),
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is True
+    assert receipt["evidence_counts"]["restricted_answer_source_request"] == 0
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python3 -c 'import os; print(os.environ.get(\"API_KEY\"))'",
+        "python3 -c 'import os; print(os.getenv(\"API_KEY\"))'",
+        "python3 -c 'import subprocess; subprocess.run([\"tool\"], env={})'",
+    ],
+)
+def test_environment_access_forms_are_credential_probes(command: str) -> None:
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=_trajectory(command=command),
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt["evidence_counts"]["credential_probe"] == 1
+
+
 def test_invalid_private_inputs_fail_before_receipt_building() -> None:
     with pytest.raises(ValueError, match="policy_schema_mismatch"):
         build_benchmark_integrity_qualification(

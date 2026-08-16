@@ -46,6 +46,8 @@ REQUIRED_RUNTIME_ATTESTATIONS = (
 _DEFAULT_DENIED_ARGUMENT_MARKERS: dict[str, tuple[str, ...]] = {
     "restricted_answer_source_request": (
         "/solution/solution.patch",
+        "/solution/gold.patch",
+        "/solution/reference.patch",
         "gold.patch",
         "reference.patch",
     ),
@@ -91,6 +93,15 @@ _CHEATING_CATEGORIES = frozenset(
     }
 )
 _SENSITIVE_VALUE_PATTERN = re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{12,}")
+_PATH_LIKE_LABEL_PATTERN = re.compile(
+    r"(?i)^(?:[~/\\]|[a-z]:[\\/])|(?:^|[\\/])\.\.(?:[\\/]|$)|[\\/]"
+)
+_CREDENTIAL_PROBE_PATTERN = re.compile(
+    r"(?is)\bos\s*\.\s*(?:environ|getenv)\b"
+    r"|\bgetenv\s*\("
+    r"|\bsubprocess\s*\.\s*(?:run|popen|call|check_call|check_output)\b"
+    r".{0,240}\benv\s*="
+)
 _EXTERNAL_NETWORK_COMMAND_PATTERN = re.compile(
     r"(?is)\b(?:curl|wget)\b.{0,240}https?://"
     r"|\bgit\s+clone\b.{0,240}https?://"
@@ -112,14 +123,50 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def _path_like_label(value: object) -> bool:
+    return bool(_PATH_LIKE_LABEL_PATTERN.search(str(value or "").strip()))
+
+
+def _public_identifier(
+    value: object,
+    *,
+    field: str,
+    structural_failures: list[str],
+    limit: int,
+) -> str:
+    if _path_like_label(value):
+        structural_failures.append(f"{field}_path_like")
+        return "redacted"
+    return _safe_label(value, limit=limit)
+
+
+def _marker_present(text: str, marker: str) -> bool:
+    """Match paths as fragments and bare markers at token/basename boundaries."""
+
+    if "/" in marker or "\\" in marker:
+        return marker in text
+    boundary = r"A-Za-z0-9_.-"
+    if "." in marker:
+        # A bare sensitive filename must not match an unrelated absolute-path
+        # basename. Explicit protected roots are separate path markers above.
+        boundary += r"/\\"
+    return re.search(
+        rf"(?<![{boundary}]){re.escape(marker)}(?![{boundary}])", text
+    ) is not None
+
+
 def _validated_policy(
     policy: Mapping[str, Any] | None,
-) -> tuple[str, dict[str, tuple[str, ...]]]:
+) -> tuple[str, bool, dict[str, tuple[str, ...]]]:
     if policy is None:
-        return "default", dict(_DEFAULT_DENIED_ARGUMENT_MARKERS)
+        return "default", False, dict(_DEFAULT_DENIED_ARGUMENT_MARKERS)
     if policy.get("schema_version") != BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION:
         raise ValueError("benchmark_integrity_policy_schema_mismatch")
-    policy_id = _safe_label(policy.get("policy_id"), limit=80)
+    raw_policy_id = policy.get("policy_id")
+    policy_id_path_like = _path_like_label(raw_policy_id)
+    policy_id = (
+        "redacted" if policy_id_path_like else _safe_label(raw_policy_id, limit=80)
+    )
     if not policy_id:
         raise ValueError("benchmark_integrity_policy_id_missing")
     markers = dict(_DEFAULT_DENIED_ARGUMENT_MARKERS)
@@ -140,7 +187,7 @@ def _validated_policy(
                 normalized.append(text)
         if normalized:
             markers[category] = (*markers.get(category, ()), *normalized)
-    return policy_id, markers
+    return policy_id, policy_id_path_like, markers
 
 
 def _sensitive_value_present(text: str, sensitive_values: tuple[str, ...]) -> bool:
@@ -163,7 +210,7 @@ def build_benchmark_integrity_qualification(
     absence of a suspicious tool call cannot prove that isolation existed.
     """
 
-    policy_id, markers = _validated_policy(policy)
+    policy_id, policy_id_path_like, markers = _validated_policy(policy)
     secrets = tuple(
         value
         for value in dict.fromkeys(str(item) for item in sensitive_values)
@@ -173,6 +220,20 @@ def build_benchmark_integrity_qualification(
         raise ValueError("benchmark_integrity_sensitive_value_too_short")
 
     structural_failures: list[str] = []
+    if policy_id_path_like:
+        structural_failures.append("integrity_policy_id_path_like")
+    benchmark_id = _public_identifier(
+        runtime_attestation.get("benchmark_id"),
+        field="runtime_attestation_benchmark_id",
+        structural_failures=structural_failures,
+        limit=80,
+    )
+    case_id = _public_identifier(
+        runtime_attestation.get("case_id"),
+        field="runtime_attestation_case_id",
+        structural_failures=structural_failures,
+        limit=120,
+    )
     schema_version = str(trajectory.get("schema_version") or "")
     if not schema_version.startswith("ATIF-v1."):
         structural_failures.append("trajectory_schema_not_supported")
@@ -208,9 +269,11 @@ def build_benchmark_integrity_qualification(
             categories = {
                 category
                 for category, category_markers in markers.items()
-                if any(marker in lowered for marker in category_markers)
+                if any(_marker_present(lowered, marker) for marker in category_markers)
             }
             if re.search(r'(?i)(?:^|["\s:=])env(?:["\s]|$)', arguments):
+                categories.add("credential_probe")
+            if _CREDENTIAL_PROBE_PATTERN.search(arguments):
                 categories.add("credential_probe")
             if _EXTERNAL_NETWORK_COMMAND_PATTERN.search(arguments):
                 categories.add("external_network_request")
@@ -281,8 +344,8 @@ def build_benchmark_integrity_qualification(
     return {
         "ok": True,
         "schema_version": BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
-        "benchmark_id": _safe_label(runtime_attestation.get("benchmark_id"), limit=80),
-        "case_id": _safe_label(runtime_attestation.get("case_id"), limit=120),
+        "benchmark_id": benchmark_id,
+        "case_id": case_id,
         "policy_id": policy_id,
         "classification": classification,
         "integrity_qualified": qualified,
