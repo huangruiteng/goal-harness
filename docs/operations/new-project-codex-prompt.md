@@ -241,10 +241,11 @@ loopx new-project-prompt \
    三个 placeholder 都必须替换为本轮实际验证过的值；不要把较小或仅准备性的
    turn 默认、拔高成 `multi_surface` / `outcome_progress`。
    这是 `spend-slot` 将消费的因果记录；普通 state-only refresh 不能替代它。
-   然后只 append 一次 quota spend：
+   然后原样（不加管道或过滤）append 一次 quota spend；输出为空或不明确时用只读
+   quota status 核对，不能重跑：
 
    ```bash
-   loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <STABLE_GOAL_ID> --slots 1 --source adapter --execute
+   loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <STABLE_GOAL_ID> --slots 1 --source adapter --execute
    ```
 
    如果 dashboard 或 controller 在 spend 后仍需状态更新，再运行第 8 步不带
