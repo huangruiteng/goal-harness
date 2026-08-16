@@ -126,8 +126,15 @@ class TestTransactionPlan:
         assert txn["receipt_seed"]["next_phase"] == "host_execute"
         settlement = txn["settlement_plan"]
         assert settlement["identity"]["goal_id"] == "g"
-        assert len(settlement["ordered_steps"]) == 3
-        for step in settlement["ordered_steps"]:
+        ordered_steps = settlement["ordered_steps"]
+        assert [step["kind"] for step in ordered_steps] == [
+            "validation",
+            "durable_writeback",
+            "quota_spend",
+            "terminal_closeout",
+        ]
+        assert ordered_steps[-1]["conditional"] is True
+        for step in ordered_steps:
             assert step["idempotency_key_ref"] == "$.identity.effect_id"
         assert _public_safe(txn)
 
