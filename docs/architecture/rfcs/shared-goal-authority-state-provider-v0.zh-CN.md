@@ -2,7 +2,7 @@
 
 - 状态：Draft，正在接受 maintainer review
 - 提案方：NoKV Lab
-- 日期：2026-08-05；修订于 2026-08-06
+- 日期：2026-08-05；修订于 2026-08-16
 - 范围：LoopX 共享 Goal 协调的独立部署合同，用来补充
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
 - 源码基线：LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
@@ -53,8 +53,8 @@ RFC 不应该一口吞掉消息、调度、配额、run history 和所有 LoopX 
 4. run history、status、quota、scheduler、host session 和 evidence body 继续由各自的
    owner 管理，不塞进这本协调账。
 
-NoKV 是记账员身后的可选 provider。Agent 不直接连接 NoKV，NoKV 也不会因此变成
-LoopX 的控制面权威。
+NoKV 是记账员身后的可选 provider。Agent 不会为 coordination write 直接连接
+NoKV，NoKV 也不会因此变成 LoopX 的控制面权威。
 
 第一个能跑的例子只有 `claim_work`：对一个已经存在且可执行的 todo，同时写入 soft
 claim、lease/fence 和 receipt。它先回答两件最容易出事故的事——多人同时抢单时谁
@@ -72,6 +72,67 @@ head 前进暴露成业务冲突。这与 LoopX 当前公开
 A 的 todo。A 重启后再次提交同一申请，必须逐字段取回自己当时的原始 receipt。
 只告诉 A “这笔账以前记过”以及 B 的当前版本不够，因为没有 `L1`、epoch `7` 和
 expiry，A 仍然无法证明自己获准执行过这项工作。
+
+### 1.1 稳定抽象：存储面、语义权威与持续协调
+
+这里最高价值的边界，不是把“LoopX Server”和“NoKV Server”理解成两个彼此竞争的
+数据库，而是三个拥有不同正确性合同、可以共同部署但必须分别归属的层次：
+
+| 层次 | 负责什么 | 绝不能负责什么 |
+| --- | --- | --- |
+| 存储面 | 耐久字节与 artifact、provider generation CAS、snapshot 与 provider recovery | Goal/todo 语义、actor eligibility、lease 或 authority receipt |
+| 语义权威 | normalized command、目标范围 precondition、claim、lease epoch、fencing、revision 与原始 receipt | raw artifact body、provider placement 或后台调度状态 |
+| 持续协调层 | 通过同一 command contract 完成观察、过期 lease 恢复、wake request 与持续 Supervisor 决策 | 直接改写 head、绕过 provider 边界，或形成第二个 coordination 真相源 |
+
+NoKV workspace service 是本 RFC 映射的候选存储面实现，仍须经过下文的分阶段验证。
+LoopX 的增量是语义权威：它把 opaque generation CAS 变成可信的 `claim_work`
+结果，并在后续扩展成可恢复的执行权。持续协调层只是 authority 的 client，不是另
+一个 writer：Supervisor 观察 projection，通过 typed command 发起 reclaim，或请求
+delivery plane 执行 wake；它自己的 scan cursor 与调度状态继续留在 coordination
+head 之外。Transport 与 endpoint reachability 仍由 delivery plane 负责；wake 已送达
+永远不能证明 authority command 已提交。
+
+同一套 NoKV deployment 可以服务两条刻意分开的路径：
+
+- **coordination path** 只保存 canonical head，并且只有 authority 持有写 credential；
+- **artifact path** 可以允许 runtime 在受限 scope 内发布 checkpoint 或 evidence，
+  但只有 opaque pointer、digest 与 privacy class 可以进入经 review 的 coordination
+  transition。
+
+可恢复工作流先发布 immutable checkpoint 或 evidence artifact，再在相关 coordination
+transition 中提交它的 pointer。若第二步之前失败，只会留下由独立 retention 或
+collection 处理的无引用 artifact；绝不能让 head 指向从未耐久发布的对象。因此，
+共享同一个物理 provider 不会合并两套 ownership contract，也不要求跨领域事务。
+
+物理上允许共同部署。一套 deployment bundle 可以同时启动 NoKV workspace service、
+LoopX authority endpoint 和 Supervisor worker。这里的“分开”是指 contract 与
+credential 分别归属；v0 不要求它们必须拆成不同仓库、进程、binary 或 license。
+可信本地验证可以使用 embedded authority。共享部署则需要在线 authority boundary，
+确保不可信或过期 client 即使合法持有受限 artifact credential，也无法发布伪造的
+coordination head。
+
+### 1.2 能力展望与可部署产品边界
+
+上述分层在不扩大 v0 ledger 的前提下形成了分阶段能力展望：
+
+| 阶段 | 新增能力 | promotion 前必须证明什么 |
+| --- | --- | --- |
+| 确定性共享协调 | provider-neutral authority、state-plus-receipt CAS、replay 与目标范围 rebase | file-backed conformance 与第 10 节的 P0 检查 |
+| 可恢复执行权 | renew、release、过期 lease reclaim、stale-fence rejection，以及带 continuation/evidence pointer 的原子 completion | crash 与 clock-boundary 测试证明被替代 executor 无法 write back |
+| 持续协调 | Supervisor observation、reclaim、delivery-plane wake request，以及通过 authority command 编排 remote resume | restart-safe reconciliation，且没有直接 provider write 或内存正确性依赖 |
+| 服务级共享控制面 | authenticated principal、tenant-to-goal 隔离、audit、有界容量、observability、service recovery，以及最终的 HA | 显式 deployment 与 migration contract，且不存在 authority bypass 或静默本地 fallback |
+
+这份能力展望不会把 quota accounting、run history、raw evidence、delivery state 或
+Supervisor runtime state 搬进 coordination aggregate。这些能力继续由第 3 节所列的
+owner 与 ledger 管理，通过 typed command、projection 或 opaque pointer 连接。
+
+给 Apache coordination core 套一层很薄的网络 wrapper，本身不足以形成新的产品边界。
+只有当一个独立交付的服务真正拥有网络信任边界，以及 authentication、持续监督、
+远程恢复、migration、audit、multi-tenancy 或 HA 等实质 authority/reconciliation
+能力时，独立发行才有意义。若项目将来创建单独授权的 server distribution，它的
+边界应沿着这一可部署的语义权威与持续协调 surface 切分，而不是沿 NoKV adapter 或
+provider-neutral core 切分。本 RFC 既不要求拆仓，也不选择独立 license；当前政策
+仍以 [`LoopX Licensing`](../../project/licensing.md) 为准。
 
 ## 2. 要做的，以及不要做的
 

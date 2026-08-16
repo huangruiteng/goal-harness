@@ -2,7 +2,7 @@
 
 - Status: Draft, under maintainer review
 - Proposed by: NoKV Lab
-- Date: 2026-08-05; revised 2026-08-06
+- Date: 2026-08-05; revised 2026-08-16
 - Scope: a separate deployment contract for LoopX shared-goal coordination,
   complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
@@ -67,7 +67,8 @@ file into a remote store:
    bodies stay with their existing owners instead of entering this ledger.
 
 NoKV is an optional provider behind the bookkeeper. Agents do not connect to
-NoKV directly, and NoKV does not become the LoopX control-plane authority.
+NoKV directly for coordination writes, and NoKV does not become the LoopX
+control-plane authority.
 
 The first runnable example has only one command, `claim_work`. For an existing
 eligible todo, it records the soft claim, lease/fence, and receipt together. It
@@ -92,6 +93,81 @@ restarts and retries the same request, it must recover its original receipt
 field for field. "This was already applied" plus B's current revision is not
 enough: without `L1`, epoch `7`, and its expiry, A still cannot prove that it
 was authorized to do the work.
+
+### 1.1 The durable abstraction: storage, semantic authority, and reconciliation
+
+The highest-value boundary is not "the LoopX server" versus "the NoKV server"
+as two competing databases. It is three separately owned layers that may be
+co-deployed while preserving different correctness contracts:
+
+| Layer | Owns | Must not own |
+| --- | --- | --- |
+| Storage plane | Durable bytes and artifacts, provider generation CAS, snapshots, and provider recovery | Goal/todo meaning, actor eligibility, leases, or authority receipts |
+| Semantic authority | Normalized commands, target-scoped preconditions, claims, lease epochs, fencing, revisions, and original receipts | Raw artifact bodies, provider placement, or background scheduling state |
+| Reconciliation layer | Observation, expired-lease recovery, wake-request emission, and continuous Supervisor decisions through the same command contract | Direct head mutation, provider bypass, or a second source of coordination truth |
+
+NoKV's workspace service is the candidate storage-plane implementation mapped
+by this RFC; it still requires the staged qualification below. The LoopX
+increment is the semantic authority that turns an opaque generation CAS into a
+trusted `claim_work` result and, later, into recoverable execution ownership.
+The reconciliation layer is a client of that authority, not another writer: a
+Supervisor observes projections and issues typed commands such as reclaim or
+requests a delivery-plane wake, while its scan cursor and scheduling state
+remain outside the coordination head. The delivery plane still owns transport
+and endpoint reachability; a delivered wake never proves an authority command
+committed.
+
+The same NoKV deployment may serve two intentionally separate paths:
+
+- the **coordination path** stores only the canonical head and is writable only
+  through authority-owned credentials;
+- the **artifact path** may accept scoped checkpoint or evidence publication
+  from a runtime, but only an opaque pointer, digest, and privacy class enter a
+  reviewed coordination transition.
+
+A recoverable workflow publishes an immutable checkpoint or evidence artifact
+first, then commits its pointer with the relevant coordination transition.
+Failure before the second step leaves an unreferenced artifact for independent
+retention or collection; it must not leave the head pointing at an object that
+was never durably published. Sharing a physical provider therefore does not
+merge the two ownership contracts or require a cross-domain transaction.
+
+Physical co-location is allowed. One deployment bundle may start a NoKV
+workspace service, a LoopX authority endpoint, and a Supervisor worker. Here,
+"separate" means separately owned contracts and credentials; it does not
+require a separate repository, process, binary, or license in v0. An embedded
+authority is sufficient for trusted local qualification. A shared deployment
+needs an online authority boundary so that untrusted or stale clients cannot
+publish a forged coordination head even when they legitimately hold scoped
+artifact credentials.
+
+### 1.2 Capability horizon and deployable product boundary
+
+The layers above create a staged capability horizon without widening the v0
+ledger:
+
+| Horizon | Added capability | Proof required before promotion |
+| --- | --- | --- |
+| Deterministic shared coordination | Provider-neutral authority, state-plus-receipt CAS, replay, and target-scoped rebase | File-backed conformance and the P0 checks in Section 10 |
+| Recoverable execution ownership | Renew, release, expired-lease reclaim, stale-fence rejection, and atomic completion with an accepted continuation/evidence pointer | Crash and clock-boundary tests showing that a superseded executor cannot write back |
+| Continuous reconciliation | Supervisor observation, reclaim, delivery-plane wake requests, and remote-resume orchestration through authority commands | Restart-safe reconciliation with no direct provider writes or in-memory correctness dependency |
+| Service-grade shared control plane | Authenticated principals, tenant-to-goal isolation, audit, bounded capacity, observability, service recovery, and eventually HA | An explicit deployment and migration contract with no authority bypass or silent local fallback |
+
+This horizon does not move quota accounting, run history, raw evidence,
+delivery state, or Supervisor runtime state into the coordination aggregate.
+Those capabilities keep the owners and ledgers listed in Section 3 and connect
+through typed commands, projections, or opaque pointers.
+
+A thin network wrapper around the Apache coordination core is not by itself a
+new product boundary. A separately distributed service becomes meaningful only
+when it owns the network trust boundary and material authority/reconciliation
+capabilities such as authentication, continuous supervision, remote recovery,
+migration, audit, multi-tenancy, or HA. If the project later creates a
+separately licensed server distribution, that boundary should follow this
+deployable semantic-authority and reconciliation surface, not the NoKV adapter
+or provider-neutral core. This RFC neither requires a repository split nor
+selects separate license terms; the current policy remains
+[`LoopX Licensing`](../../project/licensing.md).
 
 ## 2. What We Will Do, and What We Will Not
 
