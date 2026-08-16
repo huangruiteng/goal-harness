@@ -1,7 +1,5 @@
 """Heartbeat prompt rule constants inside the heartbeat bounded context."""
 
-from __future__ import annotations
-
 
 DEFAULT_MATERIAL_QUEUE_RULE = "Do not consume the learning material queue unless the user explicitly asks."
 DEFAULT_PERMISSION_RULE = "Do not ask for permissions when the current Codex session is already trusted."
@@ -56,7 +54,7 @@ HOST_LOOP_QUOTA_DISPATCH_RULE = (
     "Run quota; execute `interaction_contract` next—no detours."
 )
 HOST_LOOP_TODO_CLOSEOUT_RULE = (
-    "Nontrivial done -> successor todo or explicit no-follow-up."
+    "Done -> successor todo; final -> refresh/spend before no-follow-up completion."
 )
 CODEX_NATIVE_GOAL_UNCHANGED_WAIT_RULE = (
     "\n\nNative Codex `/goal` owns blocked state. Recheck quota at the "
