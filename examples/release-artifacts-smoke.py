@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 from pathlib import Path
 
 
@@ -52,6 +53,17 @@ def main() -> int:
     assert identity.name == "loopx", identity
     assert run("expected-tag").stdout.strip() == identity.tag
     assert run("validate-tag", identity.tag).returncode == 0
+
+    project_metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]
+    assert project_metadata["urls"] == {
+        "Homepage": "https://huangruiteng.github.io/loopx/",
+        "Documentation": "https://huangruiteng.github.io/loopx/docs/",
+        "Repository": "https://github.com/huangruiteng/loopx",
+        "Issues": "https://github.com/huangruiteng/loopx/issues",
+        "Changelog": "https://github.com/huangruiteng/loopx/releases",
+    }
 
     invalid_tag = run("validate-tag", "v999.0.0")
     assert invalid_tag.returncode == 2, invalid_tag
