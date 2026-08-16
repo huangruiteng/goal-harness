@@ -361,6 +361,84 @@ path, and canary route rather than as a user-facing release baseline.
   Lark delivery are also hardened without making them first-run requirements
   ([#2200](https://github.com/huangruiteng/loopx/pull/2200)). No persisted-state
   migration is required; advanced capabilities remain explicitly activated.
+- `v0.2.7` on 2026-07-17: control-plane convergence and exact-release-evidence
+  release at the matching `v0.2.7` tag. Scheduler, quota, and todo decisions
+  share one agent/runtime/capability/ACK scope; monitors converge independently
+  without resetting one another; blocking user gates use one typed response
+  plan; and Reward Memory v1 ships project corpus configuration with bounded
+  Issue-Fix recall.
+- `v0.2.8` on 2026-07-19: typed Codex App automation contract and periodic
+  report control plane at the matching `v0.2.8` tag. Agent-scoped scheduler,
+  quota, todo, monitor, user-gate, and frontier decisions become typed runtime
+  contracts, and a provider-neutral periodic-report control plane ships for
+  scheduled or material-progress reports without granting external-write
+  authority.
+- `v0.2.9` on 2026-07-20: lane-isolated scheduling and OpenCode host support at
+  the matching `v0.2.9` tag. One agent lane can no longer consume or suppress
+  another lane's frontier, OpenCode becomes a first-class Turn-backed host, and
+  periodic reports gain a dense self-contained HTML presentation.
+- `v0.2.10` on 2026-07-20: in-session weekly report quick start at the matching
+  `v0.2.10` tag. A normal project session can request a local report without
+  profiles, RRULE, host Automation, providers, or external sinks; owner pause
+  stays authoritative for monitor-only quota work.
+- `v0.2.11` on 2026-07-20: packaged weekly report preset at the matching
+  `v0.2.11` tag. `loopx periodic-report inspect-profile --preset weekly`
+  exposes the built-in provider-neutral preset; it creates no schedule, invokes
+  no external sink, and grants no external-write authority.
+- `v0.2.12` on 2026-07-23: heartbeat receipt and review-quality release at the
+  matching `v0.2.12` tag. One quota receipt is persisted per heartbeat turn,
+  monitor/replan routing stays fresh, `loopx pr-review` gains a code-volume and
+  simplification lens, and adaptive multi-turn live-worker lifecycle phases
+  stay visible through compact run and ledger views.
+- `v0.2.13` on 2026-07-24: monitor follow-through release at the matching
+  `v0.2.13` tag. Material monitor writeback resolves the exact todo before
+  target-key fallback, exposes newly runnable successors immediately, and
+  returns a structured stale-projection warning instead of reporting a failed
+  write when only projection reload failed. Continuous-monitor todos may no
+  longer carry `resume_when`.
+- `v0.3.0` on 2026-07-30: capability and control-contract release at the
+  matching `v0.3.0` tag. LoopX promotes simplify-first change qualification,
+  provider-neutral decision context, governed material lifecycle workflows,
+  managed-project delivery, and Ark Managed Agent host support while ordering
+  quota rules and making recoverable Turn stages explicit.
+- `v0.4.0` on 2026-08-01: onboarding and turn-authority release at the matching
+  `v0.4.0` tag. Goal startup projects capability-owned admission routes,
+  replan acknowledgements require canonical agent-visible evidence, the default
+  `quota should-run` JSON stays inside a bounded model-facing budget, and the
+  README foregrounds two inspectable 200+ hour loop trajectories.
+- `v0.4.1` on 2026-08-04: durable work selection and Goal-host continuation
+  release at the matching `v0.4.1` tag. Capability-admitted Todo routes persist
+  across turns, Goal hosts wake on the earliest material frontier transition,
+  grouped Issue Fix PR monitors materialize explicitly, and default-off Agent
+  Turn Recall ships with agent/goal/project/Todo/authority scoping.
+- `v0.4.2` on 2026-08-06: host and workflow surface release at the matching
+  `v0.4.2` tag. Pi and TraeX become first-class host paths, adaptive child
+  admission enforces domain/capability/repository/write-scope readiness,
+  provider-neutral PR queue observation and PR program workflows ship, and
+  Issue Fix pins work to an approved base snapshot.
+- `v0.4.3` on 2026-08-08: effect-interpreter evolution release at the matching
+  `v0.4.3` tag. A second real `EffectTurn` interpreter consumes turn results,
+  data-encoded execution and an ordered effect program shape land, the runtime
+  plan is replacement-first, and a unified bilingual Dev Book adds an
+  independent Control-Plane Course chapter.
+- `v0.4.4` on 2026-08-09: M6 effect-program quality-gate completion at the
+  matching `v0.4.4` tag. Hot control-plane modules are bounded,
+  `EffectTurn`/`EffectProgram` are consumed by real runtime paths, and the M6
+  RFC is marked Complete with audit evidence.
+- `v0.4.5` on 2026-08-12: security-hardening and control-plane release at the
+  matching `v0.4.5` tag. LoopX fixes five privately reported security
+  advisories, adds caller-approved completion validation, ships a
+  durable-smoke review gate, and continues replan/evidence/settlement
+  hardening with community contributions across 16 contributors.
+- `v0.4.6` on 2026-08-13: replan and notification hardening release at the
+  matching `v0.4.6` tag. Replan closeout becomes semantic, quota/heartbeat
+  notification correctness is repaired, refresh-state writeback guards land,
+  and two architecture RFCs document the effect-program direction.
+- `v0.4.7` on 2026-08-15: governed-host continuation release at the matching
+  `v0.4.7` tag. OpenCode 1/2 goal loops stop interrupting on user messages or
+  task closeout, DeepSeek Harness connects through a managed Turn connector,
+  per-goal handoff mode gates claim/lease authority in state files, and Explore
+  can publish multiple Feishu visual boards in one automated step.
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.
@@ -377,6 +455,7 @@ python3 examples/fresh-clone-quickstart-smoke.py
 python3 examples/loopx-update-smoke.py
 python3 examples/release/release-version-contract-smoke.py
 python3 examples/release/release-readiness-doc-smoke.py
+python3 examples/repository-hygiene-smoke.py
 git diff --check
 loopx check --scan-path README.md --scan-path docs/ --scan-path examples/
 ```

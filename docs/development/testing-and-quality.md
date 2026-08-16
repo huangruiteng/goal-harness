@@ -113,6 +113,18 @@ Durable smoke 应保护已交付行为、可复用合同、公开/私有边界�
 贡献者检查项、语义 oracle 示例、公开安全 fixture 规则和合并流程见
 [什么是好的 Smoke](good-smokes.md)。
 
+The repository hygiene smoke is the thin baseline for LoopX's own public
+checkout: it asserts required tracked files, runs the canonical public/private
+boundary scan, and ratchets the release timeline to every published version
+tag.
+
+仓库卫生 smoke 是 LoopX 自身公共 checkout 的薄基线：断言必需跟踪文件存在，
+执行规范的公开/私有边界扫描，并把 release 时间线收紧到每个已发布版本 tag。
+
+```bash
+python3 examples/repository-hygiene-smoke.py
+```
+
 Run one focused smoke while developing, then let the canary planner select the
 smallest cross-surface set from the Git diff:
 

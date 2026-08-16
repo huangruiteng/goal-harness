@@ -31,6 +31,9 @@ GIT_REQUIRED_SCRIPTS = {
     "control-plane-maintainability-ratchet-smoke.py": (
         "requires git ls-files so untracked local artifacts do not enter the report"
     ),
+    "repository-hygiene-smoke.py": (
+        "requires git ls-files and git tag to validate tracked hygiene files and release history"
+    ),
 }
 SERIAL_SMOKE_SCRIPTS = {
     "issue-fix-acceptance-loop-smoke.py": (
