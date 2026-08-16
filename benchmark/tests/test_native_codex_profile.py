@@ -13,6 +13,8 @@ from loopx.capabilities.benchmark_toolkit.native_codex_profile import (
     compact_native_codex_profile_receipt,
     inspect_native_codex_profile,
     install_native_codex_profile,
+    native_codex_app_server_environment,
+    native_codex_profile_environment,
     render_native_codex_goal_prompt,
 )
 
@@ -80,6 +82,54 @@ def test_compact_profile_receipt_excludes_local_paths() -> None:
     assert receipt["source_clean"] is True
     assert receipt["skill_readback_ready"] is True
     assert "/private" not in rendered
+
+
+def test_app_server_environment_explicitly_admits_only_provider_value(
+    tmp_path: Path,
+) -> None:
+    profile = _fake_profile(tmp_path)
+    base_env = {
+        "PATH": "/usr/bin:/bin",
+        "CODEX_GOAL_API_KEY": "provider-value",
+        "UNRELATED_PRIVATE_VALUE": "must-not-pass",
+    }
+    original_base_env = dict(base_env)
+
+    profile_env = native_codex_profile_environment(profile, base_env=base_env)
+    app_server_env = native_codex_app_server_environment(
+        profile,
+        provider_env_key="CODEX_GOAL_API_KEY",
+        base_env=base_env,
+    )
+
+    assert "CODEX_GOAL_API_KEY" not in profile_env
+    assert "UNRELATED_PRIVATE_VALUE" not in profile_env
+    assert app_server_env["CODEX_GOAL_API_KEY"] == "provider-value"
+    assert "UNRELATED_PRIVATE_VALUE" not in app_server_env
+    assert app_server_env["CODEX_HOME"] == str(profile.codex_home)
+    assert base_env == original_base_env
+
+
+def test_app_server_environment_rejects_invalid_or_missing_provider_key(
+    tmp_path: Path,
+) -> None:
+    profile = _fake_profile(tmp_path)
+
+    with pytest.raises(ValueError, match="provider_env_key"):
+        native_codex_app_server_environment(
+            profile,
+            provider_env_key="invalid-key",
+            base_env={"invalid-key": "value"},
+        )
+    with pytest.raises(
+        NativeCodexProfileError,
+        match="provider_environment_value_missing:CODEX_GOAL_API_KEY",
+    ):
+        native_codex_app_server_environment(
+            profile,
+            provider_env_key="CODEX_GOAL_API_KEY",
+            base_env={"PATH": "/usr/bin:/bin"},
+        )
 
 
 def test_installed_cli_renders_and_rebinds_the_real_goal_prompt(tmp_path: Path) -> None:

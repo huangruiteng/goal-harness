@@ -34,6 +34,7 @@ NATIVE_CODEX_PROFILE_REQUIRED_SKILL_IDS = (
 )
 _DEFAULT_GLOBAL_REGISTRY_TOKEN = "$HOME/.codex/loopx/registry.global.json"
 _SAFE_RELEASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+_SAFE_ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _INSTALL_ENV_PASSTHROUGH = (
     "LANG",
     "LC_ALL",
@@ -228,6 +229,32 @@ def native_codex_profile_environment(
             "PATH": f"{profile.bin_dir}{os.pathsep}{inherited_path}",
         }
     )
+    return env
+
+
+def native_codex_app_server_environment(
+    profile: NativeCodexProfile,
+    *,
+    provider_env_key: str,
+    base_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Admit one runner-owned provider value into the formal profile environment.
+
+    The underlying profile environment remains credential-free by default. The
+    runner must name the provider key explicitly and separately deny that key to
+    agent shell or tool processes.
+    """
+
+    if not _SAFE_ENV_KEY.fullmatch(provider_env_key):
+        raise ValueError("provider_env_key must be a safe environment variable name")
+    source = os.environ if base_env is None else base_env
+    provider_value = source.get(provider_env_key)
+    if not isinstance(provider_value, str) or not provider_value.strip():
+        raise NativeCodexProfileError(
+            f"provider_environment_value_missing:{provider_env_key}"
+        )
+    env = native_codex_profile_environment(profile, base_env=base_env)
+    env[provider_env_key] = provider_value
     return env
 
 
@@ -587,6 +614,7 @@ __all__ = [
     "compact_native_codex_profile_receipt",
     "inspect_native_codex_profile",
     "install_native_codex_profile",
+    "native_codex_app_server_environment",
     "native_codex_profile_environment",
     "render_native_codex_goal_prompt",
 ]

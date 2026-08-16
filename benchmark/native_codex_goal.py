@@ -35,6 +35,7 @@ from loopx.capabilities.benchmark_toolkit.native_codex_profile import (
     compact_native_codex_profile_receipt,
     inspect_native_codex_profile,
     install_native_codex_profile,
+    native_codex_app_server_environment,
     native_codex_profile_environment,
     render_native_codex_goal_prompt,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "compact_native_goal_receipt",
     "inspect_native_codex_profile",
     "install_native_codex_profile",
+    "native_codex_app_server_environment",
     "native_codex_profile_environment",
     "observe_native_goal_event",
     "probe_native_goal_process",
