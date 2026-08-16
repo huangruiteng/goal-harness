@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from loopx.contract import check_contract
 from loopx.control_plane.goals.contract_health import (
     contract_error_diagnostic,
@@ -111,6 +113,34 @@ def test_goal_filtered_contract_excludes_unrelated_goal_signals(
     assert contract["errors"] == []
     assert contract["goal_errors"] == {}
     assert GOAL_A_LONG not in json.dumps(contract, sort_keys=True)
+
+
+def test_contract_can_defer_public_boundary_scan_for_status_hot_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry_path, runtime_root, public_file = _registry(tmp_path)
+
+    def fail_if_scanned(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("public boundary scan entered the status hot path")
+
+    monkeypatch.setattr("loopx.contract.scan_public_boundary", fail_if_scanned)
+
+    contract = check_contract(
+        registry_path=registry_path,
+        runtime_root_override=str(runtime_root),
+        scan_roots=[public_file],
+        limit=5,
+        goal_id_filter=GOAL_A,
+        include_public_boundary_scan=False,
+    )
+
+    assert contract["ok"] is True
+    assert contract["public_boundary_scan"] == {
+        "state": "deferred",
+        "reason": "status_hot_path",
+        "recommended_action": "run `loopx check` before publishing",
+    }
 
 
 def test_registry_goal_problem_keeps_its_goal_owner(tmp_path: Path) -> None:

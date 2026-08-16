@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Offline ACP v1 stdio contract smoke for LoopX Chat."""
+
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+import stat
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from loopx.chat_acp import ACPStdioAdapter  # noqa: E402
+from loopx.chat_endpoints import AgentEndpointRegistry  # noqa: E402
+from loopx.chat_runtime import ChatRuntimeController  # noqa: E402
+from loopx.chat_store import ChatSessionStore  # noqa: E402
+
+
+FAKE_ACP = r'''#!/usr/bin/env python3
+import json
+import sys
+import time
+
+session_id = "acp:fixture/session"
+active_prompt_id = None
+session_cwd = ""
+for line in sys.stdin:
+    request = json.loads(line)
+    assert request.get("jsonrpc") == "2.0", request
+    method = request.get("method")
+    request_id = request.get("id")
+    if method == "initialize":
+        assert request["params"]["protocolVersion"] == 1
+        assert request["params"]["clientCapabilities"]["terminal"] is False
+        result = {
+            "protocolVersion": 1,
+            "agentCapabilities": {
+                "loadSession": True,
+                "sessionCapabilities": {"close": {}},
+            },
+        }
+    elif method == "session/new":
+        assert request["params"]["mcpServers"] == []
+        session_cwd = request["params"]["cwd"]
+        result = {"sessionId": session_id}
+    elif method == "session/load":
+        assert request["params"]["sessionId"] == session_id
+        session_cwd = request["params"]["cwd"]
+        result = {}
+    elif method == "session/prompt":
+        active_prompt_id = request_id
+        prompt = request["params"]["prompt"][0]["text"]
+        if "wait for cancel" in prompt:
+            continue
+        if "activity renew" in prompt:
+            for _ in range(4):
+                time.sleep(0.06)
+                print(json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {"sessionId": session_id, "update": {
+                        "sessionUpdate": "plan",
+                        "entries": [],
+                    }},
+                }), flush=True)
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {"sessionId": session_id, "update": {
+                "sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "private thought"},
+            }},
+        }), flush=True)
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {"sessionId": session_id, "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tool-1",
+                "title": f"读取 {session_cwd}/private-status.json",
+                "kind": "read",
+                "status": "in_progress",
+            }},
+        }), flush=True)
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "id": 900,
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": session_id,
+                "toolCall": {"toolCallId": "tool-2", "status": "pending"},
+                "options": [],
+            },
+        }), flush=True)
+        permission = json.loads(sys.stdin.readline())
+        assert permission["id"] == 900
+        assert permission["result"]["outcome"]["outcome"] == "cancelled"
+        envelope = '<loopx-review-json>' + json.dumps({
+            "schema_version": "loopx_chat_agent_response_v0",
+            "message": "ACP 回答。",
+            "proposals": [],
+            "gate": None,
+        }, ensure_ascii=False) + '</loopx-review-json>'
+        response = "ACP 回答。\n" + envelope
+        marker_split = response.index("<loopx-review-json>") + 5
+        for chunk in (response[:marker_split], response[marker_split:]):
+            print(json.dumps({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {"sessionId": session_id, "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": chunk},
+                }},
+            }, ensure_ascii=False), flush=True)
+        result = {"stopReason": "end_turn"}
+    elif method == "session/cancel":
+        if active_prompt_id is not None:
+            print(json.dumps({"jsonrpc": "2.0", "id": active_prompt_id, "result": {"stopReason": "cancelled"}}), flush=True)
+            active_prompt_id = None
+        continue
+    elif method == "session/close":
+        result = {}
+    else:
+        print(json.dumps({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "unknown"}}), flush=True)
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}), flush=True)
+'''
+
+
+def main() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-chat-acp-") as raw_tmp:
+        root = Path(raw_tmp)
+        fake = root / "fake-acp"
+        fake.write_text(FAKE_ACP, encoding="utf-8")
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        adapter = ACPStdioAdapter.start(command=(str(fake),), work_dir=root)
+        assert adapter.upstream_thread_id == "acp:fixture/session"
+        assert adapter.capabilities()["resume"] is True
+        events: list[tuple[str, dict[str, object]]] = []
+        response = adapter.start_turn("检查状态", lambda kind, payload: events.append((kind, payload)))
+        assert response["message"] == "ACP 回答。", response
+        visible = "".join(
+            str(payload.get("text") or "")
+            for kind, payload in events
+            if kind == "answer.delta"
+        )
+        assert visible.strip() == "ACP 回答。", events
+        assert "<loopx-review-json>" not in visible, visible
+        assert any(kind == "agent.phase" and "读取 [project]" in str(payload.get("label")) for kind, payload in events)
+        assert str(root) not in str(events), events
+        assert not any("private thought" in str(payload) for _, payload in events), events
+        adapter.close_session()
+
+        renewed = ACPStdioAdapter.start(
+            command=(str(fake),),
+            work_dir=root,
+            idle_timeout_sec=0.15,
+            hard_timeout_sec=2,
+        )
+        renewed_response = renewed.start_turn("activity renew", lambda *_: None)
+        assert renewed_response["message"] == "ACP 回答。", renewed_response
+        renewed.close_session()
+
+        resumed = ACPStdioAdapter.start(
+            command=(str(fake),),
+            work_dir=root,
+            resume_thread_id="acp:fixture/session",
+        )
+        events = []
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            running = executor.submit(
+                resumed.start_turn,
+                "wait for cancel",
+                lambda kind, payload: events.append((kind, payload)),
+            )
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not any(kind == "turn.started" for kind, _ in events):
+                time.sleep(0.01)
+            resumed.interrupt_turn()
+            running.result(timeout=2)
+        resumed.close_session()
+
+        store = ChatSessionStore(root / "runtime")
+        endpoint_registry = AgentEndpointRegistry(store.root)
+        endpoint_registry.upsert(
+            {
+                "agent_id": "fixture-acp",
+                "display_name": "Fixture ACP",
+                "command": [str(fake)],
+                "location": "local",
+            }
+        )
+        first = ChatRuntimeController(
+            store=store,
+            codex_bin="missing-codex-for-fixture",
+            endpoint_registry=endpoint_registry,
+        )
+        session, was_resumed = first.open_session(
+            goal_id="fixture-goal",
+            agent_id="fixture-acp",
+            work_dir=root,
+            objective="Exercise the ACP route.",
+            mode="resume_latest",
+        )
+        assert was_resumed is False
+        assert session["upstream_thread_id"] == "acp:fixture/session"
+        turn, created = first.submit_turn(
+            session_id=str(session["session_id"]),
+            client_turn_id="fixture-turn",
+            message="检查状态",
+            work_dir=root,
+            objective="Exercise the ACP route.",
+        )
+        assert created is True
+        completed = first.wait_for_turn(
+            session_id=str(session["session_id"]),
+            turn_id=str(turn["turn_id"]),
+            timeout_sec=3,
+        )
+        assert completed["status"] == "completed", completed
+        first.close()
+        second = ChatRuntimeController(
+            store=store,
+            codex_bin="missing-codex-for-fixture",
+            endpoint_registry=endpoint_registry,
+        )
+        restored, was_resumed = second.open_session(
+            goal_id="fixture-goal",
+            agent_id="fixture-acp",
+            work_dir=root,
+            objective="Exercise the ACP route.",
+            mode="resume_latest",
+        )
+        assert was_resumed is True
+        assert restored["session_id"] == session["session_id"]
+        second.close()
+
+    print("loopx-chat-acp-adapter-smoke: ok")
+
+
+if __name__ == "__main__":
+    main()

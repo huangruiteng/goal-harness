@@ -10,6 +10,11 @@
       "dict_any_count": 0,
       "lines": 2240
     },
+    "loopx/chat_actions.py": {
+      "any_count": 52,
+      "dict_any_count": 0,
+      "lines": 1590
+    },
     "loopx/canary/planner.py": {
       "any_count": 22,
       "dict_any_count": 0,

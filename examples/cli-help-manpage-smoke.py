@@ -80,6 +80,7 @@ def assert_command_reference_surface() -> None:
     assert "loopx <command> --help" in result.stdout, result.stdout
     assert "codex-cli-bootstrap-message" in result.stdout, result.stdout
     assert "loopx ready-score --goal-id <goal-id>" in result.stdout, result.stdout
+    assert "loopx chat --goal-id <goal-id>" in result.stdout, result.stdout
     assert result.stderr == "", result.stderr
 
 

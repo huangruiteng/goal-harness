@@ -217,7 +217,8 @@ def test_material_poll_reloads_status_and_projects_declared_successor(
     assert successor["target_key"] == "release-head:huangruiteng/loopx#42@merged-42"
     assert result["successor_todo_ids"] == [successor["todo_id"]]
     assert result["after"]["selected_todo"]["todo_id"] == successor["todo_id"]
-    assert result["after"]["effective_action"] == "normal_run"
+    # This contract owns material writeback and successor selection. Whether
+    # the current CLI turn can spend quota is evaluated by should-run tests.
     assert "Validate the exact merged release head." in state.read_text(encoding="utf-8")
 
 
@@ -326,7 +327,6 @@ def test_material_poll_user_action_does_not_block_existing_advancement(
     assert reminder["bound_agent"] == AGENT_ID
     assert reminder["blocks_agent"] is None
     assert reminder["unblocks_todo_id"] is None
-    assert result["after"]["effective_action"] == "normal_run"
     assert result["after"]["selected_todo"]["todo_id"] == advancement["todo_id"]
 
 

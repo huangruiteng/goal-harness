@@ -18,7 +18,11 @@ GOAL_ID = "material-capability-fixture"
 AGENT_ID = "agent-reviewer"
 
 
-def _context(tmp_path: Path) -> status_collection.StatusCollectionContext:
+def _context(
+    tmp_path: Path,
+    *,
+    notification_projection: dict[str, Any] | None = None,
+) -> status_collection.StatusCollectionContext:
     runtime_root = tmp_path / "runtime"
     runtime_root.mkdir()
     return status_collection.StatusCollectionContext(
@@ -93,6 +97,9 @@ def _context(tmp_path: Path) -> status_collection.StatusCollectionContext:
         build_status_contract=lambda: {"schema_version": "fixture"},
         build_contract_health_projection=lambda _contract: {},
         build_agent_management_projection=build_agent_management_projection,
+        build_goal_channel_notification_projection=lambda **_kwargs: (
+            notification_projection or {"goals": []}
+        ),
         status_control_plane_context_limit=5,
         max_todo_index_items=5,
     )
@@ -103,6 +110,7 @@ def _collect(
     monkeypatch: pytest.MonkeyPatch,
     *,
     available_capabilities: Any,
+    notification_projection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     monkeypatch.setattr(
         status_collection,
@@ -114,7 +122,10 @@ def _collect(
         runtime_root_override=None,
         scan_roots=[tmp_path],
         limit=5,
-        context=_context(tmp_path),
+        context=_context(
+            tmp_path,
+            notification_projection=notification_projection,
+        ),
         goal_id=GOAL_ID,
         available_capabilities=available_capabilities,
     )
@@ -149,6 +160,57 @@ def test_status_collection_forwards_material_capability_to_projection(
     )
     assert row["handoff_note"]["schema_version"] == "handoff_note_v1"
     assert projection["source_summary"]["material_frontier_count"] == 1
+
+
+def test_status_collection_omits_unconfigured_goal_channel_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _collect(
+        tmp_path,
+        monkeypatch,
+        available_capabilities=[],
+        notification_projection={
+            "schema_version": "loopx_goal_channel_notification_projection_v0",
+            "goals": [
+                {
+                    "goal_id": GOAL_ID,
+                    "configured": False,
+                    "enabled": False,
+                    "human_gate_auto_notify_enabled": False,
+                    "receipt_count": 0,
+                }
+            ],
+        },
+    )
+
+    assert "goal_channel_notification_projection" not in payload
+
+
+def test_status_collection_keeps_configured_goal_channel_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projection = {
+        "schema_version": "loopx_goal_channel_notification_projection_v0",
+        "goals": [
+            {
+                "goal_id": GOAL_ID,
+                "configured": True,
+                "enabled": True,
+                "human_gate_auto_notify_enabled": False,
+                "receipt_count": 0,
+            }
+        ],
+    }
+    payload = _collect(
+        tmp_path,
+        monkeypatch,
+        available_capabilities=[],
+        notification_projection=projection,
+    )
+
+    assert payload["goal_channel_notification_projection"] == projection
 
 
 def test_status_projection_cache_separates_capability_envelopes(

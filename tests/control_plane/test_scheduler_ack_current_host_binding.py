@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from examples.control_plane.quota_plan_fixtures import SCOPED_AGENT_ID, write_cli_fixture
-from loopx.control_plane.testing.canary_harness import run_json_cli
+from loopx.control_plane.testing.canary_harness import run_json_cli, run_json_cli_result
 
 
 GOAL_ID = "needs-operator"
@@ -38,7 +38,7 @@ def _quota(
     runtime_root: Path,
     project: Path,
 ) -> dict:
-    return run_json_cli(
+    _returncode, payload = run_json_cli_result(
         "quota",
         "should-run",
         "--goal-id",
@@ -50,6 +50,7 @@ def _quota(
         runtime_root=runtime_root,
         cwd=project,
     )
+    return payload
 
 
 def test_scheduler_ack_current_replays_host_binding_after_update(
