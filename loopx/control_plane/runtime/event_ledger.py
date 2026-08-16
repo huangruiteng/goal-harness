@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from datetime import timedelta
-from typing import Any, Callable, Iterable, Optional
+from typing import Any
 
 from .time import now_utc
 
