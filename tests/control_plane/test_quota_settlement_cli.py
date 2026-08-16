@@ -509,7 +509,7 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     tmp_path: Path,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
-    _configure_read_only_todo(project)
+    state_path = _configure_read_only_todo(project)
     binding = (
         "--agent-id",
         AGENT_ID,
@@ -601,6 +601,25 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert refresh["delivery_workspace_causality"]["requirement"] == "not_required"
     assert "delivery_workspace" not in refresh
 
+    ordinary_args = (
+        "todo",
+        "complete",
+        "--goal-id",
+        GOAL_ID,
+        *binding,
+        "--claimed-by",
+        AGENT_ID,
+        "--evidence",
+        "ordinary completion before terminal settlement",
+    )
+    ordinary_rc, ordinary = _run_cli(
+        registry_path,
+        runtime,
+        *ordinary_args,
+    )
+    assert ordinary_rc == 0, ordinary
+    assert ordinary["changed"] is True
+
     spend_args = (
         "quota",
         "spend-slot",
@@ -625,9 +644,7 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert replay["idempotent_replay"] is True
     assert _spend_run_count(runtime) == 1
 
-    complete_rc, complete = _run_cli(
-        registry_path,
-        runtime,
+    terminal_args = (
         "todo",
         "complete",
         "--goal-id",
@@ -639,7 +656,13 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
         "read-only characterization validated",
         "--no-follow-up",
     )
+    complete_rc, complete = _run_cli(
+        registry_path,
+        runtime,
+        *terminal_args,
+    )
     assert complete_rc == 0, complete
+    assert complete["changed"] is True
     assert [
         receipt["step_kind"]
         for receipt in complete["settlement_result"]["receipts"]
@@ -649,6 +672,43 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
         "quota_spend",
         "terminal_closeout",
     ]
+    assert "no_followup=true" in state_path.read_text(encoding="utf-8")
+
+    event_log = runtime / "goals" / GOAL_ID / "rollout-event-log.jsonl"
+    completion_events = [
+        event
+        for line in event_log.read_text(encoding="utf-8").splitlines()
+        if (event := json.loads(line)).get("event_kind") == "todo_complete"
+        and event.get("run_id") == TURN_ID
+    ]
+    assert [event["details"]["no_followup"] for event in completion_events] == [
+        False,
+        True,
+    ]
+    assert completion_events[0]["event_id"] != completion_events[1]["event_id"]
+
+    complete_replay_rc, complete_replay = _run_cli(
+        registry_path,
+        runtime,
+        *terminal_args,
+    )
+    assert complete_replay_rc == 0, complete_replay
+    assert complete_replay["idempotent_replay"] is True
+    assert complete_replay["changed"] is False
+    ordinary_replay_rc, ordinary_replay = _run_cli(
+        registry_path,
+        runtime,
+        *ordinary_args,
+    )
+    assert ordinary_replay_rc == 0, ordinary_replay
+    assert ordinary_replay["idempotent_replay"] is True
+    replayed_completion_events = [
+        event
+        for line in event_log.read_text(encoding="utf-8").splitlines()
+        if (event := json.loads(line)).get("event_kind") == "todo_complete"
+        and event.get("run_id") == TURN_ID
+    ]
+    assert len(replayed_completion_events) == 2
 
 
 def test_legacy_read_only_workspace_mismatch_fails_then_corrects_from_todo_contract(

@@ -19,6 +19,7 @@ from loopx.control_plane.work_items.task_lease import (
 )
 from loopx.event_sourced_state import (
     TODO_ADDED,
+    TODO_COMPLETED,
     TODO_DEFERRED,
     TODO_UPDATED,
     AppendOnlyStateEventStore,
@@ -479,6 +480,58 @@ def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path) -> None:
     )
     assert replayed["idempotent_replay"] is True
     assert replayed["changed"] is False
+
+
+def test_terminal_upgrade_cannot_replace_existing_successor(tmp_path: Path) -> None:
+    registry, _state = _write_fixture(tmp_path, multi_agent=False)
+    todo = _add_agent_todo(registry)
+
+    completed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        claimed_by=AUTHOR_AGENT,
+        completion_turn_key="turn-a",
+        evidence="ordinary completion created the successor",
+        next_agent_todo="Continue the durable successor.",
+    )
+    assert completed["changed"] is True
+
+    with pytest.raises(ValueError, match="cannot replace an existing successor"):
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            claimed_by=AUTHOR_AGENT,
+            completion_turn_key="turn-a",
+            evidence="terminal closeout must not erase the successor",
+            no_followup=True,
+        )
+
+
+def test_terminal_upgrade_requires_original_completion_turn_key(tmp_path: Path) -> None:
+    registry, _state = _write_fixture(tmp_path, multi_agent=False)
+    todo = _add_agent_todo(registry)
+
+    completed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        claimed_by=AUTHOR_AGENT,
+        completion_turn_key="turn-a",
+        evidence="ordinary completion from the original turn",
+    )
+    assert completed["changed"] is True
+
+    with pytest.raises(ValueError, match="requires the original completion_turn_key"):
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            claimed_by=AUTHOR_AGENT,
+            evidence="an unscoped caller cannot claim terminal closeout",
+            no_followup=True,
+        )
 
 
 def test_event_projected_completion_reports_task_lease_fence(
@@ -951,6 +1004,89 @@ def test_event_projected_terminal_replay_does_not_release_lease(
     }
     assert lease_path.read_text(encoding="utf-8") == lease_before
     assert json.loads(lease_before)["status"] == "active"
+
+
+def test_event_projected_completion_appends_same_turn_terminal_upgrade(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    event_log = state.with_name("events.jsonl")
+    store = AppendOnlyStateEventStore(event_log)
+    todo_id = "todo_event_terminal_upgrade"
+    store.append(
+        make_state_event(
+            event_id="evt-event-terminal-parent",
+            goal_id=GOAL_ID,
+            event_type=TODO_ADDED,
+            refs={"todo_id": todo_id},
+            payload={
+                "role": "agent",
+                "title": "Append a same-turn terminal upgrade.",
+                "task_class": "advancement_task",
+                "claimed_by": AUTHOR_AGENT,
+            },
+            recorded_at="2026-07-18T00:00:00+00:00",
+        )
+    )
+    store.append(
+        make_state_event(
+            event_id="evt-event-ordinary-completion",
+            goal_id=GOAL_ID,
+            event_type=TODO_COMPLETED,
+            refs={"todo_id": todo_id},
+            payload={
+                "completed_at": "2026-07-18T00:01:00+00:00",
+                "updated_at": "2026-07-18T00:01:00+00:00",
+                "completion_turn_key": "turn-a",
+            },
+            recorded_at="2026-07-18T00:01:00+00:00",
+        )
+    )
+
+    with pytest.raises(ValueError, match="different completion_turn_key"):
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo_id,
+            claimed_by=AUTHOR_AGENT,
+            evidence="a different turn cannot append terminal closeout",
+            completion_turn_key="turn-b",
+            no_followup=True,
+        )
+    assert sum(event["event_type"] == TODO_COMPLETED for event in store.load()) == 1
+
+    upgraded = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        claimed_by=AUTHOR_AGENT,
+        completion_turn_key="turn-a",
+        evidence="same-turn terminal closeout validated",
+        no_followup=True,
+    )
+
+    assert upgraded["source"] == "event_log"
+    assert upgraded["changed"] is True
+    upgraded_events = AppendOnlyStateEventStore(event_log).load()
+    projected = build_state_projection(upgraded_events)
+    projected_todo = projected["agent_todos"]["items"][0]
+    assert projected_todo["no_followup"] == "true"
+    assert projected_todo["completed_at"] == "2026-07-18T00:01:00+00:00"
+    assert sum(event["event_type"] == TODO_COMPLETED for event in upgraded_events) == 2
+
+    replayed = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        claimed_by=AUTHOR_AGENT,
+        completion_turn_key="turn-a",
+        evidence="same-turn terminal closeout replayed",
+        no_followup=True,
+    )
+    assert replayed["idempotent_replay"] is True
+    assert replayed["changed"] is False
+    replayed_events = AppendOnlyStateEventStore(event_log).load()
+    assert sum(event["event_type"] == TODO_COMPLETED for event in replayed_events) == 2
 
 
 def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -> None:
