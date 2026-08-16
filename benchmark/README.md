@@ -29,8 +29,9 @@ publication authority.
   connects that runtime to a real `codex app-server`. Benchmark-family adapters
   should import the installed runtime and its formal isolated profile helper,
   then retain only their isolation, environment bridge, verifier, and scoring
-  concerns. The profile helper proves that the Goal prompt, installed skills,
-  and release-snapshot CLI belong to one pinned product path.
+  concerns. The profile helper renders the real Goal prompt with its installed
+  CLI and proves that the prompt, discovered skills, and release-snapshot CLI
+  belong to one pinned product path.
 
 Legacy runners and dated packets are archived under
 [`deprecate/benchmark-legacy/`](../deprecate/benchmark-legacy/README.md). They are

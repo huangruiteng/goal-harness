@@ -113,8 +113,9 @@ The treatment also needs three independent product-path proofs:
 
 Prepare the latter two with
 `benchmark_toolkit.native_codex_profile.install_native_codex_profile`. Do not copy
-`SKILL.md` files into a runner image. Bind prompt generation to the returned
-`profile.cli_bin`, pass `profile.codex_home` to app-server, and set
+`SKILL.md` files into a runner image. Generate the first input with
+`render_native_codex_goal_prompt`, build app-server's environment with
+`native_codex_profile_environment`, and set
 `NativeGoalConfig.required_skill_ids=profile.required_skill_ids`. The runtime then
 uses `skills/list` before thread creation and fails before model work unless Codex
 actually discovers the installed skill set. A filesystem check alone is not
