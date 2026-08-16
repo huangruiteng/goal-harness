@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   Bot,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   Copy,
   Clock3,
@@ -13,16 +16,23 @@ import {
   History,
   Link2,
   LayoutDashboard,
+  MessageCircle,
+  MoreHorizontal,
   Moon,
+  Plus,
   Upload,
   Radar,
   RefreshCw,
   RotateCcw,
   Search,
+  Send,
+  Settings,
   ShieldCheck,
   Sun,
+  Sparkles,
   Terminal,
   Users,
+  X,
 } from "lucide-react";
 import {
   ColumnDef,
@@ -75,6 +85,32 @@ import {
   parseStatusPayload,
 } from "../data/status";
 import {
+  ChatApiError,
+  applyTypedAction,
+  applyTodo,
+  closeChatSession,
+  createChatSession,
+  fetchChatCapabilities,
+  fetchChatHistory,
+  fetchChatSession,
+  fetchChatSessions,
+  interruptChatTurn,
+  previewTodo,
+  previewTypedAction,
+  recordProjectionExchange,
+  resumeChatSession,
+  resumeChatTurnStreaming,
+  sendChatTurnStreaming,
+  selectAvailableChatAgent,
+  sessionInvalidatedByPayload,
+  todoNoWriteReceiptFromPayload,
+  todoReceiptLabel,
+  type ChatSessionSnapshot,
+  type ChatSessionSummary,
+  type ChatImageAttachment,
+  type TodoProposal,
+} from "../data/chat";
+import {
   DecisionResearchView,
   fetchPresentationProjection,
 } from "../data/decision-research";
@@ -96,6 +132,12 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { cn } from "../lib/utils";
+import { PersonalWorkspacePage } from "../features/personal-workspace/personal-workspace-page";
+import {
+  normalizePersonalHomeModel,
+  type WorkspaceImageAttachment,
+  type WorkspaceTimelineItem,
+} from "../features/personal-workspace/personal-workspace-model";
 
 type LaneKey = "user" | "codex" | "watch";
 
@@ -180,7 +222,7 @@ type DataSource =
   | { kind: "file"; label: string };
 
 const defaultLiveStatusUrl = "http://127.0.0.1:8765/status.json";
-const defaultGlobalStatusUrl = "http://127.0.0.1:8766/status.json";
+const defaultGlobalStatusUrl = import.meta.env.DEV ? "/status.json" : "http://127.0.0.1:8766/status.json";
 const expectedStatusContractSchemaVersion = 2;
 const fallbackStatusContractReloadHint = "scripts/macos-dashboard-launchagent.sh restart";
 const rewardOptions = ["positive", "mixed", "neutral", "negative"] as const;
@@ -2735,6 +2777,7 @@ function QuotaChip({ quota }: { quota?: ComputeQuota | null }) {
 }
 
 type OperatorMentalModelItem = {
+  id: string;
   label: string;
   badge: string;
   value: string;
@@ -2761,45 +2804,45 @@ function buildCanContinueView({
   const state = quota?.state ?? row.waitingOn;
   if (state === "eligible") {
     return {
-      value: agentTodo ? "Agent can continue" : "Ready, needs next todo",
+      value: agentTodo ? "Agent 可以继续" : "已就绪，需要下一个 Todo",
       detail: agentTodo
-        ? "There is runnable agent work and the quota guard is open."
-        : "The guard is open, but no first agent todo is projected for this goal.",
+        ? "存在可执行的 Agent 工作，配额限制也已放行。"
+        : "当前允许执行，但还没有为这个 Goal 生成第一个 Agent Todo。",
       variant: agentTodo ? "success" : "warning",
     } as const;
   }
   if (state === "operator_gate" || row.waitingOn === "user_or_controller" || row.waitingOn === "controller") {
     return {
-      value: "Needs judgment first",
+      value: "需要先做判断",
       detail: userTodo
-        ? "The next safe transition starts with the user/controller todo."
-        : "A human or controller gate is active before delivery can continue.",
+        ? "下一次安全推进要先完成用户或控制者 Todo。"
+        : "继续交付前需要通过人工或控制者确认。",
       variant: "warning",
     } as const;
   }
   if (row.waitingOn === "external_evidence" || state === "waiting") {
     return {
-      value: "Watching evidence",
-      detail: "Continue only after the external evidence or terminal marker changes.",
+      value: "正在等待证据",
+      detail: "外部证据或结束标记发生变化后才能继续。",
       variant: "info",
     } as const;
   }
   if (state === "blocked_health") {
     return {
-      value: "Repair first",
-      detail: "The control plane is asking for a health repair before delivery.",
+      value: "需要先修复",
+      detail: "控制面要求先修复健康问题，再继续交付。",
       variant: "danger",
     } as const;
   }
   if (state === "throttled" || state === "paused" || state === "focus_wait") {
     return {
-      value: "Hold",
-      detail: buildQuotaView(quota)?.shortLine ?? "The current control-plane state is not open for delivery.",
+      value: "暂时保持等待",
+      detail: buildQuotaView(quota)?.shortLine ?? "当前控制面状态不允许继续交付。",
       variant: state === "paused" ? "neutral" : "warning",
     } as const;
   }
   return {
-    value: "Check control plane",
+    value: "检查控制面",
     detail: buildQuotaView(quota)?.shortLine ?? row.status,
     variant: "neutral",
   } as const;
@@ -2837,40 +2880,45 @@ function buildOperatorMentalModelItems(row?: GoalDirectoryRow): OperatorMentalMo
 
   return [
     {
-      label: "Goal",
-      badge: row.severity === "clear" ? "clear" : row.severity,
+      id: "goal",
+      label: "目标",
+      badge: row.severity === "clear" ? "正常" : row.severity,
       value: row.goal.id,
       detail: `${row.status}; ${waitingLabel[row.waitingOn] ?? row.waitingOn}; ${row.lifecyclePhase}`,
       icon: GitBranch,
       variant: row.severity === "clear" ? "success" : severityVariant[row.severity] ?? "neutral",
     },
     {
-      label: "Next step",
-      badge: agentTodo ? "todo" : "fallback",
-      value: nextStep || "No next step projected",
-      detail: agentTodo ? "From projected agent todo." : "From project asset, queue recommendation, or latest run.",
+      id: "next-step",
+      label: "下一步",
+      badge: agentTodo ? "Todo" : "备用信息",
+      value: nextStep || "尚未生成下一步",
+      detail: agentTodo ? "来自已生成的 Agent Todo。" : "来自项目资产、队列建议或最近运行记录。",
       icon: Terminal,
       variant: agentTodo ? "info" : "neutral",
     },
     {
-      label: "Needs your judgment",
-      badge: judgment ? "gate" : "clear",
-      value: judgment || "No human judgment queued",
-      detail: userTodo ? "User/controller todo is the first handoff." : "No user gate is projected for this goal.",
+      id: "needs-your-judgment",
+      label: "需要你判断",
+      badge: judgment ? "需要确认" : "无需处理",
+      value: judgment || "没有等待人工判断的事项",
+      detail: userTodo ? "用户或控制者 Todo 是当前第一个交接项。" : "这个 Goal 当前没有用户确认环节。",
       icon: ShieldCheck,
       variant: judgment ? "warning" : "success",
     },
     {
-      label: "Evidence",
-      badge: evidence ? "seen" : "empty",
-      value: evidence || "No compact evidence yet",
-      detail: evidence ? "Latest validation or run-history signal." : "Open the run history or status source when debugging.",
+      id: "evidence",
+      label: "证据",
+      badge: evidence ? "已有" : "暂无",
+      value: evidence || "暂无摘要证据",
+      detail: evidence ? "来自最近的验证或运行记录。" : "排查问题时请打开运行历史或状态来源。",
       icon: FileCheck2,
       variant: evidence ? "info" : "neutral",
     },
     {
-      label: "Can continue",
-      badge: "guard",
+      id: "can-continue",
+      label: "是否可继续",
+      badge: "执行限制",
       value: canContinue.value,
       detail: canContinue.detail,
       icon: Gauge,
@@ -2896,15 +2944,15 @@ function OperatorMentalModelPanel({
         <div>
           <CardTitle className="flex items-center gap-2">
             <LayoutDashboard className="h-4 w-4" />
-            Operator Model
+            操作者概览
           </CardTitle>
           <p className="mt-2 text-sm text-slate-500 dark:text-zinc-400">
-            The first screen folds kernel state into five operator questions.
+            首屏把控制面状态整理成五个需要关注的问题。
           </p>
         </div>
         <Button onClick={() => onSelectGoal(row.goal.id)} size="sm" variant="secondary">
           <Search className="h-4 w-4" />
-          Inspect
+          查看详情
         </Button>
       </CardHeader>
       <CardContent>
@@ -2914,8 +2962,8 @@ function OperatorMentalModelPanel({
             return (
               <div
                 className="min-h-32 rounded-lg border border-slate-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
-                data-testid={`operator-model-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
-                key={item.label}
+                data-testid={`operator-model-${item.id}`}
+                key={item.id}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-950 dark:text-zinc-50">
@@ -4485,6 +4533,1948 @@ function ShareEventLedgerStrip({ summary }: { summary?: EventLedgerSummary | nul
           <EventClassPill counts={totals.by_class_24h} eventClass={eventClass} key={eventClass} />
         ))}
       </div>
+    </div>
+  );
+}
+
+type PersonalGoalState = "需修复" | "等你" | "等待条件" | "推进中" | "安静运行" | "已完成";
+
+type PersonalNeedsYouItem = {
+  actionKind: string | null;
+  blocking: boolean;
+  goalId: string;
+  taskClass: string | null;
+  text: string;
+  todoId: string;
+  updatedAt: string | null;
+};
+
+type PersonalAgentTodoItem = {
+  claimedBy: string | null;
+  done: boolean;
+  evidence: string | null;
+  index: number;
+  priority: string | null;
+  status: string | null;
+  taskClass: string | null;
+  text: string;
+  todoId: string;
+};
+
+type PersonalRunEvidence = {
+  generatedAt: string;
+  label: string;
+  metadata: string;
+  runId: string | null;
+  safePreview: string;
+  summary: string;
+  todoId: string | null;
+};
+
+type PersonalGoalItem = {
+  agentId: string;
+  agentSentence: string;
+  agentTodos: PersonalAgentTodoItem[];
+  goalId: string;
+  latestActivity: string;
+  needsYou: string | null;
+  needsYouActionKind: string | null;
+  needsYouBlocking: boolean;
+  needsYouTaskClass: string | null;
+  needsYouTodoId: string | null;
+  nextSentence: string;
+  runEvidence: PersonalRunEvidence | null;
+  state: PersonalGoalState;
+  title: string;
+};
+
+type PersonalHomeModel = {
+  blockingTodoCount: number;
+  goalNotifications: Array<{
+    goalId: string;
+    configured: boolean;
+    enabled: boolean;
+    humanGateAutoNotifyEnabled: boolean;
+    lastNotifiedAt: string | null;
+    receiptCount: number;
+    targetRef: string | null;
+  }>;
+  goals: PersonalGoalItem[];
+  openUserTodoCount: number;
+  userTodos: PersonalNeedsYouItem[];
+  visibleUserTodos: PersonalNeedsYouItem[];
+  workers: Array<{
+    agentId: string;
+    currentTodoGoalId: string | null;
+    currentTodoText: string | null;
+    lastActivityAt: string | null;
+    state: string | null;
+  }>;
+};
+
+type PersonalManagerMessage = {
+  activity?: string[];
+  agentLabel?: string;
+  attachments?: WorkspaceImageAttachment[];
+  id: number;
+  lines: string[];
+  pending?: boolean;
+  reconnect?: boolean;
+  role: "assistant" | "user";
+  sourceLabel?: string;
+  text: string;
+};
+
+function workspaceImageAttachments(attachments?: ChatImageAttachment[]): WorkspaceImageAttachment[] | undefined {
+  return attachments?.map((attachment) => ({
+    dataUrl: attachment.data_url,
+    id: attachment.id,
+    mimeType: attachment.mime_type,
+    name: attachment.name,
+    size: attachment.size,
+  }));
+}
+
+type PersonalProposalState =
+  | "candidate"
+  | "previewing"
+  | "ready"
+  | "applying"
+  | "approved"
+  | "rejected"
+  | "cancelled"
+  | "stale"
+  | "error";
+
+type PersonalProposalCard = {
+  goalId: string;
+  id: number;
+  previewId: string | null;
+  proposal: TodoProposal;
+  receiptLabel: string | null;
+  state: PersonalProposalState;
+  statusMessage: string | null;
+};
+
+type PersonalAgentOption = {
+  adapterKind?: string;
+  agentId: string;
+  available: boolean;
+  capability: string;
+  interrupt?: boolean;
+  label: string;
+  location?: string;
+  resume?: boolean;
+  source?: string;
+  statusLabel: string;
+  streaming?: boolean;
+  toolCalls?: boolean;
+  trustScope?: string;
+};
+
+type PersonalRuntimeBinding = {
+  agentId: string;
+  resumable: boolean;
+  sessionId: string;
+  status: string;
+  turnId?: string;
+};
+
+const personalAgentSelectionStorageKey = "loopx.personal-agent-selection.v1";
+
+function readPersonalAgentSelections() {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const value = JSON.parse(window.localStorage.getItem(personalAgentSelectionStorageKey) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(value).filter((entry): entry is [string, string] =>
+        typeof entry[0] === "string" && typeof entry[1] === "string"
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+type PersonalManagerAnswer = {
+  lines: string[];
+  text: string;
+};
+
+const personalGoalStateVariant: Record<PersonalGoalState, BadgeVariant> = {
+  "需修复": "danger",
+  "等你": "warning",
+  "等待条件": "info",
+  "推进中": "success",
+  "安静运行": "neutral",
+  "已完成": "neutral",
+};
+
+function personalOpsHref(goalId?: string) {
+  const params = new URLSearchParams();
+  params.set("view", "ops");
+  if (goalId) {
+    params.set("goalId", goalId);
+  }
+  return `/?${params.toString()}`;
+}
+
+function personalGoalTitle(goalId: string, displayName?: string | null) {
+  const registeredDisplayName = cleanShareText(displayName);
+  if (registeredDisplayName) {
+    return registeredDisplayName;
+  }
+  return goalId
+    .replace(/^loopx[-_]/i, "LoopX ")
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part, index) => index === 0 ? `${part.slice(0, 1).toUpperCase()}${part.slice(1)}` : part)
+    .join(" ");
+}
+
+function visibleAgentMessage(value: string) {
+  return value
+    .split(/\r?\n/u)
+    .filter((line) => !/^\s*GOAL_(STATUS|PROGRESS)\s*:/u.test(line))
+    .map((line) => {
+      if (/^\s*GOAL_EVIDENCE\s*:/u.test(line)) return line.replace(/^\s*GOAL_EVIDENCE\s*:/u, "验证依据：");
+      if (/^\s*NEXT_ACTION\s*:/u.test(line)) return line.replace(/^\s*NEXT_ACTION\s*:/u, "下一步：");
+      return line;
+    })
+    .join("\n")
+    .trim();
+}
+
+function isAgentResultMessage(role: string, text: string) {
+  return ["agent", "assistant"].includes(role.trim().toLowerCase()) && text.trim().length > 0;
+}
+
+function personalProjectionSentence(value: string | null | undefined, fallback = "") {
+  const cleaned = cleanShareText(value);
+  if (!cleaned || cleaned === "暂无") {
+    return fallback;
+  }
+  if (/refresh-state|latest_run|latest run-derived/i.test(cleaned)) {
+    return "刷新 LoopX 状态，确认当前进度仍然有效";
+  }
+  if (/first read-only adapter tick|read-only adapter/i.test(cleaned)) {
+    return "执行首次只读适配检查并保存进度";
+  }
+  if (/todo update recorded for/i.test(cleaned)) {
+    return "Todo 状态已经更新，正在确认下一步";
+  }
+  if (/^(loopx|python3|npm|git|run)\s|\s--[a-z0-9-]+|\b[a-z]+_[a-z_]+\b/i.test(cleaned)) {
+    return fallback || "Agent 正在整理下一步";
+  }
+  return compactShareText(cleaned, 120);
+}
+
+function personalAgentLabel(agentId: string) {
+  const normalized = agentId.toLowerCase();
+  if (normalized.includes("codex")) {
+    return "Codex";
+  }
+  if (normalized.includes("claude")) {
+    return "Claude Code";
+  }
+  if (normalized.includes("trae")) {
+    return "Trae CLI Agent";
+  }
+  if (normalized.includes("coco")) {
+    return "Coco Agent";
+  }
+  return personalGoalTitle(agentId);
+}
+
+function personalAgentCapability(agentId: string) {
+  const normalized = agentId.toLowerCase();
+  if (normalized.includes("codex")) {
+    return "代码与项目执行";
+  }
+  if (normalized.includes("claude")) {
+    return "复杂分析与长任务";
+  }
+  if (normalized.includes("openai") || normalized.includes("anthropic")) {
+    return "管家问答 · 无工具";
+  }
+  if (normalized.includes("trae")) {
+    return "前端与交互实现";
+  }
+  if (normalized.includes("coco")) {
+    return "通用任务";
+  }
+  return "已发现的项目 Agent";
+}
+
+function personalVisibleAgentMessage(value: string) {
+  const openTag = "<loopx-review-json>";
+  const closeTag = "</loopx-review-json>";
+  const start = value.lastIndexOf(openTag);
+  const end = value.lastIndexOf(closeTag);
+  if (start < 0 || end <= start) return value.trim();
+  const envelope = value.slice(start + openTag.length, end).trim();
+  try {
+    const parsed = JSON.parse(envelope) as { message?: unknown };
+    if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message.trim();
+  } catch {
+    const match = envelope.match(/"message"\s*:\s*("(?:\\.|[^"\\])*")/s);
+    if (match) {
+      try {
+        const message = JSON.parse(match[1]);
+        if (typeof message === "string" && message.trim()) return message.trim();
+      } catch {
+        // Fall through to the bounded visible answer before the malformed envelope.
+      }
+    }
+  }
+  return value.slice(0, start).trim();
+}
+
+function personalTodosForQueueItem(item: QueueItem, role: "user" | "agent") {
+  const projectAsset = item.project_asset;
+  return role === "user"
+    ? todosFromProjectAssetSummary(projectAsset?.user_todos, item.user_todos, "project_asset.user_todos")
+    : todosFromProjectAssetSummary(projectAsset?.agent_todos, item.agent_todos, "project_asset.agent_todos");
+}
+
+function personalTodoText(todo: TodoItem) {
+  return compactShareText(todo.title ?? todo.text, 112);
+}
+
+function personalAgentTodos(row: GoalDirectoryRow): PersonalAgentTodoItem[] {
+  return (getShareTodos(row, "agent")?.items ?? []).map((todo) => ({
+    claimedBy: todo.claimed_by ?? null,
+    done: todo.done,
+    evidence: todo.evidence ? compactShareText(todo.evidence, 96) : null,
+    index: todo.index,
+    priority: todo.priority ?? null,
+    status: todo.status ?? null,
+    taskClass: todo.task_class ?? null,
+    text: personalTodoText(todo),
+    todoId: todo.todo_id?.trim() || `${row.goal.id}:agent:${todo.index}`,
+  }));
+}
+
+function personalValidationSentence(value: string | null | undefined) {
+  const cleaned = cleanShareText(value);
+  if (!cleaned) {
+    return "";
+  }
+  if (/\b(state_file|registry_goal|authority_sources|source_registry)\b|\b[a-z_]+\s+\d+\/\d+/i.test(cleaned)) {
+    return "Goal 状态、Todo 与注册信息已验证";
+  }
+  return personalProjectionSentence(cleaned, "最近验证已经记录");
+}
+
+function personalVisiblePlanTodos(todos: PersonalAgentTodoItem[], limit = 4) {
+  if (todos.length <= limit) {
+    return todos;
+  }
+  const firstOpenIndex = todos.findIndex((todo) => !todo.done);
+  if (firstOpenIndex < 0) {
+    return todos.slice(-limit);
+  }
+  const start = Math.max(0, Math.min(firstOpenIndex - 2, todos.length - limit));
+  return todos.slice(start, start + limit);
+}
+
+function personalRunEvidence(payload: StatusPayload, row: GoalDirectoryRow): PersonalRunEvidence | null {
+  const latestValidation = row.queueItem?.project_asset?.latest_validation;
+  const latestRun = row.latestRun;
+  const eventSummary = payload.event_ledger_summary?.goals.find((goal) => goal.goal_id === row.goal.id);
+  if (!latestValidation && !latestRun && !eventSummary) {
+    return null;
+  }
+  const summary = [
+    personalValidationSentence(latestValidation?.summary),
+    personalProjectionSentence(latestRun?.health_check),
+    personalProjectionSentence(latestRun?.recommended_action),
+  ]
+    .find((value) => value !== "" && value !== "暂无")
+    ?? "最近一次 LoopX 运行已经记录";
+  const eventCount = eventSummary?.events_24h ?? 0;
+  const metadata = eventCount > 0
+    ? `24 小时内 ${eventCount} 个事件`
+    : latestRun?.json_exists || latestRun?.markdown_exists
+      ? "存在可查看的运行证据"
+      : "公开安全状态投影";
+  return {
+    generatedAt: latestValidation?.generated_at ?? latestRun?.generated_at ?? eventSummary?.latest_event_at ?? "",
+    label: latestValidation ? "最近验证" : "最近运行",
+    metadata,
+    runId: latestRun ? `${row.goal.id}:${latestRun.generated_at}` : null,
+    safePreview: [summary, metadata].filter(Boolean).join("\n"),
+    summary,
+    todoId: row.queueItem?.project_asset?.agent_todos?.items.find((todo) => !todo.done)?.todo_id ?? null,
+  };
+}
+
+function personalDecisionPrimaryLabel(goal: PersonalGoalItem) {
+  const signal = `${goal.needsYouTaskClass ?? ""} ${goal.needsYouActionKind ?? ""}`.toLowerCase();
+  return /approve|approval|merge|release|submit|write|publish/.test(signal) ? "确认处理" : "回复 Agent";
+}
+
+function personalProposalStateLabel(state: PersonalProposalState) {
+  const labels: Record<PersonalProposalState, string> = {
+    candidate: "候选 Todo",
+    previewing: "正在生成写入预览",
+    ready: "预览已锁定，等待你批准",
+    applying: "正在写入",
+    approved: "已批准并写入",
+    rejected: "已拒绝，未写入",
+    cancelled: "已取消，未写入",
+    stale: "状态已变化，需重新预览",
+    error: "暂时无法处理",
+  };
+  return labels[state];
+}
+
+function isPersonalGoalTerminal(row: GoalDirectoryRow) {
+  return [row.status, row.goal.status, row.latestRun?.classification, row.lifecyclePhase]
+    .filter(Boolean)
+    .some((value) => /(^|[_\s-])(done|complete|completed|finished|terminal|closed|success)([_\s-]|$)/i.test(value ?? ""));
+}
+
+function personalGoalRegistryFinding(payload: StatusPayload, row: GoalDirectoryRow) {
+  return payload.global_registry.findings.find((finding) =>
+    finding.severity === "high"
+    && (finding.goal_id === row.goal.id || finding.goal_ids.includes(row.goal.id)),
+  );
+}
+
+function personalGoalHasFailureStatus(row: GoalDirectoryRow) {
+  return [row.status, row.goal.status, row.latestRun?.classification, row.lifecyclePhase]
+    .filter(Boolean)
+    .some((value) =>
+      /(^|[_\s-])(failure|failed|error|broken|unhealthy|blocked[_\s-]?health|health[_\s-]?blocked)([_\s-]|$)/i
+        .test(value ?? ""),
+    );
+}
+
+function personalGoalNeedsRepair(payload: StatusPayload, row: GoalDirectoryRow) {
+  const staleWarning = row.queueItem?.stale_latest_run_warning;
+  return row.severity === "high"
+    || Boolean(personalGoalRegistryFinding(payload, row))
+    || Boolean(staleWarning?.requires_refresh_state || staleWarning?.severity === "high")
+    || personalGoalHasFailureStatus(row);
+}
+
+function personalRepairText(payload: StatusPayload, row: GoalDirectoryRow) {
+  const healthFinding = personalGoalRegistryFinding(payload, row);
+  return row.queueItem?.stale_latest_run_warning?.recommended_action
+    ?? row.queueItem?.stale_latest_run_warning?.reason
+    ?? healthFinding?.recommended_action
+    ?? healthFinding?.message
+    ?? row.queueItem?.recommended_action
+    ?? row.latestRun?.recommended_action
+    ?? "LoopX 状态异常，请进入管理页检查";
+}
+
+function personalGoalHasPendingOperatorGate(row: GoalDirectoryRow) {
+  const gate = row.latestRun?.operator_gate;
+  const decision = gate?.decision?.trim().toLowerCase() ?? "";
+  const terminalDecisions = new Set(["approve", "approved", "reject", "rejected", "defer", "deferred", "cancel", "cancelled"]);
+  const projectedAction = [row.queueItem?.recommended_action, row.latestRun?.recommended_action]
+    .filter(Boolean)
+    .join(" ");
+  const explicitUserWait = /(?:等待|需要)(?:用户|你|owner).{0,24}(?:批准|确认|授权|补充|选择|决定)|(?:批准|确认|授权).{0,16}(?:后|才能|方可)/i
+    .test(projectedAction);
+  return Boolean(gate && !terminalDecisions.has(decision))
+    || (row.lifecyclePhase === "operator_gated" && !terminalDecisions.has(decision))
+    || explicitUserWait;
+}
+
+function personalPendingOperatorGateText(row: GoalDirectoryRow) {
+  const gate = row.latestRun?.operator_gate;
+  return personalProjectionSentence(
+    gate?.operator_question
+      ?? gate?.reason_summary
+      ?? gate?.follow_up
+      ?? row.queueItem?.recommended_action
+      ?? row.latestRun?.recommended_action,
+    "请确认 Agent 下一步需要的权限或决策",
+  );
+}
+
+function personalGoalState(payload: StatusPayload, row: GoalDirectoryRow): PersonalGoalState {
+  const userTodos = getShareTodos(row, "user");
+  const agentTodos = getShareTodos(row, "agent");
+  const hasOpenUserTodo = Boolean(firstOpenTodo(userTodos));
+  const hasOpenAgentTodo = Boolean(firstOpenTodo(agentTodos));
+  if (["user_or_controller", "controller"].includes(row.waitingOn) || hasOpenUserTodo || personalGoalHasPendingOperatorGate(row)) {
+    return "等你";
+  }
+  if (personalGoalNeedsRepair(payload, row)) {
+    return "需修复";
+  }
+  if (row.waitingOn === "external_evidence") {
+    return "等待条件";
+  }
+  if (quotaStateForShare(row) === "eligible" || hasOpenAgentTodo) {
+    return "推进中";
+  }
+  if (isPersonalGoalTerminal(row)) {
+    return "已完成";
+  }
+  return "安静运行";
+}
+
+function personalAgentSentence(payload: StatusPayload, row: GoalDirectoryRow, state: PersonalGoalState) {
+  if (state === "需修复") {
+    return personalProjectionSentence(personalRepairText(payload, row), "LoopX 状态需要刷新");
+  }
+  if (state === "等你") {
+    return "Agent 等待你的决定";
+  }
+  if (state === "推进中") {
+    const todoText = (getShareTodos(row, "agent")?.items ?? [])
+      .filter((todo) => !todo.done)
+      .flatMap((todo) => [todo.title, todo.text])
+      .map((value) => cleanShareText(value))
+      .find((value) => value !== "" && value !== "暂无");
+    const progressText = [
+      todoText,
+      row.queueItem?.recommended_action,
+      row.latestRun?.recommended_action,
+    ].map((value) => cleanShareText(value))
+      .find((value) => value !== "" && value !== "暂无");
+    return progressText ? personalProjectionSentence(progressText, "Agent 正在推进当前 Goal") : "Agent 正在推进当前 Goal";
+  }
+  if (state === "等待条件") {
+    return "正在等待外部条件";
+  }
+  return "暂无需要你处理";
+}
+
+function personalManagerMatches(question: string, keywords: string[]) {
+  return keywords.some((keyword) => question.includes(keyword));
+}
+
+function isManagerProjectionQuestion(question: string) {
+  return personalManagerMatches(question, [
+    "我现在该做什么",
+    "哪些 Goal 在等我",
+    "Agent 在做什么",
+    "哪些 Goal 需要我",
+  ]);
+}
+
+function answerPersonalManagerQuestion(
+  payload: StatusPayload,
+  model: PersonalHomeModel,
+  question: string,
+): PersonalManagerAnswer {
+  if (personalManagerMatches(question, ["Agent", "agent", "推进", "在做"])) {
+    const activeGoals = model.goals.filter((goal) =>
+      !["安静运行", "已完成"].includes(goal.state)
+    );
+    const shownGoals = (activeGoals.length > 0 ? activeGoals : model.goals).slice(0, 3);
+    if (shownGoals.length === 0) {
+      return { text: "当前状态里还没有 Goal 可供汇总。", lines: [] };
+    }
+    return {
+      text: activeGoals.length > 0 ? "Agent 当前关注这些 Goal：" : "当前 Goal 都比较安静：",
+      lines: shownGoals.map((goal) => `${goal.title} · ${goal.state} · ${goal.agentSentence}`),
+    };
+  }
+
+  if (personalManagerMatches(question, ["等我", "阻塞", "需要我"])) {
+    if (model.userTodos.length === 0) {
+      return { text: "目前没有 Goal 在等你，开放用户待办为 0。", lines: [] };
+    }
+    return {
+      text: `有 ${model.userTodos.length} 项开放用户待办，阻塞项优先：`,
+      lines: model.userTodos.slice(0, 3).map((todo) =>
+        `${personalGoalTitle(todo.goalId)} · ${todo.blocking ? "阻塞" : "待处理"} · ${todo.text}`
+      ),
+    };
+  }
+
+  const asksForNextAction = personalManagerMatches(question, ["现在", "下一步", "我该", "该做什么"]);
+  if (asksForNextAction) {
+    const nextTodo = model.userTodos[0];
+    if (nextTodo) {
+      return {
+        text: nextTodo.blocking
+          ? `先处理「${personalGoalTitle(nextTodo.goalId)}」：${nextTodo.text}`
+          : `当前最先处理「${personalGoalTitle(nextTodo.goalId)}」：${nextTodo.text}`,
+        lines: [],
+      };
+    }
+    const repairGoal = model.goals.find((goal) => goal.state === "需修复");
+    if (repairGoal) {
+      return {
+        text: "没有待办，但这个 Goal 需要先修复。",
+        lines: [`${repairGoal.title} · ${repairGoal.agentSentence}`],
+      };
+    }
+    const progressingGoal = model.goals.find((goal) => goal.state === "推进中");
+    if (progressingGoal) {
+      return {
+        text: "目前不需要你介入，Agent 正在推进。",
+        lines: [`${progressingGoal.title} · ${progressingGoal.agentSentence}`],
+      };
+    }
+    return { text: "当前系统很安静，没有需要你立即处理的事项。", lines: [] };
+  }
+
+  if (personalManagerMatches(question, ["状态", "异常", "修复", "健康"])) {
+    const globalHealthFailed = !payload.ok
+      || !payload.contract.ok
+      || !payload.global_registry.ok
+      || payload.global_registry.summary.high > 0;
+    const repairGoals = model.goals.filter((goal) => goal.state === "需修复");
+    const lines = repairGoals.slice(0, globalHealthFailed ? 2 : 3)
+      .map((goal) => `${goal.title} · ${goal.agentSentence}`);
+    if (globalHealthFailed) {
+      lines.push("全局状态、契约或注册表健康检查未通过，请进入管理页检查。");
+    }
+    if (lines.length === 0) {
+      return { text: "当前没有发现 Goal 级或全局健康异常。", lines: [] };
+    }
+    return {
+      text: repairGoals.length > 0 ? "当前需要关注这些健康问题：" : "Goal 状态正常，但全局健康需要检查：",
+      lines,
+    };
+  }
+
+  return {
+    text: "当前管家支持三类问题：下一步、等待你的事项、Agent 与健康状态。",
+    lines: [
+      "问“我现在该做什么？”",
+      "问“哪些 Goal 在等我？”",
+      "问“Agent 在做什么？”或当前健康状态",
+    ],
+  };
+}
+
+function buildPersonalHomeModel(payload: StatusPayload, rows: GoalDirectoryRow[]): PersonalHomeModel {
+  const rowById = new Map(rows.map((row) => [row.goal.id, row]));
+  const usageById = shareUsageById(payload.usage_summary);
+  const agentRows = buildAgentManagementRows(rows, payload.todo_index, payload.agent_management_projection);
+  const projectedUserTodos = payload.attention_queue.items.flatMap((item, sourceOrder) => {
+    const blocking = ["user_or_controller", "controller"].includes(item.waiting_on);
+    return (personalTodosForQueueItem(item, "user")?.items ?? [])
+      .filter((todo) => !todo.done)
+      .map((todo, todoOrder): PersonalNeedsYouItem & { sourceOrder: number; todoOrder: number } => ({
+        actionKind: todo.action_kind ?? null,
+        blocking,
+        goalId: item.goal_id,
+        sourceOrder,
+        taskClass: todo.task_class ?? null,
+        text: personalTodoText(todo),
+        todoId: todo.todo_id?.trim() || `${item.goal_id}:user:${todo.index}`,
+        todoOrder,
+        updatedAt: todo.updated_at ?? null,
+      }));
+  });
+  const projectedGoalIds = new Set(projectedUserTodos.map((todo) => todo.goalId));
+  const pendingOperatorGates = rows.flatMap((row, rowOrder) => {
+    if (projectedGoalIds.has(row.goal.id) || !personalGoalHasPendingOperatorGate(row)) return [];
+    return [{
+      actionKind: "gate.resolve",
+      blocking: true,
+      goalId: row.goal.id,
+      sourceOrder: payload.attention_queue.items.length + rowOrder,
+      taskClass: "user_gate",
+      text: personalPendingOperatorGateText(row),
+      todoId: `${row.goal.id}:operator-gate`,
+      todoOrder: 0,
+      updatedAt: row.latestRun?.operator_gate?.recorded_at ?? row.latestRun?.generated_at ?? null,
+    } satisfies PersonalNeedsYouItem & { sourceOrder: number; todoOrder: number }];
+  });
+  const allUserTodos = [...projectedUserTodos, ...pendingOperatorGates].sort((left, right) =>
+    Number(right.blocking) - Number(left.blocking)
+    || left.sourceOrder - right.sourceOrder
+    || left.todoOrder - right.todoOrder
+  );
+  const goals = payload.run_history.goals.flatMap((goal) => {
+    if (goal.registry_member === false) {
+      return [];
+    }
+    const row = rowById.get(goal.id);
+    if (!row) {
+      return [];
+    }
+    const state = personalGoalState(payload, row);
+    if (state === "已完成") {
+      return [];
+    }
+    const needsYouTodo = allUserTodos.find((todo) => todo.goalId === goal.id);
+    const needsYou = needsYouTodo?.text ?? null;
+    const goalAgentTodos = personalAgentTodos(row);
+    const goalAgentRows = agentRows.filter(
+      (agent) => agent.goalIds.includes(goal.id) && !/unassigned|unknown/i.test(agent.agentId),
+    );
+    const agentRow =
+      goalAgentRows.find(
+        (agent) => /codex/i.test(agent.agentId) && agent.status.variant !== "danger",
+      ) ??
+      goalAgentRows.find((agent) => agent.status.variant !== "danger") ??
+      goalAgentRows.find((agent) => /codex/i.test(agent.agentId)) ??
+      goalAgentRows[0];
+    const nextSentence = [
+      row.queueItem?.recommended_action,
+      row.latestRun?.recommended_action,
+      personalAgentSentence(payload, row, state),
+    ].map((value) => personalProjectionSentence(value))
+      .find((value) => value !== "" && value !== "暂无") ?? "等待 LoopX 更新下一步";
+    return [{
+      agentId: agentRow?.agentId ?? "codex",
+      agentSentence: personalAgentSentence(payload, row, state),
+      agentTodos: goalAgentTodos,
+      goalId: goal.id,
+      latestActivity: row.latestRun?.generated_at ?? "",
+      needsYou,
+      needsYouActionKind: needsYouTodo?.actionKind ?? null,
+      needsYouBlocking: needsYouTodo?.blocking ?? false,
+      needsYouTaskClass: needsYouTodo?.taskClass ?? null,
+      needsYouTodoId: needsYouTodo?.todoId ?? null,
+      nextSentence,
+      runEvidence: personalRunEvidence(payload, row),
+      state,
+      title: personalGoalTitle(goal.id, goal.display_name),
+      usage: (() => {
+        const goalUsage = usageById.get(goal.id);
+        return goalUsage ? {
+          costUsd24h: goalUsage.cost_usd_24h,
+          costUsd7d: goalUsage.cost_usd_7d,
+          durationMs24h: goalUsage.duration_ms_24h,
+          durationMs7d: goalUsage.duration_ms_7d,
+          tokens24h: goalUsage.input_tokens_24h + goalUsage.output_tokens_24h,
+          tokens7d: goalUsage.input_tokens_7d + goalUsage.output_tokens_7d,
+        } : null;
+      })(),
+    }];
+  });
+  return {
+    blockingTodoCount: allUserTodos.filter((todo) => todo.blocking).length,
+    goalNotifications: (payload.goal_channel_notification_projection?.goals ?? []).map((row) => ({
+      goalId: row.goal_id,
+      configured: row.configured,
+      enabled: row.enabled,
+      humanGateAutoNotifyEnabled: row.human_gate_auto_notify_enabled,
+      lastNotifiedAt: row.last_notified_at ?? null,
+      receiptCount: row.receipt_count,
+      targetRef: row.target_ref ?? null,
+    })),
+    goals,
+    openUserTodoCount: allUserTodos.length,
+    userTodos: allUserTodos,
+    visibleUserTodos: allUserTodos.slice(0, 5),
+    workers: (payload.agent_management_projection?.agents ?? []).map((agent) => ({
+      agentId: agent.agent_id,
+      currentTodoGoalId: agent.current_todo?.goal_id ?? null,
+      currentTodoText: agent.current_todo?.title ? compactShareText(agent.current_todo.title, 96) : null,
+      lastActivityAt: agent.last_activity_at ?? null,
+      state: agent.state ?? null,
+    })),
+  };
+}
+
+function PersonalGoalHome({
+  isLoading,
+  onSelectGoal,
+  onRefresh,
+  payload,
+  rows,
+  selectedGoalId,
+  source,
+  theme,
+  toggleTheme,
+}: {
+  isLoading: boolean;
+  onSelectGoal: (goalId: string) => void;
+  onRefresh: () => void | Promise<void>;
+  payload: StatusPayload;
+  rows: GoalDirectoryRow[];
+  selectedGoalId: string;
+  source: DataSource;
+  theme: "light" | "dark";
+  toggleTheme: () => void;
+}) {
+  const [runtimeAgents, setRuntimeAgents] = useState<Array<{
+    adapter_kind: string;
+    agent_id: string;
+    available: boolean;
+    display_name: string;
+    interrupt: boolean;
+    location?: string;
+    resume: boolean;
+    source?: string;
+    streaming: boolean;
+    tool_calls?: boolean;
+    trust_scope?: string;
+  }>>([]);
+  const model = buildPersonalHomeModel(payload, rows);
+  const selectedGoal = model.goals.find((goal) => goal.goalId === selectedGoalId) ?? null;
+  const sessionDiscoveryKey = model.goals.map((goal) => `${goal.goalId}:${goal.agentId}`).join("|");
+  const contextId = selectedGoal?.goalId ?? "manager";
+  const managerSummary = !payload.ok
+    || !payload.contract.ok
+    || !payload.global_registry.ok
+    || payload.global_registry.summary.high > 0
+    ? "LoopX 当前存在状态问题，可以打开运行详情查看原因。"
+    : model.openUserTodoCount > 0
+      ? `你有 ${model.openUserTodoCount} 项需要处理，其中 ${model.blockingTodoCount} 项正在阻塞 Agent。`
+      : "暂时没有需要你处理的事项，Agent 会按当前计划继续推进。";
+  const discoveredAgents: PersonalAgentOption[] = runtimeAgents.length > 0
+    ? runtimeAgents.map((agent) => ({
+        agentId: agent.agent_id,
+        adapterKind: agent.adapter_kind,
+        available: agent.available,
+        capability: personalAgentCapability(agent.agent_id),
+        interrupt: agent.interrupt,
+        label: agent.display_name,
+        location: agent.location,
+        resume: agent.resume,
+        source: agent.source,
+        statusLabel: agent.available ? "可用" : "需要配置",
+        streaming: agent.streaming,
+        toolCalls: agent.tool_calls,
+        trustScope: agent.trust_scope,
+      }))
+    : [{
+        agentId: "codex",
+        available: true,
+        capability: personalAgentCapability("codex"),
+        label: "Codex",
+        statusLabel: "正在检测",
+      }];
+  const agentOptions = [
+    ...discoveredAgents,
+    {
+      agentId: "status-only",
+      available: true,
+      capability: "不调用模型",
+      adapterKind: "status_projection",
+      interrupt: false,
+      label: "仅查状态",
+      resume: true,
+      statusLabel: "只读",
+      streaming: false,
+      toolCalls: false,
+      trustScope: "read_only",
+    },
+  ];
+  const defaultAgentId = discoveredAgents.find((agent) => agent.label === "Codex" && agent.available)?.agentId
+    ?? discoveredAgents.find((agent) => agent.available)?.agentId
+    ?? "status-only";
+  const [selectedAgents, setSelectedAgents] = useState<Record<string, string>>(readPersonalAgentSelections);
+  const selectedAgentId = selectedAgents[contextId] ?? defaultAgentId;
+  const selectedAgent = selectAvailableChatAgent(agentOptions, selectedAgentId, defaultAgentId);
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"chat" | "goals">("chat");
+  const [managerInput, setManagerInput] = useState("");
+  const [messagesByContext, setMessagesByContext] = useState<Record<string, PersonalManagerMessage[]>>({});
+  const [proposalsByContext, setProposalsByContext] = useState<Record<string, PersonalProposalCard[]>>({});
+  const [sendingContextId, setSendingContextId] = useState<string | null>(null);
+  const [runtimeBindings, setRuntimeBindings] = useState<Record<string, PersonalRuntimeBinding>>({});
+  const [executionSessions, setExecutionSessions] = useState<ChatSessionSummary[]>([]);
+  const [executionSessionSnapshots, setExecutionSessionSnapshots] = useState<Record<string, ChatSessionSnapshot>>({});
+  const managerMessageId = useRef(1);
+  const proposalId = useRef(1);
+  const sessionIds = useRef(new Map<string, string>());
+  const newSessionRequired = useRef(new Set<string>());
+  const activeTurnIds = useRef(new Map<string, string>());
+  const streamControllers = useRef(new Map<string, AbortController>());
+  const interruptedContexts = useRef(new Set<string>());
+  const recoveringTurnKeys = useRef(new Set<string>());
+  const agentMenuRef = useRef<HTMLDivElement>(null);
+  const agentTriggerRef = useRef<HTMLButtonElement>(null);
+  const detailsCloseRef = useRef<HTMLButtonElement>(null);
+  const detailsTriggerRef = useRef<HTMLButtonElement>(null);
+  const managerInputRef = useRef<HTMLInputElement>(null);
+  const managerQuickPrompts = ["我现在该做什么？", "哪些 Goal 在等我？", "Agent 在做什么？"];
+  const contextMessages = messagesByContext[contextId] ?? [];
+  const contextProposals = proposalsByContext[contextId] ?? [];
+  const goalUserTodos = selectedGoal
+    ? model.userTodos.filter((todo) => todo.goalId === selectedGoal.goalId)
+    : model.userTodos;
+  const goalAgentTodos = selectedGoal?.agentTodos ?? [];
+  const visiblePlanTodos = personalVisiblePlanTodos(goalAgentTodos, selectedGoal?.needsYou ? 3 : 4);
+  const completedAgentTodoCount = goalAgentTodos.filter((todo) => todo.done).length;
+  const goalProgressLabel = goalAgentTodos.length > 0
+    ? `${completedAgentTodoCount}/${goalAgentTodos.length}`
+    : "暂无计划";
+  const questionModel = selectedGoal
+    ? {
+        ...model,
+        blockingTodoCount: goalUserTodos.filter((todo) => todo.blocking).length,
+        goals: [selectedGoal],
+        openUserTodoCount: goalUserTodos.length,
+        userTodos: goalUserTodos,
+        visibleUserTodos: goalUserTodos,
+      }
+    : model;
+
+  function recordRuntimeBinding(targetContextId: string, binding: PersonalRuntimeBinding | null) {
+    setRuntimeBindings((current) => {
+      if (binding === null) {
+        const next = { ...current };
+        delete next[targetContextId];
+        return next;
+      }
+      return { ...current, [targetContextId]: binding };
+    });
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchChatCapabilities()
+      .then((capabilities) => {
+        if (!cancelled) setRuntimeAgents(capabilities.adapters ?? []);
+      })
+      .catch(() => {
+        // The Codex fallback stays visible while the local control plane reconnects.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(personalAgentSelectionStorageKey, JSON.stringify(selectedAgents));
+    } catch {
+      // The selector remains usable when browser storage is unavailable.
+    }
+  }, [selectedAgents]);
+
+  useEffect(() => {
+    if (!selectedAgent.available) return;
+    const targetContextId = contextId;
+    const sessionKey = `${targetContextId}:${selectedAgent.agentId}`;
+    const contextKind = selectedGoal ? "goal" : "manager";
+    const channelId = selectedGoal ? `goal.${selectedGoal.goalId}` : "manager";
+    const anchorGoalId = selectedGoal?.goalId ?? model.goals[0]?.goalId ?? "";
+    let cancelled = false;
+    let recoveryController: AbortController | null = null;
+    let latestDiscoveredSessionId: string | null = null;
+    void (async () => {
+      try {
+        const history = await fetchChatHistory({
+          agentId: selectedAgent.agentId,
+          channelId,
+          goalId: selectedGoal?.goalId,
+        });
+        if (cancelled) return;
+        setMessagesByContext((current) => {
+          if ((current[targetContextId]?.length ?? 0) > 0) return current;
+          return {
+            ...current,
+            [targetContextId]: history.messages.map((message) => ({
+              agentLabel: message.role === "user" ? undefined : selectedAgent.label,
+              attachments: workspaceImageAttachments(message.attachments),
+              id: managerMessageId.current++,
+              lines: [],
+              role: message.role === "user" ? "user" : "assistant",
+              sourceLabel: message.role === "user"
+                ? undefined
+                : message.role === "error"
+                  ? "本地会话记录"
+                  : `恢复的 ${selectedAgent.label} 会话`,
+              text: message.role === "user" ? message.text : visibleAgentMessage(message.text),
+            })),
+          };
+        });
+        if (selectedAgent.agentId === "status-only") return;
+        const latest = history.sessions[0];
+        latestDiscoveredSessionId = latest?.session_id ?? null;
+        if (latest && !latest.resumable) {
+          newSessionRequired.current.add(sessionKey);
+          recordRuntimeBinding(targetContextId, {
+            agentId: selectedAgent.agentId,
+            resumable: false,
+            sessionId: latest.session_id,
+            status: "resume_failed",
+          });
+          return;
+        }
+        const sessionGoalId = latest?.goal_id ?? anchorGoalId;
+        if (!sessionGoalId) return;
+        const created = await createChatSession(
+          sessionGoalId,
+          selectedAgent.agentId,
+          "resume_latest",
+          contextKind,
+        );
+        if (cancelled) return;
+        sessionIds.current.set(sessionKey, created.session_id);
+        const activeSnapshot = history.snapshots.find(
+          (snapshot) => snapshot.session.session_id === created.session_id,
+        );
+        const activeTurnId = activeSnapshot?.session.active_turn_id ?? "";
+        recordRuntimeBinding(targetContextId, {
+          agentId: selectedAgent.agentId,
+          resumable: true,
+          sessionId: created.session_id,
+          status: activeTurnId ? "running" : "ready",
+          turnId: activeTurnId || undefined,
+        });
+        newSessionRequired.current.delete(sessionKey);
+        if (!activeTurnId) return;
+        const recoveryKey = `${created.session_id}:${activeTurnId}`;
+        if (recoveringTurnKeys.current.has(recoveryKey)) return;
+        recoveringTurnKeys.current.add(recoveryKey);
+        activeTurnIds.current.set(targetContextId, activeTurnId);
+        recordRuntimeBinding(targetContextId, {
+          agentId: selectedAgent.agentId,
+          resumable: true,
+          sessionId: created.session_id,
+          status: "running",
+          turnId: activeTurnId,
+        });
+        setSendingContextId(targetContextId);
+        recoveryController = new AbortController();
+        streamControllers.current.set(targetContextId, recoveryController);
+        let streamedText = "";
+        const streamingMessageId = appendManagerAssistantMessage(targetContextId, {
+          activity: ["正在恢复进行中的 Agent 回合"],
+          agentLabel: selectedAgent.label,
+          lines: [],
+          pending: true,
+          sourceLabel: `恢复的 ${selectedAgent.label} 会话`,
+          text: "",
+        });
+        try {
+          const streamed = await resumeChatTurnStreaming(created.session_id, activeTurnId, {
+            signal: recoveryController.signal,
+            onDelta: (delta) => {
+              streamedText += delta;
+              updateManagerAssistantMessage(targetContextId, streamingMessageId, {
+                text: streamedText,
+              });
+            },
+            onActivity: (label) => {
+              setMessagesByContext((messages) => ({
+                ...messages,
+                [targetContextId]: (messages[targetContextId] ?? []).map((message) =>
+                  message.id !== streamingMessageId
+                    ? message
+                    : {
+                        ...message,
+                        activity: [...new Set([...(message.activity ?? []), label])].slice(-6),
+                      }
+                ),
+              }));
+            },
+          });
+          if (cancelled) return;
+          updateManagerAssistantMessage(targetContextId, streamingMessageId, {
+            lines: streamed.response.gate
+              ? [streamed.response.gate.summary, streamed.response.gate.next_action].filter(Boolean).slice(0, 2)
+              : [],
+            pending: false,
+            text: streamed.response.message || streamedText.trim() || `${selectedAgent.label} 已完成分析。`,
+          });
+          const recoveryGoal = model.goals.find((goal) => goal.goalId === activeSnapshot?.session.goal_id)
+            ?? selectedGoal
+            ?? model.goals[0]
+            ?? null;
+          if (recoveryGoal && streamed.response.proposals.length > 0) {
+            const cards = streamed.response.proposals.map((proposal) => ({
+              goalId: recoveryGoal.goalId,
+              id: proposalId.current++,
+              previewId: null,
+              proposal,
+              receiptLabel: null,
+              state: "candidate" as const,
+              statusMessage: null,
+            }));
+            setProposalsByContext((current) => ({
+              ...current,
+              [targetContextId]: [...(current[targetContextId] ?? []), ...cards],
+            }));
+          }
+        } catch (error) {
+          if (cancelled) return;
+          updateManagerAssistantMessage(targetContextId, streamingMessageId, {
+            activity: [],
+            lines: [],
+            pending: false,
+            reconnect: error instanceof ChatApiError && error.payload.reconnectable === true,
+            sourceLabel: "LoopX Chat 本地后端",
+            text: error instanceof Error ? error.message : "无法恢复进行中的 Agent 回合。",
+          });
+        } finally {
+          recoveringTurnKeys.current.delete(recoveryKey);
+          if (activeTurnIds.current.get(targetContextId) === activeTurnId) {
+            activeTurnIds.current.delete(targetContextId);
+          }
+          recordRuntimeBinding(targetContextId, {
+            agentId: selectedAgent.agentId,
+            resumable: true,
+            sessionId: created.session_id,
+            status: "ready",
+          });
+          if (streamControllers.current.get(targetContextId) === recoveryController) {
+            streamControllers.current.delete(targetContextId);
+          }
+          if (!cancelled) {
+            setSendingContextId((current) => current === targetContextId ? null : current);
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof ChatApiError && error.payload.error_code === "resume_failed") {
+          newSessionRequired.current.add(sessionKey);
+          if (latestDiscoveredSessionId) {
+            recordRuntimeBinding(targetContextId, {
+              agentId: selectedAgent.agentId,
+              resumable: false,
+              sessionId: latestDiscoveredSessionId,
+              status: "resume_failed",
+            });
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      recoveryController?.abort();
+    };
+  }, [contextId, model.goals[0]?.goalId, selectedGoal?.goalId, selectedAgent.agentId, selectedAgent.available, selectedAgent.label]);
+
+  useEffect(() => {
+    if (selectedGoal || model.goals.length === 0) return;
+    let cancelled = false;
+    void Promise.all(model.goals.map(async (goal) => {
+      const listed = await fetchChatSessions({
+        agentId: goal.agentId,
+        channelId: `goal.${goal.goalId}`,
+        goalId: goal.goalId,
+      });
+      return { goalId: goal.goalId, session: listed.sessions[0] ?? null };
+    })).then((rows) => {
+      if (cancelled) return;
+      setRuntimeBindings((current) => {
+        const next = { ...current };
+        for (const row of rows) {
+          if (!row.session) continue;
+          next[row.goalId] = {
+            agentId: row.session.agent_id,
+            resumable: row.session.resumable,
+            sessionId: row.session.session_id,
+            status: row.session.active_turn_id ? "running" : row.session.status,
+            turnId: row.session.active_turn_id ?? undefined,
+          };
+        }
+        return next;
+      });
+    }).catch(() => {
+      // The read-only status projection remains available while Session discovery reconnects.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionDiscoveryKey, selectedGoal?.goalId]);
+
+  useEffect(() => {
+    if (!selectedGoal) {
+      setExecutionSessions([]);
+      setExecutionSessionSnapshots({});
+      return;
+    }
+    let cancelled = false;
+    let timer = 0;
+    const discover = async () => {
+      try {
+        const listed = await fetchChatSessions({ goalId: selectedGoal.goalId });
+        if (!cancelled) {
+          const taskSessions = listed.sessions.filter((session) => session.channel_id?.startsWith("task."));
+          setExecutionSessions(taskSessions);
+          const snapshots = await Promise.allSettled(taskSessions.map((session) => fetchChatSession(session.session_id)));
+          if (!cancelled) {
+            setExecutionSessionSnapshots(Object.fromEntries(snapshots.flatMap((result, index) => {
+              if (result.status !== "fulfilled") return [];
+              return [[taskSessions[index].session_id, result.value]];
+            })));
+          }
+        }
+      } catch {
+        // Durable Todos remain visible while the local execution runtime reconnects.
+      }
+      if (!cancelled) timer = window.setTimeout(() => void discover(), 2_000);
+    };
+    void discover();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [selectedGoal?.goalId]);
+
+  useEffect(() => {
+    if (!agentMenuOpen) {
+      return;
+    }
+    const focusHandle = window.requestAnimationFrame(() => {
+      agentMenuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    });
+    return () => {
+      window.cancelAnimationFrame(focusHandle);
+      agentTriggerRef.current?.focus();
+    };
+  }, [agentMenuOpen]);
+
+  useEffect(() => {
+    if (!detailsOpen) {
+      return;
+    }
+    const focusHandle = window.requestAnimationFrame(() => detailsCloseRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(focusHandle);
+      detailsTriggerRef.current?.focus();
+    };
+  }, [detailsOpen]);
+
+  useEffect(() => {
+    if (!agentMenuOpen && !detailsOpen) {
+      return;
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAgentMenuOpen(false);
+        setDetailsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [agentMenuOpen, detailsOpen]);
+
+  function appendManagerAssistantMessage(
+    targetContextId: string,
+    message: Omit<PersonalManagerMessage, "id" | "role">,
+  ) {
+    const id = managerMessageId.current++;
+    setMessagesByContext((messages) => ({
+      ...messages,
+      [targetContextId]: [
+        ...(messages[targetContextId] ?? []),
+        { ...message, id, role: "assistant" },
+      ],
+    }));
+    return id;
+  }
+
+  function updateManagerAssistantMessage(
+    targetContextId: string,
+    messageId: number,
+    update: Partial<Omit<PersonalManagerMessage, "id" | "role">>,
+  ) {
+    setMessagesByContext((messages) => ({
+      ...messages,
+      [targetContextId]: (messages[targetContextId] ?? []).map((message) =>
+        message.id === messageId ? { ...message, ...update } : message
+      ),
+    }));
+  }
+
+  function updatePersonalProposal(
+    targetContextId: string,
+    targetProposalId: number,
+    update: Partial<PersonalProposalCard>,
+  ) {
+    setProposalsByContext((current) => ({
+      ...current,
+      [targetContextId]: (current[targetContextId] ?? []).map((proposal) =>
+        proposal.id === targetProposalId ? { ...proposal, ...update } : proposal
+      ),
+    }));
+  }
+
+  async function sendManagerQuestion(rawQuestion: string, route?: { agentId?: string; goalId?: string | null; attachments?: WorkspaceImageAttachment[] }) {
+    const question = rawQuestion.trim();
+    if (!question) {
+      return;
+    }
+    const targetContextId = route && "goalId" in route
+      ? route.goalId ?? "manager"
+      : contextId;
+    const targetGoal = targetContextId === "manager"
+      ? questionModel.goals[0] ?? model.goals[0] ?? null
+      : model.goals.find((goal) => goal.goalId === targetContextId) ?? null;
+    const selectedRoute = route?.agentId
+      ? selectAvailableChatAgent(agentOptions, route.agentId, defaultAgentId)
+      : selectedAgent;
+    const targetQuestionModel = targetContextId === "manager"
+      ? model
+      : targetGoal
+      ? {
+          ...model,
+          blockingTodoCount: model.userTodos.filter((todo) => todo.goalId === targetGoal.goalId && todo.blocking).length,
+          goals: [targetGoal],
+          openUserTodoCount: model.userTodos.filter((todo) => todo.goalId === targetGoal.goalId).length,
+          userTodos: model.userTodos.filter((todo) => todo.goalId === targetGoal.goalId),
+          visibleUserTodos: model.userTodos.filter((todo) => todo.goalId === targetGoal.goalId),
+        }
+      : model;
+    const userMessageId = managerMessageId.current++;
+    setMessagesByContext((messages) => ({
+      ...messages,
+      [targetContextId]: [
+        ...(messages[targetContextId] ?? []),
+        { attachments: route?.attachments, id: userMessageId, lines: [], role: "user", text: question },
+      ],
+    }));
+    setManagerInput("");
+    setSendingContextId(targetContextId);
+
+    const isProjectionQuickQuestion = targetContextId === "manager" && isManagerProjectionQuestion(question);
+    if (isProjectionQuickQuestion || selectedRoute.agentId === "status-only" || !targetGoal) {
+      const answer = answerPersonalManagerQuestion(payload, targetQuestionModel, question);
+      const usesStatusOnlyRoute = selectedRoute.agentId === "status-only";
+      appendManagerAssistantMessage(targetContextId, {
+        agentLabel: usesStatusOnlyRoute ? "仅查状态" : "LoopX 管家",
+        lines: answer.lines.slice(0, 3),
+        sourceLabel: usesStatusOnlyRoute ? "LoopX 状态投影 · 仅查状态" : "LoopX 状态投影",
+        text: answer.text,
+      });
+      void recordProjectionExchange({
+        answer: [answer.text, ...answer.lines.slice(0, 3)].filter(Boolean).join("\n"),
+        contextKind: targetContextId === "manager" ? "manager" : "goal",
+        goalId: targetContextId === "manager" ? undefined : targetContextId,
+        question,
+      }).catch(() => {
+        // The current projection answer remains visible when local history persistence is unavailable.
+      });
+      setSendingContextId(null);
+      return;
+    }
+
+    const sessionKey = `${targetContextId}:${selectedRoute.agentId}`;
+    let streamingMessageId: number | null = null;
+    try {
+      let sessionId = sessionIds.current.get(sessionKey);
+      if (!sessionId) {
+        const mode = newSessionRequired.current.has(sessionKey) ? "new" : "resume_latest";
+        const session = await createChatSession(
+          targetGoal.goalId,
+          selectedRoute.agentId,
+          mode,
+          targetContextId === "manager" ? "manager" : "goal",
+        );
+        sessionId = session.session_id;
+        sessionIds.current.set(sessionKey, sessionId);
+        recordRuntimeBinding(targetContextId, {
+          agentId: selectedRoute.agentId,
+          resumable: true,
+          sessionId,
+          status: "ready",
+        });
+        newSessionRequired.current.delete(sessionKey);
+      }
+      let streamedText = "";
+      streamingMessageId = appendManagerAssistantMessage(targetContextId, {
+        activity: ["正在连接 Agent"],
+        agentLabel: selectedRoute.label,
+        lines: [],
+        pending: true,
+        sourceLabel: targetContextId !== "manager"
+          ? `${selectedRoute.label} Agent · ${personalGoalTitle(targetGoal.goalId)}`
+          : `${selectedRoute.label} 管家 · 跨 Goal`,
+        text: "",
+      });
+      const streamed = await sendChatTurnStreaming(sessionId, question, {
+        attachments: route?.attachments,
+        signal: (() => {
+          const controller = new AbortController();
+          streamControllers.current.set(targetContextId, controller);
+          return controller.signal;
+        })(),
+        onDelta: (delta) => {
+          streamedText += delta;
+          if (streamingMessageId !== null) {
+            updateManagerAssistantMessage(targetContextId, streamingMessageId, {
+              text: streamedText,
+            });
+          }
+        },
+        onActivity: (label) => {
+          if (streamingMessageId === null) return;
+          setMessagesByContext((messages) => ({
+            ...messages,
+            [targetContextId]: (messages[targetContextId] ?? []).map((message) =>
+              message.id !== streamingMessageId
+                ? message
+                : {
+                    ...message,
+                    activity: [...new Set([...(message.activity ?? []), label])].slice(-6),
+                  }
+            ),
+          }));
+        },
+        onPhase: (_phase, turnId) => {
+          activeTurnIds.current.set(targetContextId, turnId);
+          recordRuntimeBinding(targetContextId, {
+            agentId: selectedRoute.agentId,
+            resumable: true,
+            sessionId,
+            status: "running",
+            turnId,
+          });
+        },
+      });
+      const response = streamed.response;
+      updateManagerAssistantMessage(targetContextId, streamingMessageId, {
+        lines: response.gate ? [response.gate.summary, response.gate.next_action].filter(Boolean).slice(0, 2) : [],
+        pending: false,
+        text: visibleAgentMessage(response.message || streamedText.trim()) || `${selectedRoute.label} 已完成分析。`,
+      });
+      if (response.proposals.length > 0) {
+        const cards = response.proposals.map((proposal) => ({
+          goalId: targetGoal.goalId,
+          id: proposalId.current++,
+          previewId: null,
+          proposal,
+          receiptLabel: null,
+          state: "candidate" as const,
+          statusMessage: null,
+        }));
+        setProposalsByContext((current) => ({
+          ...current,
+          [targetContextId]: [...(current[targetContextId] ?? []), ...cards],
+        }));
+      }
+    } catch (error) {
+      const userInterrupted = interruptedContexts.current.delete(targetContextId);
+      if (userInterrupted) {
+        const interruptedMessage = {
+          agentLabel: selectedRoute.label,
+          lines: [],
+          pending: false,
+          sourceLabel: `${selectedRoute.label} 会话`,
+          text: "已中断。你可以在当前会话继续发送消息。",
+        };
+        if (streamingMessageId === null) {
+          appendManagerAssistantMessage(targetContextId, interruptedMessage);
+        } else {
+          updateManagerAssistantMessage(targetContextId, streamingMessageId, interruptedMessage);
+        }
+        return;
+      }
+      const payloadError = error instanceof ChatApiError ? error.payload : null;
+      if (payloadError && sessionInvalidatedByPayload(payloadError)) {
+        sessionIds.current.delete(sessionKey);
+      }
+      if (payloadError?.error_code === "resume_failed") {
+        sessionIds.current.delete(sessionKey);
+        newSessionRequired.current.add(sessionKey);
+        recordRuntimeBinding(targetContextId, {
+          agentId: selectedRoute.agentId,
+          resumable: false,
+          sessionId: runtimeBindings[targetContextId]?.sessionId ?? "resume-failed",
+          status: "resume_failed",
+        });
+      }
+      const gate = payloadError?.gate;
+      const gateSummary = gate && typeof gate === "object"
+        ? String((gate as { summary?: unknown }).summary ?? "")
+        : "";
+      const failureMessage = {
+        agentLabel: selectedRoute.label,
+        lines: gateSummary ? [gateSummary] : [],
+        pending: false,
+        reconnect: payloadError?.reconnectable === true,
+        sourceLabel: "LoopX Chat 本地后端",
+        text: payloadError?.error_code === "resume_failed"
+          ? `原 ${selectedRoute.label} 会话无法恢复。本地历史已经保留，请在运行详情里选择“重试恢复”或“开始新 Session”。`
+          : error instanceof Error ? error.message : `${selectedRoute.label} 会话暂时不可用。`,
+      };
+      if (streamingMessageId === null) {
+        appendManagerAssistantMessage(targetContextId, failureMessage);
+      } else {
+        updateManagerAssistantMessage(targetContextId, streamingMessageId, failureMessage);
+      }
+    } finally {
+      activeTurnIds.current.delete(targetContextId);
+      streamControllers.current.delete(targetContextId);
+      const boundSessionId = sessionIds.current.get(sessionKey);
+      if (boundSessionId) {
+        recordRuntimeBinding(targetContextId, {
+          agentId: selectedRoute.agentId,
+          resumable: true,
+          sessionId: boundSessionId,
+          status: "ready",
+        });
+      }
+      setSendingContextId((current) => current === targetContextId ? null : current);
+    }
+  }
+
+  async function interruptManagerTurn(run?: { agentId: string; goalId: string; sessionId?: string; turnId?: string }) {
+    const targetContextId = run?.goalId ?? contextId;
+    const binding = runtimeBindings[targetContextId];
+    const agentId = run?.agentId ?? binding?.agentId ?? selectedAgent.agentId;
+    const sessionKey = `${targetContextId}:${agentId}`;
+    const sessionId = run?.sessionId ?? binding?.sessionId ?? sessionIds.current.get(sessionKey);
+    const turnId = run?.turnId ?? binding?.turnId ?? activeTurnIds.current.get(targetContextId);
+    if (!sessionId || !turnId) return;
+    try {
+      interruptedContexts.current.add(targetContextId);
+      await interruptChatTurn(sessionId, turnId);
+      streamControllers.current.get(targetContextId)?.abort();
+    } catch (error) {
+      interruptedContexts.current.delete(targetContextId);
+      throw error;
+    } finally {
+      activeTurnIds.current.delete(targetContextId);
+      recordRuntimeBinding(targetContextId, {
+        agentId,
+        resumable: true,
+        sessionId,
+        status: "ready",
+      });
+      streamControllers.current.delete(targetContextId);
+      setSendingContextId((current) => current === targetContextId ? null : current);
+    }
+  }
+
+  async function retryManagerSession(run: { agentId: string; goalId: string; sessionId?: string }) {
+    const targetContextId = run.goalId;
+    const sessionKey = `${targetContextId}:${run.agentId}`;
+    const sessionId = run.sessionId ?? runtimeBindings[targetContextId]?.sessionId ?? sessionIds.current.get(sessionKey);
+    if (!sessionId) return;
+    try {
+      const restored = await resumeChatSession(sessionId);
+      sessionIds.current.set(sessionKey, sessionId);
+      newSessionRequired.current.delete(sessionKey);
+      recordRuntimeBinding(targetContextId, {
+        agentId: run.agentId,
+        resumable: restored.session.resumable,
+        sessionId,
+        status: restored.session.status,
+      });
+    } catch {
+      recordRuntimeBinding(targetContextId, {
+        agentId: run.agentId,
+        resumable: false,
+        sessionId,
+        status: "resume_failed",
+      });
+    }
+  }
+
+  function startNewManagerSession(run: { agentId: string; goalId: string }) {
+    const sessionKey = `${run.goalId}:${run.agentId}`;
+    sessionIds.current.delete(sessionKey);
+    newSessionRequired.current.add(sessionKey);
+    recordRuntimeBinding(run.goalId, {
+      agentId: run.agentId,
+      resumable: true,
+      sessionId: "new-session-pending",
+      status: "ready",
+    });
+  }
+
+  async function closeManagerSession(run: { agentId: string; goalId: string; sessionId?: string }) {
+    const sessionKey = `${run.goalId}:${run.agentId}`;
+    const sessionId = run.sessionId ?? runtimeBindings[run.goalId]?.sessionId ?? sessionIds.current.get(sessionKey);
+    if (sessionId && sessionId !== "new-session-pending") await closeChatSession(sessionId);
+    sessionIds.current.delete(sessionKey);
+    newSessionRequired.current.add(sessionKey);
+    recordRuntimeBinding(run.goalId, null);
+  }
+
+  async function previewPersonalProposal(card: PersonalProposalCard) {
+    const targetContextId = contextId;
+    updatePersonalProposal(targetContextId, card.id, {
+      state: "previewing",
+      statusMessage: null,
+    });
+    try {
+      const preview = await previewTodo(card.goalId, card.proposal.text);
+      updatePersonalProposal(targetContextId, card.id, {
+        previewId: preview.preview_id,
+        state: "ready",
+        statusMessage: "LoopX 已锁定这次写入预览，请确认后再提交。",
+      });
+    } catch (error) {
+      updatePersonalProposal(targetContextId, card.id, {
+        state: "error",
+        statusMessage: error instanceof Error ? error.message : "无法生成 Todo 预览。",
+      });
+    }
+  }
+
+  async function approvePersonalProposal(card: PersonalProposalCard) {
+    if (!card.previewId) {
+      return;
+    }
+    const targetContextId = contextId;
+    updatePersonalProposal(targetContextId, card.id, {
+      state: "applying",
+      statusMessage: null,
+    });
+    try {
+      const result = await applyTodo(card.goalId, card.proposal.text, card.previewId);
+      updatePersonalProposal(targetContextId, card.id, {
+        receiptLabel: todoReceiptLabel(result.receipt),
+        state: "approved",
+        statusMessage: result.receipt.already_exists ? "Todo 已存在，本次没有重复写入。" : "Todo 已写入，并返回可核对回执。",
+      });
+      onRefresh();
+    } catch (error) {
+      const noWriteReceipt = error instanceof ChatApiError
+        ? todoNoWriteReceiptFromPayload(error.payload)
+        : null;
+      updatePersonalProposal(targetContextId, card.id, noWriteReceipt ? {
+        previewId: null,
+        receiptLabel: `未写入 · 回执 ${noWriteReceipt.receipt_id.slice(0, 12)}`,
+        state: "stale",
+        statusMessage: "Goal 状态已变化，本次保持零写入。请重新生成预览。",
+      } : {
+        state: "error",
+        statusMessage: error instanceof Error ? error.message : "Todo 写入失败。",
+      });
+    }
+  }
+
+  function settlePersonalProposal(card: PersonalProposalCard, state: "rejected" | "cancelled") {
+    updatePersonalProposal(contextId, card.id, {
+      previewId: null,
+      receiptLabel: "未写入",
+      state,
+      statusMessage: state === "rejected" ? "你已拒绝这个候选 Todo。" : "你已取消本次处理。",
+    });
+  }
+
+  function chooseAgent(agentId: string) {
+    if (!agentOptions.some((agent) => agent.agentId === agentId && agent.available)) {
+      return;
+    }
+    setSelectedAgents((current) => ({ ...current, [contextId]: agentId }));
+    setAgentMenuOpen(false);
+  }
+
+  function openManagerChat() {
+    onSelectGoal("");
+    setMobilePanel("chat");
+  }
+
+  function openGoalList() {
+    onSelectGoal("");
+    setMobilePanel("goals");
+  }
+
+  function openGoalChat(goalId: string) {
+    onSelectGoal(goalId);
+    setMobilePanel("chat");
+  }
+
+  function beginDecisionReply(value: string) {
+    setManagerInput(value);
+    managerInputRef.current?.focus();
+  }
+
+  const selectedGoalStateVariant = selectedGoal ? personalGoalStateVariant[selectedGoal.state] : "neutral";
+  const selectedGoalHeaderSummary = selectedGoal
+    ? `${selectedAgent.label} · ${selectedGoal.state}${goalAgentTodos.length > 0 ? ` ${goalProgressLabel}` : ""}${goalUserTodos.length > 0 ? ` · ${goalUserTodos.length} 项等你` : ""}`
+    : "跨 Goal 的个人工作入口";
+  const diagnosis = selectedGoal?.state === "需修复" || (!selectedGoal && !payload.ok)
+    ? {
+        impact: "可见进度可能已经过期，受影响的执行路径会暂停。",
+        label: "需要关注",
+        owner: selectedGoal ? personalAgentLabel(selectedGoal.agentId) : "LoopX 管家",
+        suggestion: selectedGoal?.nextSentence ?? "刷新 LoopX 状态并检查健康信息。",
+        title: selectedGoal?.agentSentence ?? "LoopX 状态需要检查",
+      }
+    : selectedGoal?.state === "等你"
+      ? {
+          impact: selectedGoal.needsYouBlocking
+            ? "这项 Gate 约束的路径暂停；独立执行路径仍按 interaction contract 推进。"
+            : "Agent 可以继续推进；这项用户待办会持续保留。",
+          label: selectedGoal.needsYouBlocking ? "等待你的决定" : "有一项待办等你",
+          owner: "你",
+          suggestion: selectedGoal.needsYou ?? selectedGoal.nextSentence,
+          title: selectedGoal.needsYou ?? "请处理当前用户待办",
+        }
+      : {
+          impact: selectedGoal ? "Agent 可以按当前计划继续。" : "各 Goal 会按各自 interaction contract 推进。",
+          label: "运行正常",
+          owner: selectedGoal ? personalAgentLabel(selectedGoal.agentId) : "LoopX 管家",
+          suggestion: selectedGoal?.nextSentence ?? "继续观察跨 Goal 状态。",
+          title: selectedGoal ? "当前没有阻止 Agent 继续的运行异常" : "当前没有全局健康异常",
+        };
+
+  const workspaceTimeline: WorkspaceTimelineItem[] = [
+    ...(!selectedGoal && runtimeBindings.manager?.status === "resume_failed" ? [{
+      id: "run:manager:resume-failed",
+      kind: "run" as const,
+      run: {
+        agentId: runtimeBindings.manager.agentId,
+        agentLabel: personalAgentLabel(runtimeBindings.manager.agentId),
+        canInterrupt: false,
+        completedSteps: 0,
+        goalId: "manager",
+        goalTitle: "LoopX 管家",
+        latestActivity: "本地聊天记录已保留，点我查看恢复方式。",
+        resumable: false,
+        runId: "manager:resume-failed",
+        sessionId: runtimeBindings.manager.sessionId,
+        sessionStatus: "resume_failed",
+        status: "failed" as const,
+        title: "上次会话需要恢复",
+        totalSteps: 1,
+        outputs: [],
+      },
+    }] : []),
+    ...(selectedGoal ? executionSessions.map((session): WorkspaceTimelineItem => {
+      const todoId = session.channel_id?.startsWith("task.") ? session.channel_id.slice(5) : undefined;
+      const todo = selectedGoal.agentTodos.find((candidate) => candidate.todoId === todoId);
+      const running = Boolean(session.active_turn_id);
+      const snapshot = executionSessionSnapshots[session.session_id];
+      const hasResult = snapshot?.messages.some((message) => isAgentResultMessage(message.role, message.text)) === true;
+      return {
+        id: `run:task:${session.session_id}`,
+        kind: "run",
+        run: {
+          agentId: session.agent_id,
+          agentLabel: personalAgentLabel(session.agent_id),
+          canInterrupt: running,
+          completedSteps: todo?.done || hasResult ? 1 : 0,
+          goalId: selectedGoal.goalId,
+          goalTitle: selectedGoal.title,
+          latestActivity: running
+            ? "Agent 正在执行，可进入 Session 查看过程或发送纠偏。"
+            : hasResult
+              ? "Agent 已返回结果，点击查看结果与完整运行记录。"
+              : "执行 Session 已保留，可继续纠偏或恢复。",
+          resumable: session.resumable,
+          runId: session.session_id,
+          sessionId: session.session_id,
+          sessionMessages: snapshot?.messages.map((message) => ({
+            createdAt: message.created_at,
+            messageId: message.message_id,
+            role: message.role === "user" ? "user" : isAgentResultMessage(message.role, message.text) ? "assistant" : "error",
+            text: message.role === "user" ? message.text : visibleAgentMessage(message.text),
+          })),
+          sessionStatus: hasResult ? "completed" : session.status,
+          status: todo?.done || hasResult ? "completed" : running ? "running" : session.status === "resume_failed" ? "failed" : "waiting",
+          title: todo?.text ?? "Agent 执行任务",
+          todoId,
+          totalSteps: 1,
+          turnId: session.active_turn_id ?? undefined,
+        },
+      };
+    }) : []),
+    ...(selectedGoal ? [{
+      id: `run:${selectedGoal.goalId}`,
+      kind: "run" as const,
+      run: {
+        agentId: runtimeBindings[selectedGoal.goalId]?.agentId ?? selectedGoal.agentId,
+        agentLabel: personalAgentLabel(runtimeBindings[selectedGoal.goalId]?.agentId ?? selectedGoal.agentId),
+        canInterrupt: Boolean(runtimeBindings[selectedGoal.goalId]?.turnId),
+        completedSteps: selectedGoal.agentTodos.filter((todo) => todo.done).length,
+        goalId: selectedGoal.goalId,
+        goalTitle: selectedGoal.title,
+        latestActivity: selectedGoal.agentSentence,
+        resumable: runtimeBindings[selectedGoal.goalId]?.resumable ?? true,
+        runId: `goal:${selectedGoal.goalId}`,
+        sessionId: runtimeBindings[selectedGoal.goalId]?.sessionId,
+        sessionStatus: runtimeBindings[selectedGoal.goalId]?.status,
+        status: runtimeBindings[selectedGoal.goalId]?.turnId
+          ? "running" as const
+          : selectedGoal.state === "需修复"
+            ? "failed" as const
+            : "waiting" as const,
+        title: selectedGoal.nextSentence,
+        totalSteps: selectedGoal.agentTodos.length || 1,
+        turnId: runtimeBindings[selectedGoal.goalId]?.turnId,
+        outputs: selectedGoal.runEvidence ? [{
+          createdAt: selectedGoal.runEvidence.generatedAt,
+          kind: "evidence" as const,
+          outputId: `${selectedGoal.goalId}:latest-evidence`,
+          title: selectedGoal.runEvidence.label,
+        }] : [],
+      },
+    }] : []),
+    ...contextMessages.map((message): WorkspaceTimelineItem => ({
+      id: `message:${message.id}`,
+      kind: "message",
+        message: {
+          agentLabel: message.agentLabel,
+          attachments: message.attachments,
+        id: String(message.id),
+        pending: message.pending,
+        role: message.role,
+        text: message.text || (message.pending ? "Agent 正在处理…" : message.lines.join("\n")),
+      },
+    })),
+    ...(selectedGoal ? [selectedGoal] : model.goals).flatMap((goal) => goal.runEvidence ? [{
+      id: `output:${goal.goalId}:${goal.runEvidence.generatedAt || "latest"}`,
+      kind: "output" as const,
+      output: {
+        agentLabel: personalAgentLabel(goal.agentId),
+        createdAt: goal.runEvidence.generatedAt,
+        goalId: goal.goalId,
+        goalTitle: goal.title,
+        kind: "evidence" as const,
+        outputId: `${goal.goalId}:latest-evidence`,
+        runId: goal.runEvidence.runId ?? undefined,
+        safePreview: goal.runEvidence.safePreview,
+        summary: goal.runEvidence.summary,
+        title: goal.runEvidence.label,
+        todoId: goal.runEvidence.todoId ?? undefined,
+      },
+    }] : []),
+  ];
+  const workspaceModel = {
+    ...normalizePersonalHomeModel(model),
+    timeline: workspaceTimeline,
+  };
+  return (
+    <div className={theme === "dark" ? "dark" : ""} data-testid="personal-goal-home">
+      <PersonalWorkspacePage
+        agents={agentOptions.map((agent) => ({
+          adapterKind: agent.adapterKind,
+          agentId: agent.agentId,
+          available: agent.available,
+          capability: agent.capability,
+          interrupt: agent.interrupt,
+          label: agent.label,
+          location: agent.location,
+          resume: agent.resume,
+          source: agent.source,
+          streaming: agent.streaming,
+          toolCalls: agent.toolCalls,
+          trustScope: agent.trustScope,
+          workspaceCompatibility: agent.available ? "当前 Goal 写入前验证" : "不可用，需先修复 Endpoint",
+        }))}
+        callbacks={{
+          onApplyAttention: (attention) => openGoalChat(attention.goalId),
+          onCorrectRun: async (run, message) => {
+            if (!run.sessionId) throw new Error("这个 Run 还没有可纠偏的执行 Session。");
+            const proposal = await previewTypedAction({
+              actionKind: "run.correct",
+              context: { kind: "run", goal_id: run.goalId, todo_id: run.todoId },
+              idempotencyKey: `workspace-run-correct-${run.sessionId}-${Date.now().toString(36)}`,
+              normalizedParameters: { goal_id: run.goalId, message, session_id: run.sessionId },
+              summary: `纠偏执行任务：${run.title}`,
+            });
+            const applied = await applyTypedAction(proposal.proposal_id);
+            const turnId = typeof applied.turn?.turn_id === "string" ? applied.turn.turn_id : undefined;
+            recordRuntimeBinding(run.goalId, {
+              agentId: run.agentId,
+              resumable: true,
+              sessionId: run.sessionId,
+              status: turnId ? "running" : "ready",
+              turnId,
+            });
+            if (turnId) {
+              activeTurnIds.current.set(run.goalId, turnId);
+              const controller = new AbortController();
+              streamControllers.current.set(run.goalId, controller);
+              let streamedText = "";
+              const messageId = appendManagerAssistantMessage(run.goalId, {
+                activity: ["正在把纠偏送入原执行 Session"],
+                agentLabel: run.agentLabel,
+                lines: [],
+                pending: true,
+                sourceLabel: `${run.agentLabel} · 执行 Session`,
+                text: "",
+              });
+              try {
+                const streamed = await resumeChatTurnStreaming(run.sessionId, turnId, {
+                  signal: controller.signal,
+                  onDelta: (delta) => {
+                    streamedText += delta;
+                    updateManagerAssistantMessage(run.goalId, messageId, { text: streamedText });
+                  },
+                });
+                updateManagerAssistantMessage(run.goalId, messageId, {
+                  activity: [],
+                  pending: false,
+                  text: visibleAgentMessage(streamed.response.message || streamedText.trim()) || `${run.agentLabel} 已完成纠偏。`,
+                });
+              } catch (error) {
+                const interrupted = interruptedContexts.current.delete(run.goalId);
+                updateManagerAssistantMessage(run.goalId, messageId, {
+                  activity: [],
+                  pending: false,
+                  text: interrupted ? "已中断。你可以在当前会话继续发送消息。" : error instanceof Error ? error.message : "纠偏回合失败。",
+                });
+              } finally {
+                activeTurnIds.current.delete(run.goalId);
+                streamControllers.current.delete(run.goalId);
+                recordRuntimeBinding(run.goalId, {
+                  agentId: run.agentId,
+                  resumable: true,
+                  sessionId: run.sessionId,
+                  status: "ready",
+                });
+              }
+            }
+          },
+          onCloseRunSession: closeManagerSession,
+          onInterruptRun: async (run) => interruptManagerTurn(run),
+          onOpenGoal: openGoalChat,
+          onOpenRunSession: async (run) => {
+            if (!run.sessionId) return;
+            const sessionId = run.sessionId;
+            const snapshot = await fetchChatSession(sessionId);
+            setExecutionSessionSnapshots((current) => ({
+              ...current,
+              [sessionId]: snapshot,
+            }));
+            openGoalChat(run.goalId);
+            setMessagesByContext((current) => ({
+              ...current,
+              [run.goalId]: snapshot.messages.map((message) => ({
+                agentLabel: message.role === "user" ? undefined : run.agentLabel,
+                attachments: workspaceImageAttachments(message.attachments),
+                id: managerMessageId.current++,
+                lines: [],
+                role: message.role === "user" ? "user" : "assistant",
+                sourceLabel: message.role === "user" ? undefined : `${run.agentLabel} · 执行 Session`,
+                text: message.role === "user" ? message.text : visibleAgentMessage(message.text),
+              })),
+            }));
+            recordRuntimeBinding(run.goalId, {
+              agentId: run.agentId,
+              resumable: snapshot.session.resumable,
+              sessionId,
+              status: snapshot.session.active_turn_id ? "running" : snapshot.session.status,
+              turnId: snapshot.session.active_turn_id ?? undefined,
+            });
+          },
+          onOpenOutput: (output) => openGoalChat(output.goalId),
+          onExportOutput: async (output) => {
+            const contents = [
+              `# ${output.title}`,
+              "",
+              output.summary ?? "",
+              "",
+              output.safePreview ?? "此产出没有可用的公开安全预览。",
+              "",
+              `Goal: ${output.goalId}`,
+              `Todo: ${output.todoId ?? "unlinked"}`,
+              `Run: ${output.runId ?? "unlinked"}`,
+            ].join("\n");
+            const url = URL.createObjectURL(new Blob([contents], { type: "text/markdown;charset=utf-8" }));
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = `${output.outputId.replace(/[^a-z0-9._-]+/gi, "-")}.md`;
+            anchor.click();
+            URL.revokeObjectURL(url);
+          },
+          onRefresh,
+          onRetryResumeRun: retryManagerSession,
+          onSelectAgent: chooseAgent,
+          onSelectGoal: (goalId) => goalId ? openGoalChat(goalId) : openManagerChat(),
+          onSendMessage: async (message, agentId, goalId, attachments) => sendManagerQuestion(message, { agentId, goalId, attachments }),
+          onStartNewRunSession: startNewManagerSession,
+        }}
+        model={workspaceModel}
+        selectedAgentId={selectedAgent.agentId}
+        selectedGoalId={selectedGoal?.goalId ?? null}
+      />
     </div>
   );
 }
@@ -6619,6 +8609,84 @@ function GlobalRegistryHealthPanel({ health }: { health: GlobalRegistryHealth })
   );
 }
 
+function StatusRequestView({
+  error,
+  isLoading,
+  onReset,
+  onRetry,
+  requestedUrl,
+  theme,
+  toggleTheme,
+}: {
+  error: string | null;
+  isLoading: boolean;
+  onReset: () => void;
+  onRetry: () => void;
+  requestedUrl: string;
+  theme: "light" | "dark";
+  toggleTheme: () => void;
+}) {
+  const statusServiceUnavailable = Boolean(
+    error
+    && /failed to fetch|networkerror|load failed/i.test(error)
+    && requestedUrl.includes("status.json"),
+  );
+  return (
+    <div className={theme === "dark" ? "dark" : ""}>
+      <main className="min-h-screen bg-[#f6f7f9] text-slate-950 dark:bg-[#09090b] dark:text-zinc-50">
+        <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
+          <div>
+            <h1 className="text-xl font-semibold">LoopX 看板</h1>
+            <p className="mt-1 break-all text-sm text-slate-500 dark:text-zinc-400">{requestedUrl}</p>
+          </div>
+          <Button aria-label="切换主题" onClick={toggleTheme} size="icon" variant="secondary">
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </Button>
+        </header>
+        <div className="mx-auto max-w-3xl p-4 sm:p-6">
+          <Card data-testid="initial-status-state">
+            <CardContent className="flex min-h-64 items-center justify-center p-6">
+              <div className="max-w-xl text-center">
+                {error ? (
+                  <CircleAlert className="mx-auto h-6 w-6 text-rose-600 dark:text-rose-300" />
+                ) : (
+                  <RefreshCw className="mx-auto h-6 w-6 animate-spin text-slate-500 dark:text-zinc-400" />
+                )}
+                <p className="mt-3 text-sm font-medium">
+                  {error ? "无法加载实时状态" : "正在加载实时状态"}
+                </p>
+                {error ? (
+                  <>
+                    <p className="mt-2 break-words text-sm leading-6 text-slate-500 dark:text-zinc-400">
+                      {statusServiceUnavailable
+                        ? "LoopX 状态服务未连接。请从 dashboard 目录运行 npm run dev；它会同时启动 5173、8766 和 8767。"
+                        : error}
+                    </p>
+                    {statusServiceUnavailable ? (
+                      <p className="mt-2 text-xs leading-5 text-slate-400 dark:text-zinc-500">
+                        远程 SSH 开发只需转发 5173；状态请求会通过 Vite 转发到远程 8766。
+                      </p>
+                    ) : null}
+                    <div className="mt-4 flex flex-wrap justify-center gap-2">
+                      <Button disabled={isLoading} onClick={onRetry}>
+                        <RefreshCw className="h-4 w-4" />
+                        重试
+                      </Button>
+                      <Button disabled={isLoading} onClick={onReset} variant="ghost">
+                        使用示例
+                      </Button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const search = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
@@ -6628,9 +8696,21 @@ export function DashboardPage() {
   const [statusUrl, setStatusUrl] = useState(search.statusUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [requestedStatusUrl, setRequestedStatusUrl] = useState<string | null>(
+    search.statusUrl.trim() || null,
+  );
+  const [exampleModeRequested, setExampleModeRequested] = useState(false);
   const [presentationSurfaceCollection, setPresentationSurfaceCollection] =
     useState<PresentationSurfaceCollection>(exampleStatusPayload.presentation_surfaces);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const suppressedStatusUrlRef = useRef<string | null>(null);
+  const routeStatusRequestUrl = !exampleModeRequested && source.kind === "example"
+    ? search.statusUrl.trim()
+    : "";
+  const activeStatusRequestUrl = requestedStatusUrl ?? routeStatusRequestUrl;
+  // The personal workspace keeps its own shell visible through initial load and
+  // refresh. The legacy request surface remains available only for ops mode.
+  const statusRequestActive = Boolean(activeStatusRequestUrl) && search.view === "ops";
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
   const goalRows = useMemo(
@@ -6697,9 +8777,12 @@ export function DashboardPage() {
   async function loadFromUrl(url: string) {
     const trimmed = url.trim();
     if (!trimmed) {
-      setLoadError("status URL is empty");
+      setLoadError("状态地址不能为空");
       return;
     }
+    suppressedStatusUrlRef.current = null;
+    setExampleModeRequested(false);
+    setRequestedStatusUrl(trimmed);
     setIsLoading(true);
     setLoadError(null);
     try {
@@ -6744,6 +8827,7 @@ export function DashboardPage() {
           view: routeViewForUrl(currentRouteView(current)),
         }),
       });
+      setRequestedStatusUrl(null);
     } catch (error) {
       setLoadError(formatStatusError(error));
     } finally {
@@ -6752,6 +8836,8 @@ export function DashboardPage() {
   }
 
   async function loadFromFile(file: File) {
+    suppressedStatusUrlRef.current = null;
+    setExampleModeRequested(false);
     setIsLoading(true);
     setLoadError(null);
     try {
@@ -6770,10 +8856,13 @@ export function DashboardPage() {
   }
 
   function resetToExample() {
+    suppressedStatusUrlRef.current = search.statusUrl.trim() || null;
+    setExampleModeRequested(true);
     setPayload(exampleStatusPayload);
     setPresentationSurfaceCollection(exampleStatusPayload.presentation_surfaces);
     setSource({ kind: "example", label: "bundled example" });
     setStatusUrl("");
+    setRequestedStatusUrl(null);
     setLoadError(null);
     void navigate({
       search: (current) => ({
@@ -6787,15 +8876,22 @@ export function DashboardPage() {
   useEffect(() => {
     const trimmedStatusUrl = search.statusUrl.trim();
     if (trimmedStatusUrl) {
+      if (suppressedStatusUrlRef.current === trimmedStatusUrl) {
+        return;
+      }
       if (source.kind !== "url" || source.label !== trimmedStatusUrl) {
         void loadFromUrl(trimmedStatusUrl);
       }
       return;
     }
+    suppressedStatusUrlRef.current = null;
+    if (exampleModeRequested) {
+      return;
+    }
     if (search.view !== "ops" && source.kind === "example") {
       void loadFromUrl(defaultGlobalStatusUrl);
     }
-  }, [search.statusUrl, search.view, source.kind, source.label]);
+  }, [exampleModeRequested, search.statusUrl, search.view, source.kind, source.label]);
 
   useEffect(() => {
     if (search.statusUrl && source.kind === "example") {
@@ -6895,13 +8991,29 @@ export function DashboardPage() {
     });
   }
 
+  if (statusRequestActive) {
+    return (
+      <StatusRequestView
+        error={loadError}
+        isLoading={isLoading}
+        onReset={resetToExample}
+        onRetry={() => void loadFromUrl(activeStatusRequestUrl)}
+        requestedUrl={activeStatusRequestUrl}
+        theme={theme}
+        toggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+      />
+    );
+  }
+
   if (search.view !== "ops") {
     return (
-      <ShareEvidenceView
+      <PersonalGoalHome
         isLoading={isLoading}
-        onRefresh={() => void loadFromUrl(source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl))}
+        onSelectGoal={selectGoal}
+        onRefresh={() => loadFromUrl(source.kind === "url" ? source.label : (statusUrl || defaultGlobalStatusUrl))}
         payload={payload}
         rows={goalRows}
+        selectedGoalId={search.goalId}
         source={source}
         theme={theme}
         toggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -6978,7 +9090,7 @@ export function DashboardPage() {
                     {selectedPresentationSurface.title}
                   </h1>
                 ) : (
-                  <h1 className="text-2xl font-semibold">Goal Operations</h1>
+                  <h1 className="text-2xl font-semibold">Goal 控制台</h1>
                 )}
                 <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">
                   {payload.registry} · {payload.runtime_root}
@@ -7314,6 +9426,25 @@ function formatUsageCount(value?: number | null) {
   return String(value ?? 0);
 }
 
+function formatTokenCount(value?: number | null) {
+  const n = value ?? 0;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function formatCostUsd(value?: number | null) {
+  return `$${(value ?? 0).toFixed(2)}`;
+}
+
+function formatDurationMs(value?: number | null) {
+  const ms = value ?? 0;
+  if (ms >= 3_600_000) return `${(ms / 3_600_000).toFixed(1)}h`;
+  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`;
+  if (ms >= 1_000) return `${Math.round(ms / 1_000)}s`;
+  return `${ms}ms`;
+}
+
 function formatUsageShare(value?: number | null) {
   return `${Math.round((value ?? 0) * 100)}%`;
 }
@@ -7584,6 +9715,12 @@ function UsageStatsPanel({ usage }: { usage?: UsageSummary | null }) {
     return null;
   }
   const totals = usage.totals;
+  const hasUsage =
+    totals.input_tokens_24h +
+    totals.input_tokens_7d +
+    totals.output_tokens_24h +
+    totals.output_tokens_7d >
+    0;
   const topGoals = usage.goals.slice(0, 5);
   return (
     <Card>
@@ -7613,6 +9750,24 @@ function UsageStatsPanel({ usage }: { usage?: UsageSummary | null }) {
             label="Progress"
             value={`${formatUsageCount(totals.progress_signal_run_count_24h)} / ${formatUsageCount(totals.progress_signal_run_count_7d)}`}
           />
+          {hasUsage ? (
+            <>
+              <UsageMetric
+                label="Tokens 24h / 7d"
+                value={`${formatTokenCount(totals.input_tokens_24h + totals.output_tokens_24h)} / ${formatTokenCount(totals.input_tokens_7d + totals.output_tokens_7d)}`}
+              />
+              <UsageMetric
+                label="Cost 24h / 7d"
+                value={`${formatCostUsd(totals.cost_usd_24h)} / ${formatCostUsd(totals.cost_usd_7d)}`}
+              />
+              <UsageMetric
+                label="Runtime 24h / 7d"
+                value={`${formatDurationMs(totals.duration_ms_24h)} / ${formatDurationMs(totals.duration_ms_7d)}`}
+              />
+            </>
+          ) : (
+            <UsageMetric label="Cost data" value="pending ingestion" />
+          )}
         </div>
         {topGoals.length ? (
           <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-800">

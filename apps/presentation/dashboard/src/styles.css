@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "./**/*.{ts,tsx}";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -20,8 +21,2310 @@ body {
 }
 
 button,
+input,
 select {
   font: inherit;
+}
+
+.personal-home {
+  --personal-accent: rgb(37 99 235);
+  --personal-border: rgb(226 222 214);
+  display: grid;
+  width: 100%;
+  min-height: 100vh;
+  grid-template-columns: 196px minmax(0, 1fr);
+  overflow-x: clip;
+  color: rgb(35 39 45);
+  background: rgb(248 247 243);
+}
+
+.personal-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  border-right: 1px solid var(--personal-border);
+  padding: 1.5rem 1rem;
+  background: rgb(252 251 248);
+}
+
+.personal-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding-inline: 0.5rem;
+  color: rgb(24 29 36);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.personal-wordmark-mark,
+.personal-manager-icon {
+  display: grid;
+  width: 1.875rem;
+  height: 1.875rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.625rem;
+  color: white;
+  background: rgb(30 64 175);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.14);
+}
+
+.personal-nav {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 2rem;
+}
+
+.personal-nav-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.625rem;
+  border: 0;
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  color: rgb(100 105 113);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  background: transparent;
+}
+
+.personal-nav-item-active {
+  color: rgb(30 64 175);
+  background: rgb(232 238 252);
+}
+
+.personal-nav-item:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.personal-health {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding: 0.75rem 0.5rem 0;
+  color: rgb(113 113 122);
+  font-size: 0.75rem;
+}
+
+.personal-health-dot,
+.personal-state-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  background: rgb(148 163 184);
+}
+
+.personal-health-dot.is-healthy {
+  background: rgb(34 197 94);
+  box-shadow: 0 0 0 3px rgb(34 197 94 / 0.12);
+}
+
+.personal-health-dot.is-unhealthy {
+  background: rgb(225 29 72);
+  box-shadow: 0 0 0 3px rgb(225 29 72 / 0.12);
+}
+
+.personal-main {
+  position: relative;
+  min-width: 0;
+  padding-bottom: 6rem;
+}
+
+.personal-header {
+  display: flex;
+  min-height: 7rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--personal-border);
+  padding: 1.5rem clamp(1.5rem, 5vw, 4.5rem);
+  background: rgb(252 251 248 / 0.92);
+  backdrop-filter: blur(12px);
+}
+
+.personal-header h1 {
+  margin: 0;
+  color: rgb(24 29 36);
+  font-size: clamp(1.625rem, 2.5vw, 2rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+.personal-header p {
+  margin: 0.375rem 0 0;
+  color: rgb(113 113 122);
+  font-size: 0.875rem;
+}
+
+.personal-primary-link,
+.personal-row-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.625rem;
+  color: white;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  background: var(--personal-accent);
+  box-shadow: 0 1px 2px rgb(37 99 235 / 0.2);
+}
+
+.personal-primary-link {
+  min-height: 2.375rem;
+  padding-inline: 0.875rem;
+}
+
+.personal-content {
+  width: min(100%, 70rem);
+  margin-inline: auto;
+  padding: 2rem clamp(1.5rem, 5vw, 4.5rem);
+}
+
+.personal-manager-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  border: 1px solid rgb(219 224 232);
+  border-radius: 0.75rem;
+  padding: 0.875rem 1rem;
+  background: rgb(255 255 255 / 0.72);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.035);
+}
+
+.personal-manager-summary p {
+  margin: 0;
+  color: rgb(71 79 91);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.personal-manager-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  color: rgb(30 64 175);
+  background: rgb(226 233 249);
+  box-shadow: none;
+}
+
+.personal-section {
+  margin-top: 2.25rem;
+}
+
+.personal-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.personal-section-heading h2 {
+  margin: 0;
+  color: rgb(35 39 45);
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.personal-section-heading p {
+  margin: 0.25rem 0 0;
+  color: rgb(125 125 133);
+  font-size: 0.75rem;
+}
+
+.personal-section-heading > span {
+  color: rgb(125 125 133);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.personal-list {
+  overflow: hidden;
+  border: 1px solid var(--personal-border);
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 0.86);
+  box-shadow: 0 2px 8px rgb(29 35 43 / 0.035);
+}
+
+.personal-list-row {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  gap: 1rem;
+  border-bottom: 1px solid rgb(235 232 226);
+  padding: 1rem;
+}
+
+.personal-list-row:last-child {
+  border-bottom: 0;
+}
+
+.personal-needs-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+.personal-goal-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 120ms ease;
+}
+
+.personal-goal-row:hover {
+  background: rgb(248 250 252);
+}
+
+.personal-goal-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.personal-state-dot.is-blocking {
+  background: rgb(217 119 6);
+  box-shadow: 0 0 0 3px rgb(217 119 6 / 0.12);
+}
+
+.personal-row-copy {
+  min-width: 0;
+}
+
+.personal-row-copy strong,
+.personal-row-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-row-copy strong {
+  color: rgb(42 47 54);
+  font-size: 0.875rem;
+  font-weight: 580;
+}
+
+.personal-row-copy span {
+  margin-top: 0.3125rem;
+  color: rgb(125 125 133);
+  font-size: 0.75rem;
+}
+
+.personal-row-action {
+  min-height: 2rem;
+  padding-inline: 0.75rem;
+  color: rgb(30 64 175);
+  background: rgb(232 238 252);
+  box-shadow: none;
+}
+
+.personal-empty {
+  padding: 1.5rem 1rem;
+  color: rgb(125 125 133);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.personal-source-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  color: rgb(148 148 156);
+  font-size: 0.6875rem;
+}
+
+.personal-source-tools button {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  gap: 0.25rem;
+  border: 0;
+  border-radius: 0.375rem;
+  padding-inline: 0.375rem;
+  color: inherit;
+  background: transparent;
+}
+
+.personal-source-tools button:not(:disabled):hover {
+  color: rgb(71 85 105);
+  background: rgb(241 239 234);
+}
+
+.personal-manager-input {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  display: inline-flex;
+  min-width: 12rem;
+  align-items: center;
+  gap: 0.625rem;
+  border: 1px solid rgb(216 214 208);
+  border-radius: 9999px;
+  padding: 0.75rem 1rem;
+  color: rgb(125 125 133);
+  font-size: 0.8125rem;
+  text-align: left;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 0.08);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
+}
+
+.personal-manager-input:hover {
+  border-color: rgb(191 201 218);
+  color: rgb(71 85 105);
+  box-shadow: 0 10px 28px rgb(15 23 42 / 0.12);
+}
+
+.personal-manager-backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(15 23 42 / 0.2);
+  backdrop-filter: blur(1px);
+}
+
+.personal-manager-drawer {
+  display: grid;
+  width: min(26.25rem, 100vw);
+  height: 100%;
+  min-width: 0;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  color: rgb(35 39 45);
+  background: rgb(252 251 248);
+  box-shadow: -12px 0 36px rgb(15 23 42 / 0.16);
+}
+
+.personal-manager-drawer-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--personal-border);
+  padding: 1rem;
+}
+
+.personal-manager-drawer-header h2,
+.personal-manager-drawer-header p {
+  margin: 0;
+}
+
+.personal-manager-drawer-header h2 {
+  color: rgb(24 29 36);
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
+.personal-manager-drawer-header p {
+  margin-top: 0.125rem;
+  color: rgb(125 125 133);
+  font-size: 0.6875rem;
+}
+
+.personal-manager-source {
+  border-radius: 9999px;
+  padding: 0.25rem 0.5rem;
+  color: rgb(71 85 105);
+  font-size: 0.6875rem;
+  background: rgb(241 239 234);
+}
+
+.personal-manager-drawer-header button,
+.personal-manager-composer button {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 0.5rem;
+  color: rgb(100 105 113);
+  background: transparent;
+  cursor: pointer;
+}
+
+.personal-manager-drawer-header button:hover {
+  color: rgb(35 39 45);
+  background: rgb(241 239 234);
+}
+
+.personal-manager-quick-actions {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  border-bottom: 1px solid rgb(235 232 226);
+  padding: 0.75rem 1rem;
+}
+
+.personal-manager-quick-actions button {
+  flex: 0 0 auto;
+  border: 1px solid rgb(219 224 232);
+  border-radius: 9999px;
+  padding: 0.4375rem 0.6875rem;
+  color: rgb(71 79 91);
+  font-size: 0.6875rem;
+  background: rgb(255 255 255 / 0.8);
+  cursor: pointer;
+}
+
+.personal-manager-quick-actions button:hover {
+  border-color: rgb(191 201 218);
+  color: rgb(30 64 175);
+}
+
+.personal-manager-thread {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.personal-manager-message {
+  width: fit-content;
+  max-width: 88%;
+  margin-bottom: 0.75rem;
+  border-radius: 0.875rem;
+  padding: 0.75rem 0.875rem;
+  color: rgb(71 79 91);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  background: rgb(241 239 234);
+}
+
+.personal-manager-message.is-user {
+  margin-left: auto;
+  color: white;
+  background: rgb(37 99 235);
+}
+
+.personal-manager-message p,
+.personal-manager-message ul {
+  margin: 0;
+}
+
+.personal-message-answer {
+  white-space: pre-wrap;
+  color: rgb(50 57 68);
+  line-height: 1.7;
+}
+
+.personal-message-pending {
+  color: rgb(100 116 139);
+}
+
+.personal-message-activity {
+  margin-top: 0.625rem;
+  border-top: 1px solid rgb(214 211 204);
+  padding-top: 0.5rem;
+  color: rgb(100 106 116);
+}
+
+.personal-message-activity summary {
+  width: fit-content;
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.personal-message-activity ol {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0 0;
+  padding-left: 1.125rem;
+  font-size: 0.6875rem;
+}
+
+.personal-message-reconnect {
+  margin-top: 0.625rem;
+  border: 1px solid rgb(203 213 225);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.65rem;
+  color: rgb(30 64 175);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  background: white;
+}
+
+.personal-message-reconnect:hover {
+  border-color: rgb(147 197 253);
+  background: rgb(239 246 255);
+}
+
+.personal-manager-message ul {
+  display: grid;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  padding-left: 1rem;
+}
+
+.personal-manager-composer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid var(--personal-border);
+  padding: 0.875rem 1rem max(0.875rem, env(safe-area-inset-bottom));
+  background: rgb(252 251 248);
+}
+
+.personal-manager-composer input {
+  width: 100%;
+  min-width: 0;
+  height: 2.5rem;
+  border: 1px solid rgb(216 214 208);
+  border-radius: 0.625rem;
+  padding-inline: 0.75rem;
+  color: rgb(35 39 45);
+  outline: none;
+  background: white;
+}
+
+.personal-manager-composer input:focus {
+  border-color: rgb(96 165 250);
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 0.12);
+}
+
+.personal-manager-composer button {
+  color: white;
+  background: var(--personal-accent);
+}
+
+.personal-manager-composer button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+@media (max-width: 760px) {
+  .personal-home {
+    display: block;
+  }
+
+  .personal-sidebar {
+    position: static;
+    display: grid;
+    height: auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--personal-border);
+    padding: 0.75rem 1rem;
+  }
+
+  .personal-nav {
+    display: flex;
+    min-width: 0;
+    justify-content: flex-end;
+    margin-top: 0;
+  }
+
+  .personal-nav-item {
+    width: auto;
+    padding: 0.5rem;
+  }
+
+  .personal-nav-item:not(.personal-nav-item-active) {
+    font-size: 0;
+  }
+
+  .personal-health {
+    margin-top: 0;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .personal-header {
+    min-height: auto;
+    padding: 1.25rem 1rem;
+  }
+
+  .personal-content {
+    padding: 1.5rem 1rem;
+  }
+
+  .personal-list {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .personal-list-row {
+    margin-bottom: 0.625rem;
+    border: 1px solid var(--personal-border);
+    border-radius: 0.75rem;
+    background: rgb(255 255 255 / 0.9);
+  }
+
+  .personal-needs-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .personal-needs-row .personal-row-action {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .personal-manager-input {
+    right: 1rem;
+    bottom: 1rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .personal-manager-backdrop {
+    align-items: flex-end;
+  }
+
+  .personal-manager-drawer {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+  }
+}
+
+@media (max-width: 420px) {
+  .personal-wordmark-mark {
+    display: none;
+  }
+
+  .personal-sidebar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding-inline: 0.75rem;
+  }
+
+  .personal-nav {
+    gap: 0;
+  }
+
+  .personal-nav-item {
+    gap: 0.25rem;
+    padding-inline: 0.375rem;
+  }
+
+  .personal-header {
+    align-items: flex-start;
+  }
+
+  .personal-primary-link {
+    padding-inline: 0.625rem;
+  }
+
+  .personal-primary-link svg {
+    display: none;
+  }
+
+  .personal-needs-row,
+  .personal-goal-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .personal-needs-row .personal-state-dot {
+    display: none;
+  }
+
+  .personal-manager-input {
+    min-width: 0;
+    max-width: calc(100vw - 2rem);
+  }
+
+  .personal-goal-meta svg {
+    display: none;
+  }
+
+  .personal-manager-drawer-header {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+}
+
+.personal-workspace {
+  --workspace-accent: rgb(37 99 235);
+  --workspace-border: rgb(229 226 220);
+  --workspace-muted: rgb(112 116 126);
+  display: grid;
+  height: 100vh;
+  min-height: 42rem;
+  grid-template-columns: 4.5rem 20rem minmax(0, 1fr);
+  overflow: hidden;
+  color: rgb(30 34 40);
+  background: rgb(250 249 246);
+}
+
+.personal-global-rail {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  border-right: 1px solid var(--workspace-border);
+  padding: 1.125rem 0.75rem;
+  background: rgb(252 251 248);
+}
+
+.personal-rail-logo {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border-radius: 0.75rem;
+  color: white;
+  background: rgb(30 64 175);
+  box-shadow: 0 4px 12px rgb(30 64 175 / 0.18);
+}
+
+.personal-global-rail nav {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 2rem;
+}
+
+.personal-global-rail nav button,
+.personal-global-rail > button {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border: 0;
+  border-radius: 0.625rem;
+  color: rgb(128 132 140);
+  background: transparent;
+  cursor: pointer;
+}
+
+.personal-global-rail nav button.is-active {
+  color: rgb(30 64 175);
+  background: rgb(232 238 252);
+}
+
+.personal-global-rail nav button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.personal-global-rail .personal-health-dot {
+  margin-top: auto;
+}
+
+.personal-goal-sidebar {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  border-right: 1px solid var(--workspace-border);
+  background: rgb(252 251 248);
+}
+
+.personal-goal-sidebar > header {
+  display: flex;
+  height: 4.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.25rem;
+}
+
+.personal-goal-sidebar > header h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+
+.personal-goal-sidebar > header button,
+.personal-goal-sidebar > footer button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 0;
+  border-radius: 0.5rem;
+  color: rgb(112 116 126);
+  background: transparent;
+}
+
+.personal-goal-sidebar > header button:disabled {
+  opacity: 0.4;
+}
+
+.personal-manager-row,
+.personal-goal-list-row {
+  display: grid;
+  width: calc(100% - 1.5rem);
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0.75rem;
+  border: 0;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.personal-manager-row {
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-bottom: 0.5rem;
+}
+
+.personal-manager-row.is-selected,
+.personal-goal-list-row.is-selected {
+  background: rgb(233 238 250);
+}
+
+.personal-goal-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border-radius: 0.625rem;
+  color: rgb(37 99 235);
+  background: rgb(255 255 255 / 0.9);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
+}
+
+.personal-manager-row strong,
+.personal-manager-row small,
+.personal-goal-list-copy strong,
+.personal-goal-list-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-manager-row strong,
+.personal-goal-list-copy strong {
+  font-size: 0.8125rem;
+  font-weight: 620;
+}
+
+.personal-manager-row small,
+.personal-goal-list-copy small {
+  margin-top: 0.25rem;
+  color: var(--workspace-muted);
+  font-size: 0.6875rem;
+}
+
+.personal-goal-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+
+.personal-goal-list-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  margin-bottom: 0.25rem;
+}
+
+.personal-goal-list-row:hover {
+  background: rgb(245 243 239);
+}
+
+.personal-goal-list-row.is-selected:hover {
+  background: rgb(233 238 250);
+}
+
+.personal-goal-list-row .personal-state-dot {
+  width: 0.4375rem;
+  height: 0.4375rem;
+}
+
+.personal-state-dot.is-progressing {
+  background: rgb(16 185 129);
+}
+
+.personal-state-dot.is-repair {
+  background: rgb(244 63 94);
+}
+
+.personal-goal-list-row .rounded-full {
+  padding-inline: 0.45rem;
+  font-size: 0.625rem;
+}
+
+.personal-goal-sidebar > footer {
+  display: flex;
+  min-height: 3.25rem;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--workspace-border);
+  padding: 0 1.25rem;
+  color: var(--workspace-muted);
+  font-size: 0.6875rem;
+}
+
+.personal-chat-pane {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: rgb(250 249 246);
+}
+
+.personal-chat-header {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  min-width: 0;
+  min-height: 4.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--workspace-border);
+  padding: 0.75rem clamp(1rem, 2.5vw, 2rem);
+  background: rgb(252 251 248 / 0.94);
+  backdrop-filter: blur(14px);
+}
+
+.personal-chat-title,
+.personal-chat-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.personal-chat-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.personal-chat-title > div {
+  min-width: 0;
+}
+
+.personal-chat-actions {
+  flex: 0 0 auto;
+}
+
+.personal-chat-title h2,
+.personal-chat-title p {
+  margin: 0;
+}
+
+.personal-chat-title h2 {
+  overflow: hidden;
+  color: rgb(24 29 36);
+  font-size: 1rem;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-chat-title p {
+  max-width: 28rem;
+  margin-top: 0.15rem;
+  overflow: hidden;
+  color: var(--workspace-muted);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-chat-back,
+.personal-mobile-goals-button,
+.personal-chat-actions > button {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.625rem;
+  color: rgb(91 96 106);
+  background: transparent;
+  cursor: pointer;
+}
+
+.personal-mobile-goals-button,
+.personal-agent-menu-backdrop {
+  display: none;
+}
+
+.personal-chat-back:hover,
+.personal-chat-actions > button:hover {
+  border-color: var(--workspace-border);
+  background: white;
+}
+
+.personal-chat-actions > button.personal-progress-trigger {
+  display: inline-flex;
+  width: auto;
+  gap: 0.4rem;
+  padding-inline: 0.75rem;
+  border-color: var(--workspace-border);
+  color: rgb(60 67 78);
+  font-size: 0.6875rem;
+  font-weight: 620;
+  background: rgb(255 255 255 / 0.8);
+}
+
+.personal-agent-picker {
+  position: relative;
+}
+
+.personal-agent-trigger {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgb(218 218 220);
+  border-radius: 0.625rem;
+  padding: 0 0.75rem;
+  color: rgb(41 46 54);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: white;
+  cursor: pointer;
+}
+
+.personal-agent-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: min(21rem, calc(100vw - 2rem));
+  border: 1px solid var(--workspace-border);
+  border-radius: 0.875rem;
+  padding: 0.5rem;
+  background: rgb(255 255 255 / 0.98);
+  box-shadow: 0 18px 48px rgb(15 23 42 / 0.16);
+}
+
+.personal-agent-menu-title,
+.personal-agent-menu-footer {
+  padding: 0.5rem 0.625rem;
+  color: var(--workspace-muted);
+  font-size: 0.6875rem;
+}
+
+.personal-agent-menu-title {
+  color: rgb(35 39 45);
+  font-weight: 650;
+}
+
+.personal-agent-menu-footer {
+  border-top: 1px solid var(--workspace-border);
+  margin-top: 0.375rem;
+}
+
+.personal-agent-menu > button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.625rem;
+  border: 0;
+  border-radius: 0.625rem;
+  padding: 0.625rem;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.personal-agent-menu > button:hover,
+.personal-agent-menu > button.is-selected {
+  background: rgb(239 243 252);
+}
+
+.personal-agent-menu > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.personal-agent-menu strong,
+.personal-agent-menu small {
+  display: block;
+}
+
+.personal-agent-menu strong {
+  font-size: 0.75rem;
+}
+
+.personal-agent-menu small {
+  margin-top: 0.125rem;
+  color: var(--workspace-muted);
+  font-size: 0.65rem;
+}
+
+.personal-agent-avatar {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.625rem;
+  color: rgb(30 64 175);
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: rgb(226 233 249);
+}
+
+.personal-agent-online {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 9999px;
+  background: rgb(16 185 129);
+}
+
+.personal-agent-online.is-offline {
+  background: rgb(148 163 184);
+}
+
+.personal-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: 1px solid rgb(209 237 223);
+  border-radius: 9999px;
+  padding: 0.35rem 0.625rem;
+  color: rgb(51 99 78);
+  font-size: 0.65rem;
+  background: rgb(245 252 248);
+}
+
+.personal-live-badge > span {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: rgb(16 185 129);
+}
+
+.personal-chat-scroll {
+  width: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2rem clamp(1rem, 5vw, 5rem) 1.5rem;
+}
+
+.personal-chat-scroll > * {
+  width: min(100%, 56rem);
+  margin-inline: auto;
+}
+
+.personal-chat-welcome {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  margin-top: clamp(4rem, 14vh, 9rem);
+  border-radius: 1rem;
+  padding: 1rem 1.125rem;
+  background: rgb(241 239 234);
+}
+
+.personal-chat-welcome h3,
+.personal-chat-welcome p {
+  margin: 0;
+}
+
+.personal-chat-welcome h3 {
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.personal-chat-welcome p {
+  margin-top: 0.25rem;
+  color: rgb(71 79 91);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.personal-manager-quick-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.625rem;
+  overflow-x: auto;
+  border: 0;
+  padding: 1rem 0;
+}
+
+.personal-manager-quick-actions button {
+  flex: 0 0 auto;
+  border: 1px solid rgb(215 218 225);
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.875rem;
+  color: rgb(60 67 78);
+  font-size: 0.75rem;
+  background: rgb(255 255 255 / 0.78);
+  cursor: pointer;
+}
+
+.personal-manager-quick-actions button:hover {
+  border-color: rgb(163 181 220);
+  color: rgb(30 64 175);
+}
+
+.personal-goal-summary {
+  overflow: hidden;
+  border: 1px solid var(--workspace-border);
+  border-radius: 0.875rem;
+  background: rgb(255 255 255 / 0.82);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 0.03);
+}
+
+.personal-goal-summary > div {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 1rem;
+  border-bottom: 1px solid rgb(235 232 226);
+  padding: 0.8rem 1rem;
+  font-size: 0.75rem;
+}
+
+.personal-goal-summary > div:last-child {
+  border-bottom: 0;
+}
+
+.personal-goal-summary span {
+  color: var(--workspace-muted);
+}
+
+.personal-goal-summary strong {
+  min-width: 0;
+  font-weight: 560;
+}
+
+.personal-goal-summary .is-attention {
+  background: rgb(255 251 235);
+}
+
+.personal-goal-summary .is-attention span,
+.personal-goal-summary .is-attention strong {
+  color: rgb(146 64 14);
+}
+
+.personal-goal-projection {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.personal-projection-author {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 0.125rem 0.25rem;
+}
+
+.personal-projection-author strong,
+.personal-projection-author small {
+  display: block;
+}
+
+.personal-projection-author strong {
+  color: rgb(35 39 45);
+  font-size: 0.8125rem;
+  font-weight: 660;
+}
+
+.personal-projection-author small {
+  margin-top: 0.15rem;
+  color: var(--workspace-muted);
+  font-size: 0.65rem;
+}
+
+.personal-plan-card {
+  overflow: hidden;
+  border: 1px solid var(--workspace-border);
+  border-radius: 0.875rem;
+  background: rgb(255 255 255 / 0.86);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 0.025);
+}
+
+.personal-plan-card > header {
+  display: flex;
+  min-height: 3.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid rgb(235 232 226);
+  padding: 0.75rem 1rem;
+}
+
+.personal-plan-card > header strong,
+.personal-plan-card > header small {
+  display: block;
+}
+
+.personal-plan-card > header strong {
+  font-size: 0.75rem;
+  font-weight: 660;
+}
+
+.personal-plan-card > header small {
+  margin-top: 0.2rem;
+  color: var(--workspace-muted);
+  font-size: 0.625rem;
+}
+
+.personal-plan-card > header > span {
+  flex: 0 0 auto;
+  border: 1px solid rgb(224 221 215);
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.45rem;
+  color: rgb(90 94 101);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.65rem;
+  background: rgb(250 249 246);
+}
+
+.personal-plan-row {
+  display: grid;
+  min-height: 2.625rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgb(240 238 233);
+  padding: 0.625rem 1rem;
+  color: rgb(52 58 67);
+  font-size: 0.75rem;
+}
+
+.personal-plan-row svg {
+  color: rgb(37 99 235);
+}
+
+.personal-plan-row.is-done svg {
+  color: rgb(5 150 105);
+}
+
+.personal-plan-row.is-done > span {
+  color: rgb(92 98 107);
+}
+
+.personal-plan-row small {
+  color: var(--workspace-muted);
+  font-size: 0.625rem;
+}
+
+.personal-plan-card > button {
+  display: flex;
+  width: 100%;
+  min-height: 2.625rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border: 0;
+  color: rgb(84 91 102);
+  font-size: 0.6875rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.personal-plan-card > button:hover {
+  color: rgb(30 64 175);
+  background: rgb(248 249 252);
+}
+
+.personal-plan-card.is-empty > header {
+  border-bottom: 0;
+}
+
+.personal-plan-card.is-empty > p {
+  margin: -0.25rem 0 0;
+  padding: 0 1rem 1rem;
+  color: var(--workspace-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.personal-run-evidence-card {
+  display: grid;
+  width: 100%;
+  min-height: 3.75rem;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--workspace-border);
+  border-radius: 0.875rem;
+  padding: 0.75rem 1rem;
+  color: inherit;
+  text-align: left;
+  background: rgb(255 255 255 / 0.82);
+  cursor: pointer;
+}
+
+.personal-run-evidence-card:hover {
+  border-color: rgb(199 204 214);
+  background: white;
+}
+
+.personal-evidence-icon {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.625rem;
+  color: rgb(5 150 105);
+  background: rgb(236 253 245);
+}
+
+.personal-run-evidence-card strong,
+.personal-run-evidence-card small {
+  display: block;
+}
+
+.personal-run-evidence-card strong {
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.personal-run-evidence-card small {
+  max-width: 38rem;
+  margin-top: 0.2rem;
+  overflow: hidden;
+  color: var(--workspace-muted);
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-run-evidence-card em {
+  color: var(--workspace-muted);
+  font-size: 0.625rem;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.personal-decision-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 1rem;
+  border: 1px solid rgb(245 192 104);
+  border-radius: 0.875rem;
+  padding: 1rem;
+  background: rgb(255 250 238);
+}
+
+.personal-decision-card span {
+  color: rgb(180 83 9);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.personal-decision-card h3,
+.personal-decision-card p {
+  margin: 0;
+}
+
+.personal-decision-card h3 {
+  margin-top: 0.25rem;
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
+.personal-decision-card p {
+  margin-top: 0.25rem;
+  color: var(--workspace-muted);
+  font-size: 0.75rem;
+}
+
+.personal-decision-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+}
+
+.personal-decision-actions button,
+.personal-execution-card button,
+.personal-ops-link {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(187 201 234);
+  border-radius: 0.625rem;
+  padding: 0 0.75rem;
+  color: rgb(30 64 175);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: none;
+  background: white;
+  cursor: pointer;
+}
+
+.personal-decision-actions button:last-child {
+  border-color: var(--workspace-accent);
+  color: white;
+  background: var(--workspace-accent);
+}
+
+.personal-manager-thread {
+  min-width: 0;
+  overflow: visible;
+  padding: 1.25rem 0 0;
+}
+
+.personal-manager-message {
+  width: fit-content;
+  max-width: min(88%, 43rem);
+  margin-bottom: 1rem;
+  border-radius: 0.875rem;
+  padding: 0.75rem 0.875rem;
+  color: rgb(71 79 91);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  background: rgb(241 239 234);
+}
+
+.personal-manager-message.is-user {
+  margin-left: auto;
+  color: white;
+  background: rgb(37 99 235);
+}
+
+.personal-message-author {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: rgb(30 64 175);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.personal-manager-message p,
+.personal-manager-message ul {
+  margin: 0;
+}
+
+.personal-manager-message ul {
+  display: grid;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  padding-left: 1rem;
+}
+
+.personal-manager-message small {
+  display: block;
+  margin-top: 0.5rem;
+  color: rgb(125 125 133);
+  font-size: 0.625rem;
+}
+
+.personal-manager-message.is-user small {
+  color: rgb(219 234 254);
+}
+
+.personal-manager-message.is-pending {
+  color: rgb(100 116 139);
+  background: rgb(248 250 252);
+}
+
+.personal-proposal-list {
+  display: grid;
+  width: min(100%, 43rem);
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+}
+
+.personal-proposal-card {
+  display: grid;
+  gap: 0.625rem;
+  border: 1px solid rgb(211 220 238);
+  border-radius: 0.875rem;
+  padding: 0.875rem;
+  background: rgb(249 251 255);
+}
+
+.personal-proposal-card > header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.personal-proposal-card > header span {
+  border-radius: 999px;
+  padding: 0.125rem 0.5rem;
+  color: rgb(30 64 175);
+  font-size: 0.625rem;
+  font-weight: 700;
+  background: rgb(219 234 254);
+}
+
+.personal-proposal-card > header strong {
+  font-size: 0.75rem;
+}
+
+.personal-proposal-card > header small {
+  margin-left: auto;
+  color: var(--workspace-muted);
+  font-size: 0.625rem;
+}
+
+.personal-proposal-card > p,
+.personal-proposal-card > small {
+  margin: 0;
+}
+
+.personal-proposal-card > p {
+  color: rgb(30 41 59);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.personal-proposal-card > small,
+.personal-proposal-status {
+  color: rgb(100 116 139);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.personal-proposal-card > code {
+  width: fit-content;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.375rem;
+  color: rgb(71 85 105);
+  font-size: 0.625rem;
+  background: rgb(241 245 249);
+}
+
+.personal-proposal-card.is-approved {
+  border-color: rgb(167 243 208);
+  background: rgb(247 254 250);
+}
+
+.personal-proposal-card.is-stale,
+.personal-proposal-card.is-error {
+  border-color: rgb(253 186 116);
+  background: rgb(255 251 235);
+}
+
+.personal-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.personal-proposal-actions button {
+  min-height: 2.25rem;
+  border: 1px solid rgb(203 213 225);
+  border-radius: 0.625rem;
+  padding: 0 0.75rem;
+  color: rgb(71 85 105);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  background: white;
+  cursor: pointer;
+}
+
+.personal-proposal-actions button:first-child {
+  border-color: var(--workspace-accent);
+  color: white;
+  background: var(--workspace-accent);
+}
+
+.personal-proposal-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.personal-execution-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  border: 1px solid var(--workspace-border);
+  border-radius: 0.875rem;
+  padding: 0.875rem;
+  background: rgb(255 255 255 / 0.8);
+}
+
+.personal-execution-card strong,
+.personal-execution-card p {
+  margin: 0;
+}
+
+.personal-execution-card strong {
+  font-size: 0.8125rem;
+}
+
+.personal-execution-card p {
+  margin-top: 0.25rem;
+  overflow: hidden;
+  color: var(--workspace-muted);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-manager-composer {
+  position: relative;
+  display: grid;
+  width: min(calc(100% - 2rem), 58rem);
+  min-height: 4rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: 1fr;
+  gap: 0.5rem;
+  margin: 0 auto 1rem;
+  border: 1px solid rgb(213 213 214);
+  border-radius: 1rem;
+  padding: 0.5rem 0.625rem;
+  background: rgb(255 255 255 / 0.96);
+  box-shadow: 0 10px 30px rgb(15 23 42 / 0.08);
+}
+
+.personal-manager-composer input {
+  grid-column: 2;
+  grid-row: 1;
+  height: 2.75rem;
+  border: 0;
+  padding: 0 0.25rem;
+  color: rgb(35 39 45);
+  outline: none;
+  background: transparent;
+}
+
+.personal-manager-composer input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.personal-composer-tools {
+  display: flex;
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  align-items: center;
+  align-self: center;
+}
+
+.personal-composer-tools button {
+  display: inline-flex;
+  width: auto;
+  height: 2.5rem;
+  min-height: 2.5rem;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+  border: 0;
+  border-radius: 0.75rem;
+  padding: 0 0.625rem;
+  color: rgb(51 65 85);
+  font-size: 0.6875rem;
+  font-weight: 620;
+  background: rgb(245 243 239);
+  cursor: pointer;
+}
+
+.personal-composer-tools button span {
+  display: block;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-manager-composer .personal-send-button {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  grid-row: 1;
+  grid-column: 3;
+  align-self: center;
+  place-items: center;
+  border: 0;
+  border-radius: 0.75rem;
+  color: white;
+  background: var(--workspace-accent);
+  cursor: pointer;
+}
+
+.personal-manager-composer .personal-send-button:disabled {
+  cursor: default;
+  opacity: 0.34;
+}
+
+.personal-details-backdrop {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(15 23 42 / 0.18);
+  backdrop-filter: blur(1px);
+}
+
+.personal-running-details {
+  width: min(28rem, 100vw);
+  height: 100%;
+  overflow-y: auto;
+  padding: 1rem;
+  background: rgb(252 251 248);
+  box-shadow: -12px 0 36px rgb(15 23 42 / 0.16);
+}
+
+.personal-running-details > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
+.personal-running-details h2,
+.personal-running-details header p {
+  margin: 0;
+}
+
+.personal-running-details h2 {
+  font-size: 1rem;
+  font-weight: 680;
+}
+
+.personal-running-details header p {
+  margin-top: 0.25rem;
+  color: var(--workspace-muted);
+  font-size: 0.6875rem;
+}
+
+.personal-running-details header button {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 0;
+  border-radius: 0.625rem;
+  background: rgb(241 239 234);
+  cursor: pointer;
+}
+
+.personal-diagnosis-card {
+  border: 1px solid var(--workspace-border);
+  border-radius: 0.875rem;
+  padding: 1rem;
+  background: white;
+}
+
+.personal-diagnosis-card > span {
+  color: rgb(5 150 105);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.personal-diagnosis-card h3 {
+  margin: 0.375rem 0 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.personal-diagnosis-card dl,
+.personal-diagnosis-card dd {
+  margin: 0;
+}
+
+.personal-diagnosis-card dl {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.personal-diagnosis-card dl > div {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  font-size: 0.75rem;
+}
+
+.personal-diagnosis-card dt {
+  color: var(--workspace-muted);
+}
+
+.personal-running-details details {
+  border-bottom: 1px solid var(--workspace-border);
+  padding: 1rem 0.25rem;
+}
+
+.personal-running-details summary {
+  font-size: 0.8125rem;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.personal-running-details details p {
+  margin: 0.75rem 0 0;
+  color: var(--workspace-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.personal-details-todo-list {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.personal-details-todo-list li {
+  position: relative;
+  padding-left: 1rem;
+  color: rgb(72 79 89);
+  font-size: 0.71875rem;
+  line-height: 1.45;
+}
+
+.personal-details-todo-list li::before {
+  position: absolute;
+  top: 0.45em;
+  left: 0;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  content: "";
+  background: rgb(37 99 235);
+}
+
+.personal-details-todo-list li.is-done {
+  color: rgb(126 131 139);
+}
+
+.personal-details-todo-list li.is-done::before {
+  background: rgb(5 150 105);
+}
+
+.personal-ops-link {
+  width: 100%;
+  gap: 0.375rem;
+  margin-top: 1rem;
+}
+
+.dark .personal-workspace,
+.dark .personal-chat-pane {
+  color: rgb(244 244 245);
+  background: rgb(19 20 23);
+}
+
+.dark .personal-global-rail,
+.dark .personal-goal-sidebar,
+.dark .personal-chat-header,
+.dark .personal-running-details {
+  color: rgb(244 244 245);
+  background: rgb(25 26 30);
+}
+
+.dark .personal-plan-card,
+.dark .personal-run-evidence-card,
+.dark .personal-projection-author strong {
+  color: rgb(244 244 245);
+  background: rgb(30 31 35);
+}
+
+.dark .personal-plan-card > header,
+.dark .personal-plan-row {
+  border-color: rgb(63 63 70);
+}
+
+.dark .personal-plan-row,
+.dark .personal-plan-row.is-done > span {
+  color: rgb(212 212 216);
+}
+
+.dark .personal-decision-card {
+  border-color: rgb(146 64 14);
+  background: rgb(69 41 13);
+}
+
+@media (max-width: 1000px) {
+  .personal-workspace {
+    grid-template-columns: 3.75rem 16.5rem minmax(0, 1fr);
+  }
+
+  .personal-live-badge {
+    display: none;
+  }
+
+  .personal-chat-scroll {
+    padding-inline: 1.25rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .personal-workspace {
+    height: 100dvh;
+    min-height: 100dvh;
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .personal-global-rail {
+    display: none;
+  }
+
+  .personal-goal-sidebar {
+    display: none;
+    height: 100dvh;
+    border-right: 0;
+  }
+
+  .personal-workspace.mobile-goals-visible .personal-goal-sidebar {
+    display: grid;
+  }
+
+  .personal-workspace.mobile-goals-visible .personal-chat-pane {
+    display: none;
+  }
+
+  .personal-chat-pane {
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  .personal-chat-header {
+    min-height: 4.25rem;
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
+    backdrop-filter: none;
+  }
+
+  .personal-mobile-goals-button {
+    display: grid;
+  }
+
+  .personal-goal-sidebar > header button,
+  .personal-goal-sidebar > footer button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .personal-chat-title p,
+  .personal-chat-title > span,
+  .personal-chat-actions > button:first-of-type {
+    display: none;
+  }
+
+  .personal-chat-actions > button.personal-progress-trigger span {
+    display: none;
+  }
+
+  .personal-chat-actions > button.personal-progress-trigger {
+    width: 2.75rem;
+    padding: 0;
+  }
+
+  .personal-chat-back,
+  .personal-mobile-goals-button,
+  .personal-chat-actions > button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .personal-agent-trigger {
+    min-height: 2.75rem;
+    padding-inline: 0.5rem;
+  }
+
+  .personal-agent-menu-backdrop {
+    position: fixed;
+    z-index: 35;
+    inset: 0;
+    display: block;
+    border: 0;
+    background: rgb(15 23 42 / 0.2);
+    backdrop-filter: blur(1px);
+  }
+
+  .personal-agent-menu {
+    position: fixed;
+    z-index: 40;
+    top: auto;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    max-height: calc(100dvh - 1.5rem);
+    overflow-y: auto;
+    border-radius: 1rem;
+  }
+
+  .personal-agent-menu > button {
+    min-height: 3.5rem;
+  }
+
+  .personal-chat-scroll {
+    padding: 1rem 0.75rem;
+  }
+
+  .personal-chat-welcome {
+    margin-top: 1rem;
+  }
+
+  .personal-manager-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .personal-manager-quick-actions button {
+    width: 100%;
+    white-space: normal;
+  }
+
+  .personal-manager-quick-actions button:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .personal-goal-summary > div {
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+  }
+
+  .personal-decision-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .personal-run-evidence-card {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .personal-run-evidence-card em {
+    display: none;
+  }
+
+  .personal-plan-row small {
+    display: none;
+  }
+
+  .personal-decision-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .personal-decision-actions button,
+  .personal-manager-quick-actions button,
+  .personal-execution-card button,
+  .personal-ops-link,
+  .personal-running-details header button {
+    min-height: 2.75rem;
+  }
+
+  .personal-running-details header button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .personal-execution-card {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .personal-execution-card .rounded-full {
+    display: none;
+  }
+
+  .personal-execution-card button {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .personal-manager-composer {
+    position: sticky;
+    bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .personal-composer-tools button,
+  .personal-send-button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+.chat-shell {
+  background:
+    radial-gradient(circle at 48% 0%, rgb(255 255 255 / 0.92), transparent 30rem),
+    #f7f8f6;
+}
+
+.chat-goal-map {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.chat-goal-map::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  content: "";
+  background-image: radial-gradient(rgb(148 163 184 / 0.23) 0.7px, transparent 0.7px);
+  background-size: 18px 18px;
+  mask-image: linear-gradient(to bottom, transparent, black 18%, black 84%, transparent);
+  opacity: 0.44;
+}
+
+.chat-map-goal::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 3rem;
+  content: "";
+  background: rgb(203 213 225);
+}
+
+.chat-map-branches::before {
+  position: absolute;
+  top: -1.5rem;
+  right: 16.666%;
+  left: 16.666%;
+  height: 1px;
+  content: "";
+  background: rgb(203 213 225);
+}
+
+.chat-map-branches > div {
+  position: relative;
+}
+
+.chat-map-branches > div::before {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  width: 1px;
+  height: 1.5rem;
+  content: "";
+  background: rgb(203 213 225);
+}
+
+.chat-map-branches::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 2.5rem;
+  content: "";
+  background: rgb(203 213 225);
+}
+
+@media (max-width: 767px) {
+  .chat-map-goal::after,
+  .chat-map-branches::before,
+  .chat-map-branches::after,
+  .chat-map-branches > div::before {
+    display: none;
+  }
 }
 
 .frontstage-workspace-shell {

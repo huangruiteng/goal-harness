@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 
 import { DashboardPage } from "./views/dashboard-page";
+import { ChatPage } from "./views/chat-page";
 import { FrontstageDeveloperPage } from "./views/frontstage-developer-page";
 import { FrontstagePage } from "./views/frontstage-page";
 
@@ -33,6 +34,10 @@ const frontstageSearchSchema = z.object({
   todoQuery: z.string().optional().default(""),
 });
 
+const chatSearchSchema = z.object({
+  goalId: z.string().optional().default(""),
+});
+
 export const rootRoute = createRootRoute({
   component: () => <Outlet />,
 });
@@ -57,8 +62,19 @@ export const frontstageDeveloperRoute = createRoute({
   component: FrontstageDeveloperPage,
 });
 
+export const chatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/chat",
+  validateSearch: (search) => chatSearchSchema.parse(search),
+  component: () => {
+    const search = chatRoute.useSearch();
+    return <ChatPage initialGoalId={search.goalId} />;
+  },
+});
+
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
+  chatRoute,
   frontstageRoute,
   frontstageDeveloperRoute,
 ]);
