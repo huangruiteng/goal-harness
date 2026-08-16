@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from importlib import import_module
 import json
 from collections.abc import Callable, Mapping
+from importlib import import_module
 from pathlib import Path
 
 from ..capabilities.explore.activation import (
@@ -25,28 +25,33 @@ from ..control_plane.work_items.delivery_batch_scale import (
 )
 from ..control_plane.work_items.delivery_outcome import DELIVERY_OUTCOME_CHOICES
 from ..control_plane.work_items.progress_observation import ProgressResultClass
-from ..extensions.runtime import (
-    default_extension_state_file,
-    resolve_extension_activation,
-)
 from ..extensions.lark.goal_channel_lifecycle import (
     goal_channel_gate_sync_failure,
     sync_human_gate_after_refresh,
 )
+from ..extensions.runtime import (
+    default_extension_state_file,
+    resolve_extension_activation,
+)
+from ..feedback import (
+    LESSON_KINDS,
+    append_human_reward,
+    compact_reward,
+    render_reward_markdown,
+)
 from ..history import load_registry
-from ..feedback import LESSON_KINDS, append_human_reward, compact_reward, render_reward_markdown
 from ..operator_gate import (
     DEFAULT_OPERATOR_GATE,
     OPERATOR_GATE_DECISIONS,
     record_operator_gate,
     render_operator_gate_markdown,
 )
+from ..paths import resolve_runtime_root
 from ..project_map import (
     DEFAULT_PROJECT_MAP_CLASSIFICATION,
     read_only_project_map_run,
     render_read_only_project_map_markdown,
 )
-from ..paths import resolve_runtime_root
 from ..state_refresh import (
     DEFAULT_REFRESH_ACTION,
     DEFAULT_REFRESH_CLASSIFICATION,
@@ -55,7 +60,6 @@ from ..state_refresh import (
     refresh_state_run,
     render_state_refresh_markdown,
 )
-
 
 PrintPayload = Callable[
     [dict[str, object], str, Callable[[dict[str, object]], str]],
@@ -92,17 +96,29 @@ def _lark_explore_graph_syncer(
     )
 
     def sync(**kwargs: object) -> Mapping[str, object]:
+        implementation = import_module(
+            "loopx.extensions.lark.presentation.explore_results"
+        )
+        preview_kwargs = dict(kwargs)
+        preview_kwargs["execute"] = False
+        preview = dict(
+            implementation.sync_issue_fix_explore_on_material_change(
+                **preview_kwargs
+            )
+        )
+        if preview.get("status") in {"not_applicable", "not_configured"}:
+            return preview
+
         provider = import_module("loopx.extensions.lark")
         activation = resolve_extension_activation(
             str(provider.LARK_EXTENSION_ID),
             state_file=default_extension_state_file(extension_runtime_root),
             required_permissions=(str(provider.LARK_PROJECTION_SINK_PERMISSION),),
         )
-        implementation = import_module(
-            "loopx.extensions.lark.presentation.explore_results"
-        )
-        result = dict(
-            implementation.sync_issue_fix_explore_on_material_change(**kwargs)
+        result = (
+            dict(implementation.sync_issue_fix_explore_on_material_change(**kwargs))
+            if kwargs.get("execute")
+            else preview
         )
         result["extension_activation"] = activation
         return result
