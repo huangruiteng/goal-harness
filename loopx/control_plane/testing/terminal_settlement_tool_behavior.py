@@ -519,8 +519,10 @@ class DoubaoTerminalSettlementToolBehaviorActor:
                         "production heartbeat task and choose each next action "
                         "from the latest tool result. The exec tool's current "
                         "workspace is the connected goal project root, so task "
-                        "paths are directly addressable. Use one command per tool "
-                        "call. After validation, fill the quota-projected writeback "
+                        "paths are directly addressable. Read the exact proof target "
+                        "once with `cat`; do not rediscover, list, or re-read the "
+                        "workspace after it validates. Use one command per tool call. "
+                        "After validation, fill the quota-projected writeback "
                         "placeholders from the proof's typed fields and follow the "
                         "ordered settlement plan."
                     ),
