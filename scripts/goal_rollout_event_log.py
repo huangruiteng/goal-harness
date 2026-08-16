@@ -50,7 +50,6 @@ def handle_append(args: argparse.Namespace) -> int:
         event_kind=args.event_kind,
         agent_id=args.agent_id,
         todo_id=args.todo_id,
-        benchmark_id=args.benchmark_id,
         case_id=args.case_id,
         run_id=args.run_id,
         lane_id=args.lane_id,
@@ -128,7 +127,6 @@ def main() -> int:
     append_parser.add_argument("--event-kind", required=True)
     append_parser.add_argument("--agent-id")
     append_parser.add_argument("--todo-id")
-    append_parser.add_argument("--benchmark-id")
     append_parser.add_argument("--case-id")
     append_parser.add_argument("--run-id")
     append_parser.add_argument("--lane-id")

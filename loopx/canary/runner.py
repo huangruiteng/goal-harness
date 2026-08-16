@@ -44,23 +44,6 @@ SERIAL_SMOKE_SCRIPTS = {
         "creates a temporary git repository and can race host git cleanup when "
         "run beside other git-heavy smokes"
     ),
-    "skillsbench-benchmark-run-smoke.py": (
-        "covers the large SkillsBench runner/ledger integration surface and "
-        "uses shared host/runtime probes that are intentionally validated "
-        "without same-domain parallel noise"
-    ),
-    "skillsbench-app-server-goal-worker-smoke.py": (
-        "uses short fake-worker transport deadlines that are sensitive to "
-        "concurrent process scheduling"
-    ),
-    "skillsbench-host-local-launch-plan-smoke.py": (
-        "exercises host-local bridge timeout probes that are intentionally "
-        "sensitive to concurrent host process scheduling"
-    ),
-    "codex-cli-long-run-benchmark-smoke.py": (
-        "runs timing-sensitive long-horizon scenarios whose control metrics "
-        "should be measured without concurrent smoke load"
-    ),
 }
 PYTHON_BINARIES = {"python", "python3"}
 NODE_BINARIES = {"node"}

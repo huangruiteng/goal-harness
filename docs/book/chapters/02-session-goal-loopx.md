@@ -93,10 +93,9 @@ same time and cost budget
 记录 completion、独立 verifier、错误写入、人工介入、stop-policy、wall time 和 cost。没有 matched
 baseline 或独立 verifier 时，可以记录使用体验，不能声称产品能力提升。
 
-[`release_outcome_baseline_v0`](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/release-outcome-baseline-v0.md)
-进一步规定正式 release qualification 比较的是 **稳定 LoopX release 与 candidate revision**；
-它明确不把 native Agent 与 LoopX treatment 的对比当作 release promotion evidence。后者可以是
-产品研究，但必须单独说明 arm semantics，不能借用 release qualification 的结论强度。
+[Benchmark 研究 RFC](https://github.com/huangruiteng/loopx/blob/main/docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md)
+定义当前研究边界。Benchmark-native 研究必须明确 arm semantics、authority boundary 与独立
+verifier，才能作为产品研究证据。
 
 ## 用同一任务比较
 

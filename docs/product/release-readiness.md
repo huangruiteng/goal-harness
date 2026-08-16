@@ -482,11 +482,6 @@ checks the current checkout and rejects dirty or rebased source. It only
 reduces existing bounded receipts: it does not execute tests, call a provider,
 move refs, create tags, or publish a release.
 
-Matched stable/candidate outcome evidence is required only when the release
-claims benchmark or long-horizon outcome uplift. A normal release without that
-claim must record the pair as not required, not keep a retired second product
-arm alive or imply that the expensive comparison ran.
-
 ## Canary Model
 
 A release canary is a catalog-informed readiness slice. It is near-E2E in the

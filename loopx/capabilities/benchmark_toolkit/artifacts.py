@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES = (
     ".compact.json",
@@ -33,60 +33,6 @@ BENCHMARK_PRIVATE_MANIFEST_SUFFIXES = (
     ".private.json",
 )
 BENCHMARK_PUBLIC_ARTIFACT_MAX_BYTES = 2 * 1024 * 1024
-BENCHMARK_ARTIFACT_POLICY_REGISTRY: dict[str, dict[str, tuple[str, ...]]] = {
-    "default": {
-        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
-        "public_filenames": BENCHMARK_PUBLIC_ARTIFACT_FILENAMES,
-        "raw_private_markers": BENCHMARK_RAW_PRIVATE_PATH_MARKERS,
-        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
-    },
-    "terminal-bench": {
-        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
-        "public_filenames": BENCHMARK_PUBLIC_ARTIFACT_FILENAMES,
-        "raw_private_markers": BENCHMARK_RAW_PRIVATE_PATH_MARKERS,
-        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
-    },
-    "agents-last-exam": {
-        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
-        "public_filenames": (
-            "agents-last-exam-local-preflight.json",
-            "agents-last-exam-local-dry-run-plan.json",
-            "agents-last-exam-local-runner-readiness.json",
-            "agents-last-exam-local-source-readiness.json",
-            "agents-last-exam-task-material-readiness.json",
-            "agents-last-exam-baked-task-input-readiness.json",
-            "agents-last-exam-baked-task-input-scan.json",
-            "agents-last-exam-candidate-task-data-scan.json",
-            "agents-last-exam-local-launch-packet.json",
-            "agents-last-exam-local-exact-dry-run-result.json",
-            "agents-last-exam-host-codex-cli-route.json",
-            "agents-last-exam-host-codex-cua-no-task-smoke.json",
-            "agents-last-exam-validation-run-gate.json",
-        ),
-        "raw_private_markers": (
-            "trajectory.json",
-            "origin_log",
-            "/output/",
-            "/outputs/",
-            "/screenshots/",
-            "screenshot",
-            "hidden_refs",
-            "credentials",
-            "instruction.md",
-            "task.md",
-        ),
-        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
-    },
-}
-
-
-def _safe_artifact_policy_key(adapter_kind: str | None) -> str:
-    key = str(adapter_kind or "default").strip().lower().replace("_", "-")
-    if key in BENCHMARK_ARTIFACT_POLICY_REGISTRY:
-        return key
-    return "default"
-
-
 def _safe_public_artifact_basename(value: Any) -> str:
     if not isinstance(value, (str, int, float)) or isinstance(value, bool):
         return ""
@@ -105,11 +51,8 @@ def _benchmark_artifact_policy(
     adapter_kind: str | None = None,
     extra_public_filenames: Iterable[Any] = (),
 ) -> dict[str, Any]:
-    policy_key = _safe_artifact_policy_key(adapter_kind)
-    default_policy = BENCHMARK_ARTIFACT_POLICY_REGISTRY["default"]
-    policy = BENCHMARK_ARTIFACT_POLICY_REGISTRY[policy_key]
-    filenames = set(default_policy["public_filenames"])
-    filenames.update(policy["public_filenames"])
+    del adapter_kind
+    filenames = set(BENCHMARK_PUBLIC_ARTIFACT_FILENAMES)
     filenames.update(
         basename
         for basename in (
@@ -119,23 +62,11 @@ def _benchmark_artifact_policy(
         if basename
     )
     return {
-        "adapter_kind": policy_key,
-        "public_suffixes": tuple(
-            sorted(set(default_policy["public_suffixes"]) | set(policy["public_suffixes"]))
-        ),
+        "adapter_kind": "default",
+        "public_suffixes": BENCHMARK_PUBLIC_ARTIFACT_SUFFIXES,
         "public_filenames": tuple(sorted(filenames)),
-        "raw_private_markers": tuple(
-            sorted(
-                set(default_policy["raw_private_markers"])
-                | set(policy["raw_private_markers"])
-            )
-        ),
-        "private_suffixes": tuple(
-            sorted(
-                set(default_policy["private_suffixes"])
-                | set(policy["private_suffixes"])
-            )
-        ),
+        "raw_private_markers": BENCHMARK_RAW_PRIVATE_PATH_MARKERS,
+        "private_suffixes": BENCHMARK_PRIVATE_MANIFEST_SUFFIXES,
     }
 
 
@@ -343,6 +274,7 @@ BENCHMARK_CANDIDATE_SOURCE_BOUNDARY_SCHEMA_VERSION = (
     "benchmark_candidate_source_boundary_v0"
 )
 BENCHMARK_CANDIDATE_SOURCE_PUBLIC_DOC_PREFIXES = (
+    "benchmark/",
     "docs/",
     "examples/",
     "goals/",

@@ -6,6 +6,7 @@ from loopx.control_plane.work_items.progress_observation import (
     build_replan_action_packet,
     build_replan_context,
     normalize_progress_observation,
+    semantic_delta_from_writeback,
     semantic_progress_delta,
     typed_progress_repeat_trigger,
 )
@@ -237,6 +238,60 @@ def test_no_followup_ignores_coverage_complete_churn() -> None:
         semantic_progress_delta(coverage_flag_only, baseline=baseline)["accepted"]
         is False
     )
+
+
+@pytest.mark.parametrize(
+    "agent_vision",
+    [
+        None,
+        {"state": "active", "path_delta": {"outcome": "continue"}},
+        {
+            "state": "active",
+            "vision_patch": {"acceptance_summary": "Keep exploring."},
+            "path_delta": {
+                "outcome": "continue",
+                "evidence_refs": ["evidence-open-path"],
+            },
+        },
+        {"state": "no_followup", "path_delta": {"outcome": "continue"}},
+        {"state": "active", "path_delta": {"outcome": "stop"}},
+    ],
+)
+def test_no_followup_writeback_requires_terminal_vision_and_path(
+    agent_vision: dict[str, object] | None,
+) -> None:
+    delta = semantic_delta_from_writeback(
+        obligation={
+            "obligation_id": "replan-terminal-consistency",
+            "satisfying_semantic_outcomes": ["coverage_backed_no_followup"],
+        },
+        progress_observation=_observation(
+            result_class="no_followup",
+            coverage_scope_id="scope-public-entrypoints",
+        ),
+        agent_vision=agent_vision,
+    )
+
+    assert delta["accepted"] is False
+    assert delta["reason_code"] == "no_followup_vision_path_inconsistent"
+    assert "coverage_backed_no_followup" not in delta["outcomes"]
+
+
+def test_no_followup_writeback_accepts_consistent_terminal_vision_and_path() -> None:
+    delta = semantic_delta_from_writeback(
+        obligation={
+            "obligation_id": "replan-terminal-consistency",
+            "satisfying_semantic_outcomes": ["coverage_backed_no_followup"],
+        },
+        progress_observation=_observation(
+            result_class="no_followup",
+            coverage_scope_id="scope-public-entrypoints",
+        ),
+        agent_vision={"state": "no_followup", "path_delta": {"outcome": "stop"}},
+    )
+
+    assert delta["accepted"] is True
+    assert delta["satisfying_outcomes"] == ["coverage_backed_no_followup"]
 
 
 def test_host_projects_evidence_context_and_minimal_action_packet() -> None:

@@ -65,6 +65,26 @@ def _completed_advancement_chain_state() -> str:
     return "\n".join(lines) + "\n"
 
 
+def _completed_advancement_without_successor_state() -> str:
+    return f"""\
+## Agent Todo
+
+- [x] [P0] Completed a bounded advancement slice.
+  <!-- loopx:todo todo_id=todo_unsettled_completion status=done task_class=advancement_task claimed_by={AGENT_ID} no_followup=false completion_continuation=active_goal completion_turn_key=turn-unsettled completed_at=2026-08-13T11%3A30%3A00%2B08%3A00 -->
+"""
+
+
+def _terminal_no_followup_vision() -> dict:
+    return {
+        "state": "no_followup",
+        "vision_patch": {"acceptance_summary": "The bounded goal is complete."},
+        "path_delta": {
+            "outcome": "stop",
+            "evidence_refs": ["evidence:terminal-coverage"],
+        },
+    }
+
+
 def _durable_runs(count: int) -> list[dict]:
     return [
         {
@@ -466,7 +486,7 @@ def test_rotated_vision_obligation_accepts_fresh_evidence_linked_path() -> None:
 
 
 @pytest.mark.parametrize(
-    ("progress_observation", "expected_outcome"),
+    ("progress_observation", "agent_vision", "expected_outcome"),
     [
         (
             {
@@ -475,6 +495,7 @@ def test_rotated_vision_obligation_accepts_fresh_evidence_linked_path() -> None:
                 "blocker_id": "blocker-current-path",
                 "evidence_ids": ["evidence-current-blocker"],
             },
+            None,
             "new_concrete_blocker",
         ),
         (
@@ -485,6 +506,7 @@ def test_rotated_vision_obligation_accepts_fresh_evidence_linked_path() -> None:
                 "coverage_complete": True,
                 "evidence_ids": ["evidence-current-coverage"],
             },
+            None,
             "coverage_backed_exploration_exhausted",
         ),
         (
@@ -494,12 +516,14 @@ def test_rotated_vision_obligation_accepts_fresh_evidence_linked_path() -> None:
                 "coverage_scope_id": "coverage-current-goal",
                 "evidence_ids": ["evidence-current-coverage"],
             },
+            _terminal_no_followup_vision(),
             "coverage_backed_no_followup",
         ),
     ],
 )
 def test_rotated_vision_obligation_accepts_terminal_progress(
     progress_observation: dict,
+    agent_vision: dict | None,
     expected_outcome: str,
 ) -> None:
     runs = _rotated_vision_runs()
@@ -510,10 +534,65 @@ def test_rotated_vision_obligation_accepts_terminal_progress(
         agent_id=AGENT_ID,
         goal_id=GOAL_ID,
         progress_observation=progress_observation,
+        agent_vision=agent_vision,
     )
 
     assert semantic_delta is not None
     assert semantic_delta["satisfying_outcomes"] == [expected_outcome]
+
+
+def test_semantic_no_followup_cannot_replace_todo_lifecycle_settlement() -> None:
+    with pytest.raises(ValueError, match="first run loopx todo complete"):
+        enforce_open_replan_writeback(
+            newest_first_runs=[],
+            state_text=_completed_advancement_without_successor_state(),
+            agent_id=AGENT_ID,
+            goal_id=GOAL_ID,
+            progress_observation={
+                "schema_version": "typed_progress_observation_v0",
+                "result_class": "no_followup",
+                "coverage_scope_id": "coverage-current-goal",
+                "evidence_ids": ["evidence-current-coverage"],
+            },
+            agent_vision=_terminal_no_followup_vision(),
+        )
+
+
+def test_persisted_semantic_no_followup_ack_cannot_retire_todo_gap() -> None:
+    state_text = _completed_advancement_without_successor_state()
+    obligation_id = _current_obligation_id([], state_text=state_text)
+    semantic_ack = {
+        "classification": "bounded_replan_terminal",
+        "generated_at": "2026-08-13T12:00:00+08:00",
+        "agent_id": AGENT_ID,
+        "autonomous_replan_ack": {
+            "schema_version": "autonomous_replan_ack_v0",
+            "recorded": True,
+            "source": "refresh_state_semantic_delta",
+            "semantic_delta": {
+                "schema_version": "replan_semantic_delta_v0",
+                "accepted": True,
+                "outcomes": ["coverage_backed_no_followup"],
+                "satisfying_outcomes": ["coverage_backed_no_followup"],
+                "required_any_of": ["coverage_backed_no_followup"],
+                "obligation_id": obligation_id,
+            },
+        },
+    }
+
+    remaining, _ = qualify_replan_writeback(
+        newest_first_runs=[semantic_ack],
+        state_text=state_text,
+        agent_id=AGENT_ID,
+        goal_id=GOAL_ID,
+    )
+
+    assert remaining is not None
+    assert remaining["triggers"][0]["kind"] == (
+        "completed_advancement_without_successor"
+    )
+    assert "loopx todo complete --no-follow-up" in remaining["recommended_action"]
+    assert "do not invent a user gate" in remaining["recommended_action"]
 
 
 @pytest.mark.parametrize(

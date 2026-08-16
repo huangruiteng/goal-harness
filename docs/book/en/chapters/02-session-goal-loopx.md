@@ -101,10 +101,9 @@ Record completion, independent verifier result, erroneous writes, human interven
 correctness, wall time, and cost. Without a matched baseline or independent verifier, report experience;
 do not claim product uplift.
 
-[`release_outcome_baseline_v0`](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/release-outcome-baseline-v0.md)
-sets a narrower release-qualification contract: it compares a stable LoopX release with a candidate
-revision. It explicitly does not treat native-Agent-versus-LoopX treatment studies as release-promotion
-evidence. Those studies can inform product research only when their arm semantics are stated separately.
+The [benchmark research RFC](https://github.com/huangruiteng/loopx/blob/main/docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md)
+defines the current research boundary. Benchmark-native studies can inform product research only when
+their arm semantics, authority boundary, and independent verifier are stated explicitly.
 
 ## Compare them on one task
 

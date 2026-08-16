@@ -11,6 +11,7 @@ from ..status.autonomous_replan_projection import (
     autonomous_replan_obligation_from_runs,
 )
 from ..todos.active_state_todo_parser import parse_active_state_todos
+from ..todos.succession_warning import todo_succession_gap_items
 from .progress_observation import semantic_delta_from_writeback
 from .work_lane_context import build_work_lane_context_contract
 
@@ -132,11 +133,28 @@ def qualify_replan_writeback(
         completion_turn_key=completion_turn_key,
     ):
         return None, None
-    return obligation, semantic_delta_from_writeback(
+    semantic_delta = semantic_delta_from_writeback(
         obligation=obligation,
         progress_observation=progress_observation,
         agent_vision=agent_vision,
     )
+    if (
+        "coverage_backed_no_followup"
+        in set(semantic_delta.get("outcomes") or [])
+        and todo_succession_gap_items(agent_todos, agent_id=safe_agent_id)
+    ):
+        semantic_delta = {
+            **semantic_delta,
+            "accepted": False,
+            "satisfying_outcomes": [],
+            "reason_code": "todo_no_followup_settlement_required",
+            "reason": (
+                "coverage-backed no-follow-up cannot replace Todo lifecycle "
+                "settlement; first run loopx todo complete with --no-follow-up "
+                "for the completed Todo, then write the terminal vision/path"
+            ),
+        }
+    return obligation, semantic_delta
 
 
 def enforce_open_replan_writeback(
@@ -168,6 +186,8 @@ def enforce_open_replan_writeback(
         return None
     if isinstance(semantic_delta, dict) and semantic_delta.get("accepted") is True:
         return semantic_delta
+    if isinstance(semantic_delta, dict) and semantic_delta.get("reason_code"):
+        raise ValueError(str(semantic_delta.get("reason") or "invalid replan writeback"))
     raise ValueError(
         "an open autonomous replan obligation requires a typed semantic delta; "
         "this writeback does not change an accepted surface, hypothesis, probe "

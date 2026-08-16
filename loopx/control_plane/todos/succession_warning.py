@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..agents.agent_scope import agent_scope_item_claimed_by_agent_or_unclaimed
 from .contract import (
     TODO_STATUS_OPEN,
     normalize_required_write_scopes,
@@ -14,6 +15,7 @@ from .contract import (
 
 
 TODO_SUCCESSION_WARNING_SCHEMA_VERSION = "todo_succession_warning_v0"
+TODO_SUCCESSION_WARNING_REASON_CODE = "completed_advancement_without_successor"
 TODO_PARENT_SUCCESSOR_ADVISORY_SCHEMA_VERSION = "todo_parent_successor_advisory_v0"
 
 
@@ -160,13 +162,16 @@ def build_todo_succession_warning_lanes(
         ),
         "reason_code": warning.get(
             "reason_code",
-            "completed_advancement_without_successor",
+            TODO_SUCCESSION_WARNING_REASON_CODE,
         ),
         "count": count,
         "items": items,
         "recommended_action": warning.get(
             "recommended_action",
-            "record no_followup=true or add/link a successor todo",
+            (
+                "run loopx todo complete --no-follow-up for the completed Todo, "
+                "or add/link a successor Todo; do not invent a user gate"
+            ),
         ),
     }
     return {
@@ -174,3 +179,36 @@ def build_todo_succession_warning_lanes(
         "completed_without_successor_items": items,
         "todo_succession_warning": payload,
     }
+
+
+def todo_succession_gap_items(
+    summary: dict[str, Any] | None,
+    *,
+    agent_id: str | None,
+) -> list[dict[str, Any]]:
+    """Return current typed succession gaps owned by this agent lane."""
+
+    if not isinstance(summary, dict):
+        return []
+    warning = (
+        summary.get("todo_succession_warning")
+        if isinstance(summary.get("todo_succession_warning"), dict)
+        else {}
+    )
+    if warning and warning.get("reason_code") != TODO_SUCCESSION_WARNING_REASON_CODE:
+        return []
+    source_items = (
+        warning.get("items")
+        if isinstance(warning.get("items"), list)
+        else summary.get("completed_without_successor_items")
+        if isinstance(summary.get("completed_without_successor_items"), list)
+        else []
+    )
+    items = [item for item in source_items if isinstance(item, dict)]
+    if not agent_id:
+        return items
+    return [
+        item
+        for item in items
+        if agent_scope_item_claimed_by_agent_or_unclaimed(item, agent_id=agent_id)
+    ]

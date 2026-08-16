@@ -17,7 +17,8 @@ NOT use ``/goal``, which judges completion from the transcript). Pieces:
 - ``plugin`` assets           — ``.claude-plugin/plugin.json``, ``commands/loopx.md``,
                                 ``hooks/hooks.json`` (the optional gate)
 
-The honest backend contract lives in :mod:`loopx.claude_goal_baseline`.
+The retired benchmark-only baseline contract is kept under
+``deprecate/benchmark-legacy`` and is no longer a LoopX runtime module.
 """
 
 __all__: list[str] = []

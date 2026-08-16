@@ -30,7 +30,7 @@ SMOKE_SUITE_PROFILE_MANIFEST: dict[str, dict[str, Any]] = {
             "todo",
         ],
         "exclude_modules": NON_BENCHMARK_SMOKE_EXCLUDE_MODULES,
-        "description": "LoopX runtime/control-plane contracts without benchmark adapters.",
+        "description": "LoopX runtime/control-plane contracts without benchmark research or toolkit checks.",
     },
     "canary-runner": {
         "suite": "full-public",

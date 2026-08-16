@@ -180,8 +180,6 @@ and keep the first PR as a narrow slice.
 | ID | Area | Task | Validation |
 | --- | --- | --- | --- |
 | GH-C07 | state | Global registry sync now writes inside a lock (`tests/test_global_registry_write_serialization.py`); extend the same lock or optimistic-revision guard to per-goal todo/refresh/history writers and include a concurrent todo add/update regression. | New concurrency regression plus `python3 -m py_compile loopx/*.py` |
-| GH-C15 | benchmark | Implement benchmark ledger drift warning: when compact run history has a benchmark result but `benchmark-run-ledger.json/md` lacks the row, status should warn or closeout should auto-upsert. Keep raw task/log/trajectory material out. | `python3 examples/benchmark-run-ledger-smoke.py` |
-| GH-C16 | benchmark | Add a public-safe trajectory-summary contract for non-SkillsBench adapters so Terminal-Bench/SWE/ALE/EdgeBench can expose comparable counters without raw task text, logs, verifier output, or trajectory bodies. | New unit/fake fixture smoke |
 | GH-C47 | state | Task leases now back Turn fencing and typed CLI acquire/release, and the OpenCode 2 goal worker fences its own live worker lease. Adopt the shipped `task_lease_v0` in one more real host integration (for example Pi or TraeX): advertise the capability explicitly, preserve soft-claim routing, expose acquire/renew/transfer/release outcomes, and prove overlapping write scopes fail without making `quota should-run` enforce undeclared lease authority. | `python3 examples/control_plane/task-lease-runtime-smoke.py`, `python3 -m pytest -q tests/control_plane/test_task_lease.py tests/test_loopx_turn_driver.py`, and a host-focused fake fixture |
 
 ### Design / RFC

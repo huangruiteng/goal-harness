@@ -1,9 +1,24 @@
 # Benchmark Toolkit
 
-`benchmark-toolkit` is LoopX's built-in, provider-neutral surface for preparing,
-qualifying, comparing, and recording agent benchmark experiments. It composes
-existing `loopx benchmark` commands with a fail-closed integrity gate; benchmark-
-family launch details remain in `loopx/benchmark_adapters/`.
+`benchmark-toolkit` is LoopX's built-in, provider-neutral surface for permission,
+artifact, integrity, and reusable agent-runtime boundaries around benchmark
+experiments. It does not own benchmark-family runners, result ledgers, or scoring
+adapters.
+
+## Native Codex Goal runtime
+
+Benchmark adapters that use the Codex app-server Goal API should import
+`loopx.capabilities.benchmark_toolkit.native_codex_goal`. The module provides the
+real stdio JSON-RPC process transport, the ordered Goal transaction, terminal event
+correlation, post-turn Goal readback, and a public-safe receipt. A runner supplies
+its own isolated process command, environment, sandbox policy, task bridge, and
+timeouts; it should not copy the Goal state machine.
+
+The runnable source example is
+[`benchmark/deepswe/run_native_codex_goal.py`](../../../benchmark/deepswe/run_native_codex_goal.py).
+Its `--preflight-only` mode proves a live Codex initialize/thread/Goal attachment
+without invoking a model. Full mode starts one turn and waits for a correlated
+terminal event before post-turn Goal readback.
 
 The toolkit borrows the useful contracts already established by modern benchmark
 runners: an ATIF-compatible agent trajectory, a separately owned verifier phase,
@@ -108,7 +123,7 @@ A countable experiment uses the toolkit in this order:
 3. Capture ATIF tool evidence and a runner-owned runtime attestation.
 4. Run `integrity-qualification`; stop on any blocker.
 5. Run the independent verifier only after the agent phase.
-6. Reduce the official result into compact `benchmark_run_v0` / result evidence.
+6. Reduce the official result through the benchmark-owned scoring path.
 7. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
    comparison claim or ledger update.
 
@@ -123,9 +138,12 @@ false in this receipt. Those remain separate verifier and comparison contracts.
 ```bash
 loopx benchmark classify-artifacts <paths...> --format json
 loopx benchmark candidate-source-boundary <paths...> --require-clean --format json
-loopx benchmark run <family> --goal-id <goal-id> --format json
-loopx benchmark run-ledger-check --goal-id <goal-id> --format json
 ```
 
 All commands are local and no-upload by default. `benchmark-toolkit` grants no model,
 Docker, runner, upload, submission, publication, or production authority.
+
+The active benchmark research program and current public-safe practice live under
+[`benchmark/`](https://github.com/huangruiteng/loopx/blob/main/benchmark/README.md). Historical runners and dated research
+packets are retained under [`deprecate/benchmark-legacy/`](https://github.com/huangruiteng/loopx/blob/main/deprecate/benchmark-legacy/README.md)
+for source archaeology only.

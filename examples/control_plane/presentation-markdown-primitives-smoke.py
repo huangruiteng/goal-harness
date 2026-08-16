@@ -189,7 +189,6 @@ def history_duplicate_repair_markdown() -> str:
             "raw_index_records": 2,
             "removed_row_count": 0,
             "preserved_reward_overlay_rows": 0,
-            "preserved_structured_artifact_bundle_rows": 0,
             "unrepaired_group_count": 1,
             "truncated": False,
             "groups": [

@@ -111,17 +111,6 @@ def delivery_turn_kind_for_run(
         return DeliveryTurnKind.PRODUCT_PATH_EXECUTION.value
 
     evidence_keys = (
-        "benchmark_run_summary",
-        "benchmark_result_summary",
-        "benchmark_comparison_summary",
-        "benchmark_learning_ledger_summary",
-        "benchmark_experiment_report_summary",
-        "active_user_assisted_pilot_summary",
-        "benchmark_run",
-        "benchmark_result",
-        "benchmark_comparison",
-        "benchmark_learning_ledger",
-        "benchmark_experiment_report",
         "case_result",
         "compact_evidence",
     )

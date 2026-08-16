@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any
 
+from ..goals.goal_vision_state import normalize_goal_vision_state
 from ..todos.contract import (
     normalize_todo_task_domain,
     replan_successor_semantic_binding,
@@ -384,6 +385,25 @@ def semantic_delta_from_writeback(
     )
     outcomes = list(observation_delta.get("delta_kinds") or [])
 
+    no_followup_consistency_error: str | None = None
+    if "coverage_backed_no_followup" in outcomes:
+        vision_state = ""
+        path_outcome = ""
+        if isinstance(agent_vision, Mapping):
+            vision_state = normalize_goal_vision_state(agent_vision.get("state"))
+            path_delta = (
+                agent_vision.get("path_delta")
+                if isinstance(agent_vision.get("path_delta"), Mapping)
+                else {}
+            )
+            path_outcome = str(path_delta.get("outcome") or "").strip()
+        if vision_state != "no_followup" or path_outcome != "stop":
+            outcomes.remove("coverage_backed_no_followup")
+            no_followup_consistency_error = (
+                "coverage-backed no-follow-up requires agent_vision.state="
+                "no_followup and path_delta.outcome=stop"
+            )
+
     if isinstance(agent_vision, Mapping):
         patch = (
             agent_vision.get("vision_patch")
@@ -411,6 +431,8 @@ def semantic_delta_from_writeback(
 
     required = required_semantic_outcomes(obligation)
     satisfying = [outcome for outcome in outcomes if outcome in required]
+    if no_followup_consistency_error:
+        satisfying = []
     return {
         "schema_version": "replan_semantic_delta_v0",
         "accepted": bool(satisfying),
@@ -424,7 +446,14 @@ def semantic_delta_from_writeback(
         "reason": (
             "writeback changes an outcome accepted by this obligation source"
             if satisfying
+            else no_followup_consistency_error
+            if no_followup_consistency_error
             else "writeback does not satisfy this obligation's typed outcomes"
+        ),
+        **(
+            {"reason_code": "no_followup_vision_path_inconsistent"}
+            if no_followup_consistency_error
+            else {}
         ),
     }
 

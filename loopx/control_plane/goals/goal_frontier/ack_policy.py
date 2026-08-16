@@ -30,6 +30,7 @@ def autonomous_replan_ack_satisfies_obligation(
     *,
     replan_obligation: dict[str, Any] | None,
     acceptance_gaps: list[dict[str, Any]] | None,
+    todo_succession_gap_open: bool = False,
 ) -> bool:
     """Reject ACKs that miss the obligation's typed semantic outcome."""
 
@@ -54,6 +55,8 @@ def autonomous_replan_ack_satisfies_obligation(
         if str(item or "").strip()
     }
     required = set(required_semantic_outcomes(replan_obligation or {}))
+    if todo_succession_gap_open:
+        outcomes.intersection_update({"new_runnable_successor"})
     return bool(outcomes & required)
 
 

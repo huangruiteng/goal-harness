@@ -279,6 +279,15 @@ state persists across turns until evidence proves the requested end state. It
 prevents a role from declaring success merely because it consumed the currently
 selected todo, recorded a checkpoint, or observed that another lane is quiet.
 
+A typed progress observation with `result_class=no_followup` is coverage
+evidence, not Todo lifecycle settlement. A writeback may use its
+`coverage_backed_no_followup` outcome only when the same packet closes the
+agent vision with `state=no_followup` and records `path_delta.outcome=stop`.
+If a completed advancement Todo still lacks a successor, the agent must first
+settle that Todo through `loopx todo complete --no-follow-up` (or add/link a
+successor). A semantic ACK cannot replace this durable continuation, and the
+repair path must not invent a human gate without a real external authority.
+
 The audit also exposes a compact deterministic `vision_gap_judge_v0`
 instruction packet for the agent. It borrows the strict done-judge stance used
 by autonomous goal loops without calling an LLM: the agent is told to compare

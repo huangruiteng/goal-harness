@@ -25,7 +25,6 @@ from loopx.control_plane.work_items.delivery_batch_scale import (  # noqa: E402
     normalize_delivery_batch_scale,
     require_delivery_batch_scale,
 )
-from loopx.history import append_benchmark_run  # noqa: E402
 from loopx.state_refresh import refresh_state_run  # noqa: E402
 from loopx.status import delivery_batch_scale_for_run  # noqa: E402
 
@@ -206,37 +205,6 @@ def assert_refresh_state_enforces_enum(registry_path: Path) -> None:
     assert alias_payload["delivery_batch_scale"] == DeliveryBatchScale.SINGLE_SURFACE.value, alias_payload
 
 
-def assert_history_enforces_enum(registry_path: Path) -> None:
-    compact_run = {
-        "schema_version": "benchmark_run_v0",
-        "benchmark": {"id": "fixture"},
-        "case": {"id": "fixture-case"},
-    }
-    payload = append_benchmark_run(
-        registry_path=registry_path,
-        runtime_root_override=None,
-        goal_id=GOAL_ID,
-        benchmark_run=compact_run,
-        delivery_batch_scale=DeliveryBatchScale.MULTI_SURFACE.value,
-        dry_run=True,
-    )
-    assert payload["delivery_batch_scale"] == DeliveryBatchScale.MULTI_SURFACE.value, payload
-
-    try:
-        append_benchmark_run(
-            registry_path=registry_path,
-            runtime_root_override=None,
-            goal_id=GOAL_ID,
-            benchmark_run=compact_run,
-            delivery_batch_scale="batch_plus_raw_logs",
-            dry_run=True,
-        )
-    except ValueError as exc:
-        assert "delivery_batch_scale must be one of:" in str(exc)
-    else:
-        raise AssertionError("history append accepted invalid delivery batch scale")
-
-
 def assert_status_uses_enum_not_raw_value() -> None:
     assert (
         delivery_batch_scale_for_run(
@@ -267,7 +235,6 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="delivery-batch-scale-enum-") as tmp:
         registry_path, _runtime = write_fixture(Path(tmp))
         assert_refresh_state_enforces_enum(registry_path)
-        assert_history_enforces_enum(registry_path)
     assert_status_uses_enum_not_raw_value()
     print("delivery batch scale enum smoke ok")
     return 0

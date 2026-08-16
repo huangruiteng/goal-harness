@@ -226,8 +226,8 @@ proof。
 
 - [`model_behavior_qualification_v0`](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/model-behavior-qualification-v0.md)：
   何时需要真实模型行为验证；
-- [`release_outcome_baseline_v0`](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/release-outcome-baseline-v0.md)：
-  release 与 candidate 结果如何保持可比；
+- [Benchmark 研究 RFC](https://github.com/huangruiteng/loopx/blob/main/docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md)：
+  如何保证研究双臂可比并由独立 outcome evidence 支撑；
 - [Testing and Quality](https://github.com/huangruiteng/loopx/blob/main/docs/development/testing-and-quality.md)：
   unit、contract、smoke、decision replay、canary 与 release gate；
 - [Public/Private Boundary](https://github.com/huangruiteng/loopx/blob/main/docs/public-private-boundary.md)：

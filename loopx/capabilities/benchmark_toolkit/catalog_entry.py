@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     "id": "benchmark-toolkit",
     "origin": "builtin",
@@ -16,12 +15,12 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     "title": "Benchmark experiment toolkit",
     "status": "active-preview",
     "real_world_anchor": (
-        "local no-upload agent benchmark experiments with independent scoring"
+        "provider-neutral permission, artifact, and integrity boundaries for "
+        "benchmark experiments"
     ),
     "user_value": (
-        "Prepare, qualify, compare, and record benchmark runs through one "
-        "fail-closed evidence lifecycle without publishing raw tasks, "
-        "trajectories, verifier output, credentials, or local paths."
+        "Apply fail-closed evidence boundaries without replacing benchmark-native "
+        "runners, verifiers, or scoring semantics."
     ),
     "entry_command": "loopx benchmark --help",
     "commands": [
@@ -46,26 +45,6 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "purpose": "Classify benchmark artifacts before reading or publishing them.",
             "write_boundary": "path classification only; no file reads or writes",
         },
-        {
-            "command": (
-                "loopx benchmark run <family> --goal-id <goal-id> --format json"
-            ),
-            "purpose": (
-                "Build a compact benchmark_run_v0 or ingest supported official "
-                "result metadata through an adapter."
-            ),
-            "write_boundary": (
-                "dry-run by default; explicit append paths consume compact "
-                "results and never publish raw evidence"
-            ),
-        },
-        {
-            "command": (
-                "loopx benchmark run-ledger-check --goal-id <goal-id> --format json"
-            ),
-            "purpose": "Reconcile compact run history with the public benchmark ledger.",
-            "write_boundary": "read-only compact history and ledger",
-        },
     ],
     "implemented_protocols": [
         {
@@ -80,7 +59,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         },
         {
             "schema_version": "run_permission_policy_v0",
-            "module": "loopx.benchmark_core.run_permissions",
+            "module": "loopx.capabilities.benchmark_toolkit.run_permissions",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
         },
     ],
@@ -91,11 +70,10 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         "Raw trajectories are private local inputs to integrity qualification and are never copied into receipts, ledgers, docs, or PR artifacts.",
         "A clean trajectory scan is not isolation proof: runner-owned permission and verifier-order attestations are mandatory and fail closed when absent.",
         "Integrity qualification establishes countability eligibility only; an independent official result and matched experiment contract are still required.",
-        "Benchmark-family wiring remains in benchmark_adapters; the toolkit owns provider-neutral experiment and evidence policy.",
+        "Benchmark-family runners remain outside the active capability; the toolkit owns only provider-neutral permission, artifact, and integrity policy.",
     ],
     "next_real_step": (
-        "Qualify one private local run, ingest its independent compact result, "
-        "and block the paired claim when either trajectory evidence or runner "
-        "isolation attestation is incomplete."
+        "Qualify one private local run and block the paired claim when either "
+        "trajectory evidence or runner isolation attestation is incomplete."
     ),
 }

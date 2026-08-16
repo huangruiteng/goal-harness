@@ -189,7 +189,7 @@ def main() -> None:
             revert_of="event_superseded_public",
             status="eligible",
             summary="Quota allowed one bounded rollout event-log slice.",
-            artifact_refs=["docs/development/benchmark-developer-workflow.md"],
+            artifact_refs=["benchmark/deepswe/README.md"],
             details={"open_agent_todo_count": 2},
         )
         append_rollout_event(log_path, event)
@@ -230,8 +230,6 @@ def main() -> None:
             "codex-main-control",
             "--todo-id",
             "todo_406bb256efd8",
-            "--benchmark-id",
-            "terminal-bench@2.0",
             "--case-id",
             "build-cython-ext",
             "--status",
@@ -255,7 +253,7 @@ def main() -> None:
             "--summary",
             "Compact case result reduced to public-safe failure attribution.",
             "--artifact-ref",
-            "docs/research/long-horizon-agent-benchmarks/benchmark-case-analysis.json",
+            "benchmark/deepswe/README.md",
         )
         assert result_event["event_kind"] == "compact_case_result", result_event
         assert result_event["lane"]["lane_id"] == "product-capability", result_event
@@ -415,80 +413,14 @@ def main() -> None:
             "quota_should_run"
         ), should_run_payload
 
-        benchmark_run_path = tmp_root / "auto" / "benchmark-run.json"
-        benchmark_run_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": "benchmark_run_v0",
-                    "benchmark_id": "terminal-bench@2.0",
-                    "case_id": "build-cython-ext",
-                    "source_runner": "harbor",
-                    "mode": "codex-goal-mode",
-                    "progress": {
-                        "n_completed_trials": 1,
-                        "n_total_trials": 1,
-                    },
-                    "official_task_score": {
-                        "kind": "official_score",
-                        "value": 0.0,
-                        "passed": False,
-                    },
-                    "score_failure_attribution": (
-                        "official_verifier_solution_failure"
-                    ),
-                    "trials": [
-                        {
-                            "task_id": "build-cython-ext",
-                            "trial_name": "build-cython-ext-baseline",
-                        }
-                    ],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        benchmark_payload = run_loopx_cli(
-            "--registry",
-            str(registry_path),
-            "--runtime-root",
-            str(cli_runtime_root),
-            "--format",
-            "json",
-            "history",
-            "append-benchmark-run",
-            "--goal-id",
-            cli_goal_id,
-            "--benchmark-run-json",
-            str(benchmark_run_path),
-            "--classification",
-            "benchmark_run_v0",
-            "--delivery-batch-scale",
-            "implementation",
-            "--delivery-outcome",
-            "outcome_progress",
-            "--execute",
-            "--no-global-sync",
-        )
-        assert benchmark_payload["rollout_event"]["event_kind"] == (
-            "compact_blocker"
-        ), benchmark_payload
-        assert benchmark_payload["rollout_event"]["status"] == (
-            "precise_blocker"
-        ), benchmark_payload
-
         auto_events = load_rollout_events(rollout_event_log_path(cli_runtime_root, cli_goal_id))
         auto_kinds = [event["event_kind"] for event in auto_events]
         assert auto_kinds == [
             "todo_claim",
             "refresh_state",
             "quota_should_run",
-            "compact_blocker",
         ], auto_kinds
         latest_event = auto_events[-1]
-        assert latest_event["benchmark_id"] == "terminal-bench@2.0", latest_event
-        assert latest_event["case_id"] == "build-cython-ext", latest_event
         assert_boundary(latest_event)
         auto_log_text = rollout_event_log_path(cli_runtime_root, cli_goal_id).read_text(
             encoding="utf-8"

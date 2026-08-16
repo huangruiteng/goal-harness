@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from datetime import timedelta
-from typing import Any, Callable, Iterable, Optional
+from typing import Any
 
 from .time import now_utc
 
@@ -15,7 +16,6 @@ EVENT_LEDGER_CLASSES = (
 EVENT_LEDGER_PROXY_NOTE = "append-only run-history projection; compact event-class counts only"
 
 ParseTimestamp = Callable[[Any], Any]
-RunCompactor = Callable[[dict[str, Any]], Optional[dict[str, Any]]]
 RunPredicate = Callable[[dict[str, Any]], bool]
 
 
@@ -34,25 +34,16 @@ def blank_event_ledger_goal(
         "goal_id": goal_id,
         "events_24h": 0,
         "events_7d": 0,
-        "benchmark_runs_24h": 0,
-        "benchmark_runs_7d": 0,
         "by_class_24h": blank_event_class_counts(event_classes),
         "by_class_7d": blank_event_class_counts(event_classes),
         "latest_event_class": None,
         "latest_event_at": None,
-        "latest_benchmark_run": None,
     }
 
 
 def event_ledger_event_class(
     run: dict[str, Any],
     *,
-    compact_benchmark_run: RunCompactor,
-    compact_benchmark_result: RunCompactor,
-    compact_benchmark_comparison: RunCompactor,
-    compact_benchmark_learning_ledger: RunCompactor,
-    compact_benchmark_experiment_report: RunCompactor,
-    compact_active_user_assisted_pilot: RunCompactor,
     run_has_external_evidence_watch_signal: RunPredicate,
     decision_classifications: set[str],
     evidence_classifications: set[str],
@@ -62,15 +53,6 @@ def event_ledger_event_class(
     classification = str(run.get("classification") or "").lower()
     if classification == "quota_slot_spent" or isinstance(run.get("quota_event"), dict):
         return "accounting"
-    if (
-        compact_benchmark_run(run)
-        or compact_benchmark_result(run)
-        or compact_benchmark_comparison(run)
-        or compact_benchmark_learning_ledger(run)
-        or compact_benchmark_experiment_report(run)
-        or compact_active_user_assisted_pilot(run)
-    ):
-        return "evidence"
     if (
         classification in decision_classifications
         or "operator_gate" in classification
@@ -110,7 +92,6 @@ def build_event_ledger_summary(
     *,
     parse_timestamp: ParseTimestamp,
     event_class_for_run: Callable[[dict[str, Any]], str],
-    compact_benchmark_run: RunCompactor,
     event_classes: tuple[str, ...] = EVENT_LEDGER_CLASSES,
     proxy_note: str = EVENT_LEDGER_PROXY_NOTE,
 ) -> dict[str, Any]:
@@ -120,8 +101,6 @@ def build_event_ledger_summary(
     totals = {
         "events_24h": 0,
         "events_7d": 0,
-        "benchmark_runs_24h": 0,
-        "benchmark_runs_7d": 0,
         "by_class_24h": blank_event_class_counts(event_classes),
         "by_class_7d": blank_event_class_counts(event_classes),
     }
@@ -145,36 +124,16 @@ def build_event_ledger_summary(
         if latest_event_at is None or generated_at > latest_event_at:
             goal["latest_event_class"] = event_class
             goal["latest_event_at"] = generated_at.isoformat()
-        benchmark_run = compact_benchmark_run(run)
-        if benchmark_run:
-            latest_benchmark_at = parse_timestamp(
-                (goal.get("latest_benchmark_run") or {}).get("generated_at")
-                if isinstance(goal.get("latest_benchmark_run"), dict)
-                else None
-            )
-            if latest_benchmark_at is None or generated_at > latest_benchmark_at:
-                goal["latest_benchmark_run"] = {
-                    "generated_at": generated_at.isoformat(),
-                    "classification": run.get("classification"),
-                    **benchmark_run,
-                }
-
         if generated_at >= cutoff_7d:
             totals["events_7d"] += 1
             totals["by_class_7d"][event_class] += 1
             goal["events_7d"] += 1
             goal["by_class_7d"][event_class] += 1
-            if benchmark_run:
-                totals["benchmark_runs_7d"] += 1
-                goal["benchmark_runs_7d"] += 1
         if generated_at >= cutoff_24h:
             totals["events_24h"] += 1
             totals["by_class_24h"][event_class] += 1
             goal["events_24h"] += 1
             goal["by_class_24h"][event_class] += 1
-            if benchmark_run:
-                totals["benchmark_runs_24h"] += 1
-                goal["benchmark_runs_24h"] += 1
 
     goal_rows = sorted(
         goals.values(),

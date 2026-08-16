@@ -13,13 +13,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.benchmark import build_benchmark_candidate_source_boundary  # noqa: E402
+from loopx.capabilities.benchmark_toolkit import (  # noqa: E402
+    build_benchmark_candidate_source_boundary,
+)
 
 
 PRIVATE_ROOT = "/private/example/project/.local/private-benchmark-jobs/job-a"
 ALLOWED_SOURCES = [
-    "docs/research/long-horizon-agent-benchmarks/terminal-bench-next-candidate-selection-20260614.md",
-    "examples/terminal-bench-candidate-routing-packets-smoke.py",
+    "benchmark/deepswe/README.md",
+    "examples/benchmark-candidate-source-boundary-smoke.py",
     ".local/goals/loopx-meta/ACTIVE_GOAL_STATE.md",
     f"{PRIVATE_ROOT}/paired_comparison.compact.json",
     f"{PRIVATE_ROOT}/launch_observation.public.json",
@@ -72,7 +74,6 @@ def assert_boundary(payload: dict[str, object]) -> None:
 def main() -> None:
     payload = build_benchmark_candidate_source_boundary(
         [*ALLOWED_SOURCES, *BLOCKED_SOURCES],
-        adapter_kind="terminal-bench",
     )
     assert_boundary(payload)
 
@@ -85,8 +86,6 @@ def main() -> None:
             "json",
             "benchmark",
             "candidate-source-boundary",
-            "--adapter-kind",
-            "terminal-bench",
             "--require-clean",
             *ALLOWED_SOURCES,
         ],
@@ -109,8 +108,6 @@ def main() -> None:
             "json",
             "benchmark",
             "candidate-source-boundary",
-            "--adapter-kind",
-            "terminal-bench",
             "--require-clean",
             *ALLOWED_SOURCES,
             *BLOCKED_SOURCES,

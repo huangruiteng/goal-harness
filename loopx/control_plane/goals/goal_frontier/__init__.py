@@ -12,6 +12,10 @@ from ...agents.profile import agent_profile_requires_vision
 from ...agents.runtime_model import peer_work_key, select_peer_for_work
 from ...runtime.time import parse_timestamp
 from ...todos.projection import todo_item_is_watch_only_monitor
+from ...todos.succession_warning import (
+    TODO_SUCCESSION_WARNING_REASON_CODE,
+    todo_succession_gap_items,
+)
 from ...work_items.autonomous_replan_ack import (
     autonomous_replan_ack_matches_agent,
     autonomous_replan_ack_matches_frontier,
@@ -75,7 +79,7 @@ LONG_TODO_CHAIN_TRIGGER = "long_todo_chain"
 VISION_ACCEPTANCE_GAP_TRIGGER = "vision_acceptance_gap"
 VISION_SUCCESSOR_GAP_TRIGGER = "vision_successor_required"
 VISION_PROFILE_MISSING_TRIGGER = "required_agent_vision_missing"
-TODO_SUCCESSION_GAP_TRIGGER = "completed_advancement_without_successor"
+TODO_SUCCESSION_GAP_TRIGGER = TODO_SUCCESSION_WARNING_REASON_CODE
 TODO_TASK_CLASS_ADVANCEMENT = "advancement_task"
 TODO_TASK_CLASS_MONITOR = "continuous_monitor"
 LONG_TODO_CHAIN_ADVANCEMENT_THRESHOLD = 15
@@ -982,35 +986,6 @@ def _ready_deferred_successor_count(
     )
 
 
-def _succession_gap_items(
-    agent_todo_summary: dict[str, Any] | None,
-    *,
-    agent_id: str | None,
-) -> list[dict[str, Any]]:
-    if not isinstance(agent_todo_summary, dict):
-        return []
-    warning = (
-        agent_todo_summary.get("todo_succession_warning")
-        if isinstance(agent_todo_summary.get("todo_succession_warning"), dict)
-        else {}
-    )
-    source_items = (
-        warning.get("items")
-        if isinstance(warning.get("items"), list)
-        else agent_todo_summary.get("completed_without_successor_items")
-        if isinstance(agent_todo_summary.get("completed_without_successor_items"), list)
-        else []
-    )
-    items = [item for item in source_items if isinstance(item, dict)]
-    if not agent_id:
-        return items
-    return [
-        item
-        for item in items
-        if agent_scope_item_claimed_by_agent_or_unclaimed(item, agent_id=agent_id)
-    ]
-
-
 def _replan_evidence_acknowledged(
     items: list[dict[str, Any]],
     latest_replan_ack: dict[str, Any] | None,
@@ -1049,6 +1024,14 @@ def _succession_gap_acknowledged(
 ) -> bool:
     """Return true when a valid replan ack postdates the newest succession gap."""
 
+    semantic_delta = (
+        latest_replan_ack.get("semantic_delta")
+        if isinstance(latest_replan_ack, dict)
+        and isinstance(latest_replan_ack.get("semantic_delta"), dict)
+        else {}
+    )
+    if "new_runnable_successor" not in set(semantic_delta.get("outcomes") or []):
+        return False
     return _replan_evidence_acknowledged(
         gap_items,
         latest_replan_ack,
@@ -1138,7 +1121,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
         == outcome_continuity.VISION_OUTCOME_CHECKPOINT_REQUIRED_TRIGGER
         for item in compact_acceptance_gaps
     )
-    succession_gap_items = _succession_gap_items(
+    succession_gap_items = todo_succession_gap_items(
         agent_todo_summary,
         agent_id=agent_id,
     )
@@ -1236,8 +1219,9 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                     "priority": "P0",
                     "text": (
                         "run a bounded successor replan: create or link the next "
-                        "runnable advancement todo, or record an explicit "
-                        "no-follow-up rationale"
+                        "runnable advancement Todo, or settle the completed Todo "
+                        "through loopx todo complete --no-follow-up; do not invent "
+                        "a user gate"
                     ),
                 }
             ],
@@ -1246,9 +1230,13 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                 "credentials, destructive git, production actions, or owner-only decisions"
             ),
             recommended_action=(
-                "run a bounded successor replan before another quiet poll: add/link "
-                "the next advancement todo, or record explicit no-follow-up"
+                "before another quiet poll, add/link the next advancement Todo or "
+                "settle the completed Todo through loopx todo complete "
+                "--no-follow-up; do not invent a user gate"
             ),
+            extra_fields={
+                "satisfying_semantic_outcomes": ["new_runnable_successor"],
+            },
         )
     if replan_rule.rule is GoalFrontierReplanRule.VISION_ACCEPTANCE_GAP:
         return build_autonomous_replan_obligation_payload(
@@ -1613,6 +1601,12 @@ def build_goal_frontier_projection_context_from_status(
             if gap.get("kind")
             != outcome_continuity.VISION_CHECKPOINT_MISSING_TRIGGER
         ]
+    todo_succession_gap_open = bool(
+        todo_succession_gap_items(
+            agent_todo_summary,
+            agent_id=agent_id,
+        )
+    )
     replan_obligation = align_autonomous_replan_guidance_with_acceptance_policy(
         replan_obligation,
         acceptance_gaps=source_acceptance_gaps,
@@ -1650,6 +1644,7 @@ def build_goal_frontier_projection_context_from_status(
             obligation_ack,
             replan_obligation=replan_obligation,
             acceptance_gaps=source_acceptance_gaps,
+            todo_succession_gap_open=todo_succession_gap_open,
         )
         and autonomous_replan_ack_matches_frontier(
             obligation_ack,
@@ -1687,6 +1682,7 @@ def build_goal_frontier_projection_context_from_status(
             frontier_obligation_ack,
             replan_obligation=frontier_replan_obligation,
             acceptance_gaps=source_acceptance_gaps,
+            todo_succession_gap_open=todo_succession_gap_open,
         )
         and autonomous_replan_ack_matches_frontier(
             frontier_obligation_ack,

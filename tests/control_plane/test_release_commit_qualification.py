@@ -18,7 +18,6 @@ from loopx.control_plane.testing.actual_default_model_behavior_portfolio import 
 )
 from loopx.control_plane.testing.release_commit_qualification import (
     EXPECTED_RESULT_SCHEMA_BY_QUALIFICATION,
-    OUTCOME_QUALIFICATION_ID,
     REQUIRED_QUALIFICATION_IDS,
     build_exact_release_commit_qualification,
     collect_release_source_identity,
@@ -78,15 +77,6 @@ def _summary(qualification_id: str, *, commit: str = COMMIT) -> dict[str, object
             "skip_count": 0,
             "qualification_passed": True,
         },
-        OUTCOME_QUALIFICATION_ID: {
-            "decision": "owner_review_required",
-            "eligible_for_owner_review": True,
-            "candidate_ref": f"git:{commit}",
-            "distinct_case_count": 3,
-            "paired_attempt_count": 6,
-            "regression_count": 0,
-            "evidence_gap_count": 0,
-        },
     }
     return summaries[qualification_id]
 
@@ -112,7 +102,6 @@ def _check(
 
 def _manifest(
     *,
-    outcome_claimed: bool = False,
     source: dict[str, object] | None = None,
 ) -> dict[str, object]:
     candidate = source or _source()
@@ -120,21 +109,15 @@ def _manifest(
         qualification_id: _check(qualification_id, source=candidate)
         for qualification_id in REQUIRED_QUALIFICATION_IDS
     }
-    if outcome_claimed:
-        checks[OUTCOME_QUALIFICATION_ID] = _check(
-            OUTCOME_QUALIFICATION_ID,
-            source=candidate,
-            commit=str(candidate["git_commit"]),
-        )
     return {
         "schema_version": "exact_release_commit_qualification_manifest_v0",
         "candidate": candidate,
-        "claims": {"long_horizon_outcome_uplift": outcome_claimed},
+        "claims": {},
         "qualifications": checks,
     }
 
 
-def test_exact_release_manifest_qualifies_one_arm_default_without_outcome_pair() -> None:
+def test_exact_release_manifest_qualifies_required_release_checks() -> None:
     receipt = build_exact_release_commit_qualification(
         _manifest(),
         observed_source=_source(),
@@ -143,27 +126,12 @@ def test_exact_release_manifest_qualifies_one_arm_default_without_outcome_pair()
     assert receipt["ready_for_release"] is True
     assert receipt["decision"] == "ready_for_owner_release"
     assert receipt["automatic_release_promotion_allowed"] is False
-    assert receipt["outcome_baseline_requirement"] == (
-        "not_required_without_outcome_uplift_claim"
-    )
+    assert receipt["claims"] == {}
     assert receipt["required_qualification_ids"] == list(REQUIRED_QUALIFICATION_IDS)
     assert receipt["qualification_failures"] == []
     assert receipt["source_mismatches"] == []
     assert receipt["read_boundary"]["model_api_invoked"] is False
     assert receipt["read_boundary"]["release_mutation_invoked"] is False
-
-
-def test_outcome_claim_requires_matched_baseline_receipt() -> None:
-    manifest = _manifest(outcome_claimed=True)
-    receipt = build_exact_release_commit_qualification(manifest, observed_source=_source())
-    assert receipt["ready_for_release"] is True
-    assert receipt["required_qualification_ids"][-1] == OUTCOME_QUALIFICATION_ID
-
-    del manifest["qualifications"][OUTCOME_QUALIFICATION_ID]
-    receipt = build_exact_release_commit_qualification(manifest, observed_source=_source())
-    assert receipt["ready_for_release"] is False
-    assert receipt["decision"] == "hold_missing_qualification"
-    assert receipt["missing_qualification_ids"] == [OUTCOME_QUALIFICATION_ID]
 
 
 def test_source_identity_drift_and_dirty_checkout_fail_closed() -> None:
@@ -214,12 +182,10 @@ def test_manifest_rejects_unknown_or_noncompact_evidence() -> None:
     with pytest.raises(ValueError, match="unknown fields"):
         build_exact_release_commit_qualification(raw)
 
-    bad_outcome = _manifest(outcome_claimed=True)
-    bad_outcome["qualifications"][OUTCOME_QUALIFICATION_ID]["summary"][
-        "candidate_ref"
-    ] = "git:" + "9" * 40
-    receipt = build_exact_release_commit_qualification(bad_outcome)
-    assert receipt["qualification_failures"] == ["release_outcome_baseline_failed"]
+    stale_claim = _manifest()
+    stale_claim["claims"] = {"unsupported_claim": True}
+    with pytest.raises(ValueError, match="unknown fields"):
+        build_exact_release_commit_qualification(stale_claim)
 
 
 def _git(repo: Path, *args: str) -> str:

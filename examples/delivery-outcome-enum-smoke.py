@@ -23,7 +23,6 @@ from loopx.control_plane.work_items.delivery_outcome import (  # noqa: E402
     normalize_delivery_outcome,
     require_delivery_outcome,
 )
-from loopx.history import append_benchmark_run  # noqa: E402
 from loopx.state_refresh import refresh_state_run  # noqa: E402
 from loopx.status import delivery_outcome_for_run  # noqa: E402
 
@@ -157,37 +156,6 @@ def assert_refresh_state_enforces_enum(registry_path: Path) -> None:
     assert "invalid choice" in cli_result.stderr, cli_result.stderr
 
 
-def assert_history_enforces_enum(registry_path: Path) -> None:
-    compact_run = {
-        "schema_version": "benchmark_run_v0",
-        "benchmark": {"id": "fixture"},
-        "case": {"id": "fixture-case"},
-    }
-    payload = append_benchmark_run(
-        registry_path=registry_path,
-        runtime_root_override=None,
-        goal_id=GOAL_ID,
-        benchmark_run=compact_run,
-        delivery_outcome=DeliveryOutcome.PRIMARY_GOAL_OUTCOME.value,
-        dry_run=True,
-    )
-    assert payload["delivery_outcome"] == DeliveryOutcome.PRIMARY_GOAL_OUTCOME.value, payload
-
-    try:
-        append_benchmark_run(
-            registry_path=registry_path,
-            runtime_root_override=None,
-            goal_id=GOAL_ID,
-            benchmark_run=compact_run,
-            delivery_outcome="runner_contract_v0_delivered",
-            dry_run=True,
-        )
-    except ValueError as exc:
-        assert "delivery_outcome must be one of:" in str(exc)
-    else:
-        raise AssertionError("history append accepted invalid delivery outcome")
-
-
 def assert_status_uses_enum_not_classification() -> None:
     assert (
         delivery_outcome_for_run(
@@ -214,7 +182,6 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="delivery-outcome-enum-") as tmp:
         registry_path, _runtime = write_fixture(Path(tmp))
         assert_refresh_state_enforces_enum(registry_path)
-        assert_history_enforces_enum(registry_path)
     assert_status_uses_enum_not_classification()
     print("delivery outcome enum smoke ok")
     return 0

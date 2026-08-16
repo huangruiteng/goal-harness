@@ -8,7 +8,6 @@ from typing import Any
 
 from ..reward_memory import reward_memory_goal_policy
 
-from ...benchmark_core import compact_run_permission_policy_for_quota
 from ...boundary_authority import checkpointed_boundary_authority_summary
 from ...execution_profile import execution_profile_outcome_floor
 from ...explore_graph import compact_explore_graph_policy
@@ -390,22 +389,10 @@ def goal_boundary(
     for policy_source in (goal, project_asset_source):
         if not isinstance(policy_source, dict):
             continue
-        policy = compact_run_permission_policy_for_quota(
-            policy_source.get("run_permission_policy")
-            or policy_source.get("run_permission_policy_v0")
-        )
-        if policy:
-            boundary["run_permission_policy"] = policy
             break
     if isinstance(project_asset_source, dict) and project_asset_source.get("project_asset"):
         project_asset = project_asset_source.get("project_asset")
         if isinstance(project_asset, dict):
-            policy = compact_run_permission_policy_for_quota(
-                project_asset.get("run_permission_policy")
-                or project_asset.get("run_permission_policy_v0")
-            )
-            if policy:
-                boundary["run_permission_policy"] = policy
             if project_asset.get("stop_condition"):
                 boundary["stop_condition"] = project_asset.get("stop_condition")
             if isinstance(project_asset.get("execution_profile"), dict):

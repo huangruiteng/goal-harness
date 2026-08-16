@@ -342,8 +342,6 @@ def append_event_ledger_summary_markdown(
             f"samples={event_ledger.get('sample_run_count')} "
             f"events_24h={event_totals.get('events_24h')} "
             f"events_7d={event_totals.get('events_7d')} "
-            f"benchmark_runs_24h={event_totals.get('benchmark_runs_24h', 0)} "
-            f"benchmark_runs_7d={event_totals.get('benchmark_runs_7d', 0)} "
             f"classes_24h={event_class_count_text(by_class_24h, event_classes)} "
             f"classes_7d={event_class_count_text(by_class_7d, event_classes)}",
         ]
@@ -367,8 +365,6 @@ def append_event_ledger_summary_markdown(
             f"`{markdown_scalar(goal.get('goal_id') or '')}`: "
             f"events_24h={goal.get('events_24h')} "
             f"events_7d={goal.get('events_7d')} "
-            f"benchmark_runs_24h={goal.get('benchmark_runs_24h', 0)} "
-            f"benchmark_runs_7d={goal.get('benchmark_runs_7d', 0)} "
             f"latest={markdown_scalar(goal.get('latest_event_class') or '')} "
             f"classes_24h={event_class_count_text(goal_by_class_24h, event_classes)}"
         )

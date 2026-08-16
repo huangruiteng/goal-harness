@@ -80,33 +80,8 @@ def write_run(run_dir: Path, goal_id: str, *, duplicate_kind: str) -> None:
         lines.append(dict(record))
     elif duplicate_kind == "artifact_identity_collision":
         lines = [
-            {**record, "classification": "benchmark_run_v0"},
             {**record, "classification": "state_refreshed"},
-        ]
-    elif duplicate_kind == "structured_artifact_bundle":
-        lines = [
-            {
-                **record,
-                "classification": "benchmark_run_v0",
-                "health_check": "benchmark_run_v0 compact event public-safe",
-                "benchmark_run": {
-                    "schema_version": "benchmark_run_v0",
-                    "mode": "codex_loopx",
-                    "job_name": "bundle_case_a",
-                    "official_task_score": {"kind": "fixture", "value": 0.0},
-                },
-            },
-            {
-                **record,
-                "classification": "benchmark_run_v0",
-                "health_check": "benchmark_run_v0 compact event public-safe",
-                "benchmark_run": {
-                    "schema_version": "benchmark_run_v0",
-                    "mode": "codex_loopx",
-                    "job_name": "bundle_case_b",
-                    "official_task_score": {"kind": "fixture", "value": 1.0},
-                },
-            },
+            {**record, "classification": "quota_monitor_poll"},
         ]
     else:
         raise ValueError(f"unknown duplicate_kind: {duplicate_kind}")
@@ -133,9 +108,6 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
     duplicate_state_file = (
         project / ".codex" / "goals" / "plain-duplicate-goal" / "ACTIVE_GOAL_STATE.md"
     )
-    bundle_state_file = (
-        project / ".codex" / "goals" / "structured-bundle-goal" / "ACTIVE_GOAL_STATE.md"
-    )
     artifact_collision_state_file = (
         project
         / ".codex"
@@ -146,7 +118,6 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
     reward_state_file.parent.mkdir(parents=True)
     projected_reward_state_file.parent.mkdir(parents=True)
     duplicate_state_file.parent.mkdir(parents=True)
-    bundle_state_file.parent.mkdir(parents=True)
     artifact_collision_state_file.parent.mkdir(parents=True)
     reward_state_file.write_text(
         "---\nupdated_at: 2026-01-01T00:00:00+00:00\n---\n", encoding="utf-8"
@@ -156,9 +127,6 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         encoding="utf-8",
     )
     duplicate_state_file.write_text(
-        "---\nupdated_at: 2026-01-01T00:00:00+00:00\n---\n", encoding="utf-8"
-    )
-    bundle_state_file.write_text(
         "---\nupdated_at: 2026-01-01T00:00:00+00:00\n---\n", encoding="utf-8"
     )
     artifact_collision_state_file.write_text(
@@ -185,11 +153,6 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         runtime_root / "goals" / "plain-duplicate-goal" / "runs",
         "plain-duplicate-goal",
         duplicate_kind="plain_duplicate",
-    )
-    write_run(
-        runtime_root / "goals" / "structured-bundle-goal" / "runs",
-        "structured-bundle-goal",
-        duplicate_kind="structured_artifact_bundle",
     )
     write_run(
         runtime_root / "goals" / "artifact-collision-goal" / "runs",
@@ -223,14 +186,6 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
                         "id": "plain-duplicate-goal",
                         "repo": str(project),
                         "state_file": ".codex/goals/plain-duplicate-goal/ACTIVE_GOAL_STATE.md",
-                        "domain": "smoke",
-                        "status": "connected-read-only",
-                        "adapter": {"kind": "smoke", "status": "connected-read-only"},
-                    },
-                    {
-                        "id": "structured-bundle-goal",
-                        "repo": str(project),
-                        "state_file": ".codex/goals/structured-bundle-goal/ACTIVE_GOAL_STATE.md",
                         "domain": "smoke",
                         "status": "connected-read-only",
                         "adapter": {"kind": "smoke", "status": "connected-read-only"},
@@ -278,11 +233,6 @@ def main() -> None:
         assert "projected-reward-overlay-goal: duplicate index rows" not in warnings, (
             payload
         )
-        assert (
-            "structured-bundle-goal: structured artifact bundle rows raw=2 unique=1 bundles=1"
-            in checks
-        ), payload
-        assert "structured-bundle-goal: duplicate index rows" not in warnings, payload
         assert (
             "plain-duplicate-goal: duplicate index rows raw=2 unique=1 unexpected=1 auto_repairable=1"
             in warnings

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,6 @@ from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
 from loopx.control_plane.work_items.interaction_contract import (  # noqa: E402
     interaction_next_cli_actions,
 )
-from loopx.benchmark_trajectory import normalized_loopx_cli_call  # noqa: E402
 from loopx.quota import (  # noqa: E402
     build_quota_monitor_poll_event,
     build_quota_slot_spend_event,
@@ -66,8 +66,28 @@ def run_quota(root: Path, registry_path: Path, runtime: Path, *args: str) -> tup
 
 
 def is_state_or_accounting_command(action: str) -> bool:
-    call = normalized_loopx_cli_call(action, round_index=1)
-    subcommands = tuple(call["subcommands"])
+    tokens = shlex.split(action)
+    command_index = next(
+        index
+        for index, token in enumerate(tokens)
+        if token == "loopx" or token.endswith("/loopx")
+    )
+    after = tokens[command_index + 1 :]
+    parsed_subcommands: list[str] = []
+    skip_next = False
+    for token in after:
+        if skip_next:
+            skip_next = False
+            continue
+        if token in {"--format", "--registry", "--runtime-root"}:
+            skip_next = True
+            continue
+        if token.startswith("-"):
+            continue
+        parsed_subcommands.append(token)
+        if len(parsed_subcommands) == 2:
+            break
+    subcommands = tuple(parsed_subcommands)
     return subcommands[:1] == ("refresh-state",) or subcommands in {
         ("quota", "monitor-poll"),
         ("quota", "spend-slot"),

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import Enum
-from typing import Any, Iterable
-
+from typing import Any
 
 RUN_PERMISSION_POLICY_SCHEMA_VERSION = "run_permission_policy_v0"
 RUN_PERMISSION_QUOTA_PROJECTION_SCHEMA_VERSION = "run_permission_quota_projection_v0"

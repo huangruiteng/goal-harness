@@ -2141,11 +2141,10 @@ state says it is countable.
 
 **Validation**
 
-- `docs/research/long-horizon-agent-benchmarks/benchmark-core-adapter-contract-v0.md`
-- `docs/research/long-horizon-agent-benchmarks/terminal-bench-runner-mode-contract-v0.md`
-- `examples/benchmark-lifecycle-state-smoke.py`
-- `examples/benchmark-core-adapter-contract-smoke.py`
-- `examples/terminal-bench-runner-mode-contract-smoke.py`
+- `benchmark/README.md`
+- `benchmark/deepswe/README.md`
+- `examples/benchmark-candidate-source-boundary-smoke.py`
+- `examples/benchmark-run-permission-policy-smoke.py`
 
 ### Planning Governance
 

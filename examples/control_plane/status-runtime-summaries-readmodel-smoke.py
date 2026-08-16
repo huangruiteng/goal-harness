@@ -32,10 +32,6 @@ def compact_run(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def no_benchmark_projection(run: dict[str, Any]) -> None:
-    return None
-
-
 def build_context() -> StatusRuntimeSummaryContext:
     return StatusRuntimeSummaryContext(
         latest_run=lambda goal: (goal.get("latest_runs") or [None])[0],
@@ -47,12 +43,6 @@ def build_context() -> StatusRuntimeSummaryContext:
         compact_run=compact_run,
         quota_status=lambda goal: {"state": "eligible"},
         parse_timestamp=parse_timestamp,
-        compact_benchmark_run=no_benchmark_projection,
-        compact_benchmark_result=no_benchmark_projection,
-        compact_benchmark_comparison=no_benchmark_projection,
-        compact_benchmark_learning_ledger=no_benchmark_projection,
-        compact_benchmark_experiment_report=no_benchmark_projection,
-        compact_active_user_assisted_pilot=no_benchmark_projection,
         run_has_external_evidence_watch_signal=lambda run: False,
         decision_classifications={"operator_gate_notify"},
         evidence_classifications=set(),

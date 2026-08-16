@@ -244,6 +244,42 @@ def test_semantic_ack_is_bound_to_the_exact_rotated_obligation() -> None:
     ) is True
 
 
+def test_semantic_terminal_ack_cannot_close_an_open_todo_succession_gap() -> None:
+    obligation = _obligation(
+        [{"kind": "completed_advancement_without_successor", "todo_id": "todo-1"}]
+    )
+    no_followup_ack = {
+        "recorded": True,
+        "semantic_delta": {
+            "schema_version": "replan_semantic_delta_v0",
+            "accepted": True,
+            "obligation_id": obligation["obligation_id"],
+            "outcomes": ["coverage_backed_no_followup"],
+        },
+    }
+
+    assert autonomous_replan_ack_satisfies_obligation(
+        no_followup_ack,
+        replan_obligation=obligation,
+        acceptance_gaps=[],
+        todo_succession_gap_open=True,
+    ) is False
+
+    successor_ack = {
+        **no_followup_ack,
+        "semantic_delta": {
+            **no_followup_ack["semantic_delta"],
+            "outcomes": ["new_runnable_successor"],
+        },
+    }
+    assert autonomous_replan_ack_satisfies_obligation(
+        successor_ack,
+        replan_obligation=obligation,
+        acceptance_gaps=[],
+        todo_succession_gap_open=True,
+    ) is True
+
+
 def test_policy_normalization_precedes_deterministic_peer_scope_selection() -> None:
     obligation = _obligation([{"kind": "periodic_review_due", "source": "fixture"}])
     registered_agents = ["codex-primary", "codex-reviewer"]
@@ -262,5 +298,4 @@ def test_policy_normalization_precedes_deterministic_peer_scope_selection() -> N
 
     assert len(selected) == 1
     assert selected <= set(registered_agents)
-
 

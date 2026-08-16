@@ -128,7 +128,7 @@ nav:
   - Reference:
       - reference/README.md
       - Extensions: reference/extensions.md
-      - Benchmark Architecture: reference/benchmark-architecture.md
+      - Benchmark Research RFC: architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md
       - Protocols: reference/protocols/README.md
       - Contracts: reference/contracts/README.md
   - Development:
@@ -136,7 +136,6 @@ nav:
       - Technical Directions: project/technical-directions.md
       - Testing And Quality: development/testing-and-quality.md
       - Documentation Layout: development/documentation-layout.md
-      - Benchmark Workflow: development/benchmark-developer-workflow.md
       - Control Plane Course: development/control-plane-course/README.md
   - Product:
       - product/README.md

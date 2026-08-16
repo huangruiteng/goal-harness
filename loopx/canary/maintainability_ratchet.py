@@ -21,14 +21,12 @@ MODULE_DICT_ANY_LIMIT = 300
 MODULE_METRIC_BASELINE_PATH = Path(__file__).with_name("module_metric_baseline.json")
 
 CONTROL_PLANE_FORBIDDEN_DEPENDENCY_PREFIXES = (
-    "loopx.benchmark_adapters",
     "loopx.capabilities",
     "loopx.cli",
     "loopx.cli_commands",
     "loopx.presentation",
 )
 STATUS_FORBIDDEN_DEPENDENCY_PREFIXES = (
-    "loopx.benchmark_adapters",
     "loopx.presentation",
 )
 COMPATIBILITY_FACADE_PATHS = {
@@ -504,19 +502,12 @@ def collect_compatibility_facades(repository_root: Path) -> list[dict[str, Any]]
 
 
 def _is_benchmark_module_path(path: Path) -> bool:
-    parts = path.as_posix().split("/")
-    return any(
-        part in {
-            "benchmark_adapters",
-            "benchmarks",
-        }
-        or part.startswith("benchmark")
-        or part.startswith("bench_")
-        or part.startswith("terminal_bench")
-        or part.startswith("skillsbench")
-        or part.startswith("agentissue")
-        or part.startswith("agents_last_exam")
-        for part in parts
+    normalized = path.as_posix()
+    parts = normalized.split("/")
+    return (
+        normalized.startswith("benchmark/")
+        or normalized.startswith("deprecate/benchmark-legacy/")
+        or "benchmark_toolkit" in parts
     )
 
 

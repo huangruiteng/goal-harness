@@ -84,7 +84,7 @@ def manifest(source: dict[str, object]) -> dict[str, object]:
     return {
         "schema_version": "exact_release_commit_qualification_manifest_v0",
         "candidate": source,
-        "claims": {"long_horizon_outcome_uplift": False},
+        "claims": {},
         "qualifications": {
             qualification_id: {
                 "schema_version": "exact_release_check_receipt_v0",
@@ -153,9 +153,7 @@ def main() -> None:
         payload = json.loads(json_result.stdout)
         assert payload["ready_for_release"] is True, payload
         assert payload["decision"] == "ready_for_owner_release", payload
-        assert payload["outcome_baseline_requirement"] == (
-            "not_required_without_outcome_uplift_claim"
-        ), payload
+        assert payload["claims"] == {}, payload
         assert payload["read_boundary"]["checks_executed"] is False, payload
         assert payload["read_boundary"]["model_api_invoked"] is False, payload
         assert str(tmp_root) not in json_result.stdout

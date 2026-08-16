@@ -60,11 +60,11 @@ MOVED_PATHS = {
         "docs/reference/protocols/protocol-action-packet-router-comparison-v0.md"
     ),
     "docs/codex-cli-long-run-benchmark-design.md": (
-        "docs/research/long-horizon-agent-benchmarks/"
+        "deprecate/benchmark-legacy/docs/research/long-horizon-agent-benchmarks/"
         "codex-cli-long-run-benchmark-design.md"
     ),
     "docs/codex-cli-long-run-regression.md": (
-        "docs/research/long-horizon-agent-benchmarks/"
+        "deprecate/benchmark-legacy/docs/research/long-horizon-agent-benchmarks/"
         "codex-cli-long-run-regression.md"
     ),
     "docs/project-skill-delivery.md": (
@@ -387,7 +387,8 @@ def main() -> int:
         "\n## ", 1
     )[0]
     for deep_link in [
-        "docs/development/benchmark-developer-workflow.md",
+        "benchmark/README.md",
+        "deprecate/benchmark-legacy/README.md",
         "docs/product/foundations/project-level-reward-model.md",
         "loopx/capabilities/reward_memory/README.md",
         "loopx/capabilities/reward_memory/README.zh-CN.md",
@@ -425,7 +426,6 @@ def main() -> int:
         "docs/reference/contracts/README.md",
         "docs/reference/protocols/README.md",
         "docs/research/README.md",
-        "docs/research/long-horizon-agent-benchmarks/README.md",
         "docs/showcases/README.md",
         "docs/product/runtimes/codex-cli/codex-cli-tui-loop.md",
         "docs/project/technical-directions.md",
@@ -438,7 +438,7 @@ def main() -> int:
     for required in [
         "testing-and-quality.md",
         "Model behavior qualification v0",
-        "Release outcome baseline v0",
+        "Benchmark research",
     ]:
         assert required in developer_index, required
     for required in [
@@ -446,7 +446,7 @@ def main() -> int:
         "Agent-Facing Output Budgets",
         "Decision Replay And Issue #2191",
         "Doubao Model-Behavior Gate",
-        "Release Outcome Baseline",
+        "Benchmark Research Evidence",
     ]:
         assert required in quality_guide, required
 
@@ -501,7 +501,8 @@ def main() -> int:
             read("docs/reference/README.md"),
             read("docs/reference/protocols/README.md"),
             read("docs/research/README.md"),
-            read("docs/research/long-horizon-agent-benchmarks/README.md"),
+            read("benchmark/README.md"),
+            read("deprecate/benchmark-legacy/README.md"),
             read("docs/showcases/README.md"),
         ]
     )
@@ -513,6 +514,7 @@ def main() -> int:
             new_path in combined_public_indexes
             or basename in combined_public_indexes
             or new_path.startswith("docs/archive/")
+            or new_path.startswith("deprecate/benchmark-legacy/")
         ), new_path
 
     for required in [

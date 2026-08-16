@@ -79,8 +79,6 @@ def assert_source_shape() -> None:
         require(marker in bootstrap_source, f"bootstrap module missing {marker}")
     for marker in (
         "append_cli_rollout_event",
-        "append_benchmark_run_rollout_event",
-        "append_benchmark_result_rollout_event",
         "build_rollout_event(",
     ):
         require(marker in rollout_source, f"rollout module missing {marker}")

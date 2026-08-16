@@ -917,8 +917,8 @@ def assert_benchmark_readiness_scan_routes_to_advancement() -> None:
         "on local capacity and if the remote GPU route is blocked: AgentIssue-Bench "
         "first, then PerfBench, then SWE-Bench Pro public. Optimize for low "
         "frontier-agent success plus local/Docker reproducibility, objective scoring, "
-        "Codex CLI wrapper feasibility, and compact `benchmark_run_v0` / "
-        "`benchmark_result_v0` evidence. Do not spend a fresh benchmark execution "
+        "Codex CLI wrapper feasibility, compact public-safe receipts, and an "
+        "independent verifier. Do not spend a fresh benchmark execution "
         "quota slot until a setup-readiness scan proves a plausible learning run."
     )
     guard = build_quota_should_run(

@@ -34,7 +34,6 @@ def direct_summary(history: dict[str, Any]) -> dict[str, Any]:
         history,
         parse_timestamp=status_module.parse_timestamp,
         event_class_for_run=direct_event_class,
-        compact_benchmark_run=status_module.compact_benchmark_run,
     )
 
 
@@ -131,8 +130,6 @@ def main() -> None:
     assert wrapper["event_classes"] == ["accounting", "decision", "evidence", "state", "work"], wrapper
     assert totals["events_24h"] == 5, totals
     assert totals["events_7d"] == 6, totals
-    assert totals["benchmark_runs_24h"] == 0, totals
-    assert totals["benchmark_runs_7d"] == 0, totals
     assert totals["by_class_24h"] == {
         "accounting": 1,
         "decision": 1,

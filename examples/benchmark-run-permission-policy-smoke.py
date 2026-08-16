@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -12,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.benchmark_core import (  # noqa: E402
+from loopx.capabilities.benchmark_toolkit import (  # noqa: E402
     RUN_PERMISSION_POLICY_SCHEMA_VERSION,
     RUN_PERMISSION_QUOTA_PROJECTION_SCHEMA_VERSION,
     RunPermissionAction,
@@ -20,7 +19,6 @@ from loopx.benchmark_core import (  # noqa: E402
     compact_run_permission_policy_for_quota,
     validate_run_permission_policy,
 )
-from loopx.control_plane.quota.goal_boundary import goal_boundary as _goal_boundary  # noqa: E402
 
 
 def assert_default_policy_is_quota_readable() -> None:
@@ -69,32 +67,9 @@ def assert_policy_rejects_narrative_widening() -> None:
     assert projection["first_blocker"], projection
 
 
-def assert_quota_goal_boundary_consumes_structured_policy() -> None:
-    policy = build_run_permission_policy(policy_id="terminal_bench_cloud_no_upload")
-    boundary = _goal_boundary(
-        {
-            "goal_id": "fixture",
-            "adapter_kind": "benchmark_runner_v0",
-            "adapter_status": "connected",
-            "run_permission_policy": policy,
-        }
-    )
-
-    assert boundary is not None
-    projected = boundary["run_permission_policy"]
-    assert projected["policy_id"] == "terminal_bench_cloud_no_upload", boundary
-    assert projected["delivery_allowed"] is True, boundary
-    assert projected["no_upload_required"] is True, boundary
-    assert projected["leaderboard_claim_allowed"] is False, boundary
-    rendered = json.dumps(boundary, sort_keys=True)
-    assert "OWNER APPROVED" not in rendered
-    assert "ask user" not in rendered.lower()
-
-
 def main() -> int:
     assert_default_policy_is_quota_readable()
     assert_policy_rejects_narrative_widening()
-    assert_quota_goal_boundary_consumes_structured_policy()
     print("benchmark-run-permission-policy-smoke ok")
     return 0
 
