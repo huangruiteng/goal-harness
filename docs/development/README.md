@@ -63,9 +63,8 @@ not need these documents to start LoopX.
 | Status and decision payloads / 状态与决策载荷 | [Status data contract](../status-data-contract.md) |
 | Quota and spend semantics / Quota 与 spend 语义 | [Quota allocation](../quota-allocation.md) |
 | Model-behavior shadow qualification / 模型行为影子验证 | [Model behavior qualification v0](../reference/protocols/model-behavior-qualification-v0.md) |
-| Release outcome comparison / 发布结果基线 | [Release outcome baseline v0](../reference/protocols/release-outcome-baseline-v0.md) |
 | Release promotion / 发布晋级 | [Release readiness](../product/release-readiness.md) |
-| Benchmark development / Benchmark 开发 | [Benchmark developer workflow](benchmark-developer-workflow.md) |
+| Benchmark research / Benchmark 研究 | [Benchmark workspace](https://github.com/huangruiteng/loopx/blob/main/benchmark/README.md) · [Research RFC](../architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md) |
 
 ## Change Loop / 变更闭环
 

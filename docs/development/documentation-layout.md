@@ -38,7 +38,7 @@ three areas are overloaded:
 | `docs/*.md` | Concepts, contracts, integrations, operations, and roadmaps share one flat namespace | Keep only proven stable anchors; move lower-traffic files by owner and repair inbound links |
 | `docs/product/*.md` | Runtime experiments, product foundations, surfaces, and use cases are interleaved | Group under `foundations/`, `runtimes/`, `surfaces/`, and `use-cases/` |
 | `docs/reference/protocols/*.md` | Versioned contracts are flat and hard to scan | First group the index by domain; move files only with a separate protocol-path compatibility review |
-| `docs/research/long-horizon-agent-benchmarks/` | Durable evidence and dated packets are presented as one exhaustive front page | Keep artifacts stable; add topic and lifecycle indexes before considering physical moves |
+| `benchmark/` | Current benchmark research needs a small RFC-linked home outside product packages | Keep protocols and public-safe practice here; archive superseded runners under `deprecate/benchmark-legacy/` |
 
 This is a coverage-preserving migration. Unique claims, public evidence, and
 useful links must either remain at their current path or appear in a new

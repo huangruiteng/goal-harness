@@ -365,8 +365,6 @@ goals must stay out of the eligible lane even when they have a high
     "totals": {
       "events_24h": 2,
       "events_7d": 2,
-      "benchmark_runs_24h": 0,
-      "benchmark_runs_7d": 0,
       "by_class_24h": {
         "accounting": 1,
         "decision": 0,
@@ -1542,12 +1540,7 @@ Review Packet source-of-truth rule:
   copy-minimal form for an already selected or approved target-agent relay: it
   prints only the `project_agent_handoff` text in markdown output, while JSON
   output returns a minimized handoff payload instead of the full operator
-  packet. When a latest post-handoff run carries
-  `benchmark_experiment_report_replay_decision_v0`, JSON handoff-only output may
-  also include `benchmark_report_chain_handoff` so agents can read
-  `chain_map`, `replay_decision`, `next_run_mode`, `readiness`, and
-  `authorization` without parsing the handoff sentence. To keep the hot path
-  compact, handoff-only JSON does not expose a separate
+  packet. To keep the hot path compact, handoff-only JSON does not expose a separate
   `handoff_followthrough_summary` prose field; that prose remains available in
   the full Review Packet and embedded handoff text;
 - project-agent handoff commands redact local absolute registry/runtime paths
@@ -2037,180 +2030,12 @@ The summary classifies sampled run records into:
 - `state`: state refresh and other compact state-projection rows;
 - `work`: remaining bounded delivery or implementation progress rows.
 
-The summary reports 24h/7d totals and per-goal counts by event class. It also
-reports optional `benchmark_runs_24h` and `benchmark_runs_7d` counts when
-sampled run-index records carry a compact `benchmark_run_v0` object. These
-benchmark counts are evidence projections, not official score claims.
-Consumers should use them to notice that benchmark evidence exists, then drill
-into `run_history` or the project-local history command for exact evidence. It
-must not replace append-only run, reward, quota, validation, artifact, blocker,
-or evidence events.
+The summary reports 24h/7d totals and per-goal counts by event class. It must
+not replace append-only run, reward, quota, validation, artifact, blocker, or
+evidence events.
 Each per-goal row may also include `latest_event_class` and `latest_event_at`,
 which are compact routing hints for the dashboard, not replacements for the
 latest run record.
-
-When a compact run record includes `benchmark_run_summary`, it is a redacted
-projection of `benchmark_run_v0`: runner, benchmark id, job name, mode, agent
-summary, progress counts, token/cost metrics, validation state, up to three
-trial summaries, relative evidence categories, resume/inspect command
-templates, and stop conditions. For long-horizon benchmark evidence it may also
-carry compact `worker_bridge_outcome.wall_time_policy` fields: timeout tier,
-whether official timeout/resources changed, comparability, observed wall time,
-effective wall-time limit, and whether the observed or expected run meets the
-true long-task bar (`>=1800s`). These fields are claim guards, not scoring
-changes. It may also carry `overhead_attribution_counters`, a compact
-runner-side summary of wall time, usage metrics, worker bridge event counts,
-LoopX CLI call totals, and Codex runtime goal-tool counts. That summary
-is for private paired-run diagnosis only; it is not a raw phase trace and must
-not be used as a score uplift claim. These fields must not include raw Codex
-sessions, host absolute paths, credentials, private benchmark material, or
-leaderboard upload claims.
-
-Benchmark adapters that write worker-side or bridge-side compact runs should
-reuse the generic validation/claim fields below instead of inventing
-benchmark-specific synonyms:
-
-- `validation_scope`: the layer the worker validated. Recommended values are
-  `worker_bridge_connectivity` for control-plane/bridge reachability,
-  `environment_ready` for environment-only readiness, `worker_case_success` for
-  an explicit worker-side case-success claim, and `official_verifier_result`
-  when an official verifier result is present.
-- `validation.bridge_connected`: whether the LoopX-enhanced worker
-  control path is connected. This supports a connectivity claim only; it is not
-  case success.
-- `validation.case_success_claimed`: whether the worker explicitly claims the
-  benchmark case is solved. A missing scope or a legacy `status=passed` must be
-  treated as ambiguous when the official score is zero.
-- `validation.official_verifier_validation_present`,
-  `validation.official_verifier_status`, and `official_task_score`: whether the
-  benchmark-owned verifier has spoken, and what it reported.
-- `claim_boundary.bridge_connectivity_claim_allowed`,
-  `claim_boundary.case_success_claim_allowed`,
-  `claim_boundary.official_score_claim_allowed`, and
-  `claim_boundary.forbidden_claims`: the reusable boundary that keeps
-  connectivity evidence, worker claims, official score claims, and leaderboard
-  claims separate.
-
-Consumers must not promote `bridge_connected=true`, worker CLI-call evidence,
-environment readiness, or unscoped `validation.status=passed` into official case
-success. Official case success requires an official verifier result or a
-benchmark-specific adapter contract that is explicitly mapped into
-`official_task_score`.
-
-When a compact run record includes `benchmark_result_summary`, it is a redacted
-projection of `benchmark_result_v0`, not a raw benchmark log reader. The summary
-keeps `official_task_score` separate from `control_plane_score`; for
-`control_plane_score_core_v0` it preserves the fixed component order
-(`restartability`, `stale_state_avoidance`, `evidence_discipline`,
-`boundary_safety`, `writeback_quality`, `gate_compliance`,
-`failure_attribution`, `overhead`) plus compact counts such as validation,
-writeback, spend, and forbidden-access totals. It must not include changed file
-paths, raw trajectories, local artifact paths, credentials, private traces, or
-leaderboard claims.
-
-`loopx history append-benchmark-result --benchmark-result-json <path>`
-is the matching append path for this projection. It is dry-run by default and
-accepts only a compact `benchmark_result_v0` JSON object; it does not discover
-or parse runner directories, task artifacts, Codex sessions, private traces, or
-leaderboard outputs.
-
-When a compact run record includes `benchmark_comparison_summary`, it is a
-redacted projection of `benchmark_comparison_v0`. The summary links paired
-`benchmark_result_v0` scenarios and exposes only compact comparison fields such
-as task/comparison id, mode pair, baseline/treatment scenario ids,
-official-task score delta, control-plane score delta, overhead/writeback/spend
-deltas, readiness booleans, compared metric names, and stop-condition labels.
-It may carry numeric deltas or public-safe symbolic deltas such as
-`not_applicable_readiness_only`. It must not include raw benchmark logs,
-changed file paths, absolute runner directories, Codex session transcripts,
-private traces, credentials, or leaderboard submission artifacts.
-
-`loopx history append-benchmark-comparison --benchmark-comparison-json
-<path>` is the matching append path for this projection. It is dry-run by
-default and accepts only a compact `benchmark_comparison_v0` JSON object; it
-does not discover result pairs from runner directories, parse raw task
-artifacts, invoke benchmark runners, or infer leaderboard claims.
-
-When `benchmark_comparison_summary` is present, status may also include
-`benchmark_comparison_decision_note`. This is a compact consumer-facing note,
-not a new benchmark event. It maps the paired deltas into report-ready
-`claim_boundary` and `next_decision` hints: whether the evidence is
-readiness-only, control-plane-only, an official-score candidate, failure
-analysis, or still boundary-gated; which claims are allowed; which claims are
-forbidden; and the minimum next evidence. The note must preserve official-score
-delta versus control-plane delta separation and must not authorize real
-benchmark execution, model-backed simulator work, private traces, or
-leaderboard claims.
-
-When a compact run record includes `benchmark_experiment_report_summary`, it is
-a redacted projection of `benchmark_experiment_report_v0`. The summary keeps the
-paper/report surface separate from raw benchmark execution: compact experiment
-identity, official-score eligibility, passive control-plane score hints,
-operator-simulator ablation state, claim boundary, negative-result layers, and
-next-decision fields. It must not include raw benchmark logs, local artifact
-paths, Codex session transcripts, private traces, credentials, or leaderboard
-submission artifacts.
-
-`loopx history append-benchmark-report --benchmark-report-json <path>` is
-the matching append path for this projection. It is dry-run by default and
-accepts only a compact `benchmark_experiment_report_v0` JSON object; it does
-not run a benchmark, invoke a model or simulator, read runner directories, parse
-private artifacts, or infer leaderboard claims.
-
-When a compact run record includes `active_user_assisted_pilot_summary`, it is a
-redacted projection of `active_user_assisted_pilot_v0`. The summary is for
-assisted-collaboration research only: compact pilot identity, failure trigger,
-active-injection contract flags, frequency budget, visibility policy,
-operator-simulator audit counts, claim boundary, and next-run decision. It must
-not include raw simulator messages, worker chat transcripts, local artifact
-paths, hidden tests, expected solutions, benchmark answer keys, private traces,
-credentials, or leaderboard submission artifacts. It must also keep the
-assisted-collaboration claim separate from official benchmark score claims.
-
-`loopx history append-active-user-assisted-pilot --active-user-pilot-json
-<path>` is the matching append path for this projection. It is dry-run by
-default and accepts only a compactable `active_user_assisted_pilot_v0` JSON
-object; the CLI compacts the input before writing durable history. It does not
-run a benchmark, call a model-backed simulator, read private runner artifacts,
-interact with a worker, infer hidden test results, or authorize leaderboard
-claims.
-
-When `benchmark_experiment_report_summary` is present, status may also include
-`benchmark_experiment_report_readiness_note`. This is a derived consumer note,
-not a new benchmark event or publication approval. It turns the compact report
-into a small readiness and next-run authorization hint, such as
-`negative_or_control_plane_only`, `fixture_only`, `review_required`, or
-`assisted_mode_separate`. The note must preserve the no-leaderboard and
-no-simulator claim boundaries unless explicit evidence and operator approval
-exist, and it must keep raw benchmark logs, local artifact paths, private
-traces, Codex session transcripts, credentials, and submission artifacts out of
-status and review packets.
-
-Status may also derive `benchmark_experiment_report_replay_decision` from the
-readiness note. This is the smallest next-run summary a worker should need
-before deciding whether to replay a fixture, ask for operator review, or defer.
-It is intentionally a status/review-packet-only consumer of an already durable
-run-history report event; it does not create runner authority, execute
-benchmarks, call model APIs, enable simulator work, or authorize leaderboard
-publication.
-
-`docs/research/long-horizon-agent-benchmarks/benchmark-report-chain-map-v0.md`
-is the reviewer-facing map for this reporting chain. It names the public-safe
-order from `benchmark_run_v0` through
-`benchmark_experiment_report_replay_decision_v0` and the handoff fields a
-worker may inspect. The map is explanatory only: it does not add a status
-field, append a run-history event, or create authority to execute an external
-benchmark path. When a latest run has a replay decision, the review-packet
-handoff follow-through summary may include
-`chain_map=benchmark-report-chain-map-v0.md` so a worker can jump from the
-compact replay decision back to the full reviewer-facing chain contract.
-The same information may appear in
-`loopx review-packet --handoff-only --format json` as
-`benchmark_report_chain_handoff` with
-`schema_version=benchmark_report_chain_handoff_v0`. That JSON projection is a
-read-only relay helper over existing status/run-history fields; it does not add
-a new event type, runner authority, simulator path, raw artifact pointer, or
-leaderboard claim.
 
 ## Promotion Readiness Summary
 

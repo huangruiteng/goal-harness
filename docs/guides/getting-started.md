@@ -983,7 +983,8 @@ python3 examples/control_plane/todo-cli-smoke.py
 python3 examples/control_plane/todo-lifecycle-cli-smoke.py
 python3 examples/control_plane/quota-contract-smoke.py
 python3 examples/control_plane/review-packet-cli-smoke.py
-python3 examples/benchmark-run-v0-append-cli-smoke.py
+python3 examples/benchmark-candidate-source-boundary-smoke.py
+python3 examples/benchmark-run-permission-policy-smoke.py
 git diff --check
 ```
 
@@ -1024,10 +1025,10 @@ Start here:
 - [Heartbeat automation prompt](../heartbeat-automation-prompt.md)
 - [Long-task cadence hint](../operations/long-task-cadence-policy.md)
 - [Public/private boundary](../public-private-boundary.md)
-- [Benchmark developer workflow](../development/benchmark-developer-workflow.md)
+- [Benchmark research workspace](https://github.com/huangruiteng/loopx/blob/main/benchmark/README.md)
 - [Dashboard status contract](../status-data-contract.md)
 - [Codex peer task orchestration](../integrations/codex-subagent-orchestration.md)
-- [Benchmark long-run design](../research/long-horizon-agent-benchmarks/codex-cli-long-run-benchmark-design.md)
+- [DeepSWE research practice](https://github.com/huangruiteng/loopx/blob/main/benchmark/deepswe/README.md)
 
 ## Command Reference
 

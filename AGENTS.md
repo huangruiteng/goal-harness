@@ -388,17 +388,10 @@ Use this classification when cleaning or reviewing benchmark-related changes:
 - Keep focused boundary smokes such as
   `examples/benchmark-candidate-source-boundary-smoke.py`; they guard a reusable
   public/private source contract.
-- Keep ledger and analysis smokes such as
-  `examples/benchmark-run-ledger-smoke.py` and
-  `examples/benchmark-case-analysis-smoke.py` while the corresponding JSON/MD
-  assets are shipped public surfaces.
-- Keep state/control-plane regression smokes such as
-  `examples/state-projection-gap-smoke.py`; they protect automation from known
-  stuck states.
-- Treat large adapter integration smokes such as
-  `examples/skillsbench-benchmark-run-smoke.py` as high-value but expensive:
-  keep them only while they cover real runner/ledger behavior that smaller
-  tests do not yet cover, and split them when a stable smaller seam exists.
-- Do not keep one smoke per dated Terminal-Bench routing packet. Preserve the
-  packet docs as historical evidence and validate shared invariants with
-  `examples/terminal-bench-candidate-routing-packets-smoke.py`.
+- Keep toolkit permission and integrity smokes while they validate the shipped
+  provider-neutral capability contract.
+- Keep benchmark-native runners, adapters, ledgers, scoring reducers, and dated
+  experiment packets outside the active product surface. Historical versions
+  belong under `deprecate/benchmark-legacy/` and are not part of active CI.
+- Add a new active benchmark smoke only when it protects a stable toolkit
+  behavior; experiment-specific validation belongs with the research workspace.

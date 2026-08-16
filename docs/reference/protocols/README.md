@@ -82,4 +82,3 @@ scanning a chronological list.
 
 - [`model_behavior_qualification_v0`](model-behavior-qualification-v0.md): Model behavior qualification v0
 - [`pr_review_command_v0`](../../../loopx/capabilities/pr_review_queue/README.md): PR review command v0
-- [`release_outcome_baseline_v0`](release-outcome-baseline-v0.md): Release outcome baseline v0

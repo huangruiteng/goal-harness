@@ -107,8 +107,7 @@ Derived views:
 - per-agent views filter by `agent_id`, `lane.lane_id`, `claimed_by`, and
   selected `agent_lane_next_action_v0`;
 - per-todo views filter by `todo_id` and lifecycle transition events;
-- per-case or benchmark views filter by `case_id`, `benchmark_id`, and
-  validation/result events;
+- per-case views filter by `case_id` and validation/result events;
 - per-run views filter by `run_id`, `source_event_id`, and compact causality
   refs.
 
@@ -126,7 +125,7 @@ would be misleading if compressed into the parent goal's `Next Action`.
 
 Every new rollout event that should participate in concurrent-agent views should
 try to include at least one stable join key: `agent_id`, `todo_id`, `run_id`,
-`lane.lane_id`, `case_id`, or `benchmark_id`. Events that cannot expose a join
+`lane.lane_id`, or `case_id`. Events that cannot expose a join
 key may still be recorded, but projections should label any bridge from them as
 inferred rather than observed.
 

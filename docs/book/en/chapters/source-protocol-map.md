@@ -237,8 +237,8 @@ Start with:
 
 - [`model_behavior_qualification_v0`](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/model-behavior-qualification-v0.md)
   for cases where real-model behavior adds signal beyond deterministic checks;
-- [`release_outcome_baseline_v0`](https://github.com/huangruiteng/loopx/blob/main/docs/reference/protocols/release-outcome-baseline-v0.md)
-  for comparable release and candidate outcomes;
+- [Benchmark research RFC](https://github.com/huangruiteng/loopx/blob/main/docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md)
+  for matched research arms and independent outcome evidence;
 - [Testing and Quality](https://github.com/huangruiteng/loopx/blob/main/docs/development/testing-and-quality.md)
   for unit, contract, smoke, decision replay, canary, and release Gates;
 - [Public/Private Boundary](https://github.com/huangruiteng/loopx/blob/main/docs/public-private-boundary.md)

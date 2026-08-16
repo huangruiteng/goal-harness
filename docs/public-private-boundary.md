@@ -45,11 +45,11 @@ Safe public summary:
 ```json
 {
   "case_id": "synthetic-benchmark-case",
-  "adapter": "terminal-bench",
+  "adapter": "benchmark-native",
   "attempts": 2,
   "terminal_status": "blocked",
   "blocker_class": "missing-public-fixture",
-  "validation": ["python3 examples/benchmark-run-ledger-smoke.py"]
+  "validation": ["python3 examples/benchmark-candidate-source-boundary-smoke.py"]
 }
 ```
 

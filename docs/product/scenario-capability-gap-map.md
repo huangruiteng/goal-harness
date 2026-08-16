@@ -260,7 +260,7 @@ generic substrate:
 
 | Scenario Signal | Existing Surface | Capability Lesson |
 | --- | --- | --- |
-| Long-horizon benchmarks | `docs/research/long-horizon-agent-benchmarks/` | Needs artifact handles, result reducers, score-claim boundaries, and no-raw-log public evidence. |
+| Long-horizon benchmarks | `benchmark/` and the benchmark research RFC | Keep benchmark-native execution outside LoopX core while reusing the narrow toolkit boundary. |
 | ML experiment advisory | `docs/product/domain-capability-packs.md` | Domain packs should be default-off and explicit about autonomy, primary metrics, and launch authority. |
 | Host integration | `docs/reference/protocols/host-integration-surface-v0.md` | Hooks, MCP, and loopback APIs must remain thin facades over CLI-equivalent lifecycle reads and writes. |
 | Non-technical operator UI | `docs/product/surfaces/nontechnical-operator-status-model.md` | First-screen copy needs plain-language state, blockers, user actions, validation, and feedback paths. |
@@ -281,7 +281,7 @@ needs, not to start one adapter per scenario.
 | P0 | Maintainer management and multi-agent lanes | `docs/product/surfaces/intelligent-management-surface.md`, `docs/product/surfaces/nontechnical-operator-status-model.md` | `signal_v0`, `anchor_v0`, `management_projection_v0`, and lane-level `performance_review_v0` so a maintainer can review value, quality, cost, and attention before more automation is trusted. |
 | P0 | Repo issue-fix and PR-led growth | `docs/product/surfaces/intelligent-management-surface.md`, `docs/project-agent-todo-contract.md` | `issue_meta_surface_v0`, `issue_intake_packet_v0`, and `patch_handoff_packet_v0` so issue signals can stay visible without becoming raw backlog or unsafe patch authority. |
 | P0 | Creator and self-media operations | `README.md`, `README.zh-CN.md`, `docs/product/vision.md` | `content_ops_surface_v0`, source-aware draft queues, and durable `feedback_signal_v0` so source boundaries, taste feedback, and no-autopublish gates survive turns. |
-| P0 | Benchmark developer workflow | `docs/development/benchmark-developer-workflow.md`, `docs/research/long-horizon-agent-benchmarks/` | `observable_artifact_handle_v0`, compact result/blocker reducers, and score-claim boundary checks so real runs can be observed without raw task text, trajectories, logs, or host paths. |
+| P0 | Benchmark research workflow | `benchmark/`, benchmark research RFC | Matched arms, native runner/verifier ownership, compact receipts, and toolkit boundary checks without a built-in LoopX runner. |
 | P1 | Codex CLI TUI onboarding and continuation | `README.md`, `docs/product/runtimes/codex-cli/codex-cli-tui-loop.md`, `docs/product/runtimes/codex-cli/codex-cli-automation-driver.md` | `host_session_handle_v0`, visible-session proof, idle/fallback state, and prompt-upgrade detection so one-message bootstrap and same-TUI continuation are legible and recoverable. |
 | P1 | ML experiment advisory | `docs/product/domain-capability-packs.md`, `docs/product/roadmaps/experiment-controller-milestone.md` | `domain_pack_detection_v0`, `domain_pack_contract_v0`, and advisory `ml_experiment_result_v0` so experiment-shaped goals can be recognized without silently enabling launch or route decisions. |
 | P1 | Host integration and local dashboard APIs | `docs/reference/protocols/host-integration-surface-v0.md`, `docs/integration.md` | `host_integration_surface_v0` plus CLI-equivalent dry-run/writeback contracts so browser, MCP, and loopback surfaces remain facades rather than new authorities. |

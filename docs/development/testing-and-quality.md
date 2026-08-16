@@ -505,18 +505,7 @@ prompt、packet、模型响应、凭证与本地路径都不得进入 manifest�
 reducer：不运行测试、不调用模型、不移动 ref、不创建 tag、也不发布。即使回执 ready，
 仍需 owner 作出发布决定。
 
-`release_outcome_baseline` is conditional. It becomes mandatory only when the
-release explicitly claims benchmark or long-horizon outcome uplift, and its
-candidate ref must be `git:<candidate commit>`. Without that claim, the receipt
-states `not_required_without_outcome_uplift_claim`; it does not pretend that an
-expensive stable/candidate pair ran.
-
-`release_outcome_baseline` 是条件门：只有发布明确声明 benchmark 或长程 outcome
-提升时才必需，且 candidate ref 必须是 `git:<candidate commit>`。没有该声明时，
-回执会明确写出 `not_required_without_outcome_uplift_claim`，不会假装昂贵的
-stable/candidate 双臂已经运行。
-
-## Release Outcome Baseline / 发布结果基线
+## Benchmark Research Evidence / Benchmark 研究证据
 
 Deterministic and model-behavior gates qualify a control-plane contract; they
 do not prove that a release improves long-running outcomes. Outcome claims use
@@ -528,8 +517,14 @@ or incomplete arm fails closed and cannot automatically promote a release.
 必须使用小规模 stable-release-vs-candidate manifest，并匹配任务语义、runner、模型、
 reasoning、timeout 与重复次数。任一不匹配或不完整都 fail closed，且不能自动发布。
 
-See [Release outcome baseline v0](../reference/protocols/release-outcome-baseline-v0.md)
-and [Release readiness](../product/release-readiness.md).
+Current benchmark studies follow the
+[research RFC](../architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md)
+and live in the repository-level [benchmark workspace](https://github.com/huangruiteng/loopx/blob/main/benchmark/README.md).
+Legacy release reducers are archived and no longer form an active CLI or release
+qualification surface.
+
+当前 benchmark 研究遵循上述 RFC，并在仓库级 `benchmark/` 工作区中沉淀。旧 release
+reducer 已归档，不再属于 active CLI 或 release qualification surface。
 
 ## Risk-Based Review / 按风险审阅
 
