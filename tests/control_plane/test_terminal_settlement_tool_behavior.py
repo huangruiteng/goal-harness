@@ -157,6 +157,19 @@ def test_tool_loop_rejects_terminal_closeout_before_spend(tmp_path: Path) -> Non
     assert receipt["qualification_passed"] is False
     assert receipt["failure_code"] == "terminal_closeout_before_spend"
     assert receipt["settlement_receipt_steps"] == []
+    assert receipt["tool_call_receipts"][-1]["redacted_command_shape"] == {
+        "parseable": True,
+        "token_count_bucket": 12,
+        "executable_family": "control_plane",
+        "contains_loopx": True,
+        "loopx_command_path": "todo",
+        "loopx_command_action": "complete",
+        "operator_before_loopx": False,
+        "operator_after_loopx": False,
+        "has_environment_assignment": False,
+        "mentions_proof_target": False,
+        "multiline": False,
+    }
 
 
 def test_tool_loop_rejects_spend_before_writeback(tmp_path: Path) -> None:

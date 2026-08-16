@@ -221,6 +221,50 @@ def _command_path(tokens: list[str]) -> tuple[str, str | None]:
     return "unknown", None
 
 
+def _redacted_command_shape(command: str) -> dict[str, Any]:
+    """Describe a rejected action without retaining provider-selected text."""
+
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = []
+    loopx_index = next(
+        (
+            index
+            for index, token in enumerate(tokens)
+            if Path(token).name == "loopx"
+        ),
+        -1,
+    )
+    loopx_suffix = tokens[loopx_index:] if loopx_index >= 0 else []
+    command_path, command_action = _command_path(loopx_suffix)
+    operators = {";", "&&", "||", "|"}
+    return {
+        "parseable": bool(tokens),
+        "token_count_bucket": min(len(tokens), 12),
+        "executable_family": (
+            "control_plane"
+            if loopx_index == 0
+            else "shell_wrapper"
+            if tokens and Path(tokens[0]).name in {"bash", "sh", "zsh"}
+            else "workspace"
+        ),
+        "contains_loopx": loopx_index >= 0,
+        "loopx_command_path": command_path if loopx_index >= 0 else None,
+        "loopx_command_action": command_action if loopx_index >= 0 else None,
+        "operator_before_loopx": any(
+            token in operators for token in tokens[: max(loopx_index, 0)]
+        ),
+        "operator_after_loopx": any(token in operators for token in loopx_suffix),
+        "has_environment_assignment": any(
+            "=" in token and not token.startswith("-")
+            for token in tokens[: max(loopx_index, 0)]
+        ),
+        "mentions_proof_target": TERMINAL_SETTLEMENT_FIXTURE_PROOF in command,
+        "multiline": "\n" in command,
+    }
+
+
 def _matches_identity(tokens: list[str], state: _QualificationState) -> bool:
     return bool(
         argument_value(tokens, "--goal-id") == TERMINAL_SETTLEMENT_FIXTURE_GOAL_ID
@@ -536,13 +580,16 @@ class DoubaoTerminalSettlementToolBehaviorActor:
             except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
                 failure_code = str(exc)
 
-            state.steps.append(
-                {
-                    "ordinal": len(state.steps) + 1,
-                    "kind": kind if failure_code is None else failure_code,
-                    "command_digest": digest_text(tool_call.command),
-                }
-            )
+            step_receipt = {
+                "ordinal": len(state.steps) + 1,
+                "kind": kind if failure_code is None else failure_code,
+                "command_digest": digest_text(tool_call.command),
+            }
+            if failure_code is not None:
+                step_receipt["redacted_command_shape"] = _redacted_command_shape(
+                    tool_call.command
+                )
+            state.steps.append(step_receipt)
             if failure_code is not None:
                 return receipt(passed=False, failure_code=failure_code)
             if kind == "terminal_closeout":
