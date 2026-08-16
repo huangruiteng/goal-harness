@@ -78,6 +78,9 @@ promote a proposal beyond that status.
   ([中文版](goal-channel-collaboration-v0.zh-CN.md)): bind one external
   collaboration channel to one LoopX goal while preserving LoopX as the source
   of truth.
+- [Per-Goal Usage, Token, and Cost Surfacing v0](goal-usage-token-cost-v0.md):
+  capture per-goal token, cost, and duration in core `usage_summary` and surface
+  it in the existing dashboard behind a provider-neutral capture layer.
 
 RFCs must not contain internal conversations, private links, local filesystem
 paths, credentials, raw transcripts, or non-public organizational context.

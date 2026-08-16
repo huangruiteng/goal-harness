@@ -915,10 +915,12 @@ loopx serve-status --port 8765
 Run the dashboard:
 
 ```bash
-cd ~/loopx/apps/presentation/dashboard
-npm install
-npm run dev
+loopx dashboard
 ```
+
+On first run, LoopX installs the dashboard's npm dependencies. The command then
+starts the UI, global status service, and Agent Chat service together. Open
+`http://127.0.0.1:5173/` after the readiness messages appear.
 
 For the shared multi-project view:
 

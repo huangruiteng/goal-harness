@@ -116,11 +116,35 @@ generated site artifact.
 
 ## Run
 
+From any directory after installing LoopX:
+
+```bash
+loopx dashboard
+```
+
+This command installs the dashboard's npm dependencies on first run, then
+starts the Vite UI together with the loopback status and Chat services. Open
+`http://127.0.0.1:5173/` after the readiness messages appear.
+
+The equivalent source-checkout command remains available for dashboard
+development:
+
 ```bash
 npm ci
 npm run build
 npm run dev
 ```
+
+`npm run dev` starts the Vite UI together with the loopback status and Chat
+services on ports `5173`, `8766`, and `8767`. Use `npm run dev:web` when those
+LoopX services are already running separately. Vite proxies the default
+`/status.json` request to port `8766`, so an SSH user only needs to forward port
+`5173` for the normal development page.
+
+The live `/status.json` route keeps repository-wide public-boundary scanning
+out of the first-screen request. Its contract projection reports that scan as
+deferred; run `loopx check` before publishing or pushing public surfaces to
+perform the complete boundary audit.
 
 The default screen is the Chinese-first control-plane home. It is meant to
 answer the operator's first questions before raw status drill-down: which
@@ -280,6 +304,43 @@ local inspection file only. For public demos, use the sanitized
 
 You can also import a JSON file directly in the browser, or load a local API
 URL that returns the same `loopx --format json status` shape.
+
+## Live Single-Page Session Dash
+
+The primary way to watch session task progress is a loopback single-page panel:
+
+```bash
+loopx dash                 # serve at http://127.0.0.1:8767/ (auto-refresh every 10s)
+loopx dash --goal-id <goal-id>   # narrow the panel to one goal
+```
+
+Open the printed URL in any browser and keep it open while the agents work.
+The page is a human-focused fleet view: an overview strip of sessions, goals,
+active / needs-you / blocked / done buckets, open todos and run statistics,
+followed by one card per session with the goals it owns and each goal's
+status badge, todo progress bar, waiting reason, and latest run. It refreshes
+itself in place every 10 seconds by re-fetching the `/panel` fragment.
+Internal control machinery (decision frames, work-lane contracts, quota slot
+math, source warnings) is intentionally not rendered. The panel is
+read-only: no write controls, no browser write authority. The server binds
+loopback only and exposes no write routes.
+
+A one-shot static snapshot is also available for demos or sharing:
+
+```bash
+loopx dash generate [--goal-id <goal-id>] --out dash.html
+```
+
+Open `dash.html` in any browser. The command runs the public/private
+boundary scan before reporting success and withholds output on failure.
+
+```bash
+# print the projection + html as JSON instead
+loopx --format json dash generate --goal-id <goal-id>
+```
+
+See [the session dash panel design](../../../docs/product/surfaces/session-dash-panel-design.md)
+for the layout, data boundary, and validation contract.
 
 ## Browser Smokes
 
