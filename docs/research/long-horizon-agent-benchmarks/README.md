@@ -4,6 +4,13 @@ This topic folder owns LoopX research on public long-horizon agent
 benchmarks, external leaderboard strategy, operator-simulator study design, and
 paper-oriented experiment planning.
 
+The canonical claim ladder, experiment contract, benchmark portfolio, and
+mechanism-research boundary live in the
+[Long-Horizon Harness Benchmark and Research Program v0](../../architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md)
+RFC ([中文版](../../architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.zh-CN.md)).
+This folder contains executions and research artifacts under that contract; it
+does not define a second benchmark authority model.
+
 Keep this folder focused on research artifacts:
 
 - benchmark and paper dossiers;
