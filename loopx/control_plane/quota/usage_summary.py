@@ -4,11 +4,22 @@ from datetime import timedelta
 from typing import Any, Callable
 
 from .spend_sources import VISIBLE_GOAL_SLOT_SPEND_SOURCE
+from .usage_collector import UsageSample, collect_usage_for_run
 from ..runtime.time import now_utc
 
-USAGE_PROXY_NOTE = "run-history proxy; excludes token counts and raw thread logs"
+USAGE_PROXY_NOTE = (
+    "run-history proxy; carries aggregate token/cost/duration, "
+    "excludes raw thread logs"
+)
 
 ParseTimestamp = Callable[[Any], Any]
+USAGE_METRIC_NAMES = (
+    "input_tokens",
+    "output_tokens",
+    "cache_tokens",
+    "cost_usd",
+    "duration_ms",
+)
 
 
 def quota_spend_slots(run: dict[str, Any]) -> int:
@@ -55,7 +66,43 @@ def blank_usage_goal(goal_id: str) -> dict[str, Any]:
         "progress_signal_run_count_24h": 0,
         "progress_signal_run_count_7d": 0,
         "project_share_24h": 0.0,
+        "input_tokens_24h": 0,
+        "input_tokens_7d": 0,
+        "output_tokens_24h": 0,
+        "output_tokens_7d": 0,
+        "cache_tokens_24h": 0,
+        "cache_tokens_7d": 0,
+        "cost_usd_24h": 0.0,
+        "cost_usd_7d": 0.0,
+        "duration_ms_24h": 0,
+        "duration_ms_7d": 0,
     }
+
+
+def _accumulate_usage(bucket: dict[str, Any], sample: UsageSample, suffix: str) -> None:
+    bucket[f"input_tokens_{suffix}"] += sample.input_tokens
+    bucket[f"output_tokens_{suffix}"] += sample.output_tokens
+    bucket[f"cache_tokens_{suffix}"] += sample.cache_tokens
+    bucket[f"cost_usd_{suffix}"] += sample.cost_usd
+    bucket[f"duration_ms_{suffix}"] += sample.duration_ms
+
+
+def _round_cost(bucket: dict[str, Any]) -> None:
+    for suffix in ("24h", "7d"):
+        key = f"cost_usd_{suffix}"
+        if key in bucket:
+            bucket[key] = round(float(bucket[key]), 6)
+
+
+def _strip_unobserved_usage_windows(
+    bucket: dict[str, Any],
+    observed_windows: set[str],
+) -> None:
+    for suffix in ("24h", "7d"):
+        if suffix in observed_windows:
+            continue
+        for metric_name in USAGE_METRIC_NAMES:
+            bucket.pop(f"{metric_name}_{suffix}", None)
 
 
 def build_usage_summary(
@@ -75,8 +122,20 @@ def build_usage_summary(
         "automation_run_count_7d": 0,
         "progress_signal_run_count_24h": 0,
         "progress_signal_run_count_7d": 0,
+        "input_tokens_24h": 0,
+        "input_tokens_7d": 0,
+        "output_tokens_24h": 0,
+        "output_tokens_7d": 0,
+        "cache_tokens_24h": 0,
+        "cache_tokens_7d": 0,
+        "cost_usd_24h": 0.0,
+        "cost_usd_7d": 0.0,
+        "duration_ms_24h": 0,
+        "duration_ms_7d": 0,
     }
     goals: dict[str, dict[str, Any]] = {}
+    observed_usage_windows: set[str] = set()
+    goal_usage_windows: dict[str, set[str]] = {}
     sample_count = 0
 
     for run in history.get("runs") or []:
@@ -91,6 +150,7 @@ def build_usage_summary(
         slots = quota_spend_slots(run)
         automation_event = is_automation_run(run)
         progress_signal = is_progress_signal_run(run)
+        usage_sample = collect_usage_for_run(run)
 
         if generated_at >= cutoff_7d:
             totals["runs_7d"] += 1
@@ -103,6 +163,11 @@ def build_usage_summary(
             if progress_signal:
                 totals["progress_signal_run_count_7d"] += 1
                 goal["progress_signal_run_count_7d"] += 1
+            if usage_sample is not None:
+                _accumulate_usage(totals, usage_sample, "7d")
+                _accumulate_usage(goal, usage_sample, "7d")
+                observed_usage_windows.add("7d")
+                goal_usage_windows.setdefault(goal_id, set()).add("7d")
         if generated_at >= cutoff_24h:
             totals["runs_24h"] += 1
             goal["runs_24h"] += 1
@@ -114,21 +179,38 @@ def build_usage_summary(
             if progress_signal:
                 totals["progress_signal_run_count_24h"] += 1
                 goal["progress_signal_run_count_24h"] += 1
+            if usage_sample is not None:
+                _accumulate_usage(totals, usage_sample, "24h")
+                _accumulate_usage(goal, usage_sample, "24h")
+                observed_usage_windows.add("24h")
+                goal_usage_windows.setdefault(goal_id, set()).add("24h")
 
     if totals["runs_24h"]:
         for goal in goals.values():
             goal["project_share_24h"] = round(goal["runs_24h"] / totals["runs_24h"], 3)
+
+    _round_cost(totals)
+    for goal in goals.values():
+        _round_cost(goal)
 
     goal_rows = sorted(
         goals.values(),
         key=lambda item: (
             item["runs_24h"],
             item["quota_spend_slots_24h"],
+            item["cost_usd_24h"],
+            item["input_tokens_24h"],
             item["runs_7d"],
             item["goal_id"],
         ),
         reverse=True,
     )
+    _strip_unobserved_usage_windows(totals, observed_usage_windows)
+    for goal in goal_rows:
+        _strip_unobserved_usage_windows(
+            goal,
+            goal_usage_windows.get(str(goal.get("goal_id") or ""), set()),
+        )
     return {
         "available": True,
         "source": "run_history",

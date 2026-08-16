@@ -736,6 +736,7 @@ def collect_history(
         quota = goal_quota_with_spend_ledger(meta, runs) if registry_member else None
         goal_record = {
             "id": current_goal_id,
+            "display_name": meta.get("display_name") if registry_member else None,
             "domain": meta.get("domain"),
             "status": meta.get("status") if registry_member else "legacy-runtime",
             "repo": meta.get("repo") if registry_member else None,
