@@ -197,6 +197,7 @@ assert.doesNotMatch(sidebar, /onSelectChannel/, "The sidebar only navigates to t
 assert.doesNotMatch(page, /selectedChannel|selectChannel\(|__manager_channel__/, "Manager state lanes do not create hidden conversation channels");
 assert.match(page, /personal-digest-stats[\s\S]*<span><b>\{digest\.done\}<\/b>完成<\/span>/, "The away digest is a non-interactive summary");
 assert.match(page, /!selectedGoal && !managerChatOpen && managerConversationReceiptVisible[\s\S]*<ManagerConversationTray/, "The tray only appears on the manager overview after a send");
+assert.match(page, /managerMessages\.some\(\(message\) => message\.pending\)[\s\S]*setManagerConversationReceiptVisible\(true\)/, "A recovered active Manager turn restores its compact conversation tray");
 assert.match(page, /goal\.needsYou \?\? goal\.nextSentence/, "Needs-you cards keep the source Goal action visible");
 assert.match(page, /onClick=\{\(\) => onSelectGoal\(goal\.goalId\)\}/, "Manager cards open their source Goal instead of a hidden lane channel");
 assert.doesNotMatch(page, /managerConversationActive/, "Sending from the manager never replaces the overview with a separate conversation page");
@@ -238,7 +239,11 @@ assert.match(page, /我想创建一个长期 Goal：[\s\S]*完成标准：[\s\S]
 assert.match(page, /workspace_ref:\s*"current"/, "Create Goal does not leak another Goal id as its execution workspace");
 assert.match(page, /当前本地工作区（未绑定 Repository）/, "Create Goal explains that its execution workspace does not bind a repository");
 assert.doesNotMatch(model, /kind: "agent"/, "The drawer model omits the read-only Agent settings variant");
-assert.match(dashboard, /statusRequestActive = Boolean\(activeStatusRequestUrl\) && search\.view === "ops"/, "Initial load and refresh keep the personal workspace shell visible");
+assert.match(
+  dashboard,
+  /statusRequestActive = Boolean\(activeStatusRequestUrl\) && \([\s\S]*search\.view === "ops"[\s\S]*Boolean\(loadError && requestedStatusUrl\)[\s\S]*\)/,
+  "Initial load and refresh keep the workspace shell visible, while failed authoritative status requests surface recovery",
+);
 
 assert.match(page, /notificationSettingsOpen\s*\?\s*\(/, "Notification settings replace the center workspace");
 assert.match(page, /<LarkSettingsPage/, "Pure configuration mode renders the Lark management page");

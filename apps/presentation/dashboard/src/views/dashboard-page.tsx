@@ -8708,9 +8708,14 @@ export function DashboardPage() {
     ? search.statusUrl.trim()
     : "";
   const activeStatusRequestUrl = requestedStatusUrl ?? routeStatusRequestUrl;
-  // The personal workspace keeps its own shell visible through initial load and
-  // refresh. The legacy request surface remains available only for ops mode.
-  const statusRequestActive = Boolean(activeStatusRequestUrl) && search.view === "ops";
+  // The personal workspace keeps its shell visible while loading and refreshing.
+  // When an authoritative status request fails, replace any bundled or stale
+  // projection with the explicit recovery surface instead of silently falling
+  // back to example data.
+  const statusRequestActive = Boolean(activeStatusRequestUrl) && (
+    search.view === "ops"
+    || Boolean(loadError && requestedStatusUrl)
+  );
   const queue = payload.attention_queue;
   const runHistory = payload.run_history;
   const goalRows = useMemo(

@@ -655,6 +655,12 @@ export function PersonalWorkspacePage({
     () => items.flatMap((item) => item.kind === "message" ? [item.message] : []),
     [items],
   );
+  useEffect(() => {
+    if (selectedGoal || managerChatOpen) return;
+    if (managerMessages.some((message) => message.pending)) {
+      setManagerConversationReceiptVisible(true);
+    }
+  }, [managerChatOpen, managerMessages, selectedGoal]);
   const managerChatItems = useMemo(
     () => items.filter((item) => item.kind === "message"
       || (item.kind === "proposal" && sessionProposalIds.includes(item.proposal.previewId))),
