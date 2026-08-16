@@ -109,6 +109,9 @@ class NativeGoalTurn:
     post_goal_status: str = ""
     item_event_count: int = 0
     error_event_count: int = 0
+    turn_started_count: int = 0
+    turn_completed_count: int = 0
+    goal_status_poll_count: int = 0
 
 
 def attach_native_goal(
@@ -247,6 +250,7 @@ def observe_native_goal_event(
         turn.turn_id = event_turn_id
         turn.event_turn_id_observed = True
         turn.turn_status = str(event_turn.get("status") or "inProgress")
+        turn.turn_started_count += 1
         return False
     if event_turn_id and event_turn_id != turn.turn_id:
         return turn.terminal_event_observed
@@ -264,6 +268,7 @@ def observe_native_goal_event(
     }:
         turn.terminal_event_observed = True
         turn.turn_status = str(event_turn.get("status") or "completed")
+        turn.turn_completed_count += 1
     return turn.terminal_event_observed
 
 
@@ -272,13 +277,23 @@ def wait_native_goal_turn(
     turn: NativeGoalTurn,
     *,
     timeout_sec: float,
+    completed_before: int | None = None,
 ) -> NativeGoalTurn:
-    """Drain correlated app-server events until the turn reaches a terminal event."""
+    """Drain events until one more correlated turn reaches a terminal event.
+
+    ``completed_before`` lets a native Goal runtime wait for automatic
+    continuation turns without starting another model turn itself.  Omitting it
+    preserves the single-turn behavior for existing callers.
+    """
 
     if timeout_sec <= 0:
         raise ValueError("timeout_sec must be positive")
     deadline = time.monotonic() + timeout_sec
-    while not turn.terminal_event_observed:
+    if completed_before is None:
+        if turn.terminal_event_observed:
+            return turn
+        completed_before = turn.turn_completed_count
+    while turn.turn_completed_count <= completed_before:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise NativeGoalProtocolError("goal_turn_timeout")
@@ -303,6 +318,7 @@ def refresh_native_goal_status(
     if not status:
         raise NativeGoalProtocolError("post_goal_status_missing")
     turn.post_goal_status = status
+    turn.goal_status_poll_count += 1
     return status
 
 
@@ -318,6 +334,44 @@ def run_native_goal_turn(
     wait_native_goal_turn(transport, turn, timeout_sec=timeout_sec)
     refresh_native_goal_status(transport, turn)
     return turn
+
+
+def run_native_goal_until_terminal(
+    transport: NativeGoalEventTransport,
+    config: NativeGoalConfig,
+    *,
+    timeout_sec: float,
+) -> NativeGoalTurn:
+    """Run one native Goal until its status leaves ``active``.
+
+    Codex may schedule continuation turns while a Goal remains active.  The
+    caller starts exactly one task turn, then keeps draining those correlated
+    continuation events and reading the Goal status under one total timeout.
+    """
+
+    if timeout_sec <= 0:
+        raise ValueError("timeout_sec must be positive")
+    turn = start_native_goal_turn(transport, config)
+    deadline = time.monotonic() + timeout_sec
+    completed_before = turn.turn_completed_count
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise NativeGoalProtocolError("goal_timeout_before_terminal")
+        try:
+            wait_native_goal_turn(
+                transport,
+                turn,
+                timeout_sec=remaining,
+                completed_before=completed_before,
+            )
+        except NativeGoalProtocolError as exc:
+            if str(exc) == "goal_turn_timeout":
+                raise NativeGoalProtocolError("goal_timeout_before_terminal") from exc
+            raise
+        completed_before = turn.turn_completed_count
+        if refresh_native_goal_status(transport, turn) != "active":
+            return turn
 
 
 _StreamItem = Mapping[str, Any] | Exception
@@ -484,6 +538,7 @@ def probe_native_goal_process(
     codex_bin: str = "codex",
     process_command: Sequence[str] | None = None,
     process_env: Mapping[str, str] | None = None,
+    process_cwd: str | None = None,
     response_timeout_sec: float = 30,
 ) -> NativeGoalTurn:
     """Exercise a real app-server through Goal attachment without starting a model turn."""
@@ -491,7 +546,7 @@ def probe_native_goal_process(
     command = process_command or _default_app_server_command(codex_bin)
     with StdioNativeGoalTransport.spawn(
         command,
-        cwd=config.cwd,
+        cwd=process_cwd or config.cwd,
         env=process_env,
         response_timeout_sec=response_timeout_sec,
     ) as transport:
@@ -504,6 +559,7 @@ def run_native_goal_process(
     codex_bin: str = "codex",
     process_command: Sequence[str] | None = None,
     process_env: Mapping[str, str] | None = None,
+    process_cwd: str | None = None,
     response_timeout_sec: float = 30,
     goal_timeout_sec: float = 21_600,
 ) -> NativeGoalTurn:
@@ -512,11 +568,37 @@ def run_native_goal_process(
     command = process_command or _default_app_server_command(codex_bin)
     with StdioNativeGoalTransport.spawn(
         command,
-        cwd=config.cwd,
+        cwd=process_cwd or config.cwd,
         env=process_env,
         response_timeout_sec=response_timeout_sec,
     ) as transport:
         return run_native_goal_turn(transport, config, timeout_sec=goal_timeout_sec)
+
+
+def run_native_goal_process_until_terminal(
+    config: NativeGoalConfig,
+    *,
+    codex_bin: str = "codex",
+    process_command: Sequence[str] | None = None,
+    process_env: Mapping[str, str] | None = None,
+    process_cwd: str | None = None,
+    response_timeout_sec: float = 30,
+    goal_timeout_sec: float = 21_600,
+) -> NativeGoalTurn:
+    """Spawn app-server and keep the native Goal alive through continuations."""
+
+    command = process_command or _default_app_server_command(codex_bin)
+    with StdioNativeGoalTransport.spawn(
+        command,
+        cwd=process_cwd or config.cwd,
+        env=process_env,
+        response_timeout_sec=response_timeout_sec,
+    ) as transport:
+        return run_native_goal_until_terminal(
+            transport,
+            config,
+            timeout_sec=goal_timeout_sec,
+        )
 
 
 def compact_native_goal_receipt(turn: NativeGoalTurn) -> dict[str, Any]:
@@ -543,6 +625,10 @@ def compact_native_goal_receipt(turn: NativeGoalTurn) -> dict[str, Any]:
         "terminal_event_observed": turn.terminal_event_observed,
         "item_event_count": turn.item_event_count,
         "error_event_count": turn.error_event_count,
+        "turn_started_count": turn.turn_started_count,
+        "turn_completed_count": turn.turn_completed_count,
+        "goal_continuation_turn_completed_count": max(0, turn.turn_completed_count - 1),
+        "goal_status_poll_count": turn.goal_status_poll_count,
         "error_signatures": list(turn.error_signatures),
         "public_boundary": {
             "raw_objective_recorded": False,
@@ -568,7 +654,9 @@ __all__ = [
     "probe_native_goal_process",
     "refresh_native_goal_status",
     "run_native_goal_process",
+    "run_native_goal_process_until_terminal",
     "run_native_goal_turn",
+    "run_native_goal_until_terminal",
     "start_native_goal_turn",
     "wait_native_goal_turn",
 ]

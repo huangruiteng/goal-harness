@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -17,6 +18,8 @@ from benchmark.native_codex_goal import (
     observe_native_goal_event,
     probe_native_goal_process,
     run_native_goal_process,
+    run_native_goal_process_until_terminal,
+    run_native_goal_until_terminal,
     start_native_goal_turn,
 )
 
@@ -50,6 +53,65 @@ class FakeTransport:
 
     def notify(self, method: str, params: Mapping[str, Any]) -> None:
         self.calls.append((method, dict(params)))
+
+
+class ContinuationTransport(FakeTransport):
+    def __init__(self, *, terminal_after_second_turn: bool = True) -> None:
+        super().__init__()
+        self.goal_reads = 0
+        self.terminal_after_second_turn = terminal_after_second_turn
+        self.events: list[dict[str, Any]] = [
+            {
+                "method": "turn/started",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {"id": "event-turn-1", "status": "inProgress"},
+                },
+            },
+            {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {"id": "event-turn-1", "status": "completed"},
+                },
+            },
+            {
+                "method": "turn/started",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {"id": "event-turn-2", "status": "inProgress"},
+                },
+            },
+            {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {"id": "event-turn-2", "status": "completed"},
+                },
+            },
+        ]
+
+    def request(self, method: str, params: Mapping[str, Any]) -> Mapping[str, Any]:
+        if method != "thread/goal/get":
+            return super().request(method, params)
+        self.calls.append((method, dict(params)))
+        self.goal_reads += 1
+        status = (
+            "complete"
+            if self.terminal_after_second_turn and self.goal_reads >= 3
+            else "active"
+        )
+        return {
+            "goal": {
+                "threadId": "thread-1",
+                "objective": self.goal_objective,
+                "status": status,
+            }
+        }
+
+    def next_event(self, *, timeout_sec: float) -> Mapping[str, Any] | None:
+        del timeout_sec
+        return self.events.pop(0) if self.events else None
 
 
 def _config(**overrides: Any) -> NativeGoalConfig:
@@ -115,6 +177,9 @@ def test_goal_transaction_order_and_compact_receipt() -> None:
     rendered = json.dumps(receipt, sort_keys=True)
     assert receipt["event_turn_id_observed"] is True
     assert receipt["terminal_event_observed"] is True
+    assert receipt["turn_started_count"] == 1
+    assert receipt["turn_completed_count"] == 1
+    assert receipt["goal_continuation_turn_completed_count"] == 0
     assert receipt["token_budget_present"] is True
     assert "Finish the task." not in rendered
     assert "Implement the requested behavior" not in rendered
@@ -154,15 +219,47 @@ def test_terminal_event_preserves_failed_turn_status() -> None:
     assert turn.turn_status == "failed"
 
 
+def test_goal_runtime_waits_for_automatic_continuation_until_terminal() -> None:
+    transport = ContinuationTransport()
+
+    turn = run_native_goal_until_terminal(transport, _config(), timeout_sec=1)
+
+    methods = [method for method, _ in transport.calls]
+    assert methods.count("turn/start") == 1
+    assert methods.count("thread/goal/get") == 3
+    assert turn.post_goal_status == "complete"
+    assert turn.turn_started_count == 2
+    assert turn.turn_completed_count == 2
+    assert turn.goal_status_poll_count == 2
+    assert turn.turn_id == "event-turn-2"
+    assert (
+        compact_native_goal_receipt(turn)["goal_continuation_turn_completed_count"] == 1
+    )
+
+
+def test_goal_runtime_fails_closed_when_active_goal_never_continues() -> None:
+    transport = ContinuationTransport(terminal_after_second_turn=False)
+    transport.events = transport.events[:2]
+
+    with pytest.raises(NativeGoalProtocolError, match="goal_timeout_before_terminal"):
+        run_native_goal_until_terminal(transport, _config(), timeout_sec=0.01)
+
+
 def _write_fake_app_server(path: Path) -> None:
     path.write_text(
         textwrap.dedent(
             r"""
             #!/usr/bin/env python3
             import json
+            import os
             import sys
 
+            expected_process_cwd = os.environ.get("EXPECTED_PROCESS_CWD")
+            if expected_process_cwd:
+                assert os.getcwd() == expected_process_cwd
             objective = ""
+            goal_reads = 0
+            continuation_enabled = os.environ.get("FAKE_GOAL_CONTINUATION") == "1"
             for line in sys.stdin:
                 request = json.loads(line)
                 method = request.get("method")
@@ -174,16 +271,24 @@ def _write_fake_app_server(path: Path) -> None:
                     result = {"serverInfo": {"name": "fixture"}}
                 elif method == "thread/start":
                     assert params["model"] == "model-route"
+                    expected_goal_cwd = os.environ.get("EXPECTED_GOAL_CWD")
+                    if expected_goal_cwd:
+                        assert params["cwd"] == expected_goal_cwd
                     result = {"thread": {"id": "thread-1"}}
                 elif method == "thread/goal/set":
                     objective = params["objective"]
                     result = {"goal": {"threadId": "thread-1"}}
                 elif method == "thread/goal/get":
+                    goal_reads += 1
                     result = {
                         "goal": {
                             "threadId": "thread-1",
                             "objective": objective,
-                            "status": "active",
+                            "status": (
+                                "complete"
+                                if continuation_enabled and goal_reads >= 3
+                                else "active"
+                            ),
                         }
                     }
                 elif method == "turn/start":
@@ -211,6 +316,22 @@ def _write_fake_app_server(path: Path) -> None:
                             "turn": {"id": "event-turn", "status": "completed"},
                         },
                     }), flush=True)
+                elif (
+                    method == "thread/goal/get"
+                    and continuation_enabled
+                    and goal_reads == 2
+                ):
+                    for event_method, turn_id in (
+                        ("turn/started", "event-turn-2"),
+                        ("turn/completed", "event-turn-2"),
+                    ):
+                        print(json.dumps({
+                            "method": event_method,
+                            "params": {
+                                "threadId": "thread-1",
+                                "turn": {"id": turn_id, "status": "completed"},
+                            },
+                        }), flush=True)
             """
         ).lstrip(),
         encoding="utf-8",
@@ -251,6 +372,69 @@ def test_real_stdio_process_runs_complete_native_goal_transaction(
     }
 
 
+def test_process_cwd_can_differ_from_goal_thread_cwd(tmp_path: Path) -> None:
+    fake_server = tmp_path / "fake-codex"
+    _write_fake_app_server(fake_server)
+    process_cwd = tmp_path / "process"
+    goal_cwd = tmp_path / "goal"
+    process_cwd.mkdir()
+    goal_cwd.mkdir()
+    process_env = dict(os.environ)
+    process_env.update(
+        {
+            "EXPECTED_PROCESS_CWD": str(process_cwd),
+            "EXPECTED_GOAL_CWD": str(goal_cwd),
+        }
+    )
+
+    turn = run_native_goal_process(
+        _config(
+            cwd=str(goal_cwd),
+            sandbox_policy={
+                "type": "workspaceWrite",
+                "writableRoots": [str(goal_cwd)],
+                "networkAccess": False,
+            },
+        ),
+        process_command=[sys.executable, str(fake_server)],
+        process_env=process_env,
+        process_cwd=str(process_cwd),
+        response_timeout_sec=2,
+        goal_timeout_sec=2,
+    )
+
+    assert turn.terminal_event_observed is True
+
+
+def test_real_stdio_process_waits_until_native_goal_is_terminal(
+    tmp_path: Path,
+) -> None:
+    fake_server = tmp_path / "fake-continuing-codex"
+    _write_fake_app_server(fake_server)
+    process_env = dict(os.environ)
+    process_env["FAKE_GOAL_CONTINUATION"] = "1"
+
+    turn = run_native_goal_process_until_terminal(
+        _config(
+            cwd=str(tmp_path),
+            sandbox_policy={
+                "type": "workspaceWrite",
+                "writableRoots": [str(tmp_path)],
+                "networkAccess": False,
+            },
+        ),
+        process_command=[sys.executable, str(fake_server)],
+        process_env=process_env,
+        response_timeout_sec=2,
+        goal_timeout_sec=2,
+    )
+
+    assert turn.post_goal_status == "complete"
+    assert turn.turn_started_count == 2
+    assert turn.turn_completed_count == 2
+    assert turn.goal_status_poll_count == 2
+
+
 def test_real_stdio_preflight_attaches_goal_without_starting_turn(
     tmp_path: Path,
 ) -> None:
@@ -273,8 +457,8 @@ def test_runnable_example_connects_to_stdio_app_server(tmp_path: Path) -> None:
     _write_fake_app_server(fake_server)
     objective = tmp_path / "objective.txt"
     task = tmp_path / "task.txt"
-    objective.write_text("Finish the task.", encoding="utf-8")
-    task.write_text("Implement the requested behavior.", encoding="utf-8")
+    objective.write_text("\nFinish the task.\n", encoding="utf-8")
+    task.write_text("\nImplement the requested behavior.\n", encoding="utf-8")
 
     completed = subprocess.run(
         [

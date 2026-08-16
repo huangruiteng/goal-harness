@@ -17,7 +17,7 @@ from loopx.capabilities.benchmark_toolkit.native_codex_goal import (
     NativeGoalConfig,
     compact_native_goal_receipt,
     probe_native_goal_process,
-    run_native_goal_process,
+    run_native_goal_process_until_terminal,
 )
 
 
@@ -25,7 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Connect to a real `codex app-server`, attach an active Goal, and "
-            "optionally run one complete task turn."
+            "optionally run through every Goal continuation until terminal."
         )
     )
     parser.add_argument("--cwd", required=True, help="Task-visible working directory")
@@ -57,8 +57,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     config = NativeGoalConfig(
         cwd=args.cwd,
-        objective=Path(args.objective_file).read_text(encoding="utf-8"),
-        task_instruction=Path(args.task_file).read_text(encoding="utf-8"),
+        objective=Path(args.objective_file).read_text(encoding="utf-8").strip(),
+        task_instruction=Path(args.task_file).read_text(encoding="utf-8").strip(),
         model=args.model,
         effort=args.effort,
         token_budget=args.token_budget,
@@ -71,13 +71,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         mode = "goal_attachment_preflight"
     else:
-        turn = run_native_goal_process(
+        turn = run_native_goal_process_until_terminal(
             config,
             codex_bin=args.codex_bin,
             response_timeout_sec=args.response_timeout_seconds,
             goal_timeout_sec=args.goal_timeout_seconds,
         )
-        mode = "complete_goal_turn"
+        mode = "goal_until_terminal"
     receipt = compact_native_goal_receipt(turn)
     receipt["execution_mode"] = mode
     print(json.dumps(receipt, indent=2, sort_keys=True))
