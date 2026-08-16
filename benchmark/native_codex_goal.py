@@ -19,7 +19,9 @@ from loopx.capabilities.benchmark_toolkit.native_codex_goal import (
     probe_native_goal_process,
     refresh_native_goal_status,
     run_native_goal_process,
+    run_native_goal_process_until_terminal,
     run_native_goal_turn,
+    run_native_goal_until_terminal,
     start_native_goal_turn,
     wait_native_goal_turn,
 )
@@ -37,7 +39,9 @@ __all__ = [
     "probe_native_goal_process",
     "refresh_native_goal_status",
     "run_native_goal_process",
+    "run_native_goal_process_until_terminal",
     "run_native_goal_turn",
+    "run_native_goal_until_terminal",
     "start_native_goal_turn",
     "wait_native_goal_turn",
 ]
