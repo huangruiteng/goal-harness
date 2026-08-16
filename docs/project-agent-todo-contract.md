@@ -358,6 +358,13 @@ the agent should do one of two things:
   / `--reason` / `--evidence`, explaining why the feature is truly finished
   and does not need rollout, audit, docs, or product-path proof.
 
+This succession decision is durable Todo state. A later progress observation,
+vision ACK, coverage-exhausted result, or rewritten rationale cannot substitute
+for it. If the Todo is already complete without either branch, use the supported
+same-turn `todo complete --no-follow-up` recovery when its completion identity
+is still current; otherwise add/link a real successor. Do not create a user
+gate merely to silence a succession warning.
+
 This keeps the active checklist honest without making LoopX a heavyweight
 project-management state machine.
 
