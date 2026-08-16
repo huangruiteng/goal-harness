@@ -35,7 +35,9 @@ lineage, and a `turn_key`. Material results (`validated_completion` /
 - public execution effects prove durable state write and one quota spend;
 - the scheduler handoff completed;
 - `validated_completion` carries the durable Todo lifecycle outcome
-  (`successor`, `active_goal`, or `no_followup`).
+  (`successor`, `active_goal`, or `no_followup`) from the required explicit
+  `completion_continuation` field. Missing or contradictory completed state is
+  rejected rather than inferred.
 
 This keeps settlement truth in the core Effect Program rather than duplicating
 it as Turn-controller phase logic. A budget must carry strict integer domains (`type(...) is int`,
@@ -95,6 +97,10 @@ and `writes_state=false`.
   decision. Only durable `no_followup` plus a fresh terminal Goal frontier may
   produce `terminal`. An undeclared successor, reselected completed Todo, or
   missing lifecycle outcome raises `ValueError`.
+- The lifecycle may recover only an explicit `active_goal` completion to
+  `no_followup` within the same `completion_turn_key`. That audited recovery is
+  not a fourth continuation and never weakens the controller's fresh-frontier
+  requirement.
 - A validation-only intermediate, phase-only committed mapping, incomplete
   settlement receipt chain, mismatched effect identity, missing durable
   effects, or incomplete scheduler handoff cannot drive `terminal`, `run_now`,

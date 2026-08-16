@@ -132,6 +132,25 @@ def test_todo_metadata_round_trip_preserves_canonical_values() -> None:
     }
 
 
+def test_todo_metadata_round_trip_preserves_terminal_recovery_state() -> None:
+    line = format_todo_metadata_line(
+        todo_id="todo_terminal001",
+        status="done",
+        no_followup=True,
+        completion_continuation="no_followup",
+        completion_recovery="same_turn_terminal_closeout",
+    )
+
+    assert line is not None
+    assert parse_todo_metadata_line(line) == {
+        "todo_id": "todo_terminal001",
+        "status": "done",
+        "completion_continuation": "no_followup",
+        "completion_recovery": "same_turn_terminal_closeout",
+        "no_followup": True,
+    }
+
+
 def test_todo_metadata_parser_ignores_noncanonical_field_names() -> None:
     parsed = parse_todo_metadata_line(
         "  <!-- loopx:todo "
@@ -177,6 +196,14 @@ def test_todo_metadata_parser_skips_invalid_canonical_values() -> None:
         ({"decision_scope": "invalid"}, "decision_scope must use"),
         ({"excluded_agents": ["bad/value"]}, "public-safe agent tokens"),
         ({"successor_todo_ids": ["bad"]}, "successor_todo_ids must contain"),
+        (
+            {"completion_continuation": "implicit"},
+            "completion_continuation must be one of",
+        ),
+        (
+            {"completion_recovery": "best_effort"},
+            "completion_recovery must be same_turn_terminal_closeout",
+        ),
     ],
 )
 def test_todo_metadata_formatter_rejects_invalid_canonical_values(
@@ -199,6 +226,7 @@ def test_todo_metadata_formatter_enforces_cross_field_constraints() -> None:
             claimed_by="codex-quality",
             excluded_agents=["codex-quality"],
         )
+
 
 
 def test_multi_subagent_todo_parser_projects_untruncated_admission_authority() -> None:

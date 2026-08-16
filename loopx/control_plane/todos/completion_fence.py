@@ -7,6 +7,10 @@ from .contract import (
     normalize_todo_id_list,
     normalize_todo_no_followup,
 )
+from .completion_state import (
+    TodoCompletionContinuation,
+    normalize_todo_completion_continuation,
+)
 
 
 def completed_todo_replay(
@@ -43,15 +47,31 @@ def completed_todo_replay(
     terminal_upgrade = (
         no_followup and normalize_todo_no_followup(todo.get("no_followup")) is not True
     )
+    completion_continuation = normalize_todo_completion_continuation(
+        todo.get("completion_continuation")
+    )
     if terminal_upgrade:
-        if not completion_turn_key or completion_turn_key != existing_turn_key:
-            raise ValueError(
-                "todo terminal closeout requires the original completion_turn_key"
-            )
         if normalize_todo_id_list(todo.get("successor_todo_ids")):
             raise ValueError(
                 "todo terminal closeout cannot replace an existing successor"
             )
+        if completion_continuation is None:
+            raise ValueError(
+                "completed todo is missing completion_continuation; repair the "
+                "Todo with `loopx todo complete` without --no-follow-up before terminal "
+                "closeout"
+            )
+        if completion_continuation != TodoCompletionContinuation.ACTIVE_GOAL.value:
+            raise ValueError(
+                "todo terminal closeout recovery requires "
+                "completion_continuation=active_goal"
+            )
+        if not completion_turn_key or completion_turn_key != existing_turn_key:
+            raise ValueError(
+                "todo terminal closeout requires the original completion_turn_key"
+            )
+        return None
+    if completion_continuation is None:
         return None
     return {
         "ok": True,
@@ -62,6 +82,8 @@ def completed_todo_replay(
         "goal_id": goal_id,
         "todo_id": todo_id,
         "status": TODO_STATUS_DONE,
+        "completion_continuation": completion_continuation,
+        "completion_recovery": todo.get("completion_recovery"),
         "handoff_mode": handoff_mode,
         "mutation_authority": mutation_authority,
         "state_file": state_file,

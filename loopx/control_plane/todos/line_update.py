@@ -40,6 +40,12 @@ from .contract import (
     parse_todo_metadata_line,
     require_supported_todo_resume_when,
 )
+from .completion_state import (
+    TodoCompletionContinuation,
+    completion_metadata_updates,
+    normalize_todo_completion_continuation,
+    normalize_todo_completion_recovery,
+)
 
 
 def upsert_todo_metadata(
@@ -90,7 +96,12 @@ def link_generated_successor_todo_ids(
         block,
         metadata_line_for_todo_block(
             block,
-            {"successor_todo_ids": merged_successor_ids},
+            {
+                "successor_todo_ids": merged_successor_ids,
+                "completion_continuation": (
+                    TodoCompletionContinuation.SUCCESSOR.value
+                ),
+            },
         ),
     )
     update_result["successor_todo_ids"] = merged_successor_ids
@@ -136,6 +147,8 @@ def apply_todo_update_to_lines(
     clear_global_gate: bool = False,
     unblocks_todo_id: str | None = None,
     successor_todo_ids: list[str] | None = None,
+    completion_continuation: str | None = None,
+    completion_recovery: str | None = None,
     resume_when: str | None = None,
     clear_resume_when: bool = False,
     no_followup: bool | None = None,
@@ -276,6 +289,17 @@ def apply_todo_update_to_lines(
         updates["resume_when"] = normalized_resume_when
     if no_followup is not None:
         updates["no_followup"] = no_followup
+    updates.update(
+        completion_metadata_updates(
+            block,
+            target_status=target_status,
+            normalized_status=normalized_status,
+            completion_continuation=completion_continuation,
+            completion_recovery=completion_recovery,
+            no_followup=no_followup,
+            successor_todo_ids=successor_todo_ids,
+        )
+    )
     for key, value in (monitor_metadata or {}).items():
         if key in TODO_MONITOR_METADATA_FIELDS:
             updates[key] = value
@@ -346,6 +370,12 @@ def apply_todo_update_to_lines(
         ),
         "successor_todo_ids": normalize_todo_id_list(
             effective_metadata.get("successor_todo_ids")
+        ),
+        "completion_continuation": normalize_todo_completion_continuation(
+            effective_metadata.get("completion_continuation")
+        ),
+        "completion_recovery": normalize_todo_completion_recovery(
+            effective_metadata.get("completion_recovery")
         ),
         "resume_when": normalize_todo_resume_when(
             effective_metadata.get("resume_when")

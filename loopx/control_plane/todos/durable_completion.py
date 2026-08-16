@@ -30,6 +30,11 @@ from .contract import (
     normalize_todo_no_followup,
     normalize_todo_status,
 )
+from .completion_state import (
+    TodoCompletionContinuation,
+    normalize_todo_completion_continuation,
+    normalize_todo_completion_recovery,
+)
 from .event_writeback import event_projection_todo_context
 
 
@@ -108,12 +113,11 @@ def project_durable_completion_outcome(
       every declared successor must exist in the goal state
       (``existing_todo_ids``) or projection fails closed;
     - ``no_followup`` when the Todo durably records ``no_followup``;
-    - ``active_goal`` otherwise.
+    - ``active_goal`` when that value is durably recorded.
 
     Raises ``ValueError`` (fail closed) when the durable record contradicts
-    itself (both ``no_followup`` and successors), when a declared successor is
-    dangling, when the Todo id does not match ``expected_todo_id``, or when the
-    Todo is not durably done.
+    itself, omits its explicit completion continuation, declares a dangling
+    successor, does not match ``expected_todo_id``, or is not durably done.
     """
     return _project_durable_completion(
         todo=todo,
@@ -167,17 +171,50 @@ def _project_durable_completion(
         )
     successor_todo_ids = normalize_todo_id_list(todo.get("successor_todo_ids"))
     no_followup = normalize_todo_no_followup(todo.get("no_followup"))
+    completion_continuation = normalize_todo_completion_continuation(
+        todo.get("completion_continuation")
+    )
+    raw_completion_recovery = todo.get("completion_recovery")
+    completion_recovery = normalize_todo_completion_recovery(
+        raw_completion_recovery
+    )
+    if raw_completion_recovery and completion_recovery is None:
+        raise ValueError("durable completion_recovery is invalid")
+    if require_done and completion_continuation is None:
+        raise ValueError(
+            "durable completion is missing completion_continuation; repair the "
+            "Todo with `loopx todo complete`"
+        )
+    if completion_continuation is None:
+        if no_followup is True:
+            completion_continuation = TodoCompletionContinuation.NO_FOLLOWUP.value
+        elif successor_todo_ids:
+            completion_continuation = TodoCompletionContinuation.SUCCESSOR.value
+        else:
+            completion_continuation = TodoCompletionContinuation.ACTIVE_GOAL.value
     if no_followup is True:
         if successor_todo_ids:
             raise ValueError(
                 "durable completion records both no_followup and "
                 "successor_todo_ids"
             )
+        if completion_continuation != TodoCompletionContinuation.NO_FOLLOWUP.value:
+            raise ValueError(
+                "durable completion_continuation contradicts no_followup"
+            )
         return {
             "todo_id": normalized_expected_todo_id,
             "continuation": "no_followup",
         }
     if successor_todo_ids:
+        if completion_recovery is not None:
+            raise ValueError(
+                "durable completion_recovery requires a no_followup continuation"
+            )
+        if completion_continuation != TodoCompletionContinuation.SUCCESSOR.value:
+            raise ValueError(
+                "durable completion_continuation contradicts successor_todo_ids"
+            )
         if existing_todo_ids is not None:
             existing = set(existing_todo_ids)
             missing_todo_ids = [
@@ -195,6 +232,15 @@ def _project_durable_completion(
             "continuation": "successor",
             "successor_todo_ids": successor_todo_ids,
         }
+    if completion_continuation != TodoCompletionContinuation.ACTIVE_GOAL.value:
+        raise ValueError(
+            "durable completion_continuation requires matching no_followup or "
+            "successor_todo_ids"
+        )
+    if completion_recovery is not None:
+        raise ValueError(
+            "durable completion_recovery requires a no_followup continuation"
+        )
     return {
         "todo_id": normalized_expected_todo_id,
         "continuation": "active_goal",

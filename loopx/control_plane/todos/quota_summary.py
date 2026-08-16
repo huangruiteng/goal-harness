@@ -88,6 +88,8 @@ QUOTA_PAYLOAD_ITEM_FIELDS = (
     "blocking_monitor_todo_id",
     "no_followup",
     "successor_todo_ids",
+    "completion_continuation",
+    "completion_recovery",
     "replan_obligation_id",
     "target_key",
     "cadence",

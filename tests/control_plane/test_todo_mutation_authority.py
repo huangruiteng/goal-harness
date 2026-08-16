@@ -454,7 +454,9 @@ def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path) -> None:
         no_followup=True,
     )
     assert completed["completed"] is True
-    assert _agent_todo(state, todo["todo_id"])["completion_turn_key"] == "turn-a"
+    completed_todo = _agent_todo(state, todo["todo_id"])
+    assert completed_todo["completion_turn_key"] == "turn-a"
+    assert completed_todo["completion_continuation"] == "no_followup"
     completed_state = state.read_text(encoding="utf-8")
 
     with pytest.raises(ValueError, match="different completion_turn_key"):
@@ -496,6 +498,7 @@ def test_terminal_upgrade_cannot_replace_existing_successor(tmp_path: Path) -> N
         next_agent_todo="Continue the durable successor.",
     )
     assert completed["changed"] is True
+    assert completed["completion_continuation"] == "successor"
 
     with pytest.raises(ValueError, match="cannot replace an existing successor"):
         complete_goal_todo(
@@ -522,6 +525,7 @@ def test_terminal_upgrade_requires_original_completion_turn_key(tmp_path: Path) 
         evidence="ordinary completion from the original turn",
     )
     assert completed["changed"] is True
+    assert completed["completion_continuation"] == "active_goal"
 
     with pytest.raises(ValueError, match="requires the original completion_turn_key"):
         complete_goal_todo(
@@ -532,6 +536,64 @@ def test_terminal_upgrade_requires_original_completion_turn_key(tmp_path: Path) 
             evidence="an unscoped caller cannot claim terminal closeout",
             no_followup=True,
         )
+
+
+def test_terminal_upgrade_rejects_untyped_legacy_completion_until_repaired(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    todo = _add_agent_todo(registry)
+    todo_id = todo["todo_id"]
+
+    complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        claimed_by=AUTHOR_AGENT,
+        completion_turn_key="turn-a",
+        evidence="ordinary completion from the original turn",
+    )
+    state.write_text(
+        state.read_text(encoding="utf-8").replace(
+            " completion_continuation=active_goal",
+            "",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="missing completion_continuation"):
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo_id,
+            claimed_by=AUTHOR_AGENT,
+            completion_turn_key="turn-a",
+            evidence="legacy ambiguity must not be inferred",
+            no_followup=True,
+        )
+
+    repaired = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        claimed_by=AUTHOR_AGENT,
+        completion_turn_key="turn-a",
+        evidence="repair explicit completion continuation",
+        note="repair explicit completion continuation",
+    )
+    assert repaired["completion_continuation"] == "active_goal"
+
+    upgraded = complete_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo_id,
+        claimed_by=AUTHOR_AGENT,
+        completion_turn_key="turn-a",
+        evidence="same-turn terminal closeout after explicit repair",
+        no_followup=True,
+    )
+    assert upgraded["completion_continuation"] == "no_followup"
+    assert upgraded["completion_recovery"] == "same_turn_terminal_closeout"
 
 
 def test_event_projected_completion_reports_task_lease_fence(
@@ -1038,6 +1100,7 @@ def test_event_projected_completion_appends_same_turn_terminal_upgrade(
                 "completed_at": "2026-07-18T00:01:00+00:00",
                 "updated_at": "2026-07-18T00:01:00+00:00",
                 "completion_turn_key": "turn-a",
+                "completion_continuation": "active_goal",
             },
             recorded_at="2026-07-18T00:01:00+00:00",
         )
@@ -1071,6 +1134,10 @@ def test_event_projected_completion_appends_same_turn_terminal_upgrade(
     projected = build_state_projection(upgraded_events)
     projected_todo = projected["agent_todos"]["items"][0]
     assert projected_todo["no_followup"] == "true"
+    assert projected_todo["completion_continuation"] == "no_followup"
+    assert projected_todo["completion_recovery"] == (
+        "same_turn_terminal_closeout"
+    )
     assert projected_todo["completed_at"] == "2026-07-18T00:01:00+00:00"
     assert sum(event["event_type"] == TODO_COMPLETED for event in upgraded_events) == 2
 

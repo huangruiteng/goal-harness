@@ -10,10 +10,12 @@ from ...agent_registry import (
     require_registered_agent_id,
 )
 from ..agents.runtime_model import agent_runtime_model_for_goal
+from .active_state_editing import find_todo_block
 from .contract import (
     TodoContinuationPolicy,
     normalize_todo_claimed_by,
     normalize_todo_continuation_policy,
+    normalize_todo_id,
     require_todo_excluded_agents,
     resolve_todo_continuation_policy,
 )
@@ -52,6 +54,39 @@ def linked_successor_from_todo(todo: Mapping[str, Any]) -> LinkedSuccessor:
         ),
         claimed_by=normalize_todo_claimed_by(todo.get("claimed_by")),
     )
+
+
+def linked_successors_from_state(
+    *,
+    lines: list[str],
+    successor_todo_ids: Iterable[str],
+    event_fields: Mapping[str, Any] | None = None,
+) -> list[LinkedSuccessor]:
+    """Resolve declared successor rows from Markdown or event projection."""
+
+    successors: list[LinkedSuccessor] = []
+    for todo_id in successor_todo_ids:
+        match = find_todo_block(lines, todo_id=todo_id)
+        if match:
+            role, _section, _start, _end, block = match
+            successors.append(linked_successor_from_todo({**block, "role": role}))
+            continue
+        for role in ("user", "agent"):
+            summary = (event_fields or {}).get(f"{role}_todos")
+            items = summary.get("items") if isinstance(summary, Mapping) else []
+            item = next(
+                (
+                    value
+                    for value in items or []
+                    if isinstance(value, Mapping)
+                    and normalize_todo_id(value.get("todo_id")) == todo_id
+                ),
+                None,
+            )
+            if item:
+                successors.append(linked_successor_from_todo({**item, "role": role}))
+                break
+    return successors
 
 
 def _first_open_agent_successor(

@@ -481,6 +481,8 @@ def compact_todo_item(item: dict[str, Any]) -> dict[str, Any]:
         "resume_ready",
         "no_followup",
         "successor_todo_ids",
+        "completion_continuation",
+        "completion_recovery",
         "replan_obligation_id",
         "target_key",
         "cadence",

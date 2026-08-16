@@ -79,6 +79,8 @@ def _compact_succession_warning_item(item: dict[str, Any]) -> dict[str, Any]:
         "resume_ready",
         "no_followup",
         "successor_todo_ids",
+        "completion_continuation",
+        "completion_recovery",
         "target_key",
         "cadence",
         "next_due_at",

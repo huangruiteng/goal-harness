@@ -38,6 +38,11 @@ from .contract import (
     normalize_todo_task_repository,
     todo_done_for_status,
 )
+from .completion_state import (
+    TodoCompletionContinuation,
+    completion_state_for_todo_write,
+    normalize_todo_completion_continuation,
+)
 from .text import (
     TODO_PRIORITY_PREFIX_PATTERN,
     inherit_todo_priority,
@@ -342,18 +347,39 @@ def complete_event_projected_goal_todo(
         and no_followup
         and normalize_todo_no_followup(item.get("no_followup")) is not True
     )
+    untyped_completion_repair = (
+        str(item.get("status") or "") == TODO_STATUS_DONE
+        and normalize_todo_completion_continuation(
+            item.get("completion_continuation")
+        )
+        is None
+    )
     if terminal_upgrade_requested:
+        if normalize_todo_id_list(item.get("successor_todo_ids")):
+            raise ValueError(
+                "todo terminal closeout cannot replace an existing successor"
+            )
+        existing_continuation = normalize_todo_completion_continuation(
+            item.get("completion_continuation")
+        )
+        if existing_continuation is None:
+            raise ValueError(
+                "completed todo is missing completion_continuation; repair the "
+                "Todo with `loopx todo complete` without --no-follow-up before terminal "
+                "closeout"
+            )
+        if existing_continuation != TodoCompletionContinuation.ACTIVE_GOAL.value:
+            raise ValueError(
+                "todo terminal closeout recovery requires "
+                "completion_continuation=active_goal"
+            )
         existing_turn_key = str(item.get("completion_turn_key") or "")
         if not completion_turn_key or completion_turn_key != existing_turn_key:
             raise ValueError(
                 "todo terminal closeout requires the original completion_turn_key"
             )
-        if normalize_todo_id_list(item.get("successor_todo_ids")):
-            raise ValueError(
-                "todo terminal closeout cannot replace an existing successor"
-            )
     terminal_upgrade = terminal_upgrade_requested
-    if already_done and not terminal_upgrade:
+    if already_done and not terminal_upgrade and not untyped_completion_repair:
         return {
             "ok": True,
             "dry_run": dry_run,
@@ -366,6 +392,10 @@ def complete_event_projected_goal_todo(
             "todo": item.get("text") or item.get("title"),
             "todo_id": todo_id,
             "status": TODO_STATUS_DONE,
+            "completion_continuation": normalize_todo_completion_continuation(
+                item.get("completion_continuation")
+            ),
+            "completion_recovery": item.get("completion_recovery"),
             "status_changed": False,
             "next_todos": [],
             "state_file": str(context.get("state_file") or ""),
@@ -438,8 +468,19 @@ def complete_event_projected_goal_todo(
     normalized_successor_todo_ids = merge_todo_id_lists(
         successor_todo_ids,
         [item.get("todo_id") for item in next_results],
+        normalize_todo_id_list(item.get("successor_todo_ids")),
     )
+    completion_state = completion_state_for_todo_write(
+        item,
+        requested_no_followup=no_followup,
+        has_successor=bool(normalized_successor_todo_ids),
+    )
+    completion_continuation = completion_state.continuation
+    completion_recovery = completion_state.recovery
     completion_payload: dict[str, Any] = {"updated_at": updated_at}
+    completion_payload["completion_continuation"] = completion_continuation
+    if completion_recovery:
+        completion_payload["completion_recovery"] = completion_recovery
     if not already_done:
         completion_payload["completed_at"] = updated_at
     if evidence:
@@ -468,7 +509,7 @@ def complete_event_projected_goal_todo(
         producer="loopx.todo.complete",
         actor_agent_id=actor_agent_id,
     )
-    if (not already_done or terminal_upgrade) and not dry_run:
+    if (not already_done or terminal_upgrade or untyped_completion_repair) and not dry_run:
         store.append(completion_event)
 
     result = {
@@ -483,14 +524,23 @@ def complete_event_projected_goal_todo(
         "status": TODO_STATUS_DONE,
         "status_changed": not already_done,
         "text_changed": False,
-        "metadata_updated": (not already_done) or terminal_upgrade,
-        "changed": (not already_done) or terminal_upgrade or bool(next_results),
+        "metadata_updated": (
+            (not already_done) or terminal_upgrade or untyped_completion_repair
+        ),
+        "changed": (
+            (not already_done)
+            or terminal_upgrade
+            or untyped_completion_repair
+            or bool(next_results)
+        ),
         "claimed_by": normalize_todo_claimed_by(effective_claimed_by),
         "task_class": item.get("task_class"),
         "action_kind": item.get("action_kind"),
         "capability_binding_ref": item.get("capability_binding_ref"),
         "continuation_policy": item.get("continuation_policy"),
         "successor_todo_ids": normalized_successor_todo_ids,
+        "completion_continuation": completion_continuation,
+        "completion_recovery": completion_recovery,
         "next_todos": next_results,
         "state_file": str(context.get("state_file") or ""),
         "project": str(context.get("project") or "") or None,

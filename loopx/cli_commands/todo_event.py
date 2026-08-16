@@ -73,6 +73,8 @@ def append_todo_rollout_event(
             "added": bool(payload.get("added")),
             "already_exists": bool(payload.get("already_exists")),
             "no_followup": bool(getattr(args, "no_follow_up", False)),
+            "completion_continuation": payload.get("completion_continuation"),
+            "completion_recovery": payload.get("completion_recovery"),
             "mutation_authority": payload.get("mutation_authority"),
             "replan_transition": payload.get("replan_transition"),
             "settlement_effect_id": (

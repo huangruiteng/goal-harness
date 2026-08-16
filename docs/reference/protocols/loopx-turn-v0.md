@@ -357,7 +357,7 @@ Every attempted tick returns one result kind:
 | Result kind | Meaning | Required next state |
 | --- | --- | --- |
 | `validated_progress` | One bounded segment produced validated evidence. | Update current todo, refresh, spend once. |
-| `validated_completion` | Acceptance for the current todo is met. | Complete todo, link a successor or record no-follow-up, refresh, spend once. |
+| `validated_completion` | Acceptance for the current todo is met. | Complete todo with exactly one typed continuation (`successor`, `active_goal`, or `no_followup`), refresh, spend once. |
 | `repair_required` | The todo remains sound but a recoverable execution defect blocks it. | Keep or create a concrete repair todo; do not mark success. |
 | `replan_required` | The current route is exhausted or incompatible while the goal acceptance gap remains. | Write a bounded todo delta or vision replan trigger. |
 | `user_action_required` | A concrete user decision, payload, or credential action is projected. | Notify with the projected action in the configured operator language; no host run and no spend. |
@@ -374,6 +374,18 @@ authorized `no_followup` record, or `active_goal` continuation. The durable
 Turn journal records that outcome before quota spend. A Todo completion alone
 never terminates the goal; a fresh decision owns successor selection and goal
 termination.
+
+Every newly completed Todo persists `completion_continuation` explicitly. The
+value must agree with its durable relations: `successor` requires at least one
+`successor_todo_id`, `no_followup` requires `no_followup=true`, and
+`active_goal` requires neither. A completed record that omits the field is not
+interpreted as `active_goal`; it fails closed until an agent explicitly repairs
+it by replaying `loopx todo complete`. The only post-completion transition is
+the narrow #3261 recovery seam: during the original `completion_turn_key`, an
+explicit `active_goal` may be upgraded to `no_followup` after the matching
+writeback and spend receipts exist. The recovery records
+`completion_recovery=same_turn_terminal_closeout`; it cannot cross a Turn or
+replace a successor.
 
 `repair_required` and `replan_required` are distinct. Repair preserves the
 current task intent. Replan changes the runnable todo set or route because the

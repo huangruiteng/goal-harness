@@ -55,6 +55,8 @@ TODO_SUMMARY_COMPACT_FIELDS = (
     "resume_ready",
     "no_followup",
     "successor_todo_ids",
+    "completion_continuation",
+    "completion_recovery",
     "replan_obligation_id",
     "target_key",
     "cadence",

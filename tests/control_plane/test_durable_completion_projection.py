@@ -20,10 +20,11 @@ from loopx.event_sourced_state import (
 TODO_DONE = {
     "todo_id": "todo_fixture0001",
     "status": "done",
+    "completion_continuation": "active_goal",
 }
 
 
-def test_projects_active_goal_when_no_durable_continuation_recorded() -> None:
+def test_projects_explicit_active_goal_continuation() -> None:
     outcome = project_durable_completion_outcome(
         todo=TODO_DONE,
         expected_todo_id="todo_fixture0001",
@@ -37,6 +38,7 @@ def test_projects_active_goal_when_no_durable_continuation_recorded() -> None:
 def test_projects_declared_successor_continuation() -> None:
     todo = {
         **TODO_DONE,
+        "completion_continuation": "successor",
         "successor_todo_ids": ["todo_fixture0002", "todo_fixture0003"],
     }
     outcome = project_durable_completion_outcome(
@@ -53,7 +55,11 @@ def test_projects_declared_successor_continuation() -> None:
 
 def test_projects_durable_no_followup_continuation() -> None:
     outcome = project_durable_completion_outcome(
-        todo={**TODO_DONE, "no_followup": True},
+        todo={
+            **TODO_DONE,
+            "completion_continuation": "no_followup",
+            "no_followup": True,
+        },
         expected_todo_id="todo_fixture0001",
     )
     assert outcome == {
@@ -79,7 +85,11 @@ def test_projects_terminal_intent_without_premature_completion() -> None:
 
 def test_no_followup_without_existing_ids_needs_no_successor_verification() -> None:
     outcome = project_durable_completion_outcome(
-        todo={**TODO_DONE, "no_followup": True},
+        todo={
+            **TODO_DONE,
+            "completion_continuation": "no_followup",
+            "no_followup": True,
+        },
         expected_todo_id="todo_fixture0001",
         existing_todo_ids=set(),
     )
@@ -89,6 +99,7 @@ def test_no_followup_without_existing_ids_needs_no_successor_verification() -> N
 def test_fails_closed_on_no_followup_and_successor_contradiction() -> None:
     todo = {
         **TODO_DONE,
+        "completion_continuation": "no_followup",
         "no_followup": True,
         "successor_todo_ids": ["todo_fixture0002"],
     }
@@ -106,6 +117,7 @@ def test_fails_closed_on_no_followup_and_successor_contradiction() -> None:
 def test_fails_closed_on_dangling_declared_successor() -> None:
     todo = {
         **TODO_DONE,
+        "completion_continuation": "successor",
         "successor_todo_ids": ["todo_fixture0002", "todo_missing999"],
     }
     with pytest.raises(
@@ -126,6 +138,32 @@ def test_fails_closed_when_durable_todo_id_mismatches_selected() -> None:
     ):
         project_durable_completion_outcome(
             todo={**TODO_DONE, "todo_id": "todo_fixture0009"},
+            expected_todo_id="todo_fixture0001",
+        )
+
+
+def test_fails_closed_when_done_todo_omits_completion_continuation() -> None:
+    with pytest.raises(
+        ValueError,
+        match="missing completion_continuation",
+    ):
+        project_durable_completion_outcome(
+            todo={"todo_id": "todo_fixture0001", "status": "done"},
+            expected_todo_id="todo_fixture0001",
+        )
+
+
+def test_fails_closed_when_recovery_is_not_terminal() -> None:
+    with pytest.raises(
+        ValueError,
+        match="completion_recovery requires a no_followup continuation",
+    ):
+        project_durable_completion_outcome(
+            todo={
+                **TODO_DONE,
+                "completion_continuation": "active_goal",
+                "completion_recovery": "same_turn_terminal_closeout",
+            },
             expected_todo_id="todo_fixture0001",
         )
 
@@ -158,7 +196,7 @@ def test_read_persisted_todo_record_projects_declared_successor(
                 "## Agent Todo",
                 "",
                 "- [x] Advance one public fixture.",
-                "  <!-- loopx:todo todo_id=todo_fixture0001 status=done task_class=advancement_task successor_todo_ids=todo_fixture0002 -->",
+                "  <!-- loopx:todo todo_id=todo_fixture0001 status=done task_class=advancement_task successor_todo_ids=todo_fixture0002 completion_continuation=successor -->",
                 "- [ ] Continue the public fixture.",
                 "  <!-- loopx:todo todo_id=todo_fixture0002 status=open task_class=advancement_task -->",
                 "",
@@ -259,7 +297,10 @@ def test_read_persisted_todo_record_falls_back_to_event_projection(
             goal_id=goal_id,
             event_type=TODO_COMPLETED,
             refs={"todo_id": "todo_fixture0001"},
-            payload={"no_followup": "true"},
+            payload={
+                "no_followup": "true",
+                "completion_continuation": "no_followup",
+            },
         ),
     ]
     AppendOnlyStateEventStore(repo / "events.jsonl").append_many(events)

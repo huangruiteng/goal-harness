@@ -8,6 +8,12 @@ from typing import Any, Callable
 from urllib.parse import quote, unquote
 
 from ...repository_identity import normalize_repository_identity
+from .completion_state import (
+    normalize_todo_completion_continuation,
+    normalize_todo_completion_recovery,
+    normalize_todo_no_followup,
+    require_todo_completion_metadata,
+)
 
 
 TODO_TASK_PATTERN = re.compile(r"^\s*[-*]\s+\[([ xX-])\]\s+(.+?)\s*$")
@@ -171,6 +177,7 @@ TODO_REMOVED_REVIEW_CONTINUATION_POLICY_VALUES = {
     "primary_review",
     "review_handoff",
 }
+
 
 TODO_HARD_MONITOR_PATTERNS = (
     re.compile(r"(?i)\bdo not\b.*\b(?:launch|run|execute|start)\b.*\buntil\b"),
@@ -410,17 +417,6 @@ def require_supported_todo_resume_when(value: Any) -> str | None:
         "resume_when must use a supported condition: todo_done:<todo_id>, "
         "pr_merged:[owner/repo]#<number>, or capacity_available:<capability>"
     )
-
-
-def normalize_todo_no_followup(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    candidate = compact_todo_text(value).lower()
-    if candidate in {"1", "true", "yes", "y", "no_followup", "no-followup"}:
-        return True
-    if candidate in {"0", "false", "no", "n"}:
-        return False
-    return None
 
 
 def normalize_todo_global_gate(value: Any) -> bool | None:
@@ -1093,6 +1089,21 @@ _TODO_METADATA_FIELD_SCHEMA = (
         ),
     ),
     _TodoMetadataField(
+        "completion_continuation",
+        normalize_todo_completion_continuation,
+        invalid_message=(
+            "completion_continuation must be one of: active_goal, successor, "
+            "no_followup"
+        ),
+    ),
+    _TodoMetadataField(
+        "completion_recovery",
+        normalize_todo_completion_recovery,
+        invalid_message=(
+            "completion_recovery must be same_turn_terminal_closeout"
+        ),
+    ),
+    _TodoMetadataField(
         "replan_obligation_id",
         normalize_todo_replan_obligation_id,
         invalid_message=(
@@ -1260,6 +1271,8 @@ def format_todo_metadata_line(
     global_gate: bool | None = None,
     unblocks_todo_id: str | None = None,
     successor_todo_ids: Any = None,
+    completion_continuation: str | None = None,
+    completion_recovery: str | None = None,
     replan_obligation_id: str | None = None,
     resume_when: str | None = None,
     no_followup: bool | None = None,
@@ -1322,6 +1335,10 @@ def todo_block_metadata(block: dict[str, Any]) -> dict[str, Any]:
             normalized = normalize_todo_decision_scope_outcomes(value)
         elif key == "no_followup":
             normalized = normalize_todo_no_followup(value)
+        elif key == "completion_continuation":
+            normalized = normalize_todo_completion_continuation(value)
+        elif key == "completion_recovery":
+            normalized = normalize_todo_completion_recovery(value)
         elif key in {"global_gate", "goal_bound"}:
             normalized = normalize_todo_global_gate(value)
         else:
@@ -1416,6 +1433,12 @@ def metadata_line_for_todo_block(
                 metadata.pop(key, None)
         elif key == "successor_todo_ids":
             normalized = normalize_todo_id_list(value)
+            if normalized:
+                metadata[key] = normalized
+            else:
+                metadata.pop(key, None)
+        elif key in {"completion_continuation", "completion_recovery"}:
+            normalized = require_todo_completion_metadata(key, value)
             if normalized:
                 metadata[key] = normalized
             else:

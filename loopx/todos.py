@@ -57,6 +57,7 @@ from .control_plane.todos.contract import (
     require_supported_todo_resume_when,
     todo_marker_for_status,
 )
+from .control_plane.todos.completion_state import completion_state_for_todo_write
 from .control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
     find_todo_block,
@@ -70,7 +71,7 @@ from .control_plane.todos.active_state_editing import (
 from .control_plane.todos.addition import matching_todo_block, require_replan_successor_rebinding, require_replan_successor_scope
 from .control_plane.todos.completed_archive import archive_completed_todo_lines
 from .control_plane.todos.completion_policy import (
-    linked_successor_from_todo,
+    linked_successors_from_state,
     resolve_completion_policy,
 )
 from .control_plane.todos.completion_fence import completed_todo_replay
@@ -1731,35 +1732,23 @@ def complete_goal_todo(
         normalized_successor_todo_ids = normalize_todo_id_list(successor_todo_ids)
         if successor_todo_ids and not normalized_successor_todo_ids:
             raise ValueError("successor_todo_ids must contain public todo_<letters-digits-underscore-hyphen> tokens")
-        linked_successors = []
-        for successor_todo_id in normalized_successor_todo_ids:
-            successor_match = find_todo_block(lines, todo_id=successor_todo_id)
-            if successor_match:
-                successor_role, _section, _start, _end, successor_block = successor_match
-                successor_item = dict(successor_block)
-                successor_item["role"] = successor_role
-                linked_successors.append(linked_successor_from_todo(successor_item))
-                continue
-            if event_context:
-                for successor_role in ("user", "agent"):
-                    summary = event_context["fields"].get(f"{successor_role}_todos")
-                    items = summary.get("items") if isinstance(summary, dict) else []
-                    successor_item = next(
-                        (
-                            dict(item)
-                            for item in items or []
-                            if isinstance(item, dict)
-                            and normalize_todo_id(item.get("todo_id"))
-                            == successor_todo_id
-                        ),
-                        None,
-                    )
-                    if successor_item:
-                        successor_item["role"] = successor_role
-                        linked_successors.append(
-                            linked_successor_from_todo(successor_item)
-                        )
-                        break
+        completion_state = completion_state_for_todo_write(
+            completion_todo,
+            requested_no_followup=no_followup,
+            has_successor=bool(
+                normalized_successor_todo_ids
+                or next_agent_todo
+                or next_user_todo
+                or normalize_todo_id_list(
+                    completion_todo.get("successor_todo_ids")
+                )
+            ),
+        )
+        linked_successors = linked_successors_from_state(
+            lines=lines,
+            successor_todo_ids=normalized_successor_todo_ids,
+            event_fields=event_context.get("fields") if event_context else None,
+        )
         completion_policy = resolve_completion_policy(
             registry_path=registry_path,
             goal_id=goal_id,
@@ -1828,6 +1817,8 @@ def complete_goal_todo(
             note=note,
             evidence=evidence,
             completion_turn_key=completion_turn_key,
+            completion_continuation=completion_state.continuation,
+            completion_recovery=completion_state.recovery,
             claimed_by=effective_claimed_by,
             clear_claim=clear_claim,
             no_followup=True if no_followup else None,

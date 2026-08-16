@@ -822,6 +822,8 @@ def _update_todo_from_event(todo: dict[str, Any], event: dict[str, Any]) -> None
             "updated_at",
             "no_followup",
             "completion_turn_key",
+            "completion_continuation",
+            "completion_recovery",
         ):
             if payload.get(key) is not None:
                 todo[key] = compact_text(payload[key])
@@ -942,6 +944,8 @@ def render_todo_markdown(item: dict[str, Any]) -> list[str]:
         global_gate=item.get("global_gate"),
         unblocks_todo_id=item.get("unblocks_todo_id"),
         successor_todo_ids=item.get("successor_todo_ids"),
+        completion_continuation=item.get("completion_continuation"),
+        completion_recovery=item.get("completion_recovery"),
         no_followup=True if item.get("no_followup") == "true" else None,
         **monitor_metadata,
         note=item.get("note"),

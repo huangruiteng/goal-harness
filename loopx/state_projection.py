@@ -103,6 +103,8 @@ TODO_METADATA_KEYS = (
     "global_gate",
     "unblocks_todo_id",
     "successor_todo_ids",
+    "completion_continuation",
+    "completion_recovery",
     "resume_when",
     "no_followup",
     "target_key",

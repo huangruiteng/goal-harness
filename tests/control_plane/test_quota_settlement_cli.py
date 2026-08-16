@@ -619,6 +619,8 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     )
     assert ordinary_rc == 0, ordinary
     assert ordinary["changed"] is True
+    assert ordinary["completion_continuation"] == "active_goal"
+    assert ordinary["completion_recovery"] is None
 
     spend_args = (
         "quota",
@@ -663,6 +665,8 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     )
     assert complete_rc == 0, complete
     assert complete["changed"] is True
+    assert complete["completion_continuation"] == "no_followup"
+    assert complete["completion_recovery"] == "same_turn_terminal_closeout"
     assert [
         receipt["step_kind"]
         for receipt in complete["settlement_result"]["receipts"]
@@ -685,6 +689,13 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
         False,
         True,
     ]
+    assert [
+        event["details"]["completion_continuation"]
+        for event in completion_events
+    ] == ["active_goal", "no_followup"]
+    assert [
+        event["details"]["completion_recovery"] for event in completion_events
+    ] == [None, "same_turn_terminal_closeout"]
     assert completion_events[0]["event_id"] != completion_events[1]["event_id"]
 
     complete_replay_rc, complete_replay = _run_cli(
