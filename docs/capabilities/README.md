@@ -5,6 +5,12 @@ bounded, verifiable caller outcome from LoopX state. It owns the domain policy,
 normalizes provider observations, validates the result, and proposes a typed
 transition to the Kernel.
 
+Contributors can move from these product contracts to their implementation,
+registry, and validation through the
+[capability code map](https://github.com/huangruiteng/loopx/tree/main/loopx/capabilities).
+That code tree is a navigation surface, not evidence that a capability is
+registered or enabled.
+
 That makes it different from the surrounding boundaries:
 
 - the [Kernel](../architecture.md#runtime-responsibility-model) owns durable
