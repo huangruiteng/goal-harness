@@ -42,7 +42,12 @@ def _context(
             "summary": "ok",
             "errors": [],
             "warnings": [],
-            "checks": [],
+            "checks": ["public boundary scan deferred for status hot path"],
+            "public_boundary_scan": {
+                "state": "deferred",
+                "reason": "status_hot_path",
+                "recommended_action": "run `loopx check` before publishing",
+            },
         },
         build_attention_queue=lambda **_kwargs: {"items": [], "item_count": 0},
         build_runtime_summaries=lambda **_kwargs: {
@@ -141,6 +146,18 @@ def test_status_collection_keeps_material_projection_default_off(
     assert "material_frontier" not in row
     assert "handoff_note" not in row
     assert "presentation_surfaces" not in payload
+
+
+def test_status_collection_keeps_boundary_detail_off_the_hot_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _collect(tmp_path, monkeypatch, available_capabilities=[])
+
+    assert payload["contract"]["checks"] == [
+        "public boundary scan deferred for status hot path"
+    ]
+    assert "public_boundary_scan" not in payload["contract"]
 
 
 def test_status_collection_forwards_material_capability_to_projection(

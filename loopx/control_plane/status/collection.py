@@ -119,7 +119,6 @@ def collect_status(
         "error_diagnostics",
         "global_errors",
         "goal_errors",
-        "public_boundary_scan",
     ):
         if contract.get(key):
             contract_projection[key] = contract[key]
