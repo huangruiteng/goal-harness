@@ -301,10 +301,12 @@ def test_goal_hosts_attribute_spend_to_current_progress_refresh(
     assert "--delivery-batch-scale multi_surface" not in refresh_command
     assert "--delivery-outcome outcome_progress" not in refresh_command
     normalized_task_body = " ".join(task_body.split())
+    assert payload["quota_spend_command"].startswith("loopx --format json ")
     assert (
         "never default or upgrade them to `multi_surface` / `outcome_progress`"
         in normalized_task_body
     )
+    assert "no pipe/retry" in normalized_task_body
 
 
 @pytest.mark.parametrize(

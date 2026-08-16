@@ -786,7 +786,7 @@ def main() -> int:
             '--turn-instance-id "${LOOPX_TURN:?}"'
         ), payload
         assert payload["quota_spend_command"] == (
-            'loopx --registry "$HOME/.codex/loopx/registry.global.json" '
+            'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" '
             "quota spend-slot --goal-id installer-smoke-goal --slots 1 --source heartbeat --execute"
         ), payload
         assert payload["thin"] is True, payload

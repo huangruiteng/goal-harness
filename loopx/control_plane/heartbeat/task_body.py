@@ -220,7 +220,7 @@ If the result says `should_run=true`:
    ```
 
    Spend consumes this causal record; plain state-only refresh cannot replace
-   it. Then spend once:
+   it. Run spend once as rendered; no pipe/filter/retry:
 
    ```bash
    {quota_spend_command}
@@ -271,7 +271,7 @@ def render_brief_heartbeat_task_body(
     )
     return f"""Advance `{goal_id}` using `{active_state}`.
 
-Brief installed LoopX heartbeat. Thin dispatcher; detail:
+Brief LoopX heartbeat; detail:
 `{compact_prompt_command}`.
 {scope_block}
 
@@ -303,7 +303,7 @@ If `should_run=true`: fetch compact; use `status --limit 3` and
 ranker/cross-domain evidence recovery or blocker writeback;
 validate/writeback/todos; {HOST_LOOP_TODO_CLOSEOUT_COMPACT_RULE} Progress(actual,no upgrade):
 `{progress_refresh_state_command}`
-Spend:
+Spend once; no pipe/retry:
 `{quota_spend_command}`
 Post-spend state:
 `{refresh_state_command}`
@@ -408,8 +408,8 @@ If `should_run=true`:
    use `{cli_bin} todo add --goal-id {goal_id} --role user --task-class user_gate|user_action`
    for owner todos and `--role agent` for agent todos, not prose.
    {HOST_LOOP_TODO_CLOSEOUT_COMPACT_RULE}
-9. Account actual validated class/scale/outcome; never default/upgrade. Then
-   refresh and spend:
+9. Account actual class/scale/outcome; no defaults. Refresh; spend once
+   unpiped; never retry:
 
 ```bash
 {progress_refresh_state_command}
@@ -544,13 +544,13 @@ def _render_goal_task_body(
 
 {RUNTIME_EXECUTION_ROUTING_RULE}
 
-At each continuation inspect LoopX state/status/repo. {prequota_block}{HOST_LOOP_QUOTA_DISPATCH_RULE}
+Each continuation inspect state/status/repo. {prequota_block}{HOST_LOOP_QUOTA_DISPATCH_RULE}
 Guard: `{quota_guard_command}`.
 
-`should_run=false`: no delivery/spend; surface a concrete Chinese action/gate only
+`should_run=false`: no delivery/spend; surface concrete Chinese action/gate only
 for `user_channel.notify=NOTIFY`, otherwise wait.{host_wait_rule}
 
-`should_run=true`: take the highest-priority in-scope unblocked agent todo; honor
+`should_run=true`: take highest-priority unblocked in-scope todo; honor
 claims/leases and blocker-push/recovery obligations. Before dependencies, persist changed
 scope/acceptance/non-goal evidence and next todo. One bounded segment stays in this
 same Goal: a segment is progress, not a new Goal boundary. Reuse this activation
@@ -559,14 +559,13 @@ continue. Validate/write public-safe evidence, critic, and next action.
 {HOST_LOOP_TODO_CLOSEOUT_RULE}
 
 Use actual classification/scale/outcome only; never default or upgrade them to
-`multi_surface` / `outcome_progress`; refresh the accountable progress record before
-spending:
-`{progress_refresh_state_command}`. Then spend exactly once against that refresh:
-`{quota_spend_command}`.
+`multi_surface` / `outcome_progress`; refresh the accountable progress record
+before spending: `{progress_refresh_state_command}`. Then spend exactly once
+against that refresh; no pipe/retry: `{quota_spend_command}`.
 
 No spend: gate/wait/dry-run/preflight failure/no-op/duplicate. Stop: private/company
 material, credentials, destructive git, unauthorized production, or repo rules.
-Complete this {completion_subject} only on LoopX terminal success with no follow-up; else
+Complete {completion_subject} only on LoopX terminal success with no follow-up; else
 keep the gate or next action explicit.
 
 {policy_tail}"""

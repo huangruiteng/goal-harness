@@ -311,7 +311,7 @@ def main() -> int:
         '--turn-instance-id "${LOOPX_TURN:?}"'
     ), payload
     assert payload["quota_spend_command"] == (
-        'loopx --registry "$HOME/.codex/loopx/registry.global.json" '
+        'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" '
         "quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute"
     ), payload
     assert compact_payload["compact"] is True, compact_payload
@@ -484,8 +484,9 @@ def main() -> int:
         "loopx todo add --goal-id public-heartbeat-goal --role user --task-class user_gate|user_action",
         "owner todos and `--role agent` for agent todos, not prose",
         "Done->successor first; final->refresh->spend->no-follow-up",
-        'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
-        "Account actual validated class/scale/outcome",
+        'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
+        "Account actual class/scale/outcome",
+        "once unpiped; never retry",
         "Optional state-only post-spend",
         "No spend for quiet skips",
     ):
@@ -630,9 +631,7 @@ def main() -> int:
     )
     brief_task = normalized(str(brief_payload["task_body"]))
     for phrase in (
-        "Brief installed LoopX heartbeat",
-        "Thin dispatcher",
-        "Thin dispatcher; detail",
+        "Brief LoopX heartbeat; detail",
         "loopx heartbeat-prompt --compact --goal-id public-heartbeat-goal --active-state /tmp/public-heartbeat-goal/ACTIVE_GOAL_STATE.md",
         "Guard/retry; `LOOPX_TURN=<current_time_iso>`",
         'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota should-run --goal-id public-heartbeat-goal',
@@ -655,8 +654,9 @@ def main() -> int:
         "bounded segment/batch",
         "validate/writeback/todos",
         "Progress(actual,no upgrade)",
+        "Spend once; no pipe/retry",
         "Post-spend state",
-        'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
+        'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
         "No spend for quiet skips",
     ):
         assert phrase in brief_task, phrase
@@ -826,7 +826,7 @@ def main() -> int:
         "loopx todo add --goal-id <GOAL_ID> --role user --task-class user_action",
         "Use `--role agent` for project-agent follow-up work",
         "docs/project-agent-todo-contract.md",
-        'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --todo-id <SELECTED_TODO_ID> --slots 1 --source heartbeat --execute',
+        'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --todo-id <SELECTED_TODO_ID> --slots 1 --source heartbeat --execute',
         "loopx refresh-state --goal-id <GOAL_ID>",
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
         "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>",
@@ -932,7 +932,7 @@ def main() -> int:
         "loopx todo add --goal-id public-heartbeat-goal --role user --task-class user_gate",
         "loopx todo add --goal-id public-heartbeat-goal --role user --task-class user_action",
         "docs/project-agent-todo-contract.md",
-        'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
+        'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id public-heartbeat-goal --slots 1 --source heartbeat --execute',
         "loopx refresh-state --goal-id public-heartbeat-goal",
         "--classification <PUBLIC_SAFE_PROGRESS_CLASSIFICATION>",
         "--delivery-batch-scale <ACTUAL_DELIVERY_BATCH_SCALE>",
@@ -985,7 +985,7 @@ def main() -> int:
             "Public-safe repo publication is not an operator gate by itself",
             "Run the smallest useful validation",
             "loopx refresh-state --goal-id <GOAL_ID>",
-            'loopx --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --todo-id <SELECTED_TODO_ID> --slots 1 --source heartbeat --execute',
+            'loopx --format json --registry "$HOME/.codex/loopx/registry.global.json" quota spend-slot --goal-id <GOAL_ID> --todo-id <SELECTED_TODO_ID> --slots 1 --source heartbeat --execute',
             "If the dashboard or controller needs a state-only update after spend",
             "Return a compact final report",
         ),

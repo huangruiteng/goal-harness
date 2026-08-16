@@ -123,7 +123,7 @@ def render_quota_spend_command(
     agent_arg = f" --agent-id {shell_arg(agent_id)}" if agent_id else ""
     capability_args = render_available_capability_args(available_capabilities)
     return (
-        f"{shell_arg(cli_bin)} "
+        f"{shell_arg(cli_bin)} --format json "
         f"--registry {SHARED_GLOBAL_REGISTRY} "
         "quota spend-slot "
         f"--goal-id {shell_arg(goal_id)} "
@@ -758,8 +758,10 @@ setup-only turn. The configured thin loop spends only after a later validated
 delivery writeback. If I explicitly asked you to do delivery in this same turn
 and you completed a validated delivery segment, replace all three placeholders
 with this turn's actual validated classification, batch scale, and outcome.
-Never default or upgrade them to `multi_surface` / `outcome_progress`. Then write
-one accountable progress refresh and spend exactly once against that record:
+Never default or upgrade them to `multi_surface` / `outcome_progress`. Run the
+rendered commands without pipes or filters: write one accountable progress
+refresh, then spend exactly once. If spend output is ambiguous, use read-only
+quota status; never rerun it:
 
 ```bash
 {progress_refresh_command}
@@ -971,7 +973,8 @@ def render_prompt_text(
 ```
 
    这是 `spend-slot` 将消费的因果记录；普通 state-only refresh 不能替代它。
-   然后只 append 一次 quota spend：
+   然后原样（不加管道或过滤）append 一次 quota spend；输出为空或不明确时用只读
+   quota status 核对，不能重跑：
 
 ```bash
 {quota_spend_command}
