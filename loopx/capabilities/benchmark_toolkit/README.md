@@ -10,15 +10,17 @@ adapters.
 Benchmark adapters that use the Codex app-server Goal API should import
 `loopx.capabilities.benchmark_toolkit.native_codex_goal`. The module provides the
 real stdio JSON-RPC process transport, the ordered Goal transaction, terminal event
-correlation, post-turn Goal readback, and a public-safe receipt. A runner supplies
-its own isolated process command, environment, sandbox policy, task bridge, and
-timeouts; it should not copy the Goal state machine.
+correlation, Goal-status polling across automatic continuation turns, and a
+public-safe receipt. A runner supplies its own isolated process command,
+environment, sandbox policy, task bridge, and timeout; it should not copy the
+Goal state machine.
 
 The runnable source example is
 [`benchmark/deepswe/run_native_codex_goal.py`](../../../benchmark/deepswe/run_native_codex_goal.py).
 Its `--preflight-only` mode proves a live Codex initialize/thread/Goal attachment
 without invoking a model. Full mode starts one turn and waits for a correlated
-terminal event before post-turn Goal readback.
+terminal event, then keeps draining Codex-owned continuation turns until the Goal
+leaves `active`. The same total timeout covers the full Goal lifecycle.
 
 The toolkit borrows the useful contracts already established by modern benchmark
 runners: an ATIF-compatible agent trajectory, a separately owned verifier phase,

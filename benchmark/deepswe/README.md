@@ -41,16 +41,20 @@ initialize(experimentalApi=true)
   -> thread/goal/set(status=active)
   -> thread/goal/get
   -> turn/start
-  -> observe terminal event or runner timeout
+  -> observe correlated turn terminal event
+  -> thread/goal/get
+  -> while Goal remains active, observe the next automatic continuation turn
+  -> stop only after Goal leaves active or the shared Goal timeout expires
   -> stop worker
   -> independent verifier
 ```
 
 `turn/start` acceptance is not completion. The benchmark host must continue
-serving any environment bridge while it drains app-server events. If the
-response turn id and event-stream turn id differ, the event-stream id becomes
-canonical. The installed transaction, stdio transport, event reducer, and
-receipt live in
+serving any environment bridge while it drains app-server events. It starts
+only the initial task turn; Codex owns automatic continuation turns while the
+Goal remains active. If the response turn id and event-stream turn id differ,
+the event-stream id becomes canonical. The installed transaction, stdio
+transport, event reducer, and receipt live in
 [`benchmark_toolkit.native_codex_goal`](../../loopx/capabilities/benchmark_toolkit/native_codex_goal.py).
 [`../native_codex_goal.py`](../native_codex_goal.py) is intentionally only a
 compatibility import, so runner code and examples cannot drift into a second
@@ -78,10 +82,10 @@ task:
 ```python
 from loopx.capabilities.benchmark_toolkit.native_codex_goal import (
     NativeGoalConfig,
-    run_native_goal_process,
+    run_native_goal_process_until_terminal,
 )
 
-turn = run_native_goal_process(
+turn = run_native_goal_process_until_terminal(
     NativeGoalConfig(
         cwd=task_worktree,
         objective=objective,
@@ -91,12 +95,15 @@ turn = run_native_goal_process(
     ),
     process_command=runner_owned_isolated_app_server_command,
     process_env=runner_owned_environment,
+    process_cwd=runner_control_directory,
     goal_timeout_sec=timeout_seconds,
 )
 ```
 
 The imported runtime owns no evaluator access, task command bridge, credential
-policy, or score authority. Those remain explicit runner responsibilities.
+policy, or score authority. Those remain explicit runner responsibilities. A
+separate `process_cwd` is useful when the Goal-visible `cwd` exists only inside
+the runner's mount namespace.
 
 ## Authority and anti-cheating
 
