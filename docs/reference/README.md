@@ -7,6 +7,8 @@ Current groups:
 
 - [Reference contracts](contracts/README.md)
 - [Protocol contracts](protocols/README.md)
+- [Extensions and capabilities](extensions.md): outcome contracts, provider
+  registration, extension packaging, readiness, and lifecycle boundaries.
 - [Project skill delivery](project-skill-delivery.md): release-owned,
   project-local skill discovery and managed-copy lifecycle.
 

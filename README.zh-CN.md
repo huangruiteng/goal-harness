@@ -258,7 +258,23 @@ loopx doctor
 
 ## 能力
 
-LoopX 把控制面归结为五个用户可以直接行动的问题。每个问题对应一个产品
+LoopX 显式保留架构边界，使同一个受治理结果在更换 Agent harness 或外部 Provider
+后仍然成立。以下术语描述的是不同边界，而不是几种可以互换的插件：
+
+| 边界 | 含义 | 深入阅读 |
+| --- | --- | --- |
+| **Kernel** | 持有持久化 goal、todo、gate、evidence、quota、恢复和调度事实。 | [核心架构](docs/architecture.md) |
+| **Capability** | 定义稳定、provider-neutral 的合同，从 LoopX 状态交付一个有界、可验证的调用者结果。 | [Capability 目录](docs/capabilities/README.md) |
+| **Provider** | 调用外部系统或本地实现，返回有界 observation、effect result 和 readback。 | [Provider 运行责任](docs/reference/extensions.md#runtime-responsibilities) |
+| **Extension** | 通过显式安装、readiness、启用、升级、停用和回滚生命周期交付可选 Provider。 | [Extension 生命周期](docs/reference/extensions.md#runtime-lifecycle) |
+
+`--available-capability shell` 等 host 声明描述的是已观测到的执行支持；在这张
+产品图里属于 runtime capacity，不是产品 Capability，也不授予权限。真正执行前，
+Capability 仍须应用自己的 policy 和 authority check，再提出 typed transition。
+
+### 控制面核心承诺
+
+Kernel 把控制面归结为五个用户可以直接行动的问题。每个问题对应一个产品
 承诺：目标 → 长程状态；下一步 → 语义决策；人类判断 → 人机协同；
 证据 → 恢复；能否继续 → 治理。
 
@@ -286,6 +302,25 @@ LoopX 把控制面归结为五个用户可以直接行动的问题。每个问�
 这些能力共同提供 lifetime goal、具体 user gate、经过审计的安全侧路、平级 todo
 ownership、quota 与 steering、紧凑 run history、证据化 handoff、read-first 管理面、
 项目级价值信号和 public/private boundary check。
+
+### 产品 Capability 路径
+
+Capability 把上述通用原语组成 outcome-owned 工作泳道。先按结果选择，再检查当前
+已注册实现及其写入边界：
+
+| 你需要…… | Capability | 从这里开始 |
+| --- | --- | --- |
+| 把公开 issue 推进为可审查、有证据的变更 | [Issue Fix](docs/capabilities/issue-fix/README.zh-CN.md) | `loopx capability show issue-fix --format json` |
+| 在交付前对精确 final diff 做质量验收 | [Change Quality](docs/capabilities/change-quality/README.md) | `loopx capability show change-quality-qualification --format json` |
+| 维护由多个已审查分支组成、持续变化的集成栈 | [Integration Branch](docs/capabilities/integration-branch/README.md) | `loopx capability show integration-branch-reconcile --format json` |
+| 在不丢失假设和发现的前提下探索不确定研究问题 | [Explore](docs/capabilities/explore/README.zh-CN.md) | `loopx capability show explore --format json` |
+| 基于当前证据和已验证结果重新建立决策上下文 | [Decision Context](docs/capabilities/decision-context/README.zh-CN.md) | `loopx capability show decision-context --format json` |
+| 生成带 receipt 的定时或进展触发报告 | [Periodic Report](docs/capabilities/periodic-report/README.md) | `loopx capability show periodic-report --format json` |
+
+运行 `loopx capability list --format json`，读取当前安装版本的权威目录。Capability
+详情包含用户价值、成熟度、Provider readiness、入口命令、写入边界、协议和持久
+验证。可从[人类可读 Capability 索引](docs/capabilities/README.md)按结果选择；安装或
+开发 Provider 时，再进入[Extension 与 Capability](docs/reference/extensions.md)。
 
 ### 四种运行责任
 

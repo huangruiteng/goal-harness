@@ -285,10 +285,28 @@ loopx doctor
 
 ## Capabilities
 
-LoopX folds its control-plane mechanics into five questions. Each question
-delivers one product promise on top of any agent harness: objective →
-long-horizon state; next → semantic decisions; human judgment →
-human-agent collaboration; evidence → recovery; continuation → governance.
+LoopX keeps the architecture explicit so the same governed outcome can survive
+a change of agent harness or external provider. The terms describe different
+boundaries rather than interchangeable kinds of plugin:
+
+| Boundary | Meaning | Go deeper |
+| --- | --- | --- |
+| **Kernel** | Owns durable goal, todo, gate, evidence, quota, recovery, and scheduling truth. | [Architecture](docs/architecture.md) |
+| **Capability** | Defines a stable, provider-neutral contract for producing one bounded, verifiable caller outcome from LoopX state. | [Capability catalog](docs/capabilities/README.md) |
+| **Provider** | Calls an external system or local implementation and returns bounded observations, effect results, and readback. | [Provider responsibilities](docs/reference/extensions.md#runtime-responsibilities) |
+| **Extension** | Packages and operates an optional provider through explicit install, readiness, enable, upgrade, disable, and rollback lifecycle. | [Extension lifecycle](docs/reference/extensions.md#runtime-lifecycle) |
+
+Host declarations such as `--available-capability shell` describe observed
+execution support. They are runtime capacities in this product map, not product
+capabilities and not permission grants. The effective capability still applies
+its own policy and authority checks before proposing a transition.
+
+### Core Control-Plane Promises
+
+The Kernel folds its mechanics into five questions. Each question delivers one
+product promise on top of any agent harness: objective → long-horizon state;
+next → semantic decisions; human judgment → human-agent collaboration;
+evidence → recovery; continuation → governance.
 
 | Question | What LoopX keeps visible |
 | --- | --- |
@@ -315,6 +333,28 @@ The shipped primitives include lifetime goals, concrete user gates, audited safe
 fallbacks, peer todo ownership, quota and steering, compact run history,
 evidence-backed handoff, a read-first management surface, project-level value
 signals, and public/private boundary checks.
+
+### Product Capability Paths
+
+Capabilities turn those generic primitives into outcome-owned work lanes. Start
+from the outcome, then inspect the current registered implementation and its
+write boundary:
+
+| You need to... | Capability | Start with |
+| --- | --- | --- |
+| Turn a public issue into a reviewable, evidence-backed change | [Issue Fix](docs/capabilities/issue-fix/README.md) | `loopx capability show issue-fix --format json` |
+| Qualify the exact final diff before delivery | [Change Quality](docs/capabilities/change-quality/README.md) | `loopx capability show change-quality-qualification --format json` |
+| Preserve a changing stack of already reviewed branches | [Integration Branch](docs/capabilities/integration-branch/README.md) | `loopx capability show integration-branch-reconcile --format json` |
+| Explore uncertain research without losing hypotheses and findings | [Explore](docs/capabilities/explore/README.md) | `loopx capability show explore --format json` |
+| Rebase decisions on current evidence and verified outcomes | [Decision Context](docs/capabilities/decision-context/README.md) | `loopx capability show decision-context --format json` |
+| Produce scheduled or progress-triggered reports with receipts | [Periodic Report](docs/capabilities/periodic-report/README.md) | `loopx capability show periodic-report --format json` |
+
+Run `loopx capability list --format json` for the authoritative catalog in the
+installed release. A capability detail reports its user value, maturity,
+provider readiness, entry commands, write boundaries, protocols, and durable
+validation. Browse the [human-readable capability index](docs/capabilities/README.md)
+to choose by outcome; use [Extensions and Capabilities](docs/reference/extensions.md)
+when installing or building a provider.
 
 ### Runtime Responsibilities
 
