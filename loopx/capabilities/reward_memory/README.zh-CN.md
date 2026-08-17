@@ -380,7 +380,8 @@ loopx reward-memory route-check --case pr-3237 --format json
   application receipt。最简 ingest seam 复用 Stage 2/3 与声明 provider，把 standing-policy
   范围内的紧凑事件原子写入并精确读回；不自动选择事件、corpus 或模块。
 - Stage 4：evaluation harness 与 release gate。
-- Stage 5：受限的 cross-module dogfood，以及 operator edit/retire control。
+- Stage 5：受限的 cross-module dogfood、可选 post-outcome utility attribution，
+  以及 operator edit/retire control。
 
 后续阶段必须在这份合同上扩展，不能合并五类记忆、重复建设 context/provider 能力，也
 不能把 provider availability 变成 user gate。Stage 1 继续保持 stateless read model，
@@ -443,10 +444,10 @@ interruption 和 user gate 计数均为零，release gate 才能通过。
 contract invariant，不声明 semantic uplift，也不授权 production rollout。Stage 5 必须
 使用经 corpus owner 批准的 record、精确 provider readback 和真实模块结果，才能讨论收益。
 
-## Stage 5 dogfood receipt 与 operator control
+## Stage 5 dogfood receipt、utility attribution 与 operator control
 
 Stage 5 只在 Stage 3 application receipt 上增加一层薄的证据合同，不新增 store、scheduler、
-语义路由器、automatic recall 或第二套 evaluator。调用方传入紧凑的真实模块 observation，
+语义路由器、automatic recall 或 ranking behavior。调用方传入紧凑的真实模块 observation，
 其中 artifact reference 必须与 application receipt 一致：
 
 ```bash
@@ -454,16 +455,55 @@ loopx reward-memory dogfood-evaluate \
   --input compact-observations.json --format json
 ```
 
-`reward_memory_dogfood_receipt_v0` 根据已有 application outcome 推导 `hit`、`miss` 或
-`refute`，不接受调用方自行声明结果类型。`hit` 或 `refute` 必须同时满足精确 provider
-result readback 与 current-artifact verification。Receipt 只保留 opaque/hashed memory ref、
-紧凑的已验证结果摘要、latency、model token、provider call、intervention count，以及可选的
-紧凑 bot feedback；不保留 raw provider content，也不授予新的 action authority。
+`reward_memory_dogfood_receipt_v1` 用 `application_disposition` 记录 `applied`、
+`not_applied` 或 `refuted`。它表示 application coverage，不是因果 utility 判断。
+`applied` 或 `refuted` 必须同时满足精确 provider result readback 与 current-artifact
+verification。Receipt 保留精确 Stage 3 application receipt 的 opaque digest
+`application_receipt_id`，以及 opaque/hashed memory ref、紧凑的已验证 outcome ref 与摘要、
+latency、model token、provider call、intervention count，以及可选的紧凑 bot feedback；
+不保留 raw provider content，也不授予新的 action authority。
+
+旧的 `reward_memory_dogfood_receipt_v0` 曾用 `hit`、`miss`、`refute` 表示同一组
+application coverage；其中 `hit` 从未证明 memory 是 `helpful`。v1 通过替代这组有歧义的
+命名来修复合同，而不是悄悄改变 v0 语义。
+
+Post-outcome utility 使用独立的 `memory_utility_observation_v0`，标签只能是
+`helpful`、`harmful`、`neutral` 或 `unknown`。可选 evaluator 默认关闭，只能提出
+proposal。LoopX 会用独立可信的 agent、project、corpus、surface scope，已验证 outcome
+ref，以及执行边界提供的 retrieval/policy snapshot ref 校验 proposal。Snapshot freshness
+由提供可信 attribution context 的执行边界或 provider adapter 负责；如果兼容的 application
+receipt 也携带 snapshot ref，validator 会做精确交叉检查。过期或不匹配的 evaluator echo
+会被拒绝。没有独立 attribution evidence 时，即使 `applied` 且 outcome 成功也必须保持
+`unknown`。涉及多条 memory 时，attribution 默认是 `set`，不能把 set-level credit
+复制给单个 item。
+
+Evidence basis 必须类型化，不能从自然语言推断。`owner_correction`、
+`controlled_replay` 与 `deterministic_effect` 属于较强证据，evaluator proposal
+至少要带一个 opaque `evidence_ref`，即使 label 仍是 `unknown` 也不能省略。
+`evaluator_inference` 较弱，`insufficient` 只表示存在 lineage。Stage 1 保留这组类型差异；
+弱证据与强证据之间的 precedence 由 Stage 2 reducer 负责。
+
+公共 observation 只包含 opaque ref、canonical memory digest、类型化 reason code、
+evaluator/version identity 和紧凑的 public-safe evidence；URL、本地路径、raw-content
+字段，以及任何授予 action authority 或执行 write 的 proposal 都会被拒绝。Provider
+adapter 必须先把精确私有 provider ref 转成 digest，再构造这份公共合同。
+Evaluator 缺失、超时或输出畸形时 fail open：main result、application settlement 与
+dogfood readiness 都不改变。归因对象、证据、evaluator identity 与 evaluation version
+共同生成稳定 observation id，供 replay 对齐；同一键下出现不同判断属于冲突 delivery，
+不能算作额外 support，修正判断必须提供新 evidence 或提升 evaluation version。
+Utility-attribution Stage 1 不持久化也不归约 observation，因此尚不声明 duplicate
+delivery 是 no-op。Stage 5 batch 会拒绝重复的 `application_receipt_id`，每条 application
+settlement 只计数一次。Settlement `receipt_id` 会刻意排除 evaluator status 与
+`observation_id`，utility retry 和新 evidence 改用 observation identity 区分。同一
+settlement 的新 utility observation 应进入后续 append-only utility ledger，不能重复累计
+disposition 或 cost metric。
 
 只有 Stage 4 gate 仍然通过，并且受限 batch 同时包含至少一个 Issue Fix 结果、两个不同的
-LoopX domain 结果、hit/miss/refute 三类结果，以及 edit/retire 两类 operator control，
-`reward_memory_dogfood_batch_v0` 才会进入 `ready_for_bounded_issue_fix_pilot`。这只是
-试用就绪声明，semantic uplift 与 production rollout 仍然为 false。
+LoopX domain 结果、`applied`/`not_applied`/`refuted` 三类 application disposition，以及
+edit/retire 两类 operator control，`reward_memory_dogfood_batch_v1` 才会进入
+`ready_for_bounded_issue_fix_pilot`。Utility observation 不参与 readiness 判断。这只是
+试用就绪声明，semantic uplift 与 production rollout 仍然为 false；Stage 2 reducer 与
+projection、ranking influence，以及 OpenViking writeback 都不属于本次实现。
 
 Edit/retire control 同样保持克制：
 

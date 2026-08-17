@@ -451,7 +451,8 @@ loopx reward-memory route-check --case pr-3237 --format json
   write and exactly read back compact events inside a standing-policy boundary;
   it does not choose the event, corpus, or consumer module.
 - Stage 4: evaluation harness and release gate.
-- Stage 5: bounded cross-module dogfood and operator edit/retire controls.
+- Stage 5: bounded cross-module dogfood, optional post-outcome utility
+  attribution, and operator edit/retire controls.
 
 Later stages must extend this contract rather than collapsing these classes,
 duplicating existing context/provider capabilities, or turning provider
@@ -525,11 +526,11 @@ core contract invariants only, does not claim semantic uplift, and does not
 authorize production rollout. Stage 5 must use a corpus-owner-approved record,
 exact provider readback, and real module outcomes before making an uplift claim.
 
-## Stage 5 dogfood receipts and operator controls
+## Stage 5 dogfood receipts, utility attribution, and operator controls
 
 Stage 5 adds one thin evidence layer over the Stage 3 application receipt. It
 does not add a store, scheduler, semantic router, automatic recall path, or
-another evaluator. A caller supplies a compact real-module observation whose
+ranking behavior. A caller supplies a compact real-module observation whose
 artifact reference matches the application receipt:
 
 ```bash
@@ -537,21 +538,69 @@ loopx reward-memory dogfood-evaluate \
   --input compact-observations.json --format json
 ```
 
-`reward_memory_dogfood_receipt_v0` derives `hit`, `miss`, or `refute` from the
-existing application outcome instead of trusting a caller-provided label. A
-hit or refute is invalid unless the selected provider result was read back
-exactly and the current artifact was verified. The receipt retains only opaque
-or hashed memory references, a compact verified outcome summary, latency,
+`reward_memory_dogfood_receipt_v1` records `application_disposition` as
+`applied`, `not_applied`, or `refuted`. This is application coverage, not a
+causal utility judgment. An applied or refuted disposition is invalid unless
+the selected provider result was read back exactly and the current artifact
+was verified. The receipt retains the opaque digest `application_receipt_id`
+for the exact Stage 3 application receipt, plus only opaque or hashed memory
+references, a compact verified outcome reference and summary, latency,
 model-token and provider-call counts, intervention count, and optional compact
-bot feedback. It retains no raw provider content and grants no new action
-authority.
+bot feedback.
+It retains no raw provider content and grants no new action authority.
 
-`reward_memory_dogfood_batch_v0` becomes
+The former `reward_memory_dogfood_receipt_v0` used `hit`, `miss`, and `refute`
+for this same application-coverage distinction. In particular, its `hit`
+never established that a memory was `helpful`. The v1 receipt supersedes that
+ambiguous naming instead of silently changing the v0 contract.
+
+Post-outcome utility is a separate `memory_utility_observation_v0` with one of
+`helpful`, `harmful`, `neutral`, or `unknown`. The optional evaluator is
+default-off and proposal-only. LoopX validates its proposal against separately
+trusted agent, project, corpus, and surface scope; the verified outcome ref;
+and the retrieval and policy snapshot refs supplied by the execution boundary.
+Snapshot freshness is owned by the execution or provider adapter that supplies
+the trusted attribution context. When a compatible application receipt also
+carries snapshot refs, the validator cross-checks them exactly. A stale or
+mismatched evaluator echo is rejected. `applied` plus a successful outcome
+remains `unknown` without independent attribution evidence. When several
+memories are involved, attribution defaults to `set`; set-level credit is never
+copied to individual items.
+
+Evidence basis is typed rather than inferred from prose. `owner_correction`,
+`controlled_replay`, and `deterministic_effect` are stronger bases and require
+at least one opaque `evidence_ref` in the evaluator proposal, even when the
+label remains `unknown`. `evaluator_inference` is weaker and `insufficient` is
+lineage-only. Stage 1 preserves that typed distinction; the Stage 2 reducer
+owns precedence between weak and strong observations.
+
+The public observation contains only opaque references, canonical memory
+digests, typed reason codes, evaluator/version identity, and compact public-safe
+evidence. URLs, local paths, raw-content fields, and any proposal to grant
+action authority or perform a write are rejected. Provider adapters must digest
+exact private provider references before constructing this public contract. An
+absent, timed-out, or malformed evaluator fails open: the main result,
+application settlement, and dogfood readiness remain unchanged. The attribution
+subject, evidence, evaluator identity, and evaluation version produce a stable
+observation id for replay identity. A different judgment under the same key is
+a conflicting delivery, not additional support; a correction must cite new
+evidence or advance the evaluation version. Utility-attribution Stage 1 does not
+persist or reduce observations and therefore does not yet claim
+duplicate-delivery no-op behavior. The Stage 5 batch rejects duplicate
+`application_receipt_id` values and counts each application settlement once.
+The settlement `receipt_id` deliberately excludes evaluator status and
+`observation_id`; utility retries and new evidence use the observation identity
+instead. A new utility observation for the same settlement belongs in the later
+append-only utility ledger and must not duplicate disposition or cost metrics.
+
+`reward_memory_dogfood_batch_v1` becomes
 `ready_for_bounded_issue_fix_pilot` only when the Stage 4 gate still passes and
 the bounded batch contains at least one Issue Fix result, two distinct LoopX
-domain results, all three hit/miss/refute classes, and both operator controls.
-This is a trial-readiness statement. Semantic-uplift and production-rollout
-claims remain false.
+domain results, all three `applied`/`not_applied`/`refuted` application
+dispositions, and both operator controls. Utility observations do not affect
+this readiness decision. This is a trial-readiness statement; semantic uplift
+and production rollout remain false. The Stage 2 reducer and projection,
+ranking influence, and OpenViking writeback are outside this implementation.
 
 The edit/retire control is similarly narrow:
 
