@@ -336,6 +336,11 @@ class LarkChatRequestMixin:
                     binding_paths=self._lark_binding_paths(registry),
                     runner=self._lark_runner(),
                     cli_bin=cli_bin,
+                    runtime_health=(
+                        self.server.lark_goal_topic_runtime.health_snapshot()
+                        if getattr(self.server, "lark_goal_topic_runtime", None) is not None
+                        else None
+                    ),
                 ),
             }
         )
