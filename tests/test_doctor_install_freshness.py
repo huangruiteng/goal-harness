@@ -294,7 +294,7 @@ def test_python_distribution_ignores_archive_manifest_version(tmp_path: Path) ->
     assert freshness["manifest_package_version_matches_runtime"] is False
 
 
-def test_current_console_script_wins_over_path_lookup(
+def test_current_python_console_script_is_recognized(
     tmp_path: Path,
     monkeypatch,
 ) -> None:

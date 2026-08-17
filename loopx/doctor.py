@@ -825,7 +825,7 @@ def collect_doctor(
     loopx_path = resolve_command_path("loopx")
     invocation_path = current_script_invocation_path()
     loopx_canary_path = resolve_command_path("loopx-canary")
-    command_path_primary = invocation_path or loopx_path
+    command_path_primary = loopx_path or invocation_path
     canary_path = loopx_canary_path
     command_path = command_path_primary
     command_realpath = command_path.resolve() if command_path else None
