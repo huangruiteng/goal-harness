@@ -42,7 +42,6 @@ from .goal_channel_transport import (
     call,
     chat_verified,
     find_first_string,
-    goal_topic_message_permissions,
     json_payload,
     lark_args,
     message_readback_verified,
@@ -126,18 +125,7 @@ def list_lark_apps(
         except ValueError:
             continue
         identity = _app_identity(app_ref=app_ref, runner=runner, cli_bin=cli_bin)
-        permissions = (
-            goal_topic_message_permissions(
-                runner=runner,
-                cli_bin=cli_bin,
-                profile=app_ref,
-            )
-            if identity and identity.get("ready")
-            else {
-                "ready": False,
-                "error_code": "lark_app_not_ready",
-            }
-        )
+        bot_ready = bool(identity and identity.get("ready"))
         apps.append(
             {
                 "app_ref": app_ref,
@@ -145,8 +133,8 @@ def list_lark_apps(
                 "brand": public_safe_compact_text(raw.get("brand") or "lark", limit=20),
                 "active": raw.get("active") is True,
                 "ready": bool(identity and identity.get("ready")),
-                "reply_ready": bool(permissions.get("ready")),
-                "health_error_code": permissions.get("error_code"),
+                "reply_ready": bot_ready,
+                "health_error_code": None if bot_ready else "lark_app_not_ready",
             }
         )
     return apps
@@ -279,25 +267,6 @@ def connect_lark_goal_topic(
             status="blocked",
             blocker="lark_app_not_ready",
             public_summary="the selected Lark App is not ready",
-        )
-    permissions = goal_topic_message_permissions(
-        runner=runner,
-        cli_bin=effective_cli_bin,
-        profile=profile,
-    )
-    if not permissions.get("ready"):
-        return operation_packet(
-            ok=False,
-            goal_id=goal_id,
-            operation="connect_topic",
-            execute=execute,
-            status="blocked",
-            blocker="lark_message_permissions_required",
-            public_summary=(
-                "enable Lark group message read and send permissions for this App, "
-                "publish or re-authorize it, then retry"
-            ),
-            details={"required_scopes": permissions["required_scopes"]},
         )
     if not execute:
         return operation_packet(
@@ -488,6 +457,7 @@ def list_lark_connections(
     binding_paths: Mapping[str, Path],
     runner: CommandRunner = default_subprocess_runner,
     cli_bin: str = DEFAULT_CLI_BIN,
+    runtime_health: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     target_payload = read_goal_channel_targets(target_path)
     rows: list[dict[str, Any]] = []
@@ -515,16 +485,62 @@ def list_lark_connections(
                 runner=runner,
                 cli_bin=effective_cli_bin,
             )
-            health_cache[health_key] = (
-                goal_topic_message_permissions(
-                    runner=runner,
-                    cli_bin=effective_cli_bin,
-                    profile=app_ref,
-                )
-                if app_identity and app_identity.get("ready")
-                else {"ready": False, "error_code": "lark_app_not_ready"}
-            )
+            health_cache[health_key] = {
+                "ready": bool(app_identity and app_identity.get("ready")),
+                "error_code": (
+                    None
+                    if app_identity and app_identity.get("ready")
+                    else "lark_app_not_ready"
+                ),
+            }
         health = health_cache[health_key]
+        listener = (
+            runtime_health.get(app_ref, {})
+            if isinstance(runtime_health, Mapping)
+            else {}
+        )
+        listener_status = str(listener.get("status") or "")
+        listener_ready = (
+            True
+            if runtime_health is None
+            else listener_status in {"starting", "listening"}
+        )
+        last_event_status = str(listener.get("last_event_status") or "")
+        event_count = int(listener.get("event_count") or 0)
+        event_blocker = (
+            last_event_status
+            if last_event_status
+            in {
+                "message_context_permission_required",
+                "message_context_lookup_failed",
+                "message_context_unavailable",
+                "processing_failed",
+                "answer_empty",
+                "reply_failed",
+            }
+            else None
+        )
+        event_delivery_unverified = bool(
+            runtime_health is not None
+            and listener_status == "listening"
+            and event_count == 0
+            and not last_event_status
+        )
+        reply_ready = bool(
+            health.get("ready")
+            and listener_ready
+            and event_blocker is None
+            and not event_delivery_unverified
+        )
+        health_error_code = health.get("error_code")
+        if health_error_code is None and not listener_ready:
+            health_error_code = str(
+                listener.get("error_code") or "lark_event_listener_inactive"
+            )
+        if health_error_code is None and event_blocker is not None:
+            health_error_code = event_blocker
+        if health_error_code is None and event_delivery_unverified:
+            health_error_code = "lark_event_delivery_unverified"
         topic = binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
         routing = binding.get("routing") if isinstance(binding.get("routing"), Mapping) else {}
         legacy_root = (
@@ -548,8 +564,13 @@ def list_lark_connections(
                 "target_ref": target_ref,
                 "topic_name": public_safe_compact_text(topic.get("name") or goal_objective(goal), limit=120),
                 "topic_setup_required": not bool(topic.get("root_message_id") or legacy_root),
-                "reply_ready": bool(health.get("ready")),
-                "health_error_code": health.get("error_code"),
+                "reply_ready": reply_ready,
+                "health_error_code": health_error_code,
+                "listener_status": listener_status or None,
+                "listener_error_code": listener.get("error_code"),
+                "last_event_status": last_event_status or None,
+                "event_count": event_count,
+                "replied_count": int(listener.get("replied_count") or 0),
             }
         )
     return sorted(rows, key=lambda row: (str(row["app_label"]).casefold(), str(row["goal_title"]).casefold()))
