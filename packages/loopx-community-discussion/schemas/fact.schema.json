@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "discussion_fact_v0",
+  "title": "LoopX community discussion fact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fact_type",
+    "source",
+    "source_url",
+    "title",
+    "author",
+    "published_at",
+    "relevance",
+    "relevance_reason",
+    "dedupe_key"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "discussion_fact_v0"
+    },
+    "fact_type": {
+      "enum": [
+        "external_discussion",
+        "maintainer_signal",
+        "ecosystem_signal",
+        "packaging",
+        "press",
+        "unanswered_question",
+        "source_error"
+      ]
+    },
+    "source": {
+      "enum": [
+        "github",
+        "hacker_news",
+        "web",
+        "reddit",
+        "x"
+      ]
+    },
+    "source_url": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "author": {
+      "type": "string"
+    },
+    "published_at": {
+      "type": "string"
+    },
+    "relevance": {
+      "enum": [
+        "strong",
+        "weak"
+      ]
+    },
+    "relevance_reason": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "dedupe_key": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  }
+}

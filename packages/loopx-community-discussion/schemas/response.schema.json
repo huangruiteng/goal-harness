@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "loopx_community_discussion_response_v0",
+  "title": "loopx-community-discussion extension response",
+  "type": "object",
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "request_schema_version": {
+          "const": "loopx_community_discussion_request_v0"
+        },
+        "result": {
+          "$ref": "scan.schema.json"
+        }
+      },
+      "required": [
+        "request_schema_version",
+        "result"
+      ]
+    },
+    {
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "error": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "error"
+      ]
+    }
+  ],
+  "properties": {
+    "doctor": {
+      "const": "ok",
+      "type": "string"
+    },
+    "error": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "extension_id": {
+      "const": "loopx-community-discussion"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "request_schema_version": {
+      "const": "loopx_community_discussion_request_v0"
+    },
+    "result": {
+      "type": "object"
+    }
+  }
+}
