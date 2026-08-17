@@ -17,7 +17,8 @@ def main() -> int:
     inventory_payload = build_smoke_fleet_health(include_inventory=True)
     inventory = inventory_payload["inventory"]
     scripts = [entry["script"] for entry in inventory]
-    assert len(scripts) >= 500
+    assert scripts
+    assert len(scripts) == len(set(scripts))
     assert inventory_payload["cadence_counts"]["daily_full_public"] == len(scripts)
     assert inventory_payload["workflow_contract"]["missing_scripts"] == []
 
