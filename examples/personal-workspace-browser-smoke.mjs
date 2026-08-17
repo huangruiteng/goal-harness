@@ -65,6 +65,7 @@ async function installApi(page) {
     larkWrites: [],
     actionTransitions: [],
     turnRequests: [],
+    get larkConnections() { return runtime.larkConnections; },
   };
   await page.route(`http://127.0.0.1:${port}/status.json`, async (route) => {
     const fixture = require(resolve(repoRoot, "examples/status.example.json"));
@@ -157,7 +158,7 @@ async function installApi(page) {
           app_label: "LoopX Mew", app_ref: body.app_ref, chat_name: body.chat_name, enabled: true,
           event_count: 0, health_error_code: "lark_event_delivery_unverified",
           goal_id: body.goal_id, goal_title: goal?.id ?? body.goal_id, incoming_mode: body.incoming_mode,
-          last_event_status: null, listener_error_code: null, listener_status: "listening", replied_count: 0,
+          last_event_reason: null, last_event_status: null, listener_error_code: null, listener_status: "listening", replied_count: 0,
           reply_mode: "topic_reply", target_ref: "product-group", topic_name: goal?.id ?? body.goal_id,
           topic_setup_required: false, reply_ready: false,
         });
@@ -581,6 +582,27 @@ async function main() {
     if (!(await connectedRow.getByText("事件订阅待验证", { exact: false }).isVisible())) throw new Error("A zero-event listener was presented as automatic-reply ready");
     if (!(await connectedRow.getByRole("link", { name: "查看飞书事件配置" }).isVisible())) throw new Error("An unverified Lark event subscription lacked repair guidance");
     if (api.larkWrites.length !== 1 || api.larkWrites[0].execute !== true) throw new Error("Lark connect did not perform exactly one approved external write");
+    Object.assign(api.larkConnections[0], {
+      event_count: 1,
+      health_error_code: "lark_event_route_mismatch",
+      last_event_reason: "topic_mismatch",
+      last_event_status: "ignored",
+    });
+    const mismatchReadback = await page.evaluate(async () => (await fetch("/api/chat/lark/connections")).json());
+    if (mismatchReadback.connections?.[0]?.last_event_reason !== "topic_mismatch") {
+      throw new Error(`Lark route mismatch API readback mismatch: ${JSON.stringify(mismatchReadback)}`);
+    }
+    await page.getByRole("button", { name: "关闭 Lark 设置" }).click();
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByTestId("personal-goal-home").waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "通知设置", exact: true }).click();
+    const routeMismatchRow = page.locator(".personal-lark-table-row", { hasText: "Product group" });
+    try {
+      await routeMismatchRow.getByText("消息未匹配当前 Goal Topic", { exact: false }).waitFor({ state: "visible" });
+    } catch (error) {
+      throw new Error(`${error.message}; body=${(await page.locator("body").innerText()).slice(0, 4000)}`);
+    }
+    await routeMismatchRow.getByText("请重新选择群聊并连接该 Goal", { exact: false }).waitFor({ state: "visible" });
     await page.locator(".personal-lark-table-row", { hasText: "Product group" }).getByRole("button", { name: /配置/ }).click();
     await page.getByRole("dialog", { name: "Edit Lark Connection" }).waitFor({ state: "visible" });
     await page.getByRole("dialog", { name: "Edit Lark Connection" }).getByRole("button", { name: "Cancel" }).click();
