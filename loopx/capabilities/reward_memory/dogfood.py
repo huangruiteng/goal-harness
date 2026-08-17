@@ -14,19 +14,64 @@ from .candidate_review import (
     review_reward_memory_candidate,
 )
 from .evaluation import REWARD_MEMORY_EVALUATION_SCHEMA_VERSION
+from .memory_utility import (
+    build_reward_memory_utility_observation,
+    normalize_reward_memory_ref_digests,
+    reward_memory_application_receipt_id,
+    validate_reward_memory_utility_observation,
+)
 from .registry import normalize_reward_memory_corpus
 
 
-REWARD_MEMORY_DOGFOOD_RECEIPT_SCHEMA_VERSION = "reward_memory_dogfood_receipt_v0"
-REWARD_MEMORY_DOGFOOD_BATCH_SCHEMA_VERSION = "reward_memory_dogfood_batch_v0"
+REWARD_MEMORY_DOGFOOD_RECEIPT_SCHEMA_VERSION = "reward_memory_dogfood_receipt_v1"
+REWARD_MEMORY_DOGFOOD_BATCH_SCHEMA_VERSION = "reward_memory_dogfood_batch_v1"
 REWARD_MEMORY_OPERATOR_CONTROL_SCHEMA_VERSION = "reward_memory_operator_control_v0"
 
-DOGFOOD_OUTCOMES = {"hit", "miss", "refute"}
+APPLICATION_DISPOSITIONS = {"applied", "not_applied", "refuted"}
+UTILITY_EVALUATION_STATUSES = {"accepted", "rejected", "not_requested"}
 DOMAIN_FAMILIES = {"issue_fix", "loopx"}
 OPERATOR_ACTIONS = {"edit", "retire"}
 TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,199}$")
 MAX_RECEIPTS = 24
 MAX_OPERATOR_CONTROLS = 8
+
+_DOGFOOD_RECEIPT_FIELDS = frozenset(
+    {
+        "ok",
+        "schema_version",
+        "domain_family",
+        "domain_id",
+        "application_id",
+        "application_receipt_id",
+        "artifact_ref",
+        "corpus_id",
+        "surface_id",
+        "application_outcome",
+        "application_disposition",
+        "module_outcome",
+        "utility_evaluation",
+        "utility_observation",
+        "memory_ref_digests",
+        "verification",
+        "cost",
+        "intervention",
+        "bot_feedback",
+        "receipt_id",
+        "grants_new_action_authority",
+        "raw_content_captured",
+        "external_writes_performed",
+    }
+)
+_VERIFICATION_FIELDS = frozenset(
+    {"result_readback_verified", "current_artifact_verified"}
+)
+_MODULE_OUTCOME_FIELDS = frozenset(
+    {"verified", "outcome_ref", "outcome_status", "summary"}
+)
+_COST_FIELDS = frozenset({"latency_ms", "model_tokens", "provider_call_count"})
+_INTERVENTION_FIELDS = frozenset({"count", "summary"})
+_BOT_FEEDBACK_FIELDS = frozenset({"captured", "summary"})
+_UTILITY_ATTRIBUTION_FIELDS = frozenset({"context", "proposal", "created_at"})
 
 
 def _token(value: object, label: str) -> str:
@@ -57,6 +102,20 @@ def _counter(mapping: Mapping[str, Any], key: str) -> int:
     return value
 
 
+def _exact_fields(
+    mapping: Mapping[str, Any], expected: frozenset[str], label: str
+) -> None:
+    keys = set(mapping)
+    if any(not isinstance(key, str) for key in keys):
+        raise ValueError(f"{label} fields must be strings")
+    if keys != expected:
+        missing = sorted(expected - keys)
+        unknown = sorted(keys - expected)
+        raise ValueError(
+            f"{label} has invalid fields: missing={missing}, unknown={unknown}"
+        )
+
+
 def _digest(payload: Mapping[str, Any], *, prefix: str) -> str:
     value = hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -64,20 +123,35 @@ def _digest(payload: Mapping[str, Any], *, prefix: str) -> str:
     return f"{prefix}:{value}"
 
 
-def _dogfood_outcome(application_outcome: object) -> str:
+def _application_disposition(application_outcome: object) -> str:
     outcome = str(application_outcome or "").strip()
     if outcome == "applied":
-        return "hit"
+        return "applied"
     if outcome == "refuted":
-        return "refute"
+        return "refuted"
     if outcome in {
         "ignored",
         "failed",
         "not_available",
         "available_not_applied",
     }:
-        return "miss"
+        return "not_applied"
     raise ValueError("application receipt outcome is invalid")
+
+
+def _dogfood_receipt_identity(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    # Utility delivery has its own observation_id. Keep this identity tied to the
+    # application settlement so evaluator absence, rejection, or revision cannot
+    # duplicate application disposition and cost metrics.
+    module_outcome = receipt["module_outcome"]
+    return {
+        "schema_version": receipt["schema_version"],
+        "application_receipt_id": receipt["application_receipt_id"],
+        "application_outcome": receipt["application_outcome"],
+        "application_disposition": receipt["application_disposition"],
+        "module_outcome_ref": module_outcome["outcome_ref"],
+        "module_outcome_status": module_outcome["outcome_status"],
+    }
 
 
 def build_reward_memory_dogfood_receipt(
@@ -105,9 +179,12 @@ def build_reward_memory_dogfood_receipt(
     ):
         raise ValueError("application_receipt must use the Stage-3 receipt schema")
     application_id = _token(application.get("application_id"), "application_id")
+    application_receipt_id = reward_memory_application_receipt_id(application)
     artifact_ref = _token(application.get("artifact_ref"), "artifact_ref")
+    corpus_id = _token(application.get("corpus_id"), "corpus_id")
     surface_id = _token(application.get("surface_id"), "surface_id")
-    outcome = _dogfood_outcome(application.get("outcome"))
+    application_outcome = str(application.get("outcome") or "").strip()
+    application_disposition = _application_disposition(application_outcome)
     readback_verified = _boolean(application, "result_readback_verified")
     current_verified = _boolean(application, "current_artifact_verified")
     if _boolean(application, "grants_new_action_authority"):
@@ -116,22 +193,17 @@ def build_reward_memory_dogfood_receipt(
         raise ValueError("application receipt cannot contain raw content")
     if _boolean(application, "external_writes_performed"):
         raise ValueError("application receipt cannot perform external writes")
-    if outcome in {"hit", "refute"} and not readback_verified:
-        raise ValueError("hit or refute requires exact provider result readback")
-    if outcome in {"hit", "refute"} and not current_verified:
-        raise ValueError("hit or refute requires current-artifact verification")
-    memory_ref_digests = application.get("memory_ref_digests")
-    if not isinstance(memory_ref_digests, Sequence) or isinstance(
-        memory_ref_digests, (str, bytes)
-    ):
-        raise ValueError("memory_ref_digests must be a list")
-    digests = sorted(
-        {_token(value, "memory_ref_digest") for value in memory_ref_digests}
+    if application_disposition in {"applied", "refuted"} and not readback_verified:
+        raise ValueError("applied or refuted requires exact provider result readback")
+    if application_disposition in {"applied", "refuted"} and not current_verified:
+        raise ValueError("applied or refuted requires current-artifact verification")
+    digests = normalize_reward_memory_ref_digests(
+        application.get("memory_ref_digests"),
+        "memory_ref_digests",
+        minimum=0,
     )
-    if len(digests) != len(memory_ref_digests):
-        raise ValueError("memory_ref_digests must not contain duplicates")
-    if outcome in {"hit", "refute"} and not digests:
-        raise ValueError("hit or refute requires attributed memory references")
+    if application_disposition in {"applied", "refuted"} and not digests:
+        raise ValueError("applied or refuted requires attributed memory references")
 
     module_outcome = observation.get("module_outcome")
     if not isinstance(module_outcome, Mapping):
@@ -144,9 +216,64 @@ def build_reward_memory_dogfood_receipt(
     outcome_verified = _boolean(module_outcome, "outcome_verified")
     if not outcome_verified:
         raise ValueError("dogfood requires a verified real module outcome")
+    outcome_ref = _token(
+        module_outcome.get("outcome_ref"), "module_outcome.outcome_ref"
+    )
+    outcome_status = _token(
+        module_outcome.get("outcome_status"), "module_outcome.outcome_status"
+    )
     outcome_summary = _compact(
         module_outcome.get("summary"), "module_outcome.summary", limit=360
     )
+
+    verified_outcome = {
+        "verified": True,
+        "outcome_ref": outcome_ref,
+        "artifact_ref": artifact_ref,
+        "outcome_status": outcome_status,
+    }
+    utility_observation: dict[str, Any] | None = None
+    if "utility_attribution" not in observation:
+        utility_evaluation = {
+            "status": "not_requested",
+            "reason_code": "utility_attribution_not_requested",
+        }
+    else:
+        try:
+            attribution = observation.get("utility_attribution")
+            if not isinstance(attribution, Mapping):
+                raise ValueError("utility_attribution must be an object")
+            _exact_fields(
+                attribution,
+                _UTILITY_ATTRIBUTION_FIELDS,
+                "utility_attribution",
+            )
+            attribution_context = attribution.get("context")
+            evaluator_proposal = attribution.get("proposal")
+            if not isinstance(attribution_context, Mapping):
+                raise ValueError("utility attribution context must be an object")
+            if not isinstance(evaluator_proposal, Mapping):
+                raise ValueError("utility attribution proposal must be an object")
+            built_observation = build_reward_memory_utility_observation(
+                application,
+                verified_outcome,
+                attribution_context,
+                evaluator_proposal,
+                created_at=attribution.get("created_at"),
+            )
+            utility_observation = validate_reward_memory_utility_observation(
+                built_observation,
+                application_receipt=application,
+                verified_outcome=verified_outcome,
+                attribution_context=attribution_context,
+            )
+        except ValueError:
+            utility_evaluation = {
+                "status": "rejected",
+                "reason_code": "utility_attribution_rejected",
+            }
+        else:
+            utility_evaluation = {"status": "accepted"}
 
     cost = observation.get("cost")
     if not isinstance(cost, Mapping):
@@ -178,28 +305,26 @@ def build_reward_memory_dogfood_receipt(
             bot_feedback.get("summary"), "bot_feedback.summary", limit=240
         )
 
-    identity = {
-        "domain_family": family,
-        "domain_id": domain_id,
-        "application_id": application_id,
-        "artifact_ref": artifact_ref,
-        "surface_id": surface_id,
-        "outcome": outcome,
-    }
-    return {
+    receipt = {
         "ok": True,
         "schema_version": REWARD_MEMORY_DOGFOOD_RECEIPT_SCHEMA_VERSION,
-        "receipt_id": _digest(identity, prefix="dogfood"),
         "domain_family": family,
         "domain_id": domain_id,
         "application_id": application_id,
+        "application_receipt_id": application_receipt_id,
         "artifact_ref": artifact_ref,
+        "corpus_id": corpus_id,
         "surface_id": surface_id,
-        "outcome": outcome,
+        "application_outcome": application_outcome,
+        "application_disposition": application_disposition,
         "module_outcome": {
             "verified": True,
+            "outcome_ref": outcome_ref,
+            "outcome_status": outcome_status,
             "summary": outcome_summary,
         },
+        "utility_evaluation": utility_evaluation,
+        "utility_observation": utility_observation,
         "memory_ref_digests": digests,
         "verification": {
             "result_readback_verified": readback_verified,
@@ -218,6 +343,10 @@ def build_reward_memory_dogfood_receipt(
         "raw_content_captured": False,
         "external_writes_performed": False,
     }
+    receipt["receipt_id"] = _digest(
+        _dogfood_receipt_identity(receipt), prefix="dogfood"
+    )
+    return receipt
 
 
 def _scope_matches(record: Mapping[str, Any], corpus: Mapping[str, Any]) -> bool:
@@ -409,50 +538,186 @@ def _validate_control_receipt(raw: object) -> dict[str, Any]:
 def _validate_dogfood_receipt(raw: object) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise ValueError("dogfood receipt must be an object")
+    _exact_fields(raw, _DOGFOOD_RECEIPT_FIELDS, "dogfood receipt")
     if raw.get("schema_version") != REWARD_MEMORY_DOGFOOD_RECEIPT_SCHEMA_VERSION:
         raise ValueError("dogfood receipt schema is invalid")
+    if _boolean(raw, "ok") is not True:
+        raise ValueError("dogfood receipt must be successful")
     family = str(raw.get("domain_family") or "").strip()
     domain_id = _token(raw.get("domain_id"), "domain_id")
     if family not in DOMAIN_FAMILIES or not domain_id.startswith(f"{family}."):
         raise ValueError("dogfood receipt domain is invalid")
-    outcome = str(raw.get("outcome") or "").strip()
-    if outcome not in DOGFOOD_OUTCOMES:
-        raise ValueError("dogfood receipt outcome is invalid")
-    for key in ("receipt_id", "application_id", "artifact_ref", "surface_id"):
+    application_outcome = str(raw.get("application_outcome") or "").strip()
+    application_disposition = str(raw.get("application_disposition") or "").strip()
+    if application_disposition not in APPLICATION_DISPOSITIONS:
+        raise ValueError("dogfood receipt application disposition is invalid")
+    if _application_disposition(application_outcome) != application_disposition:
+        raise ValueError("dogfood receipt application outcome is inconsistent")
+    for key in (
+        "receipt_id",
+        "application_id",
+        "application_receipt_id",
+        "artifact_ref",
+        "corpus_id",
+        "surface_id",
+    ):
         _token(raw.get(key), key)
     verification = raw.get("verification")
     if not isinstance(verification, Mapping):
         raise ValueError("dogfood receipt verification is invalid")
+    _exact_fields(verification, _VERIFICATION_FIELDS, "dogfood receipt verification")
     readback = _boolean(verification, "result_readback_verified")
     current = _boolean(verification, "current_artifact_verified")
-    if outcome in {"hit", "refute"} and not (readback and current):
-        raise ValueError("hit or refute receipt is not exactly verified")
+    normalized_verification = {
+        "result_readback_verified": readback,
+        "current_artifact_verified": current,
+    }
+    if application_disposition in {"applied", "refuted"} and not (readback and current):
+        raise ValueError("applied or refuted receipt is not exactly verified")
+    digests = normalize_reward_memory_ref_digests(
+        raw.get("memory_ref_digests"),
+        "dogfood receipt memory_ref_digests",
+        minimum=0,
+    )
+    if raw["memory_ref_digests"] != digests:
+        raise ValueError("dogfood receipt memory_ref_digests must be sorted")
+    if application_disposition in {"applied", "refuted"} and not digests:
+        raise ValueError("applied or refuted receipt requires memory references")
     module_outcome = raw.get("module_outcome")
-    if not isinstance(module_outcome, Mapping) or not _boolean(
-        module_outcome, "verified"
-    ):
+    if not isinstance(module_outcome, Mapping):
+        raise ValueError("dogfood module outcome is invalid")
+    _exact_fields(module_outcome, _MODULE_OUTCOME_FIELDS, "dogfood module outcome")
+    if not _boolean(module_outcome, "verified"):
         raise ValueError("dogfood module outcome is not verified")
-    _compact(module_outcome.get("summary"), "module_outcome.summary", limit=360)
+    outcome_ref = _token(
+        module_outcome.get("outcome_ref"), "module_outcome.outcome_ref"
+    )
+    outcome_status = _token(
+        module_outcome.get("outcome_status"), "module_outcome.outcome_status"
+    )
+    normalized_module_outcome = {
+        "verified": True,
+        "outcome_ref": outcome_ref,
+        "outcome_status": outcome_status,
+        "summary": _compact(
+            module_outcome.get("summary"), "module_outcome.summary", limit=360
+        ),
+    }
+
+    utility_evaluation = raw.get("utility_evaluation")
+    if not isinstance(utility_evaluation, Mapping):
+        raise ValueError("dogfood utility evaluation is invalid")
+    evaluation_status = str(utility_evaluation.get("status") or "").strip()
+    if evaluation_status not in UTILITY_EVALUATION_STATUSES:
+        raise ValueError("dogfood utility evaluation status is invalid")
+    utility_observation = raw.get("utility_observation")
+    if evaluation_status == "accepted":
+        if set(utility_evaluation) != {"status"}:
+            raise ValueError("accepted utility evaluation must not carry a reason")
+        normalized_utility = validate_reward_memory_utility_observation(
+            utility_observation
+        )
+        utility_scope = normalized_utility["scope"]
+        if (
+            utility_scope["corpus_id"] != raw["corpus_id"]
+            or utility_scope["surface_id"] != raw["surface_id"]
+        ):
+            raise ValueError("embedded utility observation scope does not match")
+        if normalized_utility["outcome_ref"] != outcome_ref:
+            raise ValueError("embedded utility observation outcome does not match")
+        if (
+            normalized_utility["application_receipt_id"]
+            != raw["application_receipt_id"]
+        ):
+            raise ValueError(
+                "embedded utility observation application receipt does not match"
+            )
+        if normalized_utility["attribution_level"] == "item":
+            if (
+                len(normalized_utility["memory_ref_digests"]) != 1
+                or normalized_utility["memory_ref_digests"][0] not in digests
+            ):
+                raise ValueError("embedded item utility memory digest is not applied")
+        elif normalized_utility["memory_ref_digests"] != digests:
+            raise ValueError("embedded utility observation memory digests do not match")
+        normalized_utility_evaluation = {"status": "accepted"}
+    else:
+        expected_reason = f"utility_attribution_{evaluation_status}"
+        if set(utility_evaluation) != {"status", "reason_code"} or (
+            utility_evaluation.get("reason_code") != expected_reason
+        ):
+            raise ValueError("dogfood utility evaluation reason is invalid")
+        if utility_observation is not None:
+            raise ValueError(
+                "unaccepted utility evaluation cannot carry an observation"
+            )
+        normalized_utility = None
+        normalized_utility_evaluation = {
+            "status": evaluation_status,
+            "reason_code": expected_reason,
+        }
+
+    if raw["receipt_id"] != _digest(_dogfood_receipt_identity(raw), prefix="dogfood"):
+        raise ValueError("dogfood receipt identity is invalid")
     cost = raw.get("cost")
     if not isinstance(cost, Mapping):
         raise ValueError("dogfood receipt cost is invalid")
-    for key in ("latency_ms", "model_tokens", "provider_call_count"):
-        _counter(cost, key)
+    _exact_fields(cost, _COST_FIELDS, "dogfood receipt cost")
+    normalized_cost = {
+        key: _counter(cost, key)
+        for key in ("latency_ms", "model_tokens", "provider_call_count")
+    }
     intervention = raw.get("intervention")
     if not isinstance(intervention, Mapping):
         raise ValueError("dogfood receipt intervention is invalid")
-    _counter(intervention, "count")
+    _exact_fields(intervention, _INTERVENTION_FIELDS, "dogfood receipt intervention")
+    intervention_count = _counter(intervention, "count")
+    intervention_summary = intervention.get("summary")
+    if intervention_count:
+        normalized_intervention_summary = _compact(
+            intervention_summary, "intervention.summary", limit=240
+        )
+    elif intervention_summary is not None:
+        raise ValueError("intervention.summary must be null when count is zero")
+    else:
+        normalized_intervention_summary = None
+    normalized_intervention = {
+        "count": intervention_count,
+        "summary": normalized_intervention_summary,
+    }
     feedback = raw.get("bot_feedback")
     if not isinstance(feedback, Mapping):
         raise ValueError("dogfood receipt bot_feedback is invalid")
-    _boolean(feedback, "captured")
+    _exact_fields(feedback, _BOT_FEEDBACK_FIELDS, "dogfood receipt bot_feedback")
+    feedback_captured = _boolean(feedback, "captured")
+    feedback_summary = feedback.get("summary")
+    if feedback_captured:
+        normalized_feedback_summary = _compact(
+            feedback_summary, "bot_feedback.summary", limit=240
+        )
+    elif feedback_summary is not None:
+        raise ValueError("bot_feedback.summary must be null when captured is false")
+    else:
+        normalized_feedback_summary = None
+    normalized_feedback = {
+        "captured": feedback_captured,
+        "summary": normalized_feedback_summary,
+    }
     if _boolean(raw, "grants_new_action_authority"):
         raise ValueError("dogfood receipt cannot grant action authority")
     if _boolean(raw, "raw_content_captured"):
         raise ValueError("dogfood receipt cannot contain raw content")
     if _boolean(raw, "external_writes_performed"):
         raise ValueError("dogfood receipt cannot perform external writes")
-    return dict(raw)
+    result = dict(raw)
+    result["verification"] = normalized_verification
+    result["module_outcome"] = normalized_module_outcome
+    result["utility_evaluation"] = normalized_utility_evaluation
+    result["cost"] = normalized_cost
+    result["intervention"] = normalized_intervention
+    result["bot_feedback"] = normalized_feedback
+    result["utility_observation"] = normalized_utility
+    return result
 
 
 def build_reward_memory_dogfood_batch(
@@ -476,6 +741,13 @@ def build_reward_memory_dogfood_batch(
     receipt_ids = [item["receipt_id"] for item in normalized_receipts]
     if len(receipt_ids) != len(set(receipt_ids)):
         raise ValueError("dogfood batch must not double-count a receipt")
+    application_receipt_ids = [
+        item["application_receipt_id"] for item in normalized_receipts
+    ]
+    if len(application_receipt_ids) != len(set(application_receipt_ids)):
+        raise ValueError(
+            "dogfood batch must not double-count an application settlement"
+        )
     control_refs = [item["control_ref"] for item in controls]
     if len(control_refs) != len(set(control_refs)):
         raise ValueError("dogfood batch must not double-count an operator control")
@@ -496,7 +768,9 @@ def build_reward_memory_dogfood_batch(
             if item["domain_family"] == "loopx"
         }
     )
-    outcomes = {item["outcome"] for item in normalized_receipts}
+    application_dispositions = {
+        item["application_disposition"] for item in normalized_receipts
+    }
     actions = {item["action"] for item in controls}
     reason_codes: list[str] = []
     if not gate_ready:
@@ -505,19 +779,43 @@ def build_reward_memory_dogfood_batch(
         reason_codes.append("issue_fix_outcome_missing")
     if len(loopx_domains) < 2:
         reason_codes.append("two_loopx_domains_required")
-    for outcome in sorted(DOGFOOD_OUTCOMES - outcomes):
-        reason_codes.append(f"outcome_missing:{outcome}")
+    for disposition in sorted(APPLICATION_DISPOSITIONS - application_dispositions):
+        reason_codes.append(f"application_disposition_missing:{disposition}")
     for action in sorted(OPERATOR_ACTIONS - actions):
         reason_codes.append(f"operator_control_missing:{action}")
 
+    utility_observations = [
+        item["utility_observation"]
+        for item in normalized_receipts
+        if item["utility_observation"] is not None
+    ]
+    disposition_metrics = {
+        f"{disposition}_count": sum(
+            item["application_disposition"] == disposition
+            for item in normalized_receipts
+        )
+        for disposition in sorted(APPLICATION_DISPOSITIONS)
+    }
+    utility_label_metrics = {
+        f"utility_{label}_count": sum(
+            item["utility_label"] == label for item in utility_observations
+        )
+        for label in ("helpful", "harmful", "neutral", "unknown")
+    }
     totals = {
         "receipt_count": len(normalized_receipts),
         "issue_fix_receipt_count": issue_fix_count,
         "loopx_domain_count": len(loopx_domains),
-        "hit_count": sum(item["outcome"] == "hit" for item in normalized_receipts),
-        "miss_count": sum(item["outcome"] == "miss" for item in normalized_receipts),
-        "refute_count": sum(
-            item["outcome"] == "refute" for item in normalized_receipts
+        **disposition_metrics,
+        "utility_observation_count": len(utility_observations),
+        **utility_label_metrics,
+        "utility_rejected_count": sum(
+            item["utility_evaluation"]["status"] == "rejected"
+            for item in normalized_receipts
+        ),
+        "utility_not_requested_count": sum(
+            item["utility_evaluation"]["status"] == "not_requested"
+            for item in normalized_receipts
         ),
         "latency_ms": sum(item["cost"]["latency_ms"] for item in normalized_receipts),
         "model_tokens": sum(
@@ -534,24 +832,34 @@ def build_reward_memory_dogfood_batch(
         ),
     }
     ready = not reason_codes
-    compact_receipts = [
-        {
-            key: item[key]
-            for key in (
-                "receipt_id",
-                "domain_family",
-                "domain_id",
-                "artifact_ref",
-                "surface_id",
-                "outcome",
-                "verification",
-                "cost",
-                "intervention",
-                "bot_feedback",
-            )
-        }
-        for item in normalized_receipts
-    ]
+    compact_receipts = []
+    for item in normalized_receipts:
+        compact_receipts.append(
+            {
+                "receipt_id": item["receipt_id"],
+                "domain_family": item["domain_family"],
+                "domain_id": item["domain_id"],
+                "application": {
+                    "application_id": item["application_id"],
+                    "application_receipt_id": item["application_receipt_id"],
+                    "artifact_ref": item["artifact_ref"],
+                    "corpus_id": item["corpus_id"],
+                    "surface_id": item["surface_id"],
+                    "outcome": item["application_outcome"],
+                    "disposition": item["application_disposition"],
+                    "memory_ref_digests": item["memory_ref_digests"],
+                    "verification": item["verification"],
+                },
+                "module_outcome": item["module_outcome"],
+                "utility": {
+                    "evaluation": item["utility_evaluation"],
+                    "observation": item["utility_observation"],
+                },
+                "cost": item["cost"],
+                "intervention": item["intervention"],
+                "bot_feedback": item["bot_feedback"],
+            }
+        )
     return {
         "ok": ready,
         "schema_version": REWARD_MEMORY_DOGFOOD_BATCH_SCHEMA_VERSION,
@@ -559,7 +867,7 @@ def build_reward_memory_dogfood_batch(
         "reason_codes": reason_codes,
         "stage4_gate_verified": gate_ready,
         "loopx_domains": loopx_domains,
-        "outcomes": sorted(outcomes),
+        "application_dispositions": sorted(application_dispositions),
         "operator_controls": sorted(actions),
         "metrics": totals,
         "receipts": compact_receipts,
