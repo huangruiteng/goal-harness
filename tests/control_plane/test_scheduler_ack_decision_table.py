@@ -3,6 +3,9 @@ from __future__ import annotations
 import pytest
 
 from loopx.control_plane.scheduler.ack import build_scheduler_ack_plan
+from loopx.control_plane.scheduler.scheduler_hint import (
+    build_codex_app_scheduler_ack_hint,
+)
 from loopx.control_plane.scheduler.state import (
     CODEX_APP_STATEFUL_BACKOFF_STATE_KEY,
 )
@@ -151,3 +154,55 @@ def test_scheduler_ack_scope_proof_rejects_mutations(
 
     assert result["ok"] is False
     assert expected_reason_fragment in result["reason"]
+
+
+def test_scheduler_ack_hint_preserves_public_contract_and_runtime_capabilities() -> None:
+    hint = build_codex_app_scheduler_ack_hint(
+        goal_id="goal-ack-contract",
+        agent_id=AGENT_ID,
+        applied_rrule=EXPECTED_RRULE,
+        reset_token=RESET_TOKEN,
+        identity_signature=IDENTITY_SIGNATURE,
+        available_capabilities=["shell", "network", "benchmark_runner"],
+        host_match_observed=True,
+    )
+
+    assert {
+        "schema_version": hint["schema_version"],
+        "command": hint["command"],
+        "execute": hint["execute"],
+        "uses_current_hint": hint["uses_current_hint"],
+        "no_spend": hint["no_spend"],
+    } == {
+        "schema_version": "codex_app_scheduler_ack_hint_v0",
+        "command": "quota scheduler-ack-current",
+        "execute": True,
+        "uses_current_hint": True,
+        "no_spend": True,
+    }
+    assert hint["args"]["available_capabilities"] == [
+        "network",
+        "benchmark_runner",
+    ]
+    assert hint["args"]["host_match_observed"] is True
+    assert hint["cli_args"] == [
+        "quota",
+        "scheduler-ack-current",
+        "--goal-id",
+        "goal-ack-contract",
+        "--agent-id",
+        AGENT_ID,
+        "-A",
+        "--available-capability",
+        "network",
+        "--available-capability",
+        "benchmark_runner",
+        "--applied-rrule",
+        EXPECTED_RRULE,
+        "--host-match-observed",
+        "--reset-token",
+        RESET_TOKEN,
+        "--identity-signature",
+        IDENTITY_SIGNATURE,
+        "--execute",
+    ]
