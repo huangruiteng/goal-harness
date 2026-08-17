@@ -1,7 +1,21 @@
 # Contributing To LoopX
 
-Thanks for helping improve LoopX. This project is early, so the best
-contributions are small, reviewable, and tied to a public task or clear bug.
+You want to help improve LoopX? Great, and thank you. Contributions come in
+many shapes, and not all of them are code:
+
+- filing clear bug reports with reproduction steps;
+- triaging and reproducing issues;
+- improving documentation, examples, and smoke tests;
+- answering questions in issues or discussions;
+- reviewing pull requests and helping contributors navigate the review flow;
+- implementing a public task or fixing a bug.
+
+Every one of these helps. The rest of this guide covers finding work, keeping
+public/private boundaries intact, validating changes, and getting a pull
+request merged.
+
+The best code contributions are small, reviewable, and tied to a public task
+or a clear bug.
 
 ## Find Work
 
