@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,40 @@ def test_scan_public_boundary_survives_dangling_symlink(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert payload["scanned_files"] == 1
     assert payload["unreadable_files"] == []
+
+
+def test_tracked_product_runtime_source_is_not_private_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / ".local" / "worktrees" / "repo"
+    source = repo_root / "loopx" / "control_plane" / "runtime" / "example.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("PUBLIC_CONTRACT = True\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "-q"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "add", str(source.relative_to(repo_root))],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    def fail_git_probe(_: Path) -> dict[str, object]:
+        pytest.fail("product runtime source must not use private-state git probing")
+
+    monkeypatch.setattr("loopx.contract._git_probe", fail_git_probe)
+
+    payload = scan_public_boundary([repo_root])
+
+    assert payload["ok"] is True
+    assert payload["scanned_files"] == 1
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads mode 000 files")
