@@ -305,17 +305,19 @@ def rebase_native_codex_loopx_workspace_state(
 
     Call once before launch from the host path to the alias, then once after
     process termination from the alias back to the host path.  All candidate
-    files are parsed before any replacement is committed.
+    files are parsed before any replacement is committed.  The source must
+    exist; the pre-launch target may be a planned alias that the envelope will
+    materialize immediately afterwards.
     """
 
     try:
         resolved_storage = storage_root.resolve(strict=True)
         resolved_source = source_root.resolve(strict=True)
-        resolved_target = target_root.resolve(strict=True)
     except OSError as exc:
         raise NativeCodexIsolationError(
             "native_codex_loopx_state_rebase_root_missing"
         ) from exc
+    resolved_target = target_root.expanduser().resolve(strict=False)
     if not resolved_storage.is_dir():
         raise NativeCodexIsolationError(
             "native_codex_loopx_state_rebase_storage_not_directory"
