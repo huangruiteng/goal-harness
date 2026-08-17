@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import textwrap
@@ -11,6 +12,7 @@ import pytest
 from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (
     NativeCodexIsolationError,
     build_native_codex_isolation_envelope,
+    rebase_native_codex_loopx_workspace_state,
 )
 
 
@@ -71,6 +73,154 @@ def test_native_codex_isolation_rejects_overlapping_authority_roots(
             work_dir=work_dir,
             private_root=private_root,
             workspace_source=controller_root,
+        )
+
+
+def test_native_codex_loopx_state_rebase_round_trips_generated_control_state(
+    tmp_path: Path,
+) -> None:
+    visible = tmp_path / "visible"
+    alias = tmp_path / "run-work" / "host-visible"
+    alias.mkdir(parents=True)
+    project_registry = visible / ".loopx/registry.json"
+    global_registry = visible / ".loopx/runtime/registry.global.json"
+    global_registry.parent.mkdir(parents=True)
+    registry_payload = {
+        "common_runtime_root": str(visible / ".loopx/runtime"),
+        "unrelated": f"prefix-{visible}-must-not-change",
+        "goals": [{"id": "goal-1", "repo": str(visible)}],
+    }
+    for path in (project_registry, global_registry):
+        path.write_text(
+            json.dumps(registry_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    runs_dir = visible / ".loopx/runtime/goals/goal-1/runs"
+    runs_dir.mkdir(parents=True)
+    run_json = runs_dir / "run.json"
+    run_markdown = runs_dir / "run.md"
+    index_path = runs_dir / "index.jsonl"
+    run_json.write_text(
+        json.dumps(
+            {
+                "state": {"path": str(visible / ".codex/goals/goal-1/state.md")},
+                "unrelated": f"prefix-{visible}-must-not-change",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    run_markdown.write_text(
+        f"- state_file: `{visible}/.codex/goals/goal-1/state.md`\n"
+        f"- unrelated: `prefix-{visible}-must-not-change`\n",
+        encoding="utf-8",
+    )
+    index_path.write_text(
+        json.dumps(
+            {
+                "json_path": str(run_json),
+                "markdown_path": str(run_markdown),
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    originals = {
+        path: path.read_text(encoding="utf-8")
+        for path in (
+            project_registry,
+            global_registry,
+            run_json,
+            run_markdown,
+            index_path,
+        )
+    }
+
+    rebased = rebase_native_codex_loopx_workspace_state(
+        visible,
+        source_root=visible,
+        target_root=alias,
+    )
+
+    assert rebased.control_state_found is True
+    assert rebased.replacement_count == 8
+    assert set(rebased.rewritten_files) == set(originals)
+    for path in originals:
+        text = path.read_text(encoding="utf-8")
+        assert str(alias) in text
+    for path in (project_registry, global_registry, run_json, run_markdown):
+        assert f"prefix-{visible}-must-not-change" in path.read_text(encoding="utf-8")
+
+    restored = rebase_native_codex_loopx_workspace_state(
+        visible,
+        source_root=alias,
+        target_root=visible,
+    )
+
+    assert restored.control_state_found is True
+    assert restored.replacement_count == rebased.replacement_count
+    for path, original in originals.items():
+        assert path.read_text(encoding="utf-8") == original
+
+
+def test_native_codex_loopx_state_rebase_validates_all_files_before_writing(
+    tmp_path: Path,
+) -> None:
+    visible = tmp_path / "visible"
+    alias = tmp_path / "alias"
+    alias.mkdir()
+    project_registry = visible / ".loopx/registry.json"
+    global_registry = visible / ".loopx/runtime/registry.global.json"
+    global_registry.parent.mkdir(parents=True)
+    registry_text = (
+        json.dumps(
+            {"common_runtime_root": str(visible / ".loopx/runtime")},
+            indent=2,
+        )
+        + "\n"
+    )
+    project_registry.write_text(registry_text, encoding="utf-8")
+    global_registry.write_text(registry_text, encoding="utf-8")
+    runs_dir = visible / ".loopx/runtime/goals/goal-1/runs"
+    runs_dir.mkdir(parents=True)
+    (runs_dir / "index.jsonl").write_text("not-json\n", encoding="utf-8")
+
+    with pytest.raises(
+        NativeCodexIsolationError,
+        match="native_codex_loopx_state_invalid_jsonl",
+    ):
+        rebase_native_codex_loopx_workspace_state(
+            visible,
+            source_root=visible,
+            target_root=alias,
+        )
+
+    assert project_registry.read_text(encoding="utf-8") == registry_text
+    assert global_registry.read_text(encoding="utf-8") == registry_text
+
+
+def test_native_codex_loopx_state_rebase_requires_complete_registry_pair(
+    tmp_path: Path,
+) -> None:
+    visible = tmp_path / "visible"
+    alias = tmp_path / "alias"
+    alias.mkdir()
+    project_registry = visible / ".loopx/registry.json"
+    project_registry.parent.mkdir(parents=True)
+    project_registry.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(
+        NativeCodexIsolationError,
+        match="native_codex_loopx_registry_incomplete",
+    ):
+        rebase_native_codex_loopx_workspace_state(
+            visible,
+            source_root=visible,
+            target_root=alias,
         )
 
 
