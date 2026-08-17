@@ -383,12 +383,6 @@ def build_native_codex_isolation_envelope(
     tree can use their verified paths without exposing the surrounding host.
     """
 
-    unshare = _resolve_executable("unshare", error="native_codex_unshare_missing")
-    setpriv = _resolve_executable("setpriv", error="native_codex_setpriv_missing")
-    shell = _resolve_executable("sh", error="native_codex_shell_missing")
-    resolved_executable = _resolve_executable(
-        executable, error="native_codex_executable_missing"
-    )
     if isinstance(process_args, (str, bytes)):
         raise TypeError("process_args must be a sequence of arguments")
     try:
@@ -400,13 +394,9 @@ def build_native_codex_isolation_envelope(
         raise NativeCodexIsolationError("native_codex_isolation_root_not_directory")
     if _paths_overlap(resolved_work_dir, resolved_private_root):
         raise NativeCodexIsolationError("native_codex_work_dir_overlaps_private_root")
-    if resolved_executable == resolved_private_root or (
-        resolved_private_root in resolved_executable.parents
-    ):
-        raise NativeCodexIsolationError("native_codex_executable_inside_private_root")
-
     workspace_alias: Path | None = None
     workspace_raw = ""
+    resolved_workspace: Path | None = None
     if workspace_source is not None:
         try:
             resolved_workspace = workspace_source.resolve(strict=True)
@@ -425,18 +415,14 @@ def build_native_codex_isolation_envelope(
         if resolved_workspace == resolved_private_root or (
             resolved_workspace in resolved_private_root.parents
         ):
+            # A selected workspace may intentionally be a narrow child of the
+            # denied private root.  The reverse direction is unsafe because it
+            # would re-expose the private root through an ancestor bind.
             raise NativeCodexIsolationError(
                 "native_codex_workspace_source_exposes_private_root"
             )
-        if resolved_executable == resolved_workspace or (
-            resolved_workspace in resolved_executable.parents
-        ):
-            raise NativeCodexIsolationError(
-                "native_codex_executable_inside_workspace_source"
-            )
         workspace_raw = str(resolved_workspace)
         workspace_alias = resolved_work_dir / "host-visible"
-        workspace_alias.mkdir(parents=True, exist_ok=True)
 
     resolved_profile: Path | None = None
     profile_raw = ""
@@ -464,6 +450,28 @@ def build_native_codex_isolation_envelope(
                 "native_codex_profile_root_overlaps_workspace_source"
             )
         profile_raw = str(resolved_profile)
+
+    # Root policy is pure input validation and must fail deterministically even
+    # on hosts that do not provide the Linux namespace tools used at launch.
+    unshare = _resolve_executable("unshare", error="native_codex_unshare_missing")
+    setpriv = _resolve_executable("setpriv", error="native_codex_setpriv_missing")
+    shell = _resolve_executable("sh", error="native_codex_shell_missing")
+    resolved_executable = _resolve_executable(
+        executable, error="native_codex_executable_missing"
+    )
+    if resolved_executable == resolved_private_root or (
+        resolved_private_root in resolved_executable.parents
+    ):
+        raise NativeCodexIsolationError("native_codex_executable_inside_private_root")
+    if resolved_workspace is not None and (
+        resolved_executable == resolved_workspace
+        or resolved_workspace in resolved_executable.parents
+    ):
+        raise NativeCodexIsolationError(
+            "native_codex_executable_inside_workspace_source"
+        )
+    if workspace_alias is not None:
+        workspace_alias.mkdir(parents=True, exist_ok=True)
 
     command = (
         str(unshare),
