@@ -54,6 +54,48 @@ include = ["loopx*"]
 "loopx.opencode2_goal_mode" = ["*.mjs", "README.md"]
 "loopx.pi_goal_mode" = ["*.ts", "*.mjs", "README.md"]
 
+[tool.setuptools.data-files]
+"share/loopx/skills/loopx-project" = [
+  "skills/loopx-project/SKILL.md",
+]
+"share/loopx/skills/loopx-project/agents" = [
+  "skills/loopx-project/agents/openai.yaml",
+]
+"share/loopx/skills/loopx-pr-program" = [
+  "skills/loopx-pr-program/SKILL.md",
+]
+"share/loopx/skills/loopx-pr-program/agents" = [
+  "skills/loopx-pr-program/agents/openai.yaml",
+]
+"share/loopx/skills/loopx-pr-program/references" = [
+  "skills/loopx-pr-program/references/snapshot-contract.md",
+]
+"share/loopx/skills/loopx-pr-program/scripts" = [
+  "skills/loopx-pr-program/scripts/diff_snapshot.py",
+]
+"share/loopx/skills/loopx-pr-review" = [
+  "skills/loopx-pr-review/SKILL.md",
+]
+"share/loopx/skills/loopx-pr-review/agents" = [
+  "skills/loopx-pr-review/agents/openai.yaml",
+]
+"share/loopx/skills/loopx-doc-registry" = [
+  "skills/loopx-doc-registry/SKILL.md",
+]
+"share/loopx/skills/loopx-doc-registry/agents" = [
+  "skills/loopx-doc-registry/agents/openai.yaml",
+]
+"share/loopx/skills/loopx-self-repair" = [
+  "skills/loopx-self-repair/SKILL.md",
+]
+"share/loopx/skills/loopx-self-repair/agents" = [
+  "skills/loopx-self-repair/agents/openai.yaml",
+]
+"share/loopx/skills/loopx-self-repair/references" = [
+  "skills/loopx-self-repair/references/repair-patterns.md",
+  "skills/loopx-self-repair/references/upstream-issue-escalation.md",
+]
+
 [tool.pytest.ini_options]
 norecursedirs = ["deprecate"]
 

@@ -122,6 +122,10 @@ from .task_lease import handle_task_lease_command, register_task_lease_command
 from .todo import handle_todo_command, register_todo_command
 from .version import handle_version_command, register_version_command
 from .worker_bridge import handle_worker_bridge_command, register_worker_bridge_commands
+from .workflow_skills import (
+    handle_workflow_skills_command,
+    register_workflow_skills_command,
+)
 
 __all__ = [
     "handle_turn_command",
@@ -190,6 +194,7 @@ __all__ = [
     "handle_todo_command",
     "handle_version_command",
     "handle_worker_bridge_command",
+    "handle_workflow_skills_command",
     "register_turn_commands",
     "register_host_mode_plan_command",
     "register_benchmark_boundary_commands",
@@ -233,4 +238,5 @@ __all__ = [
     "register_todo_command",
     "register_version_command",
     "register_worker_bridge_commands",
+    "register_workflow_skills_command",
 ]

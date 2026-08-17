@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, distribution
 import json
 import os
 import re
@@ -127,7 +128,7 @@ def resolve_command_path(name: str) -> Path | None:
 
 
 def current_script_invocation_path() -> Path | None:
-    """Return the active LoopX wrapper when doctor was invoked by absolute path."""
+    """Return the active LoopX executable when invoked through its console script."""
     if not sys.argv or not sys.argv[0]:
         return None
     path = Path(sys.argv[0]).expanduser()
@@ -137,9 +138,34 @@ def current_script_invocation_path() -> Path | None:
         path = path.resolve()
     except OSError:
         path = path.absolute()
-    if path.exists() and path.name == "loopx" and path.parent.name == "scripts":
+    if path.exists() and path.name == "loopx":
         return path
     return None
+
+
+def python_distribution_install(module_path: Path) -> dict[str, Any]:
+    """Identify a wheel/sdist install that owns the imported LoopX module."""
+
+    try:
+        installed = distribution("loopx")
+    except PackageNotFoundError:
+        return {"available": False}
+    installer = (installed.read_text("INSTALLER") or "").strip() or "unknown"
+    expected = module_path.resolve()
+    owns_module = any(
+        item.as_posix().endswith("loopx/doctor.py")
+        and Path(item.locate()).resolve() == expected
+        for item in installed.files or ()
+    )
+    if not owns_module:
+        return {"available": False}
+    return {
+        "available": True,
+        "kind": "python_distribution",
+        "version": installed.version,
+        "installer": installer,
+        "root": str(Path(installed.locate_file("")).resolve()),
+    }
 
 
 def is_release_snapshot(root: Path | None) -> bool:
@@ -367,6 +393,7 @@ def build_install_freshness(
     freshness_source: dict[str, Any] | None = None,
     require_installed_skills: bool = True,
     doctor_agent_type: str | None = None,
+    python_distribution: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -379,6 +406,11 @@ def build_install_freshness(
     skill_problem = require_installed_skills and any(
         not skill.get("exists") or not skill.get("required_phrases") for skill in skills.values()
     )
+    distribution_install = (
+        python_distribution
+        if isinstance(python_distribution, dict) and python_distribution.get("available")
+        else None
+    )
     if command_path is None:
         status = "missing"
         reason = "loopx is not on PATH"
@@ -387,6 +419,10 @@ def build_install_freshness(
         status = "repair_recommended"
         reason = "installed LoopX skills are missing or stale"
         requires_upgrade = True
+    elif distribution_install:
+        status = "python_distribution"
+        reason = "LoopX is installed as a managed Python distribution"
+        requires_upgrade = False
     elif release_id and age_hours is not None and age_hours > INSTALL_FRESHNESS_STALE_HOURS:
         status = "stale"
         reason = f"default release snapshot is older than {INSTALL_FRESHNESS_STALE_HOURS} hours"
@@ -424,7 +460,7 @@ def build_install_freshness(
     manifest_source = (
         manifest_body.get("source") if isinstance(manifest_body.get("source"), dict) else {}
     )
-    upgrade_command = no_clone_upgrade_command(
+    no_clone_command = no_clone_upgrade_command(
         manifest_source.get("ref"),
         doctor_agent_type=doctor_agent_type,
     )
@@ -436,6 +472,14 @@ def build_install_freshness(
     contributor_upgrade_command = (
         f"{repo_root / 'scripts' / 'install-local.sh'}\n"
         f"loopx doctor{doctor_agent_arg}"
+    )
+    upgrade_command = (
+        f"{shlex.quote(sys.executable)} -m pip install --upgrade loopx\n"
+        "loopx workflow-skills --install\n"
+        "loopx slash-commands --install\n"
+        f"loopx doctor{doctor_agent_arg}"
+        if distribution_install
+        else no_clone_command
     )
     manifest_source_git_commit = manifest_source.get("git_commit")
     manifest_source_revision = (
@@ -466,13 +510,20 @@ def build_install_freshness(
         and freshness_revision_relation == GitRevisionRelation.INSTALLED_BEHIND
     )
 
-    if release_id and source_commit_is_behind and command_path is not None and not skill_problem:
+    if (
+        not distribution_install
+        and release_id
+        and source_commit_is_behind
+        and command_path is not None
+        and not skill_problem
+    ):
         status = "stale"
         reason = f"release manifest source commit is behind {freshness_source_label} commit"
         requires_upgrade = True
 
     if (
-        manifest_package_version_matches_runtime is False
+        not distribution_install
+        and manifest_package_version_matches_runtime is False
         and command_path is not None
         and not skill_problem
     ):
@@ -494,10 +545,19 @@ def build_install_freshness(
         "release_id": release_id,
         "release_age_hours": age_hours,
         "upgrade_command": upgrade_command,
-        "no_clone_upgrade_command": upgrade_command,
+        "no_clone_upgrade_command": no_clone_command,
         "contributor_upgrade_command": contributor_upgrade_command,
         "doctor_after_upgrade": f"loopx doctor{doctor_agent_arg}",
         "installed_skills_required": require_installed_skills,
+        "install_kind": (
+            "python_distribution" if distribution_install else "release_or_checkout"
+        ),
+        "python_distribution_version": (
+            distribution_install.get("version") if distribution_install else None
+        ),
+        "python_distribution_installer": (
+            distribution_install.get("installer") if distribution_install else None
+        ),
         "release_manifest_available": manifest.get("available"),
         "release_manifest_path": manifest.get("path"),
         "release_manifest_reason": manifest.get("reason"),
@@ -765,13 +825,14 @@ def collect_doctor(
     loopx_path = resolve_command_path("loopx")
     invocation_path = current_script_invocation_path()
     loopx_canary_path = resolve_command_path("loopx-canary")
-    command_path_primary = loopx_path or invocation_path
+    command_path_primary = invocation_path or loopx_path
     canary_path = loopx_canary_path
     command_path = command_path_primary
     command_realpath = command_path.resolve() if command_path else None
     canary_realpath = canary_path.resolve() if canary_path else None
     loopx_canary_realpath = loopx_canary_path.resolve() if loopx_canary_path else None
     module_path = Path(__file__).resolve()
+    python_distribution = python_distribution_install(module_path)
     package_dir = module_path.parent
     repo_root = package_dir.parent
     install_script = repo_root / "scripts" / "install-local.sh"
@@ -840,7 +901,13 @@ def collect_doctor(
         "current_invocation": {
             "module_path": str(module_path),
             "repo_root": str(repo_root),
-            "source": "release_snapshot" if is_release_snapshot(repo_root) else "live_checkout",
+            "source": (
+                "python_distribution"
+                if python_distribution.get("available")
+                else "release_snapshot"
+                if is_release_snapshot(repo_root)
+                else "live_checkout"
+            ),
         },
         "promotion_readiness": add_promotion_readiness_freshness(
             latest_promotion_readiness_event(DEFAULT_RUNTIME_ROOT)
@@ -856,6 +923,7 @@ def collect_doctor(
         freshness_source=freshness_source,
         require_installed_skills=installed_skills_required,
         doctor_agent_type=canonical_agent_type,
+        python_distribution=python_distribution,
     )
     if installed_skills_required:
         skill_delivery_status = (
@@ -1087,6 +1155,14 @@ def collect_doctor(
             "install_script": str(install_script),
             "wrapper_script": str(wrapper_script),
             "release_manifest_path": release_manifest.get("path"),
+            "install_kind": (
+                "python_distribution"
+                if python_distribution.get("available")
+                else "release_snapshot"
+                if release_root
+                else "live_checkout"
+            ),
+            "python_distribution": python_distribution,
         },
         "release_manifest": release_manifest,
         "release_provenance": release_provenance,
@@ -1117,9 +1193,15 @@ def collect_doctor(
             if canonical_agent_type
             and agent_type_uses_host_managed_skills(canonical_agent_type)
             else (
-                f"Run `{repo_root / 'scripts' / 'install-local.sh'}` and start a new shell, "
-                f"or export PATH=\"{local_bin}:$PATH\". For no-clone repair, run "
-                f"`curl -fsSL {NO_CLONE_INSTALL_URL} | bash`."
+                "Run `loopx workflow-skills --install`, then "
+                "`loopx slash-commands --install`, and rerun doctor. Upgrade this "
+                f"installation with `{shlex.quote(sys.executable)} -m pip install --upgrade loopx`."
+                if python_distribution.get("available")
+                else (
+                    f"Run `{repo_root / 'scripts' / 'install-local.sh'}` and start a new shell, "
+                    f"or export PATH=\"{local_bin}:$PATH\". For no-clone repair, run "
+                    f"`curl -fsSL {NO_CLONE_INSTALL_URL} | bash`."
+                )
             )
         ),
     }
@@ -1216,9 +1298,12 @@ def render_doctor_markdown(payload: dict[str, Any]) -> str:
                 "## Install Freshness",
                 f"- schema_version: `{freshness.get('schema_version')}`",
                 f"- status: `{freshness.get('status')}`",
+                f"- install_kind: `{freshness.get('install_kind')}`",
                 f"- requires_upgrade: `{freshness.get('requires_upgrade')}`",
                 f"- current_version: `{freshness.get('current_version')}`",
                 f"- current_version_tag: `{freshness.get('current_version_tag')}`",
+                f"- python_distribution_version: `{freshness.get('python_distribution_version')}`",
+                f"- python_distribution_installer: `{freshness.get('python_distribution_installer')}`",
                 f"- manifest_package_version: `{freshness.get('manifest_package_version')}`",
                 f"- manifest_package_version_tag: `{freshness.get('manifest_package_version_tag')}`",
                 f"- manifest_package_version_matches_runtime: `{freshness.get('manifest_package_version_matches_runtime')}`",

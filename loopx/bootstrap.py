@@ -18,7 +18,10 @@ from .execution_profile import (
     execution_profile_summary,
 )
 from .global_registry import sync_project_registry_to_global
-from .install_contract import NO_CLONE_INSTALL_URL
+from .install_contract import (
+    ARCHIVE_FALLBACK_INSTALL_COMMAND,
+    DEFAULT_INSTALL_REPAIR_COMMAND,
+)
 from .onboarding import build_onboarding_scan
 from .orchestration import (
     DEFAULT_ORCHESTRATION_MODE,
@@ -33,11 +36,6 @@ DEFAULT_OBJECTIVE = "Improve this project through bounded, verified goal segment
 DEFAULT_DOMAIN = "project-goal-control-plane"
 GENERIC_ONBOARDING_ADAPTER_KINDS = frozenset(
     {"generic_project_goal_v0", "read_only_project_map_v0"}
-)
-NO_CLONE_INSTALL_REPAIR_COMMAND = (
-    f"curl -fsSL {NO_CLONE_INSTALL_URL} | bash\n"
-    'export PATH="$HOME/.local/bin:$PATH"\n'
-    "loopx doctor"
 )
 HEARTBEAT_OPT_IN_STATUS_REQUIRED = (
     "requires explicit heartbeat=yes/no before a recurring Codex App automation is installed"
@@ -873,10 +871,11 @@ def bootstrap_project(
                     "Fix global registry write access, then rerun this command.",
                     "Use --no-global-sync only for an explicit local-only setup.",
                 ],
-                "install_repair_command": NO_CLONE_INSTALL_REPAIR_COMMAND,
+                "install_repair_command": DEFAULT_INSTALL_REPAIR_COMMAND,
+                "archive_fallback_install_command": ARCHIVE_FALLBACK_INSTALL_COMMAND,
                 "install_repair_note": (
-                    "If this local LoopX install is missing or stale, rerun the no-clone installer, "
-                    "refresh PATH, and confirm with loopx doctor before continuing project delivery."
+                    "If this local LoopX install is missing or stale, repair the PyPI distribution "
+                    "and packaged workflow skills, then confirm with loopx doctor before continuing."
                 ),
                 "private_boundary_note": "Add .loopx/ and .codex/goals/ to the project .gitignore if the goal state contains private evidence.",
                 "error": str(global_writability.get("error") or "global registry is not writable"),
@@ -962,10 +961,11 @@ def bootstrap_project(
             f"loopx --registry {runtime_root / 'registry.global.json'} status",
             f"loopx --registry {relative_state_file(project, registry_path)} history --goal-id {goal_id}",
         ],
-        "install_repair_command": NO_CLONE_INSTALL_REPAIR_COMMAND,
+        "install_repair_command": DEFAULT_INSTALL_REPAIR_COMMAND,
+        "archive_fallback_install_command": ARCHIVE_FALLBACK_INSTALL_COMMAND,
         "install_repair_note": (
-            "If this local LoopX install is missing or stale, rerun the no-clone installer, "
-            "refresh PATH, and confirm with loopx doctor before continuing project delivery."
+            "If this local LoopX install is missing or stale, repair the PyPI distribution "
+            "and packaged workflow skills, then confirm with loopx doctor before continuing."
         ),
         "private_boundary_note": "Add .loopx/ and .codex/goals/ to the project .gitignore if the goal state contains private evidence.",
     }
@@ -1107,6 +1107,17 @@ def render_bootstrap_markdown(payload: dict[str, Any]) -> str:
                 str(payload.get("install_repair_note") or ""),
                 "```bash",
                 str(payload.get("install_repair_command")),
+                "```",
+            ]
+        )
+    if payload.get("archive_fallback_install_command"):
+        lines.extend(
+            [
+                "",
+                "### Archive Fallback",
+                "Use this only when an appropriate Python package environment is unavailable.",
+                "```bash",
+                str(payload.get("archive_fallback_install_command")),
                 "```",
             ]
         )

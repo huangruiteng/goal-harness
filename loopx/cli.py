@@ -97,6 +97,7 @@ from .cli_commands import (
     handle_version_command,
     handle_host_mode_plan_command,
     handle_worker_bridge_command,
+    handle_workflow_skills_command,
     register_benchmark_command_group,
     register_turn_commands,
     register_bootstrap_connect_command,
@@ -135,6 +136,7 @@ from .cli_commands import (
     register_version_command,
     register_host_mode_plan_command,
     register_worker_bridge_commands,
+    register_workflow_skills_command,
 )
 from .cli_commands.opencode2_goal_worker import (
     handle_opencode2_goal_worker_command,
@@ -288,6 +290,7 @@ def build_parser() -> LoopXArgumentParser:
     register_summary_all_command(sub, add_subcommand_format)
     register_pr_review_command(sub, add_subcommand_format)
     register_slash_commands_command(sub, add_subcommand_format)
+    register_workflow_skills_command(sub, add_subcommand_format)
     register_dreaming_commands(sub, add_subcommand_format)
     register_evidence_log_command(sub, add_subcommand_format)
     register_explore_commands(sub, add_subcommand_format)
@@ -350,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
             "new-project-prompt",
             "start-goal",
             "slash-commands",
+            "workflow-skills",
             "heartbeat-prompt",
             "supervisor-event",
             "supervisor-observe",
@@ -394,6 +398,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         return handle_doctor_command(args, print_payload)
+
+    workflow_skills_result = handle_workflow_skills_command(
+        args,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if workflow_skills_result is not None:
+        return workflow_skills_result
 
     if args.command == "first-run-report":
         return handle_first_run_report_command(args, print_payload)

@@ -177,6 +177,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "loopx project-skill --help",
                 "purpose": "Install, inspect, or remove release-owned skills in selected project agent hosts.",
             },
+            {
+                "command": "loopx workflow-skills",
+                "purpose": "Inspect, install, or remove packaged user-level LoopX workflow skills.",
+            },
         ],
     },
     {
