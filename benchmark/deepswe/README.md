@@ -75,9 +75,35 @@ python benchmark/deepswe/run_native_codex_goal.py \
 ```
 
 Use `--preflight-only` to verify initialize, thread creation, and Goal
-attachment without starting a model turn. A benchmark adapter can reuse the
-same runtime directly while keeping its environment bridge active in another
-task:
+attachment without starting a model turn. On Linux, the same runnable can opt
+into the toolkit's host-filesystem boundary:
+
+```bash
+python benchmark/deepswe/run_native_codex_goal.py \
+  --cwd <task-worktree> \
+  --objective-file <objective.txt> \
+  --task-file <task.txt> \
+  --isolate \
+  --isolation-work-dir <runner-created-per-run-dir> \
+  --private-root <controller-private-root> \
+  --profile-root <per-run-installed-profile>
+```
+
+Isolation is explicit; the default invocation is unchanged. The work directory
+must be outside the private root and task workspace. The optional profile is a
+writable process input, so create it per run or restore it from a pinned snapshot
+rather than sharing it across trials. Use a deterministic per-run work directory:
+if the worker is killed before normal cleanup, the next identical invocation
+repairs stale workspace-alias references before launch and restores host paths on
+exit.
+
+When task-local LoopX control state exists, both `.loopx/registry.json` and
+`.loopx/runtime/registry.global.json` must exist. Neither file means there is no
+control state to relocate; only one file is treated as incomplete state and fails
+closed.
+
+A benchmark adapter can reuse the same runtime directly while keeping its
+environment bridge active in another task:
 
 ```python
 from loopx.capabilities.benchmark_toolkit.native_codex_goal import (

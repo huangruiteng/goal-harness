@@ -60,6 +60,14 @@ It validates every candidate before writing, updates files atomically, rejects
 symlinked control-state paths, and leaves task files, model output, trajectories,
 verifier evidence, and arbitrary workspace prose untouched. This keeps formally
 installed LoopX state readable after the temporary `host-visible` alias disappears.
+The two canonical registries form one consistency boundary: both absent means no
+control state, while only one present fails closed. If an abrupt process kill skips
+the reverse rewrite, a subsequent launch using the same deterministic work
+directory first recovers stale alias references.
+
+The profile bind is writable because Codex and an installed LoopX release may need
+runtime state. It must therefore be a per-run profile or a runner-restored pinned
+snapshot, never ambient state shared across trials.
 
 This is a filesystem/process envelope, not a complete benchmark sandbox. It grants
 no model credential, task-command bridge, shell-network policy, evaluator denial,
@@ -73,7 +81,11 @@ The runnable source example is
 Its `--preflight-only` mode proves a live Codex initialize/thread/Goal attachment
 without invoking a model. Full mode starts one turn and waits for a correlated
 terminal event, then keeps draining Codex-owned continuation turns until the Goal
-leaves `active`. The same total timeout covers the full Goal lifecycle.
+leaves `active`. The same total timeout covers the full Goal lifecycle. Add
+`--isolate`, `--isolation-work-dir`, and `--private-root` to make this envelope the
+real process path; `--profile-root` adds the optional per-run formal profile. The
+launcher performs recovery, pre-launch rebase, and `finally` restoration around
+both preflight and full Goal modes.
 
 ### Formal installed profile and skill discovery
 
