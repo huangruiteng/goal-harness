@@ -178,6 +178,8 @@ Before each launch, a no-agent preflight must prove:
 - formal installed LoopX CLI and skill readback from the pinned revision;
 - real app-server discovery of the required LoopX skills;
 - worker-before-verifier ordering;
+- exact-job container binding before runtime isolation inspection when concurrent
+  jobs can share an image;
 - compact result and terminal-closeout destinations.
 
 The runner owns task execution and verifier invocation. LoopX settlement occurs

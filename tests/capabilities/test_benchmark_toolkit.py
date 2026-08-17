@@ -4,19 +4,111 @@ import copy
 import json
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from loopx.capabilities.benchmark_toolkit import (
+    BENCHMARK_EXACT_CONTAINER_BINDING_SCHEMA_VERSION,
     BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION,
     BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION,
     REQUIRED_RUNTIME_ATTESTATIONS,
+    DockerContainerBindingError,
     build_benchmark_integrity_qualification,
+    compact_docker_container_binding_receipt,
+    select_exact_docker_container,
 )
 from loopx.capabilities.catalog import build_capability_detail_packet
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_exact_container_binding_uses_job_labels_and_hides_runtime_identity() -> None:
+    observed_command: list[str] = []
+    private_job = "fixture-job-private-value"
+    private_container = "fixture-job-private-value-main-1"
+
+    def fake_runner(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        observed_command.extend(str(value) for value in argv)
+        return subprocess.CompletedProcess(argv, 0, f"{private_container}\n", "")
+
+    binding = select_exact_docker_container(
+        ancestor_image="benchmark-runner:fixture",
+        required_labels={
+            "com.docker.compose.project": private_job,
+            "com.docker.compose.service": "main",
+        },
+        command_runner=fake_runner,
+    )
+
+    assert binding.container_name == private_container
+    assert "ancestor=benchmark-runner:fixture" in observed_command
+    assert f"label=com.docker.compose.project={private_job}" in observed_command
+    assert "label=com.docker.compose.service=main" in observed_command
+
+    receipt = compact_docker_container_binding_receipt(binding)
+    assert receipt["schema_version"] == BENCHMARK_EXACT_CONTAINER_BINDING_SCHEMA_VERSION
+    assert receipt["exact_job_binding"] is True
+    assert receipt["match_count"] == 1
+    assert receipt["required_label_keys"] == [
+        "com.docker.compose.project",
+        "com.docker.compose.service",
+    ]
+    rendered = json.dumps(receipt, sort_keys=True)
+    assert private_job not in rendered
+    assert private_container not in rendered
+    assert "benchmark-runner:fixture" not in rendered
+
+
+@pytest.mark.parametrize("stdout", ["", "container-a\ncontainer-b\n"])
+def test_exact_container_binding_fails_closed_on_non_exact_match(stdout: str) -> None:
+    private_value = "private-selector-value"
+
+    def fake_runner(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    with pytest.raises(
+        DockerContainerBindingError,
+        match="^docker_container_binding_not_exact$",
+    ) as error:
+        select_exact_docker_container(
+            ancestor_image="benchmark-runner:fixture",
+            required_labels={"job.identity": private_value},
+            command_runner=fake_runner,
+        )
+
+    assert private_value not in str(error.value)
+    for private_match in stdout.splitlines():
+        assert private_match not in str(error.value)
+
+
+def test_exact_container_binding_rejects_invalid_or_failed_discovery() -> None:
+    with pytest.raises(
+        DockerContainerBindingError,
+        match="^invalid_docker_container_selector$",
+    ):
+        select_exact_docker_container(
+            ancestor_image="benchmark-runner:fixture\nleak",
+            required_labels={"job.identity": "job-1"},
+        )
+
+    private_stderr = "private Docker diagnostic"
+
+    def failing_runner(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 1, "", private_stderr)
+
+    with pytest.raises(
+        DockerContainerBindingError,
+        match="^docker_container_discovery_failed$",
+    ) as error:
+        select_exact_docker_container(
+            ancestor_image="benchmark-runner:fixture",
+            required_labels={"job.identity": "job-1"},
+            command_runner=failing_runner,
+        )
+
+    assert private_stderr not in str(error.value)
 
 
 def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:

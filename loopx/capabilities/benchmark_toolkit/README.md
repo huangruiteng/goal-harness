@@ -239,6 +239,37 @@ evidence channels are required.
 paths. Path-like values fail closed and are emitted only as `redacted`, so a runner
 cannot move an operator directory into the public receipt through identifier fields.
 
+### Exact-job container binding
+
+Runtime evidence must belong to the same job as the score. An image-only Docker
+lookup is ambiguous as soon as two benchmark arms use the same image concurrently.
+Before inspecting isolation settings, bind the container with the runner-owned job
+or trial label, the service label, and the expected image:
+
+```python
+from loopx.capabilities.benchmark_toolkit import (
+    compact_docker_container_binding_receipt,
+    select_exact_docker_container,
+)
+
+binding = select_exact_docker_container(
+    ancestor_image="benchmark-runner:fixture",
+    required_labels={
+        "com.docker.compose.project": job_id,
+        "com.docker.compose.service": "main",
+    },
+)
+container_name = binding.container_name  # private runner state; do not publish
+receipt = compact_docker_container_binding_receipt(binding)
+```
+
+The selector fails closed unless exactly one running container matches. The compact
+`benchmark_exact_container_binding_v0` receipt records only the required label keys,
+match count, and a SHA-256 selector digest; it excludes the raw container identity
+and label values. The helper grants no Docker or runner authority. Callers that need
+a privileged wrapper must supply their own `command_runner` and keep that authority
+outside the receipt.
+
 Benchmark-specific private roots can be added without committing them through an
 ignored `benchmark_integrity_policy_v0` file:
 
