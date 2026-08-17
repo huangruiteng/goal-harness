@@ -9,11 +9,15 @@ installed LoopX profile.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 class NativeCodexIsolationError(RuntimeError):
@@ -28,6 +32,15 @@ class NativeCodexIsolationEnvelope:
     work_dir: Path
     workspace_alias: Path | None
     profile_root: Path | None
+
+
+@dataclass(frozen=True)
+class NativeCodexLoopXStateRebase:
+    """Result of relocating LoopX-owned paths across a workspace alias."""
+
+    control_state_found: bool
+    rewritten_files: tuple[Path, ...]
+    replacement_count: int
 
 
 _ISOLATION_SCRIPT = r"""
@@ -165,6 +178,192 @@ def _paths_overlap(left: Path, right: Path) -> bool:
     return left == right or left in right.parents or right in left.parents
 
 
+def _replace_path_prefix(value: Any, source: str, target: str) -> tuple[Any, int]:
+    if isinstance(value, str):
+        if value == source:
+            return target, 1
+        prefix = f"{source}{os.sep}"
+        if value.startswith(prefix):
+            return f"{target}{value[len(source) :]}", 1
+        return value, 0
+    if isinstance(value, list):
+        replaced: list[Any] = []
+        count = 0
+        for item in value:
+            next_item, item_count = _replace_path_prefix(item, source, target)
+            replaced.append(next_item)
+            count += item_count
+        return replaced, count
+    if isinstance(value, dict):
+        replaced_dict: dict[Any, Any] = {}
+        count = 0
+        for key, item in value.items():
+            next_item, item_count = _replace_path_prefix(item, source, target)
+            replaced_dict[key] = next_item
+            count += item_count
+        return replaced_dict, count
+    return value, 0
+
+
+def _generated_runtime_files(storage_root: Path) -> tuple[Path, ...]:
+    goals_root = storage_root / ".loopx/runtime/goals"
+    if not goals_root.exists():
+        return ()
+    if goals_root.is_symlink() or not goals_root.is_dir():
+        raise NativeCodexIsolationError("native_codex_loopx_goals_root_not_directory")
+
+    files: list[Path] = []
+    for goal_dir in sorted(goals_root.iterdir()):
+        if goal_dir.is_symlink():
+            raise NativeCodexIsolationError("native_codex_loopx_goal_dir_symlinked")
+        if not goal_dir.is_dir():
+            continue
+        runs_dir = goal_dir / "runs"
+        if not runs_dir.exists():
+            continue
+        if runs_dir.is_symlink() or not runs_dir.is_dir():
+            raise NativeCodexIsolationError("native_codex_loopx_runs_dir_not_directory")
+        for path in sorted(runs_dir.iterdir()):
+            if path.is_symlink():
+                raise NativeCodexIsolationError(
+                    "native_codex_loopx_run_artifact_symlinked"
+                )
+            if path.is_file() and path.suffix in {".json", ".jsonl", ".md"}:
+                files.append(path)
+    return tuple(files)
+
+
+def _rewrite_json_text(text: str, source: str, target: str) -> tuple[str, int]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise NativeCodexIsolationError(
+            "native_codex_loopx_state_invalid_json"
+        ) from exc
+    rewritten, count = _replace_path_prefix(payload, source, target)
+    return json.dumps(rewritten, ensure_ascii=False, indent=2) + "\n", count
+
+
+def _rewrite_jsonl_text(text: str, source: str, target: str) -> tuple[str, int]:
+    rewritten_lines: list[str] = []
+    count = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise NativeCodexIsolationError(
+                "native_codex_loopx_state_invalid_jsonl"
+            ) from exc
+        rewritten, line_count = _replace_path_prefix(payload, source, target)
+        rewritten_lines.append(json.dumps(rewritten, ensure_ascii=False))
+        count += line_count
+    suffix = "\n" if rewritten_lines else ""
+    return "\n".join(rewritten_lines) + suffix, count
+
+
+def _rewrite_markdown_text(text: str, source: str, target: str) -> tuple[str, int]:
+    # Generated Markdown embeds paths inside backticks or after punctuation.
+    # Refuse identifier-adjacent matches so prose such as ``prefix-/path`` is
+    # not silently rewritten.
+    pattern = re.compile(
+        rf"(?<![0-9A-Za-z_.-]){re.escape(source)}(?=$|[/\s`'\"\[\](){{}}:,])"
+    )
+    return pattern.subn(lambda _: target, text)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary_path = Path(temporary)
+    try:
+        os.fchmod(descriptor, path.stat().st_mode & 0o777)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def rebase_native_codex_loopx_workspace_state(
+    storage_root: Path,
+    *,
+    source_root: Path,
+    target_root: Path,
+) -> NativeCodexLoopXStateRebase:
+    """Relocate LoopX-owned state across an isolated workspace alias.
+
+    Native Codex sees ``workspace_source`` through a temporary path.  LoopX
+    registries and generated run-history artifacts may persist that path while
+    the process is alive.  This bounded rewrite keeps those artifacts readable
+    after the alias disappears without touching task files, model output, raw
+    trajectories, verifier evidence, or arbitrary workspace prose.
+
+    Call once before launch from the host path to the alias, then once after
+    process termination from the alias back to the host path.  All candidate
+    files are parsed before any replacement is committed.
+    """
+
+    try:
+        resolved_storage = storage_root.resolve(strict=True)
+        resolved_source = source_root.resolve(strict=True)
+        resolved_target = target_root.resolve(strict=True)
+    except OSError as exc:
+        raise NativeCodexIsolationError(
+            "native_codex_loopx_state_rebase_root_missing"
+        ) from exc
+    if not resolved_storage.is_dir():
+        raise NativeCodexIsolationError(
+            "native_codex_loopx_state_rebase_storage_not_directory"
+        )
+    if resolved_source == resolved_target:
+        raise NativeCodexIsolationError(
+            "native_codex_loopx_state_rebase_roots_identical"
+        )
+
+    registry_paths = (
+        resolved_storage / ".loopx/registry.json",
+        resolved_storage / ".loopx/runtime/registry.global.json",
+    )
+    existing_registries = tuple(path for path in registry_paths if path.is_file())
+    if not existing_registries:
+        return NativeCodexLoopXStateRebase(False, (), 0)
+    if len(existing_registries) != len(registry_paths):
+        raise NativeCodexIsolationError("native_codex_loopx_registry_incomplete")
+    if any(path.is_symlink() for path in registry_paths):
+        raise NativeCodexIsolationError("native_codex_loopx_registry_symlinked")
+
+    source = str(resolved_source)
+    target = str(resolved_target)
+    candidates = (*registry_paths, *_generated_runtime_files(resolved_storage))
+    pending: list[tuple[Path, str, int]] = []
+    replacement_count = 0
+    for path in candidates:
+        text = path.read_text(encoding="utf-8")
+        if path.suffix == ".json":
+            rewritten, count = _rewrite_json_text(text, source, target)
+        elif path.suffix == ".jsonl":
+            rewritten, count = _rewrite_jsonl_text(text, source, target)
+        else:
+            rewritten, count = _rewrite_markdown_text(text, source, target)
+        if count:
+            pending.append((path, rewritten, count))
+            replacement_count += count
+
+    for path, rewritten, _ in pending:
+        _atomic_write_text(path, rewritten)
+
+    return NativeCodexLoopXStateRebase(
+        control_state_found=True,
+        rewritten_files=tuple(path for path, _, _ in pending),
+        replacement_count=replacement_count,
+    )
+
+
 def build_native_codex_isolation_envelope(
     *,
     executable: str,
@@ -295,5 +494,7 @@ def build_native_codex_isolation_envelope(
 __all__ = [
     "NativeCodexIsolationEnvelope",
     "NativeCodexIsolationError",
+    "NativeCodexLoopXStateRebase",
     "build_native_codex_isolation_envelope",
+    "rebase_native_codex_loopx_workspace_state",
 ]

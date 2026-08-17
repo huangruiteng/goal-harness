@@ -38,7 +38,9 @@ from .native_codex_goal import (
 from .native_codex_isolation import (
     NativeCodexIsolationEnvelope,
     NativeCodexIsolationError,
+    NativeCodexLoopXStateRebase,
     build_native_codex_isolation_envelope,
+    rebase_native_codex_loopx_workspace_state,
 )
 from .native_codex_profile import (
     NATIVE_CODEX_GOAL_PROMPT_SCHEMA_VERSION,
@@ -83,6 +85,7 @@ __all__ = [
     "NativeCodexGoalPrompt",
     "NativeCodexIsolationEnvelope",
     "NativeCodexIsolationError",
+    "NativeCodexLoopXStateRebase",
     "NativeCodexProfile",
     "NativeCodexProfileError",
     "NativeGoalConfig",
@@ -111,6 +114,7 @@ __all__ = [
     "native_codex_profile_environment",
     "observe_native_goal_event",
     "probe_native_goal_process",
+    "rebase_native_codex_loopx_workspace_state",
     "refresh_native_goal_status",
     "render_native_codex_goal_prompt",
     "run_native_goal_process",
