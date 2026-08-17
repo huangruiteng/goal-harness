@@ -4,6 +4,7 @@ import json
 import mimetypes
 import time
 import uuid
+from collections.abc import Mapping
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,8 +30,14 @@ from .chat_lark_api import (
 )
 from .extensions.lark import LARK_EXTENSION_ID, LARK_GOAL_CHANNEL_PERMISSION
 from .extensions.lark.app_setup import LarkAppSetupManager
+from .extensions.lark.cli_resolution import (
+    LarkCliResolution,
+    build_lark_command_runner,
+    resolve_lark_cli,
+)
 from .extensions.lark.goal_channel import (
     configure_lark_goal_channel_automation,
+    default_goal_channel_target_path,
     goal_channel_target_for_name,
     list_goal_channel_targets,
     read_goal_channel_targets,
@@ -40,7 +47,6 @@ from .extensions.lark.goal_topic_connections import list_lark_apps
 from .extensions.lark.goal_topic_runtime import LarkGoalTopicRuntimeService
 from .extensions.lark.presentation.kanban import (
     CommandRunner,
-    default_subprocess_runner,
 )
 from .extensions.runtime import (
     default_extension_state_file,
@@ -334,6 +340,41 @@ def build_bounded_chat_status_projection(
     )
 
 
+def configured_lark_cli_bin(target_payload: Mapping[str, Any]) -> str | None:
+    """Return one deterministic private Target CLI reference for discovery."""
+
+    targets = target_payload.get("targets")
+    if not isinstance(targets, Mapping):
+        return None
+    for target_name in sorted(str(name) for name in targets):
+        target = targets.get(target_name)
+        identity = target.get("identity") if isinstance(target, Mapping) else None
+        cli_bin = (
+            str(identity.get("cli_bin") or "").strip()
+            if isinstance(identity, Mapping)
+            else ""
+        )
+        if cli_bin:
+            return cli_bin
+    return None
+
+
+def resolve_lark_cli_for_runtime(
+    *,
+    runtime_root: Path,
+    explicit: str | None,
+) -> LarkCliResolution:
+    """Resolve the shared CLI while preserving configured Target priority."""
+
+    target_cli_bin = configured_lark_cli_bin(
+        read_goal_channel_targets(default_goal_channel_target_path(runtime_root))
+    )
+    return resolve_lark_cli(
+        explicit=explicit,
+        target_cli_bin=target_cli_bin,
+    )
+
+
 class ChatHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
@@ -350,6 +391,7 @@ class ChatHTTPServer(ThreadingHTTPServer):
     action_service: ChatActionService
     runtime_controller: ChatRuntimeController
     lark_runner: CommandRunner
+    lark_cli_resolution: LarkCliResolution
     lark_app_setup_manager: LarkAppSetupManager
     lark_goal_topic_runtime: LarkGoalTopicRuntimeService
 
@@ -1215,6 +1257,7 @@ class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
                     "typed_actions": True,
                     "action_kinds": sorted(ACTION_KINDS),
                     "adapters": self.server.runtime_controller.capabilities(),
+                    "lark_cli": self.server.lark_cli_resolution.public_snapshot(),
                 }
             )
             return
@@ -1386,6 +1429,7 @@ def serve_chat(
     goal_id: str | None,
     codex_bin: str,
     claude_bin: str,
+    lark_cli_bin: str | None,
     startup_timeout_sec: float,
     idle_timeout_sec: float,
     hard_timeout_sec: float,
@@ -1398,6 +1442,16 @@ def serve_chat(
     resolved_assets = (assets_dir or default_chat_assets_dir()).expanduser().resolve()
     if not (resolved_assets / "index.html").is_file():
         raise FileNotFoundError("LoopX Chat web assets are unavailable; reinstall LoopX or rebuild the chat bundle")
+    registry = load_registry(registry_path)
+    runtime_root = resolve_runtime_root(
+        registry,
+        runtime_root_override,
+        registry_path=registry_path,
+    )
+    lark_cli_resolution = resolve_lark_cli_for_runtime(
+        runtime_root=runtime_root,
+        explicit=lark_cli_bin,
+    )
     server = ChatHTTPServer((host, port), ChatRequestHandler)
     server.registry_path = registry_path
     server.runtime_root_override = runtime_root_override
@@ -1407,18 +1461,17 @@ def serve_chat(
     server.codex_bin = codex_bin
     server.assets_dir = resolved_assets
     server.verbose = verbose
-    server.lark_runner = default_subprocess_runner
+    server.lark_cli_resolution = lark_cli_resolution
+    server.lark_runner = build_lark_command_runner(server.lark_cli_resolution)
     server.lark_app_setup_manager = LarkAppSetupManager(
+        cli_resolution=server.lark_cli_resolution,
         profile_verifier=lambda app_ref: any(
             app.get("app_ref") == app_ref and app.get("ready") is True
-            for app in list_lark_apps(runner=server.lark_runner)
+            for app in list_lark_apps(
+                runner=server.lark_runner,
+                cli_bin=server.lark_cli_resolution.command or "lark-cli",
+            )
         )
-    )
-    registry = load_registry(registry_path)
-    runtime_root = resolve_runtime_root(
-        registry,
-        runtime_root_override,
-        registry_path=registry_path,
     )
     server.chat_store = ChatSessionStore(runtime_root)
     server.action_store = ChatActionStore(runtime_root / "chat" / "actions")

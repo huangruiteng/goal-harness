@@ -52,6 +52,15 @@ from .presentation.kanban import CommandRunner, DEFAULT_CLI_BIN, default_subproc
 INCOMING_MODES = {"mentions", "all"}
 
 
+class LarkGroupChatLookupError(RuntimeError):
+    """Content-free failure raised when a profile cannot list its bot groups."""
+
+    error_code = "lark_group_lookup_failed"
+
+    def __init__(self) -> None:
+        super().__init__("Unable to list groups joined by the selected Lark App")
+
+
 def _json_value(result: Mapping[str, Any]) -> Any:
     try:
         return json.loads(str(result.get("stdout") or ""))
@@ -116,6 +125,7 @@ def list_lark_apps(
         except ValueError:
             continue
         identity = _app_identity(app_ref=app_ref, runner=runner, cli_bin=cli_bin)
+        bot_ready = bool(identity and identity.get("ready"))
         apps.append(
             {
                 "app_ref": app_ref,
@@ -123,6 +133,8 @@ def list_lark_apps(
                 "brand": public_safe_compact_text(raw.get("brand") or "lark", limit=20),
                 "active": raw.get("active") is True,
                 "ready": bool(identity and identity.get("ready")),
+                "reply_ready": bot_ready,
+                "health_error_code": None if bot_ready else "lark_app_not_ready",
             }
         )
     return apps
@@ -167,13 +179,13 @@ def list_lark_group_chats(
         "--page-size",
         "50",
         "--as",
-        "user",
+        "bot",
         "--format",
         "json",
     ]
     result = call(runner, lark_args(cli_bin=cli_bin, profile=profile, tail=tail))
     if result.get("returncode") != 0:
-        return []
+        raise LarkGroupChatLookupError()
     return _chat_items(json_payload(result))
 
 
@@ -228,7 +240,24 @@ def connect_lark_goal_topic(
         raise ValueError("Lark group chat id must begin with oc_")
     if incoming_mode not in INCOMING_MODES:
         raise ValueError("incoming_mode must be mentions or all")
-    identity = _app_identity(app_ref=profile, runner=runner, cli_bin=cli_bin)
+    target_payload = read_goal_channel_targets(target_path)
+    matched = _target_for_connection(
+        target_payload,
+        app_ref=profile,
+        chat_id=safe_chat_id,
+    )
+    target_identity = matched[1].get("identity") if matched is not None else None
+    target_cli_bin = (
+        str(target_identity.get("cli_bin") or "").strip()
+        if isinstance(target_identity, Mapping)
+        else ""
+    )
+    effective_cli_bin = target_cli_bin or cli_bin
+    identity = _app_identity(
+        app_ref=profile,
+        runner=runner,
+        cli_bin=effective_cli_bin,
+    )
     if not identity or not identity.get("ready"):
         return operation_packet(
             ok=False,
@@ -257,7 +286,7 @@ def connect_lark_goal_topic(
         )
     if not chat_verified(
         runner=runner,
-        cli_bin=cli_bin,
+        cli_bin=effective_cli_bin,
         profile=profile,
         identity="bot",
         chat_id=safe_chat_id,
@@ -273,7 +302,7 @@ def connect_lark_goal_topic(
         )
     if not bot_membership_verified(
         runner=runner,
-        cli_bin=cli_bin,
+        cli_bin=effective_cli_bin,
         profile=profile,
         chat_id=safe_chat_id,
         app_id=str(identity["app_id"]),
@@ -288,12 +317,6 @@ def connect_lark_goal_topic(
             public_summary="invite the selected Lark App to the group and retry",
         )
 
-    target_payload = read_goal_channel_targets(target_path)
-    matched = _target_for_connection(
-        target_payload,
-        app_ref=profile,
-        chat_id=safe_chat_id,
-    )
     if matched is None:
         target_name = _target_name(profile, safe_chat_id)
         added = add_lark_goal_channel_target(
@@ -305,7 +328,7 @@ def connect_lark_goal_topic(
             sender_profile=profile,
             bot_app_id=str(identity["app_id"]),
             bot_display_name=str(identity["label"]),
-            cli_bin=cli_bin,
+            cli_bin=effective_cli_bin,
             execute=True,
         )
         if not added.get("ok"):
@@ -321,7 +344,7 @@ def connect_lark_goal_topic(
     sent = call(
         runner,
         lark_args(
-            cli_bin=cli_bin,
+            cli_bin=effective_cli_bin,
             profile=profile,
             tail=[
                 "im",
@@ -356,7 +379,7 @@ def connect_lark_goal_topic(
         )
     verified = message_readback_verified(
         runner=runner,
-        cli_bin=cli_bin,
+        cli_bin=effective_cli_bin,
         profile=profile,
         identity="bot",
         message_id=root_message_id,
@@ -432,9 +455,13 @@ def list_lark_connections(
     registry: Mapping[str, Any],
     target_path: Path,
     binding_paths: Mapping[str, Path],
+    runner: CommandRunner = default_subprocess_runner,
+    cli_bin: str = DEFAULT_CLI_BIN,
+    runtime_health: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     target_payload = read_goal_channel_targets(target_path)
     rows: list[dict[str, Any]] = []
+    health_cache: dict[tuple[str, str], dict[str, Any]] = {}
     for goal_id, binding_path in binding_paths.items():
         try:
             goal = goal_from_registry(registry, goal_id)
@@ -449,6 +476,71 @@ def list_lark_connections(
             continue
         channel = target.get("channel") if isinstance(target.get("channel"), Mapping) else {}
         identity = target.get("identity") if isinstance(target.get("identity"), Mapping) else {}
+        app_ref = str(identity.get("sender_profile") or "default")
+        effective_cli_bin = str(identity.get("cli_bin") or "").strip() or cli_bin
+        health_key = (app_ref, effective_cli_bin)
+        if health_key not in health_cache:
+            app_identity = _app_identity(
+                app_ref=app_ref,
+                runner=runner,
+                cli_bin=effective_cli_bin,
+            )
+            health_cache[health_key] = {
+                "ready": bool(app_identity and app_identity.get("ready")),
+                "error_code": (
+                    None
+                    if app_identity and app_identity.get("ready")
+                    else "lark_app_not_ready"
+                ),
+            }
+        health = health_cache[health_key]
+        listener = (
+            runtime_health.get(app_ref, {})
+            if isinstance(runtime_health, Mapping)
+            else {}
+        )
+        listener_status = str(listener.get("status") or "")
+        listener_ready = (
+            True
+            if runtime_health is None
+            else listener_status in {"starting", "listening"}
+        )
+        last_event_status = str(listener.get("last_event_status") or "")
+        event_count = int(listener.get("event_count") or 0)
+        event_blocker = (
+            last_event_status
+            if last_event_status
+            in {
+                "message_context_permission_required",
+                "message_context_lookup_failed",
+                "message_context_unavailable",
+                "processing_failed",
+                "answer_empty",
+                "reply_failed",
+            }
+            else None
+        )
+        event_delivery_unverified = bool(
+            runtime_health is not None
+            and listener_status == "listening"
+            and event_count == 0
+            and not last_event_status
+        )
+        reply_ready = bool(
+            health.get("ready")
+            and listener_ready
+            and event_blocker is None
+            and not event_delivery_unverified
+        )
+        health_error_code = health.get("error_code")
+        if health_error_code is None and not listener_ready:
+            health_error_code = str(
+                listener.get("error_code") or "lark_event_listener_inactive"
+            )
+        if health_error_code is None and event_blocker is not None:
+            health_error_code = event_blocker
+        if health_error_code is None and event_delivery_unverified:
+            health_error_code = "lark_event_delivery_unverified"
         topic = binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
         routing = binding.get("routing") if isinstance(binding.get("routing"), Mapping) else {}
         legacy_root = (
@@ -458,7 +550,7 @@ def list_lark_connections(
         )
         rows.append(
             {
-                "app_ref": str(identity.get("sender_profile") or "default"),
+                "app_ref": app_ref,
                 "app_label": public_safe_compact_text(
                     identity.get("bot_display_name") or identity.get("sender_profile") or "Lark App",
                     limit=60,
@@ -472,6 +564,13 @@ def list_lark_connections(
                 "target_ref": target_ref,
                 "topic_name": public_safe_compact_text(topic.get("name") or goal_objective(goal), limit=120),
                 "topic_setup_required": not bool(topic.get("root_message_id") or legacy_root),
+                "reply_ready": reply_ready,
+                "health_error_code": health_error_code,
+                "listener_status": listener_status or None,
+                "listener_error_code": listener.get("error_code"),
+                "last_event_status": last_event_status or None,
+                "event_count": event_count,
+                "replied_count": int(listener.get("replied_count") or 0),
             }
         )
     return sorted(rows, key=lambda row: (str(row["app_label"]).casefold(), str(row["goal_title"]).casefold()))

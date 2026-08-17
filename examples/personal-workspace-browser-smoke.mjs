@@ -127,7 +127,7 @@ async function installApi(page) {
       await route.fulfill({ contentType: "application/json", json: {
         ok: true,
         schema_version: "loopx_lark_apps_v0",
-        apps: [{ active: true, app_ref: "mew", brand: "feishu", label: "LoopX Mew", ready: true }],
+        apps: [{ active: true, app_ref: "mew", brand: "feishu", label: "LoopX Mew", ready: true, reply_ready: true }],
       }, status: 200 });
       return;
     }
@@ -155,9 +155,11 @@ async function installApi(page) {
         runtime.larkConnections = runtime.larkConnections.filter((item) => item.goal_id !== body.goal_id);
         runtime.larkConnections.push({
           app_label: "LoopX Mew", app_ref: body.app_ref, chat_name: body.chat_name, enabled: true,
+          event_count: 0, health_error_code: "lark_event_delivery_unverified",
           goal_id: body.goal_id, goal_title: goal?.id ?? body.goal_id, incoming_mode: body.incoming_mode,
+          last_event_status: null, listener_error_code: null, listener_status: "listening", replied_count: 0,
           reply_mode: "topic_reply", target_ref: "product-group", topic_name: goal?.id ?? body.goal_id,
-          topic_setup_required: false,
+          topic_setup_required: false, reply_ready: false,
         });
         state.larkWrites.push({ ...body });
       }
@@ -564,6 +566,7 @@ async function main() {
     const connectDialog = page.getByRole("dialog", { name: "Connect Lark App" });
     await connectDialog.waitFor({ state: "visible" });
     await connectDialog.getByRole("option", { name: "Product group" }).waitFor({ state: "attached" });
+    await connectDialog.getByLabel("Group chat").selectOption({ label: "Product group" });
     await connectDialog.getByRole("button", { name: "Connect", exact: true }).click();
     await connectDialog.waitFor({ state: "hidden" });
     const connectionReadback = await page.evaluate(async () => (await fetch("/api/chat/lark/connections")).json());
@@ -574,6 +577,9 @@ async function main() {
       await page.screenshot({ path: resolve(outputDir, "lark-connection-refresh-failed.png"), fullPage: true, animations: "disabled" });
       throw new Error(`${error.message}; body=${(await page.locator("body").innerText()).slice(0, 4000)}`);
     }
+    const connectedRow = page.locator(".personal-lark-table-row", { hasText: "Product group" });
+    if (!(await connectedRow.getByText("事件订阅待验证", { exact: false }).isVisible())) throw new Error("A zero-event listener was presented as automatic-reply ready");
+    if (!(await connectedRow.getByRole("link", { name: "查看飞书事件配置" }).isVisible())) throw new Error("An unverified Lark event subscription lacked repair guidance");
     if (api.larkWrites.length !== 1 || api.larkWrites[0].execute !== true) throw new Error("Lark connect did not perform exactly one approved external write");
     await page.locator(".personal-lark-table-row", { hasText: "Product group" }).getByRole("button", { name: /配置/ }).click();
     await page.getByRole("dialog", { name: "Edit Lark Connection" }).waitFor({ state: "visible" });

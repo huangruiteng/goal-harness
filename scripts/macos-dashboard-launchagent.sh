@@ -110,6 +110,49 @@ resolve_optional_command() {
   fi
 }
 
+resolve_lark_cli_command() {
+  local python_command="$1"
+  if command -v lark-cli >/dev/null 2>&1; then
+    command -v lark-cli
+    return 0
+  fi
+  "$python_command" - "$HOME" <<'PY'
+import os
+import re
+import sys
+from pathlib import Path
+
+home = Path(sys.argv[1]).expanduser()
+nvm_root = home / ".nvm" / "versions" / "node"
+versions = []
+if nvm_root.is_dir():
+    for directory in nvm_root.iterdir():
+        match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?", directory.name)
+        if match:
+            versions.append((tuple(map(int, match.groups())), directory / "bin" / "lark-cli"))
+candidates = []
+nvm_bin = os.environ.get("NVM_BIN", "").strip()
+if nvm_bin:
+    candidates.append(Path(nvm_bin).expanduser() / "lark-cli")
+candidates.extend(path for _version, path in sorted(versions, key=lambda item: item[0], reverse=True))
+candidates.extend(
+    [
+        home / ".local" / "bin" / "lark-cli",
+        home / ".npm-global" / "bin" / "lark-cli",
+        Path("/opt/homebrew/bin/lark-cli"),
+        Path("/usr/local/bin/lark-cli"),
+        Path("/usr/bin/lark-cli"),
+        Path("/bin/lark-cli"),
+    ]
+)
+for candidate in candidates:
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        print(candidate)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
 check_inputs() {
   [[ -d "$dashboard_dir" ]] || {
     echo "Dashboard directory not found: $dashboard_dir" >&2
@@ -123,12 +166,12 @@ check_inputs() {
 
 write_plists() {
   local status_command python_command codex_command claude_command lark_cli_command
-  local path_prefix command_path command_dir status_shell chat_shell dashboard_shell control_plane_write_arg
+  local path_prefix command_path command_dir status_shell chat_shell dashboard_shell control_plane_write_arg lark_cli_arg
   status_command="$(resolve_status_command)"
   python_command="$(resolve_python_command)"
   codex_command="$(resolve_optional_command codex)"
   claude_command="$(resolve_optional_command claude)"
-  lark_cli_command="$(resolve_optional_command lark-cli)"
+  lark_cli_command="$(resolve_lark_cli_command "$python_command" 2>/dev/null || true)"
   path_prefix="$bin_dir"
   for command_path in "$codex_command" "$claude_command" "$lark_cli_command"; do
     if [[ "$command_path" == /* ]]; then
@@ -141,11 +184,15 @@ write_plists() {
   done
   path_prefix="$path_prefix:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   control_plane_write_arg=""
+  lark_cli_arg=""
   if [[ "$control_plane_write_api_enabled" == "true" ]]; then
     control_plane_write_arg=" --enable-control-plane-write-api"
   fi
+  if [[ -n "$lark_cli_command" ]]; then
+    lark_cli_arg=" --lark-cli-bin $(shell_quote "$lark_cli_command")"
+  fi
   status_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") serve-status --global-registry --host $(shell_quote "$host") --port $(shell_quote "$status_port") --limit $(shell_quote "$status_limit")$control_plane_write_arg"
-  chat_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") chat --global-registry --host $(shell_quote "$host") --port $(shell_quote "$chat_port") --codex-bin $(shell_quote "$codex_command") --claude-bin $(shell_quote "$claude_command") --no-open"
+  chat_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$status_command") --registry $(shell_quote "$registry") chat --global-registry --host $(shell_quote "$host") --port $(shell_quote "$chat_port") --codex-bin $(shell_quote "$codex_command") --claude-bin $(shell_quote "$claude_command")$lark_cli_arg --no-open"
   dashboard_shell="export PATH=$(shell_quote "$path_prefix"):\$PATH; exec $(shell_quote "$python_command") -m http.server $(shell_quote "$dashboard_port") --bind $(shell_quote "$host") --directory $(shell_quote "$dashboard_dist_dir")"
 
   mkdir -p "$launch_agents_dir" "$logs_dir"
@@ -161,7 +208,7 @@ write_plists() {
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>-lc</string>
+    <string>-c</string>
     <string>$(xml_escape "$status_shell")</string>
   </array>
   <key>RunAtLoad</key>
@@ -189,7 +236,7 @@ EOF
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>-lc</string>
+    <string>-c</string>
     <string>$(xml_escape "$chat_shell")</string>
   </array>
   <key>RunAtLoad</key>
@@ -217,7 +264,7 @@ EOF
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>-lc</string>
+    <string>-c</string>
     <string>$(xml_escape "$dashboard_shell")</string>
   </array>
   <key>RunAtLoad</key>
