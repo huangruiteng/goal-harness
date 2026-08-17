@@ -13,7 +13,9 @@ from .extensions.lark.goal_channel import (
     read_goal_channel_targets,
 )
 from .extensions.lark.app_setup import LarkAppSetupManager
+from .extensions.lark.cli_resolution import LarkCliResolution, LarkCliUnavailableError
 from .extensions.lark.goal_topic_connections import (
+    LarkGroupChatLookupError,
     connect_lark_goal_topic,
     disconnect_lark_goal_topic,
     list_lark_apps,
@@ -168,6 +170,37 @@ class LarkChatRequestMixin:
     def _lark_runner(self) -> CommandRunner:
         return getattr(self.server, "lark_runner", default_subprocess_runner)
 
+    def _lark_resolution(self) -> LarkCliResolution:
+        resolution = getattr(self.server, "lark_cli_resolution", None)
+        if isinstance(resolution, LarkCliResolution):
+            return resolution
+        return LarkCliResolution(
+            command="lark-cli",
+            available=True,
+            source="path",
+            version=None,
+            error_code=None,
+        )
+
+    def _lark_cli_bin(self) -> str:
+        resolution = self._lark_resolution()
+        if not resolution.available or not resolution.command:
+            raise LarkCliUnavailableError(
+                resolution.error_code or "lark_cli_not_installed"
+            )
+        return resolution.command
+
+    def _require_lark_cli(self) -> str | None:
+        try:
+            return self._lark_cli_bin()
+        except LarkCliUnavailableError as exc:
+            self._send_error(
+                str(exc),
+                status=503,
+                error_code=exc.error_code,
+            )
+            return None
+
     def _lark_setup_manager(self) -> LarkAppSetupManager:
         return self.server.lark_app_setup_manager
 
@@ -206,11 +239,17 @@ class LarkChatRequestMixin:
         )
 
     def _lark_apps(self) -> None:
+        cli_bin = self._require_lark_cli()
+        if cli_bin is None:
+            return
         self._send_json(
             {
                 "ok": True,
                 "schema_version": "loopx_lark_apps_v0",
-                "apps": list_lark_apps(runner=self._lark_runner()),
+                "apps": list_lark_apps(
+                    runner=self._lark_runner(),
+                    cli_bin=cli_bin,
+                ),
             }
         )
 
@@ -223,6 +262,9 @@ class LarkChatRequestMixin:
                 app_ref=_compact_text(body.get("app_ref"), limit=100),
                 brand=_compact_text(body.get("brand"), limit=20) or "feishu",
             )
+        except LarkCliUnavailableError as exc:
+            self._send_error(str(exc), status=503, error_code=exc.error_code)
+            return
         except ValueError as exc:
             self._send_error(str(exc), status=400, error_code="invalid_lark_app_setup")
             return
@@ -245,6 +287,9 @@ class LarkChatRequestMixin:
         self._send_json({"ok": True, **snapshot})
 
     def _lark_chats(self) -> None:
+        cli_bin = self._require_lark_cli()
+        if cli_bin is None:
+            return
         query = parse_qs(urlparse(self.path).query)
         app_ref = _compact_text(query.get("app_ref", [""])[0], limit=100)
         keyword = _compact_text(query.get("query", [""])[0], limit=120)
@@ -256,9 +301,17 @@ class LarkChatRequestMixin:
                 app_ref=app_ref,
                 query=keyword or None,
                 runner=self._lark_runner(),
+                cli_bin=cli_bin,
             )
         except ValueError as exc:
             self._send_error(str(exc), status=400, error_code="invalid_lark_app")
+            return
+        except LarkGroupChatLookupError as exc:
+            self._send_error(
+                str(exc),
+                status=502,
+                error_code=exc.error_code,
+            )
             return
         self._send_json(
             {
@@ -269,6 +322,9 @@ class LarkChatRequestMixin:
         )
 
     def _lark_connections(self) -> None:
+        cli_bin = self._require_lark_cli()
+        if cli_bin is None:
+            return
         registry = load_registry(self.server.registry_path)
         self._send_json(
             {
@@ -278,11 +334,21 @@ class LarkChatRequestMixin:
                     registry=registry,
                     target_path=self._goal_channel_target_path(),
                     binding_paths=self._lark_binding_paths(registry),
+                    runner=self._lark_runner(),
+                    cli_bin=cli_bin,
+                    runtime_health=(
+                        self.server.lark_goal_topic_runtime.health_snapshot()
+                        if getattr(self.server, "lark_goal_topic_runtime", None) is not None
+                        else None
+                    ),
                 ),
             }
         )
 
     def _lark_connect(self) -> None:
+        cli_bin = self._require_lark_cli()
+        if cli_bin is None:
+            return
         try:
             body = self._read_json()
             allowed = {"app_ref", "chat_id", "chat_name", "execute", "goal_id", "incoming_mode"}
@@ -307,6 +373,7 @@ class LarkChatRequestMixin:
                 incoming_mode=incoming_mode,
                 execute=body.get("execute") is True,
                 runner=self._lark_runner(),
+                cli_bin=cli_bin,
             )
         except ValueError as exc:
             self._send_error(str(exc), status=400, error_code="invalid_lark_connection")

@@ -10,6 +10,8 @@ CHAT_PID=""
 PYTHON_BIN=""
 CODEX_BIN="codex"
 CLAUDE_BIN="claude"
+LARK_CLI_BIN=""
+LARK_CLI_ARGS=()
 
 node_is_supported() {
   "$1" -e '
@@ -128,9 +130,77 @@ resolve_agent_binary() {
   printf '%s\n' "${binary_name}"
 }
 
+resolve_lark_cli_binary() {
+  local discovered=""
+  if command -v lark-cli >/dev/null 2>&1; then
+    command -v lark-cli
+    return 0
+  fi
+  discovered="${NVM_BIN:-}/lark-cli"
+  if [ -n "${NVM_BIN:-}" ] && [ -x "${discovered}" ]; then
+    printf '%s\n' "${discovered}"
+    return 0
+  fi
+
+  local candidate=""
+  local version_name=""
+  local major=0
+  local minor=0
+  local patch=0
+  local best_candidate=""
+  local best_major=-1
+  local best_minor=-1
+  local best_patch=-1
+  for candidate in "${HOME}"/.nvm/versions/node/*/bin/lark-cli; do
+    [ -x "${candidate}" ] || continue
+    version_name="$(basename "$(dirname "$(dirname "${candidate}")")")"
+    if [[ ! "${version_name}" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+      continue
+    fi
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    patch="${BASH_REMATCH[3]}"
+    if (( major > best_major \
+      || (major == best_major && minor > best_minor) \
+      || (major == best_major && minor == best_minor && patch > best_patch) )); then
+      best_candidate="${candidate}"
+      best_major="${major}"
+      best_minor="${minor}"
+      best_patch="${patch}"
+    fi
+  done
+  if [ -n "${best_candidate}" ]; then
+    printf '%s\n' "${best_candidate}"
+    return 0
+  fi
+
+  for discovered in \
+    "${HOME}/.local/bin/lark-cli" \
+    "${HOME}/.npm-global/bin/lark-cli" \
+    /opt/homebrew/bin/lark-cli \
+    /usr/local/bin/lark-cli \
+    /usr/bin/lark-cli \
+    /bin/lark-cli; do
+    [ -n "${discovered}" ] || continue
+    if [ -x "${discovered}" ]; then
+      printf '%s\n' "${discovered}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 CODEX_BIN="$(resolve_agent_binary codex)"
 CLAUDE_BIN="$(resolve_agent_binary claude)"
+if LARK_CLI_BIN="$(resolve_lark_cli_binary)"; then
+  LARK_CLI_ARGS=(--lark-cli-bin "${LARK_CLI_BIN}")
+fi
 echo "LoopX Agent executables: Codex=${CODEX_BIN}; Claude Code=${CLAUDE_BIN}"
+if [ -n "${LARK_CLI_BIN}" ]; then
+  echo "LoopX Lark CLI: discovered"
+else
+  echo "LoopX Lark CLI: runtime discovery pending"
+fi
 
 cd "${REPO_ROOT}"
 "${PYTHON_BIN}" -m loopx.cli serve-status \
@@ -146,6 +216,7 @@ STATUS_PID=$!
   --port 8767 \
   --codex-bin "${CODEX_BIN}" \
   --claude-bin "${CLAUDE_BIN}" \
+  "${LARK_CLI_ARGS[@]}" \
   --no-open &
 CHAT_PID=$!
 

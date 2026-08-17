@@ -20,6 +20,33 @@ def test_dashboard_command_is_registered() -> None:
     assert args.command == "dashboard"
 
 
+def test_chat_command_accepts_explicit_lark_cli_binary() -> None:
+    args = build_parser().parse_args(["chat", "--lark-cli-bin", "custom-lark-cli"])
+
+    assert args.lark_cli_bin == "custom-lark-cli"
+
+
+def test_chat_command_passes_explicit_lark_cli_binary_to_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(support_control, "serve_chat", lambda **kwargs: calls.append(kwargs))
+
+    assert main(["chat", "--lark-cli-bin", "custom-lark-cli", "--no-open"]) == 0
+    assert calls[0]["lark_cli_bin"] == "custom-lark-cli"
+
+
+def test_macos_launchagent_passes_discovered_lark_cli_without_login_shell() -> None:
+    script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "macos-dashboard-launchagent.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "--lark-cli-bin" in script
+    assert "resolve_lark_cli_command" in script
+    assert "<string>-lc</string>" not in script
+    assert script.count("<string>-c</string>") == 3
+
+
 def test_dashboard_command_runs_the_dashboard_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -204,12 +231,19 @@ def test_dashboard_launcher_discovers_agent_bins_outside_restricted_path(
     (fake_bin / "npm").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     (npm_global / "codex").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     (nvm_bin / "claude").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (nvm_bin / "lark-cli").write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "--version" ]]; then printf "%s\\n" "lark-cli 1.2.3"; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
     for executable in (
         fake_bin / "python3.13",
         fake_bin / "node",
         fake_bin / "npm",
         npm_global / "codex",
         nvm_bin / "claude",
+        nvm_bin / "lark-cli",
     ):
         executable.chmod(0o755)
 
@@ -221,6 +255,7 @@ def test_dashboard_launcher_discovers_agent_bins_outside_restricted_path(
             "HOME": str(home),
             "PATH": f"{fake_bin}:/usr/bin:/bin",
             "NVM_DIR": str(home / ".nvm"),
+            "NVM_BIN": str(nvm_bin),
             "LOOPX_COMMAND_LOG": str(command_log),
         },
         text=True,
@@ -234,3 +269,68 @@ def test_dashboard_launcher_discovers_agent_bins_outside_restricted_path(
     commands = command_log.read_text(encoding="utf-8")
     assert f"--codex-bin {npm_global / 'codex'}" in commands
     assert f"--claude-bin {nvm_bin / 'claude'}" in commands
+    assert f"--lark-cli-bin {nvm_bin / 'lark-cli'}" in commands
+
+
+def test_dashboard_launcher_selects_highest_semantic_nvm_lark_cli(
+    tmp_path: Path,
+) -> None:
+    release_root = tmp_path / "release"
+    scripts_dir = release_root / "scripts"
+    dashboard_dir = release_root / "apps" / "presentation" / "dashboard"
+    fake_bin = tmp_path / "bin"
+    home = tmp_path / "home"
+    low_bin = home / ".nvm" / "versions" / "node" / "v22.9.99" / "bin"
+    high_bin = home / ".nvm" / "versions" / "node" / "v22.12.10" / "bin"
+    scripts_dir.mkdir(parents=True)
+    dashboard_dir.mkdir(parents=True)
+    fake_bin.mkdir()
+    low_bin.mkdir(parents=True)
+    high_bin.mkdir(parents=True)
+    shutil.copy2(
+        Path(__file__).resolve().parents[1] / "scripts" / "dashboard-dev.sh",
+        scripts_dir / "dashboard-dev.sh",
+    )
+    (dashboard_dir / "node_modules" / ".bin").mkdir(parents=True)
+    (dashboard_dir / "node_modules" / ".bin" / "vite").touch()
+
+    command_log = tmp_path / "commands.log"
+    (fake_bin / "python3.13").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >> "$LOOPX_COMMAND_LOG"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "node").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (fake_bin / "npm").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    for lark_cli in (low_bin / "lark-cli", high_bin / "lark-cli"):
+        lark_cli.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    for executable in (
+        fake_bin / "python3.13",
+        fake_bin / "node",
+        fake_bin / "npm",
+        low_bin / "lark-cli",
+        high_bin / "lark-cli",
+    ):
+        executable.chmod(0o755)
+
+    completed = subprocess.run(
+        ["bash", str(scripts_dir / "dashboard-dev.sh")],
+        cwd=release_root,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "NVM_DIR": str(home / ".nvm"),
+            "NVM_BIN": "",
+            "LOOPX_COMMAND_LOG": str(command_log),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    commands = command_log.read_text(encoding="utf-8")
+    assert f"--lark-cli-bin {high_bin / 'lark-cli'}" in commands
+    assert f"--lark-cli-bin {low_bin / 'lark-cli'}" not in commands

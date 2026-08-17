@@ -253,6 +253,17 @@ for (const label of ["Connect Lark App", "Group chat", "Bind to Goal", "Create G
   assert.match(larkSettings, new RegExp(label), `Connect flow contains ${label}`);
 }
 assert.match(larkSettings, /One Lark App · many Goals · one topic per Goal/, "Connection cardinality is explicit");
+assert.match(larkSettings, /lark_message_permissions_required/, "Missing message permissions receive an actionable error");
+assert.match(larkSettings, /selectedApp\?\.reply_ready/, "Connect stays disabled until automatic replies are healthy");
+assert.match(larkSettings, /自动回复不可用/, "Existing unhealthy connections expose their reply health");
+assert.match(larkSettings, /listener_status/, "Connections expose the Goal Topic event listener state");
+assert.match(larkSettings, /监听中/, "Healthy Goal Topic listeners have a readable status");
+assert.match(larkSettings, /事件订阅待验证/, "Connections with no received events are not presented as healthy");
+assert.match(larkSettings, /im\.message\.receive_v1/, "Unverified event delivery names the required Feishu event");
+assert.match(larkSettings, /im:message\.group_at_msg:readonly/, "Group mention permission guidance uses the bot scope");
+assert.match(larkSettings, /发布新版/, "Permission guidance reminds operators to publish a new app version");
+assert.match(larkSettings, /未收到消息事件/, "Connections explain when Feishu event delivery has not been observed");
+assert.match(larkSettings, /message_context_permission_required/, "Received events with missing context permissions get an actionable repair hint");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*false/s, "Connect flow previews before execution");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*true/s, "Connect flow performs the approved external write");
 assert.match(larkSettings, /Register another Lark App/, "App chooser exposes Feishu registration");

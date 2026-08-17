@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from loopx.extensions.lark.goal_topic_connections import (
+    LarkGroupChatLookupError,
     connect_lark_goal_topic,
     disconnect_lark_goal_topic,
     list_lark_apps,
@@ -15,6 +18,7 @@ from loopx.extensions.lark.goal_topic_connections import (
 )
 from loopx.extensions.lark.goal_channel_contracts import read_goal_channel_binding
 from loopx.extensions.lark.goal_channel_targets import read_goal_channel_targets
+from loopx.extensions.lark.goal_channel_targets import add_lark_goal_channel_target
 
 
 APP_ID = "cli_public_fixture"
@@ -39,6 +43,15 @@ def _runner(state: dict[str, Any]):
                 {"name": "mew", "appId": APP_ID, "brand": "feishu", "active": True},
                 {"name": "standby", "appId": "cli_standby_fixture", "brand": "feishu", "active": False},
             ]
+        elif "auth" in args and "check" in args:
+            ready = profile == "mew"
+            payload = {
+                "ok": ready,
+                "granted": ["im:message", "im:message:readonly"] if ready else [],
+                "missing": [] if ready else ["im:message", "im:message:readonly"],
+            }
+            if not ready:
+                return {"returncode": 1, "stdout": json.dumps(payload), "stderr": ""}
         elif "auth" in args and "status" in args:
             payload = {
                 "appId": APP_ID if profile == "mew" else "cli_standby_fixture",
@@ -88,8 +101,24 @@ def test_lists_apps_with_readiness_without_returning_secrets() -> None:
     apps = list_lark_apps(runner=_runner(state), cli_bin="fake-lark")
 
     assert apps == [
-        {"app_ref": "mew", "label": "LoopX Mew", "brand": "feishu", "active": True, "ready": True},
-        {"app_ref": "standby", "label": "Standby", "brand": "feishu", "active": False, "ready": False},
+        {
+            "app_ref": "mew",
+            "label": "LoopX Mew",
+            "brand": "feishu",
+            "active": True,
+            "ready": True,
+            "reply_ready": True,
+            "health_error_code": None,
+        },
+        {
+            "app_ref": "standby",
+            "label": "Standby",
+            "brand": "feishu",
+            "active": False,
+            "ready": False,
+            "reply_ready": False,
+            "health_error_code": "lark_app_not_ready",
+        },
     ]
     assert "secret" not in json.dumps(apps).lower()
     assert all("app_id" not in app for app in apps)
@@ -107,6 +136,7 @@ def test_lists_group_chats_through_the_selected_app() -> None:
     assert chats == [{"chat_id": CHAT_ID, "chat_name": "Product group"}]
     call = next(args for args in state["calls"] if "+chat-search" in args)
     assert call[call.index("--profile") + 1] == "mew"
+    assert call[call.index("--as") + 1] == "bot"
     assert "--types" not in call
 
     list_lark_group_chats(
@@ -116,6 +146,21 @@ def test_lists_group_chats_through_the_selected_app() -> None:
     )
     list_call = next(args for args in state["calls"] if "+chat-list" in args)
     assert list_call[list_call.index("--types") + 1] == "group"
+    assert list_call[list_call.index("--as") + 1] == "bot"
+
+
+def test_group_chat_lookup_failure_is_not_silently_reported_as_empty() -> None:
+    def failing_runner(args: list[str], _cwd: object, _timeout: object) -> dict[str, Any]:
+        return {"returncode": 1, "stdout": "", "stderr": "provider unavailable"}
+
+    with pytest.raises(LarkGroupChatLookupError) as error:
+        list_lark_group_chats(
+            app_ref="mew",
+            runner=failing_runner,
+            cli_bin="fake-lark",
+        )
+
+    assert getattr(error.value, "error_code", None) == "lark_group_lookup_failed"
 
 
 def test_two_goals_share_one_connection_with_distinct_topics(tmp_path: Path) -> None:
@@ -155,14 +200,221 @@ def test_two_goals_share_one_connection_with_distinct_topics(tmp_path: Path) -> 
         registry=_registry(tmp_path),
         target_path=target_path,
         binding_paths={"goal-alpha": binding_path, "goal-beta": binding_path},
+        runner=runner,
+        cli_bin="fake-lark",
     )
     assert len(rows) == 2
     assert {row["goal_id"] for row in rows} == {"goal-alpha", "goal-beta"}
     assert {row["app_ref"] for row in rows} == {"mew"}
     assert {row["chat_name"] for row in rows} == {"Product group"}
     assert {row["topic_name"] for row in rows} == {"Alpha delivery", "Beta delivery"}
+    assert all(row["reply_ready"] is True for row in rows)
+    assert all(row["health_error_code"] is None for row in rows)
     assert "oc_" not in json.dumps(rows)
     assert "om_" not in json.dumps(rows)
+
+
+def test_listening_connection_without_received_events_is_not_reply_ready(
+    tmp_path: Path,
+) -> None:
+    state: dict[str, Any] = {}
+    runner = _runner(state)
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connected = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+    assert connected["ok"] is True
+
+    rows = list_lark_connections(
+        registry=_registry(tmp_path),
+        target_path=target_path,
+        binding_paths={"goal-alpha": binding_path},
+        runner=runner,
+        cli_bin="fake-lark",
+        runtime_health={
+            "mew": {
+                "status": "listening",
+                "error_code": None,
+                "event_count": 0,
+                "replied_count": 0,
+                "last_event_status": None,
+            }
+        },
+    )
+
+    assert rows[0]["listener_status"] == "listening"
+    assert rows[0]["reply_ready"] is False
+    assert rows[0]["health_error_code"] == "lark_event_delivery_unverified"
+
+
+def test_connect_preview_uses_verified_bot_identity_without_user_oauth(
+    tmp_path: Path,
+) -> None:
+    state: dict[str, Any] = {}
+    base_runner = _runner(state)
+
+    def runner(args: list[str], cwd: object, timeout: object) -> dict[str, Any]:
+        if "auth" in args and "check" in args:
+            state.setdefault("calls", []).append(list(args))
+            return {
+                "returncode": 1,
+                "stdout": json.dumps(
+                    {
+                        "ok": False,
+                        "granted": ["im:message"],
+                        "missing": ["im:message:readonly"],
+                        "suggestion": "private provider detail must not escape",
+                    }
+                ),
+                "stderr": "",
+            }
+        return base_runner(args, cwd, timeout)
+
+    result = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=tmp_path / "goal-channel-targets.json",
+        binding_path=tmp_path / "goal-channel.json",
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        execute=False,
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "preview_ready"
+    assert result["details"]["app_ref"] == "mew"
+    assert not any("auth" in call and "check" in call for call in state["calls"])
+    assert not any("+messages-send" in call for call in state["calls"])
+    assert not (tmp_path / "goal-channel.json").exists()
+
+
+def test_connection_health_reports_received_event_processing_blocker(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    runner = _runner(state)
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    result = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+    assert result["ok"] is True
+
+    rows = list_lark_connections(
+        registry=_registry(tmp_path),
+        target_path=target_path,
+        binding_paths={"goal-alpha": binding_path},
+        runner=runner,
+        cli_bin="fake-lark",
+        runtime_health={
+            "mew": {
+                "status": "listening",
+                "event_count": 1,
+                "replied_count": 0,
+                "last_event_status": "message_context_permission_required",
+                "error_code": None,
+            }
+        },
+    )
+
+    assert rows[0]["reply_ready"] is False
+    assert rows[0]["health_error_code"] == "message_context_permission_required"
+
+
+def test_connect_uses_bot_chat_access_when_member_listing_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    state: dict[str, Any] = {}
+    base_runner = _runner(state)
+
+    def runner(args: list[str], cwd: object, timeout: object) -> dict[str, Any]:
+        if "+chat-members-list" in args:
+            state.setdefault("calls", []).append(list(args))
+            return {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "identity lacks permission to enumerate chat bots",
+            }
+        return base_runner(args, cwd, timeout)
+
+    result = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=tmp_path / "goal-channel-targets.json",
+        binding_path=tmp_path / "goal-channel.json",
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+
+    assert result["ok"] is True
+    assert any("+chat-members-list" in call for call in state["calls"])
+    bot_chat_checks = [
+        call
+        for call in state["calls"]
+        if "chats" in call and "get" in call and "--as" in call
+    ]
+    assert bot_chat_checks
+    assert all(call[call.index("--as") + 1] == "bot" for call in bot_chat_checks)
+
+
+def test_existing_target_cli_bin_has_priority_for_connection(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    runner = _runner(state)
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    add_lark_goal_channel_target(
+        target_path=target_path,
+        target_name="mew-product",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        identity_mode="local_user",
+        sender_profile="mew",
+        sender_identity="bot",
+        bot_app_id=APP_ID,
+        bot_display_name="LoopX Mew",
+        cli_bin="target-lark-cli",
+        execute=True,
+    )
+
+    result = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        runner=runner,
+        cli_bin="discovered-lark-cli",
+    )
+
+    assert result["ok"] is True
+    assert state["calls"]
+    assert {call[0] for call in state["calls"]} == {"target-lark-cli"}
 
 
 def test_routes_mentions_by_topic_and_replies_in_thread(tmp_path: Path) -> None:

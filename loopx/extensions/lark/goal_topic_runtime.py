@@ -8,10 +8,12 @@ import os
 import subprocess
 import threading
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .event_inbox import (
+    MESSAGE_ID_PATTERN,
     acknowledge_lark_event_inbox,
     ingest_lark_event_inbox,
     inspect_lark_event_inbox,
@@ -28,13 +30,15 @@ SnapshotProvider = Callable[[], Mapping[str, Any]]
 ProfilePoller = Callable[[str, threading.Event], None]
 SimpleRunner = Callable[[list[str]], Mapping[str, Any]]
 ProcessFactory = Callable[[list[str]], Any]
+HealthSink = Callable[[Mapping[str, Any]], None]
 
 
 _EVENT_PROJECTION = (
     '{schema_version:"lark_event_inbox_event_v0",'
     "event_id:(.event_id // .message_id),message_id:.message_id,"
     "create_time:.create_time,content:.content,sender_id:.sender_id,"
-    "chat_id:.chat_id,root_id:.root_id,parent_id:.parent_id,"
+    "chat_id:.chat_id,root_id:(.root_id // .thread_id),thread_id:.thread_id,"
+    "parent_id:.parent_id,"
     "mentions:(.mentions // [])}"
 )
 
@@ -204,6 +208,15 @@ def poll_lark_goal_topic_profile_once(
             profile_app_id=bot_app_id,
             configured_chat_id=chat_id,
         )
+        root_id = str(enriched.get("root_id") or "")
+        context_status = str(enriched.get("message_context_status") or "")
+        if not MESSAGE_ID_PATTERN.fullmatch(root_id) and context_status in {
+            "message_context_permission_required",
+            "message_context_lookup_failed",
+            "message_context_unavailable",
+        }:
+            event_statuses.append(context_status)
+            continue
         try:
             event_result = process_lark_goal_topic_event(
                 target_payload=target_payload,
@@ -241,6 +254,7 @@ def stream_lark_goal_topic_profile(
     process_factory: ProcessFactory = _default_process_factory,
     provider_runner: Any = subprocess.run,
     reply_runner: CommandRunner = _default_simple_runner,
+    health_sink: HealthSink | None = None,
 ) -> dict[str, Any]:
     """Keep one bounded long-lived CLI consumer attached between messages."""
 
@@ -273,6 +287,8 @@ def stream_lark_goal_topic_profile(
             "--quiet",
         ]
     )
+    if health_sink is not None:
+        health_sink({"status": "listening", "error_code": None})
     watcher_done = threading.Event()
 
     def stop_consumer() -> None:
@@ -317,6 +333,17 @@ def stream_lark_goal_topic_profile(
             )
             event_count += int(result.get("event_count") or 0)
             replied_count += int(result.get("replied_count") or 0)
+            if health_sink is not None and int(result.get("event_count") or 0):
+                statuses = list(result.get("event_statuses") or [])
+                health_sink(
+                    {
+                        "status": "listening",
+                        "error_code": None,
+                        "event_count": int(result.get("event_count") or 0),
+                        "replied_count": int(result.get("replied_count") or 0),
+                        "last_event_status": str(statuses[-1]) if statuses else None,
+                    }
+                )
             if int(result.get("event_count") or 0):
                 print(
                     json.dumps(
@@ -365,9 +392,52 @@ class LarkGoalTopicRuntimeService:
         self._profile_poller = profile_poller or self._poll_profile
         self._lock = threading.Lock()
         self._workers: dict[str, tuple[threading.Event, threading.Thread]] = {}
+        self._health: dict[str, dict[str, Any]] = {}
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _update_health(self, profile: str, **updates: Any) -> None:
+        with self._lock:
+            current = dict(
+                self._health.get(
+                    profile,
+                    {
+                        "status": "starting",
+                        "event_count": 0,
+                        "replied_count": 0,
+                        "last_event_status": None,
+                        "error_code": None,
+                        "restart_count": 0,
+                    },
+                )
+            )
+            current["event_count"] = int(current.get("event_count") or 0) + int(
+                updates.pop("event_count", 0) or 0
+            )
+            current["replied_count"] = int(current.get("replied_count") or 0) + int(
+                updates.pop("replied_count", 0) or 0
+            )
+            current.update(updates)
+            current["updated_at"] = self._now()
+            self._health[profile] = current
+
+    def health_snapshot(self) -> dict[str, dict[str, Any]]:
+        """Return content-free listener health keyed by safe profile reference."""
+
+        with self._lock:
+            return {profile: dict(health) for profile, health in self._health.items()}
 
     def _poll_profile(self, profile: str, stop: threading.Event) -> None:
+        restart_count = 0
         while not stop.is_set():
+            self._update_health(
+                profile,
+                status="starting" if restart_count == 0 else "retrying",
+                error_code=None,
+                restart_count=restart_count,
+            )
             try:
                 def answer(route: Mapping[str, Any], text: str) -> str:
                     snapshot = self.snapshot_provider()
@@ -383,16 +453,37 @@ class LarkGoalTopicRuntimeService:
                         runtime_controller=self.runtime_controller,
                     )
 
-                stream_lark_goal_topic_profile(
+                result = stream_lark_goal_topic_profile(
                     profile=profile,
                     snapshot_provider=self.snapshot_provider,
                     stop=stop,
                     runtime_root=self.runtime_root,
                     answer=answer,
+                    health_sink=lambda update: self._update_health(profile, **dict(update)),
+                )
+                if stop.is_set():
+                    break
+                restart_count += 1
+                self._update_health(
+                    profile,
+                    status="retrying",
+                    error_code=(
+                        None
+                        if result.get("ok") is True
+                        else "lark_event_listener_failed"
+                    ),
+                    restart_count=restart_count,
                 )
             except Exception:
-                pass
-            stop.wait(0.25)
+                restart_count += 1
+                self._update_health(
+                    profile,
+                    status="retrying",
+                    error_code="lark_event_listener_failed",
+                    restart_count=restart_count,
+                )
+            stop.wait(min(5.0, 0.25 * (2 ** min(restart_count, 4))))
+        self._update_health(profile, status="stopped", error_code=None)
 
     def refresh(self) -> None:
         desired = set(_active_profile_configs(self.snapshot_provider()))
@@ -404,6 +495,15 @@ class LarkGoalTopicRuntimeService:
                 stop.set()
             for profile in sorted(missing):
                 stop = threading.Event()
+                self._health[profile] = {
+                    "status": "starting",
+                    "event_count": 0,
+                    "replied_count": 0,
+                    "last_event_status": None,
+                    "error_code": None,
+                    "restart_count": 0,
+                    "updated_at": self._now(),
+                }
                 thread = threading.Thread(
                     target=self._profile_poller,
                     args=(profile, stop),

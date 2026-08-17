@@ -13,6 +13,7 @@ CHAT_ID_PATTERN = re.compile(r"oc_[A-Za-z0-9_-]+")
 MESSAGE_ID_PATTERN = re.compile(r"om_[A-Za-z0-9_-]+")
 APP_ID_PATTERN = re.compile(r"cli_[A-Za-z0-9_-]+")
 SAFE_PROFILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}")
+REQUIRED_GOAL_TOPIC_SCOPES = ("im:message", "im:message:readonly")
 
 
 def json_payload(result: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -151,6 +152,49 @@ def verified_app_id(
     return app_id
 
 
+def goal_topic_message_permissions(
+    *,
+    runner: CommandRunner,
+    cli_bin: str,
+    profile: str | None,
+) -> dict[str, Any]:
+    """Return a public-safe health result for Goal Topic auto replies."""
+
+    result = call(
+        runner,
+        lark_args(
+            cli_bin=cli_bin,
+            profile=profile,
+            tail=[
+                "auth",
+                "check",
+                "--scope",
+                " ".join(REQUIRED_GOAL_TOPIC_SCOPES),
+                "--json",
+            ],
+        ),
+    )
+    payload = json_payload(result)
+    granted_raw = payload.get("granted")
+    granted_items = granted_raw if isinstance(granted_raw, list) else []
+    granted = {
+        str(scope)
+        for scope in granted_items
+        if isinstance(scope, str)
+    }
+    missing = [scope for scope in REQUIRED_GOAL_TOPIC_SCOPES if scope not in granted]
+    ready = bool(
+        result.get("returncode") == 0
+        and payload.get("ok") is True
+        and not missing
+    )
+    return {
+        "ready": ready,
+        "error_code": None if ready else "lark_message_permissions_required",
+        "required_scopes": list(REQUIRED_GOAL_TOPIC_SCOPES),
+    }
+
+
 def chat_verified(
     *,
     runner: CommandRunner,
@@ -201,15 +245,25 @@ def bot_membership_verified(
                 "--member-types",
                 "bot",
                 "--as",
-                "user",
+                "bot",
                 "--format",
                 "json",
             ],
         ),
     )
-    return bool(
-        result.get("returncode") == 0
-        and contains_exact_field(json_payload(result), "app_id", app_id)
+    if result.get("returncode") == 0:
+        return contains_exact_field(json_payload(result), "app_id", app_id)
+
+    # Some Lark tenants allow a bot to access its chats while denying the
+    # member-list endpoint. Accessing this exact chat with the selected bot
+    # profile still proves that the bot belongs to the chat; a bot outside the
+    # chat cannot resolve it through the bot identity.
+    return chat_verified(
+        runner=runner,
+        cli_bin=cli_bin,
+        profile=profile,
+        identity="bot",
+        chat_id=chat_id,
     )
 
 

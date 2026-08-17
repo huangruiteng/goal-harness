@@ -30,7 +30,13 @@ def test_existing_collector_preserves_topic_routing_fields() -> None:
 
 def _connection_runner(state: dict[str, Any]):
     def run(args: list[str], _cwd: object, _timeout: object) -> dict[str, Any]:
-        if "auth" in args and "status" in args:
+        if "auth" in args and "check" in args:
+            payload: Any = {
+                "ok": True,
+                "granted": ["im:message", "im:message:readonly"],
+                "missing": [],
+            }
+        elif "auth" in args and "status" in args:
             payload: Any = {
                 "appId": "cli_public_fixture",
                 "identities": {
@@ -292,6 +298,139 @@ def test_runtime_service_uses_one_consumer_for_reused_app_profile(tmp_path: Path
     assert service.active_profiles() == []
 
 
+def test_runtime_service_exposes_content_free_listener_health(tmp_path: Path) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import LarkGoalTopicRuntimeService
+
+    started = threading.Event()
+    release = threading.Event()
+    snapshot = {
+        "target_payload": {
+            "schema_version": "loopx_goal_channel_provider_targets_v0",
+            "targets": {
+                "workspace-bot": {
+                    "name": "workspace-bot",
+                    "provider": "lark",
+                    "enabled": True,
+                    "channel": {"chat_id": "oc_public_fixture"},
+                    "identity": {
+                        "sender_profile": "workspace-bot",
+                        "sender_identity": "bot",
+                        "bot_app_id": "cli_public_fixture",
+                        "cli_bin": "fake-lark",
+                    },
+                }
+            },
+        },
+        "binding_payloads": {
+            "goal-alpha": {
+                "schema_version": "loopx_goal_channel_lark_binding_v0",
+                "bindings": {
+                    "goal-alpha": {
+                        "goal_id": "goal-alpha",
+                        "provider": "lark",
+                        "enabled": True,
+                        "target_ref": "workspace-bot",
+                        "topic": {"root_message_id": "om_topic_alpha"},
+                    }
+                },
+            }
+        },
+    }
+
+    def poller(_profile: str, stop: threading.Event) -> None:
+        started.set()
+        while not stop.is_set() and not release.wait(0.01):
+            pass
+
+    service = LarkGoalTopicRuntimeService(
+        snapshot_provider=lambda: snapshot,
+        runtime_root=tmp_path,
+        runtime_controller=object(),
+        profile_poller=poller,
+    )
+    service.refresh()
+
+    assert started.wait(1)
+    health = service.health_snapshot()["workspace-bot"]
+    assert health["status"] in {"starting", "listening"}
+    assert health["event_count"] == 0
+    assert health["replied_count"] == 0
+    assert health["last_event_status"] is None
+    assert "path" not in health
+    assert "message" not in health
+
+    release.set()
+    service.close()
+
+
+def test_runtime_service_records_safe_failure_code_for_listener_exception(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    import loopx.extensions.lark.goal_topic_runtime as runtime
+
+    attempted = threading.Event()
+    release = threading.Event()
+    snapshot = {
+        "target_payload": {
+            "schema_version": "loopx_goal_channel_provider_targets_v0",
+            "targets": {
+                "workspace-bot": {
+                    "name": "workspace-bot",
+                    "provider": "lark",
+                    "enabled": True,
+                    "channel": {"chat_id": "oc_public_fixture"},
+                    "identity": {
+                        "sender_profile": "workspace-bot",
+                        "sender_identity": "bot",
+                        "bot_app_id": "cli_public_fixture",
+                        "cli_bin": "fake-lark",
+                    },
+                }
+            },
+        },
+        "binding_payloads": {
+            "goal-alpha": {
+                "bindings": {
+                    "goal-alpha": {
+                        "goal_id": "goal-alpha",
+                        "provider": "lark",
+                        "enabled": True,
+                        "target_ref": "workspace-bot",
+                        "topic": {"root_message_id": "om_topic_alpha"},
+                    }
+                }
+            }
+        },
+    }
+
+    def fail_stream(**_kwargs: Any) -> dict[str, Any]:
+        attempted.set()
+        release.wait(1)
+        raise RuntimeError("private message and local path must not escape")
+
+    monkeypatch.setattr(runtime, "stream_lark_goal_topic_profile", fail_stream)
+    service = runtime.LarkGoalTopicRuntimeService(
+        snapshot_provider=lambda: snapshot,
+        runtime_root=tmp_path,
+        runtime_controller=object(),
+    )
+    service.refresh()
+
+    assert attempted.wait(1)
+    release.set()
+    for _ in range(100):
+        health = service.health_snapshot().get("workspace-bot", {})
+        if health.get("error_code") == "lark_event_listener_failed":
+            break
+        threading.Event().wait(0.01)
+    assert health["status"] == "retrying"
+    assert health["error_code"] == "lark_event_listener_failed"
+    assert "private" not in json.dumps(health)
+    assert str(tmp_path) not in json.dumps(health)
+    service.close()
+
+
 def test_profile_stream_keeps_one_consumer_open_between_messages(tmp_path: Path) -> None:
     from loopx.extensions.lark.goal_topic_runtime import stream_lark_goal_topic_profile
 
@@ -470,3 +609,76 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
     assert "event" in state["consume_args"]
     assert state["provider_attempts"] == 2
     assert state["reply_text"] == "当前运行的是 LoopX 开发版。"
+
+
+def test_profile_poll_reports_message_permission_failure_without_creating_inbox(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
+
+    snapshot = {
+        "target_payload": {
+            "schema_version": "loopx_goal_channel_provider_targets_v0",
+            "targets": {
+                "mew-product": {
+                    "name": "mew-product",
+                    "provider": "lark",
+                    "enabled": True,
+                    "channel": {"chat_id": "oc_public_fixture"},
+                    "identity": {
+                        "sender_profile": "mew",
+                        "bot_app_id": "cli_public_fixture",
+                        "cli_bin": "fake-lark",
+                    },
+                }
+            },
+        },
+        "binding_payloads": {
+            "goal-alpha": {
+                "schema_version": "loopx_goal_channel_lark_binding_v0",
+                "bindings": {
+                    "goal-alpha": {
+                        "goal_id": "goal-alpha",
+                        "provider": "lark",
+                        "enabled": True,
+                        "target_ref": "mew-product",
+                        "topic": {"root_message_id": "om_topic_alpha"},
+                        "routing": {"incoming_mode": "mentions", "reply_mode": "topic_reply"},
+                    }
+                },
+            }
+        },
+    }
+    event = {
+        "event_id": "evt_incoming",
+        "message_id": "om_incoming",
+        "chat_id": "oc_public_fixture",
+        "content": "@linkmacbot hello",
+    }
+
+    def provider_runner(args: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            1,
+            json.dumps({"code": 230027, "message": "private provider detail"}),
+            "",
+        )
+
+    result = poll_lark_goal_topic_profile_once(
+        profile="mew",
+        snapshot=snapshot,
+        runtime_root=tmp_path / "runtime",
+        answer=lambda _route, _text: "must not reply",
+        consume_runner=lambda _args: {
+            "returncode": 0,
+            "stdout": json.dumps(event) + "\n",
+            "stderr": "",
+        },
+        provider_runner=provider_runner,
+        reply_runner=lambda _args: (_ for _ in ()).throw(AssertionError("must not reply")),
+    )
+
+    assert result["event_count"] == 1
+    assert result["replied_count"] == 0
+    assert result["event_statuses"] == ["message_context_permission_required"]
+    assert not (tmp_path / "runtime").exists()
