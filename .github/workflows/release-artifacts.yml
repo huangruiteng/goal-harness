@@ -102,6 +102,41 @@ jobs:
             dist/packages/*.whl
           test "$("${RUNNER_TEMP}/loopx-wheel/bin/loopx" --version)" = \
             "loopx ${RELEASE_TAG#v}"
+          skills_dir="${RUNNER_TEMP}/loopx-wheel-skills"
+          "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
+            workflow-skills --install --skills-dir "${skills_dir}" \
+            > "${RUNNER_TEMP}/loopx-workflow-skills-install.json"
+          "${RUNNER_TEMP}/loopx-wheel/bin/python" - \
+            "${RUNNER_TEMP}/loopx-workflow-skills-install.json" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload["ok"] is True, payload
+          assert payload["source"]["kind"] == "python_distribution", payload
+          assert payload["after"]["ready"] is True, payload
+          PY
+          "${RUNNER_TEMP}/loopx-wheel/bin/loopx" --format json \
+            workflow-skills --uninstall --skills-dir "${skills_dir}" \
+            > "${RUNNER_TEMP}/loopx-workflow-skills-uninstall.json"
+          "${RUNNER_TEMP}/loopx-wheel/bin/python" - \
+            "${RUNNER_TEMP}/loopx-workflow-skills-uninstall.json" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert payload["ok"] is True, payload
+          assert sorted(payload["result"]["removed"]) == [
+              "loopx",
+              "loopx-doc-registry",
+              "loopx-pr-program",
+              "loopx-pr-review",
+              "loopx-project",
+              "loopx-self-repair",
+          ], payload
+          PY
 
       - name: Exercise release contract smoke
         run: python examples/release-artifacts-smoke.py

@@ -68,6 +68,7 @@ def main() -> int:
             "LOOPX_SHELL_PROFILE": str(profile),
             "LOOPX_INSTALL_SKILL": "1",
             "LOOPX_INSTALL_CANARY": "1",
+            "LOOPX_PYTHON": sys.executable,
             "LOOPX_PROMOTE_DEFAULT": "1",
             "LOOPX_RELEASE_ID": "fresh-clone-smoke-release",
             "PATH": os.environ.get("PATH", ""),
@@ -144,7 +145,9 @@ def main() -> int:
         )
         assert bootstrap["ok"] is True, bootstrap
         assert bootstrap["goal_id"] == GOAL_ID, bootstrap
-        assert "huangruiteng.github.io/loopx/install.sh" in bootstrap["install_repair_command"], bootstrap
+        assert "python3 -m pip install --upgrade loopx" in bootstrap["install_repair_command"], bootstrap
+        assert "loopx workflow-skills --install" in bootstrap["install_repair_command"], bootstrap
+        assert "huangruiteng.github.io/loopx/install.sh" in bootstrap["archive_fallback_install_command"], bootstrap
         assert "loopx doctor" in bootstrap["install_repair_command"], bootstrap
         assert (project / ".loopx" / "registry.json").is_file(), bootstrap
         assert (project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md").is_file(), bootstrap

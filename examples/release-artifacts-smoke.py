@@ -159,6 +159,9 @@ def main() -> int:
         "vars.PYPI_PUBLISH_ENABLED == 'true'",
         "environment:\n      name: pypi",
         "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+        "workflow-skills --install --skills-dir",
+        "workflow-skills --uninstall --skills-dir",
+        'payload["source"]["kind"] == "python_distribution"',
     )
     for text in required_contract:
         assert text in workflow, text

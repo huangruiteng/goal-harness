@@ -7,6 +7,7 @@ from pathlib import Path
 from loopx import __version__
 from loopx.doctor import (
     build_install_freshness,
+    current_script_invocation_path,
     git_revision_relation,
     trusted_release_ref_for_root,
 )
@@ -231,6 +232,102 @@ def test_other_agent_freshness_does_not_require_codex_skill_directory(
     assert str(freshness["upgrade_command"]).endswith(
         "loopx doctor --agent-type other-agent"
     )
+
+
+def test_python_distribution_uses_pip_native_upgrade_path(tmp_path: Path) -> None:
+    freshness = build_install_freshness(
+        command_path=tmp_path / "loopx",
+        release_root=None,
+        repo_root=tmp_path,
+        skills={
+            "loopx-project": {
+                "exists": True,
+                "required_phrases": True,
+            }
+        },
+        python_distribution={
+            "available": True,
+            "kind": "python_distribution",
+            "version": "0.4.8",
+            "installer": "pip",
+        },
+    )
+
+    assert freshness["status"] == "python_distribution"
+    assert freshness["requires_upgrade"] is False
+    assert freshness["install_kind"] == "python_distribution"
+    assert freshness["python_distribution_version"] == "0.4.8"
+    assert "-m pip install --upgrade loopx" in str(freshness["upgrade_command"])
+    assert "loopx workflow-skills --install" in str(freshness["upgrade_command"])
+    assert "huangruiteng.github.io" in str(freshness["no_clone_upgrade_command"])
+
+
+def test_python_distribution_ignores_archive_manifest_version(tmp_path: Path) -> None:
+    freshness = build_install_freshness(
+        command_path=tmp_path / "bin" / "loopx",
+        release_root=tmp_path / "releases" / "20260713T030000Z",
+        repo_root=tmp_path,
+        skills={"loopx-project": {"exists": True, "required_phrases": True}},
+        release_manifest={
+            "available": True,
+            "manifest": {
+                "package": {"version": "0.4.7"},
+                "source": {"git_commit": "a" * 40},
+            },
+        },
+        freshness_source={
+            "label": "loopx/loopx@main",
+            "git_commit": "b" * 40,
+            "revision_relation": "installed_behind",
+        },
+        python_distribution={
+            "available": True,
+            "kind": "python_distribution",
+            "version": "0.4.8",
+            "installer": "pip",
+        },
+        now=datetime(2026, 7, 13, 4, tzinfo=timezone.utc),
+    )
+
+    assert freshness["status"] == "python_distribution"
+    assert freshness["requires_upgrade"] is False
+    assert freshness["manifest_package_version_matches_runtime"] is False
+
+
+def test_current_console_script_wins_over_path_lookup(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    console_script = tmp_path / "venv" / "bin" / "loopx"
+    console_script.parent.mkdir(parents=True)
+    console_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr("loopx.doctor.sys.argv", [str(console_script), "doctor"])
+
+    assert current_script_invocation_path() == console_script.resolve()
+
+
+def test_python_distribution_missing_skills_recommends_repair(tmp_path: Path) -> None:
+    freshness = build_install_freshness(
+        command_path=tmp_path / "loopx",
+        release_root=None,
+        repo_root=tmp_path,
+        skills={
+            "loopx-project": {
+                "exists": False,
+                "required_phrases": False,
+            }
+        },
+        python_distribution={
+            "available": True,
+            "kind": "python_distribution",
+            "version": "0.4.8",
+            "installer": "pip",
+        },
+    )
+
+    assert freshness["status"] == "repair_recommended"
+    assert freshness["requires_upgrade"] is True
+    assert "loopx workflow-skills --install" in str(freshness["upgrade_command"])
 
 
 def test_trusted_release_ref_matches_manifest_repository(tmp_path: Path) -> None:
