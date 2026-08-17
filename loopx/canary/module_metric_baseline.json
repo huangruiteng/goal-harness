@@ -20,6 +20,11 @@
       "dict_any_count": 0,
       "lines": 1984
     },
+    "loopx/chat_server.py": {
+      "any_count": 25,
+      "dict_any_count": 0,
+      "lines": 1513
+    },
     "loopx/capabilities/auto_research/demo_e2e.py": {
       "any_count": 0,
       "dict_any_count": 0,
