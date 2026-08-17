@@ -121,19 +121,18 @@ next_action: <one concrete next step>
 
 - Python 3.11 或更高版本；
 - macOS 或 Linux shell；
-- `curl` 与 `tar`；
 - 一个已有 Git 项目。
 
-使用官方 no-clone installer：
+安装 PyPI release 及其 LoopX workflow skills：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 ```
 
 !!! tip "为什么不先 clone LoopX"
-    普通使用者需要的是发布快照和 CLI，不是 LoopX 源码 checkout。clone-based install 留给希望运行
+    普通使用者需要的是已发布 CLI 和 workflow skills，不是 LoopX 源码 checkout。clone-based install 留给希望运行
     live canary 或贡献 Kernel 的开发者。
 
 `loopx doctor` 是安装事实的入口。不要只以 `which loopx` 成功作为健康证明；doctor 还会检查

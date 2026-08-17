@@ -3,6 +3,7 @@
 Guides are task-oriented paths for people starting or operating LoopX.
 
 - [Getting started](getting-started.md)
+- [Installing LoopX](installing-loopx.md)
 - [Newcomer command path](newcomer-command-path.md)
 - [Minimal custom runtime example](minimal-custom-runtime-example.md)
 - [Minimal custom runtime example (中文)](minimal-custom-runtime-example.zh-CN.md)

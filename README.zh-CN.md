@@ -169,16 +169,21 @@ creator dogfooding、reproducible demo 和证据强度标签见
 
 ## 试用 LoopX
 
-要求：Python 3.11+、`curl`、`tar`，以及 macOS 或 Linux shell。普通用户不需要
-Git；Python package 除标准库外没有 runtime 依赖。
+要求：Python 3.11+，以及 macOS 或 Linux shell。使用 console scripts 已加入
+`PATH` 的 Python 环境；普通用户不需要 Git，package 除标准库外没有 runtime
+依赖。
 
-无需 clone，直接安装：
+无需 clone，直接从 PyPI 安装：
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 ```
+
+首次安装后重启 Agent host，使其重新加载 workflow skills。`pipx`、host command
+surfaces、升级、卸载与 archive fallback 见
+[Installing LoopX](docs/guides/installing-loopx.md)。
 
 然后在项目根目录连接：
 

@@ -52,8 +52,8 @@ Use this when an agent asks for the manual shell path, or when you are setting
 up a fresh terminal without an agent driving the first step:
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 loopx slash-commands --install
 loopx bootstrap-command-pack --project .

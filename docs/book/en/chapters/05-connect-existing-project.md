@@ -130,19 +130,18 @@ Prerequisites:
 
 - Python 3.11 or later;
 - a macOS or Linux shell;
-- `curl` and `tar`;
 - an existing Git project.
 
-Use the official no-clone installer:
+Install the PyPI release and its LoopX workflow skills:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangruiteng/loopx/main/scripts/install-from-github.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 ```
 
 !!! tip "Why not clone LoopX first?"
-    Most users need a release snapshot and CLI, not a Kernel source checkout. Clone-based installation is for
+    Most users need a published CLI and workflow skills, not a Kernel source checkout. Clone-based installation is for
     developers who need live canaries or intend to contribute to LoopX.
 
 Treat `loopx doctor` as the installation fact. A successful `which loopx` only proves that one executable

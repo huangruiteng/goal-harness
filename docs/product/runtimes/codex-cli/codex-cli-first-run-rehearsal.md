@@ -9,7 +9,7 @@ or reading LoopX internals first.
 
 This route connects three shipped surfaces:
 
-1. no-clone install/update through the GitHub archive installer;
+1. PyPI install/update with packaged workflow skills and an archive fallback;
 2. one-message Codex CLI TUI bootstrap;
 3. proof-capture fixtures for later visible automation.
 
@@ -21,8 +21,8 @@ From the user's project repo:
 2. Paste one start message:
 
    ```text
-   Start LoopX for this repo. If `loopx` is missing, install it
-   with the official no-clone GitHub installer, then connect this project. Show
+   Start LoopX for this repo. If `loopx` is missing, install it from PyPI,
+   install the packaged workflow skills, then connect this project. Show
    me the current goal, concrete user gate if any, top todos, and next safe
    action before running longer work. Keep me in this Codex CLI TUI unless I
    explicitly accept a headless fallback. After I paste this, begin the Goal
@@ -32,8 +32,8 @@ From the user's project repo:
 3. The agent installs or repairs LoopX when needed, using:
 
    ```bash
-   curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-   export PATH="$HOME/.local/bin:$PATH"
+   python3 -m pip install --upgrade loopx
+   loopx workflow-skills --install
    loopx doctor
    ```
 

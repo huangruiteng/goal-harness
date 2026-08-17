@@ -1,13 +1,14 @@
 # Codex CLI Packaged Install Path
 
-Status: early product path.
+Status: shipped PyPI path with archive fallback.
 
 LoopX should be easy to adopt from the tool the user already has open.
 For Codex CLI users, the first successful path is:
 
 1. Open Codex CLI TUI in a project repo.
 2. Paste one LoopX start message.
-3. If `loopx` is missing, let the agent run the no-clone installer.
+3. If `loopx` is missing, let the agent install the PyPI distribution and its
+   packaged workflow skills.
 4. Return to the same TUI with current objective, gate, todo, and next safe action.
 
 The user should not have to clone this repository before learning whether
@@ -15,19 +16,18 @@ LoopX helps their project.
 
 ## Current User Path
 
-For a fresh machine, the installer can be run without a manual clone:
+For a fresh machine, install the release without a manual clone:
 
 ```bash
-curl -fsSL https://huangruiteng.github.io/loopx/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
 loopx doctor
 ```
 
-The installer downloads a GitHub archive, creates a stable local release
-snapshot under `~/.local/share/loopx/releases/`, installs the
-`loopx` wrapper under `~/.local/bin`, and installs the reusable Codex
-skills under `~/.codex/skills`. It also refreshes the lightweight slash-command
-facades:
+The wheel installs the `loopx` CLI and carries the reusable Codex workflows.
+`workflow-skills --install` materializes the rich workflow skills and managed
+`$loopx` entry under `~/.codex/skills`, with a versioned readback. Additional
+host command facades remain explicit through `loopx slash-commands --install`:
 
 - `~/.codex/skills/loopx*/SKILL.md` for explicit Codex command-facade
   invocation through `$loopx` or `/skills`;
@@ -42,13 +42,10 @@ unsupported native slash surface. For an explicit Codex skill invocation, use
 loop, use `loopx codex-cli-bootstrap-message --project .`, paste the generated
 setup into the TUI, then set the generated `/goal <thin task_body>`.
 
-By default, the archive source is the public `stable` ref. Maintainers can
-override it with `LOOPX_REF=main` when intentionally testing or repairing from
-the current repository head.
-
-It intentionally skips `loopx-canary` by default because there is no
-durable live checkout in this mode. Contributors who want a canary should clone
-the repository and run `scripts/install-local.sh`.
+The GitHub Pages archive installer remains the recovery fallback when a usable
+Python package environment is unavailable. It intentionally skips
+`loopx-canary`; contributors who want a canary should clone the repository and
+run `scripts/install-local.sh`.
 
 ## Codex CLI TUI Message
 
@@ -56,7 +53,8 @@ The agent-first start message can now be stricter about install repair:
 
 ```text
 Start LoopX for this repo. If `loopx` is missing, install it with
-the official no-clone GitHub installer, then connect this project. Show me the
+`python3 -m pip install --upgrade loopx`, run
+`loopx workflow-skills --install`, then connect this project. Show me the
 current objective, concrete user gate if any, top todos, and next safe action before
 running longer work. Keep me in this Codex CLI TUI unless I explicitly accept a
 headless fallback.
@@ -78,8 +76,17 @@ This keeps the product hierarchy clear:
 
 ## Update Path
 
-For users installed through the archive script, update through the explicit
-LoopX CLI flow:
+For PyPI users, upgrade the distribution and refresh host material together:
+
+```bash
+python3 -m pip install --upgrade loopx
+loopx workflow-skills --install
+loopx slash-commands --install
+loopx doctor
+```
+
+For users installed through the archive fallback, keep the explicit archive
+update flow:
 
 ```bash
 loopx update --check
@@ -122,12 +129,9 @@ which is useful for validating local changes before promotion.
 
 ## Future Packaging
 
-The no-clone archive installer is the first bridge. A mature release channel
-should later add:
+PyPI is the current default. Later channels may add:
 
 - a signed or checksum-pinned release archive;
-- `pipx install loopx` or `uv tool install loopx` after package
-  publishing is ready;
 - a Homebrew formula for macOS users;
 - signed release manifests that report current release id, latest available
   release, and installed skill freshness.

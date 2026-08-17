@@ -33,7 +33,7 @@ python3 examples/release/codex-cli-no-clone-release-verification-smoke.py
 
 ## Current Result
 
-Current release route: **ready as the default candidate, with one boundary**.
+Current archive route: **qualified as the recovery fallback, with one boundary**.
 
 Ready:
 
@@ -54,8 +54,8 @@ Boundary:
 - same-TUI automation is not the default path until visible proof plus runtime
   idle evidence pass.
 
-That means the product copy can prefer no-clone install for Codex CLI users,
-while contributor clone-plus-canary remains the development path.
+That means the archive route can remain a tested recovery option while PyPI is
+the default and contributor clone-plus-canary remains the development path.
 
 ## Release Checklist
 
@@ -68,10 +68,10 @@ python3 examples/codex-cli-tui-bootstrap-smoke-bundle-smoke.py
 python3 examples/codex-cli-proof-capture-demo-fixtures-smoke.py
 ```
 
-If the first command fails, do not advertise no-clone as the default until the
-failure is reduced to a compact blocker: missing installer dependency, archive
-layout mismatch, missing installed command, broken bootstrap generation, or
-missing public proof fixture.
+If the first command fails, do not advertise the archive fallback as qualified
+until the failure is reduced to a compact blocker: missing installer
+dependency, archive layout mismatch, missing installed command, broken
+bootstrap generation, or missing public proof fixture.
 
 ## Boundary
 
