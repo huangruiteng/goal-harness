@@ -329,7 +329,8 @@ def test_lark_connections_include_app_reply_health(monkeypatch: Any, tmp_path: P
         ]
 
     monkeypatch.setattr(api, "list_lark_connections", fake_list)
-    runner = lambda *_args: {"returncode": 0, "stdout": "{}", "stderr": ""}
+    def runner(*_args):
+        return {"returncode": 0, "stdout": "{}", "stderr": ""}
 
     class Handler(LarkChatRequestMixin):
         server = SimpleNamespace(
