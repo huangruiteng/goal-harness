@@ -9,6 +9,7 @@ import pytest
 from loopx.extensions.lark.goal_topic_connections import (
     LarkGroupChatLookupError,
     connect_lark_goal_topic,
+    decide_lark_topic_event,
     disconnect_lark_goal_topic,
     list_lark_apps,
     list_lark_connections,
@@ -341,6 +342,87 @@ def test_connection_health_reports_received_event_processing_blocker(tmp_path: P
     assert rows[0]["health_error_code"] == "message_context_permission_required"
 
 
+def test_connection_health_reports_ambiguous_topic_context(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    runner = _runner(state)
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    result = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+    assert result["ok"] is True
+
+    rows = list_lark_connections(
+        registry=_registry(tmp_path),
+        target_path=target_path,
+        binding_paths={"goal-alpha": binding_path},
+        runner=runner,
+        cli_bin="fake-lark",
+        runtime_health={
+            "mew": {
+                "status": "listening",
+                "event_count": 1,
+                "replied_count": 0,
+                "last_event_status": "topic_context_ambiguous",
+                "error_code": None,
+            }
+        },
+    )
+
+    assert rows[0]["reply_ready"] is False
+    assert rows[0]["health_error_code"] == "topic_context_ambiguous"
+
+
+def test_connection_health_reports_safe_topic_route_mismatch(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connected = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=_runner(state),
+        cli_bin="fake-lark",
+    )
+    assert connected["ok"] is True
+
+    rows = list_lark_connections(
+        registry=_registry(tmp_path),
+        target_path=target_path,
+        binding_paths={"goal-alpha": binding_path},
+        runner=_runner(state),
+        cli_bin="fake-lark",
+        runtime_health={
+            "mew": {
+                "status": "listening",
+                "event_count": 1,
+                "replied_count": 0,
+                "last_event_status": "ignored",
+                "last_event_reason": "topic_mismatch",
+                "error_code": None,
+            }
+        },
+    )
+
+    assert rows[0]["reply_ready"] is False
+    assert rows[0]["health_error_code"] == "lark_event_route_mismatch"
+    assert rows[0]["last_event_reason"] == "topic_mismatch"
+
+
 def test_connect_uses_bot_chat_access_when_member_listing_is_unavailable(
     tmp_path: Path,
 ) -> None:
@@ -417,7 +499,7 @@ def test_existing_target_cli_bin_has_priority_for_connection(tmp_path: Path) -> 
     assert {call[0] for call in state["calls"]} == {"target-lark-cli"}
 
 
-def test_routes_mentions_by_topic_and_replies_in_thread(tmp_path: Path) -> None:
+def test_routes_bound_topic_messages_and_replies_in_thread(tmp_path: Path) -> None:
     state: dict[str, Any] = {}
     runner = _runner(state)
     target_path = tmp_path / "goal-channel-targets.json"
@@ -440,7 +522,8 @@ def test_routes_mentions_by_topic_and_replies_in_thread(tmp_path: Path) -> None:
         binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
         event={"chat_id": CHAT_ID, "root_id": "om_topic_alpha", "message_id": "om_incoming", "mentioned": False},
     )
-    assert unmentioned is None
+    assert unmentioned is not None
+    assert unmentioned["goal_id"] == "goal-alpha"
 
     route = route_lark_topic_event(
         target_payload=read_goal_channel_targets(target_path),
@@ -521,6 +604,86 @@ def test_routes_mentions_by_topic_and_replies_in_thread(tmp_path: Path) -> None:
     assert reply["ok"] is True
     assert "--reply-in-thread" in state["reply_args"]
     assert state["reply_args"][state["reply_args"].index("--message-id") + 1] == "om_incoming"
+
+
+def test_topic_route_decision_reports_safe_reason_codes(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=_runner(state),
+        cli_bin="fake-lark",
+    )
+    targets = read_goal_channel_targets(target_path)
+    bindings = {"goal-alpha": read_goal_channel_binding(binding_path)}
+
+    cases = [
+        ({"chat_id": CHAT_ID}, "invalid_event"),
+        (
+            {
+                "chat_id": "oc_other_fixture",
+                "root_id": "om_topic_alpha",
+                "message_id": "om_incoming",
+                "mentioned": True,
+            },
+            "chat_mismatch",
+        ),
+        (
+            {
+                "chat_id": CHAT_ID,
+                "root_id": "om_other_topic",
+                "message_id": "om_incoming",
+                "mentioned": True,
+            },
+            "topic_mismatch",
+        ),
+        (
+            {
+                "chat_id": CHAT_ID,
+                "root_id": "om_topic_alpha",
+                "message_id": "om_incoming",
+                "sender_id": APP_ID,
+                "mentioned": True,
+            },
+            "self_message",
+        ),
+    ]
+    for event, reason in cases:
+        decision = decide_lark_topic_event(
+            target_payload=targets,
+            binding_payloads=bindings,
+            event=event,
+        )
+        assert decision == {"matched": False, "reason": reason, "route": None}
+
+    matched = decide_lark_topic_event(
+        target_payload=targets,
+        binding_payloads=bindings,
+        event={
+            "chat_id": CHAT_ID,
+            "root_id": "om_topic_alpha",
+            "message_id": "om_incoming",
+            "content": "@_user_1 你好",
+            "mentions": [
+                {
+                    "key": "@_user_1",
+                    "id": {"open_id": "ou_public_fixture"},
+                    "name": " @LoopX   Mew ",
+                }
+            ],
+        },
+    )
+    assert matched["matched"] is True
+    assert matched["reason"] == "matched"
+    assert matched["route"]["goal_id"] == "goal-alpha"
 
 
 def test_disconnect_removes_only_the_selected_goal_topic(tmp_path: Path) -> None:

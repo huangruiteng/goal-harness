@@ -20,12 +20,14 @@ def test_goal_topic_runtime_exposes_the_inbox_bridge() -> None:
     assert callable(getattr(module, "process_lark_goal_topic_event", None))
 
 
-def test_existing_collector_preserves_topic_routing_fields() -> None:
+def test_existing_collector_uses_the_real_compact_event_schema() -> None:
     projection = _jq_projection("oc_public_fixture")
 
-    assert "root_id:.root_id" in projection
-    assert "parent_id:.parent_id" in projection
-    assert "mentions:(.mentions // [])" in projection
+    assert "message_id:(.message_id // .id)" in projection
+    assert "root_id" not in projection
+    assert "parent_id" not in projection
+    assert "mentions" not in projection
+    assert "mentioned" not in projection
 
 
 def _connection_runner(state: dict[str, Any]):
@@ -552,8 +554,11 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
         "event_id": "evt_incoming",
         "message_id": "om_incoming",
         "chat_id": "oc_public_fixture",
+        "root_id": "om_topic_alpha",
+        "parent_id": "om_topic_alpha",
+        "thread_id": "omt_topic_alpha",
         "create_time": "2026-08-14T21:00:00Z",
-        "content": "@linkmacbot 你现在 loopx 的版本是什么",
+        "content": "@_user_1 你现在 loopx 的版本是什么",
     }
 
     def consume_runner(args: list[str]) -> dict[str, Any]:
@@ -561,28 +566,7 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
         return {"returncode": 0, "stdout": json.dumps(event) + "\n", "stderr": ""}
 
     def provider_runner(args: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-        assert "+messages-mget" in args
-        state["provider_attempts"] = int(state.get("provider_attempts") or 0) + 1
-        if state["provider_attempts"] == 1:
-            return subprocess.CompletedProcess(
-                args,
-                0,
-                json.dumps({"data": {"items": []}}),
-                "",
-            )
-        payload = {
-            "data": {
-                "items": [
-                    {
-                        "message_id": "om_incoming",
-                        "chat_id": "oc_public_fixture",
-                        "root_id": "om_topic_alpha",
-                        "sender": {"sender_type": "user", "id": "ou_public_fixture"},
-                    }
-                ]
-            }
-        }
-        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+        raise AssertionError(f"event routing must not query message history: {args}")
 
     result = poll_lark_goal_topic_profile_once(
         profile="mew",
@@ -607,11 +591,15 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
     }
     assert state["consume_args"][:3] == ["fake-lark", "--profile", "mew"]
     assert "event" in state["consume_args"]
-    assert state["provider_attempts"] == 2
+    projection = state["consume_args"][state["consume_args"].index("--jq") + 1]
+    assert "message_id:(.message_id // .id)" in projection
+    assert "root_id:(.root_id // .message.root_id" in projection
+    assert "parent_id:(.parent_id // .reply_to" in projection
+    assert "thread_id" in projection
     assert state["reply_text"] == "当前运行的是 LoopX 开发版。"
 
 
-def test_profile_poll_reports_message_permission_failure_without_creating_inbox(
+def test_profile_poll_routes_the_only_goal_in_a_chat_without_querying_message_history(
     tmp_path: Path,
 ) -> None:
     from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
@@ -627,7 +615,9 @@ def test_profile_poll_reports_message_permission_failure_without_creating_inbox(
                     "channel": {"chat_id": "oc_public_fixture"},
                     "identity": {
                         "sender_profile": "mew",
+                        "sender_identity": "bot",
                         "bot_app_id": "cli_public_fixture",
+                        "bot_display_name": "linkmacbot",
                         "cli_bin": "fake-lark",
                     },
                 }
@@ -653,20 +643,88 @@ def test_profile_poll_reports_message_permission_failure_without_creating_inbox(
         "event_id": "evt_incoming",
         "message_id": "om_incoming",
         "chat_id": "oc_public_fixture",
-        "content": "@linkmacbot hello",
+        "content": "hello",
     }
 
     def provider_runner(args: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args,
-            1,
-            json.dumps({"code": 230027, "message": "private provider detail"}),
-            "",
-        )
+        raise AssertionError(f"event routing must not query message history: {args}")
 
     result = poll_lark_goal_topic_profile_once(
         profile="mew",
         snapshot=snapshot,
+        runtime_root=tmp_path / "runtime",
+        answer=lambda route, text: (
+            "goal-alpha received hello"
+            if route.get("goal_id") == "goal-alpha" and text == "hello"
+            else "unexpected route"
+        ),
+        consume_runner=lambda _args: {
+            "returncode": 0,
+            "stdout": json.dumps(event) + "\n",
+            "stderr": "",
+        },
+        provider_runner=provider_runner,
+        reply_runner=_reply_runner({}),
+    )
+
+    assert result["event_count"] == 1
+    assert result["replied_count"] == 1, result
+    assert result["event_statuses"] == ["replied_and_acknowledged"]
+
+
+def test_profile_poll_reports_ambiguous_topic_context_without_querying_message_history(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
+
+    target = {
+        "name": "mew-product",
+        "provider": "lark",
+        "enabled": True,
+        "channel": {"chat_id": "oc_public_fixture"},
+        "identity": {
+            "sender_profile": "mew",
+            "bot_app_id": "cli_public_fixture",
+            "cli_bin": "fake-lark",
+        },
+    }
+    binding_payloads: dict[str, Any] = {}
+    for goal_id, topic_root in (
+        ("goal-alpha", "om_topic_alpha"),
+        ("goal-beta", "om_topic_beta"),
+    ):
+        binding_payloads[goal_id] = {
+            "schema_version": "loopx_goal_channel_lark_binding_v0",
+            "bindings": {
+                goal_id: {
+                    "goal_id": goal_id,
+                    "provider": "lark",
+                    "enabled": True,
+                    "target_ref": "mew-product",
+                    "topic": {"root_message_id": topic_root},
+                    "routing": {"incoming_mode": "mentions", "reply_mode": "topic_reply"},
+                }
+            },
+        }
+    event = {
+        "event_id": "evt_incoming",
+        "message_id": "om_incoming",
+        "chat_id": "oc_public_fixture",
+        "content": "hello",
+    }
+
+    def provider_runner(args: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise AssertionError(f"event routing must not query message history: {args}")
+
+    result = poll_lark_goal_topic_profile_once(
+        profile="mew",
+        snapshot={
+            "target_payload": {
+                "schema_version": "loopx_goal_channel_provider_targets_v0",
+                "targets": {"mew-product": target},
+            },
+            "binding_payloads": binding_payloads,
+        },
         runtime_root=tmp_path / "runtime",
         answer=lambda _route, _text: "must not reply",
         consume_runner=lambda _args: {
@@ -680,5 +738,5 @@ def test_profile_poll_reports_message_permission_failure_without_creating_inbox(
 
     assert result["event_count"] == 1
     assert result["replied_count"] == 0
-    assert result["event_statuses"] == ["message_context_permission_required"]
+    assert result["event_statuses"] == ["topic_context_ambiguous"]
     assert not (tmp_path / "runtime").exists()
