@@ -6,9 +6,15 @@ import re
 import subprocess
 import threading
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from .cli_resolution import (
+    LarkCliResolution,
+    LarkCliUnavailableError,
+    resolve_lark_cli,
+)
 from .goal_channel_transport import SAFE_PROFILE_PATTERN
 
 
@@ -33,14 +39,15 @@ class SetupProcess(Protocol):
     def terminate(self) -> None: ...
 
 
-ProcessFactory = Callable[[list[str]], SetupProcess]
+ProcessFactory = Callable[[list[str], dict[str, str]], SetupProcess]
 ProfileVerifier = Callable[[str], bool]
 
 
-def _default_process_factory(args: list[str]) -> SetupProcess:
+def _default_process_factory(args: list[str], env: dict[str, str]) -> SetupProcess:
     return subprocess.Popen(
         args,
         bufsize=1,
+        env=env,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
         text=True,
@@ -70,11 +77,13 @@ class LarkAppSetupManager:
     def __init__(
         self,
         *,
-        cli_bin: str = "lark-cli",
+        cli_resolution: LarkCliResolution | None = None,
+        process_environ: Mapping[str, str] | None = None,
         process_factory: ProcessFactory = _default_process_factory,
         profile_verifier: ProfileVerifier,
     ) -> None:
-        self._cli_bin = cli_bin
+        self._cli_resolution = cli_resolution or resolve_lark_cli()
+        self._process_environ = process_environ
         self._process_factory = process_factory
         self._profile_verifier = profile_verifier
         self._lock = threading.Lock()
@@ -86,9 +95,13 @@ class LarkAppSetupManager:
             raise ValueError("Lark App reference must be a safe lark-cli profile name")
         if brand not in {"feishu", "lark"}:
             raise ValueError("Lark App brand must be feishu or lark")
+        if not self._cli_resolution.available or not self._cli_resolution.command:
+            raise LarkCliUnavailableError(
+                self._cli_resolution.error_code or "lark_cli_not_installed"
+            )
         setup = _Setup(setup_id=f"lark_setup_{uuid.uuid4().hex}", app_ref=profile)
         args = [
-            self._cli_bin,
+            self._cli_resolution.command,
             "config",
             "init",
             "--new",
@@ -100,9 +113,12 @@ class LarkAppSetupManager:
             "zh_cn",
         ]
         try:
-            setup.process = self._process_factory(args)
+            setup.process = self._process_factory(
+                args,
+                self._cli_resolution.subprocess_env(self._process_environ),
+            )
         except OSError as exc:
-            raise ValueError("lark-cli could not start") from exc
+            raise LarkCliUnavailableError("lark_cli_start_failed") from exc
         with self._lock:
             self._setups[setup.setup_id] = setup
         threading.Thread(target=self._watch, args=(setup.setup_id,), daemon=True).start()

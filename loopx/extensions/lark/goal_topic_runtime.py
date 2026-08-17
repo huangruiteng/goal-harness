@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .event_inbox import (
+    MESSAGE_ID_PATTERN,
     acknowledge_lark_event_inbox,
     ingest_lark_event_inbox,
     inspect_lark_event_inbox,
@@ -34,7 +35,8 @@ _EVENT_PROJECTION = (
     '{schema_version:"lark_event_inbox_event_v0",'
     "event_id:(.event_id // .message_id),message_id:.message_id,"
     "create_time:.create_time,content:.content,sender_id:.sender_id,"
-    "chat_id:.chat_id,root_id:.root_id,parent_id:.parent_id,"
+    "chat_id:.chat_id,root_id:(.root_id // .thread_id),thread_id:.thread_id,"
+    "parent_id:.parent_id,"
     "mentions:(.mentions // [])}"
 )
 
@@ -204,6 +206,15 @@ def poll_lark_goal_topic_profile_once(
             profile_app_id=bot_app_id,
             configured_chat_id=chat_id,
         )
+        root_id = str(enriched.get("root_id") or "")
+        context_status = str(enriched.get("message_context_status") or "")
+        if not MESSAGE_ID_PATTERN.fullmatch(root_id) and context_status in {
+            "message_context_permission_required",
+            "message_context_lookup_failed",
+            "message_context_unavailable",
+        }:
+            event_statuses.append(context_status)
+            continue
         try:
             event_result = process_lark_goal_topic_event(
                 target_payload=target_payload,
