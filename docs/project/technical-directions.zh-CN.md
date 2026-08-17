@@ -141,6 +141,11 @@ module 或重复 authority。
    不得悄悄依赖只存在于未晋级分支的契约。
 4. Umbrella issue 用于方向讨论与决策；具体实现和 review 使用独立 issue 或 PR。
 
+当跨方向问题适合实时讨论时，阶段性的
+[开放战略 Review](../community/open-strategy-reviews.zh-CN.md)可以比较最多四个方向。
+Review 只记录 disposition、owner、下一产物或证据要求及复核 trigger，不通过投票把
+方向写入 `main`，也不改变 RFC stage 或直接授权实现。
+
 阶段、owner、integration branch、promotion gate 或 scope 出现实质变化时，必须通过
 PR 更新本文；如果 RFC index 或 task board 的路由也发生变化，应在同一 PR 更新。
 合并后由 maintainer 更新置顶 Discussion；Discussion 不能覆盖仓库已合并事实。

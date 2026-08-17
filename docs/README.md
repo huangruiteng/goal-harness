@@ -68,6 +68,8 @@ a longer onboarding path.
 ## Project And Community
 
 - [Current technical directions](project/technical-directions.md)
+- [Open strategy reviews](community/open-strategy-reviews.md)
+  ([中文](community/open-strategy-reviews.zh-CN.md))
 - [Contributing](../CONTRIBUTING.md)
 - [Contributor tasks](../CONTRIBUTOR_TASKS.md)
 - [Governance](../.github/GOVERNANCE.md)
