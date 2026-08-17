@@ -253,6 +253,9 @@ for (const label of ["Connect Lark App", "Group chat", "Bind to Goal", "Create G
   assert.match(larkSettings, new RegExp(label), `Connect flow contains ${label}`);
 }
 assert.match(larkSettings, /One Lark App · many Goals · one topic per Goal/, "Connection cardinality is explicit");
+assert.match(larkSettings, /lark_message_permissions_required/, "Missing message permissions receive an actionable error");
+assert.match(larkSettings, /selectedApp\?\.reply_ready/, "Connect stays disabled until automatic replies are healthy");
+assert.match(larkSettings, /自动回复不可用/, "Existing unhealthy connections expose their reply health");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*false/s, "Connect flow previews before execution");
 assert.match(larkSettings, /connectLarkGoalTopic\([^)]*execute:\s*true/s, "Connect flow performs the approved external write");
 assert.match(larkSettings, /Register another Lark App/, "App chooser exposes Feishu registration");

@@ -30,7 +30,13 @@ def test_existing_collector_preserves_topic_routing_fields() -> None:
 
 def _connection_runner(state: dict[str, Any]):
     def run(args: list[str], _cwd: object, _timeout: object) -> dict[str, Any]:
-        if "auth" in args and "status" in args:
+        if "auth" in args and "check" in args:
+            payload: Any = {
+                "ok": True,
+                "granted": ["im:message", "im:message:readonly"],
+                "missing": [],
+            }
+        elif "auth" in args and "status" in args:
             payload: Any = {
                 "appId": "cli_public_fixture",
                 "identities": {
@@ -470,3 +476,76 @@ def test_profile_poll_routes_provider_event_through_existing_reply_path(tmp_path
     assert "event" in state["consume_args"]
     assert state["provider_attempts"] == 2
     assert state["reply_text"] == "当前运行的是 LoopX 开发版。"
+
+
+def test_profile_poll_reports_message_permission_failure_without_creating_inbox(
+    tmp_path: Path,
+) -> None:
+    from loopx.extensions.lark.goal_topic_runtime import poll_lark_goal_topic_profile_once
+
+    snapshot = {
+        "target_payload": {
+            "schema_version": "loopx_goal_channel_provider_targets_v0",
+            "targets": {
+                "mew-product": {
+                    "name": "mew-product",
+                    "provider": "lark",
+                    "enabled": True,
+                    "channel": {"chat_id": "oc_public_fixture"},
+                    "identity": {
+                        "sender_profile": "mew",
+                        "bot_app_id": "cli_public_fixture",
+                        "cli_bin": "fake-lark",
+                    },
+                }
+            },
+        },
+        "binding_payloads": {
+            "goal-alpha": {
+                "schema_version": "loopx_goal_channel_lark_binding_v0",
+                "bindings": {
+                    "goal-alpha": {
+                        "goal_id": "goal-alpha",
+                        "provider": "lark",
+                        "enabled": True,
+                        "target_ref": "mew-product",
+                        "topic": {"root_message_id": "om_topic_alpha"},
+                        "routing": {"incoming_mode": "mentions", "reply_mode": "topic_reply"},
+                    }
+                },
+            }
+        },
+    }
+    event = {
+        "event_id": "evt_incoming",
+        "message_id": "om_incoming",
+        "chat_id": "oc_public_fixture",
+        "content": "@linkmacbot hello",
+    }
+
+    def provider_runner(args: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            1,
+            json.dumps({"code": 230027, "message": "private provider detail"}),
+            "",
+        )
+
+    result = poll_lark_goal_topic_profile_once(
+        profile="mew",
+        snapshot=snapshot,
+        runtime_root=tmp_path / "runtime",
+        answer=lambda _route, _text: "must not reply",
+        consume_runner=lambda _args: {
+            "returncode": 0,
+            "stdout": json.dumps(event) + "\n",
+            "stderr": "",
+        },
+        provider_runner=provider_runner,
+        reply_runner=lambda _args: (_ for _ in ()).throw(AssertionError("must not reply")),
+    )
+
+    assert result["event_count"] == 1
+    assert result["replied_count"] == 0
+    assert result["event_statuses"] == ["message_context_permission_required"]
+    assert not (tmp_path / "runtime").exists()

@@ -7,6 +7,7 @@ from typing import Any
 
 from loopx.contract import scan_public_boundary
 from loopx.extensions.lark.app_setup import LarkAppSetupManager
+from loopx.extensions.lark.cli_resolution import LarkCliResolution
 
 
 class _FakeProcess:
@@ -52,10 +53,10 @@ def _wait_for_terminal(manager: LarkAppSetupManager, setup_id: str) -> dict[str,
 
 
 def test_setup_streams_official_url_then_verifies_named_profile() -> None:
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], dict[str, str]]] = []
 
-    def process_factory(args: list[str]) -> _FakeProcess:
-        calls.append(args)
+    def process_factory(args: list[str], env: dict[str, str]) -> _FakeProcess:
+        calls.append((args, env))
         return _FakeProcess(
             [
                 "Scan the QR code or open this link:\n",
@@ -65,7 +66,13 @@ def test_setup_streams_official_url_then_verifies_named_profile() -> None:
         )
 
     manager = LarkAppSetupManager(
-        cli_bin="fake-lark",
+        cli_resolution=LarkCliResolution(
+            command="fake-lark",
+            available=True,
+            source="explicit",
+            version="1.2.3",
+            error_code=None,
+        ),
         process_factory=process_factory,
         profile_verifier=lambda app_ref: app_ref == "loopx-workspace-bot",
     )
@@ -73,7 +80,7 @@ def test_setup_streams_official_url_then_verifies_named_profile() -> None:
     started = manager.start(app_ref="loopx-workspace-bot", brand="feishu")
     completed = _wait_for_terminal(manager, started["setup_id"])
 
-    assert calls == [[
+    assert calls[0][0] == [
         "fake-lark",
         "config",
         "init",
@@ -84,7 +91,7 @@ def test_setup_streams_official_url_then_verifies_named_profile() -> None:
         "feishu",
         "--lang",
         "zh_cn",
-    ]]
+    ]
     assert completed == {
         "setup_id": started["setup_id"],
         "status": "ready",
@@ -96,7 +103,14 @@ def test_setup_streams_official_url_then_verifies_named_profile() -> None:
 
 def test_setup_accepts_the_official_lark_authorization_host() -> None:
     manager = LarkAppSetupManager(
-        process_factory=lambda _args: _FakeProcess([
+        cli_resolution=LarkCliResolution(
+            command="fake-lark",
+            available=True,
+            source="path",
+            version="1.2.3",
+            error_code=None,
+        ),
+        process_factory=lambda _args, _env: _FakeProcess([
             "https://open." + "la" + "rk" + "office.com/page/launcher?from=sdk\n",
         ]),
         profile_verifier=lambda app_ref: app_ref == "loopx-lark-bot",
@@ -114,7 +128,14 @@ def test_setup_accepts_the_official_lark_authorization_host() -> None:
 def test_cancel_stops_the_registration_process_without_exposing_logs() -> None:
     process = _BlockingProcess()
     manager = LarkAppSetupManager(
-        process_factory=lambda _args: process,
+        cli_resolution=LarkCliResolution(
+            command="fake-lark",
+            available=True,
+            source="path",
+            version="1.2.3",
+            error_code=None,
+        ),
+        process_factory=lambda _args, _env: process,
         profile_verifier=lambda _app_ref: False,
     )
     started = manager.start(app_ref="loopx-cancelled", brand="feishu")
@@ -129,6 +150,29 @@ def test_cancel_stops_the_registration_process_without_exposing_logs() -> None:
         "verification_url": None,
         "error": None,
     }
+
+
+def test_setup_rejects_missing_cli_with_safe_error_code() -> None:
+    manager = LarkAppSetupManager(
+        cli_resolution=LarkCliResolution(
+            command=None,
+            available=False,
+            source="missing",
+            version=None,
+            error_code="lark_cli_not_installed",
+        ),
+        process_factory=lambda _args, _env: (_ for _ in ()).throw(AssertionError("must not start")),
+        profile_verifier=lambda _app_ref: False,
+    )
+
+    try:
+        manager.start(app_ref="loopx-workspace-bot", brand="feishu")
+    except ValueError as exc:
+        assert getattr(exc, "error_code", None) == "lark_cli_not_installed"
+        assert "Install lark-cli" in str(exc)
+        assert "/Users/" not in str(exc)
+    else:
+        raise AssertionError("missing lark-cli must fail before starting a process")
 
 
 def test_lark_app_setup_source_preserves_the_public_boundary_contract() -> None:
