@@ -26,6 +26,7 @@ and PID namespaces plus `pivot_root` and fails closed when its roots overlap.
 ```python
 from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (
     build_native_codex_isolation_envelope,
+    rebase_native_codex_loopx_workspace_state,
 )
 
 envelope = build_native_codex_isolation_envelope(
@@ -36,9 +37,29 @@ envelope = build_native_codex_isolation_envelope(
     workspace_source=task_workspace,
     profile_root=profile.root,
 )
+# If the selected workspace already contains LoopX control state, relocate its
+# generated path references before launch and restore them after termination.
+rebase_native_codex_loopx_workspace_state(
+    task_workspace,
+    source_root=task_workspace,
+    target_root=envelope.workspace_alias,
+)
 # Pass envelope.process_command to probe_native_goal_process or
 # run_native_goal_process_until_terminal, and use envelope.workspace_alias as cwd.
+# In a finally block after the process terminates:
+rebase_native_codex_loopx_workspace_state(
+    task_workspace,
+    source_root=envelope.workspace_alias,
+    target_root=task_workspace,
+)
 ```
+
+The relocation helper is deliberately narrow: it rewrites only LoopX registries
+and generated run-history JSON, JSONL, and Markdown under the selected workspace.
+It validates every candidate before writing, updates files atomically, rejects
+symlinked control-state paths, and leaves task files, model output, trajectories,
+verifier evidence, and arbitrary workspace prose untouched. This keeps formally
+installed LoopX state readable after the temporary `host-visible` alias disappears.
 
 This is a filesystem/process envelope, not a complete benchmark sandbox. It grants
 no model credential, task-command bridge, shell-network policy, evaluator denial,
