@@ -275,6 +275,67 @@ LoopX advantage. `score_claim_eligible=true` only permits the official score and
 matched-pair gates to run; `score_claim_countable` and `matched_pair_countable` stay
 false in this receipt. Those remain separate verifier and comparison contracts.
 
+## Post-run case insight monitor
+
+Benchmark startup should create one `continuous_monitor` todo. Whenever a case
+reaches a new material scored state, that monitor runs a post-run analyst brief and
+writes one private `benchmark_case_insight_v0` artifact. This monitor is part of the
+benchmark lifecycle, not an optional cleanup pass.
+
+Use this analyst hint:
+
+> After the solver has stopped and scoring is complete, read the task, real
+> trajectory, final patch or workspace, hidden tests, grader or verifier, and full
+> failure and score details; explain the decisive evidence, why the outcome
+> happened, whether it was expected, and what LoopX should test or change next.
+
+The solver and analyst are separate roles. The solver remains unable to access
+hidden tests, evaluator sources, expected answers, or official feedback. Only the
+post-run analyst may read the complete private evaluation evidence, and only after
+the solver is terminal and scoring is complete.
+
+Record the result in this compact shape:
+
+```json
+{
+  "schema_version": "benchmark_case_insight_v0",
+  "case": {
+    "benchmark_id": "<public-id>",
+    "case_id": "<public-id>",
+    "arm": "<baseline-or-treatment>"
+  },
+  "outcome": {
+    "status": "<completed-or-runner-invalid>",
+    "score": "<official-score-or-null>",
+    "countable": "<true-or-false>"
+  },
+  "evidence_reviewed": [
+    "task",
+    "real_trajectory",
+    "final_patch_or_workspace",
+    "hidden_tests",
+    "grader_or_verifier",
+    "failure_and_score_details"
+  ],
+  "insight": {
+    "approach_summary": "<what-the-solver-tried>",
+    "decisive_evidence": ["<specific-observation>"],
+    "why_this_outcome": "<causal-explanation>",
+    "expectedness": "<expected-surprising-mixed-or-unknown>",
+    "baseline_treatment_difference": "<difference-or-not-yet-compared>",
+    "loopx_implication": "<reusable-product-or-experiment-insight>",
+    "next_probe": "<smallest-discriminating-next-step>"
+  },
+  "confidence": "<high-medium-or-low>",
+  "reuse_boundary": "<diagnostic-only-heldout-generalization-or-declared-feedback>"
+}
+```
+
+Keep the artifact and its raw evidence in private benchmark storage. Publish only a
+redacted reusable conclusion. Do not feed case-specific hidden evidence into a
+later scored solver unless the experiment explicitly declares that feedback loop;
+use held-out cases before making a general product claim.
+
 ## Related commands
 
 ```bash

@@ -14,8 +14,57 @@ from loopx.capabilities.benchmark_toolkit import (
     REQUIRED_RUNTIME_ATTESTATIONS,
     build_benchmark_integrity_qualification,
 )
+from loopx.capabilities.catalog import build_capability_detail_packet
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
+    capability = build_capability_detail_packet("benchmark-toolkit")["capability"]
+    analysis = capability["post_run_case_analysis"]
+
+    assert "continuous_monitor" in analysis["benchmark_start_hint"]
+    assert analysis["monitor_todo_template"] == {
+        "task_class": "continuous_monitor",
+        "action_kind": "benchmark_case_insight_monitor",
+        "trigger": "material_scored_case_transition",
+        "text": (
+            "On each material scored-case transition, read the complete private "
+            "evaluation evidence, write one benchmark_case_insight_v0, and report "
+            "only new reusable insight."
+        ),
+    }
+    hint = analysis["hint"]
+    for evidence_name in (
+        "real trajectory",
+        "hidden tests",
+        "grader or verifier",
+        "failure and score details",
+    ):
+        assert evidence_name in hint
+
+    assert "must not access" in analysis["role_boundary"]["solver"]
+    assert "only after" in analysis["role_boundary"]["post_run_analyst"]
+    artifact = analysis["artifact_template"]
+    assert artifact["schema_version"] == "benchmark_case_insight_v0"
+    assert artifact["evidence_reviewed"] == [
+        "task",
+        "real_trajectory",
+        "final_patch_or_workspace",
+        "hidden_tests",
+        "grader_or_verifier",
+        "failure_and_score_details",
+    ]
+    assert set(artifact["insight"]) == {
+        "approach_summary",
+        "decisive_evidence",
+        "why_this_outcome",
+        "expectedness",
+        "baseline_treatment_difference",
+        "loopx_implication",
+        "next_probe",
+    }
+    assert "reuse_boundary" in artifact
 
 
 def _attestation() -> dict[str, object]:
