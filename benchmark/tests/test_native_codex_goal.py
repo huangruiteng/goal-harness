@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from benchmark.deepswe import run_native_codex_goal as runnable_goal
 from benchmark.native_codex_goal import (
     NativeGoalConfig,
     NativeGoalProtocolError,
@@ -21,6 +22,9 @@ from benchmark.native_codex_goal import (
     run_native_goal_process_until_terminal,
     run_native_goal_until_terminal,
     start_native_goal_turn,
+)
+from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (
+    NativeCodexIsolationEnvelope,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -555,3 +559,114 @@ def test_runnable_example_connects_to_stdio_app_server(tmp_path: Path) -> None:
     assert receipt["goal_status"] == "active"
     assert receipt["turn_id_present"] is False
     assert str(tmp_path) not in completed.stdout
+
+
+def test_runnable_example_isolation_recovers_and_restores_loopx_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_root = tmp_path / "controller-private"
+    workspace = private_root / "task-workspace"
+    workspace.mkdir(parents=True)
+    work_dir = tmp_path / "run-work"
+    work_dir.mkdir()
+    profile_root = tmp_path / "installed-profile"
+    profile_root.mkdir()
+    alias = work_dir / "host-visible"
+    alias.mkdir()
+    objective = tmp_path / "objective.txt"
+    task = tmp_path / "task.txt"
+    objective.write_text("Finish the task.\n", encoding="utf-8")
+    task.write_text("Implement the requested behavior.\n", encoding="utf-8")
+
+    project_registry = workspace / ".loopx/registry.json"
+    global_registry = workspace / ".loopx/runtime/registry.global.json"
+    global_registry.parent.mkdir(parents=True)
+    for registry in (project_registry, global_registry):
+        registry.write_text(
+            json.dumps({"workspace": str(alias)}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def fake_envelope(**kwargs: Any) -> NativeCodexIsolationEnvelope:
+        assert kwargs["workspace_source"] == workspace
+        assert kwargs["private_root"] == private_root
+        assert kwargs["profile_root"] == profile_root
+        return NativeCodexIsolationEnvelope(
+            process_command=("isolated-codex", "app-server"),
+            work_dir=work_dir,
+            workspace_alias=alias,
+            profile_root=profile_root,
+        )
+
+    observed: dict[str, Any] = {}
+
+    def fake_probe(config: NativeGoalConfig, **kwargs: Any) -> object:
+        observed["config"] = config
+        observed["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(
+        runnable_goal,
+        "build_native_codex_isolation_envelope",
+        fake_envelope,
+    )
+    monkeypatch.setattr(runnable_goal, "probe_native_goal_process", fake_probe)
+    monkeypatch.setattr(
+        runnable_goal,
+        "compact_native_goal_receipt",
+        lambda _: {"goal_status": "active", "turn_id_present": False},
+    )
+
+    assert (
+        runnable_goal.main(
+            [
+                "--cwd",
+                str(workspace),
+                "--objective-file",
+                str(objective),
+                "--task-file",
+                str(task),
+                "--codex-bin",
+                "codex",
+                "--isolate",
+                "--isolation-work-dir",
+                str(work_dir),
+                "--private-root",
+                str(private_root),
+                "--profile-root",
+                str(profile_root),
+                "--preflight-only",
+            ]
+        )
+        == 0
+    )
+
+    config = observed["config"]
+    assert isinstance(config, NativeGoalConfig)
+    assert config.cwd == str(alias)
+    assert observed["kwargs"] == {
+        "codex_bin": "codex",
+        "process_command": ("isolated-codex", "app-server"),
+        "process_cwd": str(work_dir),
+        "response_timeout_sec": 30,
+    }
+    for registry in (project_registry, global_registry):
+        assert json.loads(registry.read_text(encoding="utf-8")) == {
+            "workspace": str(workspace)
+        }
+
+    output = capsys.readouterr().out
+    receipt = json.loads(output)
+    assert receipt["native_isolation"] == {
+        "control_state_found": True,
+        "enabled": True,
+        "prelaunch_replacement_count": 2,
+        "profile_bound": True,
+        "recovered_replacement_count": 2,
+        "restored_replacement_count": 2,
+        "workspace_alias_used": True,
+    }
+    assert str(workspace) not in output
+    assert str(alias) not in output
