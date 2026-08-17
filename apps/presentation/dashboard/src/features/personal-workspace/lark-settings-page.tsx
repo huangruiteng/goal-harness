@@ -48,6 +48,33 @@ function larkConnectionHealth(connection: LarkGoalConnection): { label: string; 
   if (connection.last_event_status === "processing_failed") {
     return { label: "消息处理失败", detail: "已收到消息事件，但 Agent 处理失败。请查看本地诊断后重试。", ready: false };
   }
+  if (connection.last_event_status === "ignored" && connection.last_event_reason === "not_addressed") {
+    return {
+      label: "最近消息未直接 @ 机器人",
+      detail: "监听正常；当前连接只响应直接 @ 机器人或对机器人的回复。",
+      ready: true,
+    };
+  }
+  if (connection.last_event_status === "ignored" && connection.last_event_reason === "self_message") {
+    return { label: "监听中", detail: "已忽略机器人自身发送的消息，避免重复回复。", ready: true };
+  }
+  if (
+    connection.health_error_code === "lark_event_route_mismatch"
+    || ["chat_mismatch", "topic_mismatch"].includes(connection.last_event_reason ?? "")
+  ) {
+    return {
+      label: "消息未匹配当前 Goal Topic",
+      detail: "事件来自其他群聊或 Topic。请重新选择群聊并连接该 Goal，然后发送一条新的 @ 消息。",
+      ready: false,
+    };
+  }
+  if (["invalid_event", "binding_unavailable"].includes(connection.last_event_reason ?? "")) {
+    return {
+      label: "消息无法路由到 Goal",
+      detail: "当前连接信息不完整。请重新连接该 Goal 后再发送一条新的 @ 消息。",
+      ready: false,
+    };
+  }
   if (connection.last_event_status === "replied_and_acknowledged") {
     return { label: "监听中", detail: `已处理 ${connection.event_count} 条事件，成功回复 ${connection.replied_count} 条。`, ready: true };
   }

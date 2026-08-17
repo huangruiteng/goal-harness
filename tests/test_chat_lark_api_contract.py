@@ -320,6 +320,7 @@ def test_lark_connections_include_app_reply_health(monkeypatch: Any, tmp_path: P
                 "goal_title": "Goal Alpha",
                 "health_error_code": "lark_message_permissions_required",
                 "incoming_mode": "mentions",
+                "last_event_reason": "topic_mismatch",
                 "reply_mode": "topic_reply",
                 "reply_ready": False,
                 "target_ref": "target-alpha",
@@ -375,6 +376,7 @@ def test_lark_connections_include_app_reply_health(monkeypatch: Any, tmp_path: P
     assert calls[0]["runtime_health"]["workspace-bot"]["status"] == "listening"
     assert responses[0]["connections"][0]["reply_ready"] is False
     assert responses[0]["connections"][0]["health_error_code"] == "lark_message_permissions_required"
+    assert responses[0]["connections"][0]["last_event_reason"] == "topic_mismatch"
 
 
 def test_connect_refreshes_the_app_level_event_consumer(monkeypatch: Any, tmp_path: Path) -> None:

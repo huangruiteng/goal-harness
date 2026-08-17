@@ -1004,6 +1004,7 @@ export type LarkGoalConnection = {
   health_error_code: string | null;
   incoming_mode: "mentions" | "all";
   event_count: number;
+  last_event_reason: string | null;
   last_event_status: string | null;
   listener_error_code: string | null;
   listener_status: "starting" | "listening" | "retrying" | "stopped" | null;
@@ -1027,6 +1028,7 @@ const larkConnectionsSchema = z.object({
     health_error_code: z.string().nullable().default(null),
     incoming_mode: z.enum(["mentions", "all"]),
     event_count: z.number().int().nonnegative().default(0),
+    last_event_reason: z.string().nullable().default(null),
     last_event_status: z.string().nullable().default(null),
     listener_error_code: z.string().nullable().default(null),
     listener_status: z.enum(["starting", "listening", "retrying", "stopped"]).nullable().default(null),
