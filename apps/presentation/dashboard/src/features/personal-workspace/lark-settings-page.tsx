@@ -32,6 +32,35 @@ import type { WorkspaceGoal } from "./personal-workspace-model";
 
 type Tab = "apps" | "connections";
 
+function larkConnectionHealth(connection: LarkGoalConnection): { label: string; detail: string; ready: boolean } {
+  if (connection.listener_status === "starting") {
+    return { label: "正在启动", detail: "LoopX 正在启动该 App 的消息事件监听。", ready: false };
+  }
+  if (connection.listener_status === "retrying") {
+    return { label: "监听重试中", detail: "事件监听暂时中断，LoopX 正在自动重试。", ready: false };
+  }
+  if (connection.listener_status === "stopped" || connection.listener_status === null) {
+    return { label: "监听未启动", detail: "请刷新连接或重新启动 LoopX 后再试。", ready: false };
+  }
+  if (connection.last_event_status === "message_context_permission_required") {
+    return { label: "消息权限不足", detail: "已收到消息事件，但无法读取群消息上下文。请发布并授权该 App 的群消息读取权限。", ready: false };
+  }
+  if (connection.last_event_status === "processing_failed") {
+    return { label: "消息处理失败", detail: "已收到消息事件，但 Agent 处理失败。请查看本地诊断后重试。", ready: false };
+  }
+  if (connection.last_event_status === "replied_and_acknowledged") {
+    return { label: "监听中", detail: `已处理 ${connection.event_count} 条事件，成功回复 ${connection.replied_count} 条。`, ready: true };
+  }
+  if (connection.health_error_code === "lark_event_delivery_unverified" || connection.event_count === 0) {
+    return {
+      label: "事件订阅待验证",
+      detail: "长连接已启动，但尚未收到消息事件。请启用 im.message.receive_v1，开通群聊 @ 消息权限，发布新版后再发送一条新的 @ 消息。",
+      ready: false,
+    };
+  }
+  return { label: connection.reply_ready ? "监听中" : "自动回复不可用", detail: `最近事件状态：${connection.last_event_status ?? "等待处理"}`, ready: connection.reply_ready };
+}
+
 function larkErrorMessage(cause: unknown, fallback: string): string {
   if (cause instanceof ChatApiError) {
     const code = String(cause.payload.error_code ?? "");
@@ -39,7 +68,7 @@ function larkErrorMessage(cause: unknown, fallback: string): string {
       lark_cli_not_installed: "未发现 lark-cli。请先安装 lark-cli，然后重新启动 LoopX。",
       lark_cli_not_executable: "已找到配置的 lark-cli，但当前无法执行。请检查安装或启动参数。",
       lark_cli_start_failed: "lark-cli 启动失败。请检查安装状态，然后重新启动 LoopX。",
-      lark_message_permissions_required: "该 App 缺少自动回复所需的群消息权限。请在飞书开放平台开启 im:message 和 im:message:readonly，发布应用并重新授权，然后回来刷新重试。",
+      lark_message_permissions_required: "该 App 缺少自动回复所需的机器人权限。请开启 im:message.group_at_msg:readonly 和 im:message:send_as_bot，发布新版后回来刷新重试。",
       lark_app_required: "请选择一个 Lark App profile。",
       invalid_lark_app: "Lark App profile 不可用或尚未完成授权。",
       lark_group_lookup_failed: "无法读取该机器人已加入的群。请检查机器人状态后重试。",
@@ -346,7 +375,14 @@ export function LarkSettingsPage({
             <div className="personal-lark-table-head" role="row"><span>Connection</span><span>Goal</span><span>Trigger</span><span>Reply mode</span><span>Actions</span></div>
             {filteredConnections.map((connection) => (
               <div className="personal-lark-table-row" key={connection.goal_id} role="row">
-                <span><strong>{connection.chat_name}</strong><small>{connection.app_label}{connection.reply_ready ? "" : " · 自动回复不可用"}</small></span>
+                <span>
+                  <strong>{connection.chat_name}</strong>
+                  <small>{connection.app_label} · {larkConnectionHealth(connection).label}</small>
+                  <small>{larkConnectionHealth(connection).detail}</small>
+                  {connection.health_error_code === "lark_event_delivery_unverified" ? (
+                    <a href="https://open.feishu.cn/document/server-docs/im-v1/message/events/receive?lang=zh-CN" rel="noreferrer" target="_blank"><ExternalLink size={12} />查看飞书事件配置</a>
+                  ) : null}
+                </span>
                 <span><strong>{connection.goal_title}</strong><small># {connection.topic_name}</small></span>
                 <span>{connection.incoming_mode === "mentions" ? "Mentions" : "All messages"}</span>
                 <span>Topic reply</span>
@@ -366,7 +402,7 @@ export function LarkSettingsPage({
           <section aria-labelledby="connect-lark-title" aria-modal="true" className="personal-lark-modal" role="dialog">
             <header><div><small>Goal Topic connection</small><h2 id="connect-lark-title">{editingGoalId ? "Edit Lark Connection" : "Connect Lark App"}</h2></div><button aria-label="关闭连接弹窗" onClick={() => setModalOpen(false)} type="button"><X size={18} /></button></header>
             <label><span>Lark App</span><select aria-label="Lark App" disabled={loading} onChange={(event) => { if (event.target.value === "__register__") openSetup(); else setAppRef(event.target.value); }} value={appRef}>{loading ? <option value="">正在加载可用的 Lark Apps…</option> : <>{apps.map((app) => <option disabled={!app.ready} key={app.app_ref} value={app.app_ref}>{app.label}{app.reply_ready ? "" : app.ready ? " · Needs message permissions" : " · Needs setup"}</option>)}<option value="__register__">＋ Register another Lark App — Create through Feishu</option></>}</select></label>
-            {selectedApp?.ready && !selectedApp.reply_ready ? <div className="personal-lark-group-state is-error" role="alert">该 App 能发送建联消息，但缺少读取群消息与自动回复所需的权限。请在飞书开放平台开启 <code>im:message</code> 和 <code>im:message:readonly</code>，发布并重新授权后刷新。</div> : null}
+            {selectedApp?.ready && !selectedApp.reply_ready ? <div className="personal-lark-group-state is-error" role="alert">该 App 能发送建联消息，但缺少接收群聊 @ 消息或自动回复所需的机器人权限。请开启 <code>im:message.group_at_msg:readonly</code>、<code>im:message.send_as_bot</code> 和事件 <code>im.message.receive_v1</code>，发布新版后刷新。</div> : null}
             <label>
               <span>Group chat</span>
               <input aria-label="搜索飞书群" onChange={(event) => setChatQuery(event.target.value)} placeholder="搜索该机器人已加入的群" type="search" value={chatQuery} />
