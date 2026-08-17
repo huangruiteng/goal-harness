@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "computer_use_action_request_v0",
+  "title": "computer_use_action_request_v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "goal_id",
+    "todo_id",
+    "provider_id",
+    "action_unit",
+    "effect_class",
+    "write_scope",
+    "stop_condition",
+    "validation_target"
+  ],
+  "properties": {
+    "schema_version": { "const": "computer_use_action_request_v0" },
+    "goal_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "todo_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "provider_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "action_unit": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "effect_class": {
+      "type": "string",
+      "enum": ["read", "draft", "external_write", "credential_use"]
+    },
+    "write_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_actions", "forbidden_effect_classes"],
+      "properties": {
+        "allowed_actions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "forbidden_effect_classes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["read", "draft", "external_write", "credential_use"]
+          }
+        }
+      }
+    },
+    "gate_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate_id", "revision", "status"],
+      "properties": {
+        "gate_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "status": { "type": "string", "enum": ["open", "closed", "pending"] }
+      }
+    },
+    "stop_condition": { "type": "string", "minLength": 1, "maxLength": 400 },
+    "validation_target": { "type": "string", "minLength": 1, "maxLength": 400 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["effect_class"],
+        "properties": {
+          "effect_class": { "enum": ["external_write", "credential_use"] }
+        }
+      },
+      "then": { "required": ["gate_binding"] }
+    }
+  ]
+}

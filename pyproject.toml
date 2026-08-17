@@ -26,6 +26,7 @@ deepseek-harness = [
 ]
 test = [
   "jsonschema>=4.23,<5",
+  "types-jsonschema>=4.23,<5",
   "pytest>=8,<9",
   "pytest-cov>=5,<7",
   "pytest-xdist>=3,<4",

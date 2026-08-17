@@ -1,0 +1,32 @@
+{
+  "case_id": "06_provider_authored_writeback_reject",
+  "description": "Receipt carries a provider-authored writeback decision (complete_todo/create_user_gate); a provider must report facts only, never decide the Kernel transition.",
+  "expect": "reject",
+  "expected_reason_contains": "must not author a Kernel writeback",
+  "receipt": {
+    "schema_version": "computer_use_receipt_v0",
+    "goal_id": "loopx-meta",
+    "todo_id": "todo_contact_form_draft",
+    "provider_id": "computer_use_runtime",
+    "attempted_action_unit": "draft_until_review_gate",
+    "stop_reason": "stopped_at_gate",
+    "observed_facts": {
+      "screen_reached": true,
+      "draft_present": true,
+      "final_action_clicked": false,
+      "unknown_modal": false
+    },
+    "evidence": {
+      "handle_kind": "host_replay_or_screenshot_pointer",
+      "raw_evidence_copied": false,
+      "private_source_redacted": true
+    },
+    "idempotency_key": "todo_contact_form_draft_attempt_3",
+    "session_reference": "provider_owned_opaque_session_handle_5",
+    "next_loopx_writeback": {
+      "complete_todo": false,
+      "create_user_gate": true,
+      "recommended_action": "ask the user to review the draft"
+    }
+  }
+}

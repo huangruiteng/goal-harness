@@ -1,0 +1,47 @@
+{
+  "case_id": "11_failed_screen_unreachable_accept",
+  "description": "Provider cannot even reach the target screen after repeated focus/app-lifecycle failures; ui_state declares the screen was never reachable, so stop_reason must be failed.",
+  "expect": "accept",
+  "request": {
+    "schema_version": "computer_use_action_request_v0",
+    "goal_id": "loopx-meta",
+    "todo_id": "todo_contact_form_draft",
+    "provider_id": "computer_use_runtime",
+    "action_unit": "draft_until_review_gate",
+    "effect_class": "draft",
+    "write_scope": {
+      "allowed_actions": [
+        "open approved screen",
+        "fill approved draft fields",
+        "capture compact receipt"
+      ],
+      "forbidden_effect_classes": ["external_write", "credential_use"]
+    },
+    "stop_condition": "stop at final confirmation or unknown modal",
+    "validation_target": "draft screen is reachable and final action remains unclicked"
+  },
+  "receipt": {
+    "schema_version": "computer_use_receipt_v0",
+    "goal_id": "loopx-meta",
+    "todo_id": "todo_contact_form_draft",
+    "provider_id": "computer_use_runtime",
+    "attempted_action_unit": "draft_until_review_gate",
+    "stop_reason": "failed",
+    "observed_facts": {
+      "screen_reached": false,
+      "draft_present": false,
+      "final_action_clicked": false,
+      "unknown_modal": false
+    },
+    "evidence": {
+      "handle_kind": "host_replay_or_screenshot_pointer",
+      "raw_evidence_copied": false,
+      "private_source_redacted": true
+    },
+    "idempotency_key": "todo_contact_form_draft_attempt_6",
+    "session_reference": "provider_owned_opaque_session_handle_8"
+  },
+  "ui_state": {
+    "screen_reachable": false
+  }
+}
