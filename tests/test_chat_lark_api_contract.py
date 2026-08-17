@@ -335,6 +335,15 @@ def test_lark_connections_include_app_reply_health(monkeypatch: Any, tmp_path: P
     class Handler(LarkChatRequestMixin):
         server = SimpleNamespace(
             registry_path=tmp_path / "registry.json",
+            lark_goal_topic_runtime=SimpleNamespace(
+                health_snapshot=lambda: {
+                    "workspace-bot": {
+                        "status": "listening",
+                        "event_count": 0,
+                        "replied_count": 0,
+                    }
+                }
+            ),
             lark_cli_resolution=LarkCliResolution(
                 command="fake-lark",
                 available=True,
@@ -363,6 +372,7 @@ def test_lark_connections_include_app_reply_health(monkeypatch: Any, tmp_path: P
 
     assert calls[0]["runner"] is runner
     assert calls[0]["cli_bin"] == "fake-lark"
+    assert calls[0]["runtime_health"]["workspace-bot"]["status"] == "listening"
     assert responses[0]["connections"][0]["reply_ready"] is False
     assert responses[0]["connections"][0]["health_error_code"] == "lark_message_permissions_required"
 

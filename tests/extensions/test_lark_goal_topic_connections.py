@@ -214,7 +214,50 @@ def test_two_goals_share_one_connection_with_distinct_topics(tmp_path: Path) -> 
     assert "om_" not in json.dumps(rows)
 
 
-def test_connect_blocks_before_provider_write_when_message_permissions_are_missing(
+def test_listening_connection_without_received_events_is_not_reply_ready(
+    tmp_path: Path,
+) -> None:
+    state: dict[str, Any] = {}
+    runner = _runner(state)
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    connected = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+    assert connected["ok"] is True
+
+    rows = list_lark_connections(
+        registry=_registry(tmp_path),
+        target_path=target_path,
+        binding_paths={"goal-alpha": binding_path},
+        runner=runner,
+        cli_bin="fake-lark",
+        runtime_health={
+            "mew": {
+                "status": "listening",
+                "error_code": None,
+                "event_count": 0,
+                "replied_count": 0,
+                "last_event_status": None,
+            }
+        },
+    )
+
+    assert rows[0]["listener_status"] == "listening"
+    assert rows[0]["reply_ready"] is False
+    assert rows[0]["health_error_code"] == "lark_event_delivery_unverified"
+
+
+def test_connect_preview_uses_verified_bot_identity_without_user_oauth(
     tmp_path: Path,
 ) -> None:
     state: dict[str, Any] = {}
@@ -250,15 +293,52 @@ def test_connect_blocks_before_provider_write_when_message_permissions_are_missi
         cli_bin="fake-lark",
     )
 
-    assert result["ok"] is False
-    assert result["status"] == "blocked"
-    assert result["blocker"] == "lark_message_permissions_required"
-    assert result["details"] == {
-        "required_scopes": ["im:message", "im:message:readonly"]
-    }
-    assert "suggestion" not in json.dumps(result)
+    assert result["ok"] is True
+    assert result["status"] == "preview_ready"
+    assert result["details"]["app_ref"] == "mew"
+    assert not any("auth" in call and "check" in call for call in state["calls"])
     assert not any("+messages-send" in call for call in state["calls"])
     assert not (tmp_path / "goal-channel.json").exists()
+
+
+def test_connection_health_reports_received_event_processing_blocker(tmp_path: Path) -> None:
+    state: dict[str, Any] = {}
+    runner = _runner(state)
+    target_path = tmp_path / "goal-channel-targets.json"
+    binding_path = tmp_path / "goal-channel.json"
+    result = connect_lark_goal_topic(
+        registry=_registry(tmp_path),
+        goal_id="goal-alpha",
+        target_path=target_path,
+        binding_path=binding_path,
+        app_ref="mew",
+        chat_id=CHAT_ID,
+        chat_name="Product group",
+        incoming_mode="mentions",
+        runner=runner,
+        cli_bin="fake-lark",
+    )
+    assert result["ok"] is True
+
+    rows = list_lark_connections(
+        registry=_registry(tmp_path),
+        target_path=target_path,
+        binding_paths={"goal-alpha": binding_path},
+        runner=runner,
+        cli_bin="fake-lark",
+        runtime_health={
+            "mew": {
+                "status": "listening",
+                "event_count": 1,
+                "replied_count": 0,
+                "last_event_status": "message_context_permission_required",
+                "error_code": None,
+            }
+        },
+    )
+
+    assert rows[0]["reply_ready"] is False
+    assert rows[0]["health_error_code"] == "message_context_permission_required"
 
 
 def test_connect_uses_bot_chat_access_when_member_listing_is_unavailable(
