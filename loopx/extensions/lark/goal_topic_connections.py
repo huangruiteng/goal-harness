@@ -506,6 +506,7 @@ def list_lark_connections(
             else listener_status in {"starting", "listening"}
         )
         last_event_status = str(listener.get("last_event_status") or "")
+        last_event_reason = str(listener.get("last_event_reason") or "")
         event_count = int(listener.get("event_count") or 0)
         event_blocker = (
             last_event_status
@@ -514,12 +515,26 @@ def list_lark_connections(
                 "message_context_permission_required",
                 "message_context_lookup_failed",
                 "message_context_unavailable",
+                "topic_context_ambiguous",
+                "topic_context_missing",
                 "processing_failed",
                 "answer_empty",
                 "reply_failed",
             }
             else None
         )
+        if (
+            event_blocker is None
+            and last_event_status == "ignored"
+            and last_event_reason
+            in {
+                "invalid_event",
+                "binding_unavailable",
+                "chat_mismatch",
+                "topic_mismatch",
+            }
+        ):
+            event_blocker = "lark_event_route_mismatch"
         event_delivery_unverified = bool(
             runtime_health is not None
             and listener_status == "listening"
@@ -569,6 +584,7 @@ def list_lark_connections(
                 "listener_status": listener_status or None,
                 "listener_error_code": listener.get("error_code"),
                 "last_event_status": last_event_status or None,
+                "last_event_reason": last_event_reason or None,
                 "event_count": event_count,
                 "replied_count": int(listener.get("replied_count") or 0),
             }
@@ -576,12 +592,14 @@ def list_lark_connections(
     return sorted(rows, key=lambda row: (str(row["app_label"]).casefold(), str(row["goal_title"]).casefold()))
 
 
-def route_lark_topic_event(
+def decide_lark_topic_event(
     *,
     target_payload: Mapping[str, Any],
     binding_payloads: Mapping[str, Mapping[str, Any]],
     event: Mapping[str, Any],
-) -> dict[str, str] | None:
+) -> dict[str, Any]:
+    """Return a content-free routing decision for one provider event."""
+
     chat_id = str(event.get("chat_id") or "")
     root_id = str(event.get("root_id") or "")
     message_id = str(event.get("message_id") or "")
@@ -590,11 +608,15 @@ def route_lark_topic_event(
         and MESSAGE_ID_PATTERN.fullmatch(root_id)
         and MESSAGE_ID_PATTERN.fullmatch(message_id)
     ):
-        return None
+        return {"matched": False, "reason": "invalid_event", "route": None}
+    has_binding = False
+    matched_chat = False
+    matched_topic = False
     for goal_id, payload in binding_payloads.items():
         binding = binding_for_goal(payload, goal_id)
         if not binding or binding.get("enabled") is not True:
             continue
+        has_binding = True
         target_ref = str(binding.get("target_ref") or "")
         target = goal_channel_target_for_name(target_payload, target_ref)
         if target is None:
@@ -605,41 +627,15 @@ def route_lark_topic_event(
         binding_channel = binding.get("channel") if isinstance(binding.get("channel"), Mapping) else {}
         topic_root = str(topic.get("root_message_id") or binding_channel.get("pinned_message_id") or "")
         routing = binding.get("routing") if isinstance(binding.get("routing"), Mapping) else {}
-        incoming_mode = str(routing.get("incoming_mode") or "mentions")
-        if str(channel.get("chat_id") or "") != chat_id or topic_root != root_id:
+        if str(channel.get("chat_id") or "") != chat_id:
             continue
+        matched_chat = True
+        if topic_root != root_id:
+            continue
+        matched_topic = True
         if str(event.get("sender_id") or "") == str(identity.get("bot_app_id") or ""):
-            return None
-        bot_display_name = " ".join(str(identity.get("bot_display_name") or "").split())
-        provider_mentions = event.get("mentions")
-        provider_mentioned = bool(
-            bot_display_name
-            and isinstance(provider_mentions, list)
-            and any(
-                isinstance(mention, Mapping)
-                and " ".join(str(mention.get("name") or "").split()).casefold()
-                == bot_display_name.casefold()
-                for mention in provider_mentions
-            )
-        )
-        rendered_content = " ".join(str(event.get("content") or "").split())
-        rendered_mentioned = bool(
-            bot_display_name
-            and "@" in rendered_content
-            and bot_display_name.casefold() in rendered_content.casefold()
-        )
-        addressed = bool(
-            event.get("mentioned") is True
-            or provider_mentioned
-            or rendered_mentioned
-            or (
-                event.get("reply_context_verified") is True
-                and event.get("reply_to_bot") is True
-            )
-        )
-        if incoming_mode == "mentions" and not addressed:
-            return None
-        return {
+            return {"matched": False, "reason": "self_message", "route": None}
+        route = {
             "app_ref": str(identity.get("sender_profile") or "default"),
             "goal_id": goal_id,
             "message_id": message_id,
@@ -647,7 +643,32 @@ def route_lark_topic_event(
             "target_ref": target_ref,
             "topic_root_message_id": topic_root,
         }
-    return None
+        return {"matched": True, "reason": "matched", "route": route}
+    reason = (
+        "binding_unavailable"
+        if not has_binding
+        else "chat_mismatch"
+        if not matched_chat
+        else "topic_mismatch"
+        if not matched_topic
+        else "binding_unavailable"
+    )
+    return {"matched": False, "reason": reason, "route": None}
+
+
+def route_lark_topic_event(
+    *,
+    target_payload: Mapping[str, Any],
+    binding_payloads: Mapping[str, Mapping[str, Any]],
+    event: Mapping[str, Any],
+) -> dict[str, str] | None:
+    decision = decide_lark_topic_event(
+        target_payload=target_payload,
+        binding_payloads=binding_payloads,
+        event=event,
+    )
+    route = decision.get("route")
+    return dict(route) if isinstance(route, Mapping) else None
 
 
 def reply_lark_goal_topic(

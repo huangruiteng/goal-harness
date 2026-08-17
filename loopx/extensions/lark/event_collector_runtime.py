@@ -247,6 +247,18 @@ def enrich_lark_event_reply_context(
     if current is None or str(current.get("chat_id") or "") != configured_chat_id:
         return enriched
 
+    # The compact lark-cli event stream intentionally carries only stable event
+    # envelope fields. Message-level routing fields live on the message lookup
+    # response, so copy them into the canonical event before deciding whether
+    # this bot was addressed and which Goal Topic owns the message.
+    for field in ("content", "mentions", "mentioned"):
+        value = current.get(field)
+        if value not in (None, "", [], False):
+            enriched[field] = value
+    current_sender_type, current_sender_id = _sender_identity(current)
+    if current_sender_id:
+        enriched["sender_id"] = current_sender_id
+
     parent_id = str(current.get("parent_id") or "").strip()
     root_id = str(current.get("root_id") or "").strip()
     if MESSAGE_ID_PATTERN.fullmatch(root_id):
@@ -269,7 +281,6 @@ def enrich_lark_event_reply_context(
         enriched["message_context_status"] = parent_status
     if parent is None or str(parent.get("chat_id") or "") != configured_chat_id:
         return enriched
-    current_sender_type, _ = _sender_identity(current)
     parent_sender_type, parent_sender_id = _sender_identity(parent)
     enriched["reply_context_verified"] = True
     enriched["message_context_status"] = "message_context_verified"

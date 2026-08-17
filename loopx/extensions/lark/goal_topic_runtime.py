@@ -18,7 +18,6 @@ from .event_inbox import (
     ingest_lark_event_inbox,
     inspect_lark_event_inbox,
 )
-from .event_collector_runtime import enrich_lark_event_reply_context
 from .goal_channel_contracts import binding_for_goal
 from .goal_channel_targets import goal_channel_target_for_name
 from .goal_topic_connections import route_lark_topic_event
@@ -35,11 +34,14 @@ HealthSink = Callable[[Mapping[str, Any]], None]
 
 _EVENT_PROJECTION = (
     '{schema_version:"lark_event_inbox_event_v0",'
-    "event_id:(.event_id // .message_id),message_id:.message_id,"
+    "event_id:(.event_id // .message_id // .id),"
+    "message_id:(.message_id // .id),"
     "create_time:.create_time,content:.content,sender_id:.sender_id,"
-    "chat_id:.chat_id,root_id:(.root_id // .thread_id),thread_id:.thread_id,"
-    "parent_id:.parent_id,"
-    "mentions:(.mentions // [])}"
+    "chat_id:.chat_id,"
+    "root_id:(.root_id // .message.root_id // .event.message.root_id),"
+    "parent_id:(.parent_id // .reply_to // .message.parent_id // .message.reply_to "
+    "// .event.message.parent_id // .event.message.reply_to),"
+    "thread_id:(.thread_id // .message.thread_id // .event.message.thread_id)}"
 )
 
 
@@ -109,10 +111,10 @@ def _default_process_factory(args: list[str]) -> subprocess.Popen[str]:
 
 def _target_for_profile_chat(
     target_payload: Mapping[str, Any], *, profile: str, chat_id: str
-) -> Mapping[str, Any] | None:
+) -> tuple[str, Mapping[str, Any]] | None:
     targets = target_payload.get("targets")
     targets = targets if isinstance(targets, Mapping) else {}
-    for target in targets.values():
+    for target_ref, target in targets.items():
         if not isinstance(target, Mapping) or target.get("enabled") is not True:
             continue
         channel = target.get("channel")
@@ -123,8 +125,34 @@ def _target_for_profile_chat(
             str(channel.get("chat_id") or "") == chat_id
             and str(identity.get("sender_profile") or "") == profile
         ):
-            return target
+            return str(target_ref), target
     return None
+
+
+def _topic_roots_for_target(
+    binding_payloads: Mapping[str, Any], *, target_ref: str
+) -> list[str]:
+    roots: list[str] = []
+    for goal_id, payload in binding_payloads.items():
+        if not isinstance(payload, Mapping):
+            continue
+        binding = binding_for_goal(payload, str(goal_id))
+        if (
+            not binding
+            or binding.get("enabled") is not True
+            or str(binding.get("target_ref") or "") != target_ref
+        ):
+            continue
+        topic = binding.get("topic") if isinstance(binding.get("topic"), Mapping) else {}
+        channel = (
+            binding.get("channel")
+            if isinstance(binding.get("channel"), Mapping)
+            else {}
+        )
+        root_id = str(topic.get("root_message_id") or channel.get("pinned_message_id") or "")
+        if MESSAGE_ID_PATTERN.fullmatch(root_id):
+            roots.append(root_id)
+    return roots
 
 
 def _event_payloads(stdout: Any) -> list[Mapping[str, Any]]:
@@ -189,34 +217,29 @@ def poll_lark_goal_topic_profile_once(
     event_statuses: list[str] = []
     for event in events:
         chat_id = str(event.get("chat_id") or "")
-        target = _target_for_profile_chat(
+        target_match = _target_for_profile_chat(
             target_payload,
             profile=profile,
             chat_id=chat_id,
         )
-        if target is None:
+        if target_match is None:
             event_statuses.append("target_unmatched")
             continue
-        identity = target.get("identity")
-        identity = identity if isinstance(identity, Mapping) else {}
-        bot_app_id = str(identity.get("bot_app_id") or "")
-        enriched = enrich_lark_event_reply_context(
-            event,
-            runner=provider_runner,
-            command_prefix=[cli_bin],
-            profile=profile,
-            profile_app_id=bot_app_id,
-            configured_chat_id=chat_id,
-        )
-        root_id = str(enriched.get("root_id") or "")
-        context_status = str(enriched.get("message_context_status") or "")
-        if not MESSAGE_ID_PATTERN.fullmatch(root_id) and context_status in {
-            "message_context_permission_required",
-            "message_context_lookup_failed",
-            "message_context_unavailable",
-        }:
-            event_statuses.append(context_status)
-            continue
+        target_ref, _target = target_match
+        routed_event = dict(event)
+        root_id = str(routed_event.get("root_id") or "")
+        if not MESSAGE_ID_PATTERN.fullmatch(root_id):
+            candidate_roots = _topic_roots_for_target(
+                binding_payloads,
+                target_ref=target_ref,
+            )
+            if len(candidate_roots) > 1:
+                event_statuses.append("topic_context_ambiguous")
+                continue
+            if not candidate_roots:
+                event_statuses.append("topic_context_missing")
+                continue
+            routed_event["root_id"] = candidate_roots[0]
         try:
             event_result = process_lark_goal_topic_event(
                 target_payload=target_payload,
@@ -225,7 +248,7 @@ def poll_lark_goal_topic_profile_once(
                     for goal_id, payload in binding_payloads.items()
                     if isinstance(payload, Mapping)
                 },
-                event=enriched,
+                event=routed_event,
                 runtime_root=runtime_root,
                 answer=answer,
                 reply_runner=reply_runner,
