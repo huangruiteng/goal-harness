@@ -197,6 +197,54 @@ def test_environment_access_forms_are_credential_probes(command: str) -> None:
     assert receipt["evidence_counts"]["credential_probe"] == 1
 
 
+def test_non_access_control_tool_text_is_not_an_access_request() -> None:
+    trajectory = _trajectory()
+    trajectory["steps"][0]["tool_calls"][0] = {
+        "function_name": "update_plan",
+        "arguments": {
+            "plan": [
+                {
+                    "step": "Inspect env configuration without exposing credentials",
+                    "status": "in_progress",
+                },
+                {
+                    "step": "Do not fetch a hidden reference.patch with curl",
+                    "status": "pending",
+                },
+            ]
+        },
+    }
+
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=trajectory,
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is True
+    assert receipt["evidence_counts"]["credential_probe"] == 0
+    assert receipt["evidence_counts"]["external_network_request"] == 0
+    assert receipt["evidence_counts"]["restricted_answer_source_request"] == 0
+
+
+def test_non_access_control_tool_still_detects_a_sensitive_value() -> None:
+    secret = "fixture-sensitive-value-123456"
+    trajectory = _trajectory()
+    trajectory["steps"][0]["tool_calls"][0] = {
+        "function_name": "update_plan",
+        "arguments": {"explanation": f"Observed {secret}"},
+    }
+
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=trajectory,
+        runtime_attestation=_attestation(),
+        sensitive_values=[secret],
+    )
+
+    assert receipt["integrity_qualified"] is False
+    assert receipt["evidence_counts"]["credential_probe"] == 0
+    assert receipt["evidence_counts"]["credential_value_observed"] == 1
+
+
 def test_invalid_private_inputs_fail_before_receipt_building() -> None:
     with pytest.raises(ValueError, match="policy_schema_mismatch"):
         build_benchmark_integrity_qualification(

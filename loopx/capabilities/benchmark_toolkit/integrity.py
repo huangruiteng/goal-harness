@@ -106,6 +106,11 @@ _EXTERNAL_NETWORK_COMMAND_PATTERN = re.compile(
     r"(?is)\b(?:curl|wget)\b.{0,240}https?://"
     r"|\bgit\s+clone\b.{0,240}https?://"
 )
+# ATIF currently carries a function name rather than a typed side-effect class.
+# Keep this exact allowlist deliberately small: these calls only update controller
+# metadata, so their narrative arguments cannot themselves access benchmark data.
+# Unknown tools remain fail-closed and continue through the access-request scan.
+_NON_ACCESS_CONTROL_TOOLS = frozenset({"update_plan"})
 
 
 def _safe_label(value: object, *, limit: int = 120) -> str:
@@ -150,9 +155,10 @@ def _marker_present(text: str, marker: str) -> bool:
         # A bare sensitive filename must not match an unrelated absolute-path
         # basename. Explicit protected roots are separate path markers above.
         boundary += r"/\\"
-    return re.search(
-        rf"(?<![{boundary}]){re.escape(marker)}(?![{boundary}])", text
-    ) is not None
+    return (
+        re.search(rf"(?<![{boundary}]){re.escape(marker)}(?![{boundary}])", text)
+        is not None
+    )
 
 
 def _validated_policy(
@@ -266,17 +272,21 @@ def build_benchmark_integrity_qualification(
             )
             arguments = _canonical_text(raw_call.get("arguments") or {})
             lowered = arguments.lower()
-            categories = {
-                category
-                for category, category_markers in markers.items()
-                if any(_marker_present(lowered, marker) for marker in category_markers)
-            }
-            if re.search(r'(?i)(?:^|["\s:=])env(?:["\s]|$)', arguments):
-                categories.add("credential_probe")
-            if _CREDENTIAL_PROBE_PATTERN.search(arguments):
-                categories.add("credential_probe")
-            if _EXTERNAL_NETWORK_COMMAND_PATTERN.search(arguments):
-                categories.add("external_network_request")
+            categories: set[str] = set()
+            if function_name.lower() not in _NON_ACCESS_CONTROL_TOOLS:
+                categories = {
+                    category
+                    for category, category_markers in markers.items()
+                    if any(
+                        _marker_present(lowered, marker) for marker in category_markers
+                    )
+                }
+                if re.search(r'(?i)(?:^|["\s:=])env(?:["\s]|$)', arguments):
+                    categories.add("credential_probe")
+                if _CREDENTIAL_PROBE_PATTERN.search(arguments):
+                    categories.add("credential_probe")
+                if _EXTERNAL_NETWORK_COMMAND_PATTERN.search(arguments):
+                    categories.add("external_network_request")
             if _sensitive_value_present(arguments, secrets):
                 categories.add("credential_value_observed")
             for category in sorted(categories):
