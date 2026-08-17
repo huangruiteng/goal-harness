@@ -195,6 +195,12 @@ Qualification rejects a run when it detects any of the following:
 - malformed or incomplete ATIF tool evidence;
 - missing runner authority or any required runtime isolation attestation.
 
+Credential-probe detection targets direct environment enumeration, sensitive-name
+lookups, environment shell commands, and procfs reads. Merely inspecting or editing
+task source that mentions an environment API, or launching a child with an explicit
+environment, is not itself a credential read; sensitive values are still scanned in
+every tool argument and observation.
+
 Access-request markers are evaluated only on tool calls that can perform or request
 resource access. Exact known controller-only calls such as `update_plan` carry
 narrative metadata and are excluded from that scan; an actual sensitive value in
