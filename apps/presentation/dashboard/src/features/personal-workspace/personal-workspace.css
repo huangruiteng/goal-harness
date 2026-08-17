@@ -279,6 +279,8 @@
 .personal-lark-modal input[type="search"], .personal-lark-modal input[type="text"], .personal-lark-modal input:not([type]), .personal-lark-modal select { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid var(--pw-line-strong); border-radius: 9px; background: #fff; color: var(--pw-text); font: inherit; }
 .personal-lark-modal label:has(input[type="search"]) { grid-template-columns: 1fr; }
 .personal-lark-modal label:has(input[type="search"]) input { margin-bottom: 2px; }
+.personal-lark-group-state { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 9px 11px; border: 1px dashed var(--pw-line-strong); border-radius: 9px; background: #fafaf8; color: var(--pw-muted); font-size: 11px; font-weight: 500; line-height: 1.45; }
+.personal-lark-group-state.is-error { border-style: solid; border-color: #efc3bd; background: var(--pw-red-bg); color: var(--pw-red); }
 .personal-lark-check { display: flex !important; align-items: flex-start; gap: 10px !important; padding: 12px; border: 1px solid var(--pw-line); border-radius: 10px; background: #fafaf8; }
 .personal-lark-check input { margin-top: 2px; accent-color: var(--pw-blue); }
 .personal-lark-check span { display: grid; gap: 2px; }

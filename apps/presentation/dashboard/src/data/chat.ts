@@ -111,6 +111,12 @@ export const chatCapabilitiesSchema = z.object({
     tool_calls: z.boolean().optional(),
     trust_scope: z.string().optional(),
   })).optional(),
+  lark_cli: z.object({
+    available: z.boolean(),
+    source: z.string(),
+    version: z.string().nullable(),
+    error_code: z.string().nullable(),
+  }).optional(),
 });
 
 export const todoProposalSchema = z.object({
@@ -908,8 +914,10 @@ export type LarkApp = {
   active: boolean;
   app_ref: string;
   brand: string;
+  health_error_code: string | null;
   label: string;
   ready: boolean;
+  reply_ready: boolean;
 };
 
 const larkAppsSchema = z.object({
@@ -918,8 +926,10 @@ const larkAppsSchema = z.object({
     active: z.boolean(),
     app_ref: z.string(),
     brand: z.string(),
+    health_error_code: z.string().nullable().default(null),
     label: z.string(),
     ready: z.boolean(),
+    reply_ready: z.boolean().default(false),
   })),
 });
 
@@ -991,7 +1001,9 @@ export type LarkGoalConnection = {
   enabled: boolean;
   goal_id: string;
   goal_title: string;
+  health_error_code: string | null;
   incoming_mode: "mentions" | "all";
+  reply_ready: boolean;
   reply_mode: "topic_reply";
   target_ref: string;
   topic_name: string;
@@ -1007,7 +1019,9 @@ const larkConnectionsSchema = z.object({
     enabled: z.boolean(),
     goal_id: z.string(),
     goal_title: z.string(),
+    health_error_code: z.string().nullable().default(null),
     incoming_mode: z.enum(["mentions", "all"]),
+    reply_ready: z.boolean().default(false),
     reply_mode: z.literal("topic_reply"),
     target_ref: z.string(),
     topic_name: z.string(),
