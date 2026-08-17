@@ -1,0 +1,51 @@
+name: stale-issue-reminder
+
+on:
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: stale-issue-reminder
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v11
+        with:
+          # Issues only: pull requests stay with the PR review/program loop.
+          days-before-issue-stale: 90
+          days-before-issue-close: -1
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          stale-issue-label: stale
+          stale-issue-message: |
+            This issue has had no activity for 90 days, so it is now marked
+            `stale` as a reminder. It will **not** be closed automatically.
+
+            - If this is still relevant: reply or update the issue and the
+              stale marker will be removed.
+            - If it is no longer needed: close it yourself, or leave a short
+              comment explaining why.
+
+            ---
+
+            这个 issue 已 90 天没有活动，现仅打上 `stale` 提醒标记，**不会自动关闭**。
+
+            - 如果仍然相关：请回复或更新，标记会自动移除。
+            - 如果已不需要：请自行关闭，或留言说明原因。
+          exempt-issue-labels: >-
+            direction/architecture-evolution,
+            direction/benchmark-evidence,
+            direction/operator-surface-im,
+            direction/shared-coordination,
+            RFC,
+            good first issue,
+            help wanted
+          remove-stale-when-updated: true
+          operations-per-run: 30
+          ascending: true
