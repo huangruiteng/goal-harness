@@ -81,7 +81,7 @@ def test_native_codex_loopx_state_rebase_round_trips_generated_control_state(
 ) -> None:
     visible = tmp_path / "visible"
     alias = tmp_path / "run-work" / "host-visible"
-    alias.mkdir(parents=True)
+    alias.parent.mkdir(parents=True)
     project_registry = visible / ".loopx/registry.json"
     global_registry = visible / ".loopx/runtime/registry.global.json"
     global_registry.parent.mkdir(parents=True)
@@ -149,12 +149,16 @@ def test_native_codex_loopx_state_rebase_round_trips_generated_control_state(
     assert rebased.control_state_found is True
     assert rebased.replacement_count == 8
     assert set(rebased.rewritten_files) == set(originals)
+    assert not alias.exists()
     for path in originals:
         text = path.read_text(encoding="utf-8")
         assert str(alias) in text
     for path in (project_registry, global_registry, run_json, run_markdown):
         assert f"prefix-{visible}-must-not-change" in path.read_text(encoding="utf-8")
 
+    # The isolation envelope materializes the planned alias between the two
+    # calls; the pre-launch relocation must not require it prematurely.
+    alias.mkdir()
     restored = rebase_native_codex_loopx_workspace_state(
         visible,
         source_root=alias,
