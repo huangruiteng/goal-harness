@@ -31,14 +31,14 @@ PRIVATE_PATTERNS = [
 ]
 
 
-def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+def run_cli(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "loopx.cli", *args],
         cwd=REPO_ROOT,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        check=True,
+        check=check,
     )
 
 
@@ -92,6 +92,8 @@ def main() -> int:
 
     def fake_run_gh_json(args: list[str], *, cwd: Path | None = None) -> object:
         calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return {}
         assert args[:2] == ["pr", "list"], calls
         assert "--search" in args and "updated:>=2026-06-27" in args, args
         state = args[args.index("--state") + 1]
@@ -140,8 +142,12 @@ def main() -> int:
         )
     finally:
         pr_review_module._run_gh_json = original_run_gh_json
-    assert len(calls) == 2, calls
-    assert [args[args.index("--state") + 1] for args in calls] == ["open", "closed"], calls
+    list_calls = [args for args in calls if args[:2] == ["pr", "list"]]
+    assert len(list_calls) == 2, calls
+    assert [args[args.index("--state") + 1] for args in list_calls] == [
+        "open",
+        "closed",
+    ], calls
     assert fetched[0]["number"] == 900, fetched
     assert fetched[0]["files"][0]["path"] == "src/status.py", fetched
     assert fetched[1]["number"] == 901, fetched
@@ -177,19 +183,18 @@ def main() -> int:
     assert groups["merged"]["complete"] is True, groups
     assert 770 not in groups["unmerged"]["pr_numbers"], groups
     assert groups["merged"]["pr_numbers"] == [770], groups
-    assert groups["unmerged"]["review_sequence"][0]["number"] == 773, groups
+    assert groups["unmerged"]["review_sequence"][0]["number"] == 771, groups
     assert groups["merged"]["review_sequence"][0]["number"] == 770, groups
     sequence = payload["review_sequence"]
-    assert sequence[0]["number"] == 773, sequence
+    assert sequence[0]["number"] == 771, sequence
     assert any(item["number"] == 775 for item in sequence), sequence
     assert any(item["number"] == 770 and item["state"] == "MERGED" for item in sequence), sequence
-    assert sequence[0]["risk_hint_level"] == "low", sequence[0]
-    assert sequence[0]["main_risk_level"] == "low", sequence[0]
+    assert sequence[0]["risk_hint_level"] == "medium", sequence[0]
+    assert sequence[0]["main_risk_level"] == "medium", sequence[0]
     merged_sequence = next(item for item in sequence if item["number"] == 770)
     assert merged_sequence["risk_hint_level"] == "medium", merged_sequence
     assert merged_sequence["main_risk_level"] == "high", merged_sequence
-    first = payload["pull_requests"][0]
-    assert first["number"] == 773, first
+    first = next(item for item in payload["pull_requests"] if item["number"] == 773)
     assert "newcomer command path" in first["motivation"], first
     template = first["review_template"]
     assert template["schema_version"] == "pr_review_five_block_template_v0", template
@@ -298,10 +303,10 @@ def main() -> int:
     ), observation
     assert observation["observation_state"] == "material_transition", observation
     assert observation["candidate_count"] == 1, observation
-    assert observation["candidate"]["number"] == 773, observation
+    assert observation["candidate"]["number"] == 771, observation
     assert (
         observation["candidate"]["head_oid"]
-        == "7730000000000000000000000000000000000000"
+        == "7710000000000000000000000000000000000000"
     ), observation
     assert observation["write_authority_granted"] is False, observation
     assert_public_safe(observed)
@@ -336,7 +341,7 @@ def main() -> int:
                 "--previous-observation-json",
                 str(previous_path),
                 "--handled-exact-head",
-                "773@7730000000000000000000000000000000000000",
+                "771@7710000000000000000000000000000000000000",
             ).stdout
         )
     assert unchanged["request"]["previous_observation_supplied"] is True, unchanged[
@@ -345,7 +350,7 @@ def main() -> int:
     assert (
         unchanged["autonomous_review"]["observation_state"] == "observed_unchanged"
     ), unchanged
-    assert unchanged["autonomous_review"]["candidate"]["number"] == 771, unchanged
+    assert unchanged["autonomous_review"]["candidate"]["number"] == 773, unchanged
     assert (
         unchanged["autonomous_review"]["projected_candidate_count"] == 2
     ), unchanged
@@ -353,11 +358,106 @@ def main() -> int:
     assert (
         progressed_observation["observation_state"] == "observed_unchanged"
     ), progressed
-    assert progressed_observation["candidate"]["number"] == 771, progressed
+    assert progressed_observation["candidate"]["number"] == 773, progressed
     assert (
         progressed_observation["projected_candidate_count"] == 1
     ), progressed
     assert progressed_observation["handled_exact_head_count"] == 1, progressed
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        checkpoint_path = Path(temp_dir) / "monitor.json"
+        checkpoint_first = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(FIXTURE),
+                "--state",
+                "open",
+                "--autonomous-observation",
+                "--observation-state-file",
+                str(checkpoint_path),
+            ).stdout
+        )
+        assert checkpoint_first["autonomous_review"]["candidate"]["number"] == 771
+        assert checkpoint_first["request"]["observation_state_file_supplied"] is True
+        assert checkpoint_first["request"]["local_checkpoint_write_performed"] is True
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        assert checkpoint["schema_version"] == "pull_request_review_monitor_checkpoint_v0"
+        assert checkpoint["repository"] == "owner/repo"
+
+        checkpoint_second = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(FIXTURE),
+                "--state",
+                "open",
+                "--autonomous-observation",
+                "--observation-state-file",
+                str(checkpoint_path),
+            ).stdout
+        )
+        assert checkpoint_second["autonomous_review"]["candidate"]["number"] == 773
+        assert checkpoint_second["request"]["previous_observation_supplied"] is True
+
+        checkpoint_handled = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(FIXTURE),
+                "--state",
+                "open",
+                "--autonomous-observation",
+                "--observation-state-file",
+                str(checkpoint_path),
+                "--handled-exact-head",
+                "771@7710000000000000000000000000000000000000",
+            ).stdout
+        )
+        assert checkpoint_handled["autonomous_review"]["handled_exact_head_count"] == 1
+
+        checkpoint_reloaded = json.loads(
+            run_cli(
+                "--format",
+                "json",
+                "pr-review",
+                "--fixture",
+                str(FIXTURE),
+                "--state",
+                "open",
+                "--autonomous-observation",
+                "--observation-state-file",
+                str(checkpoint_path),
+            ).stdout
+        )
+        assert checkpoint_reloaded["autonomous_review"]["handled_exact_head_count"] == 1
+        assert_public_safe(checkpoint_reloaded)
+
+        invalid_checkpoint_path = Path(temp_dir) / "invalid.json"
+        invalid_checkpoint_path.write_text("{}", encoding="utf-8")
+        invalid_result = run_cli(
+            "--format",
+            "json",
+            "pr-review",
+            "--fixture",
+            str(FIXTURE),
+            "--state",
+            "open",
+            "--autonomous-observation",
+            "--observation-state-file",
+            str(invalid_checkpoint_path),
+            check=False,
+        )
+        invalid_payload = json.loads(invalid_result.stdout)
+        assert invalid_result.returncode == 1, invalid_result
+        assert invalid_payload["ok"] is False, invalid_payload
+        assert str(invalid_checkpoint_path) not in json.dumps(invalid_payload)
 
     incomplete_observation = json.loads(
         run_cli(
@@ -551,14 +651,14 @@ def main() -> int:
     assert group_limited["summary"]["total_pr_count"] == 2, group_limited["summary"]
     assert group_limited["summary"]["open_pr_count"] == 1, group_limited["summary"]
     assert group_limited["summary"]["merged_pr_count"] == 1, group_limited["summary"]
-    assert group_limited["review_groups"]["unmerged"]["pr_numbers"] == [773], group_limited[
+    assert group_limited["review_groups"]["unmerged"]["pr_numbers"] == [771], group_limited[
         "review_groups"
     ]
     assert group_limited["review_groups"]["merged"]["pr_numbers"] == [770], group_limited[
         "review_groups"
     ]
     assert [item["number"] for item in group_limited["pull_requests"]] == [
-        773,
+        771,
         770,
     ], group_limited["pull_requests"]
 
@@ -616,7 +716,7 @@ def main() -> int:
     assert "#770" in markdown, markdown
     assert "## Combined Review Sequence" in markdown, markdown
     assert markdown.index("## Unmerged PRs") < markdown.index("## Merged PRs"), markdown
-    assert "risk_hint=`low`" in markdown, markdown
+    assert "risk_hint=`medium`" in markdown, markdown
     assert "template below is intentionally blank" in markdown, markdown
     assert "- 推荐阅读顺序:" in markdown, markdown
     assert "- 五块模板（留空给 agentloop 填写）:" in markdown, markdown
@@ -627,7 +727,7 @@ def main() -> int:
     assert "我的整体评价（150-300字）" in markdown, markdown
     assert "main regression risk:" not in markdown, markdown
     assert "## Combined Review Sequence" in markdown, markdown
-    assert "PR #773" in markdown, markdown
+    assert "PR #771" in markdown, markdown
 
     print("pr-review-command-smoke ok")
     return 0
