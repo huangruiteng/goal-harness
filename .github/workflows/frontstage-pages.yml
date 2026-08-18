@@ -140,33 +140,18 @@ jobs:
           set -euo pipefail
           owner="${GITHUB_REPOSITORY%%/*}"
           repo="${GITHUB_REPOSITORY#*/}"
-          count_query='query($owner: String!, $repo: String!) {
-            repository(owner: $owner, name: $repo) {
-              stargazers { totalCount }
-            }
-          }'
-          history_query='query($owner: String!, $repo: String!, $endCursor: String) {
-            repository(owner: $owner, name: $repo) {
-              stargazers(first: 100, after: $endCursor, orderBy: {field: STARRED_AT, direction: ASC}) {
-                edges { starredAt }
-                pageInfo { hasNextPage endCursor }
-              }
-            }
-          }'
           for attempt in 1 2 3; do
-            count_before="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazers.totalCount)"
-            gh api graphql --paginate --slurp \
-              -f query="$history_query" \
-              -F owner="$owner" \
-              -F repo="$repo" \
+            count_before="$(gh api "repos/$owner/$repo" --jq .stargazers_count)"
+            gh api --paginate --slurp \
+              -H "Accept: application/vnd.github.star+json" \
+              "repos/$owner/$repo/stargazers?per_page=100" \
               > "$RUNNER_TEMP/loopx-stargazer-pages.json"
-            jq '[.[].data.repository.stargazers.edges[] | {starred_at: .starredAt}]' \
+            jq '[.[][] | {starred_at: .starred_at}]' \
               "$RUNNER_TEMP/loopx-stargazer-pages.json" \
               > "$RUNNER_TEMP/loopx-stargazers.json"
-            count_after="$(gh api graphql -f query="$count_query" -F owner="$owner" -F repo="$repo" --jq .data.repository.stargazers.totalCount)"
+            count_after="$(gh api "repos/$owner/$repo" --jq .stargazers_count)"
             fetched_count="$(jq 'length' "$RUNNER_TEMP/loopx-stargazers.json")"
-            has_next_page="$(jq -r 'last.data.repository.stargazers.pageInfo.hasNextPage' "$RUNNER_TEMP/loopx-stargazer-pages.json")"
-            if [[ "$count_before" == "$count_after" && "$has_next_page" == "false" && "$fetched_count" -le "$count_after" ]]; then
+            if [[ "$count_before" == "$count_after" && "$fetched_count" -le "$count_after" ]]; then
               printf '%s\n' "$fetched_count" > "$RUNNER_TEMP/loopx-stargazers-count"
               if [[ "$fetched_count" != "$count_after" ]]; then
                 echo "::warning title=Aggregate-only stargazers omitted::Fetched all $fetched_count enumerable stargazer events; GitHub reports $count_after aggregate stars." >&2
@@ -174,7 +159,7 @@ jobs:
               break
             fi
             if [[ "$attempt" == 3 ]]; then
-              echo "stargazer snapshot changed or pagination was incomplete: before=$count_before fetched=$fetched_count after=$count_after has_next_page=$has_next_page" >&2
+              echo "stargazer snapshot changed or pagination was incomplete: before=$count_before fetched=$fetched_count after=$count_after" >&2
               exit 1
             fi
             sleep 5
