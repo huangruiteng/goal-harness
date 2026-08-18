@@ -40,6 +40,9 @@ REQUIRED_REVIEW_SECTION_HEADINGS = (
 AUTHOR_OWNED_APPROVAL_FALLBACK_TITLE = (
     "Approval conclusion (author-owned PR; GitHub blocks formal self-approval)"
 )
+AUTHOR_OWNED_REQUEST_CHANGES_FALLBACK_TITLE = (
+    "Request changes conclusion (author-owned PR; GitHub blocks formal self-review)"
+)
 REVIEW_CONCLUSION_SCHEMA_VERSION = "pull_request_review_conclusion_v0"
 
 RUNTIME_OR_CLI_PREFIXES = (
@@ -778,6 +781,18 @@ def _review_ready_timestamp(pr: Mapping[str, Any]) -> datetime | None:
     )
 
 
+def _english_review_verdict(body: str) -> str | None:
+    for line in body.splitlines():
+        normalized = line.strip().replace("**", "")
+        match = re.match(
+            r"(?i)^english verdict\s*:\s*(APPROVE|REQUEST_CHANGES)\b",
+            normalized,
+        )
+        if match:
+            return match.group(1).upper()
+    return None
+
+
 def _review_body_has_required_format(body: str, *, head_oid: str) -> bool:
     return (
         bool(head_oid)
@@ -786,7 +801,7 @@ def _review_body_has_required_format(body: str, *, head_oid: str) -> bool:
             re.search(rf"(?m)^#+\s*{re.escape(heading)}\s*$", body)
             for heading in REQUIRED_REVIEW_SECTION_HEADINGS
         )
-        and re.search(r"(?im)^\s*(?:\*\*)?english verdict\b", body) is not None
+        and _english_review_verdict(body) is not None
     )
 
 
@@ -818,6 +833,7 @@ def _review_conclusion(
     def evaluate(review: Mapping[str, Any]) -> dict[str, Any]:
         state = str(review.get("state") or "").strip().upper()
         body = str(review.get("body") or "")
+        english_verdict = _english_review_verdict(body)
         review_author = str(_as_dict(review.get("author")).get("login") or "").strip()
         commit_oid = str(_as_dict(review.get("commit")).get("oid") or "").strip()
         author_owned = bool(
@@ -831,10 +847,22 @@ def _review_conclusion(
         if not _review_body_has_required_format(body, head_oid=head_oid):
             reasons.append("review_body_missing_standalone_bilingual_format")
         if author_owned:
-            if state != "COMMENTED" or AUTHOR_OWNED_APPROVAL_FALLBACK_TITLE not in body:
+            expected_title = {
+                "APPROVE": AUTHOR_OWNED_APPROVAL_FALLBACK_TITLE,
+                "REQUEST_CHANGES": AUTHOR_OWNED_REQUEST_CHANGES_FALLBACK_TITLE,
+            }.get(english_verdict or "")
+            if state != "COMMENTED" or not expected_title or expected_title not in body:
                 reasons.append("author_owned_review_missing_titled_commented_fallback")
         elif state not in {"APPROVED", "CHANGES_REQUESTED"}:
             reasons.append("formal_review_state_required")
+        elif (
+            (state == "APPROVED" and english_verdict != "APPROVE")
+            or (
+                state == "CHANGES_REQUESTED"
+                and english_verdict != "REQUEST_CHANGES"
+            )
+        ):
+            reasons.append("review_state_verdict_mismatch")
         return {
             "schema_version": REVIEW_CONCLUSION_SCHEMA_VERSION,
             "status": "valid" if not reasons else "invalid",

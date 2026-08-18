@@ -222,10 +222,14 @@ Implementations may read compact public PR surfaces:
 
 Raw review bodies are used only for the format/exact-head decision and are not
 returned or persisted. A valid latest conclusion names the exact head, contains
-all five Chinese sections plus an English verdict, and uses formal
-`APPROVED`/`CHANGES_REQUESTED`; an author-owned no-blocker conclusion instead
-requires the titled `COMMENTED` fallback. The compact result is versioned as
-`pull_request_review_conclusion_v0` and reports typed invalid-reason codes.
+all five Chinese sections plus a line-starting `English verdict: APPROVE` or
+`English verdict: REQUEST_CHANGES`, and keeps that verdict aligned with formal
+`APPROVED`/`CHANGES_REQUESTED` state. Because GitHub blocks every self-review
+state transition, author-owned conclusions use `COMMENTED` plus one exact title:
+`Approval conclusion (author-owned PR; GitHub blocks formal self-approval)` or
+`Request changes conclusion (author-owned PR; GitHub blocks formal self-review)`.
+The compact result is versioned as `pull_request_review_conclusion_v0` and
+reports typed invalid-reason codes.
 
 They must not include raw logs, private connector payloads, credentials, local
 absolute paths, private source bodies, or hidden CI artifacts.

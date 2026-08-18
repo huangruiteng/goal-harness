@@ -78,7 +78,8 @@ For an open PR, publish validated actionable findings by default unless the
 user explicitly requested local-only/dry-run output or the finding contains
 private or security-sensitive material.
 
-- Remaining blocking finding: formal `REQUEST_CHANGES`.
+- Remaining blocker: formal `REQUEST_CHANGES`; for an author-owned PR, use a
+  `COMMENTED` review titled `Request changes conclusion (author-owned PR; GitHub blocks formal self-review)`.
 - Non-blocking finding with no blockers: formal `APPROVE`, not a bare comment.
   When the GitHub account is the PR author and GitHub rejects self-approval,
   record the same approval conclusion as a `COMMENTED` review
@@ -108,9 +109,8 @@ Publish two artifacts:
    and five sections: `动机`, `改动思路`, `具体改动`, `对主干的风险`,
    `我的整体评价`. Cover every changed surface and key symbols, not just the
    main finding.
-2. **英文简短结论** - a concise English verdict (`APPROVE`,
-   `REQUEST_CHANGES`, or the author-owned `COMMENTED` fallback) with exact
-   head, verdict, key finding, and validation.
+2. **英文简短结论** - start with exactly `English verdict:` and include the
+   verdict, exact head, key finding, and validation.
 
 Do not publish before the Chinese section covers the entire PR. Read both
 artifacts back.

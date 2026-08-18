@@ -112,7 +112,7 @@ PR_REVIEW_CATALOG_ENTRY: dict[str, Any] = {
         "A queue is observed only when result_completeness.complete=true; partial or failed reads are not_observed and never count as unchanged.",
         "Fingerprints cover exact head, formal conclusion, next action, check state, draft state, and mergeability for every open PR.",
         "Current-head review_ready_at, not updatedAt, owns age-fair ordering; one new head after REQUEST_CHANGES may use a bounded fast-feedback slot.",
-        "A complete exact-head conclusion requires the five Chinese sections, English verdict, and formal state or the titled author-owned fallback.",
+        "A complete exact-head conclusion requires the five Chinese sections, a state-aligned English verdict, and formal state or the verdict-specific titled author-owned fallback.",
         "One observation emits at most one exact-head advancement Todo preview; unchanged observations emit no duplicate candidate and may advance only from an explicit handled exact-head cursor.",
         "The capability reuses the existing pr-review GitHub scan and normalized packet; review bodies are inspected for format but never emitted or checkpointed.",
         "Candidate selection grants no GitHub review, comment, push, merge, quota, or Todo-write authority; those remain with their existing policy surfaces.",

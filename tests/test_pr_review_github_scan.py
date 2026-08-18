@@ -160,19 +160,26 @@ def _queue_pr(
     }
 
 
-def _full_review_body(head: str, *, author_fallback: bool = False) -> str:
-    fallback = (
-        "Approval conclusion (author-owned PR; GitHub blocks formal self-approval)\n\n"
-        if author_fallback
-        else ""
-    )
+def _full_review_body(
+    head: str,
+    *,
+    verdict: str = "APPROVE",
+    author_fallback: bool = False,
+) -> str:
+    fallback = ""
+    if author_fallback:
+        fallback = (
+            "Approval conclusion (author-owned PR; GitHub blocks formal self-approval)"
+            if verdict == "APPROVE"
+            else "Request changes conclusion (author-owned PR; GitHub blocks formal self-review)"
+        ) + "\n\n"
     return (
         f"{fallback}## 动机\n完整动机。\n\n"
         "## 改动思路\n完整思路。\n\n"
         "## 具体改动\n完整改动。\n\n"
         "## 对主干的风险\n完整风险。\n\n"
         "## 我的整体评价\n整体通过。\n\n"
-        f"**English verdict:** APPROVE at exact head {head}."
+        f"**English verdict:** {verdict} at exact head {head}."
     )
 
 
@@ -349,6 +356,82 @@ def test_latest_review_and_author_owned_fallback_are_enforced(monkeypatch) -> No
     assert valid_fallback["review_conclusion"]["status"] == "valid"
     assert valid_fallback["review_action_kind"] is None
 
+    row["reviews"] = [
+        {
+            "author": {"login": "maintainer"},
+            "body": _full_review_body(
+                head,
+                verdict="REQUEST_CHANGES",
+                author_fallback=True,
+            ),
+            "commit": {"oid": head},
+            "state": "COMMENTED",
+            "submittedAt": "2026-08-18T10:30:00Z",
+        }
+    ]
+    blocking_fallback = pr_review_module.build_pr_review_packet(
+        pull_requests=[row],
+        repository="owner/repo",
+        limit=10,
+        source="fixture",
+        state_filter="open",
+        reviewer_login="maintainer",
+    )["pull_requests"][0]
+    assert blocking_fallback["review_conclusion"]["status"] == "valid"
+    assert blocking_fallback["review_conclusion"]["state"] == "COMMENTED"
+    assert blocking_fallback["review_action_kind"] is None
+
+    row["reviews"][0]["body"] = _full_review_body(
+        head,
+        verdict="REQUEST_CHANGES",
+        author_fallback=False,
+    )
+    untitled_blocking_fallback = pr_review_module.build_pr_review_packet(
+        pull_requests=[row],
+        repository="owner/repo",
+        limit=10,
+        source="fixture",
+        state_filter="open",
+        reviewer_login="maintainer",
+    )["pull_requests"][0]
+    assert untitled_blocking_fallback["review_conclusion"]["status"] == "invalid"
+    assert (
+        "author_owned_review_missing_titled_commented_fallback"
+        in untitled_blocking_fallback["review_conclusion"]["invalid_reasons"]
+    )
+
+    row["reviews"] = [
+        {
+            "author": {"login": "peer-reviewer"},
+            "body": _full_review_body(head, verdict="REQUEST_CHANGES"),
+            "commit": {"oid": head},
+            "state": "APPROVED",
+            "submittedAt": "2026-08-18T10:45:00Z",
+        }
+    ]
+    mismatched_peer_verdict = pr_review_module.build_pr_review_packet(
+        pull_requests=[row],
+        repository="owner/repo",
+        limit=10,
+        source="fixture",
+        state_filter="open",
+        reviewer_login="maintainer",
+    )["pull_requests"][0]
+    assert mismatched_peer_verdict["review_conclusion"]["status"] == "invalid"
+    assert (
+        "review_state_verdict_mismatch"
+        in mismatched_peer_verdict["review_conclusion"]["invalid_reasons"]
+    )
+
+    row["reviews"] = [
+        {
+            "author": {"login": "maintainer"},
+            "body": _full_review_body(head, author_fallback=True),
+            "commit": {"oid": head},
+            "state": "COMMENTED",
+            "submittedAt": "2026-08-18T09:00:00Z",
+        }
+    ]
     row["reviews"].append(
         {
             "author": {"login": "maintainer"},

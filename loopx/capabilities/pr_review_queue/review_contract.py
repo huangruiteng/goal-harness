@@ -381,6 +381,10 @@ def build_review_execution_contract() -> dict[str, Any]:
                 "COMMENTED review titled 'Approval conclusion (author-owned PR; "
                 "GitHub blocks formal self-approval)'"
             ),
+            "author_owned_blocker_fallback": (
+                "COMMENTED review titled 'Request changes conclusion (author-owned "
+                "PR; GitHub blocks formal self-review)'"
+            ),
             "merged_pr": "POST_MERGE_AUDIT_COMMENT when a new actionable finding exists",
             "publication_exceptions": [
                 "explicit local-only request",
