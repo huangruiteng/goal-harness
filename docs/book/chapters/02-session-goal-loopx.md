@@ -45,7 +45,7 @@ LoopX 同时处理 Goal、Agent 和 Host，但三者回答的是不同问题：
 | 身份 | 回答的问题 | 稳定性与选择规则 |
 | --- | --- | --- |
 | `goal_id` | 正在推进哪个长期项目边界？ | 绑定 registry、Todo、Gate 和 evidence lineage；复用时选择已有的精确 id |
-| `agent_id` | 当前由哪个 peer/lane 承担工作？ | 绑定 claim、Vision、quota 与 writeback；新接入默认注册 fresh identity |
+| `agent_id` | 当前由哪个 peer/lane 承担工作？ | 绑定 claim、Vision、quota 与 writeback；只有不存在已注册 lane 或显式 `--new-peer` 时新接入才默认注册 fresh identity |
 | `host_surface` / runtime profile | 这一轮实际由哪个产品表面执行和唤醒？ | 绑定 App heartbeat、visible Goal 或其他 host loop；必须按当前运行面显式声明 |
 
 已有 Goal 可以继续复用，不代表新 session 应接管已有 Agent identity。最新 Goal-start 合同要求：

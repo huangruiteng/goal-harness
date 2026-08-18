@@ -4,19 +4,111 @@ import copy
 import json
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from loopx.capabilities.benchmark_toolkit import (
+    BENCHMARK_EXACT_CONTAINER_BINDING_SCHEMA_VERSION,
     BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION,
     BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION,
     REQUIRED_RUNTIME_ATTESTATIONS,
+    DockerContainerBindingError,
     build_benchmark_integrity_qualification,
+    compact_docker_container_binding_receipt,
+    select_exact_docker_container,
 )
 from loopx.capabilities.catalog import build_capability_detail_packet
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_exact_container_binding_uses_job_labels_and_hides_runtime_identity() -> None:
+    observed_command: list[str] = []
+    private_job = "fixture-job-private-value"
+    private_container = "fixture-job-private-value-main-1"
+
+    def fake_runner(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        observed_command.extend(str(value) for value in argv)
+        return subprocess.CompletedProcess(argv, 0, f"{private_container}\n", "")
+
+    binding = select_exact_docker_container(
+        ancestor_image="benchmark-runner:fixture",
+        required_labels={
+            "com.docker.compose.project": private_job,
+            "com.docker.compose.service": "main",
+        },
+        command_runner=fake_runner,
+    )
+
+    assert binding.container_name == private_container
+    assert "ancestor=benchmark-runner:fixture" in observed_command
+    assert f"label=com.docker.compose.project={private_job}" in observed_command
+    assert "label=com.docker.compose.service=main" in observed_command
+
+    receipt = compact_docker_container_binding_receipt(binding)
+    assert receipt["schema_version"] == BENCHMARK_EXACT_CONTAINER_BINDING_SCHEMA_VERSION
+    assert receipt["exact_job_binding"] is True
+    assert receipt["match_count"] == 1
+    assert receipt["required_label_keys"] == [
+        "com.docker.compose.project",
+        "com.docker.compose.service",
+    ]
+    rendered = json.dumps(receipt, sort_keys=True)
+    assert private_job not in rendered
+    assert private_container not in rendered
+    assert "benchmark-runner:fixture" not in rendered
+
+
+@pytest.mark.parametrize("stdout", ["", "container-a\ncontainer-b\n"])
+def test_exact_container_binding_fails_closed_on_non_exact_match(stdout: str) -> None:
+    private_value = "private-selector-value"
+
+    def fake_runner(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    with pytest.raises(
+        DockerContainerBindingError,
+        match="^docker_container_binding_not_exact$",
+    ) as error:
+        select_exact_docker_container(
+            ancestor_image="benchmark-runner:fixture",
+            required_labels={"job.identity": private_value},
+            command_runner=fake_runner,
+        )
+
+    assert private_value not in str(error.value)
+    for private_match in stdout.splitlines():
+        assert private_match not in str(error.value)
+
+
+def test_exact_container_binding_rejects_invalid_or_failed_discovery() -> None:
+    with pytest.raises(
+        DockerContainerBindingError,
+        match="^invalid_docker_container_selector$",
+    ):
+        select_exact_docker_container(
+            ancestor_image="benchmark-runner:fixture\nleak",
+            required_labels={"job.identity": "job-1"},
+        )
+
+    private_stderr = "private Docker diagnostic"
+
+    def failing_runner(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 1, "", private_stderr)
+
+    with pytest.raises(
+        DockerContainerBindingError,
+        match="^docker_container_discovery_failed$",
+    ) as error:
+        select_exact_docker_container(
+            ancestor_image="benchmark-runner:fixture",
+            required_labels={"job.identity": "job-1"},
+            command_runner=failing_runner,
+        )
+
+    assert private_stderr not in str(error.value)
 
 
 def test_catalog_exposes_post_run_case_insight_monitor_contract() -> None:
@@ -229,21 +321,126 @@ def test_bare_sensitive_filename_does_not_match_unrelated_path_basename() -> Non
 
 
 @pytest.mark.parametrize(
-    "command",
+    ("argument_key", "command", "expected_probe"),
     [
-        "python3 -c 'import os; print(os.environ.get(\"API_KEY\"))'",
-        "python3 -c 'import os; print(os.getenv(\"API_KEY\"))'",
-        "python3 -c 'import subprocess; subprocess.run([\"tool\"], env={})'",
+        ("cmd", "python3 -c 'import os; print(os.environ.get(\"API_KEY\"))'", True),
+        ("cmd", "python3 -c 'import os; print(os.getenv(\"API_KEY\"))'", True),
+        (
+            "cmd",
+            "python3 -c 'import os; print(os.getenv(\"OPENAI_API_KEY\"))'",
+            True,
+        ),
+        ("cmd", "python3 -c 'import os; print(os.environ[\"AUTH_TOKEN\"])'", True),
+        ("cmd", "python3 -c 'import os; print(os.environ)'", True),
+        ("cmd", "python3 -c 'import os; print(os.environ.copy())'", True),
+        ("cmd", "python3 -c 'import os; print(os.environ.items())'", True),
+        ("cmd", "node -e 'console.log(process.env)'", True),
+        ("cmd", "node -e 'console.log(process.env.API_KEY)'", True),
+        ("cmd", "node -e 'console.log(process.env.APP_MODULE_PATH)'", False),
+        ("cmd", "env && git status", True),
+        ("cmd", "git status\nenv", True),
+        ("cmd", "sh -c env", True),
+        ("command", "bash -lc printenv", True),
+        ("cmd", "/usr/bin/env", True),
+        ("cmd", "/usr/bin/printenv API_KEY", True),
+        ("cmd", "cat /proc/self/environ", True),
+        ("cmd", "grep -R 'os.getenv(\"API_KEY\")' src", False),
+        ("cmd", "rg 'os.environ.copy\\(\\)' src", False),
+        ("cmd", "grep -R 'printenv API_KEY' src", False),
+        (
+            "cmd",
+            (
+                "python3 -c 'from pathlib import Path; "
+                'Path("module.py").write_text("os.getenv(\\"API_KEY\\")")\''
+            ),
+            False,
+        ),
+        ("cmd", "python3 -c 'import os; print(os.getenv(\"APP_MODULE_PATH\"))'", False),
+        (
+            "cmd",
+            "python3 -c 'import subprocess; subprocess.run([\"tool\"], env={})'",
+            False,
+        ),
     ],
 )
-def test_environment_access_forms_are_credential_probes(command: str) -> None:
+def test_typed_command_distinguishes_environment_probe_from_source_text(
+    argument_key: str,
+    command: str,
+    expected_probe: bool,
+) -> None:
+    trajectory = _trajectory()
+    trajectory["steps"][0]["tool_calls"][0]["arguments"] = {
+        argument_key: command,
+        "description": 'Review source that mentions os.getenv("API_KEY")',
+    }
     receipt = build_benchmark_integrity_qualification(
-        trajectory=_trajectory(command=command),
+        trajectory=trajectory,
         runtime_attestation=_attestation(),
     )
 
-    assert receipt["integrity_qualified"] is False
-    assert receipt["evidence_counts"]["credential_probe"] == 1
+    assert receipt["integrity_qualified"] is (not expected_probe)
+    assert receipt["evidence_counts"]["credential_probe"] == int(expected_probe)
+
+
+@pytest.mark.parametrize(
+    ("orchestrator_input", "expected_probe"),
+    [
+        (
+            (
+                'const result = await tools.exec_command({cmd: "sh -c env"}); '
+                "text(result.output);"
+            ),
+            True,
+        ),
+        (
+            (
+                'const command = "bash -lc printenv"; '
+                "await tools.exec_command({cmd: command});"
+            ),
+            True,
+        ),
+        (
+            'const cmd = "/usr/bin/env"; await tools.exec_command({cmd});',
+            True,
+        ),
+        (
+            "await tools.exec_command("
+            + json.dumps(
+                {"command": "python3 -c 'import os; print(os.environ.items())'"}
+            )
+            + ");",
+            True,
+        ),
+        (
+            "await tools.exec_command({cmd: "
+            + json.dumps("grep -R 'os.getenv(\"API_KEY\")' src")
+            + "});",
+            False,
+        ),
+        (
+            ('await tools.exec_command({cmd: "printf ok", metadata: {cmd: "env"}});'),
+            False,
+        ),
+        ('const fixture = \'{"cmd":"env"}\'; text(fixture);', False),
+    ],
+)
+def test_codex_orchestrator_extracts_only_executed_nested_commands(
+    orchestrator_input: str,
+    expected_probe: bool,
+) -> None:
+    trajectory = _trajectory()
+    trajectory["steps"][0]["tool_calls"][0] = {
+        "function_name": "exec",
+        "arguments": {"input": orchestrator_input},
+    }
+
+    receipt = build_benchmark_integrity_qualification(
+        trajectory=trajectory,
+        runtime_attestation=_attestation(),
+    )
+
+    assert receipt["integrity_qualified"] is (not expected_probe)
+    assert receipt["evidence_counts"]["credential_probe"] == int(expected_probe)
 
 
 def test_non_access_control_tool_text_is_not_an_access_request() -> None:

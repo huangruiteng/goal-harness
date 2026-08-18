@@ -1276,7 +1276,8 @@ def build_host_loop_activation_packet(
             )
         else:
             gate_steps = [
-                "Select one registered agent lane from identity_selection_gate.",
+                "Select one registered agent lane from identity_selection_gate; do not register a fresh agent.",
+                "When a thread id is available, persist the thread-to-agent binding so later /loopx calls reuse this lane.",
                 "Run that choice's host-specific activation_input_command.",
             ]
             gate_criterion = "One registered agent identity is explicitly selected."

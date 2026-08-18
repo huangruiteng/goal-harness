@@ -35,6 +35,7 @@ SELECTED_TODO_AGENT_FIELDS = (
     "selected_by",
     "confidence",
     "claim_required_before_work",
+    "selection_binding",
 )
 WORK_LANE_SELECTED_TODO_ITEM_FIELDS = (
     "monitor_due_items",

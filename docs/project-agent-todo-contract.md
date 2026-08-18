@@ -642,6 +642,9 @@ loopx todo complete \
 The version check is optional; the idempotency key is required while the lease
 is active. A missing or mismatched key fails before Todo or successor state is
 written, including when two host processes intentionally share one `agent_id`.
+`todo supersede` moves the same todo to done and crosses the same fence with
+the same two options; a leased todo cannot be retired keylessly through either
+verb.
 
 ## Parsed Schema
 

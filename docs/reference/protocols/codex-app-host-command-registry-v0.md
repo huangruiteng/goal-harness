@@ -153,10 +153,12 @@ After parsing, the host hands the agent or CLI a compact packet:
 }
 ```
 
-Codex App CLI reads `CODEX_THREAD_ID` when `--thread-id` is omitted. A stable
-thread ID with no binding is a new host session and defaults to fresh agent
-registration. Selecting an existing lane is an explicit takeover choice. The
-selected fresh or existing identity must be persisted with
+Codex App CLI reads `CODEX_THREAD_ID` when `--thread-id` is omitted, including
+`codex-app-ssh` remote sessions. A stable thread ID with no binding returns an
+identity gate that requires selecting an existing lane when registered agents
+exist; fresh registration is the default only for a goal with no registered
+lanes or explicit `--new-peer`. Selecting an existing lane is an explicit
+takeover choice. The selected fresh or existing identity must be persisted with
 `loopx bind-agent-thread --execute`, and its source/global readback must verify
 before Todo writeback. Later `/loopx` calls in the same
 `(host_surface, goal_id, thread_id)` reuse that agent ID and carry it through

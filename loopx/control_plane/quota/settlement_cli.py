@@ -11,6 +11,7 @@ from ..todos.contract import (
     normalize_todo_replan_obligation_id,
 )
 from .effect_program import SettlementIdentity
+from .error_codes import HeartbeatReceiptIdentityConflictError
 from .heartbeat_receipt import (
     heartbeat_receipt_view,
     upgrade_identityless_heartbeat_receipt,
@@ -41,9 +42,7 @@ def reconcile_existing_heartbeat_receipt(
     receipt_status = "replayed"
     receipt_appended = False
     rollout_todo_id = quota_rollout_todo_id(payload, args)
-    rollout_replan_obligation_id = quota_rollout_replan_obligation_id(
-        payload, args
-    )
+    rollout_replan_obligation_id = quota_rollout_replan_obligation_id(payload, args)
     if rollout_todo_id or rollout_replan_obligation_id:
         existing_details_value = receipt.get("details")
         existing_details = (
@@ -66,15 +65,31 @@ def reconcile_existing_heartbeat_receipt(
             replan_obligation_id=rollout_replan_obligation_id,
         ).effect_id
         if (existing_todo_id or existing_replan_obligation_id) and existing_effect_id:
+            requested_todo_id = normalize_todo_id(args.todo_id)
+            if requested_todo_id and requested_todo_id != existing_todo_id:
+                raise HeartbeatReceiptIdentityConflictError(
+                    "heartbeat receipt settlement identity conflicts with the "
+                    "current selected Todo: explicitly requested Todo differs"
+                )
+            requested_replan_obligation_id = normalize_todo_replan_obligation_id(
+                getattr(args, "replan_obligation_id", None)
+            )
+            if (
+                requested_replan_obligation_id
+                and requested_replan_obligation_id != existing_replan_obligation_id
+            ):
+                raise HeartbeatReceiptIdentityConflictError(
+                    "heartbeat receipt settlement identity conflicts with the "
+                    "explicitly requested autonomous replan obligation"
+                )
             if (
                 existing_todo_id != rollout_todo_id
-                or existing_replan_obligation_id
-                != rollout_replan_obligation_id
+                or existing_replan_obligation_id != rollout_replan_obligation_id
                 or existing_effect_id != expected_effect_id
             ):
-                raise ValueError(
+                raise HeartbeatReceiptIdentityConflictError(
                     "heartbeat receipt settlement identity conflicts with the "
-                    "current selected Todo"
+                    "current settlement binding"
                 )
         else:
             rollout_details = quota_rollout_details(
@@ -120,14 +135,12 @@ def reconcile_existing_heartbeat_receipt_for_turn(
 ) -> tuple[dict[str, object], str, bool, str, bool]:
     """Reconcile an existing receipt and report whether the turn is receipt-ready."""
 
-    receipt, status, appended, stall_observation = (
-        reconcile_existing_heartbeat_receipt(
-            payload,
-            args,
-            runtime_root=runtime_root,
-            turn_instance_id=turn_instance_id,
-            existing=existing,
-        )
+    receipt, status, appended, stall_observation = reconcile_existing_heartbeat_receipt(
+        payload,
+        args,
+        runtime_root=runtime_root,
+        turn_instance_id=turn_instance_id,
+        existing=existing,
     )
     return receipt, status, appended, stall_observation, True
 
@@ -213,8 +226,7 @@ def quota_rollout_settlement_binding(
     )
     if planned_todo_id and planned_replan_obligation_id:
         raise ValueError(
-            "quota settlement plan cannot bind both todo_id and "
-            "replan_obligation_id"
+            "quota settlement plan cannot bind both todo_id and replan_obligation_id"
         )
     if planned_todo_id or planned_replan_obligation_id:
         return planned_todo_id, planned_replan_obligation_id
@@ -224,9 +236,8 @@ def quota_rollout_settlement_binding(
         if isinstance(payload.get("selected_todo"), Mapping)
         else {}
     )
-    selected_todo_id = (
-        normalize_todo_id(payload.get("todo_id"))
-        or normalize_todo_id(selected_todo.get("todo_id"))
+    selected_todo_id = normalize_todo_id(payload.get("todo_id")) or normalize_todo_id(
+        selected_todo.get("todo_id")
     )
     if selected_todo_id:
         return selected_todo_id, None
@@ -236,9 +247,7 @@ def quota_rollout_settlement_binding(
         if isinstance(payload.get("replan_action_packet"), Mapping)
         else {}
     )
-    return None, normalize_todo_replan_obligation_id(
-        replan_packet.get("obligation_id")
-    )
+    return None, normalize_todo_replan_obligation_id(replan_packet.get("obligation_id"))
 
 
 def quota_rollout_replan_obligation_id(
@@ -247,6 +256,8 @@ def quota_rollout_replan_obligation_id(
 ) -> str | None:
     _, replan_obligation_id = quota_rollout_settlement_binding(payload, args)
     return replan_obligation_id
+
+
 def quota_rollout_details(
     payload: Mapping[str, object],
     args: argparse.Namespace,
@@ -326,9 +337,7 @@ def attach_spend_settlement_result(
                 identity,
             )
         )
-    payload["settlement_result"] = settlement_result_payload(
-        settlement_result
-    )
+    payload["settlement_result"] = settlement_result_payload(settlement_result)
     if settlement_result.failure is not None:
         payload["ok"] = False
         payload["receipt_repair_required"] = True

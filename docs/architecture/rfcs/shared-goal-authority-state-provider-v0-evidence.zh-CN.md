@@ -35,19 +35,27 @@
 python3 examples/nokv-shadow-provider/probes.py contract
 ```
 
-命令退出码为 `0`，并逐项报告以下六个通过的合同探针：
+命令退出码为 `0`，并逐项报告以下九个通过的合同探针：
 
 - `contract.bootstrap_and_preconditions`；
 - `contract.a_success_b_advance_replay_a`；
 - `contract.operation_identity`；
 - `contract.competing_claims`；
 - `contract.crash_windows_and_ambiguity`；
-- `contract.version_domains_and_retain_all`。
+- `contract.version_domains_and_retain_all`；
+- `contract.nokv_adapter_exception_mapping`（NoKV adapter 把 0.11.0 SDK 的
+  `FileNotFoundError` / `FileExistsError` / `RuntimeError` 全部映射为类型化
+  provider 结果，不向 authority 泄露异常）；
+- `contract.durable_completion_projection`；
+- `contract.durable_completion_fail_closed`（含显式 `completion_continuation`
+  缺失或矛盾时的 fail-closed）。
 
 最终机器判定为
-`{"ok":true,"probe":"contract.summary","probes":6}`。这是使用确定性
+`{"ok":true,"probe":"contract.summary","probes":9}`。这是使用确定性
 provider fake 验证 authority/provider 合同的结果；它没有启动或验证真实
-NoKV 服务，不能替代 live-stack 证据。
+NoKV 服务，不能替代 live-stack 证据。该命令由
+`tests/test_nokv_shadow_provider_probes.py` 作为常规 pytest 门槛守住，
+LoopX 生命周期合同的变化会在这里立刻显形，而不是让证据静默变红。
 
 这里的“逐字段相同”至少覆盖原始 `accepted_authority_revision`、
 `accepted_todo_revision`、`lease_id`、`lease_epoch`、`applied_at` 与

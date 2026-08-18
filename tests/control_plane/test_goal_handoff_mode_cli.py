@@ -458,3 +458,65 @@ def test_cli_task_lease_acquire_in_soft_mode_maps_typed_error_code(
     assert payload["ok"] is False
     assert payload["error_code"] == "handoff_mode_forbids_lease"
     assert payload["handoff_mode"] == HANDOFF_MODE_SOFT_CLAIM
+
+
+# ---------------------------------------------------------------------------
+# (f) supersede crosses the same lease fence as complete through the CLI.
+# ---------------------------------------------------------------------------
+
+
+def test_todo_supersede_cli_requires_key_in_hard_lease_and_accepts_it(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    registry, _state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    acquire_task_lease(
+        registry_path=registry,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        owner=AGENT_A,
+        idempotency_key="turn-lease-1",
+        ttl_seconds=600,
+    )
+
+    exit_code, payload = _run_cli(
+        capsys,
+        registry,
+        "todo",
+        "supersede",
+        "--goal-id",
+        GOAL_ID,
+        "--todo-id",
+        todo["todo_id"],
+        "--agent-id",
+        AGENT_A,
+        "--reason",
+        "keyless supersede must be fenced",
+    )
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["error_code"] == "lease_fence_required"
+
+    exit_code, payload = _run_cli(
+        capsys,
+        registry,
+        "todo",
+        "supersede",
+        "--goal-id",
+        GOAL_ID,
+        "--todo-id",
+        todo["todo_id"],
+        "--agent-id",
+        AGENT_A,
+        "--reason",
+        "keyed supersede",
+        "--task-lease-idempotency-key",
+        "turn-lease-1",
+    )
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert payload["task_lease_fence"]["execution_instance_verified"] is True
+    assert payload["task_lease_fence"]["released"] is True

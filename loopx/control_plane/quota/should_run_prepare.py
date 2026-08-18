@@ -105,6 +105,7 @@ class _QuotaDecisionPreparation:
     agent_lane_recommendation: Any
     effective_available_capabilities: Any
     runtime_available_capabilities: Any
+    receipt_bound_todo_id: str | None
     user_todo_summary: dict[str, Any] | None
     agent_todo_summary: dict[str, Any] | None
     agent_scoped_user_todo_override: dict[str, Any] | None
@@ -363,6 +364,7 @@ def _prepare_quota_should_run_item(
     goal_health_ok: bool,
     item: dict[str, Any],
     health_items: list[Any],
+    receipt_bound_todo_id: str | None,
 ) -> _QuotaDecisionPreparation:
     quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
     state = str(quota.get("state") or "unknown")
@@ -643,6 +645,7 @@ def _prepare_quota_should_run_item(
         agent_lane_recommendation=agent_lane_recommendation,
         effective_available_capabilities=effective_available_capabilities,
         runtime_available_capabilities=available_capabilities,
+        receipt_bound_todo_id=receipt_bound_todo_id,
         user_todo_summary=user_todo_summary,
         agent_todo_summary=agent_todo_summary,
         agent_scoped_user_todo_override=agent_scoped_user_todo_override,

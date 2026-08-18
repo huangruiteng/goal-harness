@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from loopx import contract
 from loopx.contract import scan_public_boundary
 
 
@@ -73,3 +74,23 @@ def test_a_literal_on_a_line_with_references_still_fails(tmp_path: Path) -> None
 
     assert len(payload["hits"]) == 1
     assert payload["credential_reference_hits"] == []
+
+
+def test_blocked_private_doc_url_does_not_probe_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "private-link.md").write_text(
+        "https://docs." + "internal/example\n",
+        encoding="utf-8",
+    )
+
+    def fail_git_probe(_: Path) -> dict[str, object]:
+        pytest.fail("blocked private document URLs do not need git classification")
+
+    monkeypatch.setattr(contract, "_git_probe", fail_git_probe)
+
+    payload = scan_public_boundary([tmp_path])
+
+    assert payload["ok"] is False
+    assert payload["hits"] == ["private-link.md:1: private_doc_url"]

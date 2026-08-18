@@ -91,15 +91,28 @@ lease, gate, quota, or scheduling decisions.
 
 ## Validation boundary
 
-A static compatibility audit is pinned to NoKV
-[`90883d13539e31185f0d78131989fb51912dbd7e`](https://github.com/NoKV-Lab/NoKV/commit/90883d13539e31185f0d78131989fb51912dbd7e).
-At that baseline, the Python `publish_bytes` surface accepts
+The provider mapping is pinned to NoKV
+[`3d75d96965`](https://github.com/NoKV-Lab/NoKV/commit/3d75d96965) (the
+0.11.0 line). At that baseline, the Python `publish_bytes` surface accepts
 `expected_generation` for create-only or replacement CAS and exposes optional
-publication `operation_id` and `artifact_revision_id` inputs. This establishes
-that the provider mapping has a source-level API seam; it does not prove its
-live behavior. The NoKV Python SDK and required services were not available in
-the validation environment, so this candidate has no live NoKV execution
-result.
+publication `operation_id` and `artifact_revision_id` inputs; `read` and
+`stat` return the path `generation` the adapter treats as
+`provider_generation`. Since NoKV 0.11.0 the SDK raises `FileNotFoundError`
+for a missing path and `FileExistsError` for a create-only collision (earlier
+SDKs raised `RuntimeError` for both); the adapter classifies both generations
+by exception class first and by message token second, and
+`contract.nokv_adapter_exception_mapping` pins that classification offline
+with a fake client that raises the 0.11.0 exception classes.
+
+The mapping was exercised once by hand against a live NoKV stack at that
+pin (etcd, an S3-compatible object store, `nokv serve`, and `nokv-python`
+built from the same commit): the adapter verbs and the Section 10 checks
+1 to 9 passed with two independent client handles. That run is recorded
+here as evidence for the mapping only; it is not part of the merge gate,
+and it does not qualify restart, recovery, HA, or performance. SDKs built
+before NoKV 0.11.0 cannot decode a 0.11.0 control-plane routing record, so
+the earlier `90883d13539e31185f0d78131989fb51912dbd7e` audit baseline is no
+longer a usable pin.
 
 Run the merge-relevant deterministic regression from the repository root with:
 
@@ -124,27 +137,33 @@ It must prove all of the following:
 - pre/post-CAS faults and ambiguous results recover success only from a stored
   receipt or a later successful CAS after target revalidation; same-generation
   receipt absence fails unproved;
+- the NoKV adapter maps every SDK outcome it can observe (missing head,
+  create-only collision, stale generation, pre-publish failure) onto the typed
+  provider verbs and never leaks an SDK exception class into the authority;
 - a hand-evolved post-completion head read back through the provider byte-CAS
   projects to the same typed continuation outcomes (`successor | no_followup |
   active_goal`) as the LoopX durable-completion seam, failing closed on a
-  contradictory record (both `no_followup` and successors) and on a dangling
-  declared successor, with replay-stable projections.
+  contradictory record (both `no_followup` and successors), on a dangling
+  declared successor, on an explicit `completion_continuation` that
+  contradicts the recorded fields, and on a done record that omits its
+  explicit continuation, with replay-stable projections.
 
 The durable-completion probes are the read-side comparison registered by the
 RFC's later runtime qualification slice. They do not implement or qualify the
 atomic `complete_todo_with_successor` write side.
 
-The eight current result tags are
+The nine current result tags are
 `contract.bootstrap_and_preconditions`,
 `contract.a_success_b_advance_replay_a`, `contract.operation_identity`,
 `contract.competing_claims`, `contract.crash_windows_and_ambiguity`,
 `contract.version_domains_and_retain_all`,
+`contract.nokv_adapter_exception_mapping`,
 `contract.durable_completion_projection`, and
 `contract.durable_completion_fail_closed`.
 
-The probe has no live-stack mode in this candidate. A future live exercise
-would require etcd, an S3-compatible object store, `nokv serve`, and the NoKV
-Python SDK, plus separately reviewed restart and recovery assertions. An
+The probe has no live-stack mode in this candidate. A repeatable live
+exercise would require etcd, an S3-compatible object store, `nokv serve`, and
+the NoKV Python SDK, plus separately reviewed restart and recovery assertions. An
 earlier run against the superseded last-envelope adapter is not evidence that
 the revised receipt contract passes. Do not reuse its latency, restart, or
 promotion conclusions for this implementation.

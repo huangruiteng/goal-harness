@@ -8,6 +8,13 @@ from .artifacts import (
     filter_public_benchmark_artifact_paths,
     materialize_public_benchmark_artifacts,
 )
+from .container_binding import (
+    BENCHMARK_EXACT_CONTAINER_BINDING_SCHEMA_VERSION,
+    DockerContainerBinding,
+    DockerContainerBindingError,
+    compact_docker_container_binding_receipt,
+    select_exact_docker_container,
+)
 from .integrity import (
     BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION,
     BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION,
@@ -70,6 +77,7 @@ from .run_permissions import (
 
 __all__ = [
     "BENCHMARK_CANDIDATE_SOURCE_BOUNDARY_SCHEMA_VERSION",
+    "BENCHMARK_EXACT_CONTAINER_BINDING_SCHEMA_VERSION",
     "BENCHMARK_INTEGRITY_POLICY_SCHEMA_VERSION",
     "BENCHMARK_INTEGRITY_QUALIFICATION_SCHEMA_VERSION",
     "BENCHMARK_RUNTIME_INTEGRITY_ATTESTATION_SCHEMA_VERSION",
@@ -82,6 +90,8 @@ __all__ = [
     "REQUIRED_RUNTIME_ATTESTATIONS",
     "RUN_PERMISSION_POLICY_SCHEMA_VERSION",
     "RUN_PERMISSION_QUOTA_PROJECTION_SCHEMA_VERSION",
+    "DockerContainerBinding",
+    "DockerContainerBindingError",
     "NativeCodexGoalPrompt",
     "NativeCodexIsolationEnvelope",
     "NativeCodexIsolationError",
@@ -102,6 +112,7 @@ __all__ = [
     "build_run_permission_policy",
     "classify_benchmark_artifact_path",
     "classify_benchmark_candidate_source_path",
+    "compact_docker_container_binding_receipt",
     "compact_native_codex_goal_prompt_receipt",
     "compact_native_codex_profile_receipt",
     "compact_native_goal_receipt",
@@ -121,6 +132,7 @@ __all__ = [
     "run_native_goal_process_until_terminal",
     "run_native_goal_turn",
     "run_native_goal_until_terminal",
+    "select_exact_docker_container",
     "start_native_goal_turn",
     "validate_run_permission_policy",
     "wait_native_goal_turn",

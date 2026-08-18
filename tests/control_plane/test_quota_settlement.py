@@ -15,6 +15,9 @@ from loopx.control_plane.effect_program import (
     SettlementStepKind,
 )
 from loopx.control_plane.quota import effect_program as quota_effect_program
+from loopx.control_plane.quota.heartbeat_receipt import (
+    heartbeat_receipt_settlement_todo_id,
+)
 from loopx.control_plane.quota.settlement import (
     build_codex_app_settlement_plan,
     require_settlement_terminal_closeout,
@@ -50,7 +53,10 @@ def _receipt(step: SettlementStepKind, marker: str) -> SettlementReceipt:
 
 
 def test_quota_reexports_the_core_settlement_algebra() -> None:
-    assert quota_effect_program.SettlementIdentity is core_effect_program.SettlementIdentity
+    assert (
+        quota_effect_program.SettlementIdentity
+        is core_effect_program.SettlementIdentity
+    )
     assert quota_effect_program.SettlementPlan is core_effect_program.SettlementPlan
     assert quota_effect_program.SettlementResult is core_effect_program.SettlementResult
 
@@ -64,6 +70,17 @@ def test_settlement_identity_rejects_dual_binding_before_projection() -> None:
             turn_instance_id=TURN_ID,
             replan_obligation_id="replan-0000000000000001",
         )
+
+
+def test_replan_bound_heartbeat_receipt_is_not_projected_as_a_todo() -> None:
+    event = {
+        "goal_id": GOAL_ID,
+        "agent_id": AGENT_ID,
+        "run_id": TURN_ID,
+        "details": {"replan_obligation_id": "replan-0000000000000001"},
+    }
+
+    assert heartbeat_receipt_settlement_todo_id(event) is None
 
 
 def test_selected_todo_suppresses_stale_replan_packet_binding() -> None:

@@ -65,7 +65,16 @@ def _pr_snapshot(item: Mapping[str, Any]) -> dict[str, Any]:
         "checks": _check_snapshot(item.get("checks")),
         "is_draft": item.get("is_draft") is True,
         "merge_state": _upper(item.get("merge_state")),
+        "review_ready_at": item.get("review_ready_at"),
+        "author_owned": item.get("author_owned") is True,
+        "review_conclusion_status": str(
+            (item.get("review_conclusion") or {}).get("status")
+            if isinstance(item.get("review_conclusion"), Mapping)
+            else ""
+        ),
     }
+    if "review_action_kind" in item:
+        snapshot["review_action_kind"] = item.get("review_action_kind")
     return snapshot | {"fingerprint": _fingerprint(snapshot)}
 
 
@@ -166,6 +175,20 @@ def _candidate_action(item: Mapping[str, Any]) -> tuple[str, str] | None:
         r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", head_oid
     ):
         return None
+    if "review_action_kind" in item:
+        action_kind = str(item.get("review_action_kind") or "").strip()
+        if not action_kind:
+            return None
+        if action_kind not in {
+            "rereview_pull_request_exact_head",
+            "qualify_pull_request_merge_readiness",
+            "review_pull_request_exact_head",
+        }:
+            return None
+        return (
+            action_kind,
+            "P0" if action_kind == "rereview_pull_request_exact_head" else "P1",
+        )
     decision = _upper(item.get("review_decision"))
     if decision == "CHANGES_REQUESTED":
         return "rereview_pull_request_exact_head", "P0"
@@ -293,11 +316,7 @@ def build_pull_request_review_queue_observation(
         key=lambda item: (int(item.split("@", 1)[0]), item),
     )
     handled_set = set(handled)
-    projected_set = {
-        key
-        for key in projected_set
-        if key not in handled_set
-    }
+    projected_set = {key for key in projected_set if key not in handled_set}
     projected_sorted = sorted(
         projected_set,
         key=lambda item: (int(item.split("@", 1)[0]), item),
@@ -343,8 +362,8 @@ def build_pull_request_review_queue_observation(
             "projected_candidate_exact_heads": projected_sorted,
             "projected_candidate_count": len(projected_sorted),
             "selection_policy": (
-                "rotate through unprojected unhandled PRs in the existing "
-                "pr-review sequence; exact head required"
+                "one fast-feedback selection for a new head after REQUEST_CHANGES; "
+                "otherwise rotate through the age-fair unprojected backlog; exact head required"
             ),
             "write_authority_granted": False,
             "external_write_performed": False,
@@ -390,7 +409,17 @@ def build_pull_request_review_queue_observation(
     )
 
     queue_items = [
-        {key: item[key] for key in ("number", "fingerprint")}
+        {
+            key: item[key]
+            for key in (
+                "number",
+                "fingerprint",
+                "head_oid",
+                "review_decision",
+                "review_action_kind",
+            )
+            if key in item
+        }
         for item in sorted(ranked_items, key=lambda row: str(row.get("number")))
     ]
     queue_fingerprint = _fingerprint(
@@ -420,12 +449,31 @@ def build_pull_request_review_queue_observation(
     candidate_selection_reason = None
     if observation_state == "material_transition":
         for item in changed:
+            prior = prior_items.get(str(item.get("number")), {})
+            action = _candidate_action(item)
+            became_approved = (
+                action is not None
+                and action[0] == "qualify_pull_request_merge_readiness"
+                and _upper(prior.get("review_decision")) != "APPROVED"
+            )
+            is_author_response = (
+                bool(prior)
+                and _upper(prior.get("review_decision")) == "CHANGES_REQUESTED"
+                and str(prior.get("head_oid") or "").strip().lower()
+                != str(item.get("head_oid") or "").strip().lower()
+            )
+            if not is_author_response and not became_approved:
+                continue
             exact_head_key = _exact_head_key(item.get("number"), item.get("head_oid"))
             if exact_head_key in handled_set:
                 continue
             candidate = _candidate_packet(item, repository=normalized_repository)
             if candidate is not None:
-                candidate_selection_reason = "unhandled_material_transition"
+                candidate_selection_reason = (
+                    "author_response_fast_feedback"
+                    if is_author_response
+                    else "approval_merge_readiness_transition"
+                )
                 break
     if candidate is None:
         for item in ranked_items:
@@ -434,7 +482,7 @@ def build_pull_request_review_queue_observation(
                 continue
             candidate = _candidate_packet(item, repository=normalized_repository)
             if candidate is not None:
-                candidate_selection_reason = "unhandled_backlog_progression"
+                candidate_selection_reason = "age_fair_backlog_progression"
                 break
     candidate_exact_head = (
         _exact_head_key(candidate.get("number"), candidate.get("head_oid"))
@@ -489,8 +537,8 @@ def build_pull_request_review_queue_observation(
         "projected_candidate_exact_heads": projected_sorted,
         "projected_candidate_count": len(projected_sorted),
         "selection_policy": (
-            "rotate through unprojected unhandled PRs in the existing "
-            "pr-review sequence; exact head required"
+            "one fast-feedback selection for a new head after REQUEST_CHANGES; "
+            "otherwise rotate through the age-fair unprojected backlog; exact head required"
         ),
         "write_authority_granted": False,
         "external_write_performed": False,

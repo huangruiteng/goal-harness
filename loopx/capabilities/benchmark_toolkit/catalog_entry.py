@@ -136,6 +136,11 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
         },
         {
+            "schema_version": "benchmark_exact_container_binding_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.container_binding",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
             "schema_version": "run_permission_policy_v0",
             "module": "loopx.capabilities.benchmark_toolkit.run_permissions",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
@@ -152,6 +157,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         "The toolkit never grants runner, Docker, model, upload, submission, or publication authority; each effect remains separately gated.",
         "Raw trajectories are private local inputs to integrity qualification and are never copied into receipts, ledgers, docs, or PR artifacts.",
         "A clean trajectory scan is not isolation proof: runner-owned permission and verifier-order attestations are mandatory and fail closed when absent.",
+        "Concurrent Docker runs must bind runtime evidence to one exact job-owned container; image-only discovery is not sufficient.",
         "Integrity qualification establishes countability eligibility only; an independent official result and matched experiment contract are still required.",
         "Post-run analyst access never widens the solving agent's evidence boundary or grants feedback reuse in another scored run.",
         "Benchmark-family runners remain outside the active capability; the toolkit owns only provider-neutral permission, artifact, integrity, and analyst-brief policy.",

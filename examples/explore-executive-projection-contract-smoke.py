@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATHS = (
     ROOT / "skills" / "loopx-project" / "SKILL.md",
-    ROOT / "docs" / "capabilities" / "explore" / "README.md",
+    ROOT / "loopx" / "capabilities" / "explore" / "README.md",
 )
 
 REQUIRED_FRAGMENTS = (

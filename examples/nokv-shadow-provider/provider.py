@@ -162,14 +162,22 @@ class ProviderProtocolError(RuntimeError):
 
 
 class NoKVCoordinationProvider:
-    """Map one goal's deterministic head bytes to a NoKV generation CAS."""
+    """Map one goal's deterministic head bytes to a NoKV generation CAS.
 
-    _TRANSIENT_READ_ERRORS = (
-        "exceeds the artifact logical size",
-        "fence changed",
-        "retry budget",
-        "read fence",
-    )
+    The NoKV Python SDK raises ``FileNotFoundError`` for a missing path and
+    ``FileExistsError`` for a create-only collision since NoKV 0.11.0
+    (``nokv-python`` maps the ``NotFound`` / ``AlreadyExists`` RPC codes to
+    those ``OSError`` subclasses); every other RPC, transport, or publication
+    failure is a ``RuntimeError``. Earlier SDKs raised ``RuntimeError`` for
+    all of them. The adapter classifies by exception class first and by the
+    documented not-found message tokens second, so both generations of the
+    SDK map onto the same typed provider verbs. It never treats human error
+    text as commit proof: a publish that raises is ``ambiguous`` and the
+    authority reloads its atomically stored receipt index.
+    """
+
+    _CLIENT_ERRORS = (RuntimeError, OSError)
+    _NOT_FOUND_TOKENS = ("not found", "does not exist", "no such path")
 
     def __init__(self, client, workbench: str, goal_id: str):
         self.client = client
@@ -177,40 +185,30 @@ class NoKVCoordinationProvider:
         self.goal_id = goal_id
         self.head_path = f"goals/{goal_id}/coordination-head.json"
 
-    @staticmethod
-    def _not_found(exc: RuntimeError) -> bool:
+    @classmethod
+    def _not_found(cls, exc: BaseException) -> bool:
+        if isinstance(exc, FileNotFoundError):
+            return True
         message = str(exc).lower()
-        return any(token in message for token in (
-            "not found",
-            "does not exist",
-            "no such path",
-        ))
+        return any(token in message for token in cls._NOT_FOUND_TOKENS)
 
-    def load(self, retries: int = 10):
+    def load(self):
         """Return ``(aggregate | None, provider_generation)``."""
-        last_error = None
-        for attempt in range(retries):
-            try:
-                result = self.client.read(self.workbench, self.head_path)
-            except RuntimeError as exc:
-                if self._not_found(exc):
-                    return None, 0
-                message = str(exc).lower()
-                if any(token in message for token in self._TRANSIENT_READ_ERRORS):
-                    last_error = exc
-                    time.sleep(0.01 * (attempt + 1))
-                    continue
-                raise
-            aggregate = json.loads(bytes(result["bytes"]))
-            if not isinstance(aggregate, dict):
-                raise ProviderProtocolError("coordination head must be an object")
-            return aggregate, int(result["metadata"]["generation"])
-        raise last_error or RuntimeError("NoKV read retry budget exhausted")
+        try:
+            result = self.client.read(self.workbench, self.head_path)
+        except self._CLIENT_ERRORS as exc:
+            if self._not_found(exc):
+                return None, 0
+            raise
+        aggregate = json.loads(bytes(result["bytes"]))
+        if not isinstance(aggregate, dict):
+            raise ProviderProtocolError("coordination head must be an object")
+        return aggregate, int(result["metadata"]["generation"])
 
     def _generation(self) -> int:
         try:
             metadata = self.client.stat(self.workbench, self.head_path)
-        except RuntimeError as exc:
+        except self._CLIENT_ERRORS as exc:
             if self._not_found(exc):
                 return 0
             raise
@@ -224,7 +222,7 @@ class NoKVCoordinationProvider:
         """Serialize and conditionally store an opaque aggregate."""
         try:
             current = self._generation()
-        except RuntimeError as exc:
+        except self._CLIENT_ERRORS as exc:
             # No publish was attempted, so this provider failure proves no write.
             return {"result": "failed", "error": str(exc)}
         if current != expected_provider_generation:
@@ -242,9 +240,11 @@ class NoKVCoordinationProvider:
                 operation_id=uuid.uuid4().hex,
                 artifact_revision_id=uuid.uuid4().hex,
             )
-        except RuntimeError:
-            # Do not parse human error text as commit proof.  The authority
-            # reloads and trusts only its atomically stored receipt index.
+        except self._CLIENT_ERRORS:
+            # Do not parse human error text as commit proof: a create-only
+            # collision (``FileExistsError``), a generation mismatch, or a lost
+            # response all reload; the authority trusts only its atomically
+            # stored receipt index.
             return {"result": "ambiguous"}
         return {
             "result": "applied",

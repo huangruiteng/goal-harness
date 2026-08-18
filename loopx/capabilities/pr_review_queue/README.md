@@ -11,8 +11,9 @@ resolved by `gh`, or the explicit `--repo owner/repo` target. LoopX's own
 repository may be used for dogfood and public fixtures, but the command is not
 LoopX-repo-specific.
 
-The command is read-only. It does not approve reviews, post PR comments, merge,
-push, spend LoopX quota, or mark LoopX todos complete.
+The default command is read-only. An explicit `--observation-state-file`
+writes only its local public-safe checkpoint. Neither mode approves reviews,
+posts PR comments, merges, pushes, spends LoopX quota, or completes LoopX todos.
 
 The built-in `pull-request-review` capability adds an optional autonomous
 observation to this same command. It reuses the existing GitHub scan and
@@ -48,16 +49,19 @@ templates enter the model context:
 loopx --format json pr-review --state all [--repo owner/repo] [--since ISO]
 ```
 
-For an autonomous maintainer monitor, request the complete open queue and the
-read-only observation packet:
+For an autonomous maintainer monitor, request the complete open queue while
+persisting its compact cursor in an ignored local checkpoint:
 
 ```bash
 loopx --format json pr-review --repo owner/repo --state open \
-  --autonomous-observation
+  --autonomous-observation \
+  --observation-state-file .local/pr-review-monitor.json
 ```
 
-On a later poll, pass either the prior `autonomous_review` object or the full
-prior PR-review packet:
+The same command reuses that checkpoint on later Codex tasks. Its atomic local
+write grants no GitHub, Todo, push, or merge authority.
+`--previous-observation-json` remains available for stateless callers and is
+mutually exclusive with `--observation-state-file`:
 
 ```bash
 loopx --format json pr-review --repo owner/repo --state open \
@@ -72,7 +76,7 @@ handled cursor:
 ```bash
 loopx --format json pr-review --repo owner/repo --state open \
   --autonomous-observation \
-  --previous-observation-json previous.json \
+  --observation-state-file .local/pr-review-monitor.json \
   --handled-exact-head 2768@0123456789abcdef0123456789abcdef01234567
 ```
 
@@ -92,8 +96,8 @@ the cursor as evidence that a review happened.
 
 `projected_candidate_exact_heads` persists every candidate that has been emitted
 but not yet completed. An unchanged poll skips those projected exact heads and
-selects the next unprojected, unhandled PR in the existing review sequence, so
-the monitor keeps rotating through the backlog instead of waiting on one PR.
+selects the next unprojected, unhandled PR in the age-fair review sequence, so
+the monitor keeps rotating instead of waiting on one PR.
 When every actionable PR has already been projected, `candidate` is `None` and
 `pending_candidate_exact_head` remains the last pending cursor. A material
 transition on an already projected exact head still re-selects that head.
@@ -118,14 +122,18 @@ states:
   rotating. An unhandled candidate remains in `projected_candidate_exact_heads`
   until the caller supplies its completion cursor.
 - `material_transition`: a complete observation changed an exact head, review
-  decision, check state, draft state, mergeability, or open-queue membership.
+  conclusion, check state, draft state, mergeability, or open-queue membership.
+  A new head following `REQUEST_CHANGES` may use one fast-feedback slot;
+  check-only activity does not preempt older review-ready work.
 
 The repository-scoped fingerprint contains only compact public PR metadata.
-Persisted `items` carry only PR number and item fingerprint, so the autonomous
-packet does not duplicate the full review queue. The capability selects at
-most one unhandled, non-draft open PR in the existing `pr-review` sequence:
-changed PRs first, then an unchanged poll rotates to the next unprojected
-candidate. Projected-but-unhandled candidates are skipped until they are
+Persisted `items` carry the PR number, fingerprint, exact head, decision, and
+next action; they never carry review bodies. One community response head after
+`REQUEST_CHANGES` may take the fast-feedback lane, then community work is
+oldest-first by the current head's `review_ready_at`. Author-owned fallback
+reviews follow community work, with 24-hour and 48-hour aging lanes preventing
+starvation. `updatedAt` does not define readiness because comments and checks
+must not make old code look new. Projected candidates remain skipped until
 handled or their exact head materially changes.
 It emits a
 `pull_request_review_todo_preview_v0` bound to its exact head. The preview may
@@ -208,10 +216,20 @@ Implementations may read compact public PR surfaces:
 - PR body summary;
 - changed-file list and diff scale;
 - status-check rollup;
-- merge-state metadata.
+- merge-state metadata;
+- current-head commit timestamps and review metadata used to derive
+  `review_ready_at` and validate a standalone exact-head conclusion.
 
-Commit headlines may be used as optional single-PR deep-review evidence, but
-the default window review should not require fetching them for every PR.
+Raw review bodies are used only for the format/exact-head decision and are not
+returned or persisted. A valid latest conclusion names the exact head, contains
+all five Chinese sections plus a line-starting `English verdict: APPROVE` or
+`English verdict: REQUEST_CHANGES`, and keeps that verdict aligned with formal
+`APPROVED`/`CHANGES_REQUESTED` state. Because GitHub blocks every self-review
+state transition, author-owned conclusions use `COMMENTED` plus one exact title:
+`Approval conclusion (author-owned PR; GitHub blocks formal self-approval)` or
+`Request changes conclusion (author-owned PR; GitHub blocks formal self-review)`.
+The compact result is versioned as `pull_request_review_conclusion_v0` and
+reports typed invalid-reason codes.
 
 They must not include raw logs, private connector payloads, credentials, local
 absolute paths, private source bodies, or hidden CI artifacts.
@@ -478,6 +496,11 @@ A first implementation is acceptable when:
   long answer;
 - live packets expose and recheck `headRefOid` so a review verdict is bound to
   the remote revision actually inspected;
+- autonomous packets order community work by current-head `review_ready_at`,
+  bound response preemption to one slot, age author-owned fallbacks, and ignore
+  check-only activity for priority;
+- `--observation-state-file` atomically carries observation and handled cursors
+  across Codex tasks without returning a local path or granting external writes;
 - template sections must leave `content` empty so agentloop reads the real PR
   before writing the review;
 - `metadata_risk_hint` must be repository-generic and must not special-case

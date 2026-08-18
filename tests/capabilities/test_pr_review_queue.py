@@ -88,7 +88,10 @@ def test_initial_complete_observation_selects_one_exact_head_candidate() -> None
     assert result["candidate_count"] == 1
     assert result["repository"] == "owner/repo"
     assert result["queue_size"] == 2
-    assert all(set(item) == {"number", "fingerprint"} for item in result["items"])
+    assert all(
+        set(item) == {"number", "fingerprint", "head_oid", "review_decision"}
+        for item in result["items"]
+    )
     candidate = result["candidate"]
     assert candidate["number"] == 1
     assert candidate["head_oid"] == f"{1:040d}"
@@ -160,7 +163,7 @@ def test_handled_exact_head_advances_unchanged_backlog() -> None:
     assert repeated["changed_pr_numbers"] == []
     assert repeated["handled_exact_heads"] == handled
     assert repeated["candidate"]["number"] == 2
-    assert repeated["candidate_selection_reason"] == "unhandled_backlog_progression"
+    assert repeated["candidate_selection_reason"] == "age_fair_backlog_progression"
 
     still_pending = _observe([_pr(1), _pr(2)], previous=repeated)
     assert still_pending["observation_state"] == "observed_unchanged"
@@ -179,7 +182,7 @@ def test_handled_changed_pr_does_not_strand_unchanged_backlog() -> None:
     assert result["observation_state"] == "material_transition"
     assert result["changed_pr_numbers"] == [1]
     assert result["candidate"]["number"] == 2
-    assert result["candidate_selection_reason"] == "unhandled_backlog_progression"
+    assert result["candidate_selection_reason"] == "age_fair_backlog_progression"
 
 
 def test_new_head_reopens_a_previously_handled_pr() -> None:
@@ -192,7 +195,7 @@ def test_new_head_reopens_a_previously_handled_pr() -> None:
 
     assert result["candidate"]["number"] == 1
     assert result["candidate"]["head_oid"] == "f" * 40
-    assert result["candidate_selection_reason"] == "unhandled_material_transition"
+    assert result["candidate_selection_reason"] == "age_fair_backlog_progression"
     assert result["handled_exact_heads"] == []
 
 
@@ -206,7 +209,7 @@ def test_closed_handled_pr_advances_and_prunes_cursor() -> None:
 
     assert result["removed_pr_numbers"] == ["1"]
     assert result["candidate"]["number"] == 2
-    assert result["candidate_selection_reason"] == "unhandled_backlog_progression"
+    assert result["candidate_selection_reason"] == "age_fair_backlog_progression"
     assert result["handled_exact_heads"] == []
 
 
@@ -241,6 +244,31 @@ def test_exact_review_fingerprint_change_selects_changed_pr_only() -> None:
         result["candidate"]["todo_preview"]["action_kind"]
         == "rereview_pull_request_exact_head"
     )
+
+
+def test_check_only_change_does_not_preempt_older_backlog() -> None:
+    first = _observe([_pr(1), _pr(2), _pr(3)])
+    changed = [_pr(1), _pr(2), _pr(3, failures=["pytest"])]
+
+    result = _observe(changed, previous=first)
+
+    assert result["observation_state"] == "material_transition"
+    assert result["changed_pr_numbers"] == [3]
+    assert result["candidate"]["number"] == 2
+    assert result["candidate_selection_reason"] == "age_fair_backlog_progression"
+
+
+def test_new_head_after_changes_requested_gets_one_fast_feedback_slot() -> None:
+    first = _observe([_pr(1, decision="CHANGES_REQUESTED"), _pr(2)])
+
+    result = _observe(
+        [_pr(1, head="f" * 40, decision="CHANGES_REQUESTED"), _pr(2)],
+        previous=first,
+    )
+
+    assert result["candidate"]["number"] == 1
+    assert result["candidate"]["head_oid"] == "f" * 40
+    assert result["candidate_selection_reason"] == "author_response_fast_feedback"
 
 
 def test_check_draft_and_mergeability_changes_are_material() -> None:

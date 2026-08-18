@@ -58,6 +58,7 @@ from loopx.todos import (
     add_goal_todo,
     complete_goal_todo,
     list_goal_todos,
+    supersede_goal_todo,
     update_goal_todo,
 )
 
@@ -1538,3 +1539,282 @@ def test_holder_gate_normalizes_lease_owner_case_variants(tmp_path: Path) -> Non
         )
         assert gate["active"] is True
         assert gate["owner"] == AGENT_A
+
+
+# ---------------------------------------------------------------------------
+# supersede is a completion-equivalent transition (status -> done) and must
+# cross the same lease fence as complete
+# ---------------------------------------------------------------------------
+
+
+def test_hard_lease_supersede_without_lease_is_typed_rejected(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    before = state.read_bytes()
+
+    with pytest.raises(TaskLeaseError) as error:
+        supersede_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            agent_id=AGENT_A,
+            reason="no lease exists",
+        )
+
+    assert error.value.code == "handoff_mode_requires_lease"
+    assert error.value.payload["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert state.read_bytes() == before
+
+
+def test_hard_lease_supersede_by_non_holder_without_key_is_typed_rejected(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime", goal_id=GOAL_ID, todo_id=todo["todo_id"]
+    )
+    before = state.read_bytes()
+
+    with pytest.raises(TaskLeaseError) as error:
+        supersede_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            agent_id=AGENT_B,
+            reason="peer supersedes without any key",
+        )
+
+    assert error.value.code == "lease_fence_required"
+    assert state.read_bytes() == before
+    assert _agent_todo(state, todo["todo_id"])["done"] is False
+    assert lease_file.exists()
+
+
+def test_hard_lease_supersede_by_holder_without_key_is_typed_rejected(
+    tmp_path: Path,
+) -> None:
+    """The fence is keyed to the execution instance, not to the agent identity."""
+
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+
+    with pytest.raises(TaskLeaseError) as error:
+        supersede_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            agent_id=AGENT_A,
+            reason="holder forgot the key",
+        )
+
+    assert error.value.code == "lease_fence_required"
+    assert _agent_todo(state, todo["todo_id"])["done"] is False
+
+
+def test_hard_lease_supersede_with_verified_key_succeeds_and_releases_lease(
+    tmp_path: Path,
+) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime", goal_id=GOAL_ID, todo_id=todo["todo_id"]
+    )
+
+    result = supersede_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        reason="superseded with the verified key",
+        next_agent_todo="Continue the superseding work.",
+        task_lease_idempotency_key="turn-lease-1",
+    )
+
+    assert result["ok"] is True
+    assert result["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    assert result["task_lease_fence"]["required"] is True
+    assert result["task_lease_fence"]["execution_instance_verified"] is True
+    assert result["task_lease_fence"]["released"] is True
+    assert _agent_todo(state, todo["todo_id"])["done"] is True
+    assert not lease_file.exists()
+    assert result["next_todos"][0]["added"] is True
+
+
+def test_hard_lease_supersede_dry_run_keeps_lease_and_state(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+    lease_file = task_lease_path(
+        runtime_root=tmp_path / "runtime", goal_id=GOAL_ID, todo_id=todo["todo_id"]
+    )
+    before = state.read_bytes()
+
+    result = supersede_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=AGENT_A,
+        reason="preview only",
+        task_lease_idempotency_key="turn-lease-1",
+        dry_run=True,
+    )
+
+    assert result["dry_run"] is True
+    assert result["task_lease_fence"]["execution_instance_verified"] is True
+    assert result["task_lease_fence"].get("released") is not True
+    assert lease_file.exists()
+    assert state.read_bytes() == before
+
+
+def test_hard_lease_delegated_supersede_passes_gate_with_marker(tmp_path: Path) -> None:
+    """The delegated door mirrors complete: it opens the claim gate, never an
+    effective lease. Without a lease the fence is optional and the marker rides."""
+
+    registry, state = _write_workspace(
+        tmp_path,
+        handoff_mode=HANDOFF_MODE_HARD_LEASE,
+        lifecycle_authority=[
+            {
+                "agent_id": ORCHESTRATOR,
+                "actions": ["supersede"],
+                "requires_reason": True,
+            }
+        ],
+    )
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+
+    result = supersede_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        agent_id=ORCHESTRATOR,
+        authority_reason="retire stale work",
+        reason="delegated supersede",
+    )
+
+    assert result["ok"] is True
+    assert result["handoff_gate_overridden"] is True
+    assert result["task_lease_fence"]["required"] is False
+    assert _agent_todo(state, todo["todo_id"])["done"] is True
+
+
+def test_legacy_pin_supersede_ignores_missing_lease_but_fences_effective_lease(
+    tmp_path: Path,
+) -> None:
+    """Legacy parity with complete since the completion fence landed: no lease
+    means no fence; an effective foreign lease requires the key."""
+
+    registry, state = _write_workspace(tmp_path)
+    free_todo = _add_todo(registry, claimed_by=AGENT_A)
+    free = supersede_goal_todo(
+        registry_path=registry,
+        goal_id=GOAL_ID,
+        todo_id=free_todo["todo_id"],
+        agent_id=AGENT_A,
+        reason="legacy supersede without any lease",
+    )
+    assert free["ok"] is True
+    assert free["handoff_mode"] == HANDOFF_MODE_LEGACY
+    assert free["task_lease_fence"]["required"] is False
+
+    leased_todo = _add_todo(registry)
+    _acquire(registry, tmp_path, leased_todo["todo_id"], owner=AGENT_A)
+    with pytest.raises(TaskLeaseError) as error:
+        supersede_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=leased_todo["todo_id"],
+            agent_id=AGENT_B,
+            reason="legacy peer supersedes a leased todo",
+        )
+    assert error.value.code == "lease_fence_required"
+    assert _agent_todo(state, leased_todo["todo_id"])["done"] is False
+
+
+# ---------------------------------------------------------------------------
+# force bootstrap rewrites the state file: the declared mode must travel with it
+# ---------------------------------------------------------------------------
+
+
+def _force_bootstrap(registry: Path, state: Path, tmp_path: Path, **overrides: Any) -> dict[str, Any]:
+    from loopx.bootstrap import bootstrap_project
+
+    options: dict[str, Any] = dict(
+        project=state.parent,
+        registry_path=registry,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        objective="Rebuild the active state without changing the handoff contract.",
+        domain="harness_self_improvement",
+        role="owner",
+        parent_goal_id=None,
+        state_file=state,
+        goal_doc=None,
+        adapter_kind="harness_self_improvement",
+        adapter_status="active",
+        next_probe=None,
+        spawn_allowed=False,
+        max_children=0,
+        allowed_domains=None,
+        write_scope=None,
+        onboarding_scan_enabled=False,
+        preserve_todos=False,
+        force=True,
+        dry_run=False,
+        sync_global=False,
+    )
+    options.update(overrides)
+    return bootstrap_project(**options)
+
+
+def test_force_bootstrap_replace_preserves_declared_handoff_mode(tmp_path: Path) -> None:
+    """Appendix B rule 5: a mode change needs quiescence; a forced state rebuild
+    is not a mode change and must not silently fall back to legacy."""
+
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+
+    payload = _force_bootstrap(registry, state, tmp_path)
+
+    assert payload["state_action"] == "replaced"
+    assert payload["force_bootstrap_warning"]["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    rebuilt = state.read_text(encoding="utf-8")
+    assert goal_handoff_mode(rebuilt) == HANDOFF_MODE_HARD_LEASE
+    assert todo["todo_id"] not in rebuilt
+
+
+def test_force_bootstrap_replace_keeps_legacy_default_absent(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path)
+
+    payload = _force_bootstrap(registry, state, tmp_path)
+
+    assert payload["state_action"] == "replaced"
+    assert payload["force_bootstrap_warning"]["handoff_mode"] == HANDOFF_MODE_LEGACY
+    assert "handoff_mode:" not in state.read_text(encoding="utf-8")
+    assert goal_handoff_mode(state.read_text(encoding="utf-8")) == HANDOFF_MODE_LEGACY
+
+
+def test_force_bootstrap_dry_run_reports_preserved_mode_without_writing(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_SOFT_CLAIM)
+    before = state.read_bytes()
+
+    payload = _force_bootstrap(registry, state, tmp_path, dry_run=True)
+
+    assert payload["force_bootstrap_warning"]["handoff_mode"] == HANDOFF_MODE_SOFT_CLAIM
+    assert state.read_bytes() == before
+
+
+def test_force_bootstrap_replace_refuses_invalid_declared_mode(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode="banana")
+    before = state.read_bytes()
+
+    with pytest.raises(HandoffModeError) as error:
+        _force_bootstrap(registry, state, tmp_path)
+
+    assert error.value.code == "invalid_handoff_mode"
+    assert state.read_bytes() == before

@@ -119,6 +119,7 @@ from .control_plane.todos.handoff_mode import (
     resolve_todo_completion_handoff,
 )
 from .control_plane.work_items.task_lease import (
+    enter_terminal_todo_lease_fence,
     hold_task_lease_mutation_fence,
     release_verified_task_lease_fence,
 )
@@ -1995,6 +1996,7 @@ def supersede_goal_todo(
     next_continuation_policy: str | None = None,
     next_excluded_agents: list[str] | None = None,
     agent_id: str | None = None, authority_reason: str | None = None,
+    task_lease_idempotency_key: str | None = None, task_lease_expected_version: int | None = None,
     project: Path | None = None,
     state_file: Path | None = None,
     dry_run: bool = False,
@@ -2014,10 +2016,8 @@ def supersede_goal_todo(
         state_file=state_file,
     )
     with exclusive_file_lock(
-        resolved_state_file,
-        agent_id=agent_id,
-        operation="todo_supersede",
-    ):
+        resolved_state_file, agent_id=agent_id, operation="todo_supersede",
+    ), ExitStack() as lease_fence_stack:
         original = resolved_state_file.read_text(encoding="utf-8")
         lines = original.splitlines()
         updated_at = now_local()
@@ -2037,21 +2037,17 @@ def supersede_goal_todo(
             todo=authority_todo,
             actor_agent_id=agent_id, authority_reason=authority_reason,
         )
+        completion_handoff, task_lease_fence = enter_terminal_todo_lease_fence(
+            lease_fence_stack, registry_path=registry_path, goal_id=goal_id, todo_id=todo_id,
+            todo=authority_todo, actor_agent_id=agent_id, state_text=original, mutation_authority=mutation_authority,
+            idempotency_key=task_lease_idempotency_key, expected_version=task_lease_expected_version,
+        )
         effective_next_claimed_by = (
-            require_registered_agent_id(
-                registry_path=registry_path,
-                goal_id=goal_id,
-                agent_id=next_claimed_by,
-                field="next_claimed_by",
-            )
-            if next_claimed_by
-            else None
+            require_registered_agent_id(registry_path=registry_path, goal_id=goal_id, agent_id=next_claimed_by, field="next_claimed_by")
+            if next_claimed_by else None
         )
         effective_next_excluded_agents = require_registered_todo_excluded_agents(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            excluded_agents=next_excluded_agents,
-            field="next_excluded_agents",
+            registry_path=registry_path, goal_id=goal_id, excluded_agents=next_excluded_agents, field="next_excluded_agents",
         )
         if effective_next_claimed_by and not next_agent_todo:
             raise ValueError("--next-claimed-by requires --next-agent-todo")
@@ -2183,6 +2179,7 @@ def supersede_goal_todo(
             new_text = replace_updated_at(new_text, updated_at)
         if changed and not dry_run:
             resolved_state_file.write_text(new_text, encoding="utf-8")
+        release_verified_task_lease_fence(task_lease_fence, committed=changed and not dry_run)
     return {
         "ok": True,
         "dry_run": dry_run,
@@ -2191,6 +2188,7 @@ def supersede_goal_todo(
         **update_result,
         "changed": changed,
         "mutation_authority": mutation_authority,
+        "task_lease_fence": task_lease_fence, **completion_handoff,
         "next_todos": next_results,
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,

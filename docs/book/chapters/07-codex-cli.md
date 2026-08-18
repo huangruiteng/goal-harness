@@ -87,10 +87,11 @@ heartbeat。若 packet 报告 scheduler context 缺失，先修复 runtime profi
 
 ## 5. 保持身份与 Todo 归属
 
-新的 argument-bearing guided start 默认要求 fresh Agent identity，即使 Goal 中只有一个已注册身份。
-已有 id 只在用户明确要求 takeover 那个 peer 时复用。完成选择后，visible Goal、quota、refresh 与
-writeback 都应显式保留同一个 `--agent-id`；缺失或不匹配时应 fail closed，而不是回退到“唯一
-身份”。
+新的 argument-bearing guided start 在 Goal 已有已注册身份（哪怕只有一个）时不会默认注册 fresh
+Agent，而是返回 identity gate 要求选择其中一个 lane；只有 Goal 没有任何已注册 lane 或显式
+`--new-peer` 时才默认 fresh。已有 id 只在用户明确要求 takeover 那个 peer 时复用。完成选择后，
+visible Goal、quota、refresh 与 writeback 都应显式保留同一个 `--agent-id`；缺失或不匹配时应
+fail closed，而不是回退到“唯一身份”。
 
 Agent identity 表达 LoopX 工作 lane，不证明具体 Host。判断工作是否真的在 Codex CLI 运行，要看
 `host_surface`、runtime profile 或对应 run metadata。

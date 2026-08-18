@@ -135,8 +135,16 @@ def main() -> None:
             goal_text="start another task",
         )
         gate = unbound["guided_transaction"]["identity_selection_gate"]
-        assert gate["default_action"] == "register_fresh_agent", gate
-        assert gate["fresh_agent_registration"]["recommended"] is True, gate
+        assert gate["default_action"] == "select_agent_identity", gate
+        assert gate["fresh_agent_registration"] is None, gate
+        assert {choice["agent_id"] for choice in gate["choices"]} == {
+            "codex-a",
+            "codex-b",
+        }, gate
+        assert all(
+            choice["requires_explicit_takeover_intent"] is True
+            for choice in gate["choices"]
+        ), gate
 
         register_output = io.StringIO()
         with contextlib.redirect_stdout(register_output):

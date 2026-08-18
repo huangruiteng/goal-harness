@@ -195,6 +195,13 @@ Qualification rejects a run when it detects any of the following:
 - malformed or incomplete ATIF tool evidence;
 - missing runner authority or any required runtime isolation attestation.
 
+Credential-probe detection reads typed command fields, then classifies direct
+environment commands, runtime-language enumeration or sensitive-name lookups, and
+procfs reads. Neighboring tool prose and commands that only inspect or write source
+text are not executed credential reads. Launching a child with an explicit
+environment is also not itself a credential read; sensitive values are still
+scanned in every tool argument and observation.
+
 Access-request markers are evaluated only on tool calls that can perform or request
 resource access. Exact known controller-only calls such as `update_plan` carry
 narrative metadata and are excluded from that scan; an actual sensitive value in
@@ -238,6 +245,37 @@ evidence channels are required.
 `benchmark_id`, `case_id`, and a custom policy's `policy_id` are public labels, not
 paths. Path-like values fail closed and are emitted only as `redacted`, so a runner
 cannot move an operator directory into the public receipt through identifier fields.
+
+### Exact-job container binding
+
+Runtime evidence must belong to the same job as the score. An image-only Docker
+lookup is ambiguous as soon as two benchmark arms use the same image concurrently.
+Before inspecting isolation settings, bind the container with the runner-owned job
+or trial label, the service label, and the expected image:
+
+```python
+from loopx.capabilities.benchmark_toolkit import (
+    compact_docker_container_binding_receipt,
+    select_exact_docker_container,
+)
+
+binding = select_exact_docker_container(
+    ancestor_image="benchmark-runner:fixture",
+    required_labels={
+        "com.docker.compose.project": job_id,
+        "com.docker.compose.service": "main",
+    },
+)
+container_name = binding.container_name  # private runner state; do not publish
+receipt = compact_docker_container_binding_receipt(binding)
+```
+
+The selector fails closed unless exactly one running container matches. The compact
+`benchmark_exact_container_binding_v0` receipt records only the required label keys,
+match count, and a SHA-256 selector digest; it excludes the raw container identity
+and label values. The helper grants no Docker or runner authority. Callers that need
+a privileged wrapper must supply their own `command_runner` and keep that authority
+outside the receipt.
 
 Benchmark-specific private roots can be added without committing them through an
 ignored `benchmark_integrity_policy_v0` file:

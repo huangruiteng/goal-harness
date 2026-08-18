@@ -439,6 +439,10 @@ path, and canary route rather than as a user-facing release baseline.
   task closeout, DeepSeek Harness connects through a managed Turn connector,
   per-goal handoff mode gates claim/lease authority in state files, and Explore
   can publish multiple Feishu visual boards in one automated step.
+- `v0.4.8` on 2026-08-16: open-core packaging and qualification release at the
+  matching `v0.4.8` tag. LoopX adopts Apache-2.0 for the open core, ships as a
+  first-class PyPI distribution, adds per-Todo validation budgets, and tightens
+  benchmark integrity qualification and Content Ops presentation density.
 
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.

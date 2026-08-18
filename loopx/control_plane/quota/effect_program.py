@@ -8,6 +8,7 @@ from ..effect_program import (
     SETTLEMENT_IDENTITY_SCHEMA_VERSION,
     SETTLEMENT_PLAN_SCHEMA_VERSION,
     SETTLEMENT_RECEIPT_SCHEMA_VERSION,
+    SettlementBindingKind,
     SettlementFailure,
     SettlementFailureKind,
     SettlementIdentity,
@@ -23,6 +24,7 @@ __all__ = [
     "SETTLEMENT_IDENTITY_SCHEMA_VERSION",
     "SETTLEMENT_PLAN_SCHEMA_VERSION",
     "SETTLEMENT_RECEIPT_SCHEMA_VERSION",
+    "SettlementBindingKind",
     "SettlementFailure",
     "SettlementFailureKind",
     "SettlementIdentity",
@@ -70,8 +72,7 @@ def build_codex_app_settlement_plan(
     binding_arg = (
         f" --todo-id {shlex.quote(todo_id)}"
         if todo_id
-        else " --replan-obligation-id "
-        f"{shlex.quote(str(replan_obligation_id))}"
+        else f" --replan-obligation-id {shlex.quote(str(replan_obligation_id))}"
     )
     turn_arg = f" --turn-instance-id {quoted_turn}"
     terminal_closeout = (
@@ -161,18 +162,13 @@ def settlement_binding_args(plan: Mapping[str, Any] | None) -> str:
     if not isinstance(identity, Mapping):
         return ""
     todo_id = str(identity.get("todo_id") or "").strip()
-    replan_obligation_id = str(
-        identity.get("replan_obligation_id") or ""
-    ).strip()
+    replan_obligation_id = str(identity.get("replan_obligation_id") or "").strip()
     turn_instance_id = str(identity.get("turn_instance_id") or "").strip()
     if bool(todo_id) == bool(replan_obligation_id) or not turn_instance_id:
         return ""
     binding_arg = (
         f" --todo-id {shlex.quote(todo_id)}"
         if todo_id
-        else " --replan-obligation-id "
-        f"{shlex.quote(replan_obligation_id)}"
+        else f" --replan-obligation-id {shlex.quote(replan_obligation_id)}"
     )
-    return binding_arg + (
-        f" --turn-instance-id {_quoted_turn_ref(turn_instance_id)}"
-    )
+    return binding_arg + (f" --turn-instance-id {_quoted_turn_ref(turn_instance_id)}")

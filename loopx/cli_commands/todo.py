@@ -387,16 +387,17 @@ def register_todo_command(
     todo_parser.add_argument(
         "--task-lease-idempotency-key",
         help=(
-            "For todo complete, prove the execution instance that owns an active "
-            "hard task lease. Required when that todo has an effective lease."
+            "For todo complete and todo supersede, prove the execution instance "
+            "that owns an active hard task lease. Required when that todo has an "
+            "effective lease."
         ),
     )
     todo_parser.add_argument(
         "--task-lease-expected-version",
         type=int,
         help=(
-            "For todo complete, optionally CAS the active hard task lease version. "
-            "Requires --task-lease-idempotency-key."
+            "For todo complete and todo supersede, optionally CAS the active hard "
+            "task lease version. Requires --task-lease-idempotency-key."
         ),
     )
     todo_parser.add_argument(
@@ -828,6 +829,8 @@ def handle_todo_command(
                 next_excluded_agents=args.next_excluded_agents,
                 agent_id=args.agent_id,
                 authority_reason=args.authority_reason,
+                task_lease_idempotency_key=args.task_lease_idempotency_key,
+                task_lease_expected_version=args.task_lease_expected_version,
                 **_todo_path_args(args),
                 dry_run=bool(args.dry_run),
             )

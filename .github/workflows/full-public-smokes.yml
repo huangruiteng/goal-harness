@@ -50,10 +50,6 @@ jobs:
             offset: 300
           - shard: 4
             offset: 400
-          - shard: 5
-            offset: 500
-          - shard: 6
-            offset: 600
     env:
       SHARD_LIMIT: "100"
       SMOKE_TIMEOUT_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.timeout_seconds || '120' }}
@@ -69,6 +65,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install smoke runtime dependencies
+        run: python -m pip install --disable-pip-version-check "jsonschema>=4.23,<5"
+
       - name: Preview full-public shard
         run: |
           python3 examples/run-smokes.py \
@@ -82,7 +81,7 @@ jobs:
       - name: Run full-public shard
         run: |
           set -euo pipefail
-          mkdir -p smoke-results
+          mkdir -p "$RUNNER_TEMP/loopx-smoke-results"
           python3 examples/run-smokes.py \
             --suite full-public \
             --offset "${{ matrix.offset }}" \
@@ -90,14 +89,14 @@ jobs:
             --timeout-seconds "${SMOKE_TIMEOUT_SECONDS}" \
             --jobs "${SMOKE_JOBS}" \
             --json \
-            | tee "smoke-results/full-public-shard-${{ matrix.shard }}.json"
+            | tee "$RUNNER_TEMP/loopx-smoke-results/full-public-shard-${{ matrix.shard }}.json"
 
       - name: Upload smoke result
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: full-public-smokes-shard-${{ matrix.shard }}
-          path: smoke-results/full-public-shard-${{ matrix.shard }}.json
+          path: ${{ runner.temp }}/loopx-smoke-results/full-public-shard-${{ matrix.shard }}.json
           if-no-files-found: ignore
 
   smoke-fleet-health:

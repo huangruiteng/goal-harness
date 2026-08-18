@@ -19,6 +19,15 @@ Every tracked repository change must be pushed on a branch and reviewed through
 a pull request before it reaches `main`. Do not push broad mixed commits or
 direct commits to `main`.
 
+### DCO Sign-Off
+
+Every commit in a pull-request branch must include a
+`Signed-off-by: Your Name <your.email@example.com>` trailer, or the `DCO`
+check will reject the PR. Always commit with `git commit -s`. If a commit is
+already missing the trailer, amend it with `git commit --amend -s` (or an
+interactive rebase for multiple commits) before pushing. See CONTRIBUTING.md
+for the full DCO policy.
+
 Only skip this worktree/PR gate when the user explicitly says the change is
 local-only and must not be proposed for the repository.
 
