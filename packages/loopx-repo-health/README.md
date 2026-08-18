@@ -9,13 +9,43 @@ community-funnel monitoring, and content material.
 
 - Counts: stars, forks, watchers, open issues, releases, contributors, sampled
   PR total, sampled commented-issue total.
-- Traffic (14-day window): views and clones (requires repository access).
+- Traffic (14-day window): repo views, clones, top paths, and derived docs
+  views (requires repository access).
 - Latency: PR merge p25/p75 and first-human-response p25/p75, computed from a
   bounded recent sample.
 - Recent star timeline: weekly buckets from the newest stargazer pages.
 
 Every metric comes from public repository data. The provider never accepts or
 emits raw trajectories, benchmark evidence, credentials, or private links.
+
+## Metric model
+
+The snapshot is organized into two groups so reports and digests can stay
+plain-language while remaining CHAOSS-aligned.
+
+Adoption and awareness (easy to read, best for recaps):
+
+| plain language | snapshot field | CHAOSS alignment |
+| --- | --- | --- |
+| people who visited the repo page | `traffic_14d.views.uniques` | activity/attention proxy |
+| people who read docs or README | `traffic_14d.docs_views.uniques` | documentation activity proxy |
+| people who cloned the repo | `traffic_14d.clones.uniques` | adoption/trial proxy |
+| stars / forks / watchers | `counts.stars/forks/watchers` | popularity/social proof |
+
+Community health (CHAOSS working-group aligned):
+
+| plain language | snapshot field | CHAOSS alignment |
+| --- | --- | --- |
+| active contributor count | `counts.contributors` | bus factor input |
+| time to first human response | `latency.first_response_*` | time-to-first-response |
+| PR merge turnaround | `latency.pr_merge_*` | code review latency |
+| release cadence input | `counts.releases` | release frequency input |
+
+`traffic_14d.docs_views` is derived from the top paths returned by GitHub with
+one classification rule: README, `docs/` tree (including blob/tree links), and
+`wiki/` tree. Its `uniques` is the sum of per-path uniques and is not
+de-duplicated across paths. Consumers must not reinterpret missing metrics as
+zero; unavailable traffic surfaces are reported as zero with a warning.
 
 ## Auth and boundaries
 

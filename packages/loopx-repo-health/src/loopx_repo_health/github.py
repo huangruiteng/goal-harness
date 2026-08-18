@@ -23,13 +23,30 @@ from .contract import RepoHealthSnapshot, SNAPSHOT_SCHEMA_VERSION
 
 
 API_BASE = "https://api.github.com"
-USER_AGENT = "loopx-repo-health/0.1.0"
+USER_AGENT = "loopx-repo-health/0.2.0"
 REQUEST_TIMEOUT_SECONDS = 15
 _LINK_LAST_PAGE = re.compile(r'[?&]page=(\d+)>;\s*rel="last"')
+_DOCS_PATH_PATTERN = re.compile(
+    r"^(?:/[^/]+/[^/]+)?"
+    r"(?:/docs(?:/|$)|/wiki(?:/|$)|/(?:blob|tree)/[^/]+/docs(?:/|$)|/blob/[^/]+/readme(?:\.|$)|/readme(?:\.|$))",
+    re.IGNORECASE,
+)
 
 
 class GitHubError(RuntimeError):
     pass
+
+
+def is_docs_path(path: str) -> bool:
+    """Return True when a GitHub popular path is a documentation surface.
+
+    Documentation surfaces are the README file, the ``docs/`` tree (including
+    blob/tree links into it), and the ``wiki/`` tree. This is the single
+    classification rule for the derived ``docs_views`` metric; changing it
+    changes metric semantics and requires contract revision.
+    """
+
+    return bool(_DOCS_PATH_PATTERN.match(path))
 
 
 def _token() -> str | None:
@@ -168,8 +185,8 @@ class GitHubRepoHealthCollector:
         )
         return _last_page(headers) or 0
 
-    def _collect_traffic(self) -> dict[str, dict[str, int]]:
-        result: dict[str, dict[str, int]] = {}
+    def _collect_traffic(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
         for surface in ("views", "clones"):
             try:
                 payload, _ = _request_json(f"/repos/{self.owner}/{self.repo}/traffic/{surface}")
@@ -177,6 +194,27 @@ class GitHubRepoHealthCollector:
             except GitHubError as exc:
                 result[surface] = {"count": 0, "uniques": 0}
                 self.warnings.append(f"traffic/{surface} unavailable: {exc}")
+        try:
+            payload, _ = _request_json(f"/repos/{self.owner}/{self.repo}/traffic/popular/paths")
+            rows = [
+                {
+                    "path": str(item.get("path", "")),
+                    "title": str(item.get("title", "")),
+                    "count": int(item.get("count", 0)),
+                    "uniques": int(item.get("uniques", 0)),
+                }
+                for item in payload or []
+            ]
+            docs_rows = [row for row in rows if is_docs_path(row["path"])]
+            result["paths"] = rows
+            result["docs_views"] = {
+                "count": sum(row["count"] for row in docs_rows),
+                "uniques": sum(row["uniques"] for row in docs_rows),
+            }
+        except GitHubError as exc:
+            result["paths"] = []
+            result["docs_views"] = {"count": 0, "uniques": 0}
+            self.warnings.append(f"traffic/popular/paths unavailable: {exc}")
         return result
 
     def _closed_pull_requests(self, limit: int = 200) -> list[dict[str, Any]]:

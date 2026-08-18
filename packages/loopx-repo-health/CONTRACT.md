@@ -24,6 +24,12 @@ but do not reinterpret missing metrics as zero.
 - `traffic_14d` requires repository access; unavailable surfaces become zero
   counts with a warning, so consumers can distinguish "no traffic" from
   "no access".
+- `traffic_14d.paths` is the bounded top-paths list returned by GitHub
+  (`traffic/popular/paths`). `traffic_14d.docs_views` is derived from those
+  paths with the single classification rule: README (`/readme...`),
+  `docs/` tree (including blob/tree links), and `wiki/` tree. The derived
+  `uniques` value is the sum of per-path uniques and is not de-duplicated
+  across paths.
 - Credentials are never part of the request or response packet; authentication
   comes from the process environment only.
 - The provider rejects a request with a mismatched `schema_version` before
