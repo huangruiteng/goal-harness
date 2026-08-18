@@ -87,6 +87,17 @@ real process path; `--profile-root` adds the optional per-run formal profile. Th
 launcher performs recovery, pre-launch rebase, and `finally` restoration around
 both preflight and full Goal modes.
 
+The same adapter publishes `public_trajectory_summary_v0` from the compact
+`native_codex_goal_turn_receipt_v0` lifecycle fields. The benchmark toolkit owns
+the strict reducer because public/private evidence reduction is already part of
+this capability; the DeepSWE research adapter is its first active caller. The
+summary carries only typed counts, status labels, and content-free notification
+kind counts. It never reopens event payloads, and it marks message and tool-call
+semantics unavailable rather than guessing them. Missing, malformed, or
+inconsistent lifecycle facts fail closed. The similarly named archived reducer
+under `deprecate/benchmark-legacy/` is historical evidence, not a dependency or
+compatibility entry point for this native-runner contract.
+
 ### Formal installed profile and skill discovery
 
 A treatment that only supplies a Goal prompt and a source-checkout CLI has not

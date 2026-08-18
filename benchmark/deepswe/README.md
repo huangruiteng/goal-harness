@@ -203,3 +203,21 @@ Keep raw tasks, trajectories, tool arguments, logs, diffs, credentials,
 verifier output, private audit references, and local paths in ignored private
 storage. Promote concrete result tables only after the matched study is solid
 enough to support the stated claim level.
+
+### Public trajectory lifecycle summary
+
+The runnable native Goal adapter now emits a nested
+`public_trajectory_summary_v0` beside its existing compact receipt. The summary
+is derived only from the receipt's typed Goal lifecycle counters: notification
+kinds, item-event counts, completed turns, continuation turns, error events, and
+Goal-status polls. `goal_terminal` means the adapter observed a completed turn
+and then read a non-active Goal status; `attached`, `in_progress`, and
+`turn_terminal` remain explicitly incomplete.
+
+The summary does not inspect or retain event payloads, task or assistant text,
+tool arguments or output, verifier output, credentials, or paths. Its item-type
+counts are event counts, not inferred tool-call counts; the coverage block keeps
+that limitation machine-readable. Malformed, missing, or internally
+inconsistent lifecycle facts fail closed instead of producing a partial public
+artifact. This is the active native-runner contract and does not restore or
+depend on the archived legacy benchmark reducer.
