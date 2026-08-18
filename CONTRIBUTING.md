@@ -8,6 +8,7 @@ many shapes, and not all of them are code:
 - improving documentation, examples, and smoke tests;
 - answering questions in issues or discussions;
 - reviewing pull requests and helping contributors navigate the review flow;
+- following the [Code of Conduct](CODE_OF_CONDUCT.md);
 - implementing a public task or fixing a bug.
 
 Every one of these helps. The rest of this guide covers finding work, keeping
@@ -16,6 +17,14 @@ request merged.
 
 The best code contributions are small, reviewable, and tied to a public task
 or a clear bug.
+
+## Code Of Conduct
+
+Everyone participating in LoopX community spaces, including maintainers and
+contributors, is expected to follow the
+[Contributor Covenant](CODE_OF_CONDUCT.md). Reports of unacceptable behavior
+can be sent to huangrt01@163.com; maintainers review every report promptly and
+keep the reporter's identity confidential to the extent possible.
 
 ## Find Work
 
