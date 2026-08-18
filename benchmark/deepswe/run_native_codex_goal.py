@@ -13,13 +13,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.capabilities.benchmark_toolkit.native_codex_goal import (
+from loopx.capabilities.benchmark_toolkit.native_codex_goal import (  # noqa: E402
     NativeGoalConfig,
     compact_native_goal_receipt,
     probe_native_goal_process,
     run_native_goal_process_until_terminal,
 )
-from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (
+from loopx.capabilities.benchmark_toolkit.public_trajectory import (  # noqa: E402
+    build_native_goal_public_trajectory_summary,
+)
+from loopx.capabilities.benchmark_toolkit.native_codex_isolation import (  # noqa: E402
     NativeCodexIsolationEnvelope,
     NativeCodexLoopXStateRebase,
     build_native_codex_isolation_envelope,
@@ -171,6 +174,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
     receipt = compact_native_goal_receipt(turn)
     receipt["execution_mode"] = mode
+    receipt["public_trajectory_summary"] = (
+        build_native_goal_public_trajectory_summary(
+            receipt,
+            adapter_id="deepswe-native-codex-goal",
+        )
+    )
     receipt["native_isolation"] = {
         "enabled": envelope is not None,
         "workspace_alias_used": bool(envelope and envelope.workspace_alias),

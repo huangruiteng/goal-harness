@@ -558,6 +558,11 @@ def test_runnable_example_connects_to_stdio_app_server(tmp_path: Path) -> None:
     assert receipt["execution_mode"] == "goal_attachment_preflight"
     assert receipt["goal_status"] == "active"
     assert receipt["turn_id_present"] is False
+    summary = receipt["public_trajectory_summary"]
+    assert summary["schema_version"] == "public_trajectory_summary_v0"
+    assert summary["adapter_id"] == "deepswe-native-codex-goal"
+    assert summary["lifecycle_state"] == "attached"
+    assert summary["complete"] is False
     assert str(tmp_path) not in completed.stdout
 
 
@@ -616,7 +621,21 @@ def test_runnable_example_isolation_recovers_and_restores_loopx_state(
     monkeypatch.setattr(
         runnable_goal,
         "compact_native_goal_receipt",
-        lambda _: {"goal_status": "active", "turn_id_present": False},
+        lambda _: {
+            "schema_version": "native_codex_goal_turn_receipt_v0",
+            "goal_status": "active",
+            "post_goal_status": None,
+            "turn_status": "not_started",
+            "terminal_event_observed": False,
+            "item_event_count": 0,
+            "error_event_count": 0,
+            "turn_started_count": 0,
+            "turn_completed_count": 0,
+            "goal_continuation_turn_completed_count": 0,
+            "goal_status_poll_count": 0,
+            "notification_counts": {},
+            "turn_id_present": False,
+        },
     )
 
     assert (
