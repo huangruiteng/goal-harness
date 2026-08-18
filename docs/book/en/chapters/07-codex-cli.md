@@ -90,8 +90,10 @@ ignoring the warning.
 
 ## 5. Preserve identity and Todo ownership
 
-An argument-bearing guided start defaults to a fresh Agent identity even when the Goal has only one
-registered Agent. Reuse an existing id only when the user explicitly requests takeover of that peer.
+An argument-bearing guided start does not default to a fresh Agent identity when the Goal has registered
+Agents (even a single one); it returns an identity gate that requires selecting one lane. Fresh
+registration is the default only for a Goal with no registered lanes or an explicit `--new-peer`. Reuse
+an existing id only when the user explicitly requests takeover of that peer.
 After selection, the visible Goal, quota, refresh, and writeback paths should preserve the same explicit
 `--agent-id`. A missing or mismatched identity must fail closed rather than fall back to “the only Agent.”
 
