@@ -26,6 +26,11 @@ providers as silence.
   filtered as non-community signals.
 - Maintainer-authored items are typed `maintainer_signal`; other authors are
   `external_discussion`, so digests can prioritize user voices.
+- Public recommendations from projects and public adoption declarations from
+  organizations are typed `adoption_declaration`. They are the highest-bar
+  adoption evidence (someone self-identifies as a user and advocates
+  publicly); digests must rank them above passive signals and ordinary
+  discussion.
 - HN collection disables typo tolerance and requires exact substring matches
   to keep the well-known Loopxo/Looptap/looped-music/CrowdStrike noise out.
 - Credentials are never part of a request or response packet; GitHub

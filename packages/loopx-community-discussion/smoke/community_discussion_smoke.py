@@ -46,6 +46,15 @@ def _fixture() -> dict:
         published_at="2026-08-15T00:00:00Z",
         text="loop engineering is a useful frame",
     )
+    adoption = make_fact(
+        fact_type="adoption_declaration",
+        source="web",
+        source_url="https://example.com/org-blog/we-standardize-on-loopx",
+        title="We standardized our agent control plane on LoopX",
+        author="example-org",
+        published_at="2026-08-14T00:00:00Z",
+        text="loopx project adoption announcement",
+    )
     duplicate = make_fact(
         fact_type="external_discussion",
         source="github",
@@ -54,14 +63,14 @@ def _fixture() -> dict:
         author="external-user",
         published_at="2026-08-17T00:00:00Z",
     )
-    facts = merge_facts([external, maintainer, ecosystem, duplicate])  # type: ignore[list-item]
+    facts = merge_facts([external, maintainer, ecosystem, adoption, duplicate])  # type: ignore[list-item]
     return {
         "schema_version": SCAN_SCHEMA_VERSION,
         "scan_at": "2026-08-17T00:00:00+00:00",
         "window_days": 14,
         "repo": {"owner": "huangruiteng", "name": "loopx"},
         "stats": {
-            "raw_facts": 4,
+            "raw_facts": 5,
             "deduped_facts": len(facts),
             "source_errors": 0,
             "strong": sum(1 for f in facts if f["relevance"] == "strong"),
@@ -73,7 +82,7 @@ def _fixture() -> dict:
 
 def _run_offline() -> int:
     fixture = _fixture()
-    if len(fixture["facts"]) != 3:
+    if len(fixture["facts"]) != 4:
         print(f"FAIL: dedupe should collapse duplicate facts, got {len(fixture['facts'])}", file=sys.stderr)
         return 1
     violations = validate_scan(fixture)
@@ -124,6 +133,12 @@ def _run_offline() -> int:
     md = render_markdown(fixture)
     if "## External discussions" not in md or "https://github.com/huangruiteng/loopx/issues/1" not in md:
         print("FAIL: markdown digest missing external discussion section", file=sys.stderr)
+        return 1
+    if "## Public adoption & recommendations" not in md or "we-standardize-on-loopx" not in md:
+        print("FAIL: markdown digest missing adoption_declaration section", file=sys.stderr)
+        return 1
+    if md.index("## Public adoption & recommendations") > md.index("## External discussions"):
+        print("FAIL: adoption declarations must rank above ordinary discussion", file=sys.stderr)
         return 1
 
     print("ok: offline contract smoke passed")

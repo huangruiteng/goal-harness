@@ -22,6 +22,7 @@
     },
     "fact_type": {
       "enum": [
+        "adoption_declaration",
         "external_discussion",
         "maintainer_signal",
         "ecosystem_signal",

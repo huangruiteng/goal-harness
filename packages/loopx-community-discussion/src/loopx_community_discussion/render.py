@@ -6,6 +6,7 @@ from typing import Any
 
 
 SECTION_CAPS = {
+    "adoption_declaration": 8,
     "external_discussion": 8,
     "maintainer_signal": 5,
     "ecosystem_signal": 5,
@@ -39,6 +40,7 @@ def render_markdown(scan: dict[str, Any]) -> str:
         by_type.setdefault(fact["fact_type"], []).append(fact)
 
     sections = [
+        ("Public adoption & recommendations", "adoption_declaration"),
         ("External discussions", "external_discussion"),
         ("Maintainer signals", "maintainer_signal"),
         ("Ecosystem signals", "ecosystem_signal"),

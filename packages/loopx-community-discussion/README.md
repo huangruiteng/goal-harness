@@ -16,6 +16,18 @@ community funnel monitoring, or an operator digest.
   articles. Typo tolerance is disabled and an exact substring match is
   required, because Algolia's default fuzzy search returns thousands of
   unrelated Loopxo/Looptap/looped-music/CrowdStrike hits.
+- `adoption_declaration`: public recommendations from projects and public
+  adoption declarations from organizations. This is the highest-bar adoption
+  signal — the author self-identifies as a user and advocates publicly — and
+  the digest projection ranks it first, above passive signals and ordinary
+  discussion.
+
+## Digest ordering
+
+Signals are ordered by adoption maturity, not by volume: public adoption
+declarations and recommendations rank first, followed by ecosystem articles,
+press and packaging reach, then maintainer signals, and finally ordinary
+external discussion and unanswered questions (early-stage engagement).
 
 The provider is metadata-first: title, source URL, author, timestamp,
 relevance, and a dedupe key. It never stores raw provider payloads, full post

@@ -15,6 +15,7 @@ FACT_SCHEMA_VERSION = "discussion_fact_v0"
 SCAN_SCHEMA_VERSION = "community_discussion_scan_v0"
 
 FACT_TYPES = {
+    "adoption_declaration",
     "external_discussion",
     "maintainer_signal",
     "ecosystem_signal",
