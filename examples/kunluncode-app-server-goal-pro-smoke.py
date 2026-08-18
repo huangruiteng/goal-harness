@@ -7,10 +7,15 @@ import argparse
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
-from loopx.kunluncode_goal_mode.app_server import (
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from loopx.kunluncode_goal_mode.app_server import (  # noqa: E402
     KUNLUN_APP_SERVER_PROTOCOL_VERSION,
     KunlunAppServerClient,
     build_app_server_command,
