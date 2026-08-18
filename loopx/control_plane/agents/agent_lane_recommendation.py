@@ -306,6 +306,7 @@ def build_agent_lane_next_action(
     capability_gate: dict[str, Any] | None,
     active_next_action: Any = None,
     scoped_user_gate_fallback: dict[str, Any] | None = None,
+    receipt_bound_todo_id: str | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(agent_identity, dict):
         return None
@@ -395,6 +396,7 @@ def build_agent_lane_next_action(
         )
 
     preferred_todo_ids = _todo_ids_from_action(active_next_action)
+    receipt_todo_id = normalize_todo_id(receipt_bound_todo_id)
     active_next_action_items = (
         agent_todo_summary.get("active_next_action_executable_items")
         if isinstance(agent_todo_summary.get("active_next_action_executable_items"), list)
@@ -431,11 +433,17 @@ def build_agent_lane_next_action(
             source_candidates.append(raw_item)
         for raw_item in sorted(
             source_candidates,
-            key=lambda candidate: _agent_lane_candidate_sort_key(
-                candidate,
-                agent_id=agent_id,
-                preferred_todo_ids=preferred_todo_ids,
-                agent_profile=agent_profile,
+            key=lambda candidate: (
+                0
+                if receipt_todo_id
+                and normalize_todo_id(candidate.get("todo_id")) == receipt_todo_id
+                else 1,
+                _agent_lane_candidate_sort_key(
+                    candidate,
+                    agent_id=agent_id,
+                    preferred_todo_ids=preferred_todo_ids,
+                    agent_profile=agent_profile,
+                ),
             ),
         ):
             text = protocol_action_text(raw_item.get("text"), limit=500)
@@ -451,6 +459,8 @@ def build_agent_lane_next_action(
             payload = compact_todo_summary_item(raw_item, text=text)
             if selected_by == "unclaimed_todo":
                 payload["claim_required_before_work"] = True
+            if receipt_todo_id and normalize_todo_id(todo_id) == receipt_todo_id:
+                payload["selection_binding"] = "heartbeat_receipt"
             lineage_source = source
             if (
                 source == "capability_gate.runnable_candidates"

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..todos.contract import normalize_todo_id
 from .effect_program import SettlementIdentity
+from .error_codes import HeartbeatReceiptIdentityConflictError
 from .heartbeat_receipt import (
     heartbeat_receipt_view,
     upgrade_identityless_heartbeat_receipt,
@@ -56,11 +57,17 @@ def reconcile_existing_heartbeat_receipt(
             turn_instance_id=turn_instance_id,
         ).effect_id
         if existing_todo_id and existing_effect_id:
+            requested_todo_id = normalize_todo_id(args.todo_id)
+            if requested_todo_id and requested_todo_id != existing_todo_id:
+                raise HeartbeatReceiptIdentityConflictError(
+                    "heartbeat receipt settlement identity conflicts with the "
+                    "current selected Todo: explicitly requested Todo differs"
+                )
             if (
                 existing_todo_id != rollout_todo_id
                 or existing_effect_id != expected_effect_id
             ):
-                raise ValueError(
+                raise HeartbeatReceiptIdentityConflictError(
                     "heartbeat receipt settlement identity conflicts with the "
                     "current selected Todo"
                 )

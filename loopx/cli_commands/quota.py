@@ -16,12 +16,14 @@ from ..control_plane.quota.cli_projection import (
 from ..control_plane.goals.path_resolution import resolve_goal_local_path
 from ..control_plane.quota.goal_boundary import registry_goal_by_id
 from ..control_plane.quota.error_codes import (
+    HeartbeatReceiptIdentityConflictError,
     QuotaCommandValidationError,
     quota_error_code,
 )
 from ..control_plane.quota.heartbeat_receipt import (
     fail_heartbeat_receipt,
     find_heartbeat_receipt,
+    heartbeat_receipt_settlement_todo_id,
     heartbeat_receipt_view,
 )
 from ..control_plane.quota.host_poll_receipts import (
@@ -348,6 +350,11 @@ def _quota_failure_payload(
             **lock_timeout_fields,
         }
 
+    public_reason = (
+        str(error)
+        if isinstance(error, HeartbeatReceiptIdentityConflictError)
+        else "quota collection failed"
+    )
     payload: dict[str, object] = {
         "ok": False,
         "mode": command,
@@ -355,7 +362,7 @@ def _quota_failure_payload(
         "decision": "skip",
         "should_run": False,
         "error_code": quota_error_code(error),
-        "reason": "quota collection failed",
+        "reason": public_reason,
         "state": "blocked_health",
         "waiting_on": "codex",
         "status": "quota_collection_failed",
@@ -531,6 +538,18 @@ def handle_quota_command(
         scheduler_context = context.scheduler_context
         operator_inbox_urgency_projector = context.operator_inbox_urgency_projector
         if args.quota_command == "should-run":
+            receipt_bound_todo_id = None
+            if heartbeat_turn_id:
+                heartbeat_receipt_existing = find_heartbeat_receipt(
+                    runtime_root,
+                    goal_id=args.goal_id,
+                    agent_id=args.agent_id,
+                    turn_instance_id=heartbeat_turn_id,
+                )
+                if heartbeat_receipt_existing:
+                    receipt_bound_todo_id = heartbeat_receipt_settlement_todo_id(
+                        heartbeat_receipt_existing
+                    )
             payload = build_live_quota_should_run_decision(
                 status_payload,
                 goal_id=args.goal_id,
@@ -546,14 +565,9 @@ def handle_quota_command(
                 bounded_research_frontier_projector=(
                     project_live_explore_composition_frontier
                 ),
+                receipt_bound_todo_id=receipt_bound_todo_id,
             )
             if heartbeat_turn_id:
-                heartbeat_receipt_existing = find_heartbeat_receipt(
-                    runtime_root,
-                    goal_id=args.goal_id,
-                    agent_id=args.agent_id,
-                    turn_instance_id=heartbeat_turn_id,
-                )
                 if heartbeat_receipt_existing:
                     (
                         heartbeat_receipt_existing,
@@ -622,6 +636,7 @@ def handle_quota_command(
                             bounded_research_frontier_projector=(
                                 project_live_explore_composition_frontier
                             ),
+                            receipt_bound_todo_id=receipt_bound_todo_id,
                         )
                         cache_metadata = None
                         heartbeat_stall_observation = (

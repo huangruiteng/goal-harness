@@ -681,6 +681,7 @@ def _resolve_quota_should_run_route(
             agent_todo_summary=prepared.agent_todo_summary,
             capability_gate=prepared.capability_gate,
             scoped_user_gate_fallback=prepared.scoped_user_gate_fallback,
+            receipt_bound_todo_id=prepared.receipt_bound_todo_id,
             active_next_action=(
                 item.get("active_state_next_action")
                 or (

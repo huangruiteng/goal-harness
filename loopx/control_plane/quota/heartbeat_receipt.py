@@ -12,6 +12,7 @@ from ...rollout_event_log import (
     rollout_event_log_path,
 )
 from .effect_program import SETTLEMENT_IDENTITY_SCHEMA_VERSION, SettlementIdentity
+from .error_codes import HeartbeatReceiptIdentityConflictError
 from .settlement_workspace_causality import (
     delivery_workspace_causality_from_event_details,
 )
@@ -65,6 +66,15 @@ def _receipt_settlement_identity(
     return todo_id, effect_id
 
 
+def heartbeat_receipt_settlement_todo_id(
+    event: Mapping[str, object],
+) -> str | None:
+    """Return the Todo already bound to a committed heartbeat receipt."""
+
+    identity = _receipt_settlement_identity(event)
+    return identity[0] if identity is not None else None
+
+
 def _effective_heartbeat_receipt(
     events: list[dict[str, object]],
 ) -> dict[str, object] | None:
@@ -76,7 +86,7 @@ def _effective_heartbeat_receipt(
         if identity is not None:
             identities[identity] = event
     if len(identities) > 1:
-        raise ValueError(
+        raise HeartbeatReceiptIdentityConflictError(
             "heartbeat receipt has conflicting settlement identities for the "
             "same goal, agent, and turn"
         )
@@ -169,7 +179,7 @@ def upgrade_identityless_heartbeat_receipt(
         expected_identity = (normalized_todo_id, normalized_effect_id)
         if existing_identity is not None:
             if existing_identity != expected_identity:
-                raise ValueError(
+                raise HeartbeatReceiptIdentityConflictError(
                     "heartbeat receipt settlement identity conflicts with the "
                     "current selected Todo"
                 )

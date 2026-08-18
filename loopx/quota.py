@@ -795,6 +795,7 @@ def build_quota_should_run(
         Mapping[str, Any] | SchedulerExecutionContextResolution | None
     ) = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
+    receipt_bound_todo_id: str | None = None,
 ) -> dict[str, Any]:
     from .control_plane.quota.should_run import (
         build_quota_should_run as _build_quota_should_run,
@@ -810,6 +811,7 @@ def build_quota_should_run(
         codex_app_automation_id=codex_app_automation_id,
         scheduler_execution_context=scheduler_execution_context,
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+        receipt_bound_todo_id=receipt_bound_todo_id,
     )
 
 

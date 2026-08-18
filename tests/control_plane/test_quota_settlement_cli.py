@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GOAL_ID = "settlement-cli-fixture"
 AGENT_ID = "codex-settlement-cli"
 TODO_ID = "todo_fixture_settlement"
+REENTRY_TODO_ID = "todo_fixture_network_reentry"
 TURN_ID = "turn-settlement-cli-1"
 
 
@@ -164,6 +165,22 @@ def _configure_read_only_todo(project: Path) -> Path:
         encoding="utf-8",
     )
     return state_path
+
+
+def _configure_runtime_capability_reentry_fixture(project: Path) -> None:
+    state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    state_text = state_path.read_text(encoding="utf-8")
+    state_path.write_text(
+        state_text.replace(
+            "## Agent Todo\n\n",
+            "## Agent Todo\n\n"
+            "- [ ] [P0] Inspect the network target.\n"
+            f"  <!-- loopx:todo todo_id={REENTRY_TODO_ID} status=open "
+            "task_class=advancement_task action_kind=inspect_target "
+            "required_capabilities=network -->\n",
+        ),
+        encoding="utf-8",
+    )
 
 
 def _initialize_git_checkout(project: Path) -> None:
@@ -503,6 +520,70 @@ def test_same_turn_identityless_guard_upgrades_and_settles_full_chain(
     assert spend_replay["appended"] is False
     assert _spend_run_count(runtime) == 1
     assert _heartbeat_receipt_count(runtime, TURN_ID) == 2
+
+
+def test_runtime_capability_reentry_preserves_receipt_bound_todo_and_rejects_explicit_conflict(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _configure_runtime_capability_reentry_fixture(project)
+    guard_args = (
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        TURN_ID,
+        "--scan-path",
+        str(project),
+    )
+
+    first_rc, first = _run_cli(registry_path, runtime, *guard_args)
+    replay_rc, replay = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        "--available-capability",
+        "network",
+    )
+
+    assert first_rc == 0, first
+    assert first["selected_todo"]["todo_id"] == TODO_ID
+    assert first["heartbeat_receipt"]["settlement_identity"]["todo_id"] == TODO_ID
+    candidates = first["runtime_capability_reentry"]["candidates"]
+    assert candidates[0]["verification_target"]["todo_id"] == REENTRY_TODO_ID
+    assert replay_rc == 0, replay
+    assert replay["selected_todo"]["todo_id"] == TODO_ID
+    assert replay["selected_todo"]["selection_binding"] == "heartbeat_receipt"
+    assert replay["agent_lane_next_action"]["todo_id"] == TODO_ID
+    assert replay["heartbeat_receipt"]["status"] == "replayed"
+    assert replay["heartbeat_receipt"]["settlement_identity"]["todo_id"] == TODO_ID
+    assert (
+        replay["interaction_contract"]["cli_channel"]["settlement_plan"]["identity"][
+            "todo_id"
+        ]
+        == TODO_ID
+    )
+    assert _heartbeat_receipt_count(runtime, TURN_ID) == 1
+
+    conflict_rc, conflict = _run_cli(
+        registry_path,
+        runtime,
+        *guard_args,
+        "--available-capability",
+        "network",
+        "--todo-id",
+        REENTRY_TODO_ID,
+    )
+
+    assert conflict_rc == 1, conflict
+    assert conflict["error_code"] == "heartbeat_receipt_identity_conflict"
+    assert "explicitly requested Todo" in conflict["reason"]
+    assert conflict["heartbeat_receipt"]["status"] == "write_failed"
+    assert _heartbeat_receipt_count(runtime, TURN_ID) == 1
 
 
 def test_read_only_settlement_omits_non_causal_delivery_workspace(
