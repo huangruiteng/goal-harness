@@ -221,6 +221,22 @@ def test_pending_change_ledger_is_restart_safe_idempotent_and_path_free(
         _weekday_policy(),
         now=datetime.fromisoformat("2026-08-18T12:00:00+08:00"),
     )
+    with pytest.raises(ValueError, match="absolute paths"):
+        record_pending_change(
+            runtime_root=runtime_root,
+            repo_path=repo,
+            decision=decision,
+            source="manual_cli",
+            validation_refs=["artifact:/home/example/private.log"],
+        )
+    with pytest.raises(ValueError, match="credentials"):
+        record_pending_change(
+            runtime_root=runtime_root,
+            repo_path=repo,
+            decision=decision,
+            source="manual_cli",
+            validation_refs=["Bear" + "er example-credential"],
+        )
     first = record_pending_change(
         runtime_root=runtime_root,
         repo_path=repo,

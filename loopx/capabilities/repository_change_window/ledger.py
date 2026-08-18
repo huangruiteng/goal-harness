@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 from ...file_lock import exclusive_file_lock
+from ...feedback import validate_local_control_text
 from ...registry import atomic_write_json
 from .repository import (
     RepositoryChangeWindowError,
@@ -31,7 +32,6 @@ _PUBLIC_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/#-]{0,191}$")
 _ABSOLUTE_PATH_TOKEN_RE = re.compile(
     r"(?:^|[\s=:('])(?:/(?!/)|[A-Za-z]:[\\/]|\\\\)",
 )
-_CREDENTIAL_MARKERS = ("authorization:", "bearer ")
 _RESOLUTIONS = {"merged", "superseded", "abandoned"}
 
 
@@ -70,12 +70,16 @@ def _public_value(
         or normalized.startswith("//")
         or "file://" in lowered
     )
-    if contains_absolute_path or any(
-        marker in lowered for marker in _CREDENTIAL_MARKERS
-    ):
+    if contains_absolute_path:
         raise RepositoryChangeWindowError(
-            f"{field} must not contain credentials or local absolute paths"
+            f"{field} must not contain local absolute paths"
         )
+    try:
+        validate_local_control_text(field, normalized)
+    except ValueError as exc:
+        raise RepositoryChangeWindowError(
+            f"{field} must not contain credentials"
+        ) from exc
     if "\n" in normalized or "\r" in normalized:
         raise RepositoryChangeWindowError(f"{field} must be one line")
     return normalized
