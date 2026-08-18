@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -93,6 +94,7 @@ def _run_cli(
     registry_path: Path,
     runtime: Path,
     *args: str,
+    cwd: Path = REPO_ROOT,
 ) -> tuple[int, dict[str, Any]]:
     result = subprocess.run(
         [
@@ -107,10 +109,14 @@ def _run_cli(
             "json",
             *args,
         ],
-        cwd=REPO_ROOT,
+        cwd=cwd,
         check=False,
         capture_output=True,
         text=True,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(REPO_ROOT),
+        },
     )
     return result.returncode, json.loads(result.stdout)
 
@@ -757,8 +763,7 @@ def test_runtime_capability_reentry_preserves_receipt_bound_todo_and_rejects_exp
     assert first_rc == 0, first
     assert first["selected_todo"]["todo_id"] == TODO_ID
     assert first["heartbeat_receipt"]["settlement_identity"]["todo_id"] == TODO_ID
-    candidates = first["runtime_capability_reentry"]["candidates"]
-    assert candidates[0]["verification_target"]["todo_id"] == REENTRY_TODO_ID
+    assert "runtime_capability_reentry" not in first
     assert replay_rc == 0, replay
     assert replay["selected_todo"]["todo_id"] == TODO_ID
     assert replay["selected_todo"]["selection_binding"] == "heartbeat_receipt"
@@ -788,6 +793,127 @@ def test_runtime_capability_reentry_preserves_receipt_bound_todo_and_rejects_exp
     assert "explicitly requested Todo" in conflict["reason"]
     assert conflict["heartbeat_receipt"]["status"] == "write_failed"
     assert _heartbeat_receipt_count(runtime, TURN_ID) == 1
+
+
+def test_peer_refresh_rejects_implicit_canonical_workspace_before_writeback(
+    tmp_path: Path,
+) -> None:
+    project, runtime, registry_path = _write_fixture(tmp_path)
+    _initialize_git_checkout(project)
+    subprocess.run(["git", "add", "."], cwd=project, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Test",
+            "-c",
+            "user.email=loopx-test@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "fixture",
+        ],
+        cwd=project,
+        check=True,
+    )
+    binding = (
+        "--agent-id",
+        AGENT_ID,
+        "--todo-id",
+        TODO_ID,
+        "--turn-instance-id",
+        TURN_ID,
+    )
+    _guard_rc, guard = _run_cli(
+        registry_path,
+        runtime,
+        "quota",
+        "should-run",
+        "--codex-app",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--turn-instance-id",
+        TURN_ID,
+        "--scan-path",
+        str(project),
+    )
+    assert guard["heartbeat_receipt"]["settlement_identity"]["todo_id"] == TODO_ID
+
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["goals"][0]["coordination"]["registered_agents"].append(
+        "codex-settlement-peer"
+    )
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    state_path.write_text(
+        state_path.read_text(encoding="utf-8").replace(
+            "action_kind=validate -->",
+            f"action_kind=validate claimed_by={AGENT_ID} -->",
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=project, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=LoopX Test",
+            "-c",
+            "user.email=loopx-test@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "peer fixture",
+        ],
+        cwd=project,
+        check=True,
+    )
+    linked_worktree = tmp_path / "linked-worktree"
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "--detach", str(linked_worktree)],
+        cwd=project,
+        check=True,
+    )
+
+    refresh_args = (
+        "refresh-state",
+        "--goal-id",
+        GOAL_ID,
+        "--classification",
+        "peer_delivery_validated",
+        "--delivery-batch-scale",
+        "single_surface",
+        "--delivery-outcome",
+        "outcome_progress",
+        *binding,
+        "--no-global-sync",
+        "--suppress-external-sinks",
+    )
+    canonical_rc, canonical = _run_cli(
+        registry_path,
+        runtime,
+        *refresh_args,
+        cwd=project,
+    )
+    assert canonical_rc == 1, canonical
+    assert "must be refreshed from the independent git worktree" in canonical["error"]
+    assert _classification_count(runtime, "peer_delivery_validated") == 0
+
+    linked_rc, linked = _run_cli(
+        registry_path,
+        runtime,
+        *refresh_args,
+        cwd=linked_worktree,
+    )
+    assert linked_rc == 0, linked
+    assert linked["delivery_workspace"]["workspace_kind"] == (
+        "independent_git_worktree"
+    )
 
 
 def test_same_turn_receipt_replay_defers_newly_due_higher_priority_monitor(

@@ -1180,21 +1180,25 @@ def refresh_state_run(
             current_path=delivery_workspace_path,
             peer_independent_worktree_required=peer_independent_worktree_required,
         )
-        if delivery_workspace_path is not None:
-            if delivery_workspace is None:
-                raise ValueError(
-                    "--delivery-workspace-path must identify a git checkout with "
-                    "a credential-free origin repository"
-                )
-            if (
-                peer_independent_worktree_required
-                and delivery_workspace.get("workspace_kind")
+        if delivery_workspace_path is not None and delivery_workspace is None:
+            raise ValueError(
+                "--delivery-workspace-path must identify a git checkout with "
+                "a credential-free origin repository"
+            )
+        if (
+            peer_independent_worktree_required
+            and (
+                delivery_workspace is None
+                or delivery_workspace.get("workspace_kind")
                 != "independent_git_worktree"
-            ):
-                raise ValueError(
-                    "--delivery-workspace-path must identify the independent git "
-                    "worktree that produced this peer delivery"
-                )
+            )
+        ):
+            raise ValueError(
+                "accountable peer delivery must be refreshed from the independent "
+                "git worktree that produced it, or name that worktree with "
+                "--delivery-workspace-path"
+            )
+        if delivery_workspace_path is not None and delivery_workspace is not None:
             delivery_workspace["repository_source"] = (
                 "refresh_state.delivery_workspace_path"
             )
