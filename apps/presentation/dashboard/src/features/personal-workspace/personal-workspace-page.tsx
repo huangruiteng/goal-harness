@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
-import { Bot, CalendarClock, ListPlus, MessageCircleQuestion, Paperclip, Plus, Send, X } from "lucide-react";
+import { AlertCircle, Bot, CalendarClock, ListPlus, MessageCircleQuestion, Paperclip, Plus, Send, X } from "lucide-react";
 
 import {
   applyTypedAction,
@@ -36,6 +36,7 @@ import type {
   WorkspaceImageAttachment,
   WorkspaceModel,
   WorkspaceRun,
+  WorkspaceSystemHealth,
   WorkspaceTimelineItem,
 } from "./personal-workspace-model";
 import { goalTitleFor, workspaceHomeLaneForGoal, workspaceSessionStatusLabel } from "./personal-workspace-model";
@@ -86,7 +87,15 @@ function activityTimeLabel(value?: string) {
   return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(parsed);
 }
 
-function ManagerHomeBoard({ goals, onSelectGoal }: { goals: WorkspaceGoal[]; onSelectGoal: (goalId: string) => void }) {
+function ManagerHomeBoard({
+  goals,
+  onSelectGoal,
+  systemHealth,
+}: {
+  goals: WorkspaceGoal[];
+  onSelectGoal: (goalId: string) => void;
+  systemHealth?: WorkspaceSystemHealth;
+}) {
   const active = Object.fromEntries(activeHomeLanes.map((lane) => [lane.key, [] as WorkspaceGoal[]])) as Record<(typeof activeHomeLanes)[number]["key"], WorkspaceGoal[]>;
   const history: WorkspaceGoal[] = [];
   goals.forEach((goal) => {
@@ -104,6 +113,22 @@ function ManagerHomeBoard({ goals, onSelectGoal }: { goals: WorkspaceGoal[]; onS
   );
   return (
     <section aria-label="Goal 工作区" className="personal-home-board">
+      {systemHealth && (!systemHealth.ok || systemHealth.issues.length > 0 || systemHealth.freshnessWarning) ? (
+        <div className="personal-system-health-banner" role="alert">
+          <div className="personal-system-health-header">
+            <AlertCircle size={15} />
+            <strong>系统健康：{systemHealth.summary}</strong>
+            {systemHealth.freshnessWarning ? <small>（{systemHealth.freshnessWarning}）</small> : null}
+          </div>
+          {systemHealth.issues.length > 0 ? (
+            <ul className="personal-system-health-issues">
+              {systemHealth.issues.map((issue, idx) => (
+                <li key={idx}>{issue}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       <div className="personal-home-lanes">
         {activeHomeLanes.map((lane) => (
           <section className={`personal-home-lane is-${lane.key}`} data-testid={`personal-home-lane-${lane.key}`} key={lane.key}>
@@ -1416,7 +1441,7 @@ export function PersonalWorkspacePage({
             ) : selectedGoal && selectedGoalTab === "files" ? (
               <section className="personal-object-list"><header><strong>Files & Outputs</strong><span>{items.filter((item) => item.kind === "output").length}</span></header>{items.filter((item): item is Extract<WorkspaceTimelineItem, { kind: "output" }> => item.kind === "output").map((item) => <button key={item.id} onClick={() => setSelection({ item: item.output, kind: "output" })} type="button"><span>↗</span><strong>{item.output.title}</strong><p>{item.output.summary ?? item.output.safePreview ?? item.output.kind ?? "公开安全产出"}</p><small title={item.output.createdAt}>{[item.output.goalTitle, item.output.todoId ? `Task ${item.output.todoId}` : null, activityTimeLabel(item.output.createdAt)].filter(Boolean).join(" · ")}</small></button>)}</section>
             ) : !selectedGoal && !managerChatOpen ? (
-              <ManagerHomeBoard goals={workspaceGoals} onSelectGoal={selectGoal} />
+              <ManagerHomeBoard goals={workspaceGoals} onSelectGoal={selectGoal} systemHealth={model.systemHealth} />
             ) : !selectedGoal ? (
               <ChannelTimeline items={managerChatItems} onSelect={setSelection} selectedGoal={null} />
             ) : (

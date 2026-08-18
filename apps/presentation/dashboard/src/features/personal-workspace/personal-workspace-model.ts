@@ -221,11 +221,19 @@ export type WorkspaceGoalNotification = {
   targetRef?: string | null;
 };
 
+export type WorkspaceSystemHealth = {
+  freshnessWarning?: string | null;
+  issues: string[];
+  ok: boolean;
+  summary: string;
+};
+
 export type WorkspaceModel = {
   blockingTodoCount: number;
   goalNotifications?: WorkspaceGoalNotification[];
   goals: WorkspaceGoal[];
   openUserTodoCount: number;
+  systemHealth?: WorkspaceSystemHealth;
   timeline?: WorkspaceTimelineItem[];
   userTodos: WorkspaceAttention[];
   workers?: WorkspaceWorker[];
@@ -265,6 +273,7 @@ export type PersonalHomeCompatibleModel = {
   goalNotifications?: WorkspaceGoalNotification[];
   goals: WorkspaceGoal[];
   openUserTodoCount: number;
+  systemHealth?: WorkspaceSystemHealth;
   userTodos: WorkspaceAttention[];
   workers?: WorkspaceWorker[];
 };
@@ -315,6 +324,7 @@ export function normalizePersonalHomeModel(model: PersonalHomeCompatibleModel): 
     goalNotifications: model.goalNotifications,
     goals: model.goals,
     openUserTodoCount: model.openUserTodoCount,
+    systemHealth: model.systemHealth,
     userTodos: model.userTodos,
     workers: model.workers,
   };

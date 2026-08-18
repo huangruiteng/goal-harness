@@ -109,44 +109,10 @@ excludes(
 );
 
 for (const [snippet, label] of [
-  ["<UsageMetric", "usage metric component"],
-  ["label=\"有进展运行\"", "progress metric label"],
-  ["value={`${formatUsageCount(totals.progress_signal_run_count_24h)} / ${formatUsageCount(totals.progress_signal_run_count_7d)}`}", "progress metric value"],
-  ["xl:grid-cols-5", "five-column metric grid"],
-  ["<div className=\"text-right\">进展</div>", "top-goal progress header"],
-  ["goal.progress_signal_run_count_24h", "top-goal 24h progress value"],
-  ["grid-cols-[minmax(0,1fr)_70px_70px_80px_80px]", "five-column top-goal grid"],
-] as const) {
-  includes(dashboardSource, snippet, label);
-}
-
-for (const [snippet, label] of [
-  ["<EventLedgerSummaryPanel summary={payload.event_ledger_summary} />", "ops event ledger panel"],
-  ["<PromotionReadinessSummaryPanel summary={payload.promotion_readiness_summary} />", "ops promotion readiness panel"],
-  ["<PromotionGatePanel gate={payload.promotion_gate} />", "ops promotion gate panel"],
-  ["<DecisionFreshnessSummaryPanel summary={payload.decision_freshness_summary} />", "ops decision freshness panel"],
-  ["function ShareEventLedgerStrip", "share event ledger strip"],
-  ["控制面事件账本", "Chinese event ledger title"],
-  ["对话任务不是事实来源", "source-of-truth copy"],
-  ["eventClassLabel", "event class label map"],
-  ["花费记录", "accounting label"],
-  ["人类决策", "decision label"],
-  ["证据观察", "evidence label"],
-  ["状态刷新", "state label"],
-  ["实际推进", "work label"],
-  ["function ShareDecisionFreshnessWarning", "share decision freshness warning"],
-  ["function DecisionFreshnessSummaryPanel", "ops decision freshness component"],
-  ["function PromotionReadinessSummaryPanel", "ops promotion readiness component"],
-  ["function PromotionGatePanel", "ops promotion gate component"],
-  ["晋级确认", "promotion gate panel title"],
-  ["晋级就绪度", "promotion readiness panel title"],
-  ["安装器日志都不是事实来源", "promotion source-of-truth copy"],
-  ["决策新鲜度", "Chinese decision freshness panel title"],
-  ["精确回放仍以只追加运行历史为准", "exact replay source-of-truth copy"],
-  ["当前样本里没有需要重新确认的检查点决策", "empty decision freshness copy"],
-  ["决策需重新确认", "Chinese decision rebase warning title"],
-  ["这不是仓库回滚", "Chinese non-rollback copy"],
-  ["shareDecisionFreshnessById(payload.decision_freshness_summary)", "share freshness grouping"],
+  ["buildPersonalHomeModel(payload, rows)", "personal workspace model assembly"],
+  ["shareUsageById(payload.usage_summary)", "goal usage projection"],
+  ["systemHealth", "system health projection"],
+  ["payload.decision_freshness_summary", "decision freshness check"],
 ] as const) {
   includes(dashboardSource, snippet, label);
 }

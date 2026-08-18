@@ -28,8 +28,8 @@ const viteSource = readFileSync("vite.config.ts", "utf8");
 const dashboardDevSource = readFileSync("../../../scripts/dashboard-dev.sh", "utf8");
 const designSource = readFileSync("design.md", "utf8");
 
-includes(routerSource, 'view: z.enum(["ops", "share"]).optional()', "optional operator route");
-excludes(routerSource, 'view: z.enum(["ops", "share"]).optional().default("share")', "legacy share default");
+excludes(routerSource, 'view: z.enum(["ops", "share"])', "legacy dual-view routing removed");
+excludes(routerSource, 'chatRoute', "legacy standalone chat route removed");
 includes(dashboardSource, 'data-testid="personal-goal-home"', "personal workspace route");
 includes(dashboardSource, "<PersonalWorkspacePage", "personal workspace rendering");
 includes(dashboardSource, "buildPersonalHomeModel(payload, rows)", "public-safe workspace projection");
