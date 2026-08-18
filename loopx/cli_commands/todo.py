@@ -617,6 +617,7 @@ def handle_todo_command(
                 role=args.role,
                 text=args.text,
                 status=args.status,
+                note=args.note,
                 task_class=args.task_class,
                 action_kind=args.action_kind,
                 task_domain=args.task_domain,

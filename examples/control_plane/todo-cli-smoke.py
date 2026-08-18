@@ -25,6 +25,8 @@ GOAL_ID = "todo-cli-goal"
 USER_TODO = "Review the owner decision checklist before approving delivery."
 SCOPED_USER_GATE = "Choose the side-agent publishing channel before posting externally."
 AGENT_TODO = "Summarize the read-only evidence after the user checklist is done."
+AGENT_TODO_NOTE = "Start from the public-safe evidence summary."
+UPDATED_AGENT_TODO_NOTE = "Preserve the validated summary as the handoff context."
 UPDATED_AGENT_TODO = "Publish the compact evidence summary after validation passes."
 MONITOR_TODO = "Monitor the release-note draft PR until the next scheduled check."
 MONITOR_DUE_AT = "2026-01-02T00:00:00+00:00"
@@ -247,8 +249,23 @@ def main() -> int:
         assert scoped_gate["agent_id"] == "codex-side-bypass", scoped_gate
         assert scoped_gate["blocks_agent"] == "codex-side-bypass", scoped_gate
 
-        agent_payload = run_cli(registry_path, "todo", "add", "--goal-id", GOAL_ID, "--role", "agent", "--text", AGENT_TODO)
+        agent_payload = run_cli(
+            registry_path,
+            "todo",
+            "add",
+            "--goal-id",
+            GOAL_ID,
+            "--role",
+            "agent",
+            "--text",
+            AGENT_TODO,
+            "--note",
+            AGENT_TODO_NOTE,
+        )
         assert agent_payload["added"] is True, agent_payload
+        assert agent_payload["note"] == AGENT_TODO_NOTE, agent_payload
+        added_fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
+        assert added_fields["agent_todos"]["items"][0]["note"] == AGENT_TODO_NOTE, added_fields
         legacy_agent = run_cli(
             legacy_registry_path,
             "todo",
@@ -293,6 +310,8 @@ def main() -> int:
             "advancement_task",
             "--action-kind",
             "run_eval",
+            "--note",
+            UPDATED_AGENT_TODO_NOTE,
             "--continuation-policy",
             "independent_handoff",
             "--required-capability",
@@ -309,6 +328,7 @@ def main() -> int:
         assert metadata_payload["metadata_updated"] is True, metadata_payload
         assert metadata_payload["task_class"] == "advancement_task", metadata_payload
         assert metadata_payload["action_kind"] == "run_eval", metadata_payload
+        assert metadata_payload["note"] == UPDATED_AGENT_TODO_NOTE, metadata_payload
         assert (
             metadata_payload["continuation_policy"] == "independent_handoff"
         ), metadata_payload
@@ -347,6 +367,7 @@ def main() -> int:
         assert fields["agent_todos"]["items"][0]["todo_id"].startswith("todo_"), fields
         assert fields["agent_todos"]["items"][0]["task_class"] == "advancement_task", fields
         assert fields["agent_todos"]["items"][0]["action_kind"] == "run_eval", fields
+        assert fields["agent_todos"]["items"][0]["note"] == UPDATED_AGENT_TODO_NOTE, fields
         assert fields["agent_todos"]["items"][0]["required_capabilities"] == [
             "shell",
             "benchmark_runner",
@@ -422,6 +443,7 @@ def main() -> int:
         assert agent_lookup["matched"] is True, agent_lookup
         assert agent_lookup["todo"]["todo_id"] == metadata_payload["todo_id"], agent_lookup
         assert agent_lookup["todo"]["action_kind"] == "run_eval", agent_lookup
+        assert agent_lookup["todo"]["note"] == UPDATED_AGENT_TODO_NOTE, agent_lookup
         assert agent_lookup["relations"]["required_capabilities"] == [
             "shell",
             "benchmark_runner",
