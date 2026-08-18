@@ -643,6 +643,10 @@ def decide_lark_topic_event(
             text_mentions_bot = bool(
                 (bot_display_name and f"@{bot_display_name}".casefold() in content_text.casefold())
                 or (sender_profile and f"@{sender_profile}".casefold() in content_text.casefold())
+                or content_text.startswith("@_user_")
+                or "@_user_" in content_text
+                or content_text.startswith("@_all")
+                or "@_all" in content_text
             )
             is_addressed = bool(
                 event.get("mentioned") is True

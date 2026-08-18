@@ -633,7 +633,7 @@ def test_profile_poll_routes_the_only_goal_in_a_chat_without_querying_message_hi
                         "enabled": True,
                         "target_ref": "mew-product",
                         "topic": {"root_message_id": "om_topic_alpha"},
-                        "routing": {"incoming_mode": "mentions", "reply_mode": "topic_reply"},
+                        "routing": {"incoming_mode": "all", "reply_mode": "topic_reply"},
                     }
                 },
             }
