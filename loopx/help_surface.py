@@ -195,6 +195,10 @@ COMMAND_GROUPS: list[dict[str, object]] = [
                 "command": "loopx integration-branch --help",
                 "purpose": "Detect reviewed source-branch drift and rebuild one local integration branch.",
             },
+            {
+                "command": "loopx change-window --help",
+                "purpose": "Apply a repository-local schedule and inspect blocked unmerged work in the shared ledger.",
+            },
             {"command": "loopx registry", "purpose": "Inspect registered goals and adapters."},
             {"command": "loopx sync-global", "purpose": "Merge project state into the shared registry."},
             {

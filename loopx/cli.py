@@ -23,6 +23,10 @@ from .capabilities.integration_branch.cli import (
     handle_integration_branch_command,
     register_integration_branch_commands,
 )
+from .capabilities.repository_change_window.cli import (
+    handle_repository_change_window_command,
+    register_repository_change_window_commands,
+)
 from .capabilities.decision_context.cli import (
     handle_decision_context_command,
     register_decision_context_commands,
@@ -240,6 +244,8 @@ def build_parser() -> LoopXArgumentParser:
     register_change_quality_commands(sub, add_subcommand_format)
 
     register_integration_branch_commands(sub, add_subcommand_format)
+
+    register_repository_change_window_commands(sub, add_subcommand_format)
 
     register_content_ops_commands(sub, add_subcommand_format)
 
@@ -476,6 +482,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     if integration_branch_result is not None:
         return integration_branch_result
+
+    repository_change_window_result = handle_repository_change_window_command(
+        args,
+        registry_path=registry_path,
+        runtime_root_arg=args.runtime_root,
+        output_format=output_format,
+        print_payload=print_payload,
+    )
+    if repository_change_window_result is not None:
+        return repository_change_window_result
 
     if args.command == "ml-experiment":
         return handle_ml_experiment_command(args, output_format=output_format, print_payload=print_payload)
