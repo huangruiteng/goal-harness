@@ -34,9 +34,10 @@ function managerProjectionIntent(message: string) {
 }
 
 function executionIntent(message: string) {
+  const asksForAdvice = /(怎么|如何|为什么|给.*建议|分析一下|解释|只读)/u.test(message);
   const asksForMutation = /(解决一下|修复一下|处理一下|执行一下|改一下|跑(?:一下)?测试|rebase|push|提交|推送)/iu.test(message);
-  const asksForAdvice = /(怎么|如何|给.*建议)/u.test(message) && !asksForMutation;
-  return !asksForAdvice && asksForMutation
+  if (asksForAdvice) return false;
+  return asksForMutation
     && /(帮我|请|给我|直接|现在|开始|bytedcli|codebase|git|rebase|push|提交|推送)/iu.test(message);
 }
 
@@ -69,7 +70,7 @@ export function routeWorkspaceInput(rawMessage: string, context: WorkspaceRouter
   if (context.goalId && !requestsHeartbeat && !negates(message, /定时|监控|监测|持续观察/iu) && /(定时|监控|监测|每.{0,8}(分钟|小时|天)|持续观察)/u.test(message)) {
     candidates.push({ actionKind: "monitor.create", confidence: 0.94, normalizedParameters: { goal_id: context.goalId } });
   }
-  if (context.goalId && agent && /((让|交给).{0,20}(管理|负责|接管).{0,8}(goal|目标)|(绑定).{0,12}(goal|目标)|(goal|目标).{0,12}(交给|绑定|负责|接管))/iu.test(message)) {
+  if (context.goalId && agent && !negates(message, /绑定|负责|接管|管理/iu) && /((让|交给).{0,20}(管理|负责|接管).{0,8}(goal|目标)|(绑定).{0,12}(goal|目标)|(goal|目标).{0,12}(交给|绑定|负责|接管))/iu.test(message)) {
     candidates.push({ actionKind: "agent.bind", confidence: 0.96, normalizedParameters: { agent_id: agent.agentId, goal_id: context.goalId } });
   }
   if (context.goalId && !referencesExistingTodo && !negates(message, new RegExp(todoSubject, "iu"))
@@ -80,10 +81,10 @@ export function routeWorkspaceInput(rawMessage: string, context: WorkspaceRouter
     candidates.push({ actionKind: "todo.create", confidence: 0.9, normalizedParameters: { goal_id: context.goalId, start_execution: true } });
   }
   if (context.goalId && todo) {
-    const operation = /完成|做完|关闭/u.test(message) ? "complete"
-      : /阻塞|卡住/u.test(message) ? "block"
-        : /暂缓|稍后|推迟/u.test(message) ? "defer"
-          : agent && /交给|分配给|改派/u.test(message) ? "reassign"
+    const operation = !negates(message, /完成|做完|关闭/u) && /完成|做完|关闭/u.test(message) ? "complete"
+      : !negates(message, /阻塞|卡住/u) && /阻塞|卡住/u.test(message) ? "block"
+        : !negates(message, /暂缓|稍后|推迟/u) && /暂缓|稍后|推迟/u.test(message) ? "defer"
+          : agent && !negates(message, /交给|分配给|改派/u) && /交给|分配给|改派/u.test(message) ? "reassign"
             : null;
     if (operation) {
       candidates.push({
@@ -93,7 +94,8 @@ export function routeWorkspaceInput(rawMessage: string, context: WorkspaceRouter
       });
     }
   }
-  if (context.goalId && /(请|现在|开始|批准|执行).{0,8}(发布|上线|合并|部署|删除|付款)/u.test(message)) {
+  const protectedSubject = /发布|上线|合并|部署|删除|付款/iu;
+  if (context.goalId && !negates(message, protectedSubject) && /(请|现在|开始|批准|执行).{0,8}(发布|上线|合并|部署|删除|付款)/u.test(message)) {
     candidates.push({ actionKind: "goal.update", confidence: 0.98, normalizedParameters: { goal_id: context.goalId, status: "operator_gate_requested" } });
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from "react";
-import { Bot, CalendarClock, MessageCircleQuestion, Paperclip, Send, X } from "lucide-react";
+import { Bot, CalendarClock, ListPlus, MessageCircleQuestion, Paperclip, Plus, Send, X } from "lucide-react";
 
 import {
   applyTypedAction,
@@ -24,6 +24,7 @@ import { ContextDrawer } from "./context-drawer";
 import { GoalSidebar } from "./goal-sidebar";
 import { GoalTasksView } from "./goal-tasks-view";
 import { LarkSettingsPage } from "./lark-settings-page";
+import { MarkdownText } from "./markdown";
 import type {
   PersonalWorkspaceCallbacks,
   WorkspaceAgentOption,
@@ -41,6 +42,22 @@ import { goalTitleFor, workspaceHomeLaneForGoal, workspaceSessionStatusLabel } f
 import { routeWorkspaceInput } from "./personal-workspace-router";
 import { WorkspaceShell } from "./workspace-shell";
 import "./personal-workspace.css";
+
+export function sanitizeTaskDraftFromReply(reply: string): string {
+  const nextStepMatch = reply.match(/(?:下一步|建议|行动项|待办)[：:\s]*([^\n]+)/u);
+  let candidate = nextStepMatch ? nextStepMatch[1] : reply;
+  candidate = candidate
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[#*~_>]/g, "")
+    .replace(/^[-*•\d+.\s]+/u, "")
+    .replace(/^(好的|没问题|收到|建议如下|任务如下|分析如下|结论[：:])[\s，,：:]*/u, "");
+  const lines = candidate.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const firstLine = lines[0] || candidate;
+  const normalized = firstLine.replace(/\s+/gu, " ").trim();
+  return Array.from(normalized).slice(0, 120).join("");
+}
 
 function dedupeProposals(proposals: WorkspaceActionPreview[]): WorkspaceActionPreview[] {
   const latest = new Map<string, WorkspaceActionPreview>();
@@ -106,33 +123,81 @@ function ManagerHomeBoard({ goals, onSelectGoal }: { goals: WorkspaceGoal[]; onS
   );
 }
 
-function ManagerConversationTray({ messages, onOpenConversation }: {
+function ManagerConversationTray({
+  agentLabel,
+  messages,
+  onClose,
+  onDraftTask,
+  onOpenConversation,
+  title,
+}: {
+  agentLabel?: string;
   messages: Array<Extract<WorkspaceTimelineItem, { kind: "message" }>['message']>;
+  onClose?: () => void;
+  onDraftTask?: (text: string) => void;
   onOpenConversation: () => void;
+  title?: string;
 }) {
   const latestUserIndex = messages.reduce((latest, message, index) => message.role === "user" ? index : latest, 0);
   const latestExchange = messages.slice(Math.max(0, latestUserIndex));
   const visibleMessages = latestExchange.slice(-3);
+  const latestAssistantMessage = visibleMessages.filter((item) => item.role === "assistant" && !item.pending).at(-1);
+
+  useEffect(() => {
+    if (!onClose) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
-    <button aria-label="查看完整对话" className="personal-manager-conversation-tray" onClick={onOpenConversation} type="button">
+    <aside aria-label="对话回执" className="personal-manager-conversation-tray">
       <header>
         <span>
           <Bot size={16} />
-          <strong>管家对话</strong>
+          <strong>{title ?? "管家对话"}</strong>
           <small>{messages.at(-1)?.pending ? "正在回复" : "刚刚"}</small>
         </span>
-        <span className="personal-manager-conversation-link">查看完整对话</span>
+        <div className="personal-manager-conversation-actions">
+          {onDraftTask && latestAssistantMessage ? (
+            <button
+              className="personal-manager-conversation-btn"
+              onClick={() => onDraftTask(latestAssistantMessage.text)}
+              title="将 Agent 最新回复转为 Task 草稿"
+              type="button"
+            >
+              <ListPlus size={13} />
+              <span>转为 Task</span>
+            </button>
+          ) : null}
+          <button className="personal-manager-conversation-link" onClick={onOpenConversation} type="button">查看完整对话</button>
+          {onClose ? (
+            <button
+              aria-label="关闭对话回执"
+              className="personal-manager-conversation-close"
+              onClick={onClose}
+              title="关闭对话回执"
+              type="button"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
       </header>
       <div aria-live="polite" className="personal-manager-conversation-messages">
         {visibleMessages.map((message) => (
           <article className={`is-${message.role}`} key={message.id}>
-            <strong>{message.role === "user" ? "你" : message.agentLabel ?? "LoopX 管家"}</strong>
-            <p>{message.text}</p>
-            {message.pending ? <small>正在整理…</small> : null}
+            <strong>{message.role === "user" ? "你" : message.agentLabel ?? agentLabel ?? "LoopX 管家"}</strong>
+            <div className="personal-manager-conversation-bubble">
+              {message.role === "user" ? <p>{message.text}</p> : <MarkdownText text={message.text} />}
+              {message.pending ? <small>正在整理…</small> : null}
+            </div>
           </article>
         ))}
       </div>
-    </button>
+    </aside>
   );
 }
 
@@ -483,6 +548,7 @@ export function PersonalWorkspacePage({
   const [selectedGoalTab, setSelectedGoalTab] = useState<WorkspaceGoalTab>("chat");
   const [managerChatOpen, setManagerChatOpen] = useState(false);
   const [managerConversationReceiptVisible, setManagerConversationReceiptVisible] = useState(false);
+  const [goalConversationReceiptVisible, setGoalConversationReceiptVisible] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>(() => {
     try {
       const raw = window.sessionStorage.getItem("loopx-pw-composer-drafts");
@@ -655,12 +721,22 @@ export function PersonalWorkspacePage({
     () => items.flatMap((item) => item.kind === "message" ? [item.message] : []),
     [items],
   );
+  const goalMessages = useMemo(
+    () => selectedGoal ? items.flatMap((item) => item.kind === "message" ? [item.message] : []) : [],
+    [items, selectedGoal],
+  );
   useEffect(() => {
     if (selectedGoal || managerChatOpen) return;
     if (managerMessages.some((message) => message.pending)) {
       setManagerConversationReceiptVisible(true);
     }
   }, [managerChatOpen, managerMessages, selectedGoal]);
+  useEffect(() => {
+    if (!selectedGoal || selectedGoalTab === "chat") return;
+    if (goalMessages.some((message) => message.pending)) {
+      setGoalConversationReceiptVisible(true);
+    }
+  }, [goalMessages, selectedGoal, selectedGoalTab]);
   const managerChatItems = useMemo(
     () => items.filter((item) => item.kind === "message"
       || (item.kind === "proposal" && sessionProposalIds.includes(item.proposal.previewId))),
@@ -1000,6 +1076,7 @@ export function PersonalWorkspacePage({
     setLocalGoalId(goalId);
     setManagerChatOpen(false);
     setManagerConversationReceiptVisible(false);
+    setGoalConversationReceiptVisible(false);
     setActiveSessionRun(null);
     setSelection(null);
     setSelectedGoalTab("chat");
@@ -1025,6 +1102,7 @@ export function PersonalWorkspacePage({
     try {
       if (pendingImages.length) {
         if (!selectedGoalId) setManagerConversationReceiptVisible(true);
+        else if (selectedGoalTab !== "chat") setGoalConversationReceiptVisible(true);
         await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId, pendingImages);
         return;
       }
@@ -1155,13 +1233,15 @@ export function PersonalWorkspacePage({
         return;
       }
       if (!selectedGoalId) setManagerConversationReceiptVisible(true);
+      else if (selectedGoalTab !== "chat") setGoalConversationReceiptVisible(true);
       await callbacks.onSendMessage?.(message, selectedAgentId, selectedGoalId);
     } catch (error) {
       if (!messageOverride) {
         setComposer(message);
         setImageAttachments(pendingImages);
       }
-      throw error;
+      const errorMessage = error instanceof Error ? error.message : "消息发送失败，请稍后重试。";
+      setActionFeedback(`发送失败：${errorMessage}`);
     } finally {
       setSending(false);
     }
@@ -1273,7 +1353,10 @@ export function PersonalWorkspacePage({
             }}
             onSelectGoalTab={(tab) => {
               setSelectedGoalTab(tab);
-              if (tab === "chat") setActiveSessionRun(null);
+              if (tab === "chat") {
+                setActiveSessionRun(null);
+                setGoalConversationReceiptVisible(false);
+              }
             }}
             onSelectAgent={selectAgent}
             onReturnManagerHome={() => {
@@ -1314,7 +1397,7 @@ export function PersonalWorkspacePage({
                 goal={selectedGoal}
                 items={items}
                 onDraftTaskFromMessage={(reply) => {
-                  const taskDraft = reply.replace(/\s+/gu, " ").trim().slice(0, 240);
+                  const taskDraft = sanitizeTaskDraftFromReply(reply);
                   setComposer(`创建一个 Task：${taskDraft}`);
                   setActionFeedback("已根据回复生成 Task 草稿。编辑后发送，LoopX 会先展示确认预览。");
                   window.requestAnimationFrame(() => composerRef.current?.focus());
@@ -1351,10 +1434,31 @@ export function PersonalWorkspacePage({
           </div>
           <div className="personal-composer-wrap">
             {!selectedGoal && !managerChatOpen && managerConversationReceiptVisible && managerMessages.length ? (
-              <ManagerConversationTray messages={managerMessages} onOpenConversation={() => {
-                setManagerConversationReceiptVisible(false);
-                setManagerChatOpen(true);
-              }} />
+              <ManagerConversationTray
+                messages={managerMessages}
+                onClose={() => setManagerConversationReceiptVisible(false)}
+                onOpenConversation={() => {
+                  setManagerConversationReceiptVisible(false);
+                  setManagerChatOpen(true);
+                }} />
+            ) : null}
+            {selectedGoal && selectedGoalTab !== "chat" && goalConversationReceiptVisible && goalMessages.length ? (
+              <ManagerConversationTray
+                agentLabel={selectedAgentLabel}
+                messages={goalMessages}
+                onClose={() => setGoalConversationReceiptVisible(false)}
+                onDraftTask={selectedGoalTab === "tasks" ? (reply) => {
+                  const taskDraft = sanitizeTaskDraftFromReply(reply);
+                  setComposer(`创建一个 Task：${taskDraft}`);
+                  setActionFeedback("已根据回复生成 Task 草稿。编辑后发送，LoopX 会先展示确认预览。");
+                  window.requestAnimationFrame(() => composerRef.current?.focus());
+                } : undefined}
+                onOpenConversation={() => {
+                  setGoalConversationReceiptVisible(false);
+                  setSelectedGoalTab("chat");
+                }}
+                title={`${selectedGoal.title} · ${selectedAgentLabel}`}
+              />
             ) : null}
             {actionFeedback ? (
               <div className="personal-action-feedback" role="status">
@@ -1362,18 +1466,26 @@ export function PersonalWorkspacePage({
                 <button aria-label="关闭操作回执" onClick={() => setActionFeedback(null)} type="button"><X size={14} /></button>
               </div>
             ) : null}
-            {selectedGoal ? (
-              <p className="personal-composer-hint">
-                {goalRunningCount > 0
+            <p className="personal-composer-hint">
+              {selectedGoal
+                ? goalRunningCount > 0
                   ? `${selectedAgentLabel} 正在执行 ${goalRunningCount} 个任务 · 你的消息作为纠偏进入本会话，不会打断执行`
-                  : `你的消息由 ${selectedAgentLabel} 在本 Goal 的会话中接收`}
-              </p>
-            ) : null}
-            <div className="personal-quick-prompts">
-              <button aria-label="将“我现在该做什么”填入编辑框" className="is-draft" onClick={() => fillQuickPrompt("我现在该做什么？")} title="填入编辑框，确认后再发送" type="button"><MessageCircleQuestion size={13} />询问下一步</button>
-              <button className="is-immediate" disabled={sending} onClick={() => void sendMessage("请给我一份当前 Goal 的进度报告：已完成、执行中、阻塞和下一步。")} title="点击后立即向当前 Agent 发送请求" type="button"><Send size={13} />向 Agent 获取进度报告</button>
-              <button aria-label="配置定时检查" className="is-draft" onClick={() => prepareScheduleDraft("monitor", selectedGoalId)} title="先填写检查内容、频率和停止条件，不会立即创建" type="button"><CalendarClock size={13} />配置定时检查</button>
-            </div>
+                  : `你的消息由 ${selectedAgentLabel} 在本 Goal 的会话中接收`
+                : "你的消息由 LoopX 管家跨 Goal 接收，支持全局询问与创建 Goal"}
+            </p>
+            {selectedGoal ? (
+              <div className="personal-quick-prompts">
+                <button aria-label="将“我现在该做什么”填入编辑框" className="is-draft" onClick={() => fillQuickPrompt("我现在该做什么？")} title="填入编辑框，确认后再发送" type="button"><MessageCircleQuestion size={13} /><span>询问下一步</span><small className="personal-prompt-subtle">草稿</small></button>
+                <button className="is-immediate" disabled={sending} onClick={() => void sendMessage("请给我一份当前 Goal 的进度报告：已完成、执行中、阻塞和下一步。")} title="点击后立即向当前 Agent 发送请求" type="button"><Send size={13} /><span>向 Agent 获取进度报告</span><em className="personal-prompt-badge">立即发送</em></button>
+                <button aria-label="配置定时检查" className="is-draft" onClick={() => prepareScheduleDraft("monitor", selectedGoalId)} title="先填写检查内容、频率和停止条件，不会立即创建" type="button"><CalendarClock size={13} /><span>配置定时检查</span><small className="personal-prompt-subtle">草稿</small></button>
+              </div>
+            ) : (
+              <div className="personal-quick-prompts">
+                <button aria-label="将“有哪些 Goal 正在等我”填入编辑框" className="is-draft" onClick={() => fillQuickPrompt("有哪些 Goal 正在等我？我现在该优先处理什么？")} title="填入编辑框，确认后再发送" type="button"><MessageCircleQuestion size={13} /><span>询问全局待办</span><small className="personal-prompt-subtle">草稿</small></button>
+                <button className="is-immediate" disabled={sending} onClick={() => void sendMessage("请帮我汇总所有活跃 Goal 的最新进展与阻塞。")} title="点击后立即向 LoopX 管家获取全局进展" type="button"><Send size={13} /><span>汇总所有 Goal 进展</span><em className="personal-prompt-badge">立即发送</em></button>
+                <button aria-label="创建新 Goal" className="is-draft" onClick={requestGoalCreate} title="填入 Goal 模板草稿，检查后再创建" type="button"><Plus size={13} /><span>创建新 Goal</span><small className="personal-prompt-subtle">草稿</small></button>
+              </div>
+            )}
             {goalDraftActive ? <div className="personal-goal-draft-status" role="status"><strong>Goal 草稿</strong><span>补充内容后发送，LoopX 会先展示待确认操作。</span></div> : null}
             {imageAttachments.length ? <div className="personal-composer-images" aria-label="待发送图片">{imageAttachments.map((attachment) => (
               <figure key={attachment.id}>

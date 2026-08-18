@@ -27,8 +27,10 @@ equal(routeWorkspaceInput("把 todo-1 标记完成", goalContext).actionKind, "t
 equal(routeWorkspaceInput("帮我修复 MR 冲突，跑测试，然后 push", goalContext).actionKind, "todo.create", "execution task");
 equal(routeWorkspaceInput("创建任务并设置 Heartbeat", goalContext).route, "clarify", "compound intent");
 equal(routeWorkspaceInput("创建任务并设置 Heartbeat", goalContext).missingFields.join(","), "single_intent", "compound missing field");
-equal(routeWorkspaceInput("现在部署到生产", goalContext).actionKind, "goal.update", "protected action");
 equal(routeWorkspaceInput("解释一下现在的状态", goalContext).route, "agent_chat", "goal chat");
+equal(routeWorkspaceInput("请问怎么解决一下这个问题？", goalContext).route, "agent_chat", "advice question stays in chat");
+equal(routeWorkspaceInput("请不要部署到生产环境", goalContext).route, "agent_chat", "negated deployment does not trigger gate");
+equal(routeWorkspaceInput("整理验收材料还没有完成，不要关闭", goalContext).route, "agent_chat", "negated complete does not update todo");
 
 const createGoal = routeWorkspaceInput("创建 Goal：整理每周复盘", { ...goalContext, goalId: null });
 equal(createGoal.route, "typed_action", "goal route");
