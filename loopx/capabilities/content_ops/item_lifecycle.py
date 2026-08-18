@@ -56,6 +56,7 @@ _ITEM_KEYS = {
     "created_at",
     "updated_at",
     "autopublish_allowed",
+    "approval_sequence",
 }
 
 
@@ -299,6 +300,16 @@ def _require_item(item: Mapping[str, Any]) -> dict[str, Any]:
     revision = candidate.get("revision")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
         raise ValueError("revision must be a positive integer")
+    approval_sequence = candidate.get("approval_sequence")
+    if (
+        isinstance(approval_sequence, bool)
+        or not isinstance(approval_sequence, int)
+        or approval_sequence < 0
+    ):
+        raise ValueError("approval_sequence must be a non-negative integer")
+    approval = candidate.get("approval")
+    if isinstance(approval, Mapping) and approval_sequence < 1:
+        raise ValueError("approval_sequence must be positive while approval is present")
     _digest(candidate.get("content_digest"), "content_digest")
     _token(candidate.get("content_ref"), "content_ref")
     _source_refs(candidate.get("source_refs"))
@@ -357,6 +368,7 @@ def build_content_ops_item(
         "content_digest": _digest(content_digest, "content_digest"),
         "content_ref": _token(content_ref, "content_ref"),
         "source_refs": _source_refs(source_refs),
+        "approval_sequence": 0,
         "approval": None,
         "delivery_intent": None,
         "delivery_receipt": None,
@@ -537,6 +549,7 @@ def _transition(item: dict[str, Any], event: Mapping[str, Any]) -> None:
         ):
             raise ValueError("valid_from must not be after valid_until")
         item["approval"] = approval
+        item["approval_sequence"] = int(item["approval_sequence"]) + 1
         item["state"] = "approved"
         return
 
@@ -721,6 +734,7 @@ def project_content_ops_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "channel": current["channel"],
         "state": state,
         "revision": current["revision"],
+        "approval_sequence": current["approval_sequence"],
         "approval_present": current.get("approval") is not None,
         "delivery_intent_present": current.get("delivery_intent") is not None,
         "published_url": delivery.get("public_url"),

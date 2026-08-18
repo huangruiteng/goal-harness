@@ -210,6 +210,76 @@ def test_event_retry_is_idempotent_and_changed_reuse_is_rejected() -> None:
         apply_content_ops_item_event(first["item"], changed)
 
 
+def test_mismatched_expected_state_or_revision_is_rejected_not_silently_applied() -> None:
+    """A fresh event_id (not a replay) whose expected_state/expected_revision
+    disagree with the item's real current values must fail loudly. Nothing
+    else in this codebase re-derives expected_state/expected_revision for the
+    caller -- callers (including content-ops's CUA reducer) rely entirely on
+    this rejection to catch a stale or forged optimistic-concurrency claim."""
+
+    item = _apply(_item(), "event-review", "submit_review")
+
+    with pytest.raises(ValueError, match="expected_state does not match"):
+        apply_content_ops_item_event(
+            item,
+            _event(item, "event-wrong-state", "approve", {}, "2026-08-03T09:07:00+08:00")
+            | {"expected_state": "captured"},
+        )
+
+    with pytest.raises(ValueError, match="expected_revision does not match"):
+        apply_content_ops_item_event(
+            item,
+            _event(item, "event-wrong-revision", "approve", {}, "2026-08-03T09:07:00+08:00")
+            | {"expected_revision": item["revision"] + 1},
+        )
+
+
+def test_approval_sequence_advances_on_reapproval_even_without_content_revise() -> None:
+    item = _apply(_item(), "event-review", "submit_review")
+    assert item["approval_sequence"] == 0
+
+    item = _apply(
+        item,
+        "event-approve-1",
+        "approve",
+        {
+            "approval_ref": "decision:partner-launch-reply-v1-a",
+            "revision": 1,
+            "content_digest": DIGEST_V1,
+            "effect_kind": "reply",
+        },
+    )
+    first_gate_revision = item["approval_sequence"]
+    assert first_gate_revision == 1
+
+    item = _apply(item, "event-revoke", "revoke_approval", {"reason": "owner asked to re-check tone"})
+    assert item["state"] == "review_ready"
+    assert item["approval"] is None
+    assert item["approval_sequence"] == first_gate_revision, (
+        "approval_sequence must survive revoke so a stale in-flight action "
+        "request cannot be confused with the new approval below"
+    )
+
+    item = _apply(
+        item,
+        "event-approve-2",
+        "approve",
+        {
+            "approval_ref": "decision:partner-launch-reply-v1-b",
+            "revision": 1,
+            "content_digest": DIGEST_V1,
+            "effect_kind": "reply",
+        },
+    )
+    second_gate_revision = item["approval_sequence"]
+
+    assert second_gate_revision > first_gate_revision, (
+        "content revision (1) never changed across the revoke/reapprove cycle, "
+        "so only a dedicated approval_sequence counter -- not item.revision -- "
+        "can distinguish the revoked approval from the live one"
+    )
+
+
 def test_superseded_item_is_terminal_and_links_successor() -> None:
     item = _apply(
         _item(),
