@@ -7,9 +7,10 @@
   complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
 - Source baseline: LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
-- Provider API baseline: NoKV `90883d13539e31185f0d78131989fb51912dbd7e`,
-  used only to map the Python `publish_bytes` generation-CAS API statically;
-  the current candidate has not been run against a live NoKV stack
+- Provider API baseline: NoKV `3d75d96965` (0.11.0 line). The Python
+  `publish_bytes` generation-CAS mapping was exercised once by hand against a
+  live NoKV stack at that pin (see the example README); the run is evidence for
+  the mapping only, not part of any merge gate
 - Language note: the
   [Chinese version](./shared-goal-authority-state-provider-v0.zh-CN.md) and this
   English version are semantic mirrors. A difference between them is a defect.

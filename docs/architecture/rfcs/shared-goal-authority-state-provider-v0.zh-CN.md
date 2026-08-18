@@ -6,9 +6,9 @@
 - 范围：LoopX 共享 Goal 协调的独立部署合同，用来补充
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
 - 源码基线：LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
-- Provider API 基线：NoKV `90883d13539e31185f0d78131989fb51912dbd7e`；
-  只用于静态映射 Python `publish_bytes` generation-CAS API，当前 candidate 尚未在
-  真实 NoKV stack 上运行
+- Provider API 基线：NoKV `3d75d96965`（0.11.0 线）。Python `publish_bytes`
+  generation-CAS 映射已在该基线的真实 NoKV stack 上手工跑过一次（见示例 README）；
+  该次运行只是映射本身的证据，不属于任何合并门槛
 - 语言说明：[英文版](./shared-goal-authority-state-provider-v0.md)与本中文版互为
   语义镜像；两者不一致属于缺陷
 

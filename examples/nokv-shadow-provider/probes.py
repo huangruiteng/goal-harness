@@ -37,6 +37,7 @@ from loopx.control_plane.todos.durable_completion import (  # noqa: E402
 
 from provider import (  # noqa: E402
     CoordinationAuthority,
+    NoKVCoordinationProvider,
     bootstrap_aggregate,
     sample_envelope,
 )
@@ -809,6 +810,132 @@ def probe_durable_completion_fail_closed() -> None:
     )
 
 
+class FakeNoKVClient:
+    """Minimal double for the NoKV Python SDK ``Client`` surface the adapter uses.
+
+    It raises the exception classes the SDK raises since NoKV 0.11.0
+    (``nokv-python`` maps ``NotFound`` to ``FileNotFoundError`` and
+    ``AlreadyExists`` to ``FileExistsError``; other RPC failures stay
+    ``RuntimeError``).  Generations restart at 1 per path lifetime and every
+    replacement advances by one, like the live workspace.
+    """
+
+    def __init__(self):
+        self.paths: dict[tuple[str, str], tuple[bytes, int]] = {}
+        self.stat_failure: Exception | None = None
+
+    def stat(self, workbench: str, path: str) -> dict:
+        if self.stat_failure is not None:
+            failure, self.stat_failure = self.stat_failure, None
+            raise failure
+        try:
+            _bytes, generation = self.paths[(workbench, path)]
+        except KeyError:
+            raise FileNotFoundError("workspace request failed: path does not exist") from None
+        return {"generation": generation}
+
+    def read(self, workbench: str, path: str) -> dict:
+        try:
+            data, generation = self.paths[(workbench, path)]
+        except KeyError:
+            raise FileNotFoundError("workspace request failed: path does not exist") from None
+        return {"bytes": data, "metadata": {"generation": generation}}
+
+    def publish_bytes(self, workbench: str, path: str, data: bytes, **options) -> dict:
+        expected = options.get("expected_generation")
+        current = self.paths.get((workbench, path))
+        if expected is None:
+            if current is not None:
+                raise FileExistsError(
+                    "artifact publication failed during complete: workspace request "
+                    "failed: path already exists"
+                )
+            generation = 1
+        else:
+            if current is None or current[1] != expected:
+                raise RuntimeError(
+                    "artifact publication failed during complete: workspace request "
+                    f"failed: path generation mismatch: expected {expected}"
+                )
+            generation = current[1] + 1
+        self.paths[(workbench, path)] = (bytes(data), generation)
+        return {"generation": generation}
+
+
+def probe_nokv_adapter_exception_mapping() -> None:
+    """The NoKV byte-CAS adapter must classify SDK exceptions into RFC verbs.
+
+    ``load`` returns ``(None, 0)`` for an uninitialized head, and
+    ``compare_and_put`` returns typed ``applied | conflict | ambiguous | failed``
+    for every SDK outcome it can observe: it never leaks ``FileNotFoundError``,
+    ``FileExistsError``, or ``RuntimeError`` to the authority.
+    """
+
+    client = FakeNoKVClient()
+    goal_id = "adapter-mapping"
+    provider = NoKVCoordinationProvider(client, "wb-adapter", goal_id)
+    head = bootstrap_aggregate(goal_id, {})
+
+    assert provider.load() == (None, 0)
+    created = provider.compare_and_put(0, head)
+    assert created == {"result": "applied", "provider_generation": 1}, created
+    loaded, generation = provider.load()
+    assert loaded == head and generation == 1
+
+    # bootstrap race: the loser observed generation 0 before the winner landed
+    lost_race = provider.compare_and_put(0, head)
+    assert lost_race["result"] == "conflict", lost_race
+    assert lost_race["current_provider_generation"] == 1
+    provider._generation = lambda: 0  # the stat pre-check raced too
+    lost_race_at_publish = provider.compare_and_put(0, head)
+    assert lost_race_at_publish == {"result": "ambiguous"}, lost_race_at_publish
+    del provider._generation
+
+    # replacement CAS: stale expected generation, both before and at publish
+    advanced = copy.deepcopy(head)
+    advanced["authority_revision"] = 1
+    replaced = provider.compare_and_put(1, advanced)
+    assert replaced == {"result": "applied", "provider_generation": 2}, replaced
+    stale = provider.compare_and_put(1, advanced)
+    assert stale == {"result": "conflict", "current_provider_generation": 2}, stale
+    provider._generation = lambda: 1
+    stale_at_publish = provider.compare_and_put(1, advanced)
+    assert stale_at_publish == {"result": "ambiguous"}, stale_at_publish
+    del provider._generation
+
+    # a provider failure before any publish attempt proves that nothing was written
+    client.stat_failure = RuntimeError("RPC transport failed: connection refused")
+    failed = provider.compare_and_put(2, advanced)
+    assert failed["result"] == "failed", failed
+    assert provider.load() == (advanced, 2)
+
+    # legacy SDKs raised RuntimeError for a missing path; both spellings stay classified
+    class LegacyClient(FakeNoKVClient):
+        def read(self, workbench: str, path: str) -> dict:
+            if (workbench, path) not in self.paths:
+                raise RuntimeError("workspace request failed: path not found")
+            return super().read(workbench, path)
+
+        def stat(self, workbench: str, path: str) -> dict:
+            if (workbench, path) not in self.paths:
+                raise RuntimeError("workspace request failed: path not found")
+            return super().stat(workbench, path)
+
+    legacy = NoKVCoordinationProvider(LegacyClient(), "wb-legacy", goal_id)
+    assert legacy.load() == (None, 0)
+    assert legacy.compare_and_put(0, head)["result"] == "applied"
+
+    out(
+        "contract.nokv_adapter_exception_mapping",
+        ok=True,
+        uninitialized_load_typed=True,
+        create_only_race_typed=True,
+        stale_generation_typed=True,
+        pre_publish_failure_typed=True,
+        legacy_runtime_error_still_classified=True,
+    )
+
+
 PROBES = (
     probe_bootstrap_and_preconditions,
     probe_a_b_replay_a,
@@ -816,6 +943,7 @@ PROBES = (
     probe_competing_claims,
     probe_crash_windows_and_ambiguity,
     probe_version_domains_and_retain_all,
+    probe_nokv_adapter_exception_mapping,
     probe_durable_completion_projection,
     probe_durable_completion_fail_closed,
 )

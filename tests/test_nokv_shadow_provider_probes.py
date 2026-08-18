@@ -24,6 +24,7 @@ EXPECTED_TAGS = (
     "contract.competing_claims",
     "contract.crash_windows_and_ambiguity",
     "contract.version_domains_and_retain_all",
+    "contract.nokv_adapter_exception_mapping",
     "contract.durable_completion_projection",
     "contract.durable_completion_fail_closed",
 )
