@@ -2,7 +2,7 @@
 
 - Status: Draft, under maintainer review
 - Proposed by: NoKV Lab
-- Date: 2026-08-05; revised 2026-08-16
+- Date: 2026-08-05; revised 2026-08-18
 - Scope: a separate deployment contract for LoopX shared-goal coordination,
   complementing
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
@@ -317,9 +317,10 @@ or raw evidence. It contains only the facts needed to adjudicate the command
 slice and recover its proof. As in current LoopX, a claimed todo remains `open`,
 without inventing a `claimed` lifecycle status that local mode does not have.
 In the target contract, `claimed_by` carries soft ownership and the lease/fence
-carries execution authority; the current implementation does not honor this
-yet: when the two records diverge, the markdown claimant wins on the write
-path. See Appendix B.
+carries execution authority. The default `legacy` handoff mode does not honor
+this: when the two records diverge, the markdown claimant wins on the write
+path. A goal that declares `hard_lease` turns the divergence into a typed
+error and requires the key at completion. See Appendix B.
 
 Each eligibility revision or digest is scoped to the snapshot referenced by the
 target todo: authorization covers only that todo's actor scope, dependency
@@ -657,9 +658,12 @@ Durable completion continuation read-back
 (`durable_completion.py`: `read_persisted_todo_record` /
 `project_durable_completion_outcome`) is a provider read point: it re-reads
 the persisted lifecycle record (Markdown first, event projection fallback)
-after the completion write and before settlement. Once a remote provider
-becomes canonical, this seam flips to provider-first without changing the
-typed outcome contract below.
+after the completion write and before settlement. The persisted record
+carries an explicit `completion_continuation`; the seam fails closed when a
+done record omits it or when it contradicts the recorded successor or
+no-follow-up fields, so a provider that holds completion state must store
+that field byte for byte. Once a remote provider becomes canonical, this seam
+flips to provider-first without changing the typed outcome contract below.
 
 ### P0: contract and deterministic proof
 
@@ -764,9 +768,15 @@ authority owns it. Three values:
   rejected; release and inspect remain available to clean up and view
   leftover leases.
 - `hard_lease`: changing the claim on an existing todo requires holding its
-  active lease; completion requires the key; the self-disarm-on-conflict
+  active lease; every transition that retires an existing todo as done
+  (`complete` and `supersede`) requires the key; the self-disarm-on-conflict
   behavior becomes a loud error. Assigning a claimant at todo creation stays
-  allowed: a fresh todo cannot have a lease yet.
+  allowed: a fresh todo cannot have a lease yet. One harness-owned case keeps
+  the keyed invariant without making the presenter hold the lease across a
+  human wait: completing a user-role `user_gate` todo without explicit lease
+  credentials lets the completion fence mint the key itself under the same
+  per-goal lease lock, verify it, and release it on commit; an existing
+  time-active lease is never displaced.
 
 Companion rules:
 
@@ -783,6 +793,19 @@ Companion rules:
    the result. No new bypass switches.
 5. Switching modes requires quiescence: refuse while the goal still has open
    claims or active leases, and list what blocks it. No forced switch in v0.
+
+### Status (2026-08-18)
+
+The gate shipped as the `handoff_mode` front-matter field with the
+`legacy | soft_claim | hard_lease` semantics above, the quiescence-only
+`loopx handoff-mode show|set` switch, and the delegated-authority door with
+its `handoff_gate_overridden` marker; the user-gate key minting above landed
+as a follow-up. `legacy` remains the default and keeps the divergence hole by
+design. Two side doors found after the gate landed are closed alongside this
+revision: `supersede` crosses the same lease fence as `complete`, and a forced
+state rebuild (`bootstrap --force`) carries the declared mode instead of
+resetting it to `legacy`. The next stage, a file-backed provider shadow behind
+the coordination contract of Section 11, has not started.
 
 ### Relation to Staged Delivery
 

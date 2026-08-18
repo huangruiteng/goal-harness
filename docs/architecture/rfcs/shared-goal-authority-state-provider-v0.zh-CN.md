@@ -2,7 +2,7 @@
 
 - 状态：Draft，正在接受 maintainer review
 - 提案方：NoKV Lab
-- 日期：2026-08-05；修订于 2026-08-16
+- 日期：2026-08-05；修订于 2026-08-18
 - 范围：LoopX 共享 Goal 协调的独立部署合同，用来补充
   [`host-integration-surface-v0`](../../reference/protocols/host-integration-surface-v0.md)
 - 源码基线：LoopX `c6a1da1eaa22962faaeb6d4050d867462e7665ff`
@@ -274,8 +274,9 @@ owner，新 host 或 extension 也可以新增本地 artifact，而无需修改�
 该 schema 不包含 raw todo body、transcript、credential、绝对路径或 raw evidence。
 它只包含裁决这一命令切片与恢复其凭证所需的事实。与现有 LoopX 一致，claim 后
 todo 仍为 `open`，不会引入一个本地状态机不存在的 `claimed` status。在目标合同里，
-soft ownership 由 `claimed_by` 表示，执行权由 lease/fence 表示；当前实现尚未做到
-这一点：两本账分叉时，软认领方在写路径上实际胜出，详见附录 B。
+soft ownership 由 `claimed_by` 表示，执行权由 lease/fence 表示；默认的 `legacy`
+交接模式没有做到这一点：两本账分叉时，软认领方在写路径上实际胜出。声明了
+`hard_lease` 的 goal 会把分叉变成类型化错误，并在完成时要求钥匙，详见附录 B。
 
 这里的 eligibility revision/digest 都是目标 todo 所引用的快照：authorization 只覆盖
 该 todo 的 actor scope，dependency 只覆盖它的传递依赖闭包，gate 只覆盖实际约束
@@ -568,8 +569,10 @@ history、quota、scheduler 或 evidence 的通用存储抽象，这些账继续
 （`durable_completion.py`：`read_persisted_todo_record` /
 `project_durable_completion_outcome`）是一个 provider read point：它在完成写入之后、
 settlement 之前重新读取已落盘的 lifecycle record（Markdown 优先，event projection
-兜底）。一旦远端 provider 成为 canonical，这个 seam 翻转为 provider-first，且不改变
-下述 typed outcome 合同。
+兜底）。落盘记录带有显式的 `completion_continuation`；done 记录缺少该字段、或该字段
+与 successor / no-follow-up 字段矛盾时，seam 都 fail closed，因此持有完成状态的
+provider 必须逐字节保存这个字段。一旦远端 provider 成为 canonical，这个 seam 翻转为
+provider-first，且不改变下述 typed outcome 合同。
 
 ### P0：合同与 deterministic proof
 
@@ -655,9 +658,13 @@ HA 或 production qualification 声明。
   存在；这是有意保留的默认值，不是疏漏。
 - `soft_claim`：该 goal 只用软认领。acquire/renew/transfer 被拒绝；release 与
   inspect 保留，用于清理和查看遗留租约。
-- `hard_lease`：改动已有 todo 的认领关系必须持有它的活租约；完成必须带钥匙；
-  "矛盾态自动失效"改为响亮报错。新建 todo 时顺手指定认领人仍然允许——新 todo
-  不可能已有租约。
+- `hard_lease`：改动已有 todo 的认领关系必须持有它的活租约；所有把已有 todo
+  置为 done 的转移（`complete` 与 `supersede`）都必须带钥匙；"矛盾态自动失效"
+  改为响亮报错。新建 todo 时顺手指定认领人仍然允许——新 todo 不可能已有租约。
+  有一个由 harness 自己持有的例外保住"带钥匙"这个不变量、又不逼 presenter 在
+  人工等待期间一直持约：完成 user 角色的 `user_gate` todo 且没有显式租约凭证时，
+  完成栅栏会在同一把 per-goal 租约锁下自己铸出钥匙、验证、并在提交后释放；
+  已存在的时间有效租约永远不会被顶掉。
 
 配套约定：
 
@@ -670,6 +677,16 @@ HA 或 production qualification 声明。
    绕过开关。
 5. 切换模式要求静止：goal 内仍有未完成的认领或活租约时拒绝切换，并列出
    阻挡者。v0 不提供强制切换。
+
+### 现状（2026-08-18）
+
+门禁已经落地：状态文件前置的 `handoff_mode` 字段与上述 `legacy | soft_claim |
+hard_lease` 语义、只允许静止态切换的 `loopx handoff-mode show|set`、以及带
+`handoff_gate_overridden` 标记的委托授权门；上面的 user gate 自动铸钥匙作为后续
+补充落地。`legacy` 仍是默认值，分叉洞按设计保留。门禁落地后发现的两扇侧门随本次
+修订一并关上：`supersede` 与 `complete` 过同一道租约栅栏；强制重建状态
+（`bootstrap --force`）保留已声明的模式而不是把它重置回 `legacy`。下一阶段，即
+第 11 节协调合同后面的 file-backed provider shadow，尚未开始。
 
 ### 与分阶段交付的关系
 
