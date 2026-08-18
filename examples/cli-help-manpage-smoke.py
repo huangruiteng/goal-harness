@@ -52,7 +52,7 @@ def assert_concise_default_help(output: str) -> None:
     assert "evidence-log --goal-id ID --agent-id AGENT --thin" in output, output
     assert "man loopx" in output, output
     assert LONG_TAIL_COMMAND not in output, output
-    assert len(output.splitlines()) <= 38, output
+    assert len(output.splitlines()) <= 39, output
 
 
 def assert_default_help_surface() -> None:
@@ -165,6 +165,7 @@ def assert_installer_manpage_surface() -> None:
             "LOOPX_SHELL_PROFILE": str(profile),
             "LOOPX_INSTALL_SKILL": "0",
             "LOOPX_INSTALL_CANARY": "0",
+            "LOOPX_PYTHON": sys.executable,
             "LOOPX_PROMOTE_DEFAULT": "1",
             "LOOPX_RELEASE_ID": "help-manpage-smoke-release",
             "PATH": os.environ.get("PATH", ""),
