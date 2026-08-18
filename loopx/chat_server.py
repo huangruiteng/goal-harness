@@ -1420,42 +1420,45 @@ class ChatRequestHandler(LarkChatRequestMixin, BaseHTTPRequestHandler):
 
 def serve_chat(
     *,
-    registry_path: Path,
-    runtime_root_override: str | None,
-    scan_roots: list[Path],
-    limit: int,
-    host: str,
-    port: int,
-    goal_id: str | None,
-    codex_bin: str,
-    claude_bin: str,
-    lark_cli_bin: str | None,
-    startup_timeout_sec: float,
-    idle_timeout_sec: float,
-    hard_timeout_sec: float,
-    assets_dir: Path | None,
-    open_browser: bool,
-    verbose: bool,
+    registry_path: Path | None = None,
+    runtime_root_override: str | Path | None = None,
+    scan_roots: list[Path] | None = None,
+    limit: int = 20,
+    host: str = DEFAULT_CHAT_HOST,
+    port: int = DEFAULT_CHAT_PORT,
+    goal_id: str | None = None,
+    codex_bin: str = "codex",
+    claude_bin: str = "claude",
+    lark_cli_bin: str | None = None,
+    startup_timeout_sec: float = 30.0,
+    idle_timeout_sec: float = 180.0,
+    hard_timeout_sec: float = 900.0,
+    assets_dir: Path | None = None,
+    open_browser: bool = False,
+    verbose: bool = False,
 ) -> None:
     if not is_loopback_host(host):
         raise ValueError("loopx chat requires a loopback --host such as 127.0.0.1")
     resolved_assets = (assets_dir or default_chat_assets_dir()).expanduser().resolve()
     if not (resolved_assets / "index.html").is_file():
         raise FileNotFoundError("LoopX Chat web assets are unavailable; reinstall LoopX or rebuild the chat bundle")
-    registry = load_registry(registry_path)
+    resolved_registry_path = registry_path or (Path.home() / ".loopx" / "registry.json")
+    resolved_runtime_root_override = str(runtime_root_override) if runtime_root_override else None
+    resolved_scan_roots = scan_roots if scan_roots is not None else [Path.cwd()]
+    registry = load_registry(resolved_registry_path) if resolved_registry_path.exists() else {}
     runtime_root = resolve_runtime_root(
         registry,
-        runtime_root_override,
-        registry_path=registry_path,
+        resolved_runtime_root_override,
+        registry_path=resolved_registry_path,
     )
     lark_cli_resolution = resolve_lark_cli_for_runtime(
         runtime_root=runtime_root,
         explicit=lark_cli_bin,
     )
     server = ChatHTTPServer((host, port), ChatRequestHandler)
-    server.registry_path = registry_path
-    server.runtime_root_override = runtime_root_override
-    server.scan_roots = scan_roots
+    server.registry_path = resolved_registry_path
+    server.runtime_root_override = resolved_runtime_root_override
+    server.scan_roots = resolved_scan_roots
     server.limit = limit
     server.selected_goal_id = goal_id
     server.codex_bin = codex_bin

@@ -532,10 +532,62 @@ def register_support_control_commands(
         help="Custom Agent id used by the remove action.",
     )
 
-    subparsers.add_parser(
+    dashboard_parser = subparsers.add_parser(
         "dashboard",
         help="Start the local LoopX dashboard, status service, and Chat service.",
     )
+    dashboard_parser.add_argument("--goal-id", help="Goal to select when the local workspace opens.")
+    dashboard_parser.add_argument("--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host.")
+    dashboard_parser.add_argument("--port", type=int, default=DEFAULT_CHAT_PORT)
+    dashboard_parser.add_argument(
+        "--codex-bin",
+        default="codex",
+        help="Codex CLI executable used for the read-only app-server session.",
+    )
+    dashboard_parser.add_argument(
+        "--claude-bin",
+        default="claude",
+        help="Claude Code CLI executable used for read-only Agent sessions.",
+    )
+    dashboard_parser.add_argument(
+        "--lark-cli-bin",
+        help=(
+            "Optional explicit lark-cli executable. When omitted, LoopX uses its bounded "
+            "runtime discovery order."
+        ),
+    )
+    dashboard_parser.add_argument(
+        "--assets-dir",
+        help="Optional LoopX Chat web bundle directory. Defaults to packaged assets.",
+    )
+    dashboard_parser.add_argument(
+        "--scan-root",
+        default=default_public_scan_root(),
+        help="Public files used by the underlying status projection.",
+    )
+    dashboard_parser.add_argument(
+        "--scan-path",
+        action="append",
+        default=[],
+        help="Specific public file or directory to scan. Repeatable.",
+    )
+    dashboard_parser.add_argument("--limit", type=int, default=20)
+    dashboard_parser.add_argument(
+        "--global-registry",
+        action="store_true",
+        help="Use the shared global registry even when the command runs in a project directory.",
+    )
+    dashboard_parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Start the local server without opening a browser.",
+    )
+    dashboard_parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Prefer the Vite HMR dev launcher if running from a local repository checkout.",
+    )
+    dashboard_parser.add_argument("--verbose", action="store_true", help="Print HTTP request logs.")
 
 
 def handle_support_control_command(
@@ -956,7 +1008,26 @@ def handle_support_control_command(
 
     if args.command == "dashboard":
         try:
-            return launch_dashboard()
+            dashboard_registry_path = explicit_global_registry(args.runtime_root) if getattr(args, "global_registry", False) else registry_path
+            scan_roots = [Path(item).expanduser() for item in getattr(args, "scan_path", []) or []]
+            if not scan_roots and getattr(args, "scan_root", None):
+                scan_roots = [Path(args.scan_root).expanduser()]
+            return launch_dashboard(
+                registry_path=dashboard_registry_path,
+                runtime_root_override=args.runtime_root,
+                scan_roots=scan_roots,
+                limit=max(0, getattr(args, "limit", 20)),
+                host=getattr(args, "host", DEFAULT_CHAT_HOST),
+                port=getattr(args, "port", DEFAULT_CHAT_PORT),
+                goal_id=getattr(args, "goal_id", None),
+                codex_bin=getattr(args, "codex_bin", "codex"),
+                claude_bin=getattr(args, "claude_bin", "claude"),
+                lark_cli_bin=getattr(args, "lark_cli_bin", None),
+                assets_dir=Path(args.assets_dir).expanduser().resolve() if getattr(args, "assets_dir", None) else None,
+                verbose=getattr(args, "verbose", False),
+                open_browser=not getattr(args, "no_open", False),
+                prefer_dev=getattr(args, "dev", False),
+            )
         except Exception as exc:
             payload = {
                 "ok": False,

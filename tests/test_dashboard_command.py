@@ -50,10 +50,10 @@ def test_macos_launchagent_passes_discovered_lark_cli_without_login_shell() -> N
 def test_dashboard_command_runs_the_dashboard_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[bool] = []
+    calls: list[dict[str, object]] = []
 
-    def fake_launch_dashboard() -> int:
-        calls.append(True)
+    def fake_launch_dashboard(**kwargs: object) -> int:
+        calls.append(kwargs)
         return 23
 
     monkeypatch.setattr(
@@ -64,7 +64,31 @@ def test_dashboard_command_runs_the_dashboard_launcher(
     )
 
     assert main(["dashboard"]) == 23
-    assert calls == [True]
+    assert len(calls) == 1
+
+
+def test_launch_dashboard_in_installed_mode_serves_packaged_chat(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from loopx.dashboard_launcher import launch_dashboard
+    import loopx.dashboard_launcher as dashboard_launcher
+
+    # Point release root to an empty directory without scripts/dashboard-dev.sh (simulating installed wheel site-packages)
+    monkeypatch.setenv("LOOPX_RELEASE_ROOT", str(tmp_path))
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "loopx.chat_server.serve_chat",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    # Launch dashboard should invoke serve_chat using packaged web bundle
+    result = launch_dashboard(open_browser=False)
+    assert result == 0
+    assert len(calls) == 1
+    assert calls[0]["open_browser"] is False
+    assert (Path(str(calls[0]["assets_dir"])) / "index.html").is_file()
 
 
 def test_serve_status_still_returns_success_when_server_stops_cleanly(
@@ -334,3 +358,24 @@ def test_dashboard_launcher_selects_highest_semantic_nvm_lark_cli(
     commands = command_log.read_text(encoding="utf-8")
     assert f"--lark-cli-bin {high_bin / 'lark-cli'}" in commands
     assert f"--lark-cli-bin {low_bin / 'lark-cli'}" not in commands
+
+
+def test_dashboard_command_in_installed_mode_resolves_packaged_web_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("LOOPX_RELEASE_ROOT", str(tmp_path))
+    served: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "loopx.chat_server.serve_chat",
+        lambda **kwargs: served.append(kwargs),
+    )
+
+    exit_code = main(["dashboard", "--host", "127.0.0.1", "--port", "8791", "--no-open"])
+    assert exit_code == 0
+    assert len(served) == 1
+    assert served[0]["host"] == "127.0.0.1"
+    assert served[0]["port"] == 8791
+    assert served[0]["open_browser"] is False
+    assert (Path(str(served[0]["assets_dir"])) / "index.html").is_file()

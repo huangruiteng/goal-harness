@@ -146,74 +146,27 @@ out of the first-screen request. Its contract projection reports that scan as
 deferred; run `loopx check` before publishing or pushing public surfaces to
 perform the complete boundary audit.
 
-The default screen is the Chinese-first control-plane home. It is meant to
-answer the operator's first questions before raw status drill-down: which
-project line is active, which user todo is truly blocking, which agent todo is
-high priority, which quota/guard state applies, and what evidence has already
-been written back. It loads the shared global status source by default when the
-loopback global server is available, so multi-project state is visible without
-passing `view=share` or opening a debugging table.
-Because this screen is the operator-facing home, it translates raw machine
-status into Chinese decision copy. Exact tokens such as `single_surface`,
-`focus_wait`, or `quota_slot_spent` may remain useful in `?view=ops` and packet
-drill-downs, but the home should foreground user todos, agent priorities,
-quota guard judgments, and evidence writeback in human-readable terms.
+The default screen is the Personal Workspace—LoopX's sole operator-facing frontend.
+It provides a unified, coherent experience for managing long-running agent Goals:
 
-`?view=ops` remains as the explicit detailed workbench. That view keeps the
-legacy operator tools: `Todo Focus`, `User Actions`, `Goal Directory`,
-attention lanes, selected-goal run history, reward dry-run/append controls,
-and raw queue filters. Use it when debugging status contracts, reward overlays,
-or individual queue items; do not treat it as the product's main screen.
+- **LoopX Manager Overview (`/`)**:
+  Cross-Goal triage answering operator priorities before raw drill-down:
+  - 4-lane overview flow (`需要你` / `执行中` / `观察中` / `已安排`);
+  - System Health diagnostics highlighting control-plane and registry status;
+  - Unified conversation tray supporting global questions, Goal creation drafts, and progress summaries.
 
-The old `view=share` URL value is tolerated as a compatibility alias for the
-main control-plane home, but the dashboard normalizes non-`ops` views out of
-the URL. Browser search parameters such as `actionKind`, `goalId`, `lane`,
-`severity`, `statusUrl`, and `view` are UI state only. They are not approval,
-reward append, controller opt-in, write-control, or durable goal truth.
+- **Goal Workspace (`/?goalId=<id>`)**:
+  Dedicated workspace for an individual Goal:
+  - **Chat**: Goal-scoped Agent communication, streaming turns, and action previews;
+  - **Tasks**: 4-column kanban board (`待确认`, `待执行 / 进行中`, `定时与持续`, `已完成`) with quick status updates and one-click conversion of Agent replies to Task drafts;
+  - **Files**: Repository artifact browser and file inspects;
+  - **Context Drawer**: Goal diagnosis, repository bindings, Lark Topic connections, and session health.
 
-The detailed ops workbench consumes the same agent-facing
-`loopx status` JSON. Its first-screen action cards can group reward
-gates, controller opt-ins, evidence watches, Codex handoffs, and health blocks;
-each card may expose a safe local path and reward-draft hint. The copied
-handoff remains a short `【GH Packet】` artifact with user todo, gate, safety
-boundary, safe path, command, and project-agent stop rule. It is still a
-handoff artifact; it is not approval, reward append, controller opt-in, or
-write-control.
+- **Action Safety & Control Plane**:
+  Durable modifications to Goals, Todos, Heartbeats, monitors, or settings follow the typed preview → explicit user confirmation → verified receipt protocol. The browser never performs unmediated direct writes to control-plane truth.
 
-The selected-goal detail in `?view=ops` starts with `Operator Decision`, which
-turns the selected goal's queue item, lifecycle phase, and readiness gates into
-one of the user-level stances: review or authorize, let Codex continue, wait
-for evidence, or fix health first. That same panel includes a `Safe CLI Path`:
-a local dry-run, history, or status command that matches the current stance. It
-is a bridge from user-facing review to agent-facing CLI execution, not a
-browser write path.
-
-When a selected goal has a compact run record, the run-history panel also shows
-a `Reward CLI Draft`. It is intentionally local-only and defaults to
-`--dry-run`; browser writes to private runtime indexes remain disabled unless
-the local status server explicitly enables the reward write API. Draft defaults
-are derived from the selected `Operator Decision`
-and missing gates, so an evidence watch, controller opt-in, mapped handoff, and
-already-rewarded run start with different decision/reward/reason/follow-up
-values. The operator can still edit or reset the draft before validation.
-
-When the dashboard is loaded from the loopback `Live` source, the same panel can
-send that draft to `POST /reward/dry-run` for local validation. The endpoint
-returns a compact validation result, the Chinese active-state summary Codex can
-write after a real reward append, and the project-agent history command. It
-also returns a `preview_id` that locks the selected goal, run, reward payload,
-and current raw index count.
-If the live server was started with `--enable-reward-write-api`, the dashboard
-can then call `POST /reward/append` for that exact preview. The append writes
-one run-bound `human_reward` overlay, refreshes status, and leaves the compact
-overlay as the source of truth future agents read through `status` or
-`history`.
-Durable reward should be recorded as a run-bound `human_reward` overlay through
-`loopx reward`; active state may summarize the reward afterward, but it
-should not be the only source of truth for multi-agent reward signals.
-When a real CLI append should also update the active goal state, use
-`loopx reward --write-active-state-summary`; the dashboard append path
-sets the same summary-write intent after the operator confirms the preview.
+- **Public Frontstage (`/frontstage`)**:
+  Public `/frontstage` continues to serve as an unauthenticated, read-only showcase and public-safe presentation surface. Real local operator workflows belong exclusively in the Personal Workspace.
 
 ## Load Live Status
 

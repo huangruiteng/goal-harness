@@ -635,6 +635,25 @@ def decide_lark_topic_event(
         matched_topic = True
         if str(event.get("sender_id") or "") == str(identity.get("bot_app_id") or ""):
             return {"matched": False, "reason": "self_message", "route": None}
+        incoming_mode = str(routing.get("incoming_mode") or "mentions").strip().lower()
+        if incoming_mode != "all":
+            content_text = str(event.get("content") or "").strip()
+            bot_display_name = str(identity.get("bot_display_name") or identity.get("bot_name") or "").strip()
+            sender_profile = str(identity.get("sender_profile") or "").strip()
+            text_mentions_bot = bool(
+                (bot_display_name and f"@{bot_display_name}".casefold() in content_text.casefold())
+                or (sender_profile and f"@{sender_profile}".casefold() in content_text.casefold())
+            )
+            is_addressed = bool(
+                event.get("mentioned") is True
+                or event.get("addressed") is True
+                or event.get("reply_context_verified") is True
+                or event.get("reply_to_bot") is True
+                or (isinstance(event.get("mentions"), list) and len(event["mentions"]) > 0)
+                or text_mentions_bot
+            )
+            if not is_addressed:
+                return {"matched": False, "reason": "not_addressed", "route": None}
         route = {
             "app_ref": str(identity.get("sender_profile") or "default"),
             "goal_id": goal_id,

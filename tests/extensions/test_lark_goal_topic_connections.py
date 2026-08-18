@@ -517,13 +517,30 @@ def test_routes_bound_topic_messages_and_replies_in_thread(tmp_path: Path) -> No
         cli_bin="fake-lark",
     )
 
+    unmentioned_decision = decide_lark_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
+        event={"chat_id": CHAT_ID, "root_id": "om_topic_alpha", "message_id": "om_incoming", "mentioned": False},
+    )
+    assert unmentioned_decision == {"matched": False, "reason": "not_addressed", "route": None}
+
     unmentioned = route_lark_topic_event(
         target_payload=read_goal_channel_targets(target_path),
         binding_payloads={"goal-alpha": read_goal_channel_binding(binding_path)},
         event={"chat_id": CHAT_ID, "root_id": "om_topic_alpha", "message_id": "om_incoming", "mentioned": False},
     )
-    assert unmentioned is not None
-    assert unmentioned["goal_id"] == "goal-alpha"
+    assert unmentioned is None
+
+    # When incoming_mode is 'all', unmentioned messages in the bound topic are matched
+    all_binding = read_goal_channel_binding(binding_path)
+    all_binding["bindings"]["goal-alpha"]["routing"]["incoming_mode"] = "all"
+    unmentioned_all_mode = route_lark_topic_event(
+        target_payload=read_goal_channel_targets(target_path),
+        binding_payloads={"goal-alpha": all_binding},
+        event={"chat_id": CHAT_ID, "root_id": "om_topic_alpha", "message_id": "om_incoming", "mentioned": False},
+    )
+    assert unmentioned_all_mode is not None
+    assert unmentioned_all_mode["goal_id"] == "goal-alpha"
 
     route = route_lark_topic_event(
         target_payload=read_goal_channel_targets(target_path),
