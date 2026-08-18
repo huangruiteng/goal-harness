@@ -676,6 +676,7 @@ def main(argv: list[str] | None = None) -> int:
 
     benchmark_result = handle_benchmark_command(
         args,
+        registry_path=registry_path,
         print_payload=print_payload,
         output_format=output_format,
     )
