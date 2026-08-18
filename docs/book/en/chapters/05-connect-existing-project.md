@@ -208,7 +208,9 @@ Guided start keeps two decisions separate:
    several, return a read-only `goal_selection_gate`. Select one exact rerun command from `choices`. Before
    that selection, do not write Todos, register an Agent, or activate a Host loop.
 2. **Agent identity:** for new onboarding with task text, omitting `--agent-id` defaults to fresh identity
-   registration. Existing Agents are explicit takeover choices, not automatic defaults.
+   registration only when the Goal has no registered lanes (or `--new-peer` is explicit). When registered
+   lanes exist, `start-goal` returns an identity gate that requires selecting one existing lane. Existing
+   Agents are explicit takeover choices, not automatic defaults.
 
 Do not select a Goal from objective similarity, and do not take over an Agent merely because it is the only
 registered identity. Preview and then atomically register a new public-safe id:

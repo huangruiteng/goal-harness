@@ -195,8 +195,9 @@ Guided start 会把两个选择分开：
 1. **Goal selection**：如果项目只有一个已注册 Goal，复用它的精确 `goal_id`；如果有多个，返回
    只读 `goal_selection_gate`。从 `choices` 中选择一个精确重跑命令，在此之前不写 Todo、不注册
    Agent，也不激活 Host loop。
-2. **Agent identity**：对带任务文本的新接入，未指定 `--agent-id` 时默认要求 fresh identity。
-   已有 Agent 是 takeover choice，不是自动默认值。
+2. **Agent identity**：对带任务文本的新接入，未指定 `--agent-id` 时，只有 Goal 没有任何已注册
+   lane（或显式 `--new-peer`）才默认 fresh identity；已有已注册 lane 时，`start-goal` 会返回
+   identity gate，要求选择一个已有 lane。已有 Agent 是 takeover choice，不是自动默认值。
 
 不要根据 objective 的文字相似度选择 Goal，也不要因为 registry 中只有一个 Agent 就自动接管它。
 推荐路径是先预览、再原子注册一个新的 public-safe id：
