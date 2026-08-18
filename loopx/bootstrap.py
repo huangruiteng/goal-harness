@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from .control_plane.runtime.time import now_local_iso
+from .control_plane.todos.handoff_mode import (
+    HANDOFF_MODE_LEGACY,
+    goal_handoff_mode,
+)
 from .control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
     insertion_anchor,
@@ -433,6 +437,7 @@ def render_state_markdown(
     accept_onboarding_agent_todos: bool = False,
     begin_autonomous_advance: bool = False,
     codex_app_heartbeat: str = "ask",
+    handoff_mode: str = HANDOFF_MODE_LEGACY,
 ) -> str:
     safe_objective = objective.replace('"', '\\"')
     profile_summary = execution_profile_summary(execution_profile)
@@ -450,13 +455,19 @@ def render_state_markdown(
         begin_autonomous_advance=begin_autonomous_advance,
         codex_app_heartbeat=codex_app_heartbeat,
     )
+    # ``handoff_mode`` travels in the state front matter (RFC shared-goal
+    # authority, Appendix B). Legacy is the absent default and is never
+    # materialized, so an untouched goal keeps its byte-for-byte shape.
+    handoff_mode_line = (
+        f"handoff_mode: {handoff_mode}\n" if handoff_mode != HANDOFF_MODE_LEGACY else ""
+    )
     state_text = f"""---
 status: active
 owner_mode: goal
 objective: "{safe_objective}"
 updated_at: {updated_at}
 adapter_id: {goal_id}
----
+{handoff_mode_line}---
 
 # Active Goal State
 
@@ -765,12 +776,18 @@ def bootstrap_project(
         "replaced": "would-replace",
     }
     force_bootstrap_warning = None
+    declared_handoff_mode = HANDOFF_MODE_LEGACY
     if state_exists and force:
+        # A forced rebuild replaces todos, never the goal's handoff contract:
+        # the declared mode is carried into the rewritten front matter, and an
+        # invalid declaration fails closed before anything is rewritten.
+        declared_handoff_mode = goal_handoff_mode(state_file.read_text(encoding="utf-8"))
         force_bootstrap_warning = {
             "kind": "force_reconnect_existing_active_state",
             "state_file": str(state_file),
             "state_action": state_action,
             "will_replace_active_state": state_action == "replaced",
+            "handoff_mode": declared_handoff_mode,
             "preserve_todos_requested": bool(preserve_todos),
             "recommended_scope_migration": (
                 "Use configure-goal --write-scope ... --execute to change write scope "
@@ -897,6 +914,7 @@ def bootstrap_project(
                     accept_onboarding_agent_todos=accept_onboarding_agent_todos,
                     begin_autonomous_advance=begin_autonomous_advance,
                     codex_app_heartbeat=codex_app_heartbeat,
+                    handoff_mode=declared_handoff_mode,
                 ),
                 encoding="utf-8",
             )

@@ -1734,3 +1734,87 @@ def test_legacy_pin_supersede_ignores_missing_lease_but_fences_effective_lease(
     assert error.value.code == "lease_fence_required"
     assert _agent_todo(state, leased_todo["todo_id"])["done"] is False
 
+
+# ---------------------------------------------------------------------------
+# force bootstrap rewrites the state file: the declared mode must travel with it
+# ---------------------------------------------------------------------------
+
+
+def _force_bootstrap(registry: Path, state: Path, tmp_path: Path, **overrides: Any) -> dict[str, Any]:
+    from loopx.bootstrap import bootstrap_project
+
+    options: dict[str, Any] = dict(
+        project=state.parent,
+        registry_path=registry,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        objective="Rebuild the active state without changing the handoff contract.",
+        domain="harness_self_improvement",
+        role="owner",
+        parent_goal_id=None,
+        state_file=state,
+        goal_doc=None,
+        adapter_kind="harness_self_improvement",
+        adapter_status="active",
+        next_probe=None,
+        spawn_allowed=False,
+        max_children=0,
+        allowed_domains=None,
+        write_scope=None,
+        onboarding_scan_enabled=False,
+        preserve_todos=False,
+        force=True,
+        dry_run=False,
+        sync_global=False,
+    )
+    options.update(overrides)
+    return bootstrap_project(**options)
+
+
+def test_force_bootstrap_replace_preserves_declared_handoff_mode(tmp_path: Path) -> None:
+    """Appendix B rule 5: a mode change needs quiescence; a forced state rebuild
+    is not a mode change and must not silently fall back to legacy."""
+
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_HARD_LEASE)
+    todo = _add_todo(registry, claimed_by=AGENT_A)
+    _acquire(registry, tmp_path, todo["todo_id"], owner=AGENT_A)
+
+    payload = _force_bootstrap(registry, state, tmp_path)
+
+    assert payload["state_action"] == "replaced"
+    assert payload["force_bootstrap_warning"]["handoff_mode"] == HANDOFF_MODE_HARD_LEASE
+    rebuilt = state.read_text(encoding="utf-8")
+    assert goal_handoff_mode(rebuilt) == HANDOFF_MODE_HARD_LEASE
+    assert todo["todo_id"] not in rebuilt
+
+
+def test_force_bootstrap_replace_keeps_legacy_default_absent(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path)
+
+    payload = _force_bootstrap(registry, state, tmp_path)
+
+    assert payload["state_action"] == "replaced"
+    assert payload["force_bootstrap_warning"]["handoff_mode"] == HANDOFF_MODE_LEGACY
+    assert "handoff_mode:" not in state.read_text(encoding="utf-8")
+    assert goal_handoff_mode(state.read_text(encoding="utf-8")) == HANDOFF_MODE_LEGACY
+
+
+def test_force_bootstrap_dry_run_reports_preserved_mode_without_writing(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode=HANDOFF_MODE_SOFT_CLAIM)
+    before = state.read_bytes()
+
+    payload = _force_bootstrap(registry, state, tmp_path, dry_run=True)
+
+    assert payload["force_bootstrap_warning"]["handoff_mode"] == HANDOFF_MODE_SOFT_CLAIM
+    assert state.read_bytes() == before
+
+
+def test_force_bootstrap_replace_refuses_invalid_declared_mode(tmp_path: Path) -> None:
+    registry, state = _write_workspace(tmp_path, handoff_mode="banana")
+    before = state.read_bytes()
+
+    with pytest.raises(HandoffModeError) as error:
+        _force_bootstrap(registry, state, tmp_path)
+
+    assert error.value.code == "invalid_handoff_mode"
+    assert state.read_bytes() == before
