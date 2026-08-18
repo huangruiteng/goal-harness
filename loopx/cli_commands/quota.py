@@ -674,6 +674,7 @@ def handle_quota_command(
                 turn_instance_id=heartbeat_turn_id,
                 scheduler_execution_context=scheduler_context,
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                monitor_poll_recorder=record_quota_monitor_poll,
                 status_reloader=lambda: collect_status(
                     registry_path=registry_path,
                     runtime_root_override=runtime_root_arg,

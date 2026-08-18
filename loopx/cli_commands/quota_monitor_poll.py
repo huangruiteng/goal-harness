@@ -15,7 +15,6 @@ from ..control_plane.quota.heartbeat_receipt import (
 from ..control_plane.scheduler.execution_context import (
     SchedulerExecutionContextResolution,
 )
-from ..quota import record_quota_monitor_poll
 
 
 def _receipt_bound_monitor_todo_id(
@@ -57,9 +56,10 @@ def record_quota_monitor_poll_for_cli(
     ),
     operator_inbox_urgency_projector: Callable[..., dict[str, object]],
     status_reloader: Callable[[], dict[str, object]],
+    monitor_poll_recorder: Callable[..., dict[str, object]],
 ) -> dict[str, object]:
     """Execute the monitor-poll CLI request with receipt-bound settlement identity."""
-    return record_quota_monitor_poll(
+    return monitor_poll_recorder(
         status_payload,
         goal_id=args.goal_id,
         registry_path=registry_path,
