@@ -316,6 +316,39 @@ def _monitor_successor_receipts(
     return receipts, successor_ids
 
 
+def _monitor_poll_replay_conflict_fields(
+    *,
+    existing: dict[str, Any],
+    monitor_event: dict[str, Any],
+    todo_id: str | None,
+    target_key: str | None,
+    result_hash: str | None,
+    material_change: bool,
+) -> list[str]:
+    conflicts: list[str] = []
+    recorded_todo_id = normalize_todo_id(
+        existing.get("todo_id") or monitor_event.get("todo_id")
+    )
+    if todo_id != recorded_todo_id:
+        conflicts.append("todo_id")
+    recorded_target_key = (
+        str(
+            existing.get("target_key")
+            or monitor_event.get("target_key")
+            or ""
+        ).strip()
+        or None
+    )
+    if target_key is not None and target_key != recorded_target_key:
+        conflicts.append("target_key")
+    recorded_result_hash = str(monitor_event.get("result_hash") or "").strip() or None
+    if result_hash != recorded_result_hash:
+        conflicts.append("result_hash")
+    if material_change is not bool(monitor_event.get("material_change")):
+        conflicts.append("material_change")
+    return conflicts
+
+
 def _allows_registry_due_monitor_poll(
     before: dict[str, Any],
     *,
@@ -450,8 +483,10 @@ def record_quota_monitor_poll_for_decision(
     _index_lock_held: bool = False,
     status_reloader: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    normalized_turn_instance_id = normalize_turn_instance_id(turn_instance_id)
-    normalized_todo_id = normalize_todo_id(todo_id) if todo_id else None
+    normalized_turn_instance_id, normalized_todo_id = (
+        normalize_turn_instance_id(turn_instance_id),
+        normalize_todo_id(todo_id) if todo_id else None,
+    )
     safe_target_key = str(target_key or "").strip() or None
     safe_result_hash = str(result_hash or "").strip() or None
 
@@ -525,17 +560,33 @@ def record_quota_monitor_poll_for_decision(
             )
             if existing:
                 artifact = _load_monitor_poll_artifact(existing)
+                monitor_event = (
+                    artifact.get("monitor_event")
+                    if isinstance(artifact.get("monitor_event"), dict)
+                    else {}
+                )
+                replay_conflicts = _monitor_poll_replay_conflict_fields(
+                    existing=existing,
+                    monitor_event=monitor_event,
+                    todo_id=normalized_todo_id,
+                    target_key=safe_target_key,
+                    result_hash=safe_result_hash,
+                    material_change=material_change,
+                )
+                if replay_conflicts:
+                    conflict = failure(
+                        "turn-scoped monitor-poll request conflicts with the "
+                        "existing idempotent poll event"
+                    )
+                    conflict["error_code"] = "heartbeat_receipt_identity_conflict"
+                    conflict["conflict_fields"] = replay_conflicts
+                    return conflict
                 after = after_decision(
                     _status_with_monitor_poll(
                         status_payload,
                         goal_id=goal_id,
                         index_record=existing,
                     )
-                )
-                monitor_event = (
-                    artifact.get("monitor_event")
-                    if isinstance(artifact.get("monitor_event"), dict)
-                    else {}
                 )
                 replay_receipts, replay_successor_ids = _monitor_successor_receipts(
                     monitor_event.get("todo_writeback")

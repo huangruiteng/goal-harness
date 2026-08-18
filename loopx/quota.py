@@ -17,6 +17,7 @@ from .control_plane.quota.heartbeat_recommendation import (
 from .control_plane.quota.decision_summary import (
     goal_status_health_ok as _goal_status_health_ok,
 )
+from .control_plane.quota.error_codes import HeartbeatReceiptIdentityConflictError
 from .control_plane.quota.goal_boundary import registry_goal_by_id as _registry_goal_by_id
 from .control_plane.quota.policy_constants import (
     AUTONOMOUS_CANDIDATE_CONTEXT_FIELDS,  # noqa: F401
@@ -77,6 +78,7 @@ from .control_plane.scheduler.state import (
 )
 from .control_plane.todos.contract import (
     normalize_todo_claimed_by,
+    normalize_todo_id,
 )
 from .control_plane.todos.projection import (
     todo_index_rank as projection_todo_index_rank,
@@ -943,6 +945,7 @@ def record_quota_monitor_poll(
     next_user_task_class: str | None = None,
     next_claimed_by: str | None = None,
     turn_instance_id: str | None = None,
+    receipt_bound_todo_id: str | None = None,
     scheduler_execution_context: Mapping[str, Any] | SchedulerExecutionContextResolution | None = None,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]] | None = None,
     bounded_research_frontier_projector: (
@@ -951,6 +954,23 @@ def record_quota_monitor_poll(
     status_reloader: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     safe_goal_id = _validate_goal_id_path_segment(str(goal_id or ""))
+    normalized_requested_todo_id = normalize_todo_id(todo_id) if todo_id else None
+    normalized_receipt_todo_id = (
+        normalize_todo_id(receipt_bound_todo_id)
+        if receipt_bound_todo_id
+        else None
+    )
+    if (
+        normalized_receipt_todo_id
+        and normalized_requested_todo_id
+        and normalized_requested_todo_id != normalized_receipt_todo_id
+    ):
+        raise HeartbeatReceiptIdentityConflictError(
+            "turn-scoped monitor-poll Todo conflicts with the committed "
+            "heartbeat receipt: expected "
+            f"{normalized_receipt_todo_id}, requested {normalized_requested_todo_id}"
+        )
+    effective_todo_id = normalized_requested_todo_id or normalized_receipt_todo_id
 
     def should_run(current_status: dict[str, Any]) -> dict[str, Any]:
         decision_status = current_status
@@ -975,6 +995,7 @@ def record_quota_monitor_poll(
             available_capabilities=available_capabilities,
             scheduler_execution_context=scheduler_execution_context,
             operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+            receipt_bound_todo_id=normalized_receipt_todo_id,
         )
 
     before = should_run(status_payload)
@@ -989,7 +1010,7 @@ def record_quota_monitor_poll(
         source=source,
         reason_summary=reason_summary,
         agent_id=agent_id,
-        todo_id=todo_id,
+        todo_id=effective_todo_id,
         target_key=target_key,
         result_hash=result_hash,
         material_change=material_change,

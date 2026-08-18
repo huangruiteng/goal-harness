@@ -11,6 +11,7 @@ from ...quota import (
 )
 from ..agents.agent_lane_recommendation import (
     build_agent_lane_next_action,
+    build_receipt_bound_monitor_next_action,
     scope_status_item_to_agent_lane as _scope_status_item_to_agent_lane,
 )
 from ..agents.agent_scope import (
@@ -575,6 +576,16 @@ def _prepare_quota_should_run_item(
                 )
             ),
         )
+        if not (
+            isinstance(candidate, dict)
+            and candidate.get("selection_binding") == "heartbeat_receipt"
+        ):
+            candidate = build_receipt_bound_monitor_next_action(
+                agent_identity=agent_identity,
+                agent_todo_items=agent_todo_source_items,
+                available_capabilities=effective_available_capabilities,
+                receipt_bound_todo_id=receipt_bound_todo_id,
+            )
         if (
             isinstance(candidate, dict)
             and candidate.get("selection_binding") == "heartbeat_receipt"

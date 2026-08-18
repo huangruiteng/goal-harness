@@ -209,10 +209,14 @@ def _prepare_quota_command_context(
         )
     except ValueError as exc:
         raise QuotaCommandValidationError(str(exc)) from exc
-    if heartbeat_turn_id and command not in {"should-run", "spend-slot"}:
+    if heartbeat_turn_id and command not in {
+        "should-run",
+        "monitor-poll",
+        "spend-slot",
+    }:
         raise QuotaCommandValidationError(
-            "--turn-instance-id is only valid with `quota should-run` or "
-            "`quota spend-slot`"
+            "--turn-instance-id is only valid with `quota should-run`, "
+            "`quota monitor-poll`, or `quota spend-slot`"
         )
     if getattr(args, "replan_obligation_id", None) and command != "spend-slot":
         raise QuotaCommandValidationError(
@@ -515,6 +519,33 @@ def _quota_renderer(
     }.get(command, render_quota_markdown)
 
 
+def _receipt_bound_monitor_todo_id(
+    args: argparse.Namespace,
+    *,
+    runtime_root: Path,
+    turn_instance_id: str | None,
+) -> str | None:
+    if not turn_instance_id:
+        return None
+    receipt = find_heartbeat_receipt(
+        runtime_root,
+        goal_id=args.goal_id,
+        agent_id=args.agent_id,
+        turn_instance_id=turn_instance_id,
+    )
+    if receipt is None:
+        raise HeartbeatReceiptIdentityConflictError(
+            "turn-scoped monitor-poll requires a committed heartbeat receipt; "
+            "run quota should-run with the same --turn-instance-id first"
+        )
+    todo_id = heartbeat_receipt_settlement_todo_id(receipt)
+    if todo_id is None:
+        raise HeartbeatReceiptIdentityConflictError(
+            "turn-scoped monitor-poll requires a heartbeat receipt bound to a Todo"
+        )
+    return todo_id
+
+
 def handle_quota_command(
     args: argparse.Namespace,
     *,
@@ -685,6 +716,12 @@ def handle_quota_command(
                 next_user_todo=args.next_user_todo,
                 next_user_task_class=args.next_user_task_class,
                 next_claimed_by=args.next_claimed_by,
+                turn_instance_id=heartbeat_turn_id,
+                receipt_bound_todo_id=_receipt_bound_monitor_todo_id(
+                    args,
+                    runtime_root=runtime_root,
+                    turn_instance_id=heartbeat_turn_id,
+                ),
                 scheduler_execution_context=scheduler_context,
                 operator_inbox_urgency_projector=operator_inbox_urgency_projector,
                 bounded_research_frontier_projector=(

@@ -160,9 +160,10 @@ def register_quota_command(
     quota_parser.add_argument(
         "--turn-instance-id",
         help=(
-            "Stable heartbeat settlement id for `quota should-run` and "
-            "`quota spend-slot`. The guard persists one idempotent receipt; "
-            "reuse the same id through writeback, spend, and retries."
+            "Stable heartbeat settlement id for `quota should-run`, "
+            "`quota monitor-poll`, and `quota spend-slot`. The guard persists "
+            "one idempotent receipt; reuse the same id through monitor "
+            "writeback, refresh-state, spend, and retries."
         ),
     )
     quota_parser.add_argument(

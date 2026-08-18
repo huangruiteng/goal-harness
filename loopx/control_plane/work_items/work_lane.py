@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..todos.contract import normalize_todo_id
+from ..todos.contract import TODO_TASK_CLASS_MONITOR, normalize_todo_id
 from ..todos.projection import todo_priority_label, todo_priority_rank
 
 
@@ -128,6 +128,28 @@ def preserve_heartbeat_receipt_bound_work_lane(
     todo_id = normalize_todo_id(selected_todo.get("todo_id"))
     if not todo_id or selected_todo.get("selection_binding") != "heartbeat_receipt":
         return contract
+    if selected_todo.get("task_class") == TODO_TASK_CLASS_MONITOR:
+        return {
+            **contract,
+            "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
+            "lane": "continuous_monitor",
+            "obligation": "attempt_due_monitor",
+            "must_attempt_work": True,
+            "selection_binding": "heartbeat_receipt",
+            "selected_todo_id": todo_id,
+            "monitor_due_items": [selected_todo],
+            "reason_codes": [
+                "due_monitor_context",
+                "heartbeat_receipt_bound_replay",
+                "same_turn_settlement_identity",
+            ],
+            "monitor_policy": "settle_receipt_bound_monitor_before_reselection",
+            "deferred_work_lane": contract,
+            "action": (
+                "settle the due monitor already bound to this heartbeat turn; "
+                "reconsider newly runnable monitor priority on the next turn"
+            ),
+        }
     return {
         "schema_version": WORK_LANE_CONTRACT_SCHEMA_VERSION,
         "lane": "advancement_task",
