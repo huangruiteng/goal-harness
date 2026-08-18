@@ -239,7 +239,8 @@ def _command_strings(function_name: str, raw_arguments: object) -> tuple[str, ..
 
 def _shell_segments(command: str) -> tuple[tuple[str, ...], ...]:
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|\n")
+        lexer.whitespace = " \t\r"
         lexer.whitespace_split = True
         lexer.commenters = ""
         tokens = list(lexer)
@@ -248,7 +249,7 @@ def _shell_segments(command: str) -> tuple[tuple[str, ...], ...]:
     segments: list[tuple[str, ...]] = []
     current: list[str] = []
     for token in tokens:
-        if token and all(character in ";&|" for character in token):
+        if token and all(character in ";&|\n" for character in token):
             if current:
                 segments.append(tuple(current))
                 current = []

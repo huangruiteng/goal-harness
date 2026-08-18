@@ -338,6 +338,7 @@ def test_bare_sensitive_filename_does_not_match_unrelated_path_basename() -> Non
         ("cmd", "node -e 'console.log(process.env.API_KEY)'", True),
         ("cmd", "node -e 'console.log(process.env.APP_MODULE_PATH)'", False),
         ("cmd", "env && git status", True),
+        ("cmd", "git status\nenv", True),
         ("cmd", "sh -c env", True),
         ("command", "bash -lc printenv", True),
         ("cmd", "/usr/bin/env", True),
