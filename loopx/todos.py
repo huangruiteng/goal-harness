@@ -606,6 +606,7 @@ def add_todo_to_lines(
     validation_label: str | None = None,
     validation_timeout_seconds: int | None = None,
     monitor_metadata: dict[str, Any] | None = None,
+    note: str | None = None,
     evidence: str | None = None,
     updated_at: str | None = None,
 ) -> dict[str, Any]:
@@ -720,6 +721,7 @@ def add_todo_to_lines(
                 else None
             ),
             **normalized_monitor_metadata,
+            note=note,
             evidence=evidence,
             updated_at=updated_at,
         )
@@ -737,12 +739,20 @@ def add_todo_to_lines(
         }
         if status:
             status_changed = set_todo_marker(lines, block, normalized_status)
-        if task_class:
-            updates["task_class"] = task_class
-        if action_kind:
-            updates["action_kind"] = action_kind
-        if task_domain:
-            updates["task_domain"] = task_domain
+        for metadata_field, metadata_value in (
+            ("task_class", task_class),
+            ("action_kind", action_kind),
+            ("task_domain", task_domain),
+            ("task_repository", task_repository),
+            ("continuation_policy", continuation_policy),
+            ("claimed_by", claimed_by),
+            ("blocks_agent", blocks_agent),
+            ("unblocks_todo_id", unblocks_todo_id),
+            ("note", note),
+            ("evidence", evidence),
+        ):
+            if metadata_value:
+                updates[metadata_field] = metadata_value
         if capability_binding_ref:
             requested_binding_ref = normalize_todo_capability_binding_ref(
                 capability_binding_ref
@@ -762,10 +772,6 @@ def add_todo_to_lines(
                     "capability_binding_ref is immutable once set"
                 )
             updates["capability_binding_ref"] = requested_binding_ref
-        if task_repository:
-            updates["task_repository"] = task_repository
-        if continuation_policy:
-            updates["continuation_policy"] = continuation_policy
         if required_write_scopes is not None:
             updates["required_write_scopes"] = required_write_scopes
         if required_capabilities is not None:
@@ -778,22 +784,16 @@ def add_todo_to_lines(
             updates["decision_scope"] = decision_scope
         if required_decision_scopes is not None:
             updates["required_decision_scopes"] = required_decision_scopes
-        if claimed_by:
-            updates["claimed_by"] = claimed_by
         if bound_agent:
             updates["bound_agent"] = bound_agent
             updates["goal_bound"] = None
         elif goal_bound is not None:
             updates["bound_agent"] = None
             updates["goal_bound"] = goal_bound
-        if blocks_agent:
-            updates["blocks_agent"] = blocks_agent
         if excluded_agents is not None:
             updates["excluded_agents"] = excluded_agents
         if global_gate is not None:
             updates["global_gate"] = global_gate
-        if unblocks_todo_id:
-            updates["unblocks_todo_id"] = unblocks_todo_id
         if replan_obligation_id:
             updates["replan_obligation_id"] = require_replan_successor_rebinding(
                 existing_obligation_id=block.get("replan_obligation_id"),
@@ -802,8 +802,6 @@ def add_todo_to_lines(
         if normalized_resume_when:
             updates["resume_when"] = normalized_resume_when
         updates.update(normalized_monitor_metadata)
-        if evidence:
-            updates["evidence"] = evidence
         if updated_at and not block.get("updated_at"):
             updates["updated_at"] = updated_at
         metadata_line = metadata_line_for_todo_block(block, updates)
@@ -871,6 +869,7 @@ def add_todo_to_lines(
         "next_due_at": effective_metadata.get("next_due_at"),
         "expires_at": effective_metadata.get("expires_at"),
         "watch_only": effective_metadata.get("watch_only"),
+        "note": effective_metadata.get("note") or note,
         "evidence": effective_metadata.get("evidence") or evidence,
         "updated_at": effective_metadata.get("updated_at") or updated_at,
     }
@@ -883,6 +882,7 @@ def add_goal_todo(
     role: str,
     text: str,
     status: str | None = None,
+    note: str | None = None,
     task_class: str | None = None,
     action_kind: str | None = None,
     task_domain: str | None = None,
@@ -1112,6 +1112,7 @@ def add_goal_todo(
             validation_label=validation_label,
             validation_timeout_seconds=validation_timeout_seconds,
             monitor_metadata=normalized_monitor_metadata,
+            note=note,
             updated_at=updated_at,
         )
         added = bool(add_result["added"])
@@ -1163,6 +1164,7 @@ def add_goal_todo(
         "next_due_at": add_result.get("next_due_at"),
         "expires_at": add_result.get("expires_at"),
         "watch_only": add_result.get("watch_only"),
+        "note": add_result.get("note"),
         "state_file": str(resolved_state_file),
         "project": str(resolved_project) if resolved_project else None,
         "updated_at": updated_at if changed else None,
