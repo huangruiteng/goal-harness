@@ -309,20 +309,73 @@ receipt.
 
 A countable experiment uses the toolkit in this order:
 
-1. Declare a `run_permission_policy_v0` and preflight the runner boundary.
-2. Launch one frozen case/arm; do not expose evaluator sources or official feedback.
-3. Capture ATIF tool evidence and a runner-owned runtime attestation.
-4. Run `integrity-qualification`; stop on any blocker.
-5. Run the independent verifier only after the agent phase.
-6. Reduce the official result through the benchmark-owned scoring path.
-7. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
-   comparison claim or ledger update.
+1. Read the project experiment board before selecting or launching another case.
+2. Declare a `run_permission_policy_v0` and preflight the runner boundary.
+3. Upsert the planned or running row, then launch one frozen case/arm; do not expose
+   evaluator sources or official feedback.
+4. Capture ATIF tool evidence and a runner-owned runtime attestation.
+5. Run `integrity-qualification`; stop on any blocker.
+6. Run the independent verifier only after the agent phase.
+7. Reduce the official result through the benchmark-owned scoring path.
+8. Upsert terminal score, countability, effort, treatment fidelity, and insight
+   status, then read the matched-comparison projection.
+9. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
+   comparison claim.
 
 Integrity qualification is necessary but not sufficient for a score claim. It does
 not establish task correctness, official score authority, experiment parity, or a
 LoopX advantage. `score_claim_eligible=true` only permits the official score and
 matched-pair gates to run; `score_claim_countable` and `matched_pair_countable` stay
 false in this receipt. Those remain separate verifier and comparison contracts.
+
+## Experiment board
+
+The project-local experiment board keeps baseline, standard control or treatment,
+and diagnostic explore runs in one compact projection. It is not a second score
+authority and never stores raw task text, trajectories, logs, hidden evaluation,
+verifier output, credentials, or local paths.
+
+An agent using this capability should start or resume a study by reading the board:
+
+```bash
+loopx benchmark experiment-board-show \
+  --goal-id <goal-id> \
+  --format json
+```
+
+Preview and then execute an idempotent row update when a run starts or reaches a
+terminal state:
+
+```bash
+loopx benchmark experiment-board-upsert \
+  --goal-id <goal-id> \
+  --row-json <compact-row.json> \
+  --format json
+
+loopx benchmark experiment-board-upsert \
+  --goal-id <goal-id> \
+  --row-json <compact-row.json> \
+  --execute \
+  --format json
+```
+
+The default ledger is locked, atomically updated, and keyed by benchmark, study,
+case, and run identity. A compact row carries arm role, exact and comparison
+protocol ids, model, score metrics, countability, treatment fidelity, bounded
+effort, and an optional insight status or public-safe handle. Unknown fields and
+path-like references fail closed.
+
+Every non-baseline row names an exact `comparison_anchor_run_id`. Standard control
+or treatment rows anchor to a baseline. Explore rows use `diagnostic_only` claim
+scope and may anchor to the baseline or fixed standard arm they are examining.
+Matched comparisons require compatible benchmark, study, case, model, primary
+metric, comparison protocol, score countability, and treatment fidelity. Exact
+protocol revisions remain visible as a warning even when a declared comparison
+protocol says an older credible score remains semantically comparable.
+
+Full post-run analysis stays in private `benchmark_case_insight_v0` storage. The
+board records only its compact status or handle, so reading the board cannot widen
+the solving agent's evidence boundary.
 
 ## Post-run case insight monitor
 

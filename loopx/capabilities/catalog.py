@@ -221,6 +221,24 @@ def render_capability_detail_markdown(payload: dict[str, Any]) -> str:
                 f"  - boundary: {item.get('write_boundary')}",
             ]
         )
+    agent_usage = record.get("agent_usage")
+    if isinstance(agent_usage, Mapping):
+        lines.extend(["", "## Agent Usage", ""])
+        start_hint = agent_usage.get("benchmark_start_hint") or agent_usage.get(
+            "start_hint"
+        )
+        if start_hint:
+            lines.extend([str(start_hint), ""])
+        for step in agent_usage.get("required_sequence") or []:
+            lines.append(f"- `{step}`")
+        board_commands = agent_usage.get("board_commands")
+        if isinstance(board_commands, Mapping):
+            lines.append("")
+            for name, command in board_commands.items():
+                lines.append(f"- {name}: `{command}`")
+        selection_rule = agent_usage.get("selection_rule")
+        if selection_rule:
+            lines.extend(["", f"- selection rule: {selection_rule}"])
     lines.extend(["", "## Implemented Protocols", ""])
     for item in record.get("implemented_protocols") or []:
         if not isinstance(item, Mapping):

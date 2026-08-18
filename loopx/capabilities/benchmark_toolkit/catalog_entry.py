@@ -26,6 +26,31 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     "commands": [
         {
             "command": (
+                "loopx benchmark experiment-board-show --goal-id <goal-id> "
+                "--format json"
+            ),
+            "purpose": (
+                "Read baseline, treatment, explore, countability, effort, and "
+                "insight status before selecting or launching another arm."
+            ),
+            "write_boundary": "read-only project-local public-safe domain state",
+        },
+        {
+            "command": (
+                "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
+                "--row-json <compact-row.json> --execute --format json"
+            ),
+            "purpose": (
+                "Idempotently record one planned, running, or terminal compact run "
+                "row; omit --execute for a no-write preview."
+            ),
+            "write_boundary": (
+                "explicit project-local domain-state write; rejects raw paths, "
+                "logs, trajectories, hidden evaluation, credentials, and unknown fields"
+            ),
+        },
+        {
+            "command": (
                 "loopx benchmark integrity-qualification "
                 "--trajectory-json <private.json> "
                 "--runtime-attestation-json <attestation.json> "
@@ -57,6 +82,37 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             ),
         },
     ],
+    "agent_usage": {
+        "benchmark_start_hint": (
+            "At benchmark start, read the experiment board before selecting or "
+            "launching a case; update the same stable row at every material run "
+            "transition."
+        ),
+        "required_sequence": [
+            "read_experiment_board_before_launch_or_case_selection",
+            "upsert_preregistered_or_running_row_when_a_run_starts",
+            "upsert_terminal_score_countability_effort_and_insight_status",
+            "read_matched_comparisons_before_selecting_the_next_arm",
+        ],
+        "board_commands": {
+            "read": (
+                "loopx benchmark experiment-board-show --goal-id <goal-id> "
+                "--format json"
+            ),
+            "preview": (
+                "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
+                "--row-json <compact-row.json> --format json"
+            ),
+            "write": (
+                "loopx benchmark experiment-board-upsert --goal-id <goal-id> "
+                "--row-json <compact-row.json> --execute --format json"
+            ),
+        },
+        "selection_rule": (
+            "Keep diagnostic-only explore rows separate and make paired claims "
+            "only from matched_pair_countable comparisons."
+        ),
+    },
     "post_run_case_analysis": {
         "benchmark_start_hint": (
             "When starting a benchmark, add one continuous_monitor todo that runs "
@@ -126,6 +182,16 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
     },
     "implemented_protocols": [
         {
+            "schema_version": "benchmark_experiment_board_row_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.experiment_board",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
+            "schema_version": "benchmark_experiment_board_v0",
+            "module": "loopx.capabilities.benchmark_toolkit.experiment_board",
+            "doc": "loopx/capabilities/benchmark_toolkit/README.md",
+        },
+        {
             "schema_version": "benchmark_integrity_qualification_v0",
             "module": "loopx.capabilities.benchmark_toolkit.integrity",
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
@@ -151,7 +217,12 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "doc": "loopx/capabilities/benchmark_toolkit/README.md",
         },
     ],
-    "smokes": ["python -m pytest tests/capabilities/test_benchmark_toolkit.py -q"],
+    "smokes": [
+        (
+            "python -m pytest tests/capabilities/test_benchmark_toolkit.py "
+            "tests/capabilities/test_benchmark_experiment_board.py -q"
+        )
+    ],
     "docs": ["loopx/capabilities/benchmark_toolkit/README.md"],
     "boundaries": [
         "The toolkit never grants runner, Docker, model, upload, submission, or publication authority; each effect remains separately gated.",
@@ -160,10 +231,10 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
         "Concurrent Docker runs must bind runtime evidence to one exact job-owned container; image-only discovery is not sufficient.",
         "Integrity qualification establishes countability eligibility only; an independent official result and matched experiment contract are still required.",
         "Post-run analyst access never widens the solving agent's evidence boundary or grants feedback reuse in another scored run.",
-        "Benchmark-family runners remain outside the active capability; the toolkit owns only provider-neutral permission, artifact, integrity, and analyst-brief policy.",
+        "The experiment board is a compact projection, not a score authority: benchmark-family runners and scoring adapters remain outside the active capability.",
     ],
     "next_real_step": (
-        "After each scored case, keep solver integrity separate and write one "
-        "private benchmark_case_insight_v0 from the complete evaluation evidence."
+        "Use the board before launch and after each scored case while keeping "
+        "solver integrity separate from private benchmark_case_insight_v0 analysis."
     ),
 }
