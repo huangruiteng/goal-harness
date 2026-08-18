@@ -81,7 +81,7 @@ private or security-sensitive material.
 - Remaining blocking finding: formal `REQUEST_CHANGES`.
 - Non-blocking finding with no blockers: formal `APPROVE`, not a bare comment.
   When the GitHub account is the PR author and GitHub rejects self-approval,
-  record the same approval conclusion as a `COMMENTED` review or PR comment
+  record the same approval conclusion as a `COMMENTED` review
   titled `Approval conclusion (author-owned PR; GitHub blocks formal self-approval)`
   so the verdict remains public and machine-visible.
 - Non-blocking finding with only P2 suggestions: still `APPROVE`; keep the P2
@@ -164,14 +164,14 @@ For recurring observation, use the same capability:
 ```bash
 loopx --format json pr-review --repo owner/repo --state open \
   --autonomous-observation \
-  [--previous-observation-json previous.json] \
+  [--observation-state-file .local/pr-review-monitor.json] \
   [--handled-exact-head NUMBER@HEAD_OID]
 ```
 
 Treat `not_observed`, `observed_unchanged`, and `material_transition`
-literally. A candidate is scheduling evidence only; it grants no Todo, review,
-comment, approval, push, or merge authority. Supply `--handled-exact-head` only
-after exact-head review-result readback proves completion.
+literally. Prefer the stable ignored checkpoint across tasks; it carries the age-fair
+cursor but grants no external authority. Supply `--handled-exact-head` only after exact-head readback proves completion. Stateless callers may use
+`--previous-observation-json` instead.
 
 ## Failure
 
