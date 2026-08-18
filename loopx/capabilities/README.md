@@ -53,6 +53,7 @@ availability and maturity in the installed release.
 | Qualify the exact final diff through bounded review, safe repair, and strict receipts | [Change Quality](change_quality/README.md) |
 | Review a changing public PR queue against exact-head evidence and typed completion rules | [Pull Request Review](pr_review_queue/README.md) |
 | Detect source-head drift and safely rebuild a local stack of already reviewed branches | [Integration Branch](integration_branch/README.md) |
+| Gate local repository changes by a typed schedule and retain blocked unmerged work across restarts | [Repository Change Window](repository_change_window/README.md) |
 
 ### Research And Decision Continuity
 
