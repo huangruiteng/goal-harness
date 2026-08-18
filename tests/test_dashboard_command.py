@@ -72,7 +72,6 @@ def test_launch_dashboard_in_installed_mode_serves_packaged_chat(
     tmp_path: Path,
 ) -> None:
     from loopx.dashboard_launcher import launch_dashboard
-    import loopx.dashboard_launcher as dashboard_launcher
 
     # Point release root to an empty directory without scripts/dashboard-dev.sh (simulating installed wheel site-packages)
     monkeypatch.setenv("LOOPX_RELEASE_ROOT", str(tmp_path))
